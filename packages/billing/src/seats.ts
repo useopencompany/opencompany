@@ -4,13 +4,14 @@ import {
   loadGoatBillingOverview,
   reconcileGoatStripeSeatQuantity,
 } from "@opencompany/db/goat-billing";
+import type Stripe from "stripe";
 import { getGoatStripe } from "./stripe";
 
 type DbLike = any;
 
 export async function syncGoatStripeSeatQuantityForWorkspace(
   workspaceId: string,
-  deps: { db?: DbLike } = {},
+  deps: { db?: DbLike; stripe?: Stripe } = {},
 ) {
   const db: DbLike = deps.db ?? getDb();
   const overview = await loadGoatBillingOverview(workspaceId, { db });
@@ -27,7 +28,7 @@ export async function syncGoatStripeSeatQuantityForWorkspace(
   }
 
   const quantity = Math.max(1, overview.memberCount);
-  const stripe = getGoatStripe();
+  const stripe = deps.stripe ?? getGoatStripe();
   const item = await stripe.subscriptionItems.retrieve(itemId);
   const stripeQuantity = Math.max(1, item.quantity ?? 1);
   let changed = false;
@@ -49,7 +50,10 @@ export async function syncGoatStripeSeatQuantityForWorkspace(
   return { ok: true as const, changed, quantity };
 }
 
-export async function reconcileGoatStripeSeatQuantities(limit = 100, deps: { db?: DbLike } = {}) {
+export async function reconcileGoatStripeSeatQuantities(
+  limit = 100,
+  deps: { db?: DbLike; stripe?: Stripe } = {},
+) {
   const db: DbLike = deps.db ?? getDb();
   const candidates = await listGoatStripeSeatReconciliationCandidates({ limit, db });
   let reconciled = 0;
@@ -57,7 +61,10 @@ export async function reconcileGoatStripeSeatQuantities(limit = 100, deps: { db?
   let failed = 0;
   for (const workspaceId of candidates) {
     try {
-      const result = await syncGoatStripeSeatQuantityForWorkspace(workspaceId, { db });
+      const result = await syncGoatStripeSeatQuantityForWorkspace(workspaceId, {
+        db,
+        ...(deps.stripe ? { stripe: deps.stripe } : {}),
+      });
       if (result.ok) reconciled += 1;
       if (result.ok && result.changed) changed += 1;
     } catch (error) {

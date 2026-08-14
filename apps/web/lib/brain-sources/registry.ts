@@ -1,4 +1,4 @@
-import type { GoatBrainSourceConfigProvider } from "@opencompany/db/goat-schema";
+import type { BrainSourceConfigProvider } from "@opencompany/protocol";
 import type { LucideIcon } from "lucide-react";
 import {
   Contact,
@@ -16,7 +16,7 @@ import {
 export const GOAT_JAMIE_DOCS_HREF = "/docs/integrations/jamie";
 
 export type GoatBrainSourceProviderDef = {
-  id: GoatBrainSourceConfigProvider;
+  id: BrainSourceConfigProvider;
   name: string;
   description: string;
   icon: LucideIcon;
@@ -137,7 +137,7 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
 // The meeting-note providers (Jamie, Granola, Fathom) have nothing to scope —
 // once connected, every meeting flows in — so onboarding auto-enables them on
 // connect instead of prompting for config.
-export function goatBrainSourceNeedsConfig(id: GoatBrainSourceConfigProvider): boolean {
+export function goatBrainSourceNeedsConfig(id: BrainSourceConfigProvider): boolean {
   return (
     id === "slack" ||
     id === "linear" ||

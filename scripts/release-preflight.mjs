@@ -9,7 +9,6 @@ const groups = {
   web: {
     label: "Vercel web app",
     required: [
-      "DATABASE_URL",
       "WORKOS_CLIENT_ID",
       "WORKOS_API_KEY",
       "WORKOS_COOKIE_PASSWORD",
@@ -17,73 +16,34 @@ const groups = {
       "GOAT_NEXT_PUBLIC_APP_URL",
       "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
       "GOAT_AUTHKIT_DOMAIN",
-      "VERCEL_AI_GATEWAY_API_KEY",
-      "BLOB_READ_WRITE_TOKEN",
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
       "GOAT_API_ORIGIN",
       "NEXT_PUBLIC_GOAT_API_ORIGIN",
-      "NEXT_PUBLIC_GOAT_HEADLESS_CHAT",
-      "ELECTRIC_URL",
-      "MONID_API_KEY",
-      "GOAT_STRIPE_API_KEY",
-      "GOAT_STRIPE_WEBHOOK_SECRET",
-      "GOAT_STRIPE_CHECKOUT_ENABLED",
-      "GOAT_X_CLIENT_ID",
-      "GOAT_X_CLIENT_SECRET",
-      "GOAT_X_STATE_SECRET",
       "CRON_SECRET",
       "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
       "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
     ],
     optional: [
       "RUNNER_INTERNAL_URL",
-      "EXA_API_KEY",
-      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
-      "MCP_OAUTH_STATE_SECRET",
       "RESEND_API_KEY",
       "RESEND_WELCOME_FROM",
       "RESEND_REPLY_TO",
-      "GITHUB_INTEGRATION_APP_ID",
-      "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
-      "GITHUB_INTEGRATION_APP_SLUG",
-      "GITHUB_INTEGRATION_APP_CLIENT_ID",
-      "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
-      "GITHUB_INTEGRATION_STATE_SECRET",
-      "GOOGLE_OAUTH_CLIENT_ID",
-      "GOOGLE_OAUTH_CLIENT_SECRET",
-      "GOOGLE_INTEGRATION_STATE_SECRET",
-      "ELECTRIC_SOURCE_ID",
-      "ELECTRIC_SOURCE_SECRET",
-      "ELECTRIC_SECRET",
-      "ELECTRIC_TOKEN",
       "GOAT_OBSERVABILITY_ENABLED",
       "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
       "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
-      "GOAT_CHAT_ACTIONS_KILL_SWITCH",
-      "GOAT_CHAT_SANDBOX_IMAGE",
-      "LINQ_API_TOKEN",
-      "LINQ_FROM_NUMBER",
-      "LINQ_API_BASE_URL",
-      "GOAT_IMESSAGE_PROVIDER",
-      "GOAT_IMESSAGE_KILL_SWITCH",
-      "GOAT_IMESSAGE_DAILY_CAP",
-      "GOAT_MANAGED_CAPABILITIES_KILL_SWITCH",
-      "GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS",
-      "LATITUDE_API_KEY",
-      "LATITUDE_PROJECT_SLUG",
-      "LATITUDE_SERVICE_NAME",
-      "LATITUDE_TELEMETRY_DISABLED",
     ],
   },
   api: {
-    label: "Render canonical Chat API",
+    label: "Render canonical product API",
     required: [
       "API_DATABASE_URL",
       "WORKOS_CLIENT_ID",
       "WORKOS_API_KEY",
       "WORKOS_COOKIE_PASSWORD",
       "WORKOS_COOKIE_DOMAIN",
+      "GOAT_STRIPE_API_KEY",
+      "CRON_SECRET",
       "API_BROWSER_ORIGINS",
       "GOAT_AUTHKIT_DOMAIN",
       "GOAT_API_OAUTH_AUDIENCE",
@@ -115,9 +75,7 @@ const groups = {
       "GOAT_LINEAR_CLIENT_SECRET",
       "GOAT_LINEAR_WEBHOOK_SECRET",
       "GOAT_LINEAR_STATE_SECRET",
-      // #1203 4d1: remote-MCP, X account, and Slack bot OAuth ingress. The
-      // Slack bot signing secret stays web-owned for the events webhook but is
-      // part of the shared isGoatSlackBotConfigured gate.
+      // Remote-MCP, X account, and Slack bot OAuth/webhook ingress.
       "MCP_OAUTH_STATE_SECRET",
       "GOAT_X_CLIENT_ID",
       "GOAT_X_CLIENT_SECRET",
@@ -126,12 +84,14 @@ const groups = {
       "GOAT_SLACK_BOT_CLIENT_SECRET",
       "GOAT_SLACK_BOT_SIGNING_SECRET",
       "GOAT_SLACK_BOT_STATE_SECRET",
-      // Engine auth (#1203 5a3): the API makes the Codex/Infisical control
-      // calls to the runner's internal routes. Requiredness mirrors the web
-      // group: the public URL is the guaranteed fallback, the internal URL an
-      // optional override.
+      // Engine auth control calls use the runner's internal transport. The
+      // public URL is the guaranteed fallback; the internal URL is optional.
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
+      // Billing/usage and Stripe ingress.
+      "GOAT_STRIPE_WEBHOOK_SECRET",
+      "GOAT_STRIPE_CHECKOUT_ENABLED",
+      "MONID_API_KEY",
     ],
     // Browser profiles are feature-flag gated: the Browserbase credentials are
     // required only when GOAT_BROWSER_PROFILES_ENABLED is "true" in this env.
@@ -187,8 +147,7 @@ const groups = {
       "LINQ_API_BASE_URL",
       "GOAT_IMESSAGE_PROVIDER",
       "GOAT_IMESSAGE_KILL_SWITCH",
-      // Engine auth (#1203 5a3): optional internal-network override for the
-      // runner control calls, mirroring the web group.
+      // Optional internal-network override for runner control calls.
       "RUNNER_INTERNAL_URL",
     ],
   },
@@ -355,7 +314,7 @@ for (const name of selected) {
   }
 }
 
-if (selected.some((name) => name === "web" || name === "runner")) {
+if (selected.includes("runner")) {
   const latitudeApiKeySet = !isUnset(process.env.LATITUDE_API_KEY);
   const latitudeProjectSet = !isUnset(process.env.LATITUDE_PROJECT_SLUG);
   if (latitudeApiKeySet !== latitudeProjectSet) {

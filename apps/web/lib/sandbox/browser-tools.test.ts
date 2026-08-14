@@ -203,9 +203,7 @@ describe("Goat chat browser sandbox", () => {
     expect(output).toMatchObject({
       ok: true,
       command: "browser_screenshot",
-      screenshotUrl: expect.stringMatching(
-        /^\/api\/chat-screenshots\/chat_1\/\d+-[a-f0-9-]+\.png$/,
-      ),
+      screenshotUrl: expect.stringMatching(/^\/v1\/chat-screenshots\/chat_1\/\d+-[a-f0-9-]+\.png$/),
     });
     expect(readFileToBuffer).toHaveBeenCalledWith(
       {

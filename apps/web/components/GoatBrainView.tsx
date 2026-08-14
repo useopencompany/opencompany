@@ -69,7 +69,6 @@ import { GoatBrainOverview } from "@/components/GoatBrainOverview";
 import { useGoatNavInset } from "@/components/GoatNavInset";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { useHydrated } from "@/components/useHydrated";
-import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
 import {
   buildGoatBrainDraftIngestStates,
   type GoatBrainDraftIngestState,
@@ -80,7 +79,6 @@ import {
   uploadHeadlessBrainAsset,
   validateBrainAssetFile,
 } from "@/lib/brain-asset-upload";
-import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
 import { isExternalHref, sourceHrefForRef } from "@/lib/brain-source-links";
 import {
   getHeadlessBrainCollections,
@@ -99,6 +97,11 @@ import {
   renameHeadlessBrainFolder,
   updateHeadlessBrainDocument,
 } from "@/lib/headless-knowledge-commands";
+import type {
+  GoatBrainDocumentView,
+  GoatBrainFolderView,
+  GoatBrainOverviewStats,
+} from "@/lib/headless-knowledge-types";
 import { brainDocumentToView } from "@/lib/headless-knowledge-types";
 
 type Props = {

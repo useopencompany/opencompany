@@ -1,35 +1,25 @@
-import { getDb } from "@opencompany/db/client";
-import { goatIntegrations } from "@opencompany/db/goat-schema";
-import { and, eq, isNull } from "drizzle-orm";
+import type { IntegrationAccountDto } from "@opencompany/protocol";
 import {
   type GoatIntegrationAccountView,
   type GoatPersonalAccountProvider,
   goatPersonalAccountsFromRows,
 } from "@/lib/integration-state";
+import { serverApiClient, serverApiError } from "@/lib/server-api-client";
 
-// Server-side mirror of the Electric-fed client state: all of the user's
-// personal (workspace_id IS NULL) integration rows, grouped per provider.
-export async function getGoatPersonalAccounts(
-  userWorkosId: string,
-): Promise<Record<GoatPersonalAccountProvider, GoatIntegrationAccountView[]>> {
-  const rows = await getDb()
-    .select({
-      id: goatIntegrations.id,
-      provider: goatIntegrations.provider,
-      workspaceId: goatIntegrations.workspaceId,
-      externalId: goatIntegrations.externalId,
-      accountEmail: goatIntegrations.accountEmail,
-      accountName: goatIntegrations.accountName,
-      connectionLabel: goatIntegrations.connectionLabel,
-      statusReason: goatIntegrations.statusReason,
-      status: goatIntegrations.status,
-      scopes: goatIntegrations.scopes,
-      capabilityModes: goatIntegrations.capabilityModes,
-    })
-    .from(goatIntegrations)
-    .where(
-      and(eq(goatIntegrations.userWorkosId, userWorkosId), isNull(goatIntegrations.workspaceId)),
-    )
-    .orderBy(goatIntegrations.createdAt);
-  return goatPersonalAccountsFromRows(rows);
+// Server-side snapshot for initial hydration. Live updates arrive from the API-owned
+// integration account read model after the client mounts.
+export async function getGoatPersonalAccounts(): Promise<
+  Record<GoatPersonalAccountProvider, GoatIntegrationAccountView[]>
+> {
+  const response = await (await serverApiClient()).v1["integration-accounts"].$get();
+  if (!response.ok) throw await serverApiError(response, "Could not load integration accounts.");
+  const accounts = (await response.json()).data as IntegrationAccountDto[];
+  return goatPersonalAccountsFromRows(
+    accounts.map((account: IntegrationAccountDto) => ({
+      ...account,
+      id: account.integrationId,
+      workspaceId: null,
+      externalId: null,
+    })),
+  );
 }

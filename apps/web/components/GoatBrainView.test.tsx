@@ -3,7 +3,6 @@ import type { BrainDocumentDto } from "@opencompany/protocol";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
 import {
   createHeadlessBrainDocument,
   createHeadlessBrainFolder,
@@ -12,6 +11,7 @@ import {
   renameHeadlessBrainFolder,
   updateHeadlessBrainDocument,
 } from "@/lib/headless-knowledge-commands";
+import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/headless-knowledge-types";
 import { GoatBrainView } from "./GoatBrainView";
 
 const routerMock = vi.hoisted(() => ({

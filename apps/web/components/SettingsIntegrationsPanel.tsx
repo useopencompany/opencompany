@@ -47,6 +47,10 @@ import {
   listHeadlessBrowserProfiles,
 } from "@/lib/headless-browser-profile-api";
 import {
+  getHeadlessIntegrationAccounts,
+  type HeadlessIntegrationAccountReadModel,
+} from "@/lib/headless-integration-collections";
+import {
   completeGoatInfisicalAuth,
   disconnectGoatInfisicalAuth,
   type GoatInfisicalAuthFlow,
@@ -80,7 +84,6 @@ import {
   goatIntegrationConnectionError,
   goatIntegrationConnectionSuccess,
 } from "@/lib/onboarding-integrations";
-import { createGoatCollections, type GoatIntegrationRow } from "@/lib/task-collections";
 
 // Presentation metadata for each integration card: the real brand logo (or a
 // monogram fallback where no square vector mark exists), the colored logo tile,
@@ -235,6 +238,7 @@ export function SettingsIntegrationsPanel({
   isWorkspaceAdmin,
   imessageEnabled = false,
   browserProfilesEnabled = false,
+  scopeKey = "active",
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
@@ -242,6 +246,7 @@ export function SettingsIntegrationsPanel({
   // Preferences; pairing state alone must not surface it.
   imessageEnabled?: boolean;
   browserProfilesEnabled?: boolean;
+  scopeKey?: string;
 }) {
   const hydrated = useHydrated();
   return (
@@ -260,6 +265,7 @@ export function SettingsIntegrationsPanel({
           isWorkspaceAdmin={isWorkspaceAdmin}
           imessageEnabled={imessageEnabled}
           browserProfilesEnabled={browserProfilesEnabled}
+          scopeKey={scopeKey}
         />
       )}
     </>
@@ -302,19 +308,27 @@ function LiveSettingsIntegrations({
   isWorkspaceAdmin,
   imessageEnabled,
   browserProfilesEnabled,
+  scopeKey,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
   imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
+  scopeKey: string;
 }) {
-  const collections = useMemo(() => createGoatCollections(), []);
-  const { data: rows, isLoading } = useLiveQuery((q) =>
-    q.from({ integration: collections.integrations }),
+  const integrationAccountsCollection = useMemo(
+    () => getHeadlessIntegrationAccounts(scopeKey),
+    [scopeKey],
+  );
+  const { data: rows, isLoading } = useLiveQuery(
+    (q) => q.from({ integration: integrationAccountsCollection }),
+    [integrationAccountsCollection],
   );
   const integrations = useMemo(() => {
     if (isLoading && !rows?.length) return initialIntegrations;
-    const liveIntegrations = goatIntegrationStateFromRows((rows ?? []) as GoatIntegrationRow[]);
+    const liveIntegrations = goatIntegrationStateFromRows(
+      (rows ?? []) as HeadlessIntegrationAccountReadModel[],
+    );
     return {
       ...liveIntegrations,
       codex: initialIntegrations.codex,

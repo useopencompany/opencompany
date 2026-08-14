@@ -1,5 +1,5 @@
-import type { GoatChatMessageAttachment, GoatTask } from "@opencompany/db/goat-schema";
 import { updateGoatTaskForActor } from "@opencompany/goat-agent/application/task-creation";
+import type { GoatChatMessageAttachment } from "@opencompany/goat-agent/chat-attachment-formats";
 import type { GoatSkillMentionRef } from "@opencompany/goat-agent/skills";
 import { createGoatTaskFromWorkflow as createSharedGoatTaskFromWorkflow } from "@opencompany/goat-agent/workflow-tasks";
 import type { GoatWorkflowMentionRef } from "@opencompany/goat-agent/workflows";
@@ -21,7 +21,7 @@ export function createGoatTaskFromWorkflow(input: {
   description: string;
   attachments?: GoatChatMessageAttachment[];
   attachmentTexts?: Record<string, string> | null;
-}): Promise<GoatTask> {
+}) {
   return createSharedGoatTaskFromWorkflow(input, {
     createTask: ({ actorId, ...task }) =>
       createGoatTaskForUser({

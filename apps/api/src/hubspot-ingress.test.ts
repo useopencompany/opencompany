@@ -36,7 +36,13 @@ function ingress(overrides: { authError?: ApiError } = {}) {
     db: sentinelDb,
     identify: async () => {
       if (overrides.authError) throw overrides.authError;
-      return { userId: "user_1", organizationId: null, method: "session", activeWorkspaceId: null };
+      return {
+        userId: "user_1",
+        organizationId: null,
+        method: "session",
+        activeWorkspaceId: null,
+        activeBrainId: null,
+      };
     },
   });
 }

@@ -1,20 +1,15 @@
 import { getAgentModelDefinition } from "@opencompany/agent-runtime";
 import type {
   GoatHarnessEngine,
-  GoatTaskEvent,
   GoatTaskEventType,
-  GoatTaskMessage,
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
-  GoatTaskModelUsage,
   GoatTaskModelUsagePhase,
   GoatTaskReportedOutcome,
-  GoatTaskSandboxUsage,
   GoatTaskStage,
   GoatTaskStatus,
   GoatTaskToolName,
-  GoatTaskToolUsage,
-} from "@opencompany/db/goat-schema";
+} from "@opencompany/goat-agent/task-runtime-types";
 import type { GoatChatSessionView } from "@/lib/chat-ui";
 
 export type GoatTaskRunTaskInput =
@@ -58,7 +53,21 @@ export type GoatTaskRunTaskInput =
     };
 
 export type GoatTaskRunMessageInput =
-  | GoatTaskMessage
+  | {
+      id: string;
+      taskId: string;
+      userWorkosId: string;
+      role: GoatTaskMessageRole;
+      status: GoatTaskMessageStatus;
+      content: string;
+      modelMessage: unknown | null;
+      toolName: GoatTaskToolName | null;
+      toolCallId: string | null;
+      responseToMessageId: string | null;
+      createdAt: Date | string;
+      updatedAt: Date | string;
+      completedAt: Date | string | null;
+    }
   | {
       id: string;
       task_id: string;
@@ -76,7 +85,15 @@ export type GoatTaskRunMessageInput =
     };
 
 export type GoatTaskRunEventInput =
-  | GoatTaskEvent
+  | {
+      id: number;
+      taskId: string;
+      userWorkosId: string;
+      messageId: string | null;
+      type: GoatTaskEventType;
+      payload: Record<string, unknown>;
+      createdAt: Date | string;
+    }
   | {
       id: number;
       task_id: string;
@@ -87,82 +104,76 @@ export type GoatTaskRunEventInput =
       created_at: string;
     };
 
-export type GoatTaskRunModelUsageInput =
-  | GoatTaskModelUsage
-  | {
-      id: number;
-      task_id: string;
-      user_workos_id: string;
-      message_id: string | null;
-      run_lease_id: string | null;
-      phase: string;
-      step_index: number;
-      model_provider: string;
-      model_name: string;
-      response_id: string | null;
-      response_model_id: string | null;
-      finish_reason: string | null;
-      raw_finish_reason: string | null;
-      input_tokens: UsageNumberInput;
-      input_no_cache_tokens: UsageNumberInput;
-      input_cache_read_tokens: UsageNumberInput;
-      input_cache_write_tokens: UsageNumberInput;
-      output_tokens: UsageNumberInput;
-      output_text_tokens: UsageNumberInput;
-      output_reasoning_tokens: UsageNumberInput;
-      total_tokens: UsageNumberInput;
-      raw_usage: Record<string, unknown>;
-      provider_created_at: string | null;
-      provider_cost_usd_micros: UsageNumberInput;
-      platform_fee_usd_micros: UsageNumberInput;
-      total_cost_usd_micros: UsageNumberInput;
-      cost_basis: Record<string, unknown>;
-      created_at: string;
-    };
+export type GoatTaskRunModelUsageInput = {
+  id: number;
+  task_id: string;
+  user_workos_id: string;
+  message_id: string | null;
+  run_lease_id: string | null;
+  phase: string;
+  step_index: number;
+  model_provider: string;
+  model_name: string;
+  response_id: string | null;
+  response_model_id: string | null;
+  finish_reason: string | null;
+  raw_finish_reason: string | null;
+  input_tokens: UsageNumberInput;
+  input_no_cache_tokens: UsageNumberInput;
+  input_cache_read_tokens: UsageNumberInput;
+  input_cache_write_tokens: UsageNumberInput;
+  output_tokens: UsageNumberInput;
+  output_text_tokens: UsageNumberInput;
+  output_reasoning_tokens: UsageNumberInput;
+  total_tokens: UsageNumberInput;
+  raw_usage: Record<string, unknown>;
+  provider_created_at: string | null;
+  provider_cost_usd_micros: UsageNumberInput;
+  platform_fee_usd_micros: UsageNumberInput;
+  total_cost_usd_micros: UsageNumberInput;
+  cost_basis: Record<string, unknown>;
+  created_at: string;
+};
 
-export type GoatTaskRunToolUsageInput =
-  | GoatTaskToolUsage
-  | {
-      id: number;
-      task_id: string;
-      user_workos_id: string;
-      message_id: string | null;
-      run_lease_id: string | null;
-      tool_call_id: string;
-      tool_name: string;
-      provider: string;
-      operation: string;
-      provider_request_id: string | null;
-      provider_cost_usd_micros: UsageNumberInput;
-      platform_fee_usd_micros: UsageNumberInput;
-      total_cost_usd_micros: UsageNumberInput;
-      raw_usage: Record<string, unknown>;
-      cost_basis: Record<string, unknown>;
-      created_at: string;
-    };
+export type GoatTaskRunToolUsageInput = {
+  id: number;
+  task_id: string;
+  user_workos_id: string;
+  message_id: string | null;
+  run_lease_id: string | null;
+  tool_call_id: string;
+  tool_name: string;
+  provider: string;
+  operation: string;
+  provider_request_id: string | null;
+  provider_cost_usd_micros: UsageNumberInput;
+  platform_fee_usd_micros: UsageNumberInput;
+  total_cost_usd_micros: UsageNumberInput;
+  raw_usage: Record<string, unknown>;
+  cost_basis: Record<string, unknown>;
+  created_at: string;
+};
 
-export type GoatTaskRunSandboxUsageInput =
-  | GoatTaskSandboxUsage
-  | {
-      id: number;
-      task_id: string;
-      user_workos_id: string;
-      message_id: string | null;
-      run_lease_id: string | null;
-      sandbox_id: string;
-      template: string | null;
-      vcpu: number | null;
-      ram_mib: number | null;
-      started_at: string | null;
-      ended_at: string | null;
-      active_ms: UsageNumberInput;
-      provider_cost_usd_micros: UsageNumberInput;
-      platform_fee_usd_micros: UsageNumberInput;
-      total_cost_usd_micros: UsageNumberInput;
-      raw_metrics: Record<string, unknown>;
-      cost_basis: Record<string, unknown>;
-      created_at: string;
-    };
+export type GoatTaskRunSandboxUsageInput = {
+  id: number;
+  task_id: string;
+  user_workos_id: string;
+  message_id: string | null;
+  run_lease_id: string | null;
+  sandbox_id: string;
+  template: string | null;
+  vcpu: number | null;
+  ram_mib: number | null;
+  started_at: string | null;
+  ended_at: string | null;
+  active_ms: UsageNumberInput;
+  provider_cost_usd_micros: UsageNumberInput;
+  platform_fee_usd_micros: UsageNumberInput;
+  total_cost_usd_micros: UsageNumberInput;
+  raw_metrics: Record<string, unknown>;
+  cost_basis: Record<string, unknown>;
+  created_at: string;
+};
 
 export type GoatHarnessRunViewModel = {
   hasDurableRun: boolean;

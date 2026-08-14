@@ -4,7 +4,7 @@ import {
   parseGoatPublishedChatArtifact,
 } from "@opencompany/agent-runtime";
 import { isBrowserToolName } from "@opencompany/browser-tools";
-import type { GoatTaskStatus } from "@opencompany/db/goat-schema";
+import type { GoatTaskStatus } from "@opencompany/goat-agent/task-runtime-types";
 import type { GoatTaskView } from "@/components/GoatSurface";
 import {
   CODEX_APPROVAL_TOOL_NAME,

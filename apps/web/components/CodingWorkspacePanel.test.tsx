@@ -1,9 +1,9 @@
 import "@testing-library/jest-dom/vitest";
+import type { EngineRuntimeStatus } from "@opencompany/protocol";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { GoatCodexSandboxStatus } from "@/lib/task-runner";
 import { CodingWorkspacePanel, type CodingWorkspacePanelHandle } from "./CodingWorkspacePanel";
 
 // The panel no longer owns its own open/close trigger — a host (GoatSurface's header
@@ -15,7 +15,7 @@ function Harness({
   engineLabel,
 }: {
   chatSessionId: string;
-  sandboxStatus: GoatCodexSandboxStatus | null;
+  sandboxStatus: EngineRuntimeStatus | null;
   engineLabel: string;
 }) {
   const panelRef = useRef<CodingWorkspacePanelHandle>(null);
@@ -81,11 +81,14 @@ describe("CodingWorkspacePanel", () => {
       "fetch",
       vi.fn(async () =>
         Response.json({
-          ok: true,
-          websocketUrl: "wss://runner.example.com/goat/runtime",
-          ticket: "signed-ticket",
-          expiresAt: Date.now() + 60_000,
-          sandboxStatus: "sleeping",
+          data: {
+            conversationId: "chat_1",
+            websocketUrl: "wss://runner.example.com/goat/runtime",
+            ticket: "signed-ticket",
+            expiresAt: Date.now() + 60_000,
+            runtimeStatus: "sleeping",
+          },
+          meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
         }),
       ),
     );
@@ -106,9 +109,10 @@ describe("CodingWorkspacePanel", () => {
     expect(fetch).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Preview" }));
-    expect(fetch).toHaveBeenCalledWith("/api/coding-workspaces/sessions/chat_1/runtime-access", {
-      method: "POST",
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://localhost:3000/v1/conversations/chat_1/engine-session/runtime-access",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
+    );
   });
 
   it("uses the intended default desktop width when no preference is stored", () => {

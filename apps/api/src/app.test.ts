@@ -29,6 +29,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
 import type { AttachmentUploadService } from "./attachments";
 import type { BrainAssetService } from "./brain-assets";
+import type { ChatResourceService } from "./chat-resources";
 import { ApiError } from "./errors";
 import type { ApiRateLimiter } from "./rate-limit";
 
@@ -91,13 +92,25 @@ describe("canonical Hono API", () => {
       browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
       brainAssets: fakeBrainAssets(),
+      brainControl: fakeBrainControl(),
       attachments: fakeAttachments(),
       userSettings: fakeUserSettings(),
       feedback: fakeFeedback(),
       repoConfigs: fakeRepoConfigs(),
       integrationAccounts: fakeIntegrationAccounts(),
+      slackBotSettings: fakeSlackBotSettings(),
       engineAuth: fakeEngineAuth(),
+      engineSessions: fakeEngineSessions(),
+      billing: fakeBilling(),
+      workspaceCapabilities: fakeWorkspaceCapabilities(),
+      workspaceControl: fakeWorkspaceControl(),
+      identity: fakeIdentity(),
+      onboarding: fakeOnboarding(),
+      onboardingEmails: fakeOnboardingEmails(),
       authenticate: async () => {
+        throw new ApiError(401, "authentication_required", "Authentication required.");
+      },
+      identify: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
       },
     });
@@ -109,12 +122,23 @@ describe("canonical Hono API", () => {
       error: { code: "authentication_required", requestId: "request_test" },
       meta: { apiVersion: "v1" },
     });
+    const onboardingUnauthorized = await unauthenticated.request("/v1/onboarding", {
+      headers: { "X-Request-Id": "request_onboarding_test" },
+    });
+    expect(onboardingUnauthorized.status).toBe(401);
+    await expect(onboardingUnauthorized.json()).resolves.toMatchObject({
+      error: { code: "authentication_required", requestId: "request_onboarding_test" },
+      meta: { apiVersion: "v1" },
+    });
 
     const app = testApp(repository);
     const invalid = await app.request("/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": "send_1" },
-      body: JSON.stringify({ content: "", engine: "opencompany" }),
+      body: JSON.stringify({
+        content: "",
+        engine: { type: "opencompany", schemaVersion: 1 },
+      }),
     });
     expect(invalid.status).toBe(400);
     await expect(invalid.json()).resolves.toMatchObject({
@@ -1002,6 +1026,7 @@ describe("canonical Hono API", () => {
       slackBotIngress: {
         start: record("slack-bot.start", calls),
         callback: record("slack-bot.callback", calls),
+        webhook: record("slack-bot.webhook", calls),
       },
     });
 
@@ -1040,6 +1065,7 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/x-account/callback", "x-account.callback"],
       ["GET", "/integrations/slack-bot/start", "slack-bot.start"],
       ["GET", "/integrations/slack-bot/callback", "slack-bot.callback"],
+      ["POST", "/webhooks/slack-bot/events", "slack-bot.webhook"],
     ];
     for (const [method, path, service] of routes) {
       const response = await app.request(path, { method, body: method === "POST" ? "{}" : null });
@@ -1083,7 +1109,10 @@ describe("canonical Hono API", () => {
     const app = testApp(repository, {
       browserOrigins: ["https://my.opencompany.chat"],
     });
-    const body = JSON.stringify({ content: "Hello", engine: "opencompany" });
+    const body = JSON.stringify({
+      content: "Hello",
+      engine: { type: "opencompany", schemaVersion: 1 },
+    });
     const headers = { "Content-Type": "application/json", "Idempotency-Key": "send_1" };
 
     for (const origin of [undefined, "https://attacker.example"]) {
@@ -1134,7 +1163,10 @@ describe("canonical Hono API", () => {
     const response = await app.request("/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": "send_1" },
-      body: JSON.stringify({ content: "Hello", engine: "opencompany" }),
+      body: JSON.stringify({
+        content: "Hello",
+        engine: { type: "opencompany", schemaVersion: 1 },
+      }),
     });
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toMatchObject({
@@ -1153,6 +1185,96 @@ describe("canonical Hono API", () => {
     });
   });
 
+  it("admits Codex through the canonical Message command with versioned engine settings", async () => {
+    const repository = fakeRepository();
+    const getCodexStatus = vi.fn(async () => ({
+      status: "connected" as const,
+      statusReason: null,
+      lastValidatedAt: null,
+      lastRotatedAt: null,
+    }));
+    const app = testApp(repository, {
+      engineAuth: engineAuthService({ getCodexStatus }),
+    });
+    const response = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_codex_1" },
+      body: JSON.stringify({
+        clientConversationId: "conversation_codex_1",
+        content: "Build the feature",
+        engine: {
+          type: "codex",
+          schemaVersion: 1,
+          settings: {
+            reasoningEffort: "xhigh",
+            planModeEnabled: true,
+            goalMode: { objective: "Ship it", tokenBudget: 12_000 },
+          },
+        },
+        model: "openai/gpt-5.6-sol",
+      }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(getCodexStatus).toHaveBeenCalledWith(actor);
+    expect(repository.lastCommand).toMatchObject({
+      engine: "codex",
+      model: "openai/gpt-5.6-sol",
+      runtimeModel: "gpt-5.6-sol",
+      settings: {
+        reasoningEffort: "xhigh",
+        planModeReasoningEffort: "high",
+        goalMode: { objective: "Ship it", tokenBudget: 12_000 },
+      },
+    });
+  });
+
+  it("fails closed when a coding-engine credential is disconnected", async () => {
+    const response = await testApp(fakeRepository(), {
+      engineAuth: engineAuthService({
+        getClaudeCodeStatus: async () => ({
+          status: null,
+          statusReason: null,
+          lastValidatedAt: null,
+          lastRotatedAt: null,
+        }),
+      }),
+    }).request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_claude_1" },
+      body: JSON.stringify({
+        content: "Build the feature",
+        engine: {
+          type: "claude_code",
+          schemaVersion: 1,
+          settings: { reasoningEffort: "high" },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "conflict" } });
+  });
+
+  it("rejects a follow-up that tries to switch Conversation engines", async () => {
+    const response = await testApp(fakeRepository()).request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "send_switch_1" },
+      body: JSON.stringify({
+        conversationId: "conversation_1",
+        content: "Continue",
+        engine: {
+          type: "codex",
+          schemaVersion: 1,
+          settings: { reasoningEffort: "high" },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "conflict" } });
+  });
+
   it("resolves Auto inside the authenticated command boundary", async () => {
     const repository = fakeRepository();
     const resolveAutoModel = vi.fn(async () => ({
@@ -1167,7 +1289,7 @@ describe("canonical Hono API", () => {
         clientConversationId: "conversation_auto",
         clientMessageId: "message_auto",
         content: "Route this",
-        engine: "opencompany",
+        engine: { type: "opencompany", schemaVersion: 1 },
         model: "auto",
         attachmentIds: ["attachment_1"],
       }),
@@ -1195,7 +1317,11 @@ describe("canonical Hono API", () => {
     const response = await testApp(fakeRepository()).request("/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": "send_auto_2" },
-      body: JSON.stringify({ content: "Route this", engine: "opencompany", model: "auto" }),
+      body: JSON.stringify({
+        content: "Route this",
+        engine: { type: "opencompany", schemaVersion: 1 },
+        model: "auto",
+      }),
     });
 
     expect(response.status).toBe(503);
@@ -1209,7 +1335,15 @@ describe("canonical Hono API", () => {
     const response = await testApp(fakeRepository(), { resolveAutoModel }).request("/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": "send_auto_3" },
-      body: JSON.stringify({ content: "Route this", engine: "claude_code", model: "auto" }),
+      body: JSON.stringify({
+        content: "Route this",
+        engine: {
+          type: "claude_code",
+          schemaVersion: 1,
+          settings: { reasoningEffort: "high" },
+        },
+        model: "auto",
+      }),
     });
 
     expect(response.status).toBe(400);
@@ -1503,6 +1637,25 @@ describe("canonical Hono API", () => {
     );
   });
 
+  it("streams the authenticated integration-account read model without client-selected scope", async () => {
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(fakeRepository(), { readModels: { stream } });
+
+    const response = await app.request(
+      "/v1/read-models/integration-accounts-v1?table=goat.integration_credentials&where=true",
+    );
+
+    expect(response.status).toBe(200);
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({ actor, readModel: "integration-accounts-v1" }),
+    );
+
+    const invalid = await app.request(
+      "/v1/read-models/integration-accounts-v1?conversationId=conversation_1",
+    );
+    expect(invalid.status).toBe(400);
+  });
+
   it("uploads a private attachment through the typed multipart operation", async () => {
     const uploaded: File[] = [];
     const attachments: AttachmentUploadService = {
@@ -1535,6 +1688,186 @@ describe("canonical Hono API", () => {
       },
     });
     expect(JSON.stringify(json)).not.toMatch(/blob|pathname|url/iu);
+  });
+
+  it("owns authenticated Conversation shares behind the canonical resource", async () => {
+    const findShare = vi.fn(async () => null);
+    const ensureShare = vi.fn(async () => "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd");
+    const revokeShare = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      chatResources: chatResourceService({ findShare, ensureShare, revokeShare }),
+    });
+
+    const current = await app.request("/v1/conversations/conversation_1/share");
+    expect(current.status).toBe(200);
+    await expect(current.json()).resolves.toMatchObject({
+      data: { conversationId: "conversation_1", shareId: null },
+    });
+    expect(findShare).toHaveBeenCalledWith(actor, "conversation_1");
+
+    const created = await app.request("/v1/conversations/conversation_1/share", {
+      method: "PUT",
+    });
+    expect(created.status).toBe(200);
+    await expect(created.json()).resolves.toMatchObject({
+      data: {
+        conversationId: "conversation_1",
+        shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+      },
+    });
+    expect(ensureShare).toHaveBeenCalledWith(actor, "conversation_1");
+
+    const revoked = await app.request("/v1/conversations/conversation_1/share", {
+      method: "DELETE",
+    });
+    expect(revoked.status).toBe(200);
+    await expect(revoked.json()).resolves.toMatchObject({
+      data: { conversationId: "conversation_1", shareId: null },
+    });
+    expect(revokeShare).toHaveBeenCalledWith(actor, "conversation_1");
+  });
+
+  it("owns Conversation title generation and Message analytics in the API runtime", async () => {
+    const generate = vi.fn(async () => ({
+      conversationId: "conversation_1",
+      title: "Launch plan",
+      generated: true,
+    }));
+    const captureChatMessage = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      chatTitles: { generate },
+      captureChatMessage,
+    });
+
+    const title = await app.request("/v1/conversations/conversation_1/title", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId: "message_user_1" }),
+    });
+    expect(title.status).toBe(200);
+    await expect(title.json()).resolves.toMatchObject({
+      data: { conversationId: "conversation_1", title: "Launch plan", generated: true },
+    });
+    expect(generate).toHaveBeenCalledWith(actor, "conversation_1", "message_user_1");
+
+    const message = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "message-title-1" },
+      body: JSON.stringify({
+        content: "Prepare a launch plan",
+        engine: { type: "opencompany", schemaVersion: 1 },
+      }),
+    });
+    expect(message.status).toBe(202);
+    await vi.waitFor(() => {
+      expect(generate).toHaveBeenCalledWith(actor, "conversation_1", "message_user_1");
+      expect(captureChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actor,
+          conversationId: "conversation_1",
+          firstMessage: true,
+          engine: "opencompany",
+          messageLength: 21,
+          selectionMode: "manual",
+        }),
+      );
+    });
+  });
+
+  it("does not repeat title or analytics side effects for an idempotent Message replay", async () => {
+    const repository = fakeRepository();
+    repository.createMessageAndRun = async ({ command }) => {
+      repository.lastCommand = command;
+      return {
+        conversationId: "conversation_1",
+        messageId: "message_user_1",
+        assistantMessageId: "message_assistant_1",
+        runId: "run_1",
+        transactionId: "42",
+        idempotentReplay: true,
+      };
+    };
+    const generate = vi.fn(async () => ({
+      conversationId: "conversation_1",
+      title: "Launch plan",
+      generated: true,
+    }));
+    const captureChatMessage = vi.fn(async () => undefined);
+    const app = testApp(repository, {
+      chatTitles: { generate },
+      captureChatMessage,
+    });
+
+    const response = await app.request("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "message-replay-1" },
+      body: JSON.stringify({
+        content: "Prepare a launch plan",
+        engine: { type: "opencompany", schemaVersion: 1 },
+      }),
+    });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({ data: { replayed: true } });
+    expect(generate).not.toHaveBeenCalled();
+    expect(captureChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("serves public Chat presentation without actor authentication or private metadata", async () => {
+    const loadPublicShare = vi.fn(async () => ({
+      shareId: "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+      title: "Shared Chat",
+      kind: "chat" as const,
+      engine: "codex" as const,
+      messages: [{ id: "message_1", role: "assistant" as const, parts: [] }],
+    }));
+    const app = testApp(fakeRepository(), {
+      chatResources: chatResourceService({ loadPublicShare }),
+      authenticate: async () => {
+        throw new Error("Public resources must not authenticate an actor.");
+      },
+    });
+
+    const response = await app.request(
+      "/public/chat-shares/goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("x-robots-tag")).toContain("noindex");
+    const body = await response.json();
+    expect(body).toMatchObject({
+      data: { title: "Shared Chat", engine: "codex", messages: [{ id: "message_1" }] },
+    });
+    expect(JSON.stringify(body)).not.toMatch(/sessionId|contextTokens|blob|lease|token/iu);
+  });
+
+  it("streams authorized Chat resource bytes with defensive headers", async () => {
+    const downloadAttachment = vi.fn(async () => ({
+      stream: new Response("private attachment").body as ReadableStream<Uint8Array>,
+      mediaType: "image/png",
+      filename: 'diagram\u0000 "final".png',
+      sizeBytes: 18,
+      inline: true,
+      cacheControl: "private, max-age=86400, immutable",
+      sandbox: false,
+    }));
+    const app = testApp(fakeRepository(), {
+      chatResources: chatResourceService({ downloadAttachment }),
+    });
+
+    const response = await app.request("/v1/chat-attachments/message_1/attachment_1");
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("private attachment");
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toContain("private");
+    expect(response.headers.get("content-disposition")).toContain("diagram_ _final_.png");
+    expect(downloadAttachment).toHaveBeenCalledWith({
+      actor,
+      messageId: "message_1",
+      attachmentId: "attachment_1",
+    });
   });
 
   it("uploads and replaces private Brain assets through typed multipart operations", async () => {
@@ -1921,16 +2254,38 @@ describe("canonical Hono API", () => {
   });
 
   it("serves the integration account control plane through typed commands", async () => {
+    const list = vi.fn(async () => [
+      {
+        integrationId: "gint_abc123",
+        provider: "gmail" as const,
+        status: "connected" as const,
+        connected: true,
+        accountEmail: "owner@example.com",
+        accountName: "Owner",
+        connectionLabel: null,
+        statusReason: null,
+        scopes: ["gmail.readonly"],
+        capabilityModes: {},
+      },
+    ]);
     const getUsage = vi.fn(async () => ({ affectedBrainSourceCount: 3 }));
     const disconnect = vi.fn(async () => undefined);
     const setCapabilityMode = vi.fn(async () => undefined);
     const app = testApp(fakeRepository(), {
       integrationAccounts: integrationAccountService({
+        list,
         getUsage,
         disconnect,
         setCapabilityMode,
       }),
     });
+
+    const listed = await app.request("/v1/integration-accounts");
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toMatchObject({
+      data: [{ integrationId: "gint_abc123", provider: "gmail" }],
+    });
+    expect(list).toHaveBeenCalledWith(actor);
 
     const usage = await app.request("/v1/integration-accounts/gint_abc123/usage");
     expect(usage.status).toBe(200);
@@ -1959,6 +2314,76 @@ describe("canonical Hono API", () => {
       data: { integrationId: "gint_abc123", deleted: true },
     });
     expect(disconnect).toHaveBeenCalledWith(actor, "gint_abc123");
+  });
+
+  it("serves authenticated Slack bot settings and destination resources", async () => {
+    const getWorkspaceSettings = vi.fn(async () => ({
+      isAdmin: true,
+      configured: true,
+      installed: true,
+      status: "connected" as const,
+      needsScopeUpgrade: false,
+      teamName: "Acme",
+      statusReason: null,
+      destinationCount: 1,
+    }));
+    const getDestination = vi.fn(async () => ({
+      installed: true,
+      botConnected: true,
+      isAdmin: true,
+      brainVisibility: "workspace" as const,
+      source: { enabled: true, channels: [{ id: "C1", name: "general" }] },
+    }));
+    const setDestination = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      slackBotSettings: {
+        ...fakeSlackBotSettings(),
+        getWorkspaceSettings,
+        getDestination,
+        setDestination,
+      },
+    });
+
+    const workspace = await app.request("/v1/workspace/slack-bot");
+    expect(workspace.status).toBe(200);
+    await expect(workspace.json()).resolves.toMatchObject({
+      data: { installed: true, teamName: "Acme", destinationCount: 1 },
+    });
+
+    const destination = await app.request("/v1/brains/brain_1/slack-bot");
+    expect(destination.status).toBe(200);
+    await expect(destination.json()).resolves.toMatchObject({
+      data: { source: { channels: [{ id: "C1", name: "general" }] } },
+    });
+
+    const updated = await app.request("/v1/brains/brain_1/slack-bot", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, channels: [{ id: "C2", name: "product" }] }),
+    });
+    expect(updated.status).toBe(200);
+    expect(setDestination).toHaveBeenCalledWith(actor, "brain_1", {
+      enabled: true,
+      channels: [{ id: "C2", name: "product" }],
+    });
+  });
+
+  it("forwards standing action permissions through the authenticated command", async () => {
+    const alwaysAllowAction = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      integrationAccounts: integrationAccountService({ alwaysAllowAction }),
+    });
+
+    const response = await app.request("/v1/actions/gmail.send_email/permissions/always-allow", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { actionId: "gmail.send_email", state: "allowed" },
+      meta: { apiVersion: "v1" },
+    });
+    expect(alwaysAllowAction).toHaveBeenCalledWith(actor, "gmail.send_email");
   });
 
   it("routes provider connect commands and never echoes the submitted key", async () => {
@@ -2127,6 +2552,41 @@ describe("canonical Hono API", () => {
       },
       meta: { apiVersion: "v1", protocolVersion: expect.any(String) },
     });
+  });
+
+  it("serves qualified coding runtime status and access resources", async () => {
+    const getRuntimeStatus = vi.fn(async () => "sleeping" as const);
+    const createRuntimeAccess = vi.fn(async () => ({
+      conversationId: "conversation_1",
+      websocketUrl: "wss://runner.example.test/goat/runtime",
+      ticket: "short-lived-ticket",
+      expiresAt: 1_786_449_900,
+      runtimeStatus: "running" as const,
+    }));
+    const app = testApp(fakeRepository(), {
+      engineSessions: engineSessionService({ getRuntimeStatus, createRuntimeAccess }),
+    });
+
+    const status = await app.request("/v1/conversations/conversation_1/engine-session/runtime");
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({
+      data: { conversationId: "conversation_1", status: "sleeping" },
+    });
+    expect(getRuntimeStatus).toHaveBeenCalledWith(actor, "conversation_1");
+
+    const access = await app.request(
+      "/v1/conversations/conversation_1/engine-session/runtime-access",
+      { method: "POST" },
+    );
+    expect(access.status).toBe(201);
+    await expect(access.json()).resolves.toMatchObject({
+      data: {
+        conversationId: "conversation_1",
+        websocketUrl: "wss://runner.example.test/goat/runtime",
+        runtimeStatus: "running",
+      },
+    });
+    expect(createRuntimeAccess).toHaveBeenCalledWith(actor, "conversation_1");
   });
 
   it("saves the Claude Code token without echoing it and disconnects engines", async () => {
@@ -2311,6 +2771,411 @@ describe("canonical Hono API", () => {
     });
     expect(completeInfisicalAuth).toHaveBeenCalledTimes(1);
   });
+
+  it("serves authorized billing read models without internal ledger or Stripe objects", async () => {
+    const getOverview = vi.fn(async () => ({
+      creditBalanceUsdMicros: 3_000_000,
+      includedBalanceUsdMicros: 1_000_000,
+      topUpBalanceUsdMicros: 2_000_000,
+      plan: "pro" as const,
+      subscriptionStatus: "active",
+      seatQuantity: 2,
+      includedUsagePeriodEnd: "2026-09-01T00:00:00.000Z",
+      cancelAtPeriodEnd: false,
+      currentPeriodEnd: "2026-09-01T00:00:00.000Z",
+      paymentNeedsAttention: false,
+      proMonthlyPriceCents: 2_000,
+      hobbyIncludedUsageCents: 100,
+      memberCount: 2,
+      memberCap: 10,
+      spendThisMonthUsdMicros: 500_000,
+      spendThisMonthByCategory: { chat: 500_000, ingestion: 0, capabilities: 0 },
+      recentActivity: [
+        {
+          activityId: "billing_activity_safe",
+          source: "chat_model_usage",
+          amountUsdMicros: -500_000,
+          providerCostUsdMicros: 500_000,
+          platformFeeUsdMicros: 0,
+          capabilityAction: null,
+          isAutoRefill: false,
+          createdAt: "2026-08-13T12:00:00.000Z",
+        },
+      ],
+      lowBalanceWarnUsdMicros: 1_000_000,
+      includedUsagePerSeatCents: 2_000,
+      topUpAmountsCents: [1_000],
+      defaultTopUpCents: 1_000,
+      minTopUpCents: 500,
+      maxTopUpCents: 50_000,
+      autoRefillMonthlyMaxCents: 50_000,
+      autoRefill: {
+        enabled: true,
+        amountCents: 1_000,
+        hasPaymentMethod: true,
+        lastError: null,
+      },
+      isAdmin: true,
+    }));
+    const app = testApp(fakeRepository(), {
+      billing: { ...fakeBilling(), getOverview },
+    });
+
+    const response = await app.request("/v1/billing");
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(body.data).toMatchObject({
+      plan: "pro",
+      creditBalanceUsdMicros: 3_000_000,
+      recentActivity: [{ activityId: "billing_activity_safe" }],
+    });
+    expect(JSON.stringify(body)).not.toMatch(/stripeCustomerId|paymentMethodId|ledgerId/u);
+    expect(getOverview).toHaveBeenCalledWith(actor);
+  });
+
+  it("forwards the required idempotency key to billing commands", async () => {
+    const createCreditTopUp = vi.fn(async () => ({
+      redirectUrl: "https://checkout.stripe.test/session",
+    }));
+    const app = testApp(fakeRepository(), {
+      billing: { ...fakeBilling(), createCreditTopUp },
+    });
+    const response = await app.request("/v1/billing/top-ups", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "billing-command-1" },
+      body: JSON.stringify({ amountCents: 1_000 }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(createCreditTopUp).toHaveBeenCalledWith(actor, {
+      amountCents: 1_000,
+      idempotencyKey: "billing-command-1",
+    });
+    const missingKey = await app.request("/v1/billing/top-ups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ amountCents: 1_000 }),
+    });
+    expect(missingKey.status).toBe(400);
+    expect(createCreditTopUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes capabilities and Brain controls through their authorized services", async () => {
+    const getSettings = vi.fn(async () => ({
+      capabilities: [{ source: "x" as const, enabled: true }],
+      sessionBudgetUsdMicros: 5_000_000,
+    }));
+    const setCapability = vi.fn(async () => ({ source: "x" as const, enabled: false }));
+    const getApproval = vi.fn(async () => ({
+      runId: "gcr_1",
+      source: "lead" as const,
+      action: "lead.find_person_email",
+      status: "awaiting_approval" as const,
+      maxCostUsdMicros: 360_000,
+      expiresAt: new Date("2026-08-13T16:00:00.000Z"),
+      settledCostUsdMicros: null,
+    }));
+    const createBrain = vi.fn(async () => ({ brainId: "brain_new" }));
+    const getAccess = vi.fn(async () => ({
+      visibility: "restricted" as const,
+      memberIds: ["user_1"],
+      workspaceMembers: [],
+    }));
+    const app = testApp(fakeRepository(), {
+      workspaceCapabilities: {
+        ...fakeWorkspaceCapabilities(),
+        getSettings,
+        setCapability,
+        getApproval,
+      },
+      brainControl: { ...fakeBrainControl(), createBrain, getAccess },
+    });
+
+    const settings = await app.request("/v1/capabilities");
+    expect(settings.status).toBe(200);
+    await expect(settings.json()).resolves.toMatchObject({
+      data: { capabilities: [{ source: "x", enabled: true }] },
+    });
+
+    const toggled = await app.request("/v1/capabilities/x", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(toggled.status).toBe(200);
+    expect(setCapability).toHaveBeenCalledWith(actor, "x", false);
+
+    const approval = await app.request("/v1/capability-approvals/gcr_1");
+    expect(approval.status).toBe(200);
+    await expect(approval.json()).resolves.toMatchObject({
+      data: { expiresAt: "2026-08-13T16:00:00.000Z" },
+    });
+
+    const created = await app.request("/v1/brains", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Research", visibility: "workspace" }),
+    });
+    expect(created.status).toBe(201);
+    expect(createBrain).toHaveBeenCalledWith(actor, {
+      name: "Research",
+      visibility: "workspace",
+    });
+
+    const access = await app.request("/v1/brains/brain_new/access");
+    expect(access.status).toBe(200);
+    expect(getAccess).toHaveBeenCalledWith(actor, "brain_new");
+  });
+
+  it("routes workspace settings, membership, provisioning, and switch commands", async () => {
+    const getSettings = vi.fn(async () => ({
+      workspace: { id: "goat_ws_current", name: "Current Organization" },
+      role: "admin" as const,
+      plan: "pro" as const,
+      memberCap: 10,
+      members: [],
+      invitations: [],
+    }));
+    const invite = vi.fn(async () => undefined);
+    const removeMember = vi.fn(async () => undefined);
+    const rename = vi.fn(async () => ({ id: "goat_ws_current", name: "Renamed" }));
+    const create = vi.fn(async () => ({
+      workspaceId: "goat_ws_new",
+      organizationId: "org_new",
+      brainId: "brain_new",
+    }));
+    const switchWorkspace = vi.fn(async () => ({
+      workspaceId: "goat_ws_next",
+      organizationId: "org_next",
+      brainId: null,
+    }));
+    const app = testApp(fakeRepository(), {
+      workspaceControl: {
+        ...fakeWorkspaceControl(),
+        getSettings,
+        invite,
+        removeMember,
+        rename,
+        create,
+        switch: switchWorkspace,
+      },
+    });
+
+    const settings = await app.request("/v1/workspace");
+    expect(settings.status).toBe(200);
+    await expect(settings.json()).resolves.toMatchObject({
+      data: { workspace: { id: "goat_ws_current" }, plan: "pro" },
+    });
+
+    const invited = await app.request("/v1/workspace/invitations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "teammate@example.com" }),
+    });
+    expect(invited.status).toBe(201);
+    expect(invite).toHaveBeenCalledWith(actor, "teammate@example.com");
+
+    const removed = await app.request("/v1/workspace/members/user_2", { method: "DELETE" });
+    expect(removed.status).toBe(200);
+    expect(removeMember).toHaveBeenCalledWith(actor, "user_2");
+
+    const renamed = await app.request("/v1/workspace", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Renamed" }),
+    });
+    expect(renamed.status).toBe(200);
+    expect(rename).toHaveBeenCalledWith(actor, "Renamed");
+
+    const created = await app.request("/v1/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId: "goat_ws_new", name: "New Workspace" }),
+    });
+    expect(created.status).toBe(201);
+    expect(create).toHaveBeenCalledWith(actor, {
+      workspaceId: "goat_ws_new",
+      name: "New Workspace",
+    });
+
+    const switched = await app.request("/v1/workspaces/goat_ws_next/switch", { method: "POST" });
+    expect(switched.status).toBe(200);
+    expect(switchWorkspace).toHaveBeenCalledWith(actor, "goat_ws_next");
+  });
+
+  it("routes identity reads and synchronization through the pre-onboarding identity tier", async () => {
+    const identity = {
+      userId: "user_mid_onboarding",
+      organizationId: null,
+      activeWorkspaceId: null,
+      activeBrainId: null,
+      method: "session" as const,
+    };
+    const authenticate = vi.fn(async () => {
+      throw new Error("The actor tier must not run for identity.");
+    });
+    const identify = vi.fn(async () => identity);
+    const service = fakeIdentity();
+    const get = vi.spyOn(service, "get");
+    const sync = vi.spyOn(service, "sync");
+    const app = testApp(fakeRepository(), { authenticate, identify, identity: service });
+
+    expect((await app.request("/v1/identity")).status).toBe(200);
+    expect((await app.request("/v1/identity/sync", { method: "POST" })).status).toBe(200);
+    expect(get).toHaveBeenCalledWith(identity);
+    expect(sync).toHaveBeenCalledWith(identity);
+    expect(authenticate).not.toHaveBeenCalled();
+  });
+
+  it("routes onboarding through verified identity without the onboarded actor gate", async () => {
+    const identity = {
+      userId: "user_mid_onboarding",
+      organizationId: null,
+      activeWorkspaceId: null,
+      activeBrainId: null,
+      method: "session" as const,
+      refreshedSessionCookie: "wos-session=refreshed; Path=/; HttpOnly",
+    };
+    const authenticate = vi.fn(async () => {
+      throw new Error("The actor tier must not run for onboarding.");
+    });
+    const identify = vi.fn(async () => identity);
+    const getState = vi.fn(async () => ({
+      onboarding: null,
+      workspace: null,
+      activeBrainId: null,
+    }));
+    const checkSlug = vi.fn(async () => ({ slug: "analytical-co", available: true }));
+    const saveProfile = vi.fn(async () => undefined);
+    const saveWorkspace = vi.fn(async () => ({
+      workspaceId: "goat_ws_new",
+      organizationId: "org_new",
+      brainId: "brain_general",
+      createdByCaller: true,
+    }));
+    const finish = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      authenticate,
+      identify,
+      onboarding: { getState, checkSlug, saveProfile, saveWorkspace, finish },
+    });
+
+    const state = await app.request("/v1/onboarding");
+    expect(state.status).toBe(200);
+    expect(state.headers.get("set-cookie")).toContain("wos-session=refreshed");
+    expect(getState).toHaveBeenCalledWith(identity);
+
+    const checked = await app.request("/v1/onboarding/workspace-slug/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug: "analytical-co" }),
+    });
+    expect(checked.status).toBe(200);
+    expect(checkSlug).toHaveBeenCalledWith(identity, "analytical-co");
+
+    const profile = await app.request("/v1/onboarding/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "founder", companyUrl: "https://opencompany.ai/" }),
+    });
+    expect(profile.status).toBe(200);
+    expect(saveProfile).toHaveBeenCalledWith(identity, {
+      role: "founder",
+      companyUrl: "https://opencompany.ai/",
+    });
+
+    const workspace = await app.request("/v1/onboarding/workspace", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
+        name: "Analytical Co",
+        slug: "analytical-co",
+      }),
+    });
+    expect(workspace.status).toBe(200);
+    expect(saveWorkspace).toHaveBeenCalledWith(identity, {
+      workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
+      name: "Analytical Co",
+      slug: "analytical-co",
+    });
+
+    const completed = await app.request("/v1/onboarding/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ referralSource: "friend" }),
+    });
+    expect(completed.status).toBe(200);
+    expect(finish).toHaveBeenCalledWith(identity, "friend");
+    expect(identify).toHaveBeenCalledTimes(5);
+    expect(authenticate).not.toHaveBeenCalled();
+  });
+
+  it("protects internal onboarding-email persistence with the shared cron secret", async () => {
+    const enroll = vi.fn(async () => undefined);
+    const claimDue = vi.fn(async () => [
+      {
+        id: "goem_1",
+        workosUserId: "user_1",
+        step: "welcome" as const,
+        attempts: 1,
+        email: "owner@example.com",
+        firstName: "Owner",
+        terminalOnFailure: false,
+      },
+    ]);
+    const settle = vi.fn(async () => undefined);
+    const unsubscribe = vi.fn(async () => 2);
+    const app = testApp(fakeRepository(), {
+      onboardingEmails: { enroll, claimDue, settle, unsubscribe },
+      emailLifecycleInternalSecret: "cron-secret",
+    });
+
+    const unauthorized = await app.request("/internal/onboarding-emails/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 4 }),
+    });
+    expect(unauthorized.status).toBe(401);
+    expect(claimDue).not.toHaveBeenCalled();
+
+    const headers = {
+      Authorization: "Bearer cron-secret",
+      "Content-Type": "application/json",
+    };
+    const enrolled = await app.request("/internal/onboarding-emails/enroll", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ workosUserId: "user_1" }),
+    });
+    expect(enrolled.status).toBe(200);
+    expect(enroll).toHaveBeenCalledWith("user_1");
+
+    const claimed = await app.request("/internal/onboarding-emails/claim", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ limit: 4, workosUserId: "user_1" }),
+    });
+    expect(claimed.status).toBe(200);
+    expect(claimDue).toHaveBeenCalledWith(4, "user_1");
+
+    const settled = await app.request("/internal/onboarding-emails/settle", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id: "goem_1", outcome: "sent" }),
+    });
+    expect(settled.status).toBe(200);
+    expect(settle).toHaveBeenCalledWith({ id: "goem_1", outcome: "sent" });
+
+    const unsubscribed = await app.request("/internal/onboarding-emails/unsubscribe", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ email: "OWNER@EXAMPLE.COM" }),
+    });
+    expect(unsubscribed.status).toBe(200);
+    expect(unsubscribe).toHaveBeenCalledWith("owner@example.com");
+  });
 });
 
 function testApp(
@@ -2327,13 +3192,29 @@ function testApp(
     browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
     brainAssets: fakeBrainAssets(),
+    brainControl: fakeBrainControl(),
     attachments: fakeAttachments(),
     userSettings: fakeUserSettings(),
     feedback: fakeFeedback(),
     repoConfigs: fakeRepoConfigs(),
     integrationAccounts: fakeIntegrationAccounts(),
+    slackBotSettings: fakeSlackBotSettings(),
     engineAuth: fakeEngineAuth(),
+    engineSessions: fakeEngineSessions(),
+    billing: fakeBilling(),
+    workspaceCapabilities: fakeWorkspaceCapabilities(),
+    workspaceControl: fakeWorkspaceControl(),
+    identity: fakeIdentity(),
+    onboarding: fakeOnboarding(),
+    onboardingEmails: fakeOnboardingEmails(),
     authenticate: async () => ({ actor }),
+    identify: async () => ({
+      userId: actor.userId,
+      organizationId: null,
+      activeWorkspaceId: actor.workspaceId,
+      activeBrainId: null,
+      method: actor.authenticationMethod,
+    }),
     defaultModel: "provider/default",
     ...overrides,
   });
@@ -2385,6 +3266,157 @@ function fakeBrainAssets(): BrainAssetService {
   };
 }
 
+function fakeBrainControl(): Parameters<typeof createApiApp>[0]["brainControl"] {
+  return {
+    switchBrain: async () => {
+      throw new Error("Unexpected Brain switch.");
+    },
+    createBrain: async () => {
+      throw new Error("Unexpected Brain creation.");
+    },
+    getAccess: async () => {
+      throw new Error("Unexpected Brain access read.");
+    },
+    setAccess: async () => {
+      throw new Error("Unexpected Brain access mutation.");
+    },
+    getEnrichment: async () => {
+      throw new Error("Unexpected Brain enrichment read.");
+    },
+    setEnrichment: async () => {
+      throw new Error("Unexpected Brain enrichment mutation.");
+    },
+    getIntelligence: async () => {
+      throw new Error("Unexpected Brain intelligence read.");
+    },
+    setIntelligence: async () => {
+      throw new Error("Unexpected Brain intelligence mutation.");
+    },
+  };
+}
+
+function fakeWorkspaceCapabilities(): Parameters<typeof createApiApp>[0]["workspaceCapabilities"] {
+  return {
+    getSettings: async () => {
+      throw new Error("Unexpected workspace capability settings read.");
+    },
+    setCapability: async () => {
+      throw new Error("Unexpected workspace capability mutation.");
+    },
+    setSessionBudget: async () => {
+      throw new Error("Unexpected workspace capability budget mutation.");
+    },
+    getApproval: async () => {
+      throw new Error("Unexpected capability approval read.");
+    },
+    getApprovalByToolCall: async () => {
+      throw new Error("Unexpected tool-call capability approval read.");
+    },
+  };
+}
+
+function fakeWorkspaceControl(): Parameters<typeof createApiApp>[0]["workspaceControl"] {
+  return {
+    getSettings: async () => {
+      throw new Error("Unexpected workspace settings read.");
+    },
+    invite: async () => {
+      throw new Error("Unexpected workspace invitation.");
+    },
+    revokeInvitation: async () => {
+      throw new Error("Unexpected workspace invitation revoke.");
+    },
+    removeMember: async () => {
+      throw new Error("Unexpected workspace member removal.");
+    },
+    rename: async () => {
+      throw new Error("Unexpected workspace rename.");
+    },
+    create: async () => {
+      throw new Error("Unexpected workspace creation.");
+    },
+    switch: async () => {
+      throw new Error("Unexpected workspace switch.");
+    },
+  };
+}
+
+function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
+  const data = {
+    user: {
+      id: actor.userId,
+      email: "owner@example.com",
+      firstName: "Owner",
+      lastName: null,
+      avatarUrl: null,
+      timezone: "UTC",
+      taskSpawningEnabled: true,
+      autoModelRoutingEnabled: false,
+      chatCapabilitiesBetaEnabled: false,
+      imessageEnabled: false,
+      wikiEnabled: true,
+      taskViewMode: "board" as const,
+      preferredMcpClient: null,
+      mcpSetupCompletedAt: null,
+      onboardedAt: "2026-08-13T12:00:00.000Z",
+      createdAt: "2026-08-13T12:00:00.000Z",
+      updatedAt: "2026-08-13T12:00:00.000Z",
+    },
+    workspaces: [
+      {
+        id: actor.workspaceId,
+        name: "Workspace",
+        slug: "workspace",
+        role: "admin" as const,
+      },
+    ],
+    activeWorkspaceId: actor.workspaceId,
+    brains: [],
+    activeBrainId: null,
+  };
+  return {
+    get: async () => data,
+    sync: async () => data,
+  };
+}
+
+function fakeOnboarding(): Parameters<typeof createApiApp>[0]["onboarding"] {
+  return {
+    getState: async () => {
+      throw new Error("Unexpected onboarding state read.");
+    },
+    checkSlug: async () => {
+      throw new Error("Unexpected onboarding slug check.");
+    },
+    saveProfile: async () => {
+      throw new Error("Unexpected onboarding profile mutation.");
+    },
+    saveWorkspace: async () => {
+      throw new Error("Unexpected onboarding workspace mutation.");
+    },
+    finish: async () => {
+      throw new Error("Unexpected onboarding completion.");
+    },
+  };
+}
+
+function fakeOnboardingEmails(): Parameters<typeof createApiApp>[0]["onboardingEmails"] {
+  return {
+    enroll: async () => {
+      throw new Error("Unexpected onboarding email enrollment.");
+    },
+    claimDue: async () => {
+      throw new Error("Unexpected onboarding email claim.");
+    },
+    settle: async () => {
+      throw new Error("Unexpected onboarding email settlement.");
+    },
+    unsubscribe: async () => {
+      throw new Error("Unexpected onboarding email unsubscribe.");
+    },
+  };
+}
+
 function fakeBrainImports(): Parameters<typeof createApiApp>[0]["brainImports"] {
   return {
     start: async () => {
@@ -2430,6 +3462,32 @@ function fakeFeedback(): Parameters<typeof createApiApp>[0]["feedback"] {
   };
 }
 
+function fakeBilling(): Parameters<typeof createApiApp>[0]["billing"] {
+  return {
+    getOverview: async () => {
+      throw new Error("Unexpected billing overview read.");
+    },
+    getUsage: async () => {
+      throw new Error("Unexpected billing usage read.");
+    },
+    getBalance: async () => {
+      throw new Error("Unexpected billing balance read.");
+    },
+    createCreditTopUp: async () => {
+      throw new Error("Unexpected billing top-up.");
+    },
+    createProCheckout: async () => {
+      throw new Error("Unexpected billing subscription checkout.");
+    },
+    createBillingPortal: async () => {
+      throw new Error("Unexpected billing portal session.");
+    },
+    updateAutoRefill: async () => {
+      throw new Error("Unexpected billing auto-refill update.");
+    },
+  };
+}
+
 function fakeRepoConfigs(): Parameters<typeof createApiApp>[0]["repoConfigs"] {
   return {
     list: async () => {
@@ -2449,6 +3507,9 @@ function fakeRepoConfigs(): Parameters<typeof createApiApp>[0]["repoConfigs"] {
 
 function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrationAccounts"] {
   return {
+    list: async () => {
+      throw new Error("Unexpected integration account list.");
+    },
     getUsage: async () => {
       throw new Error("Unexpected integration account usage read.");
     },
@@ -2457,6 +3518,9 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     },
     setCapabilityMode: async () => {
       throw new Error("Unexpected capability mode mutation.");
+    },
+    alwaysAllowAction: async () => {
+      throw new Error("Unexpected standing permission mutation.");
     },
     connectAttio: async () => {
       throw new Error("Unexpected Attio connect.");
@@ -2487,6 +3551,26 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     },
     saveJamieWebhookApiKey: async () => {
       throw new Error("Unexpected Jamie API key mutation.");
+    },
+  };
+}
+
+function fakeSlackBotSettings(): Parameters<typeof createApiApp>[0]["slackBotSettings"] {
+  return {
+    getWorkspaceSettings: async () => {
+      throw new Error("Unexpected Slack bot workspace settings read.");
+    },
+    disconnect: async () => {
+      throw new Error("Unexpected Slack bot disconnect.");
+    },
+    getDestination: async () => {
+      throw new Error("Unexpected Slack bot destination read.");
+    },
+    listChannels: async () => {
+      throw new Error("Unexpected Slack bot channel list.");
+    },
+    setDestination: async () => {
+      throw new Error("Unexpected Slack bot destination mutation.");
     },
   };
 }
@@ -2539,6 +3623,23 @@ function engineAuthService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["engineAuth"]>,
 ): Parameters<typeof createApiApp>[0]["engineAuth"] {
   return { ...fakeEngineAuth(), ...overrides };
+}
+
+function fakeEngineSessions(): Parameters<typeof createApiApp>[0]["engineSessions"] {
+  return {
+    getRuntimeStatus: async () => {
+      throw new Error("Unexpected engine runtime status read.");
+    },
+    createRuntimeAccess: async () => {
+      throw new Error("Unexpected engine runtime access mutation.");
+    },
+  };
+}
+
+function engineSessionService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["engineSessions"]>,
+): Parameters<typeof createApiApp>[0]["engineSessions"] {
+  return { ...fakeEngineSessions(), ...overrides };
 }
 
 function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {
@@ -2689,6 +3790,26 @@ function brainSourceDetails() {
 
 function brainAssetService(overrides: Partial<BrainAssetService>): BrainAssetService {
   return { ...fakeBrainAssets(), ...overrides };
+}
+
+function chatResourceService(overrides: Partial<ChatResourceService>): ChatResourceService {
+  const unexpected = async (): Promise<never> => {
+    throw new Error("Unexpected Chat resource operation.");
+  };
+  return {
+    findShare: unexpected,
+    ensureShare: unexpected,
+    revokeShare: unexpected,
+    loadPublicShare: unexpected,
+    loadPublicShareMetadata: unexpected,
+    deleteArtifact: unexpected,
+    downloadArtifact: unexpected,
+    downloadAttachment: unexpected,
+    downloadScreenshot: unexpected,
+    downloadPublicAttachment: unexpected,
+    downloadPublicArtifact: unexpected,
+    ...overrides,
+  };
 }
 
 function fakeKnowledgeService() {

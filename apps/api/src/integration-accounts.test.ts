@@ -23,6 +23,7 @@ import { saveGoatJamieWebhookApiKey } from "@opencompany/goat-agent/integrations
 import { disconnectGoatStripeIntegration } from "@opencompany/goat-agent/integrations/stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIntegrationAccountService } from "./integration-accounts";
+import type { RunnerClient } from "./runner-client";
 
 vi.mock("@opencompany/db/goat-integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -124,6 +125,56 @@ afterEach(() => {
 });
 
 describe("integration account service", () => {
+  it("lists only credential-free personal account fields", async () => {
+    const service = createIntegrationAccountService({
+      db: fakeDb([
+        [
+          {
+            id: "gint_gmail",
+            provider: "gmail",
+            workspaceId: null,
+            externalId: "google_subject",
+            accountEmail: "ada@example.com",
+            accountName: "Ada",
+            connectionLabel: "Personal",
+            statusReason: null,
+            status: "connected",
+            scopes: ["gmail.readonly"],
+            capabilityModes: { read: "on" },
+          },
+          {
+            id: "gint_linear_mcp",
+            provider: "linear",
+            workspaceId: null,
+            externalId: "linear_mcp",
+            accountEmail: null,
+            accountName: "Acme",
+            connectionLabel: null,
+            statusReason: null,
+            status: "connected",
+            scopes: [],
+            capabilityModes: {},
+          },
+        ],
+      ]),
+    });
+
+    await expect(service.list(member)).resolves.toEqual([
+      {
+        integrationId: "gint_gmail",
+        provider: "gmail",
+        status: "connected",
+        connected: true,
+        accountEmail: "ada@example.com",
+        accountName: "Ada",
+        connectionLabel: "Personal",
+        statusReason: null,
+        scopes: ["gmail.readonly"],
+        capabilityModes: { read: "on" },
+      },
+    ]);
+  });
+
   it("gates usage reads to the personal connection owner", async () => {
     const service = createIntegrationAccountService({ db: fakeDb([[]]) });
     await expect(service.getUsage(member, "gint_x")).rejects.toMatchObject({
@@ -187,6 +238,34 @@ describe("integration account service", () => {
     expect(applyGoatIntegrationCapabilityMode).toHaveBeenCalledWith(
       expect.objectContaining({ integrationIds: ["gint_x"], capabilityId: "write", mode: "ask" }),
     );
+  });
+
+  it("forwards standing action permission changes to the execution owner", async () => {
+    const postJson = vi.fn(async () => ({ changed: true }));
+    const runner = {
+      requestJson: vi.fn(),
+      postJson: postJson as RunnerClient["postJson"],
+    } as RunnerClient;
+    const service = createIntegrationAccountService({ db: fakeDb(), runner });
+
+    await expect(service.alwaysAllowAction(member, " gmail.send_email ")).resolves.toBeUndefined();
+    expect(postJson).toHaveBeenCalledWith(
+      "/internal/goat/actions/always-allow",
+      {
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        actionId: "gmail.send_email",
+      },
+      { errorFormat: "error-message" },
+    );
+  });
+
+  it("fails closed when the execution owner is unavailable", async () => {
+    const service = createIntegrationAccountService({ db: fakeDb() });
+    await expect(service.alwaysAllowAction(member, "gmail.send_email")).rejects.toMatchObject({
+      status: 503,
+      message: "The action permission service is unavailable.",
+    });
   });
 
   it("keeps the retired key-format copy for provider connects", async () => {

@@ -41,6 +41,29 @@ describe("runner client", () => {
     );
   });
 
+  it("supports authenticated JSON reads without sending a request body", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ ok: true, status: "sleeping" }));
+    const client = createRunnerClient({
+      url: "https://runner.internal/",
+      token: "runner-secret",
+      fetch: fetchMock as never,
+    });
+
+    await expect(
+      client.requestJson("/internal/goat/codex-chat/sandboxes/sandbox_1/status", {
+        method: "GET",
+        errorFormat: "error-message",
+      }),
+    ).resolves.toEqual({ ok: true, status: "sleeping" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://runner.internal/internal/goat/codex-chat/sandboxes/sandbox_1/status",
+      {
+        method: "GET",
+        headers: { Authorization: "Bearer runner-secret" },
+      },
+    );
+  });
+
   it("falls back from RUNNER_INTERNAL_URL to RUNNER_PUBLIC_URL like the retired web helpers", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "");
     vi.stubEnv("RUNNER_PUBLIC_URL", "https://runner.public");

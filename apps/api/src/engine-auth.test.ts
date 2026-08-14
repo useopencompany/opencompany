@@ -56,6 +56,9 @@ function fakeRunner(results: unknown[] = []) {
   let call = 0;
   const calls: { path: string; body: Record<string, unknown>; options: unknown }[] = [];
   const runner: RunnerClient = {
+    requestJson: vi.fn(async () => {
+      throw new Error("Unexpected generic runner call.");
+    }) as RunnerClient["requestJson"],
     postJson: vi.fn(async (path, body, options) => {
       calls.push({ path, body, options });
       const result = results[call++];

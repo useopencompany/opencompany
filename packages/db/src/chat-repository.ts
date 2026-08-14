@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
+import {
+  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
+  GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION,
+} from "@opencompany/agent-runtime";
 import {
   type Actor,
   type ChatAttachmentFormat,
@@ -9,6 +12,7 @@ import {
   CoreError,
   type CreateMessageCommand,
   type CreateMessageResult,
+  type EngineQuestionAnswer,
   type Message,
   type MessageAttachment,
   type MessagePage,
@@ -369,7 +373,7 @@ export class PostgresChatRepository implements ChatRepository {
           )
         RETURNING run.id, run.assistant_message_id, run.status, run.event_sequence
       ),
-      canceled_approvals AS (
+      canceled_approvals AS MATERIALIZED (
         UPDATE goat.run_approvals AS approval
         SET status = 'canceled',
             resolution = 'canceled',
@@ -378,7 +382,20 @@ export class PostgresChatRepository implements ChatRepository {
             updated_at = ${now}
         WHERE approval.run_id IN (SELECT id FROM changed_turns)
           AND approval.status = 'pending'
-        RETURNING approval.id
+        RETURNING approval.id, approval.run_id, approval.tool_call_id
+      ),
+      canceled_capabilities AS MATERIALIZED (
+        UPDATE goat.capability_runs AS capability
+        SET status = 'canceled',
+            updated_at = ${now}
+        FROM canceled_approvals AS approval
+        JOIN goat.codex_chat_turns AS run ON run.id = approval.run_id
+        WHERE capability.tool_call_id = approval.tool_call_id
+          AND capability.chat_session_id = run.chat_session_id
+          AND capability.user_workos_id = run.user_workos_id
+          AND capability.workspace_id = ${input.actor.workspaceId}
+          AND capability.status IN ('awaiting_approval', 'approved')
+        RETURNING capability.id
       ),
       inserted_events AS (
         INSERT INTO goat.run_events (
@@ -431,7 +448,8 @@ export class PostgresChatRepository implements ChatRepository {
       SELECT
         updated_chat.id AS "conversationId",
         pg_current_xact_id()::text AS "transactionId",
-        (SELECT count(*) FROM notified) AS "notifyCount"
+        (SELECT count(*) FROM notified) AS "notifyCount",
+        (SELECT count(*) FROM canceled_capabilities) AS "capabilityCancelCount"
       FROM updated_chat
     `);
     return row ? { conversationId: row.conversationId, transactionId: row.transactionId } : null;
@@ -575,8 +593,23 @@ export class PostgresChatRepository implements ChatRepository {
     const attachmentsJson = JSON.stringify(resolvedAttachments.attachments);
     const attachmentTextsJson = JSON.stringify(resolvedAttachments.attachmentTexts);
     const settingsJson = JSON.stringify({
+      ...(input.command.settings ?? {}),
       ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
     });
+    const runtimeModel = input.command.runtimeModel ?? input.command.model;
+    const assistantDebugTrace =
+      input.command.engine === "opencompany"
+        ? {
+            schemaVersion: "opencompany.chat.debug.v1",
+            model: runtimeModel,
+            steps: [],
+            uiMessageParts: [],
+          }
+        : {
+            schemaVersion: "goat.codex_chat.debug.v1",
+            model: runtimeModel,
+            uiMessageParts: [],
+          };
     const title = conversationTitle(
       input.command.content,
       resolvedAttachments.attachments[0]?.filename,
@@ -732,7 +765,20 @@ export class PostgresChatRepository implements ChatRepository {
           AND paused.chat_session_id = chat.id
           AND paused.user_workos_id = chat.owner_user_workos_id
           AND paused.status = 'paused'
-        RETURNING approval.id, approval.run_id
+        RETURNING approval.id, approval.run_id, approval.tool_call_id
+      ),
+      dismissed_capabilities AS MATERIALIZED (
+        UPDATE goat.capability_runs AS capability
+        SET status = 'canceled',
+            updated_at = ${now}
+        FROM dismissed_approvals AS approval
+        JOIN goat.codex_chat_turns AS paused ON paused.id = approval.run_id
+        WHERE capability.tool_call_id = approval.tool_call_id
+          AND capability.chat_session_id = paused.chat_session_id
+          AND capability.user_workos_id = paused.user_workos_id
+          AND capability.workspace_id = ${input.actor.workspaceId}
+          AND capability.status IN ('awaiting_approval', 'approved')
+        RETURNING capability.id
       ),
       dismissed_approval_messages AS MATERIALIZED (
         UPDATE goat.chat_messages AS message
@@ -822,9 +868,13 @@ export class PostgresChatRepository implements ChatRepository {
         )
         SELECT
           ${runtimeId}, target_chat.owner_user_workos_id, target_chat.id, ${input.command.engine},
-          target_chat.model, ${input.actor.workspaceId},
+          ${runtimeModel}, ${input.actor.workspaceId},
           CASE WHEN target_chat.task_id IS NULL
-            THEN ${GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION}
+            THEN ${
+              input.command.engine === "opencompany"
+                ? GOAT_CHAT_HOST_TOOL_CONTRACT_VERSION
+                : GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION
+            }
             ELSE NULL
           END,
           ${runId}, 'queued', ${now}, ${now}
@@ -907,7 +957,7 @@ export class PostgresChatRepository implements ChatRepository {
         SELECT
           reservation.assistant_message_id, target_chat.id, 'assistant', '',
           target_chat.task_id,
-          '{"schemaVersion":"opencompany.chat.debug.v1","steps":[]}'::jsonb,
+          ${JSON.stringify(assistantDebugTrace)}::jsonb,
           ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true
@@ -980,7 +1030,8 @@ export class PostgresChatRepository implements ChatRepository {
             THEN true
           ELSE jsonb_array_length(jsonb_build_object('reason', 'unmaterialized')) = 0
         END AS materialized,
-        (SELECT count(*) FROM notified) AS "notifyCount"
+        (SELECT count(*) FROM notified) AS "notifyCount",
+        (SELECT count(*) FROM dismissed_capabilities) AS "capabilityCancelCount"
       FROM reservation
       `);
     } catch (error) {
@@ -1122,6 +1173,30 @@ export class PostgresChatRepository implements ChatRepository {
           )
         RETURNING run.id, run.status, run.event_sequence
       ),
+      canceled_approvals AS MATERIALIZED (
+        UPDATE goat.run_approvals AS approval
+        SET status = 'canceled',
+            resolution = 'canceled',
+            response = jsonb_build_object('resolution', 'canceled'),
+            resolved_at = ${now},
+            updated_at = ${now}
+        WHERE approval.run_id IN (SELECT id FROM changed WHERE status = 'interrupted')
+          AND approval.status = 'pending'
+        RETURNING approval.id, approval.run_id, approval.tool_call_id
+      ),
+      canceled_capabilities AS MATERIALIZED (
+        UPDATE goat.capability_runs AS capability
+        SET status = 'canceled',
+            updated_at = ${now}
+        FROM canceled_approvals AS approval
+        JOIN goat.codex_chat_turns AS run ON run.id = approval.run_id
+        WHERE capability.tool_call_id = approval.tool_call_id
+          AND capability.chat_session_id = run.chat_session_id
+          AND capability.user_workos_id = run.user_workos_id
+          AND capability.workspace_id = ${input.actor.workspaceId}
+          AND capability.status IN ('awaiting_approval', 'approved')
+        RETURNING capability.id
+      ),
       inserted_event AS (
         INSERT INTO goat.run_events (
           id, run_id, sequence, schema_version, type, payload, created_at
@@ -1193,7 +1268,8 @@ export class PostgresChatRepository implements ChatRepository {
       SELECT
         COALESCE((SELECT changed.status FROM changed), run.status) AS status,
         NOT EXISTS (SELECT 1 FROM changed) AS replayed,
-        (SELECT count(*) FROM notified) AS "notifyCount"
+        (SELECT count(*) FROM notified) AS "notifyCount",
+        (SELECT count(*) FROM canceled_capabilities) AS "capabilityCancelCount"
       FROM goat.codex_chat_turns AS run
       JOIN authorized ON authorized.id = run.id
     `);
@@ -1208,9 +1284,17 @@ export class PostgresChatRepository implements ChatRepository {
       runId: string;
       approvalId: string;
       resolution: "approved" | "denied" | "answered" | "canceled";
-      answer?: string;
+      answer?: string | EngineQuestionAnswer;
     };
   }): Promise<ResolveApprovalResult | null> {
+    if (typeof input.command.answer === "object") {
+      return this.resolveEngineQuestionApproval({
+        actor: input.actor,
+        runId: input.command.runId,
+        approvalId: input.command.approvalId,
+        answer: input.command.answer,
+      });
+    }
     const now = this.options.now?.() ?? new Date();
     const eventId = (this.options.ids ?? defaultIds).event();
     const response = { resolution: input.command.resolution, answer: input.command.answer };
@@ -1262,7 +1346,40 @@ export class PostgresChatRepository implements ChatRepository {
             updated_at = ${now}
         WHERE approval.id IN (SELECT id FROM authorized)
           AND approval.status = 'pending'
-        RETURNING approval.id, approval.run_id
+        RETURNING approval.id, approval.run_id, approval.tool_call_id
+      ),
+      transitioned_capability AS MATERIALIZED (
+        UPDATE goat.capability_runs AS capability
+        SET status = CASE
+              WHEN ${input.command.resolution === "approved"}::boolean THEN 'approved'
+              ELSE 'canceled'
+            END,
+            approved_at = CASE
+              WHEN ${input.command.resolution === "approved"}::boolean THEN ${now}
+              ELSE capability.approved_at
+            END,
+            updated_at = ${now}
+        FROM changed
+        JOIN goat.codex_chat_turns AS approved_run ON approved_run.id = changed.run_id
+        WHERE capability.tool_call_id = changed.tool_call_id
+          AND capability.chat_session_id = approved_run.chat_session_id
+          AND capability.user_workos_id = approved_run.user_workos_id
+          AND capability.workspace_id = ${input.actor.workspaceId}
+          AND ${
+            input.command.resolution === "approved" ||
+            input.command.resolution === "denied" ||
+            input.command.resolution === "canceled"
+          }::boolean
+          AND (
+            (${input.command.resolution === "approved"}::boolean
+              AND capability.status = 'awaiting_approval'
+              AND capability.approval_expires_at > ${now})
+            OR
+            (${input.command.resolution !== "approved"}::boolean
+              AND capability.status IN ('awaiting_approval', 'approved')
+              AND capability.approval_expires_at > ${now})
+          )
+        RETURNING capability.id
       ),
       rewritten_assistant AS MATERIALIZED (
         UPDATE goat.chat_messages AS message
@@ -1283,7 +1400,9 @@ export class PostgresChatRepository implements ChatRepository {
                           'reason', ${
                             input.command.resolution === "approved"
                               ? null
-                              : (input.command.answer ?? "Denied by user.")
+                              : typeof input.command.answer === "string"
+                                ? input.command.answer
+                                : "Denied by user."
                           }::text
                         )
                       )
@@ -1372,7 +1491,8 @@ export class PostgresChatRepository implements ChatRepository {
         approval.run_id AS "runId",
         approval.response,
         NOT EXISTS (SELECT 1 FROM changed) AS replayed,
-        (SELECT count(*) FROM notified) AS "notifyCount"
+        (SELECT count(*) FROM notified) AS "notifyCount",
+        (SELECT count(*) FROM transitioned_capability) AS "capabilityTransitionCount"
       FROM goat.run_approvals AS approval
       JOIN authorized ON authorized.id = approval.id
     `);
@@ -1394,6 +1514,104 @@ export class PostgresChatRepository implements ChatRepository {
     };
   }
 
+  private async resolveEngineQuestionApproval(input: {
+    actor: Actor;
+    runId: string;
+    approvalId: string;
+    answer: EngineQuestionAnswer;
+  }): Promise<ResolveApprovalResult | null> {
+    const [current] = await this.rows<{
+      request: Record<string, unknown>;
+      response: Record<string, unknown> | null;
+      status: string;
+    }>(sql`
+      SELECT interaction.request, approval.response, interaction.status
+      FROM goat.codex_chat_interactions AS interaction
+      JOIN goat.run_approvals AS approval
+        ON approval.id = interaction.id
+       AND approval.run_id = interaction.codex_chat_turn_id
+      JOIN goat.codex_chat_turns AS run ON run.id = interaction.codex_chat_turn_id
+      JOIN goat.codex_chat_sessions AS runtime ON runtime.id = run.codex_chat_session_id
+      JOIN goat.chat_sessions AS chat ON chat.id = run.chat_session_id
+      WHERE interaction.id = ${input.approvalId}
+        AND run.id = ${input.runId}
+        AND runtime.workspace_id = ${input.actor.workspaceId}
+        AND chat.kind = 'chat'
+        AND chat.user_workos_id = ${input.actor.userId}
+        AND run.user_workos_id = ${input.actor.userId}
+        AND chat.closed_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM goat.workspace_members AS member
+          WHERE member.workspace_id = ${input.actor.workspaceId}
+            AND member.user_workos_id = ${input.actor.userId}
+        )
+      LIMIT 1
+    `);
+    if (!current) return null;
+    const answers = normalizeEngineQuestionAnswers(current.request, input.answer.answers);
+    const canonicalAnswer = { type: "engine_questions", schemaVersion: 1, answers } as const;
+    const storedAnswer = current.response?.answer;
+    if (current.status === "resolved") {
+      if (JSON.stringify(storedAnswer) !== JSON.stringify(canonicalAnswer)) {
+        throw new CoreError(
+          "idempotency_conflict",
+          "The approval was already resolved differently.",
+        );
+      }
+      return {
+        approvalId: input.approvalId,
+        runId: input.runId,
+        resolution: "answered",
+        idempotentReplay: true,
+      };
+    }
+    if (current.status !== "pending") {
+      throw new CoreError("conflict", "This engine question is no longer waiting.");
+    }
+
+    const now = this.options.now?.() ?? new Date();
+    const interactionResponse = { answers };
+    const approvalResponse = { resolution: "answered", answer: canonicalAnswer };
+    const [changed] = await this.rows<{ id: string }>(sql`
+      WITH resolved_interaction AS MATERIALIZED (
+        UPDATE goat.codex_chat_interactions AS interaction
+        SET status = 'resolved',
+            response = ${JSON.stringify(interactionResponse)}::jsonb,
+            resolved_at = ${now},
+            updated_at = ${now}
+        WHERE interaction.id = ${input.approvalId}
+          AND interaction.codex_chat_turn_id = ${input.runId}
+          AND interaction.status = 'pending'
+          AND EXISTS (
+            SELECT 1 FROM goat.codex_chat_turns AS run
+            WHERE run.id = interaction.codex_chat_turn_id
+              AND run.status = 'running'
+              AND run.lease_id = interaction.lease_id
+          )
+        RETURNING interaction.id
+      )
+      UPDATE goat.run_approvals AS approval
+      SET status = 'resolved',
+          resolution = 'answered',
+          response = ${JSON.stringify(approvalResponse)}::jsonb,
+          resolved_at = ${now},
+          updated_at = ${now}
+      WHERE approval.id IN (SELECT id FROM resolved_interaction)
+        AND approval.run_id = ${input.runId}
+        AND approval.status = 'pending'
+      RETURNING approval.id
+    `);
+    if (!changed) {
+      throw new CoreError("conflict", "This engine question is no longer waiting.");
+    }
+    return {
+      approvalId: input.approvalId,
+      runId: input.runId,
+      resolution: "answered",
+      idempotentReplay: false,
+    };
+  }
+
   private async resolveAttachments(
     actor: Actor,
     attachmentIds: readonly string[],
@@ -1408,6 +1626,35 @@ export class PostgresChatRepository implements ChatRepository {
   private async rows<Row>(query: SQL): Promise<Row[]> {
     return rowsFromExecute<Row>(await this.execute(query));
   }
+}
+
+function normalizeEngineQuestionAnswers(
+  request: Record<string, unknown>,
+  rawAnswers: Readonly<Record<string, { answers: readonly string[] }>>,
+) {
+  const questions = Array.isArray(request.questions) ? request.questions : [];
+  const expectedIds = questions.flatMap((question) => {
+    if (!question || typeof question !== "object" || Array.isArray(question)) return [];
+    const id = (question as Record<string, unknown>).id;
+    return typeof id === "string" && id.trim() ? [id] : [];
+  });
+  if (
+    expectedIds.length === 0 ||
+    expectedIds.length !== questions.length ||
+    new Set(expectedIds).size !== expectedIds.length ||
+    Object.keys(rawAnswers).some((id) => !expectedIds.includes(id))
+  ) {
+    throw new CoreError("invalid_argument", "The engine question is invalid.");
+  }
+  return Object.fromEntries(
+    expectedIds.map((id) => {
+      const answers = rawAnswers[id]?.answers.map((answer) => answer.trim()).filter(Boolean) ?? [];
+      if (answers.length === 0 || answers.length > 8) {
+        throw new CoreError("invalid_argument", "Answer every engine question.");
+      }
+      return [id, { answers }];
+    }),
+  );
 }
 
 export class PostgresRunExecutionRepository implements RunExecutionRepository {
@@ -2070,6 +2317,8 @@ function hashCommand(command: CreateMessageCommand) {
         content: command.content,
         engine: command.engine,
         model: command.model,
+        runtimeModel: command.runtimeModel ?? null,
+        settings: command.settings ?? {},
         attachmentIds: command.attachmentIds ?? [],
         mentions: command.mentions ?? [],
       }),

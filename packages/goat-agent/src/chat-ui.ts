@@ -146,7 +146,7 @@ export type GoatChatMention =
 // Attachment view riding on user-message metadata. The blob fields are only
 // present client → server on submit (the server re-validates them); server →
 // client rehydration strips them — the client fetches bytes through
-// /api/chat-attachments/{messageId}/{attachmentId} instead.
+// /v1/chat-attachments/{messageId}/{attachmentId} instead.
 export type GoatChatUiAttachment = {
   id: string;
   kind: GoatChatAttachmentKind;

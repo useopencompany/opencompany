@@ -1,3 +1,4 @@
+import type { RunExecutionRepository } from "@opencompany/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
 import {
@@ -297,9 +298,15 @@ describe("createGoatCodexChatProjector", () => {
 
   it("durably projects and resolves an app-server user-input request", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const execution = {
+      appendEvents: vi.fn(async (input: Parameters<RunExecutionRepository["appendEvents"]>[0]) =>
+        input.events.map((event, index) => ({ ...event, sequence: index + 1 })),
+      ),
+    } as unknown as RunExecutionRepository;
     const projector = createGoatCodexChatProjector({
-      target: projectorTarget(),
+      target: projectorTarget({ canonicalAttemptId: "attempt_1" }),
       redact: (value) => value,
+      execution,
     });
 
     const interaction = await projector.requestUserInput(userInputRequest());
@@ -307,13 +314,17 @@ describe("createGoatCodexChatProjector", () => {
     expect(mocks.execute.mock.calls.map(([query]) => sqlText(query))).toEqual(
       expect.arrayContaining([
         expect.stringContaining("INSERT INTO goat.codex_chat_interactions"),
+        expect.stringContaining("INSERT INTO goat.run_approvals"),
         expect.stringContaining("INSERT INTO goat.codex_chat_events"),
         expect.stringContaining("UPDATE goat.chat_messages AS message"),
       ]),
     );
 
     await projector.resolveInteraction(interaction.interactionId, "answered");
-    expect(mocks.execute).toHaveBeenCalledTimes(4);
+    expect(mocks.execute).toHaveBeenCalledTimes(6);
+    expect(mocks.execute.mock.calls.map(([query]) => sqlText(query))).toContainEqual(
+      expect.stringContaining("UPDATE goat.run_approvals AS approval"),
+    );
   });
 
   it("rejects malformed user-input requests before persistence", async () => {

@@ -4,8 +4,6 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
-import { markGoatChatSeen } from "@/lib/chat-client";
 import {
   GOAT_CHAT_COMPOSER_FOCUS_EVENT,
   GOAT_HOME_NAVIGATION_EVENT,
@@ -24,6 +22,8 @@ import {
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { CLAUDE_CHAT_DEFAULT_MODEL_ID } from "@/lib/claude-chat-constants";
+import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
+import { HeadlessChatTransport } from "@/lib/headless-chat-transport";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import {
   buildGoatOnboardingKickoffPrompt,
@@ -64,7 +64,6 @@ const historyMock = vi.hoisted(() => ({
 
 const attachmentUploadMock = vi.hoisted(() => ({
   canonicalUpload: vi.fn(),
-  upload: vi.fn(),
 }));
 
 const taskCommandMocks = vi.hoisted(() => ({
@@ -122,24 +121,47 @@ const knowledgeCommandMocks = vi.hoisted(() => ({
   }),
 }));
 
+const headlessChatMocks = vi.hoisted(() => ({
+  startBackground: vi.fn(
+    async (input: {
+      content: string;
+      clientConversationId: string;
+      clientMessageId: string;
+      model: string;
+      engine?: unknown;
+    }) => ({
+      conversationId: input.clientConversationId,
+      runId: "run_background_1",
+    }),
+  ),
+}));
+
+const headlessChatCommandMocks = vi.hoisted(() => ({
+  cancel: vi.fn(async () => ({})),
+  getRuntimeStatus: vi.fn(async () => null),
+  resolveQuestions: vi.fn(async () => ({})),
+  updateConversation: vi.fn(async () => ({ transactionId: "1" })),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
   usePathname: () => pathnameMock.value,
 }));
 
 vi.mock("@/lib/chat-actions", () => ({
-  closeGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
   createGoatChatShareAction: vi.fn(async () => ({
     ok: true,
     shareId: "goat_chat_share_123e4567-e89b-42d3-a456-426614174000",
   })),
   getGoatChatShareAction: vi.fn(async () => ({ ok: true, shareId: null })),
-  reopenGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
   revokeGoatChatShareAction: vi.fn(async () => ({ ok: true })),
 }));
 
-vi.mock("@/lib/chat-client", () => ({
-  markGoatChatSeen: vi.fn(async () => ({ ok: true, error: null })),
+vi.mock("@/lib/headless-chat-commands", () => ({
+  cancelHeadlessChatRun: headlessChatCommandMocks.cancel,
+  getEngineRuntimeStatus: headlessChatCommandMocks.getRuntimeStatus,
+  resolveEngineQuestions: headlessChatCommandMocks.resolveQuestions,
+  updateHeadlessChatConversation: headlessChatCommandMocks.updateConversation,
 }));
 
 // Server action module; importing it for real drags authkit into jsdom.
@@ -147,19 +169,13 @@ vi.mock("@/lib/integration-account-actions", () => ({
   alwaysAllowGoatChatActionAction: vi.fn(async () => ({ ok: true })),
 }));
 
-vi.mock("@/lib/chat-attachment-upload", () => ({
-  uploadGoatChatAttachmentBlob: attachmentUploadMock.upload,
-}));
-
 vi.mock("@/lib/headless-chat-attachment-upload", () => ({
   uploadHeadlessChatAttachment: attachmentUploadMock.canonicalUpload,
 }));
 
-// This suite characterizes the rollback adapter and shared UI behavior. Canonical transport and
-// Auto preflight have focused tests in the headless Chat modules.
-vi.mock("@/lib/headless-chat-feature", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/headless-chat-feature")>()),
-  HEADLESS_CHAT_ENABLED: false,
+vi.mock("@/lib/headless-chat-transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/headless-chat-transport")>()),
+  startHeadlessBackgroundChat: headlessChatMocks.startBackground,
 }));
 
 vi.mock("@/lib/headless-task-commands", () => ({
@@ -214,6 +230,7 @@ vi.mock("@ai-sdk/react", async () => {
       );
       chatMock.lastResume = options.resume ?? false;
       const transportRef = React.useRef(options.transport);
+      transportRef.current = options.transport;
       chatMock.startWithSessionId = (sessionId: string, model: string) => {
         setMessages((current) => [
           ...current,
@@ -266,11 +283,12 @@ vi.mock("@ai-sdk/react", async () => {
             body: requestOptions?.body,
             credentials: undefined,
             headers: undefined,
-            api: "/api/chat",
+            api: "/v1/messages",
             trigger: "submit-message",
             messageId: userMessage.id,
           });
           if (preparedRequest) chatMock.preparedRequestBodies.push(preparedRequest.body);
+          else if (requestOptions?.body) chatMock.preparedRequestBodies.push(requestOptions.body);
           if (chatMock.sendError) throw chatMock.sendError;
           if (chatMock.finishSessionId) {
             options.onFinish?.({
@@ -297,6 +315,22 @@ function requestChatSessionId(init: RequestInit | undefined, fallback: string) {
   if (typeof body.newSessionId === "string") return body.newSessionId;
   if (typeof body.sessionId === "string") return body.sessionId;
   return fallback;
+}
+
+function acceptHeadlessConversation(conversationId: string) {
+  const handlers = vi
+    .mocked(HeadlessChatTransport.prototype.setEventHandlers)
+    .mock.calls.at(-1)
+    ?.at(0);
+  if (!handlers?.onAccepted) throw new Error("Headless Chat accepted handler is not registered.");
+  act(() =>
+    handlers.onAccepted?.({
+      conversationId,
+      runId: "run_accepted_1",
+      assistantMessageId: "assistant_accepted_1",
+      transactionId: "transaction_accepted_1",
+    }),
+  );
 }
 
 class MockDictationWebSocket extends EventTarget {
@@ -396,8 +430,11 @@ describe("GoatSurface chat streaming UI", () => {
     routerMock.replace.mockReset();
     historyMock.replaceState.mockReset();
     vi.spyOn(window.history, "replaceState").mockImplementation(historyMock.replaceState);
-    vi.mocked(closeGoatChatSessionAction).mockClear();
-    vi.mocked(markGoatChatSeen).mockClear();
+    vi.spyOn(HeadlessChatTransport.prototype, "setEventHandlers");
+    headlessChatCommandMocks.cancel.mockClear();
+    headlessChatCommandMocks.getRuntimeStatus.mockClear();
+    headlessChatCommandMocks.resolveQuestions.mockClear();
+    headlessChatCommandMocks.updateConversation.mockClear();
     taskCommandMocks.archive.mockClear();
     taskCommandMocks.cancel.mockReset();
     taskCommandMocks.cancel.mockResolvedValue({});
@@ -408,13 +445,9 @@ describe("GoatSurface chat streaming UI", () => {
     automationCommandMocks.runSchedule.mockClear();
     automationCommandMocks.updateSchedule.mockClear();
     knowledgeCommandMocks.listSkillCatalog.mockClear();
+    headlessChatMocks.startBackground.mockClear();
     attachmentUploadMock.canonicalUpload.mockReset();
     attachmentUploadMock.canonicalUpload.mockResolvedValue({ id: "attachment_1" });
-    attachmentUploadMock.upload.mockReset();
-    attachmentUploadMock.upload.mockResolvedValue({
-      blobUrl: "https://blob.test/goat-chat/user_1/brief.pdf",
-      blobPathname: "goat-chat/user_1/brief.pdf",
-    });
     vi.stubGlobal(
       "ResizeObserver",
       class ResizeObserver {
@@ -460,22 +493,10 @@ describe("GoatSurface chat streaming UI", () => {
     const chatResponseReady = new Promise<void>((resolve) => {
       resolveChatResponse = resolve;
     });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      void init;
-      if (String(input).includes("/api/electric/")) {
-        return new Response("", {
-          headers: {
-            "electric-handle": "test-handle",
-            "electric-offset": "0",
-            "electric-schema": "[]",
-          },
-        });
-      }
-
+    headlessChatMocks.startBackground.mockImplementationOnce(async (input) => {
       await chatResponseReady;
-      return new Response("done", { status: 200 });
+      return { conversationId: input.clientConversationId, runId: "run_background_1" };
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <>
@@ -504,27 +525,20 @@ describe("GoatSurface chat streaming UI", () => {
     expect(textarea).toHaveClass("text-transparent");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
-    await waitFor(() => expect(chatRequests()).toHaveLength(1));
-    const [, init] = chatRequests()[0]!;
-    const body = JSON.parse(String((init as RequestInit).body));
-
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledTimes(1));
+    const body = headlessChatMocks.startBackground.mock.calls[0]![0];
     expect(body).toMatchObject({
-      sessionId: null,
+      content: "Research Q3",
       model: DEFAULT_GOAT_MODEL,
-      message: {
-        role: "user",
-        parts: [{ type: "text", text: "Research Q3" }],
-      },
     });
-    expect(body.newSessionId).toMatch(/^goat_chat_/);
-    expect(body.message.id).toMatch(/^ui_background_/);
+    expect(body.clientConversationId).toMatch(/^goat_chat_/);
+    expect(body.clientMessageId).toMatch(/^ui_background_/);
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
-      `${body.newSessionId}:Research Q3`,
+      `${body.clientConversationId}:Research Q3`,
     );
     await waitFor(() =>
       expect(screen.getByTestId("local-chat-states")).toHaveTextContent(
-        `${body.newSessionId}:working`,
+        `${body.clientConversationId}:working`,
       ),
     );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
@@ -541,23 +555,6 @@ describe("GoatSurface chat streaming UI", () => {
 
   it("starts a raw ampersand Codex directive from a running Codex chat as a new background Codex session", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url === "/api/codex-chat/messages") {
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            sessionId: requestChatSessionId(init, "goat_chat_codex_background"),
-            userMessageId: "goat_chat_msg_codex_user",
-            assistantMessageId: "goat_chat_msg_codex_assistant",
-            mode: "started",
-          }),
-          { status: 202, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      return Response.json({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <GoatSurface
@@ -595,19 +592,17 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(submit);
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
-    );
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
-    const body = JSON.parse(String((init as RequestInit).body));
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledTimes(1));
+    const body = headlessChatMocks.startBackground.mock.calls[0]![0];
     expect(body).toMatchObject({
-      message: {
-        role: "user",
-        parts: [{ type: "text", text: "refactor the parser" }],
+      content: "refactor the parser",
+      engine: {
+        type: "codex",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "xhigh" },
       },
     });
-    expect(body.sessionId).toBeUndefined();
-    expect(body.newSessionId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^goat_chat_/);
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
@@ -837,14 +832,18 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    await waitFor(() => expect(markGoatChatSeen).toHaveBeenCalledWith(initialChat.id));
-    vi.mocked(markGoatChatSeen).mockClear();
+    await waitFor(() =>
+      expect(updateHeadlessChatConversation).toHaveBeenCalledWith(initialChat.id, {
+        markSeen: true,
+      }),
+    );
+    headlessChatCommandMocks.updateConversation.mockClear();
 
     await act(async () => {
       chatMock.status = "streaming";
       chatMock.startWithSessionId?.(initialChat.id, DEFAULT_GOAT_MODEL);
     });
-    expect(markGoatChatSeen).not.toHaveBeenCalled();
+    expect(updateHeadlessChatConversation).not.toHaveBeenCalled();
 
     chatMock.status = "ready";
     rerender(
@@ -856,7 +855,11 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    await waitFor(() => expect(markGoatChatSeen).toHaveBeenCalledWith(initialChat.id));
+    await waitFor(() =>
+      expect(updateHeadlessChatConversation).toHaveBeenCalledWith(initialChat.id, {
+        markSeen: true,
+      }),
+    );
   });
 
   it("continues a session-backed workflow task through the same chat composer", async () => {
@@ -1206,7 +1209,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("updates the URL without a server navigation and sends the reserved id", async () => {
+  it("renders a new chat immediately and navigates only after the reserved id is accepted", async () => {
     const user = userEvent.setup();
     render(
       <>
@@ -1223,12 +1226,9 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start now");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    const optimisticHref = historyMock.replaceState.mock.calls[0]?.[2];
-    expect(optimisticHref).toMatch(
-      /^\/chat\/goat_chat_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
-    expect(historyMock.replaceState).toHaveBeenCalledWith(null, "", optimisticHref);
-    const optimisticSessionId = String(optimisticHref).slice("/chat/".length);
+    await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
+    const optimisticSessionId = (chatMock.preparedRequestBodies[0] as { newSessionId: string })
+      .newSessionId;
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       sessionId: null,
       newSessionId: optimisticSessionId,
@@ -1237,8 +1237,15 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
       `${optimisticSessionId}:Start now`,
     );
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
+
+    acceptHeadlessConversation(optimisticSessionId);
+
+    expect(routerMock.replace).toHaveBeenCalledWith(`/chat/${optimisticSessionId}`, {
+      scroll: false,
+    });
   });
 
   it("keeps Shift+Enter as a newline in the main composer", async () => {
@@ -1256,7 +1263,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.push).not.toHaveBeenCalled();
   });
 
-  it("keeps the reserved detail URL and reuses its id when the first send is retried", async () => {
+  it("keeps a new chat local and reuses its reserved id when the first send is retried", async () => {
     const user = userEvent.setup();
     chatMock.sendError = new Error("network failed");
     render(
@@ -1276,7 +1283,8 @@ describe("GoatSurface chat streaming UI", () => {
 
     await waitFor(() => expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Try again"));
     const firstRequest = chatMock.preparedRequestBodies[0] as { newSessionId: string };
-    expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    expect(routerMock.replace).not.toHaveBeenCalled();
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent("none");
 
     chatMock.sendError = null;
@@ -1290,9 +1298,15 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
       `${firstRequest.newSessionId}:Try again`,
     );
-    expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
+
+    acceptHeadlessConversation(firstRequest.newSessionId);
+
+    expect(routerMock.replace).toHaveBeenCalledWith(`/chat/${firstRequest.newSessionId}`, {
+      scroll: false,
+    });
   });
 
   it("resets and focuses the blank composer immediately when Home is requested", async () => {
@@ -1425,12 +1439,14 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
+    const request = chatMock.preparedRequestBodies[0] as { newSessionId: string };
     act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
-    act(() => chatMock.finishWithSessionId?.("goat_chat_returned_late"));
+    acceptHeadlessConversation(request.newSessionId);
 
     expect(screen.getByPlaceholderText("Ask Goat anything...")).toHaveFocus();
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
-    expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
@@ -1688,7 +1704,7 @@ describe("GoatSurface chat streaming UI", () => {
     );
   });
 
-  it("submits Codex engine chats to the codex-chat endpoint", async () => {
+  it("submits Codex engine chats through the canonical Message transport", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void input;
@@ -1720,29 +1736,26 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Clone my repo");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
-    );
-    expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
-    const body = JSON.parse(String((init as RequestInit).body));
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Clone my repo" });
+    const body = chatMock.preparedRequestBodies.at(-1) as Record<string, unknown>;
     expect(body).toMatchObject({
       newSessionId: expect.stringMatching(/^goat_chat_/),
-      message: {
-        id: expect.stringMatching(/^goat_chat_msg_/),
-        role: "user",
-        parts: [{ type: "text", text: "Clone my repo" }],
-      },
-      settings: {
-        reasoningEffort: "xhigh",
-        planModeEnabled: false,
-        goalMode: null,
+      engine: {
+        type: "codex",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "xhigh" },
       },
       model: "openai/gpt-5.6-sol",
     });
-    expect(historyMock.replaceState).toHaveBeenCalledWith(null, "", `/chat/${body.newSessionId}`);
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
+
+    acceptHeadlessConversation(String(body.newSessionId));
+
+    expect(routerMock.replace).toHaveBeenCalledWith(`/chat/${body.newSessionId}`, {
+      scroll: false,
+    });
   });
 
   it("selects a Claude model and submits per-turn reasoning effort", async () => {
@@ -1795,17 +1808,14 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Inspect this repository");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/claude-chat/messages", expect.any(Object)),
-    );
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/claude-chat/messages")!;
-    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Inspect this repository" });
+    expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
       newSessionId: expect.stringMatching(/^goat_chat_/),
       model: "anthropic/claude-opus-4.8",
-      settings: { reasoningEffort: "xhigh" },
-      message: {
-        role: "user",
-        parts: [{ type: "text", text: "Inspect this repository" }],
+      engine: {
+        type: "claude_code",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "xhigh" },
       },
     });
   });
@@ -1857,13 +1867,8 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(textarea, "implement this");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
-    );
-    const postCall = fetchMock.mock.calls.find(([input]) => input === "/api/codex-chat/messages");
-    const body = JSON.parse(String(postCall?.[1]?.body));
-    expect(body.message).toMatchObject({
-      parts: [{ type: "text", text: "@skill/coding-work implement this" }],
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "@skill/coding-work implement this",
       metadata: {
         mentions: [{ kind: "skill", id: "coding-work" }],
       },
@@ -1909,33 +1914,20 @@ describe("GoatSurface chat streaming UI", () => {
     await screen.findByText("PDF");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
-    );
-    const body = JSON.parse(
-      String(fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")?.[1]?.body),
-    );
-    expect(body.message.metadata.attachments).toEqual([
+    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1);
+    const message = chatMock.sendMessage.mock.calls.at(-1)?.[0];
+    expect(message.metadata.attachments).toEqual([
       expect.objectContaining({
+        id: "attachment_1",
         kind: "pdf",
         filename: "brief.pdf",
-        blobUrl: "https://blob.test/goat-chat/user_1/brief.pdf",
       }),
     ]);
   });
 
   it("restores a cloud Codex attachment when submission fails", async () => {
     const user = userEvent.setup();
-    let rejectRequest: ((error: Error) => void) | null = null;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        () =>
-          new Promise<Response>((_resolve, reject) => {
-            rejectRequest = reject;
-          }),
-      ),
-    );
+    chatMock.sendError = new Error("network failed");
     render(
       <GoatSurface
         tasks={[]}
@@ -1956,10 +1948,7 @@ describe("GoatSurface chat streaming UI", () => {
     });
     await screen.findByText("PDF");
     await user.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(screen.queryByText("brief.pdf")).not.toBeInTheDocument());
-    act(() => rejectRequest?.(new Error("network failed")));
-
-    expect(await screen.findByText("brief.pdf")).toBeInTheDocument();
+    expect((await screen.findAllByText("brief.pdf")).length).toBeGreaterThan(0);
   });
 
   it("submits Codex reasoning, plan, and goal settings", async () => {
@@ -2004,17 +1993,17 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Run the failing suite");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
-    );
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
-    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
-      settings: {
-        reasoningEffort: "high",
-        planModeEnabled: true,
-        goalMode: {
-          objective: "Fix the flaky tests",
-          tokenBudget: 200000,
+    expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
+      engine: {
+        type: "codex",
+        schemaVersion: 1,
+        settings: {
+          reasoningEffort: "high",
+          planModeEnabled: true,
+          goalMode: {
+            objective: "Fix the flaky tests",
+            tokenBudget: 200000,
+          },
         },
       },
     });
@@ -2085,26 +2074,20 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Implement plan" }));
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
-    );
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
-    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Implement the plan." });
+    expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
       sessionId: "goat_chat_codex_1",
-      message: { role: "user", parts: [{ type: "text", text: "Implement the plan." }] },
-      settings: { reasoningEffort: "high", planModeEnabled: false, goalMode: null },
+      engine: {
+        type: "codex",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "high" },
+      },
     });
   });
 
   it("posts an interactive Codex question answer to its durable interaction", async () => {
     const user = userEvent.setup();
     const interactionId = "goat_codex_chat_interaction_123e4567-e89b-12d3-a456-426614174000";
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      void input;
-      void init;
-      return Response.json({ ok: true }, { status: 202 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <GoatSurface
@@ -2116,6 +2099,12 @@ describe("GoatSurface chat streaming UI", () => {
           title: "Codex question",
           model: DEFAULT_GOAT_MODEL,
           engine: "codex",
+          codexRuntime: {
+            status: "running",
+            activeTurnId: "goat_codex_chat_turn_1",
+            error: null,
+            updatedAt: new Date().toISOString(),
+          },
           messages: [
             {
               id: "assistant_question",
@@ -2151,26 +2140,20 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("radio", { name: /Foundational/ }));
     await user.click(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        `/api/codex-chat/interactions/${interactionId}`,
-        expect.objectContaining({ method: "POST" }),
+      expect(headlessChatCommandMocks.resolveQuestions).toHaveBeenCalledWith(
+        "goat_codex_chat_turn_1",
+        interactionId,
+        { scope: { answers: ["Foundational"] } },
       ),
     );
-    const [, init] = fetchMock.mock.calls.find(
-      ([url]) => url === `/api/codex-chat/interactions/${interactionId}`,
-    )!;
-    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
-      answers: { scope: { answers: ["Foundational"] } },
-    });
   });
 
-  it("opens existing Codex chats in codex mode without enabling resume", () => {
+  it("opens existing Codex chats in codex mode with canonical reconnect enabled", () => {
     render(
       <GoatSurface
         tasks={[]}
         defaultModel={DEFAULT_GOAT_MODEL}
         codexConnected
-        chatResumeEnabled
         initialChat={{
           id: "goat_chat_codex_1",
           title: "Codex chat",
@@ -2187,7 +2170,7 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    expect(chatMock.lastResume).toBe(false);
+    expect(chatMock.lastResume).toBe(true);
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
     expect(screen.getByRole("button", { name: "Share Codex chat" })).toBeInTheDocument();
   });
@@ -2380,6 +2363,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
     const firstRequest = chatMock.preparedRequestBodies[0] as { newSessionId: string };
+    acceptHeadlessConversation(firstRequest.newSessionId);
     act(() => chatMock.finishWithSessionId?.(firstRequest.newSessionId));
 
     await user.type(screen.getByPlaceholderText("Reply..."), "Second message");
@@ -2395,8 +2379,11 @@ describe("GoatSurface chat streaming UI", () => {
       sessionId: firstRequest.newSessionId,
       model: DEFAULT_GOAT_MODEL,
     });
-    expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
-    expect(routerMock.replace).not.toHaveBeenCalled();
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    expect(routerMock.replace).toHaveBeenCalledTimes(1);
+    expect(routerMock.replace).toHaveBeenCalledWith(`/chat/${firstRequest.newSessionId}`, {
+      scroll: false,
+    });
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
@@ -2452,19 +2439,14 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(textarea, "check repo access");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    expect(chatMock.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "@codex check repo access" }),
     );
-    expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
-    const body = JSON.parse(String((init as RequestInit).body));
+    const body = chatMock.preparedRequestBodies.at(-1) as { newSessionId: string };
     expect(body).toMatchObject({
       newSessionId: expect.stringMatching(/^goat_chat_/),
-      message: {
-        role: "user",
-        parts: [{ type: "text", text: "@codex check repo access" }],
-      },
       model: "openai/gpt-5.6-sol",
+      engine: { type: "codex", schemaVersion: 1 },
     });
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
       `${body.newSessionId}:@codex check repo access`,
@@ -2530,19 +2512,14 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(textarea, "check repo access");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/claude-chat/messages", expect.any(Object)),
+    expect(chatMock.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "@claude check repo access" }),
     );
-    expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/claude-chat/messages")!;
-    const body = JSON.parse(String((init as RequestInit).body));
+    const body = chatMock.preparedRequestBodies.at(-1);
     expect(body).toMatchObject({
       newSessionId: expect.stringMatching(/^goat_chat_/),
-      message: {
-        role: "user",
-        parts: [{ type: "text", text: "@claude check repo access" }],
-      },
       model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
+      engine: { type: "claude_code", schemaVersion: 1 },
     });
     expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
       DEFAULT_GOAT_MODEL,
@@ -2640,10 +2617,6 @@ describe("GoatSurface chat streaming UI", () => {
 
   it("starts a selected workflow with uploaded attachments", async () => {
     const user = userEvent.setup();
-    attachmentUploadMock.upload.mockResolvedValueOnce({
-      blobUrl: "https://blob.test/goat-chat/user_1/report.docx",
-      blobPathname: "goat-chat/user_1/report.docx",
-    });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/skills") return Response.json({ skills: [] });
@@ -2715,7 +2688,6 @@ describe("GoatSurface chat streaming UI", () => {
       attachmentIds: ["attachment_1"],
     });
     expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalled();
-    expect(attachmentUploadMock.upload).toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByText("report.docx")).toBeNull());
@@ -2786,8 +2758,9 @@ describe("GoatSurface chat streaming UI", () => {
     expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
       description: "#morning-test run today's checks",
     });
-    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/codex-chat/messages")).toBe(
-      false,
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("messages"),
+      expect.anything(),
     );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue("");
@@ -3587,13 +3560,15 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Archive Market research" }));
 
-    expect(closeGoatChatSessionAction).toHaveBeenCalledWith("chat_1");
+    expect(updateHeadlessChatConversation).toHaveBeenCalledWith("chat_1", { archived: true });
     expect(screen.queryByText("Market research")).not.toBeInTheDocument();
   });
 
   it("restores a home chat when the archive request rejects", async () => {
     const user = userEvent.setup();
-    vi.mocked(closeGoatChatSessionAction).mockRejectedValueOnce(new Error("network unavailable"));
+    headlessChatCommandMocks.updateConversation.mockRejectedValueOnce(
+      new Error("network unavailable"),
+    );
     render(
       <GoatSurface
         tasks={[]}
@@ -3668,28 +3643,13 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getAllByLabelText("Attach files")).toHaveLength(2);
     await user.keyboard("{Enter}");
 
-    const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
-    await waitFor(() => expect(chatRequests()).toHaveLength(1));
-    const [, init] = chatRequests()[0]!;
-    expect(init).toBeDefined();
-    const body = JSON.parse(String((init as RequestInit).body));
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/chat",
-      expect.objectContaining({
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledTimes(1));
+    const body = headlessChatMocks.startBackground.mock.calls[0]![0];
     expect(body).toMatchObject({
-      sessionId: null,
+      content: "Research Q3",
       model: DEFAULT_GOAT_MODEL,
-      message: {
-        role: "user",
-        parts: [{ type: "text", text: "Research Q3" }],
-      },
     });
-    expect(body.message.id).toMatch(/^ui_background_/);
+    expect(body.clientMessageId).toMatch(/^ui_background_/);
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
     expect(routerMock.push).not.toHaveBeenCalled();
     expect(
@@ -3755,17 +3715,12 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Enter}");
 
-    const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
-    await waitFor(() => expect(chatRequests()).toHaveLength(1));
-    const [, init] = chatRequests()[0]!;
-    const body = JSON.parse(String((init as RequestInit).body));
-
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledTimes(1));
+    const body = headlessChatMocks.startBackground.mock.calls[0]![0];
     expect(body).toMatchObject({
-      message: {
-        parts: [{ type: "text", text: "Research Q3" }],
-      },
+      content: "Research Q3",
     });
-    expect(body.newSessionId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^goat_chat_/);
   });
 
   it("routes a dropped file only to the Cmd+K composer while the compose view is open", async () => {
@@ -3793,8 +3748,8 @@ describe("GoatSurface chat streaming UI", () => {
       },
     });
 
-    await waitFor(() => expect(attachmentUploadMock.upload).toHaveBeenCalledTimes(1));
-    expect(attachmentUploadMock.upload).toHaveBeenCalledWith("user_1", file, "application/pdf");
+    await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
+    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({ file });
     expect(await within(dialog).findByText("PDF")).toBeInTheDocument();
   });
 
@@ -3836,15 +3791,13 @@ describe("GoatSurface chat streaming UI", () => {
     );
     await user.click(within(dialog).getByRole("button", { name: "Send message" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
-    );
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
-    const body = JSON.parse(String((init as RequestInit).body));
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledTimes(1));
+    const body = headlessChatMocks.startBackground.mock.calls[0]![0];
     expect(body).toMatchObject({
-      message: { role: "user", parts: [{ type: "text", text: "Clone my repo" }] },
+      content: "Clone my repo",
+      engine: { type: "codex", schemaVersion: 1 },
     });
-    expect(body.newSessionId).toMatch(/^goat_chat_/);
+    expect(body.clientConversationId).toMatch(/^goat_chat_/);
     // Never adopted into the visible thread and never navigated to.
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
@@ -3921,9 +3874,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
       description: "#morning-test run today's checks",
     });
-    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/codex-chat/messages")).toBe(
-      false,
-    );
+    expect(headlessChatMocks.startBackground).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -3961,7 +3912,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     // Invalid settings must be caught before the dialog closes or any request fires —
     // otherwise the draft is lost behind a misleading "started" toast (regression guard).
-    expect(fetchMock.mock.calls.some(([url]) => url === "/api/codex-chat/messages")).toBe(false);
+    expect(headlessChatMocks.startBackground).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(quickComposerInput).toHaveValue("Run the failing suite");
@@ -4075,7 +4026,11 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(archivedOption);
 
-    await waitFor(() => expect(reopenGoatChatSessionAction).toHaveBeenCalledWith("chat_archived"));
+    await waitFor(() =>
+      expect(updateHeadlessChatConversation).toHaveBeenCalledWith("chat_archived", {
+        archived: false,
+      }),
+    );
     expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_archived");
   });
 
@@ -4137,7 +4092,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("does not navigate or refresh when the stream confirms the reserved session id", async () => {
+  it("does not navigate again when the stream confirms an accepted session id", async () => {
     const user = userEvent.setup();
 
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
@@ -4147,10 +4102,14 @@ describe("GoatSurface chat streaming UI", () => {
 
     await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
     const request = chatMock.preparedRequestBodies[0] as { newSessionId: string };
+    acceptHeadlessConversation(request.newSessionId);
     act(() => chatMock.finishWithSessionId?.(request.newSessionId));
 
-    expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
-    expect(routerMock.replace).not.toHaveBeenCalled();
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    expect(routerMock.replace).toHaveBeenCalledTimes(1);
+    expect(routerMock.replace).toHaveBeenCalledWith(`/chat/${request.newSessionId}`, {
+      scroll: false,
+    });
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
@@ -4237,7 +4196,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.queryByText("Earlier answer")).not.toBeInTheDocument();
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
     expect(routerMock.replace).toHaveBeenCalledWith("/");
-    expect(closeGoatChatSessionAction).not.toHaveBeenCalled();
+    expect(updateHeadlessChatConversation).not.toHaveBeenCalledWith("chat_1", { archived: true });
   });
 
   it("closes the open chat when Escape is pressed", async () => {

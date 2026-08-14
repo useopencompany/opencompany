@@ -2,12 +2,12 @@
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { TaskSource } from "@opencompany/core";
+import { createGoatTaskForActor } from "@opencompany/goat-agent/application/task-creation";
+import type { GoatChatMessageAttachment } from "@opencompany/goat-agent/chat-attachment-formats";
 import type {
-  GoatChatMessageAttachment,
   GoatHarnessEngine,
   GoatHarnessSpec,
-} from "@opencompany/db/goat-schema";
-import { createGoatTaskForActor } from "@opencompany/goat-agent/application/task-creation";
+} from "@opencompany/goat-agent/task-runtime-types";
 import { after } from "next/server";
 import { triggerGoatCodexChatWake } from "@/lib/task-runner";
 

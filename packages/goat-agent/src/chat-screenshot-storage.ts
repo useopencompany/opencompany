@@ -17,7 +17,7 @@ export function goatChatScreenshotBlobPath(input: {
 }
 
 export function goatChatScreenshotUrl(input: { chatSessionId: string; filename: string }) {
-  return `/api/chat-screenshots/${encodeURIComponent(input.chatSessionId)}/${encodeURIComponent(
+  return `/v1/chat-screenshots/${encodeURIComponent(input.chatSessionId)}/${encodeURIComponent(
     safeScreenshotFilename(input.filename),
   )}`;
 }

@@ -1,8 +1,15 @@
+import { createHmac } from "node:crypto";
 import { connectGoatSlackBotIntegration } from "@opencompany/db/goat-integrations";
+import {
+  claimGoatSlackBotEvent,
+  getGoatSlackBotThreadParticipation,
+  releaseGoatSlackBotEvent,
+} from "@opencompany/db/goat-slack-bot";
 import { listGoatWorkspacesForUser } from "@opencompany/db/goat-workspaces";
 import { slackApiRequest } from "@opencompany/goat-agent/integrations/slack";
 import { createGoatSlackBotState } from "@opencompany/goat-agent/integrations/slack-bot";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RunnerClient } from "./runner-client";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 
 vi.mock("@opencompany/db/goat-workspaces", async (importOriginal) => ({
@@ -13,12 +20,19 @@ vi.mock("@opencompany/db/goat-integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   connectGoatSlackBotIntegration: vi.fn(),
 }));
+vi.mock("@opencompany/db/goat-slack-bot", () => ({
+  claimGoatSlackBotEvent: vi.fn(),
+  getGoatSlackBotThreadParticipation: vi.fn(async () => null),
+  markGoatSlackBotIntegrationStatusForTeam: vi.fn(async () => undefined),
+  releaseGoatSlackBotEvent: vi.fn(async () => undefined),
+}));
 vi.mock("@opencompany/goat-agent/integrations/slack", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   slackApiRequest: vi.fn(),
 }));
 
 const sentinelDb = { sentinel: "db" };
+const runnerRequest = vi.fn(async () => ({ ok: true }));
 
 function ingress(overrides: { role?: string } = {}) {
   vi.mocked(listGoatWorkspacesForUser).mockResolvedValue([
@@ -34,7 +48,12 @@ function ingress(overrides: { role?: string } = {}) {
       organizationId: null,
       method: "session",
       activeWorkspaceId: null,
+      activeBrainId: null,
     }),
+    runner: {
+      requestJson: runnerRequest as RunnerClient["requestJson"],
+      postJson: runnerRequest as RunnerClient["postJson"],
+    },
   });
 }
 
@@ -56,6 +75,11 @@ describe("Slack bot ingress", () => {
     vi.stubEnv("GOAT_SLACK_BOT_CLIENT_SECRET", "slack-bot-secret");
     vi.stubEnv("GOAT_SLACK_BOT_SIGNING_SECRET", "slack-bot-signing");
     vi.stubEnv("GOAT_SLACK_BOT_STATE_SECRET", "slack-bot-state-secret");
+    vi.mocked(claimGoatSlackBotEvent).mockResolvedValue({
+      eventId: "Ev123",
+      claimId: "gsbec_claim",
+    });
+    vi.mocked(getGoatSlackBotThreadParticipation).mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -196,4 +220,139 @@ describe("Slack bot ingress", () => {
       "https://goat.example.com/settings/workspace/slack?integration=slack_bot&setup=error&reason=connection_sync_failed",
     );
   });
+
+  it("verifies, claims, and dispatches answer events to the runner", async () => {
+    const response = await ingress().webhook(
+      signedEventRequest({
+        type: "app_mention",
+        channel: "C123",
+        user: "U123",
+        ts: "1784196000.000100",
+        text: "<@B123> what changed?",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(claimGoatSlackBotEvent).toHaveBeenCalledWith(
+      { eventId: "Ev123", teamId: "T123" },
+      sentinelDb,
+    );
+    expect(runnerRequest).toHaveBeenCalledWith(
+      "/internal/goat/slack-bot/events",
+      {
+        schemaVersion: 1,
+        eventId: "Ev123",
+        claimId: "gsbec_claim",
+        kind: "mention",
+        input: {
+          teamId: "T123",
+          channelId: "C123",
+          messageTs: "1784196000.000100",
+          threadTs: null,
+          text: "<@B123> what changed?",
+          slackUserId: "U123",
+        },
+      },
+      { errorFormat: "error-message" },
+    );
+  });
+
+  it("releases a claim when runner dispatch fails while still acknowledging Slack", async () => {
+    runnerRequest.mockRejectedValueOnce(new Error("runner unavailable"));
+
+    const response = await ingress().webhook(
+      signedEventRequest({
+        type: "app_mention",
+        channel: "C123",
+        user: "U123",
+        ts: "1784196000.000100",
+        text: "<@B123> what changed?",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(releaseGoatSlackBotEvent).toHaveBeenCalledWith(
+      { eventId: "Ev123", claimId: "gsbec_claim" },
+      sentinelDb,
+    );
+  });
+
+  it("routes only known participating thread follow-ups", async () => {
+    const unknown = await ingress().webhook(
+      signedEventRequest({
+        type: "message",
+        channel: "C123",
+        channel_type: "channel",
+        user: "U123",
+        ts: "1784196000.000200",
+        thread_ts: "1784196000.000100",
+        text: "and what about churn?",
+      }),
+    );
+    await expect(unknown.json()).resolves.toEqual({ ok: true, ignored: true });
+    expect(runnerRequest).not.toHaveBeenCalled();
+
+    vi.mocked(getGoatSlackBotThreadParticipation).mockResolvedValue({
+      integrationId: "gint_1",
+    });
+    const known = await ingress().webhook(
+      signedEventRequest({
+        type: "message",
+        channel: "C123",
+        channel_type: "channel",
+        user: "U123",
+        ts: "1784196000.000200",
+        thread_ts: "1784196000.000100",
+        text: "and what about churn?",
+      }),
+    );
+    await expect(known.json()).resolves.toEqual({ ok: true });
+    expect(runnerRequest).toHaveBeenCalledWith(
+      "/internal/goat/slack-bot/events",
+      expect.objectContaining({ kind: "follow_up" }),
+      { errorFormat: "error-message" },
+    );
+  });
+
+  it("rejects invalid signatures and answers Slack URL verification", async () => {
+    const invalid = await ingress().webhook(
+      new Request("https://api.example.com/webhooks/slack-bot/events", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    expect(invalid.status).toBe(401);
+
+    const verification = await ingress().webhook(
+      signedEnvelope({ type: "url_verification", challenge: "challenge_1" }),
+    );
+    await expect(verification.json()).resolves.toEqual({ challenge: "challenge_1" });
+  });
 });
+
+function signedEventRequest(event: Record<string, unknown>) {
+  return signedEnvelope({
+    type: "event_callback",
+    team_id: "T123",
+    event_id: "Ev123",
+    event,
+  });
+}
+
+function signedEnvelope(payload: Record<string, unknown>) {
+  const rawBody = JSON.stringify(payload);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = `v0=${createHmac("sha256", "slack-bot-signing")
+    .update(`v0:${timestamp}:${rawBody}`)
+    .digest("hex")}`;
+  return new Request("https://api.example.com/webhooks/slack-bot/events", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-slack-request-timestamp": timestamp,
+      "x-slack-signature": signature,
+    },
+    body: rawBody,
+  });
+}

@@ -63,7 +63,6 @@ function CanonicalTaskDetailPanel({
       codexConnected={data.codexConnected}
       claudeCodeConnected={data.claudeCodeConnected}
       taskSpawningEnabled={data.featureFlags.taskSpawning}
-      chatResumeEnabled={false}
       userName={userName}
       userWorkosId={data.user.workosUserId}
       taskConversation={{
@@ -101,7 +100,6 @@ function LegacyTaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunViewM
       codexConnected={data.codexConnected}
       claudeCodeConnected={data.claudeCodeConnected}
       taskSpawningEnabled={data.featureFlags.taskSpawning}
-      chatResumeEnabled={false}
       userName={userName}
       userWorkosId={data.user.workosUserId}
       taskConversation={{

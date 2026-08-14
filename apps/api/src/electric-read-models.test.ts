@@ -19,6 +19,68 @@ const actor = {
 };
 
 describe("Electric read models", () => {
+  it("serves integration accounts as a credential-free actor and workspace read model", async () => {
+    let requestedUrl: URL | undefined;
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        requestedUrl = new URL(String(input));
+        return Response.json([
+          {
+            headers: { operation: "insert" },
+            key: JSON.stringify("integration_1"),
+            value: {
+              id: "integration_1",
+              user_workos_id: "must-not-cross",
+              workspace_id: "workspace_1",
+              provider: "github",
+              external_id: "123456",
+              connection_label: "OpenCompany",
+              account_name: "OpenCompany",
+              account_email: null,
+              account_type: "Organization",
+              status: "connected",
+              status_reason: null,
+              scopes: JSON.stringify(["repo"]),
+              capability_modes: JSON.stringify({ repositories: "on" }),
+              oauth_access_token: "must-not-cross",
+            },
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "integration-accounts-v1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/integration-accounts-v1?table=goat.integration_credentials",
+      ),
+    });
+
+    expect(requestedUrl?.searchParams.get("table")).toBe("goat.integrations");
+    expect(requestedUrl?.searchParams.get("where")).toBe(
+      `("user_workos_id" = $1 AND "workspace_id" IS NULL) OR "workspace_id" = $2`,
+    );
+    expect(requestedUrl?.searchParams.get("params[1]")).toBe("user_1");
+    expect(requestedUrl?.searchParams.get("params[2]")).toBe("workspace_1");
+    expect(requestedUrl?.searchParams.get("columns")).not.toContain("credential");
+    expect((await response.json())[0]?.value).toEqual({
+      id: "integration_1",
+      provider: "github",
+      workspaceId: "workspace_1",
+      externalId: "123456",
+      connectionLabel: "OpenCompany",
+      accountName: "OpenCompany",
+      accountEmail: null,
+      accountType: "Organization",
+      status: "connected",
+      statusReason: null,
+      scopes: ["repo"],
+      capabilityModes: { repositories: "on" },
+    });
+  });
+
   it("selects the physical shape server-side and returns only canonical Message fields", async () => {
     let upstreamUrl = "";
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
@@ -190,6 +252,61 @@ describe("Electric read models", () => {
         requestUrl: new URL("https://api.example.test/v1/read-models/chat-runs-v1"),
       }),
     ).rejects.toMatchObject({ status: 400, code: "invalid_request" });
+  });
+
+  it("qualifies engine sessions globally and strips runtime ownership fields", async () => {
+    let upstreamUrl = "";
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        upstreamUrl = String(input);
+        return Response.json([
+          {
+            headers: { operation: "insert" },
+            key: '"runtime_1"',
+            value: {
+              chat_session_id: "conversation_1",
+              engine: "codex",
+              status: "running",
+              active_turn_id: "run_1",
+              error: null,
+              updated_at: "2026-08-13 08:00:00+00",
+              sandbox_id: "must-not-cross",
+              lease_id: "must-not-cross",
+              user_workos_id: "must-not-cross",
+              workspace_id: "must-not-cross",
+            },
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "engine-sessions-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/engine-sessions-v1"),
+    });
+    const requestedUrl = new URL(upstreamUrl);
+    expect(requestedUrl.searchParams.get("table")).toBe("goat.codex_chat_sessions");
+    expect(requestedUrl.searchParams.get("where")).toContain('"user_workos_id" = $1');
+    expect(requestedUrl.searchParams.get("where")).toContain('"workspace_id" = $2');
+    expect(requestedUrl.searchParams.get("params[1]")).toBe("user_1");
+    expect(requestedUrl.searchParams.get("params[2]")).toBe("workspace_1");
+    expect(requestedUrl.searchParams.get("columns")).not.toContain("sandbox_id");
+    await expect(response.json()).resolves.toEqual([
+      {
+        headers: { operation: "insert" },
+        key: '"runtime_1"',
+        value: {
+          conversationId: "conversation_1",
+          engine: "codex",
+          status: "running",
+          activeRunId: "run_1",
+          error: null,
+          updatedAt: "2026-08-13T08:00:00.000Z",
+        },
+      },
+    ]);
   });
 
   it("fixes Brain shape identity server-side and projects only canonical document fields", async () => {

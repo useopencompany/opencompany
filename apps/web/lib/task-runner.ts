@@ -1,4 +1,4 @@
-import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
+import type { GoatHarnessSpec } from "@opencompany/goat-agent/task-runtime-types";
 
 const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
 const CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS = 5_000;

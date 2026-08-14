@@ -1,4 +1,4 @@
-import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
+import type { GoatHarnessSpec } from "@opencompany/goat-agent/task-runtime-types";
 import { describe, expect, it } from "vitest";
 import { deriveGoatTaskWorkflowSteps } from "@/lib/task-workflow-activity";
 

@@ -32,6 +32,7 @@
         "@hono/node-server": "^1.19.11",
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/analytics": "workspace:*",
+        "@opencompany/billing": "workspace:*",
         "@opencompany/chat-presentation": "workspace:*",
         "@opencompany/core": "workspace:*",
         "@opencompany/db": "workspace:*",
@@ -47,6 +48,7 @@
         "hono": "4.12.28",
         "jose": "^5.10.0",
         "pg": "^8.13.1",
+        "stripe": "^22.1.1",
       },
       "devDependencies": {
         "@types/node": "^25.9.1",
@@ -256,6 +258,7 @@
       "dependencies": {
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/analytics": "workspace:*",
+        "@opencompany/core": "workspace:*",
         "@opencompany/db": "workspace:*",
         "drizzle-orm": "^0.45.2",
         "stripe": "^22.1.1",
@@ -366,6 +369,8 @@
         "ai": "^6.0.189",
         "ajv": "8.20.0",
         "drizzle-orm": "^0.45.2",
+        "jose": "^5.10.0",
+        "mcp-handler": "^1.1.0",
         "zod": "^4.4.3",
       },
       "devDependencies": {

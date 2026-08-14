@@ -3801,6 +3801,1322 @@
         ],
         "additionalProperties": false
       },
+      "WorkspaceCapabilitySettingsEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceCapability"
+                }
+              },
+              "sessionBudgetUsdMicros": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "capabilities",
+              "sessionBudgetUsdMicros"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceCapability": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "x",
+              "linkedin",
+              "youtube",
+              "instagram",
+              "tiktok",
+              "lead",
+              "seo"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "CapabilitySessionBudgetEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionBudgetUsdMicros": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "sessionBudgetUsdMicros"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetCapabilitySessionBudgetBody": {
+        "type": "object",
+        "properties": {
+          "budgetUsd": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "budgetUsd"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceCapabilityMutationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WorkspaceCapability"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetWorkspaceCapabilityBody": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "CapabilityApprovalEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CapabilityApproval"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CapabilityApproval": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "x",
+              "linkedin",
+              "youtube",
+              "instagram",
+              "tiktok",
+              "lead",
+              "seo"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "awaiting_approval",
+              "approved",
+              "canceled",
+              "expired",
+              "executing",
+              "running",
+              "stopping",
+              "succeeded",
+              "failed",
+              "stopped",
+              "timed_out"
+            ]
+          },
+          "maxCostUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "expiresAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "settledCostUsdMicros": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          },
+          "sessionBudgetUsdMicros": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "runId",
+          "source",
+          "action",
+          "status",
+          "maxCostUsdMicros",
+          "expiresAt",
+          "settledCostUsdMicros"
+        ],
+        "additionalProperties": false
+      },
+      "BrainControlMutationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "brainId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              }
+            },
+            "required": [
+              "brainId"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CreateBrainBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "restricted"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "name",
+          "visibility"
+        ],
+        "additionalProperties": false
+      },
+      "BrainAccessEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BrainAccess"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "BrainAccess": {
+        "type": "object",
+        "properties": {
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "restricted"
+            ]
+          },
+          "memberIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "maxItems": 1000
+          },
+          "workspaceMembers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceMember"
+            },
+            "maxItems": 1000
+          }
+        },
+        "required": [
+          "visibility",
+          "memberIds",
+          "workspaceMembers"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceMember": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 4096
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "name",
+          "avatarUrl",
+          "role"
+        ],
+        "additionalProperties": false
+      },
+      "BrainAccessMutationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "updated": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "updated"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetBrainAccessBody": {
+        "type": "object",
+        "properties": {
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "restricted"
+            ]
+          },
+          "memberIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "maxItems": 1000
+          }
+        },
+        "required": [
+          "visibility",
+          "memberIds"
+        ],
+        "additionalProperties": false
+      },
+      "BrainEnrichmentEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "enabled"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetBrainEnrichmentBody": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "BrainIntelligenceEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "intelligence": {
+                "type": "string",
+                "enum": [
+                  "basic",
+                  "frontier"
+                ]
+              }
+            },
+            "required": [
+              "intelligence"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetBrainIntelligenceBody": {
+        "type": "object",
+        "properties": {
+          "intelligence": {
+            "type": "string",
+            "enum": [
+              "basic",
+              "frontier"
+            ]
+          }
+        },
+        "required": [
+          "intelligence"
+        ],
+        "additionalProperties": false
+      },
+      "IdentityEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "Identity": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/IdentityUser"
+          },
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IdentityWorkspace"
+            },
+            "maxItems": 1000
+          },
+          "activeWorkspaceId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "brains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IdentityBrain"
+            },
+            "maxItems": 1000
+          },
+          "activeBrainId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          }
+        },
+        "required": [
+          "user",
+          "workspaces",
+          "activeWorkspaceId",
+          "brains",
+          "activeBrainId"
+        ],
+        "additionalProperties": false
+      },
+      "IdentityUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
+          },
+          "firstName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 128
+          },
+          "lastName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 128
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 4096
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "taskSpawningEnabled": {
+            "type": "boolean"
+          },
+          "autoModelRoutingEnabled": {
+            "type": "boolean"
+          },
+          "chatCapabilitiesBetaEnabled": {
+            "type": "boolean"
+          },
+          "imessageEnabled": {
+            "type": "boolean"
+          },
+          "wikiEnabled": {
+            "type": "boolean"
+          },
+          "taskViewMode": {
+            "type": "string",
+            "enum": [
+              "board",
+              "list"
+            ]
+          },
+          "preferredMcpClient": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "claude",
+              "chatgpt",
+              "cursor",
+              null
+            ]
+          },
+          "mcpSetupCompletedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "onboardedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "firstName",
+          "lastName",
+          "avatarUrl",
+          "timezone",
+          "taskSpawningEnabled",
+          "autoModelRoutingEnabled",
+          "chatCapabilitiesBetaEnabled",
+          "imessageEnabled",
+          "wikiEnabled",
+          "taskViewMode",
+          "preferredMcpClient",
+          "mcpSetupCompletedAt",
+          "onboardedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "IdentityWorkspace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "slug": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 40
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "role"
+        ],
+        "additionalProperties": false
+      },
+      "IdentityBrain": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "restricted"
+            ]
+          },
+          "enrichmentEnabled": {
+            "type": "boolean"
+          },
+          "intelligence": {
+            "type": "string",
+            "enum": [
+              "basic",
+              "frontier"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "name",
+          "slug",
+          "description",
+          "visibility",
+          "enrichmentEnabled",
+          "intelligence"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceSettingsEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WorkspaceSettings"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceSettings": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ]
+          },
+          "plan": {
+            "type": "string",
+            "enum": [
+              "hobby",
+              "pro"
+            ]
+          },
+          "memberCap": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceMember"
+            },
+            "maxItems": 1000
+          },
+          "invitations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceInvitation"
+            },
+            "maxItems": 1000
+          }
+        },
+        "required": [
+          "workspace",
+          "role",
+          "plan",
+          "memberCap",
+          "members",
+          "invitations"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceInvitation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
+          },
+          "state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "expiresAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "state",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceRenameEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "RenameWorkspaceBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceCommandEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "completed": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "completed"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "InviteWorkspaceMemberBody": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceActivationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WorkspaceActivation"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "WorkspaceActivation": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "organizationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "brainId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "organizationId",
+          "brainId"
+        ],
+        "additionalProperties": false
+      },
+      "CreateWorkspaceBody": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "required": [
+          "workspaceId",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingStateEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OnboardingState"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingState": {
+        "type": "object",
+        "properties": {
+          "onboarding": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "role": {
+                "type": "string",
+                "nullable": true
+              },
+              "companyDomain": {
+                "type": "string",
+                "nullable": true
+              },
+              "contextUrls": {
+                "type": "array",
+                "nullable": true,
+                "items": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "maxItems": 20
+              },
+              "referralSource": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "role",
+              "companyDomain",
+              "contextUrls",
+              "referralSource"
+            ],
+            "additionalProperties": false
+          },
+          "workspace": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "slug": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 40
+              },
+              "createdByCaller": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "slug",
+              "createdByCaller"
+            ],
+            "additionalProperties": false
+          },
+          "activeBrainId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          }
+        },
+        "required": [
+          "onboarding",
+          "workspace",
+          "activeBrainId"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingWorkspaceSlugEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "slug": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "available": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "slug",
+              "available"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CheckOnboardingWorkspaceSlugBody": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingCommandEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "completed": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "completed"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SaveOnboardingProfileBody": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "founder",
+              "product",
+              "sales",
+              "marketing",
+              "operations",
+              "investing",
+              "consulting",
+              "research"
+            ]
+          },
+          "companyUrl": {
+            "type": "string",
+            "maxLength": 2048,
+            "format": "uri"
+          }
+        },
+        "required": [
+          "role",
+          "companyUrl"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingWorkspaceEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "workspaceId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "organizationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "brainId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "createdByCaller": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "workspaceId",
+              "organizationId",
+              "brainId",
+              "createdByCaller"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SaveOnboardingWorkspaceBody": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$/u"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "name",
+          "slug"
+        ],
+        "additionalProperties": false
+      },
+      "FinishOnboardingBody": {
+        "type": "object",
+        "properties": {
+          "referralSource": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "referralSource"
+        ],
+        "additionalProperties": false
+      },
       "BrainSourceOptionsEnvelope": {
         "type": "object",
         "properties": {
@@ -5421,6 +6737,97 @@
         },
         "additionalProperties": false
       },
+      "ConversationShareEnvelopeV1": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ConversationShareV1"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ConversationShareV1": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "shareId": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+            "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+            "description": "Unguessable public Chat share capability."
+          }
+        },
+        "required": [
+          "conversationId",
+          "shareId"
+        ],
+        "additionalProperties": false
+      },
+      "GenerateConversationTitleEnvelopeV1": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "conversationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "title": {
+                "type": "string",
+                "nullable": true
+              },
+              "generated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "conversationId",
+              "title",
+              "generated"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "GenerateConversationTitleBodyV1": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          }
+        },
+        "required": [
+          "messageId"
+        ],
+        "additionalProperties": false
+      },
       "MessagePage": {
         "type": "object",
         "properties": {
@@ -5628,12 +7035,7 @@
             "maxLength": 10000
           },
           "engine": {
-            "type": "string",
-            "enum": [
-              "opencompany",
-              "codex",
-              "claude_code"
-            ]
+            "$ref": "#/components/schemas/MessageEngineV1"
           },
           "model": {
             "type": "string",
@@ -5661,6 +7063,141 @@
         "required": [
           "content",
           "engine"
+        ],
+        "additionalProperties": false
+      },
+      "MessageEngineV1": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "opencompany"
+                ]
+              },
+              "schemaVersion": {
+                "type": "number",
+                "enum": [
+                  1
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "schemaVersion"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "codex"
+                ]
+              },
+              "schemaVersion": {
+                "type": "number",
+                "enum": [
+                  1
+                ]
+              },
+              "settings": {
+                "type": "object",
+                "properties": {
+                  "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh"
+                    ]
+                  },
+                  "planModeEnabled": {
+                    "type": "boolean"
+                  },
+                  "goalMode": {
+                    "$ref": "#/components/schemas/CodexGoalModeV1"
+                  }
+                },
+                "required": [
+                  "reasoningEffort"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "type",
+              "schemaVersion",
+              "settings"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "claude_code"
+                ]
+              },
+              "schemaVersion": {
+                "type": "number",
+                "enum": [
+                  1
+                ]
+              },
+              "settings": {
+                "type": "object",
+                "properties": {
+                  "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh"
+                    ]
+                  }
+                },
+                "required": [
+                  "reasoningEffort"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "type",
+              "schemaVersion",
+              "settings"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "CodexGoalModeV1": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "objective": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "tokenBudget": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 2000000
+          }
+        },
+        "required": [
+          "objective"
         ],
         "additionalProperties": false
       },
@@ -5726,6 +7263,283 @@
         },
         "required": [
           "file"
+        ],
+        "additionalProperties": false
+      },
+      "ChatArtifactDeleteEnvelopeV1": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "artifactId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "deleted"
+                ]
+              }
+            },
+            "required": [
+              "artifactId",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PublicChatShareEnvelopeV1": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublicChatShareV1"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PublicChatShareV1": {
+        "type": "object",
+        "properties": {
+          "shareId": {
+            "type": "string",
+            "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+            "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+            "description": "Unguessable public Chat share capability."
+          },
+          "title": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "task"
+            ]
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "opencompany",
+              "codex",
+              "claude_code"
+            ]
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicChatMessageV1"
+            }
+          }
+        },
+        "required": [
+          "shareId",
+          "title",
+          "kind",
+          "engine",
+          "messages"
+        ],
+        "additionalProperties": false
+      },
+      "PublicChatMessageV1": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+                "nullable": true
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "parts"
+        ],
+        "additionalProperties": false
+      },
+      "PublicChatShareMetadataEnvelopeV1": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublicChatShareMetadataV1"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PublicChatShareMetadataV1": {
+        "type": "object",
+        "properties": {
+          "shareId": {
+            "type": "string",
+            "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+            "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+            "description": "Unguessable public Chat share capability."
+          },
+          "title": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "task"
+            ]
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "opencompany",
+              "codex",
+              "claude_code"
+            ]
+          }
+        },
+        "required": [
+          "shareId",
+          "title",
+          "kind",
+          "engine"
+        ],
+        "additionalProperties": false
+      },
+      "EngineRuntimeStatusEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "conversationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "status": {
+                "type": "string",
+                "nullable": true,
+                "enum": [
+                  "running",
+                  "sleeping",
+                  "deleted",
+                  null
+                ]
+              }
+            },
+            "required": [
+              "conversationId",
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EngineRuntimeAccessEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "conversationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "websocketUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "ticket": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8192
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0,
+                "exclusiveMinimum": true
+              },
+              "runtimeStatus": {
+                "type": "string",
+                "enum": [
+                  "running",
+                  "sleeping"
+                ]
+              }
+            },
+            "required": [
+              "conversationId",
+              "websocketUrl",
+              "ticket",
+              "expiresAt",
+              "runtimeStatus"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "additionalProperties": false
       },
@@ -7176,8 +8990,57 @@
             ]
           },
           "answer": {
-            "type": "string",
-            "maxLength": 10000
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "engine_questions"
+                    ]
+                  },
+                  "schemaVersion": {
+                    "type": "number",
+                    "enum": [
+                      1
+                    ]
+                  },
+                  "answers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "answers": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          },
+                          "minItems": 1,
+                          "maxItems": 8
+                        }
+                      },
+                      "required": [
+                        "answers"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "type",
+                  "schemaVersion",
+                  "answers"
+                ],
+                "additionalProperties": false
+              }
+            ]
           }
         },
         "required": [
@@ -8214,6 +10077,40 @@
         ],
         "additionalProperties": false
       },
+      "ActionPermissionEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "actionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "allowed"
+                ]
+              }
+            },
+            "required": [
+              "actionId",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
       "ClaudeCodeAuthStatusEnvelope": {
         "type": "object",
         "properties": {
@@ -8576,6 +10473,525 @@
         },
         "required": [
           "browserToken"
+        ],
+        "additionalProperties": false
+      },
+      "BillingOverviewEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BillingOverview"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "BillingOverview": {
+        "type": "object",
+        "properties": {
+          "creditBalanceUsdMicros": {
+            "type": "integer"
+          },
+          "includedBalanceUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "topUpBalanceUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "plan": {
+            "type": "string",
+            "enum": [
+              "hobby",
+              "pro"
+            ]
+          },
+          "subscriptionStatus": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 64
+          },
+          "seatQuantity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includedUsagePeriodEnd": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "cancelAtPeriodEnd": {
+            "type": "boolean"
+          },
+          "currentPeriodEnd": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "paymentNeedsAttention": {
+            "type": "boolean"
+          },
+          "proMonthlyPriceCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hobbyIncludedUsageCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "memberCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "memberCap": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "spendThisMonthUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "spendThisMonthByCategory": {
+            "type": "object",
+            "properties": {
+              "chat": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "ingestion": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "capabilities": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "chat",
+              "ingestion",
+              "capabilities"
+            ],
+            "additionalProperties": false
+          },
+          "recentActivity": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "activityId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "example": "run_019fed53"
+                },
+                "source": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "amountUsdMicros": {
+                  "type": "integer"
+                },
+                "providerCostUsdMicros": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "platformFeeUsdMicros": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "capabilityAction": {
+                  "type": "string",
+                  "nullable": true,
+                  "maxLength": 256
+                },
+                "isAutoRefill": {
+                  "type": "boolean"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "activityId",
+                "source",
+                "amountUsdMicros",
+                "providerCostUsdMicros",
+                "platformFeeUsdMicros",
+                "capabilityAction",
+                "isAutoRefill",
+                "createdAt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "lowBalanceWarnUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includedUsagePerSeatCents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "topUpAmountsCents": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxItems": 20
+          },
+          "defaultTopUpCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minTopUpCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxTopUpCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "autoRefillMonthlyMaxCents": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "autoRefill": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "amountCents": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "hasPaymentMethod": {
+                "type": "boolean"
+              },
+              "lastError": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 1000
+              }
+            },
+            "required": [
+              "enabled",
+              "amountCents",
+              "hasPaymentMethod",
+              "lastError"
+            ],
+            "additionalProperties": false
+          },
+          "isAdmin": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "creditBalanceUsdMicros",
+          "includedBalanceUsdMicros",
+          "topUpBalanceUsdMicros",
+          "plan",
+          "subscriptionStatus",
+          "seatQuantity",
+          "includedUsagePeriodEnd",
+          "cancelAtPeriodEnd",
+          "currentPeriodEnd",
+          "paymentNeedsAttention",
+          "proMonthlyPriceCents",
+          "hobbyIncludedUsageCents",
+          "memberCount",
+          "memberCap",
+          "spendThisMonthUsdMicros",
+          "spendThisMonthByCategory",
+          "recentActivity",
+          "lowBalanceWarnUsdMicros",
+          "includedUsagePerSeatCents",
+          "topUpAmountsCents",
+          "defaultTopUpCents",
+          "minTopUpCents",
+          "maxTopUpCents",
+          "autoRefillMonthlyMaxCents",
+          "autoRefill",
+          "isAdmin"
+        ],
+        "additionalProperties": false
+      },
+      "BillingUsageEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BillingUsage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "BillingUsage": {
+        "type": "object",
+        "properties": {
+          "breakdown": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "day": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32
+                },
+                "category": {
+                  "type": "string",
+                  "enum": [
+                    "chat",
+                    "ingestion",
+                    "capabilities",
+                    "other"
+                  ]
+                },
+                "spendUsdMicros": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "providerCostUsdMicros": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "platformFeeUsdMicros": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "day",
+                "category",
+                "spendUsdMicros",
+                "providerCostUsdMicros",
+                "platformFeeUsdMicros"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "ingestedThisMonth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pending": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "creditBalanceUsdMicros": {
+            "type": "integer"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "provider",
+                "count"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "recent": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "activityId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "example": "run_019fed53"
+                },
+                "provider": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "rawEventCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "consumed"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "activityId",
+                "provider",
+                "rawEventCount",
+                "status",
+                "createdAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "breakdown",
+          "ingestedThisMonth",
+          "pending",
+          "creditBalanceUsdMicros",
+          "providers",
+          "recent"
+        ],
+        "additionalProperties": false
+      },
+      "BillingBalanceEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BillingBalance"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "BillingBalance": {
+        "type": "object",
+        "properties": {
+          "balanceUsdMicros": {
+            "type": "integer"
+          },
+          "lowBalanceWarnUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "enforcementEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "balanceUsdMicros",
+          "lowBalanceWarnUsdMicros",
+          "enforcementEnabled"
+        ],
+        "additionalProperties": false
+      },
+      "BillingRedirectEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "redirectUrl": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "redirectUrl"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CreateBillingTopUpBody": {
+        "type": "object",
+        "properties": {
+          "amountCents": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "amountCents"
+        ],
+        "additionalProperties": false
+      },
+      "BillingAutoRefillEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "updated": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "updated"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateBillingAutoRefillBody": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "amountCents": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "enabled",
+          "amountCents"
         ],
         "additionalProperties": false
       }
@@ -10333,6 +12749,1302 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BrowserProfileLiveViewEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capabilities": {
+      "get": {
+        "tags": [
+          "Capabilities"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace managed-capability settings and the per-chat spending budget.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCapabilitySettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capabilities/session-budget": {
+      "put": {
+        "tags": [
+          "Capabilities"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCapabilitySessionBudgetBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace per-chat capability spending budget updated. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitySessionBudgetEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capabilities/{source}": {
+      "put": {
+        "tags": [
+          "Capabilities"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "x",
+                "linkedin",
+                "youtube",
+                "instagram",
+                "tiktok",
+                "lead",
+                "seo"
+              ]
+            },
+            "required": true,
+            "name": "source",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWorkspaceCapabilityBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace managed capability updated. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCapabilityMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capability-approvals/by-tool-call/{toolCallId}": {
+      "get": {
+        "tags": [
+          "Capabilities"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "toolCallId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Latest approval visible to the actor for a tool call, including session budget.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityApprovalEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capability-approvals/{runId}": {
+      "get": {
+        "tags": [
+          "Capabilities"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capability approval visible to the acting user in the active workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityApprovalEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/brains": {
+      "post": {
+        "tags": [
+          "Brains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBrainBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Brain created in the active workspace. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainControlMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/brains/{brainId}/switch": {
+      "post": {
+        "tags": [
+          "Brains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Brain access authorized for the active workspace; clients may activate it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainControlMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/brains/{brainId}/access": {
+      "get": {
+        "tags": [
+          "Brains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Brain visibility, selected members, and workspace member choices. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainAccessEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Brains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBrainAccessBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Brain visibility and restricted member set updated. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainAccessMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/brains/{brainId}/enrichment": {
+      "get": {
+        "tags": [
+          "Brains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Brain enrichment setting. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainEnrichmentEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Brains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBrainEnrichmentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Brain enrichment setting updated. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainEnrichmentEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/brains/{brainId}/intelligence": {
+      "get": {
+        "tags": [
+          "Brains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Brain intelligence tier. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainIntelligenceEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Brains"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "brainId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBrainIntelligenceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Brain intelligence tier updated. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainIntelligenceEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/identity": {
+      "get": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated identity, accessible workspaces, and the selected workspace Brain list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/identity/sync": {
+      "post": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated identity profile and accepted organization memberships synchronized, then resolved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspace": {
+      "get": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active workspace settings, members, plan, and pending invitations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameWorkspaceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Active workspace and its identity organization renamed. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceRenameEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspace/invitations": {
+      "post": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteWorkspaceMemberBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Invitation sent within the active workspace member cap. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspace/invitations/{invitationId}": {
+      "delete": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "invitationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending invitation in the active identity organization revoked. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspace/members/{userId}": {
+      "delete": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "userId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Member removed from the active workspace and identity organization. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspaces": {
+      "post": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkspaceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Workspace provisioned idempotently by workspace id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceActivationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{workspaceId}/switch": {
+      "post": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "workspaceId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace membership authorized and browser activation resources returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceActivationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/onboarding": {
+      "get": {
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated onboarding state without requiring onboarding completion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/onboarding/workspace-slug/check": {
+      "post": {
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckOnboardingWorkspaceSlugBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Normalized workspace slug availability for the authenticated identity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingWorkspaceSlugEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/onboarding/profile": {
+      "put": {
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveOnboardingProfileBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated identity onboarding profile saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/onboarding/workspace": {
+      "put": {
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveOnboardingWorkspaceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Onboarding workspace saved or provisioned for the authenticated identity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingWorkspaceEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/onboarding/complete": {
+      "post": {
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinishOnboardingBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Onboarding completed for an identity with an accessible workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingCommandEnvelope"
                 }
               }
             }
@@ -12248,6 +15960,212 @@
         }
       }
     },
+    "/v1/conversations/{conversationId}/share": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current public share capability for an authorized Conversation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationShareEnvelopeV1"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Idempotently create or return a Conversation public share capability.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationShareEnvelopeV1"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Idempotently revoke a Conversation public share capability.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationShareEnvelopeV1"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/title": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateConversationTitleBodyV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generate a title when the Message is the Conversation's first user Message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateConversationTitleEnvelopeV1"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/conversations/{conversationId}/messages": {
       "get": {
         "tags": [
@@ -12405,6 +16323,583 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AttachmentUploadEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat-artifacts/{artifactId}": {
+      "delete": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "artifactId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Generated Chat artifact tombstoned and its private blobs removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatArtifactDeleteEnvelopeV1"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat-artifacts/{artifactId}/versions/{versionId}": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "artifactId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "versionId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ]
+            },
+            "required": false,
+            "name": "download",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized private bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat-attachments/{messageId}/{attachmentId}": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "messageId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "attachmentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized private bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat-screenshots/{conversationId}/{filename}": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "required": true,
+            "name": "filename",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized private bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/public/chat-shares/{shareId}": {
+      "get": {
+        "tags": [
+          "Public Chat shares"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+              "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+              "description": "Unguessable public Chat share capability."
+            },
+            "required": true,
+            "description": "Unguessable public Chat share capability.",
+            "name": "shareId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only public presentation transcript addressed by an unguessable share capability.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicChatShareEnvelopeV1"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/public/chat-shares/{shareId}/metadata": {
+      "get": {
+        "tags": [
+          "Public Chat shares"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+              "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+              "description": "Unguessable public Chat share capability."
+            },
+            "required": true,
+            "description": "Unguessable public Chat share capability.",
+            "name": "shareId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public metadata for share page and Open Graph presentation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicChatShareMetadataEnvelopeV1"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/public/chat-shares/{shareId}/attachments/{messageId}/{attachmentId}": {
+      "get": {
+        "tags": [
+          "Public Chat shares"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+              "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+              "description": "Unguessable public Chat share capability."
+            },
+            "required": true,
+            "description": "Unguessable public Chat share capability.",
+            "name": "shareId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "messageId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "attachmentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized private bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/public/chat-shares/{shareId}/artifacts/{artifactId}/versions/{versionId}": {
+      "get": {
+        "tags": [
+          "Public Chat shares"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu",
+              "example": "goat_chat_share_01234567-89ab-4cde-8f01-23456789abcd",
+              "description": "Unguessable public Chat share capability."
+            },
+            "required": true,
+            "description": "Unguessable public Chat share capability.",
+            "name": "shareId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "artifactId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "versionId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ]
+            },
+            "required": false,
+            "name": "download",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized private bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/engine-session/runtime": {
+      "get": {
+        "tags": [
+          "Engine sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Qualified runtime status for a coding-engine Conversation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineRuntimeStatusEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/engine-session/runtime-access": {
+      "post": {
+        "tags": [
+          "Engine sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Short-lived access to the Conversation's coding workspace runtime.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineRuntimeAccessEnvelope"
                 }
               }
             }
@@ -12700,6 +17195,7 @@
                 "chat-conversations-v1",
                 "chat-messages-v1",
                 "chat-runs-v1",
+                "engine-sessions-v1",
                 "tasks-v1",
                 "workflows-v1",
                 "workflow-schedules-v1",
@@ -13784,6 +18280,55 @@
         }
       }
     },
+    "/v1/actions/{actionId}/permissions/always-allow": {
+      "post": {
+        "tags": [
+          "Approvals"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "required": true,
+            "name": "actionId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persist the standing permission represented by an action approval. The action catalog is re-resolved for the authenticated actor and workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionPermissionEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/integration-accounts/{integrationId}": {
       "delete": {
         "tags": [
@@ -14278,6 +18823,333 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InfisicalAuthFlowEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized workspace billing overview.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingOverviewEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/usage": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized workspace usage read model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingUsageEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/balance": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized workspace credit balance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingBalanceEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/top-ups": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBillingTopUpBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Idempotent Stripe credit top-up Checkout session created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingRedirectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/subscription-checkouts": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Idempotent Stripe Pro subscription Checkout session created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingRedirectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/portal-sessions": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Idempotent Stripe billing portal session created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingRedirectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/auto-refill": {
+      "put": {
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBillingAutoRefillBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace auto-refill configuration updated idempotently.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingAutoRefillEnvelope"
                 }
               }
             }

@@ -3,7 +3,7 @@ import {
   type GoatBrainCaptureResult,
   type GoatBrainCaptureSource,
 } from "@opencompany/goat-agent/brain-capture";
-import { nextAvailableGoatBrainId } from "@/lib/brain";
+import { nextAvailableGoatBrainId } from "@opencompany/goat-agent/brain-files";
 
 export * from "@opencompany/goat-agent/brain-capture";
 

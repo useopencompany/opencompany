@@ -1,10 +1,22 @@
+import type { GoatBrainDocumentView } from "@opencompany/goat-agent/brain-files";
 import type {
   BrainDocumentDto,
   BrainDocumentReadModel,
   BrainFolderDto,
   BrainFolderReadModel,
+  BrainOverviewDto,
 } from "@opencompany/protocol";
-import type { GoatBrainDocumentView, GoatBrainFolderView } from "./brain";
+
+export type { GoatBrainDocumentView } from "@opencompany/goat-agent/brain-files";
+
+export type GoatBrainFolderView = BrainFolderDto & { name: string };
+
+export type GoatBrainSnapshot = {
+  folders: GoatBrainFolderView[];
+  documents: GoatBrainDocumentView[];
+};
+
+export type GoatBrainOverviewStats = BrainOverviewDto;
 
 export function brainDocumentToView(
   document: BrainDocumentDto | BrainDocumentReadModel,

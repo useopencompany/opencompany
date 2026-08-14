@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => {
     isLoading: true,
   };
   return {
+    getHeadlessChatConversations: vi.fn(() => ({})),
+    getHeadlessEngineSessions: vi.fn(() => ({})),
+    getHeadlessIntegrationAccounts: vi.fn(() => ({})),
     getHeadlessTaskSchedules: vi.fn(() => ({})),
     getHeadlessTasks: vi.fn(() => ({})),
     listLegacyTaskCompatibility: vi.fn(async () => []),
@@ -28,13 +31,13 @@ vi.mock("@tanstack/react-db", () => ({
   useLiveQuery: mocks.useLiveQuery,
 }));
 
-vi.mock("@/lib/task-collections", () => ({
-  createGoatCollections: () => ({
-    tasks: {},
-    chatSessions: {},
-    codexChatSessions: {},
-    integrations: {},
-  }),
+vi.mock("@/lib/headless-chat-collections", () => ({
+  getHeadlessChatConversations: mocks.getHeadlessChatConversations,
+  getHeadlessEngineSessions: mocks.getHeadlessEngineSessions,
+}));
+
+vi.mock("@/lib/headless-integration-collections", () => ({
+  getHeadlessIntegrationAccounts: mocks.getHeadlessIntegrationAccounts,
 }));
 
 vi.mock("@/lib/headless-automation-collections", () => ({
@@ -55,6 +58,7 @@ describe("GoatAppDataProvider", () => {
   beforeEach(() => {
     mocks.getHeadlessTasks.mockClear();
     mocks.getHeadlessTaskSchedules.mockClear();
+    mocks.getHeadlessIntegrationAccounts.mockClear();
     mocks.listLegacyTaskCompatibility.mockClear();
     mocks.useLiveQuery.mockClear();
   });
@@ -96,6 +100,7 @@ describe("GoatAppDataProvider", () => {
 
     expect(mocks.getHeadlessTasks).toHaveBeenCalledWith("workspace_1");
     expect(mocks.getHeadlessTaskSchedules).toHaveBeenCalledWith("workspace_1");
+    expect(mocks.getHeadlessIntegrationAccounts).toHaveBeenCalledWith("workspace_1");
     await waitFor(() => expect(mocks.listLegacyTaskCompatibility).toHaveBeenCalledTimes(1));
 
     rerender(
@@ -111,6 +116,7 @@ describe("GoatAppDataProvider", () => {
 
     expect(mocks.getHeadlessTasks).toHaveBeenCalledWith("workspace_2");
     expect(mocks.getHeadlessTaskSchedules).toHaveBeenCalledWith("workspace_2");
+    expect(mocks.getHeadlessIntegrationAccounts).toHaveBeenCalledWith("workspace_2");
     await waitFor(() => expect(mocks.listLegacyTaskCompatibility).toHaveBeenCalledTimes(2));
   });
 
@@ -140,32 +146,26 @@ describe("GoatAppDataProvider", () => {
     const now = new Date().toISOString();
     const chatRow = {
       id: "goat_chat_claude_1",
-      user_workos_id: "user_1",
       title: "Claude task",
       model: "anthropic/claude-sonnet-5",
       engine: "claude_code" as const,
-      closed_at: null,
-      pinned_at: null,
-      last_seen_at: now,
-      created_at: now,
-      updated_at: now,
+      archivedAt: null,
+      pinnedAt: null,
+      lastSeenAt: now,
+      createdAt: now,
+      updatedAt: now,
     };
     const runtimeRow = {
-      id: "goat_codex_chat_1",
-      user_workos_id: "user_1",
-      chat_session_id: "goat_chat_claude_1",
-      model: "claude-sonnet-5",
-      sandbox_id: "sbx_1",
-      codex_thread_id: null,
-      active_turn_id: null,
+      conversationId: "goat_chat_claude_1",
+      engine: "claude_code" as const,
+      activeRunId: null,
       status: "idle" as const,
       error: null,
-      created_at: now,
-      updated_at: now,
+      updatedAt: now,
     };
     // useLiveQuery is called once per collection per render, in a fixed order:
-    // tasks, schedules, chatSessions, codexChatSessions, integrations. Only the
-    // chat collections carry live data here; the rest stay loading so their memos
+    // tasks, schedules, conversations, engineSessions, integrations. Only the
+    // Chat collections carry live data here; the rest stay loading so their memos
     // fall back to (empty) initial data instead of dereferencing it.
     const perCollection = [
       { data: [], isLoading: true },
@@ -197,27 +197,22 @@ describe("GoatAppDataProvider", () => {
     const old = "2026-07-01T10:00:00.000Z";
     const chatRow = {
       id: "goat_chat_active_turn",
-      user_workos_id: "user_1",
       title: "Lagging runtime",
       model: "anthropic/claude-sonnet-5",
       engine: "opencompany" as const,
-      kind: "chat" as const,
-      closed_at: null,
-      pinned_at: null,
-      last_seen_at: "2026-07-01T09:59:00.000Z",
-      created_at: old,
-      updated_at: old,
+      archivedAt: null,
+      pinnedAt: null,
+      lastSeenAt: "2026-07-01T09:59:00.000Z",
+      createdAt: old,
+      updatedAt: old,
     };
     const runtimeRow = {
-      id: "goat_codex_chat_1",
-      user_workos_id: "user_1",
-      chat_session_id: "goat_chat_active_turn",
-      model: "gpt-5.5",
-      active_turn_id: "goat_codex_chat_turn_1",
+      conversationId: "goat_chat_active_turn",
+      engine: "opencompany" as const,
+      activeRunId: "goat_codex_chat_turn_1",
       status: "idle" as const,
       error: null,
-      created_at: now,
-      updated_at: now,
+      updatedAt: now,
     };
     const perCollection = [
       { data: [], isLoading: false },
@@ -246,16 +241,14 @@ describe("GoatAppDataProvider", () => {
     const now = new Date().toISOString();
     const chatRow = {
       id: "goat_chat_live",
-      user_workos_id: "user_1",
       title: "Live chat",
       model: "anthropic/claude-sonnet-5",
       engine: "opencompany" as const,
-      kind: "chat" as const,
-      closed_at: null,
-      pinned_at: null,
-      last_seen_at: now,
-      created_at: now,
-      updated_at: now,
+      archivedAt: null,
+      pinnedAt: null,
+      lastSeenAt: now,
+      createdAt: now,
+      updatedAt: now,
     };
     const perCollection = [
       { data: [], isLoading: false },
@@ -360,7 +353,6 @@ function initialData(): GoatAppInitialData {
     featureFlags: { taskSpawning: false, autoModelRouting: false, imessage: false, wiki: false },
     codexConnected: false,
     claudeCodeConnected: false,
-    chatResumeEnabled: false,
     mcpSetup: { preferredClient: null, completedAt: null },
   };
 }
