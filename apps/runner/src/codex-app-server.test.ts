@@ -459,6 +459,7 @@ describe("runCodexAppServerTurn", () => {
 
   it("resumes an existing thread id on follow-up turns", async () => {
     const sandbox = fakeSandbox();
+    const prepareBootstrapTurn = vi.fn(async () => ({ task: "durable history" }));
 
     const summary = await runCodexAppServerTurn({
       sandbox: sandbox as never,
@@ -466,6 +467,7 @@ describe("runCodexAppServerTurn", () => {
       codexHome,
       skillFingerprint: "skills_a",
       task: "continue",
+      prepareBootstrapTurn,
       model: "gpt-5.5",
       reasoningEffort: "medium",
       planModeReasoningEffort: null,
@@ -513,6 +515,7 @@ describe("runCodexAppServerTurn", () => {
     expect(sandbox.sentMessages().find((message) => message.method === "turn/start")).toMatchObject(
       {
         params: {
+          input: [{ type: "text", text: "continue", text_elements: [] }],
           collaborationMode: {
             mode: "default",
             settings: {
@@ -524,7 +527,62 @@ describe("runCodexAppServerTurn", () => {
         },
       },
     );
+    expect(prepareBootstrapTurn).not.toHaveBeenCalled();
     expect(summary.sessionId).toBe("thread_existing");
+  });
+
+  it("bootstraps durable history when a follow-up thread cannot be resumed", async () => {
+    const sandbox = fakeSandbox({ resumeError: true });
+    const persistedThreadIds: string[] = [];
+    const prepareBootstrapTurn = vi.fn(async () => ({
+      task: "durable conversation history\n\ncurrent user request",
+    }));
+
+    const summary = await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "current user request",
+      prepareBootstrapTurn,
+      model: "gpt-5.5",
+      reasoningEffort: "medium",
+      planModeReasoningEffort: null,
+      existingEngineSessionId: "thread_missing",
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async () => undefined,
+      onEngineSessionId: async (threadId) => {
+        persistedThreadIds.push(threadId);
+      },
+      onActivity: async () => undefined,
+    });
+
+    expect(sandbox.sentMethods()).toEqual([
+      "initialize",
+      "initialized",
+      "thread/resume",
+      "thread/start",
+      "turn/start",
+    ]);
+    expect(sandbox.sentMessages().find((message) => message.method === "turn/start")).toMatchObject(
+      {
+        params: {
+          input: [
+            {
+              type: "text",
+              text: "durable conversation history\n\ncurrent user request",
+              text_elements: [],
+            },
+          ],
+        },
+      },
+    );
+    expect(persistedThreadIds).toEqual(["thread_started"]);
+    expect(prepareBootstrapTurn).toHaveBeenCalledOnce();
+    expect(summary.sessionId).toBe("thread_started");
   });
 
   it("reattaches to the original active turn without starting a duplicate", async () => {
@@ -1030,6 +1088,7 @@ type FakeSandboxOptions = {
   completeGoalDelayMs?: number;
   requestDynamicTool?: boolean;
   requestUserInput?: boolean;
+  resumeError?: boolean;
   resumedTurn?: "active" | "completed";
 };
 
@@ -1146,6 +1205,15 @@ async function respondToProxyMessage(
     return;
   }
   if (message.method === "thread/resume") {
+    if (options.resumeError) {
+      await onStdout(
+        `${JSON.stringify({
+          id: message.id,
+          error: { code: -32600, message: "Thread not found" },
+        })}\n`,
+      );
+      return;
+    }
     const resumedTurn =
       options.resumedTurn === "active"
         ? { id: "turn_existing", status: "inProgress", items: [] }

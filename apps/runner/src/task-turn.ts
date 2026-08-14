@@ -803,7 +803,8 @@ export async function settleDurableTurn(input: {
           engine = COALESCE(${next?.engine ?? null}, runtime.engine),
           model = COALESCE(${next?.runtimeModel ?? null}, runtime.model),
           codex_thread_id = CASE
-            WHEN ${next?.engine ?? null}::text IS DISTINCT FROM runtime.engine
+            WHEN ${Boolean(next)}::boolean
+              AND ${next?.engine ?? null}::text IS DISTINCT FROM runtime.engine
               THEN NULL
             ELSE runtime.codex_thread_id
           END,

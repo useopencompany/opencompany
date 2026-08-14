@@ -68,6 +68,11 @@ export type CodexAppServerLocalImage = {
   detail?: "high" | "original";
 };
 
+export type CodexAppServerBootstrapTurn = {
+  task: string;
+  localImages?: CodexAppServerLocalImage[];
+};
+
 export type CodexAppServerSkill = {
   name: string;
   path: string;
@@ -186,6 +191,7 @@ export async function runCodexAppServerTurn(input: {
   codexHome: string;
   skillFingerprint: string;
   task: string;
+  prepareBootstrapTurn?: () => Promise<CodexAppServerBootstrapTurn>;
   skills?: CodexAppServerSkill[];
   localImages?: CodexAppServerLocalImage[];
   dynamicTools?: CodexAppServerDynamicTool[];
@@ -317,6 +323,7 @@ async function killSocketAppServerProcesses(sandbox: SandboxHandle, socketPath: 
 async function runTurnThroughProxy(input: {
   sandbox: SandboxHandle;
   task: string;
+  prepareBootstrapTurn?: () => Promise<CodexAppServerBootstrapTurn>;
   skills?: CodexAppServerSkill[];
   localImages?: CodexAppServerLocalImage[];
   dynamicTools?: CodexAppServerDynamicTool[];
@@ -404,7 +411,12 @@ async function runTurnThroughProxy(input: {
 
     const thread = await startOrResumeThread({
       client,
-      input: { ...input, dynamicTools },
+      input: {
+        ...input,
+        dynamicTools,
+        allowFreshThreadOnResumeFailure: !input.reattachExistingTurn,
+        ...(input.prepareBootstrapTurn ? { prepareBootstrapTurn: input.prepareBootstrapTurn } : {}),
+      },
     });
     threadId = thread.id;
     if (threadId !== input.existingEngineSessionId) {
@@ -450,17 +462,23 @@ async function runTurnThroughProxy(input: {
       const turn = await client.request("turn/start", {
         threadId,
         input: [
-          { type: "text", text: input.task, text_elements: [] },
+          {
+            type: "text",
+            text: thread.bootstrapTurn?.task ?? input.task,
+            text_elements: [],
+          },
           ...(input.skills ?? []).map((skill) => ({
             type: "skill",
             name: skill.name,
             path: skill.path,
           })),
-          ...(input.localImages ?? []).map((image) => ({
-            type: "localImage",
-            path: image.path,
-            ...(image.detail ? { detail: image.detail } : {}),
-          })),
+          ...(input.localImages ?? [])
+            .concat(thread.bootstrapTurn?.localImages ?? [])
+            .map((image) => ({
+              type: "localImage",
+              path: image.path,
+              ...(image.detail ? { detail: image.detail } : {}),
+            })),
         ],
         cwd: input.plan.codexWorkRoot,
         model: input.model,
@@ -543,24 +561,37 @@ async function startOrResumeThread(input: {
     reasoningEffort: CodexReasoningEffort;
     planModeReasoningEffort: CodexReasoningEffort | null;
     dynamicTools: CodexAppServerDynamicTool[];
+    allowFreshThreadOnResumeFailure: boolean;
+    prepareBootstrapTurn?: () => Promise<CodexAppServerBootstrapTurn>;
     plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
   };
 }) {
   if (input.input.existingEngineSessionId) {
-    const resumed = await input.client.request("thread/resume", {
-      threadId: input.input.existingEngineSessionId,
-      model: input.input.model,
-      cwd: input.input.plan.codexWorkRoot,
-      sandbox: "workspace-write",
-      approvalPolicy: "never",
-      config: reasoningConfig(input.input.reasoningEffort, input.input.planModeReasoningEffort),
-    });
-    return {
-      id: stringFromPath(resumed, ["thread", "id"]) ?? input.input.existingEngineSessionId,
-      value: isRecord(resumed) && isRecord(resumed.thread) ? resumed.thread : {},
-    };
+    try {
+      const resumed = await input.client.request("thread/resume", {
+        threadId: input.input.existingEngineSessionId,
+        model: input.input.model,
+        cwd: input.input.plan.codexWorkRoot,
+        sandbox: "workspace-write",
+        approvalPolicy: "never",
+        config: reasoningConfig(input.input.reasoningEffort, input.input.planModeReasoningEffort),
+      });
+      return {
+        id: stringFromPath(resumed, ["thread", "id"]) ?? input.input.existingEngineSessionId,
+        value: isRecord(resumed) && isRecord(resumed.thread) ? resumed.thread : {},
+        resumed: true,
+        bootstrapTurn: null,
+      };
+    } catch (error) {
+      if (!input.input.allowFreshThreadOnResumeFailure) throw error;
+      logger.warn("Codex thread resume failed; bootstrapping a fresh thread", {
+        event: "opencompany.codex_app_server_thread_resume_failed",
+        error_name: error instanceof Error ? error.name : typeof error,
+      });
+    }
   }
 
+  const bootstrapTurn = await input.input.prepareBootstrapTurn?.();
   const started = await input.client.request("thread/start", {
     model: input.input.model,
     cwd: input.input.plan.codexWorkRoot,
@@ -576,6 +607,8 @@ async function startOrResumeThread(input: {
   return {
     id: threadId,
     value: isRecord(started) && isRecord(started.thread) ? started.thread : {},
+    resumed: false,
+    bootstrapTurn: bootstrapTurn ?? null,
   };
 }
 
