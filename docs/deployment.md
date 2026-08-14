@@ -34,7 +34,8 @@ Manual dispatch can force surfaces and health checks. Do not bypass preflight or
 
 Run `bun run infisical:release:preflight` to validate the release group. The hosted workflow also
 checks Vercel project metadata and required host values that cannot be verified through a normal
-environment pull.
+environment pull. It creates `.vercel/project.json` from release credentials at runtime; the
+repository tracks only a placeholder example, never a live Vercel project or organization binding.
 
 ## Migrations
 

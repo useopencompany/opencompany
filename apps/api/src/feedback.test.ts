@@ -13,7 +13,7 @@ const actor: Actor = {
 
 function fakeDb(rows: { user?: unknown[]; workspace?: unknown[] } = {}) {
   const results = [
-    rows.user ?? [{ email: "ana@acme.com", firstName: "Ana", lastName: "Ng" }],
+    rows.user ?? [{ email: "ana@acme.example", firstName: "Ana", lastName: "Ng" }],
     rows.workspace ?? [{ id: "gws_1", name: "Acme" }],
   ];
   let call = 0;
@@ -102,7 +102,7 @@ describe("feedback service", () => {
     expect(input.title).toBe("[Bug] The board drops my column order.");
     expect(input.stateId).toBe("st_triage");
     expect(input.labelIds).toEqual(["lbl_source", "lbl_bug"]);
-    expect(input.description).toContain("Submitted by: Ana Ng <ana@acme.com>");
+    expect(input.description).toContain("Submitted by: Ana Ng <ana@acme.example>");
     expect(input.description).toContain("Workspace: Acme (gws_1)");
     expect(input.description).toContain("Type: bug");
   });

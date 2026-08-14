@@ -10,6 +10,11 @@ Authenticate the Infisical CLI, then run `bun run setup`. The setup script pulls
 branch-isolated Neon database. `bun run env:pull` refreshes shared values without replacing the
 branch database. `bun run setup -- --check` reports missing requirements without writing.
 
+`infisical init` writes the local, gitignored `.infisical.json` project binding. `vercel link`
+writes the local, gitignored `.vercel/project.json` binding when Vercel access is needed. Never
+commit either file; the tracked `*.example` files contain placeholders only. Conductor uses
+`.worktreeinclude` to copy existing root bindings into new local workspaces.
+
 ## Production
 
 Edit secrets in the runtime's Infisical path and verify the integration sync on the destination:

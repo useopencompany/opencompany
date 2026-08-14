@@ -214,7 +214,7 @@ export function AuthCard({
               id="email"
               type="email"
               autoComplete="email"
-              placeholder="you@company.com"
+              placeholder="you@company.example"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               disabled={isPending}
