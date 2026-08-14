@@ -61,7 +61,12 @@ export function captureMarketingEvent<EventName extends MarketingAnalyticsEventN
   if (!initialized) return;
 
   try {
-    posthog.capture(event, properties);
+    // Marketing CTAs navigate away immediately, so do not leave conversion events
+    // waiting in PostHog's request batch for the page-unload flush.
+    posthog.capture(event, properties, {
+      send_instantly: true,
+      transport: "sendBeacon",
+    });
   } catch (error) {
     debugWarn(`capture failed for ${event}`, error);
   }
