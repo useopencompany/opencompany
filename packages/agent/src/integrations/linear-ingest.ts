@@ -29,10 +29,10 @@ export type LinearIdentity = {
 
 const LINEAR_PROVIDER = "linear" as const;
 const LINEAR_INGEST_ENVS = [
-  "GOAT_LINEAR_CLIENT_ID",
-  "GOAT_LINEAR_CLIENT_SECRET",
-  "GOAT_LINEAR_WEBHOOK_SECRET",
-  "GOAT_LINEAR_STATE_SECRET",
+  "OPENCOMPANY_LINEAR_CLIENT_ID",
+  "OPENCOMPANY_LINEAR_CLIENT_SECRET",
+  "OPENCOMPANY_LINEAR_WEBHOOK_SECRET",
+  "OPENCOMPANY_LINEAR_STATE_SECRET",
 ] as const;
 
 // Read-only scope: the app reads issues, comments, and teams to route and
@@ -125,7 +125,7 @@ export function verifyLinearIngestState(state: string): LinearIngestStatePayload
 
 export function buildLinearAuthorizationUrl(state: string) {
   const url = new URL("https://linear.app/oauth/authorize");
-  url.searchParams.set("client_id", requiredEnv("GOAT_LINEAR_CLIENT_ID"));
+  url.searchParams.set("client_id", requiredEnv("OPENCOMPANY_LINEAR_CLIENT_ID"));
   url.searchParams.set("redirect_uri", linearIngestCallbackUrl());
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", LINEAR_INGEST_SCOPES.join(","));
@@ -143,8 +143,8 @@ export async function exchangeLinearCode(code: string): Promise<LinearOAuthResul
       grant_type: "authorization_code",
       code,
       redirect_uri: linearIngestCallbackUrl(),
-      client_id: requiredEnv("GOAT_LINEAR_CLIENT_ID"),
-      client_secret: requiredEnv("GOAT_LINEAR_CLIENT_SECRET"),
+      client_id: requiredEnv("OPENCOMPANY_LINEAR_CLIENT_ID"),
+      client_secret: requiredEnv("OPENCOMPANY_LINEAR_CLIENT_SECRET"),
     }).toString(),
   });
   if (!response.ok) {
@@ -255,7 +255,7 @@ function sanitizeReturnTo(value: string) {
 }
 
 function signStateBody(body: string) {
-  return createHmac("sha256", requiredEnv("GOAT_LINEAR_STATE_SECRET"))
+  return createHmac("sha256", requiredEnv("OPENCOMPANY_LINEAR_STATE_SECRET"))
     .update(body)
     .digest("base64url");
 }

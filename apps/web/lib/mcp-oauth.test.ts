@@ -18,11 +18,11 @@ describe("resolveAuthKitDomain", () => {
   it("rejects missing and non-origin values", () => {
     expect(resolveAuthKitDomain("")).toEqual({
       ok: false,
-      error: "GOAT_AUTHKIT_DOMAIN is not configured.",
+      error: "OPENCOMPANY_AUTHKIT_DOMAIN is not configured.",
     });
     expect(resolveAuthKitDomain("https://example.authkit.app/oauth2")).toEqual({
       ok: false,
-      error: "GOAT_AUTHKIT_DOMAIN must be a URL origin.",
+      error: "OPENCOMPANY_AUTHKIT_DOMAIN must be a URL origin.",
     });
   });
 });

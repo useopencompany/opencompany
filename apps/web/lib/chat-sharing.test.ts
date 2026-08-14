@@ -7,7 +7,7 @@ const meta = { apiVersion: "v1" as const, protocolVersion: PROTOCOL_VERSION };
 
 describe("public Chat share API adapter", () => {
   beforeEach(() => {
-    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
   });
 
   afterEach(() => {

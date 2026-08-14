@@ -52,7 +52,7 @@ function validShareId(value: string) {
 }
 
 function publicApiClient() {
-  return createApiClient(publicApiOrigin(process.env.GOAT_API_ORIGIN), {
+  return createApiClient(publicApiOrigin(process.env.OPENCOMPANY_API_ORIGIN), {
     fetch: (request: RequestInfo | URL, init?: RequestInit) =>
       globalThis.fetch(request, { ...init, cache: "no-store" }),
   });

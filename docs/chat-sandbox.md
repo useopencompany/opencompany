@@ -12,7 +12,7 @@ not enter the browser protocol.
 
 ## Runtime configuration
 
-`GOAT_CHAT_SANDBOX_IMAGE` optionally selects a prebuilt image in the runner environment. When it is
+`OPENCOMPANY_CHAT_SANDBOX_IMAGE` optionally selects a prebuilt image in the runner environment. When it is
 absent, the shared sandbox provisioner starts a stock Node 24 image and installs the pinned
 `agent-browser` package and Chromium on first use. The fallback is appropriate for local checks but
 has a slower first browser operation.
@@ -31,8 +31,8 @@ export VERCEL_PROJECT_SLUG=your-web-project
 apps/web/sandbox-image/build-push.sh
 ```
 
-Set `GOAT_CHAT_SANDBOX_IMAGE_REF` instead when supplying the complete registry image reference. Once
-the image is ready, set its reference as `GOAT_CHAT_SANDBOX_IMAGE` in the runner environment and
+Set `OPENCOMPANY_CHAT_SANDBOX_IMAGE_REF` instead when supplying the complete registry image reference. Once
+the image is ready, set its reference as `OPENCOMPANY_CHAT_SANDBOX_IMAGE` in the runner environment and
 redeploy the runner.
 
 ## Smoke test

@@ -25,7 +25,7 @@ bun run setup
 bun run dev:web
 ```
 
-Setup copies `.env.example` to `.env.local` when needed, pulls Infisical `dev` values from `/goat`
+Setup copies `.env.example` to `.env.local` when needed, pulls Infisical `dev` values from `/web`
 and `/runner`, creates or reuses a Neon child branch named for the current Git branch, runs the
 checked-in migrations, starts local Electric, and mirrors the required values to
 `apps/web/.env.local`. It is safe to rerun.

@@ -93,7 +93,7 @@ function mintState(provider: McpOAuthProvider, overrides: Record<string, unknown
 describe("remote MCP OAuth ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
     vi.stubEnv("MCP_OAUTH_STATE_SECRET", STATE_SECRET);
   });
 

@@ -147,7 +147,7 @@ async function handleWebhook(input: IngressInput, request: Request): Promise<Res
     rawBody,
     timestamp: request.headers.get("x-slack-request-timestamp"),
     signature: request.headers.get("x-slack-signature"),
-    secret: process.env.GOAT_SLACK_BOT_SIGNING_SECRET,
+    secret: process.env.OPENCOMPANY_SLACK_BOT_SIGNING_SECRET,
   });
   if (!verified) {
     return Response.json({ error: "Invalid Slack signature." }, { status: 401 });

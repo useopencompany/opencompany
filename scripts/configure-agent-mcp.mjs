@@ -9,14 +9,18 @@ const claudeMcpPath = join(repoRoot, ".mcp.json");
 const codexConfigPath = join(repoRoot, ".codex", "config.toml");
 const codexMarkerStart = "# BEGIN opencompany generated SigNoz MCP";
 const codexMarkerEnd = "# END opencompany generated SigNoz MCP";
-const mcpEnvKeys = ["SIGNOZ_MCP_URL", "SIGNOZ_MCP_REGION", "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT"];
+const mcpEnvKeys = [
+  "SIGNOZ_MCP_URL",
+  "SIGNOZ_MCP_REGION",
+  "OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT",
+];
 const defaultSignozMcpRegion = "eu2";
 
 const mcpUrl = resolveSignozMcpUrl(withConductorRootEnvFallback(process.env));
 
 if (!mcpUrl) {
   console.log(
-    "[agent-mcp] SigNoz MCP not configured. Set SIGNOZ_MCP_REGION, SIGNOZ_MCP_URL, or GOAT_OTEL_EXPORTER_OTLP_ENDPOINT.",
+    "[agent-mcp] SigNoz MCP not configured. Set SIGNOZ_MCP_REGION, SIGNOZ_MCP_URL, or OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT.",
   );
   process.exit(0);
 }
@@ -35,7 +39,7 @@ function resolveSignozMcpUrl(env) {
   const explicitRegion = normalize(env.SIGNOZ_MCP_REGION);
   if (explicitRegion) return mcpUrlFromRegion(explicitRegion);
 
-  const inferredRegion = inferRegionFromOtlpEndpoint(env.GOAT_OTEL_EXPORTER_OTLP_ENDPOINT);
+  const inferredRegion = inferRegionFromOtlpEndpoint(env.OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT);
   if (inferredRegion) return mcpUrlFromRegion(inferredRegion);
 
   return mcpUrlFromRegion(defaultSignozMcpRegion);

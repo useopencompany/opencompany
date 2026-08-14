@@ -35,7 +35,7 @@ external provider or fixture was unavailable.
 - Never rewrite migration history or run production migrations from a development task.
 - New env vars must be added to `.env.example`, the appropriate Infisical path, release preflight,
   and operational documentation.
-- Web production secrets live in the retained `prod` `/goat` deployment namespace; API secrets
+- Web production secrets live in the `prod` `/web` deployment namespace; API secrets
   live in `prod` `/api`; runner secrets live in `prod` `/runner`; release credentials live in
   `prod` `/release`.
 

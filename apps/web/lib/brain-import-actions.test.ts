@@ -7,7 +7,7 @@ vi.mock("next/headers", () => ({ headers: vi.fn() }));
 describe("Brain import API actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
     vi.mocked(headers).mockResolvedValue(
       new Headers({
         Cookie: "wos-session=sealed",

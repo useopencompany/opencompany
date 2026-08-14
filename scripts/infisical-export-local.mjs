@@ -10,26 +10,26 @@ const env = readFlag("--env") ?? "dev";
 const outputFile = readFlag("--output-file") ?? ".env.local";
 const paths = readListFlag("--path");
 if (paths.length === 0) {
-  paths.push("/goat", "/runner");
+  paths.push("/web", "/runner");
 }
 
 const preserveLocalKeys = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
-  "GOAT_PORT",
-  "GOAT_HTTPS_PORT",
-  "GOAT_NEXT_PUBLIC_APP_URL",
-  "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+  "OPENCOMPANY_PORT",
+  "OPENCOMPANY_HTTPS_PORT",
+  "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
+  "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
 ]);
 const LOCAL_WEB_HTTPS_PORT = "3443";
 const LOCAL_WEB_APP_URL = `https://localhost:${LOCAL_WEB_HTTPS_PORT}`;
 const localDefaultLines = [
   'OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS="developer@example.com"',
-  'GOAT_PORT="3002"',
-  `GOAT_HTTPS_PORT="${LOCAL_WEB_HTTPS_PORT}"`,
-  `GOAT_NEXT_PUBLIC_APP_URL=${JSON.stringify(LOCAL_WEB_APP_URL)}`,
-  `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=${JSON.stringify(`${LOCAL_WEB_APP_URL}/auth/callback`)}`,
+  'OPENCOMPANY_PORT="3002"',
+  `OPENCOMPANY_HTTPS_PORT="${LOCAL_WEB_HTTPS_PORT}"`,
+  `OPENCOMPANY_NEXT_PUBLIC_APP_URL=${JSON.stringify(LOCAL_WEB_APP_URL)}`,
+  `OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI=${JSON.stringify(`${LOCAL_WEB_APP_URL}/auth/callback`)}`,
 ];
 const chunks = [];
 for (const path of paths) {

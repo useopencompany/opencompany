@@ -244,8 +244,8 @@ jobs:
               description: `Production release ${shortSha} is in progress.`,
             };
 
-            if (process.env.PRODUCTION_GOAT_URL) {
-              status.environment_url = process.env.PRODUCTION_GOAT_URL;
+            if (process.env.PRODUCTION_OPENCOMPANY_URL) {
+              status.environment_url = process.env.PRODUCTION_OPENCOMPANY_URL;
             }
 
             await github.rest.repos.createDeploymentStatus(status);
@@ -292,15 +292,15 @@ jobs:
       - name: Map web production app env
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
         run: |
-          web_url="${PRODUCTION_GOAT_URL%/}"
+          web_url="${PRODUCTION_OPENCOMPANY_URL%/}"
           if [ -z "$web_url" ]; then
-            echo "PRODUCTION_GOAT_URL is required to deploy the web app."
+            echo "PRODUCTION_OPENCOMPANY_URL is required to deploy the web app."
             exit 1
           fi
 
           {
-            echo "GOAT_NEXT_PUBLIC_APP_URL=$web_url"
-            echo "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$web_url/auth/callback"
+            echo "OPENCOMPANY_NEXT_PUBLIC_APP_URL=$web_url"
+            echo "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$web_url/auth/callback"
           } >> "$GITHUB_ENV"
 
       - name: Check Vercel web project config
@@ -312,12 +312,12 @@ jobs:
           const { mkdirSync, writeFileSync } = require("node:fs");
 
           async function main() {
-            const projectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const projectId = process.env.OPENCOMPANY_VERCEL_PROJECT_ID;
             const teamId = process.env.VERCEL_ORG_ID;
             const token = process.env.VERCEL_TOKEN;
 
             if (!projectId || !teamId || !token) {
-              throw new Error("GOAT_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
+              throw new Error("OPENCOMPANY_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
             }
 
             const response = await fetch(
@@ -332,7 +332,7 @@ jobs:
             const project = await response.json();
 
             if (project.id !== projectId) {
-              throw new Error("Fetched Vercel project id does not match GOAT_VERCEL_PROJECT_ID.");
+              throw new Error("Fetched Vercel project id does not match OPENCOMPANY_VERCEL_PROJECT_ID.");
             }
 
             if (project.rootDirectory !== "apps/web") {
@@ -389,14 +389,14 @@ jobs:
             "WORKOS_API_KEY",
             "WORKOS_COOKIE_PASSWORD",
             "WORKOS_COOKIE_DOMAIN",
-            "GOAT_NEXT_PUBLIC_APP_URL",
-            "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
-            "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-            "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+            "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
+            "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+            "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
+            "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
-            "GOAT_API_ORIGIN",
-            "NEXT_PUBLIC_GOAT_API_ORIGIN",
+            "OPENCOMPANY_API_ORIGIN",
+            "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN",
             "CRON_SECRET",
             "BLOB_READ_WRITE_TOKEN",
           ];
@@ -446,12 +446,12 @@ jobs:
           }
 
           async function main() {
-            const webProjectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const webProjectId = process.env.OPENCOMPANY_VERCEL_PROJECT_ID;
             const teamId = process.env.VERCEL_ORG_ID;
             const token = process.env.VERCEL_TOKEN;
 
             if (!webProjectId || !teamId || !token) {
-              throw new Error("GOAT_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
+              throw new Error("OPENCOMPANY_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
             }
 
             const webEnv = await listProductionEnv(webProjectId, "web", teamId, token);
@@ -464,13 +464,13 @@ jobs:
               throw new Error(`Missing web Vercel production env keys: ${missing.join(", ")}`);
             }
 
-            const expectedWebOrigin = new URL(process.env.PRODUCTION_GOAT_URL).origin;
+            const expectedWebOrigin = new URL(process.env.PRODUCTION_OPENCOMPANY_URL).origin;
             const expectedApiOrigin = new URL(process.env.PRODUCTION_API_URL).origin;
             const expectedValues = new Map([
-              ["GOAT_NEXT_PUBLIC_APP_URL", expectedWebOrigin],
-              ["GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedWebOrigin}/auth/callback`],
-              ["GOAT_API_ORIGIN", expectedApiOrigin],
-              ["NEXT_PUBLIC_GOAT_API_ORIGIN", expectedApiOrigin],
+              ["OPENCOMPANY_NEXT_PUBLIC_APP_URL", expectedWebOrigin],
+              ["OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedWebOrigin}/auth/callback`],
+              ["OPENCOMPANY_API_ORIGIN", expectedApiOrigin],
+              ["NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN", expectedApiOrigin],
               ["WORKOS_COOKIE_DOMAIN", "opencompany.chat"],
             ]);
             const configuredWebUrls = await Promise.all(
@@ -498,7 +498,7 @@ jobs:
 
       - name: Pull Vercel web production env
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: VERCEL_PROJECT_ID="$GOAT_VERCEL_PROJECT_ID" bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+        run: VERCEL_PROJECT_ID="$OPENCOMPANY_VERCEL_PROJECT_ID" bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
 
       - name: Build web
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
@@ -510,12 +510,12 @@ jobs:
           # and local builds pass with larger effective limits. The runner has
           # 16GB, so give the build real headroom.
           NODE_OPTIONS: --max-old-space-size=6144
-        run: VERCEL_PROJECT_ID="$GOAT_VERCEL_PROJECT_ID" bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID"
+        run: VERCEL_PROJECT_ID="$OPENCOMPANY_VERCEL_PROJECT_ID" bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$OPENCOMPANY_VERCEL_PROJECT_ID"
 
       - name: Deploy web
         id: deploy-web
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: node scripts/release-vercel-deploy.mjs --label web --project-env GOAT_VERCEL_PROJECT_ID
+        run: node scripts/release-vercel-deploy.mjs --label web --project-env OPENCOMPANY_VERCEL_PROJECT_ID
 
       - name: Check Vercel marketing project config
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
@@ -527,7 +527,7 @@ jobs:
 
           async function main() {
             const projectId = process.env.MARKETING_VERCEL_PROJECT_ID;
-            const webProjectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const webProjectId = process.env.OPENCOMPANY_VERCEL_PROJECT_ID;
             const teamId = process.env.VERCEL_ORG_ID;
             const token = process.env.VERCEL_TOKEN;
 
@@ -579,8 +579,8 @@ jobs:
                 .map((env) => env.key),
             );
             const requiredAnalyticsKeys = [
-              "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-              "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+              "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
+              "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
             ];
             const missingAnalyticsKeys = requiredAnalyticsKeys.filter(
               (key) => !productionKeys.has(key),
@@ -671,13 +671,13 @@ jobs:
       - name: Smoke check release
         if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
         env:
-          EXPECTED_GOAT_RELEASE: ${{ steps.release-scope.outputs.web == 'true' && env.RELEASE_SHA || '' }}
+          EXPECTED_WEB_RELEASE: ${{ steps.release-scope.outputs.web == 'true' && env.RELEASE_SHA || '' }}
           EXPECTED_API_RELEASE: ${{ steps.release-scope.outputs.api == 'true' && env.RELEASE_SHA || '' }}
           EXPECTED_RUNNER_RELEASE: ${{ steps.release-scope.outputs.runner == 'true' && env.RELEASE_SHA || '' }}
-          SMOKE_GOAT: "true"
+          SMOKE_WEB: "true"
           SMOKE_API: "true"
           SMOKE_RUNNER: "true"
-          SMOKE_GOAT_ATTEMPTS: "12"
+          SMOKE_WEB_ATTEMPTS: "12"
           SMOKE_API_ATTEMPTS: "12"
           SMOKE_RUNNER_ATTEMPTS: "12"
           SMOKE_DELAY_MS: "10000"
@@ -721,8 +721,8 @@ jobs:
               description,
             };
 
-            if (process.env.PRODUCTION_GOAT_URL) {
-              status.environment_url = process.env.PRODUCTION_GOAT_URL;
+            if (process.env.PRODUCTION_OPENCOMPANY_URL) {
+              status.environment_url = process.env.PRODUCTION_OPENCOMPANY_URL;
             }
 
             await github.rest.repos.createDeploymentStatus(status);

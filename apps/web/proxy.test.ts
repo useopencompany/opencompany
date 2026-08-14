@@ -8,7 +8,7 @@ afterEach(() => {
 
 describe("localHttpsRedirectUrl", () => {
   it("redirects local HTTP document requests to the configured opencompany HTTPS origin", () => {
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://localhost:3443");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://localhost:3443");
 
     const redirect = localHttpsRedirectUrl(
       request("http://localhost:3002/tasks/TASK-1?tab=run", {
@@ -21,7 +21,7 @@ describe("localHttpsRedirectUrl", () => {
   });
 
   it("does not redirect when the request already targets the configured HTTPS host", () => {
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://localhost:3443");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://localhost:3443");
 
     const redirect = localHttpsRedirectUrl(
       request("http://localhost:3002/tasks/TASK-1", {
@@ -34,7 +34,7 @@ describe("localHttpsRedirectUrl", () => {
   });
 
   it("does not redirect API, RSC, or prefetch requests", () => {
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://localhost:3443");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://localhost:3443");
 
     expect(
       localHttpsRedirectUrl(
@@ -65,7 +65,7 @@ describe("localHttpsRedirectUrl", () => {
   });
 
   it("does not redirect non-local configured app origins", () => {
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
 
     const redirect = localHttpsRedirectUrl(
       request("http://localhost:3002/tasks/TASK-1", {

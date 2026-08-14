@@ -1,4 +1,3 @@
-import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -19,11 +18,24 @@ import {
   ELECTRIC_IMAGE,
   ELECTRIC_LOCAL_URL,
 } from "./lib/electric-dev.mjs";
+import { environmentFileMigrationPlan, migrateEnvironmentFile } from "./lib/env-name-migration.mjs";
 
 const CHECK_MODE = argv.includes("--check");
 const PULL_ENV_MODE = argv.includes("--pull-env");
 const START_DEV_MODE = argv.includes("--dev");
 const STRIPE_MODE = argv.includes("--stripe");
+const LOCAL_ENV_PATHS = [".env.local", ".env.override.local", "apps/web/.env.local"];
+let initialEnvironmentMoves;
+try {
+  initialEnvironmentMoves = CHECK_MODE
+    ? planLocalEnvironmentMigrations()
+    : migrateLocalEnvironmentFiles();
+} catch (error) {
+  console.error(`\n\x1b[31m✗ Setup failed:\x1b[0m ${error.message}\n`);
+  exit(1);
+}
+await import("./load-env.mjs");
+
 const SHARED_DATABASE_MODE =
   argv.includes("--shared-db") || process.env.OPENCOMPANY_SHARED_DATABASE === "1";
 const PERSONAL_ENV_PATH = ".env.override.local";
@@ -32,9 +44,9 @@ const MIN_NODE = [20, 20, 0];
 const WORKOS_ENV_KEYS = ["WORKOS_CLIENT_ID", "WORKOS_API_KEY", "WORKOS_COOKIE_PASSWORD"];
 const LINEAR_ENV_KEYS = [
   "LINEAR_API_KEY",
-  "GOAT_FEEDBACK_LINEAR_TEAM_ID",
-  "GOAT_FEEDBACK_LINEAR_PROJECT_ID",
-  "GOAT_FEEDBACK_LINEAR_LABELS",
+  "OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID",
+  "OPENCOMPANY_FEEDBACK_LINEAR_PROJECT_ID",
+  "OPENCOMPANY_FEEDBACK_LINEAR_LABELS",
 ];
 const GITHUB_WORK_INTEGRATION_ENV_KEYS = [
   "GITHUB_INTEGRATION_APP_ID",
@@ -50,7 +62,11 @@ const GOOGLE_INTEGRATION_ENV_KEYS = [
   "GOOGLE_OAUTH_CLIENT_SECRET",
   "GOOGLE_INTEGRATION_STATE_SECRET",
 ];
-const X_INTEGRATION_ENV_KEYS = ["GOAT_X_CLIENT_ID", "GOAT_X_CLIENT_SECRET", "GOAT_X_STATE_SECRET"];
+const X_INTEGRATION_ENV_KEYS = [
+  "OPENCOMPANY_X_CLIENT_ID",
+  "OPENCOMPANY_X_CLIENT_SECRET",
+  "OPENCOMPANY_X_STATE_SECRET",
+];
 const RUNNER_ENV_KEYS = [
   "RUNNER_PUBLIC_URL",
   "RUNNER_INTERNAL_URL",
@@ -61,43 +77,43 @@ const RUNNER_ENV_KEYS = [
   "RUNNER_DB_POOL_MAX",
   "RUNNER_WORKER_CONCURRENCY",
   "RUNNER_JOB_LEASE_TTL_MS",
-  "RUNNER_GOAT_TASK_WORKER_ENABLED",
-  "RUNNER_GOAT_BROWSER_ENABLED",
+  "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
+  "RUNNER_OPENCOMPANY_BROWSER_ENABLED",
   "E2B_API_KEY",
   "VERCEL_AI_GATEWAY_API_KEY",
   "EXA_API_KEY",
   "APIFY_API_TOKEN",
   "BLOB_READ_WRITE_TOKEN",
   "MONID_API_KEY",
-  "GOAT_HUBSPOT_CLIENT_ID",
-  "GOAT_HUBSPOT_CLIENT_SECRET",
+  "OPENCOMPANY_HUBSPOT_CLIENT_ID",
+  "OPENCOMPANY_HUBSPOT_CLIENT_SECRET",
   "LINQ_API_TOKEN",
   "LINQ_FROM_NUMBER",
   "LINQ_API_BASE_URL",
-  "GOAT_IMESSAGE_PROVIDER",
-  "GOAT_IMESSAGE_KILL_SWITCH",
-  "GOAT_IMESSAGE_DAILY_CAP",
+  "OPENCOMPANY_IMESSAGE_PROVIDER",
+  "OPENCOMPANY_IMESSAGE_KILL_SWITCH",
+  "OPENCOMPANY_IMESSAGE_DAILY_CAP",
   "OPENAI_API_KEY",
   "OPENAI_CODEX_API_KEY",
   "OPENCOMPANY_CODEX_E2B_TEMPLATE",
   "RUNNER_CODEX_MODEL",
   "RUNNER_CODEX_TIMEOUT_MS",
   "RUNNER_CODEX_API_KEY_FALLBACK_ENABLED",
-  "RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS",
-  "RUNNER_GOAT_CODEX_CHAT_LEASE_TTL_MS",
-  "GOAT_DICTATION_REALTIME_MODEL",
-  "GOAT_DICTATION_FINAL_MODEL",
-  "GOAT_BRAIN_GATEWAY_BASE_URL",
-  "GOAT_BRAIN_EMBEDDING_MODEL",
-  "GOAT_BRAIN_VECTOR_MAX_DISTANCE",
-  "GOAT_CHAT_ACTIONS_KILL_SWITCH",
-  "GOAT_CHAT_SANDBOX_IMAGE",
-  "GOAT_MANAGED_CAPABILITIES_KILL_SWITCH",
-  "GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS",
-  "GOAT_REVOLUT_BUSINESS_WORKSPACE_ID",
-  "GOAT_REVOLUT_BUSINESS_API_TOKEN",
-  "GOAT_REVOLUT_BUSINESS_ACCOUNT_LABEL",
-  "GOAT_REVOLUT_BUSINESS_API_BASE_URL",
+  "RUNNER_OPENCOMPANY_CODEX_CHAT_IDLE_TIMEOUT_MS",
+  "RUNNER_OPENCOMPANY_CODEX_CHAT_LEASE_TTL_MS",
+  "OPENCOMPANY_DICTATION_REALTIME_MODEL",
+  "OPENCOMPANY_DICTATION_FINAL_MODEL",
+  "OPENCOMPANY_BRAIN_GATEWAY_BASE_URL",
+  "OPENCOMPANY_BRAIN_EMBEDDING_MODEL",
+  "OPENCOMPANY_BRAIN_VECTOR_MAX_DISTANCE",
+  "OPENCOMPANY_CHAT_ACTIONS_KILL_SWITCH",
+  "OPENCOMPANY_CHAT_SANDBOX_IMAGE",
+  "OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH",
+  "OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS",
+  "OPENCOMPANY_REVOLUT_BUSINESS_WORKSPACE_ID",
+  "OPENCOMPANY_REVOLUT_BUSINESS_API_TOKEN",
+  "OPENCOMPANY_REVOLUT_BUSINESS_ACCOUNT_LABEL",
+  "OPENCOMPANY_REVOLUT_BUSINESS_API_BASE_URL",
   "RUNNER_INSTANCE_ID",
 ];
 const LOCAL_RUNNER_REQUIRED_ENV_KEYS = [
@@ -109,21 +125,21 @@ const LOCAL_RUNNER_REQUIRED_ENV_KEYS = [
   "VERCEL_AI_GATEWAY_API_KEY",
 ];
 const STRIPE_OPTIONAL_ENV_KEYS = [
-  "GOAT_STRIPE_API_KEY",
-  "GOAT_STRIPE_WEBHOOK_SECRET",
-  "GOAT_STRIPE_CHECKOUT_ENABLED",
+  "OPENCOMPANY_STRIPE_API_KEY",
+  "OPENCOMPANY_STRIPE_WEBHOOK_SECRET",
+  "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
   "STRIPE_LISTEN_DISABLED",
   "STRIPE_LISTEN_EVENTS",
   "STRIPE_CLI_PROJECT_NAME",
 ];
 const BILLING_LOCAL_ENV_KEYS = [
-  "GOAT_STRIPE_API_KEY",
-  "GOAT_STRIPE_WEBHOOK_SECRET",
-  "GOAT_STRIPE_CHECKOUT_ENABLED",
+  "OPENCOMPANY_STRIPE_API_KEY",
+  "OPENCOMPANY_STRIPE_WEBHOOK_SECRET",
+  "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
 ];
-const OBSERVABILITY_ENV_KEYS = [
+const RUNTIME_OBSERVABILITY_ENV_KEYS = [
   "BETTER_STACK_ERRORS_DSN",
   "OBSERVABILITY_ENABLED",
   "OBSERVABILITY_ENV",
@@ -140,10 +156,10 @@ const OBSERVABILITY_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
 ];
-const OBSERVABILITY_ENV_KEYS = [
-  "GOAT_OBSERVABILITY_ENABLED",
-  "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
-  "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+const AGENT_TELEMETRY_ENV_KEYS = [
+  "OPENCOMPANY_OBSERVABILITY_ENABLED",
+  "OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT",
+  "OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS",
   "LATITUDE_API_KEY",
   "LATITUDE_PROJECT_SLUG",
   "LATITUDE_SERVICE_NAME",
@@ -159,11 +175,11 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "WORKOS_REDIRECT_URI",
   "NEXT_PUBLIC_POSTHOG_TOKEN",
   "NEXT_PUBLIC_POSTHOG_HOST",
-  "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-  "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+  "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
+  "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
   "NEXT_PUBLIC_ANALYTICS_DEBUG",
-  "GOAT_API_ORIGIN",
-  "NEXT_PUBLIC_GOAT_API_ORIGIN",
+  "OPENCOMPANY_API_ORIGIN",
+  "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN",
   "OPENCOMPANY_NGROK_REQUIRED",
   "OPENCOMPANY_NGROK_URL",
   "NGROK_AUTHTOKEN",
@@ -171,8 +187,8 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   ...X_INTEGRATION_ENV_KEYS,
   ...LINEAR_ENV_KEYS,
   ...RUNNER_ENV_KEYS,
-  ...OBSERVABILITY_ENV_KEYS,
-  ...OBSERVABILITY_ENV_KEYS,
+  ...RUNTIME_OBSERVABILITY_ENV_KEYS,
+  ...AGENT_TELEMETRY_ENV_KEYS,
   ...AGENT_MCP_ENV_KEYS,
 ];
 const SHARED_DEV_ENV_KEYS = [
@@ -183,7 +199,7 @@ const SHARED_DEV_ENV_KEYS = [
 ];
 const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const INFISICAL_DEV_ENV = "dev";
-const INFISICAL_DEV_PATHS = ["/goat", "/runner"];
+const INFISICAL_DEV_PATHS = ["/web", "/runner"];
 const HTTP_LOCAL_WEB_APP_URL = "http://localhost:3002";
 const LOCAL_WEB_APP_URL = webHttpsOrigin(process.env);
 const LOCAL_WEB_WORKOS_REDIRECT_URI = `${LOCAL_WEB_APP_URL}/auth/callback`;
@@ -192,21 +208,21 @@ const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
-  "GOAT_PORT",
-  "GOAT_HTTPS_PORT",
-  "GOAT_NEXT_PUBLIC_APP_URL",
-  "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+  "OPENCOMPANY_PORT",
+  "OPENCOMPANY_HTTPS_PORT",
+  "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
+  "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
 ]);
 const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "developer@example.com",
-  GOAT_PORT: "3002",
-  GOAT_HTTPS_PORT: webHttpsPort(process.env),
-  GOAT_NEXT_PUBLIC_APP_URL: LOCAL_WEB_APP_URL,
-  GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_WEB_WORKOS_REDIRECT_URI,
+  OPENCOMPANY_PORT: "3002",
+  OPENCOMPANY_HTTPS_PORT: webHttpsPort(process.env),
+  OPENCOMPANY_NEXT_PUBLIC_APP_URL: LOCAL_WEB_APP_URL,
+  OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_WEB_WORKOS_REDIRECT_URI,
 };
 const WEB_LOCAL_ENV_KEYS = [
-  "GOAT_PORT",
-  "GOAT_HTTPS_PORT",
+  "OPENCOMPANY_PORT",
+  "OPENCOMPANY_HTTPS_PORT",
   "DATABASE_URL",
   "WORKOS_CLIENT_ID",
   "WORKOS_API_KEY",
@@ -214,8 +230,8 @@ const WEB_LOCAL_ENV_KEYS = [
   "RUNNER_PUBLIC_URL",
   "RUNNER_INTERNAL_URL",
   "RUNNER_INTERNAL_TOKEN",
-  "GOAT_API_ORIGIN",
-  "NEXT_PUBLIC_GOAT_API_ORIGIN",
+  "OPENCOMPANY_API_ORIGIN",
+  "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN",
   "CRON_SECRET",
   "BLOB_READ_WRITE_TOKEN",
   "WORKOS_COOKIE_NAME",
@@ -234,9 +250,10 @@ const WEB_LOCAL_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
   "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
-  "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-  "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
-  ...OBSERVABILITY_ENV_KEYS,
+  "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
+  "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
+  ...RUNTIME_OBSERVABILITY_ENV_KEYS,
+  ...AGENT_TELEMETRY_ENV_KEYS,
 ];
 
 function assertNodeVersion() {
@@ -353,6 +370,18 @@ function writeEnvValues(path, values) {
   );
 }
 
+function planLocalEnvironmentMigrations() {
+  return LOCAL_ENV_PATHS.flatMap((path) =>
+    environmentFileMigrationPlan(path).map((move) => ({ path, ...move })),
+  );
+}
+
+function migrateLocalEnvironmentFiles() {
+  return LOCAL_ENV_PATHS.flatMap((path) =>
+    migrateEnvironmentFile(path).map((move) => ({ path, ...move })),
+  );
+}
+
 function isPlaceholder(value) {
   if (!value) return true;
   return (
@@ -386,7 +415,9 @@ function inspectState() {
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
     neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
-    stripeWebhookSecret: isPlaceholder(env.GOAT_STRIPE_WEBHOOK_SECRET) ? "placeholder" : "set",
+    stripeWebhookSecret: isPlaceholder(env.OPENCOMPANY_STRIPE_WEBHOOK_SECRET)
+      ? "placeholder"
+      : "set",
     billing: billingMissing.length === 0 ? "ready" : "placeholder",
     billingMissingKeys: billingMissing,
   };
@@ -579,10 +610,10 @@ async function ensureLocalDevDefaults() {
 }
 
 function shouldReplaceLocalDefault(key, current, next) {
-  if (key === "GOAT_NEXT_PUBLIC_APP_URL") {
+  if (key === "OPENCOMPANY_NEXT_PUBLIC_APP_URL") {
     return current === HTTP_LOCAL_WEB_APP_URL && next !== current;
   }
-  if (key === "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI") {
+  if (key === "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI") {
     return current === `${HTTP_LOCAL_WEB_APP_URL}/auth/callback` && next !== current;
   }
   return false;
@@ -592,11 +623,12 @@ async function ensureWebEnvFile() {
   step("Web app env file");
 
   const env = readEffectiveLocalEnv();
-  const webAppUrl = env.GOAT_NEXT_PUBLIC_APP_URL || LOCAL_WEB_APP_URL;
-  const webRedirectUri = env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI || `${webAppUrl}/auth/callback`;
+  const webAppUrl = env.OPENCOMPANY_NEXT_PUBLIC_APP_URL || LOCAL_WEB_APP_URL;
+  const webRedirectUri =
+    env.OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI || `${webAppUrl}/auth/callback`;
   const values = {
-    GOAT_NEXT_PUBLIC_APP_URL: webAppUrl,
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
+    OPENCOMPANY_NEXT_PUBLIC_APP_URL: webAppUrl,
+    OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
     NEXT_PUBLIC_APP_URL: webAppUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
     WORKOS_REDIRECT_URI: webRedirectUri,
@@ -615,7 +647,7 @@ async function ensureWebEnvFile() {
 function canPullSharedDevEnvFromInfisical() {
   if (!existsSync(".infisical.json")) return false;
 
-  const result = spawnSync("infisical", ["export", "--env", INFISICAL_DEV_ENV, "--path", "/goat"], {
+  const result = spawnSync("infisical", ["export", "--env", INFISICAL_DEV_ENV, "--path", "/web"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -689,7 +721,7 @@ function pullBillingDevEnvFromInfisical() {
 
   const result = spawnSync(
     "infisical",
-    ["export", "--env", INFISICAL_DEV_ENV, "--path", "/goat", "--format", "json"],
+    ["export", "--env", INFISICAL_DEV_ENV, "--path", "/web", "--format", "json"],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
   );
   if (result.status !== 0) return [];
@@ -714,7 +746,7 @@ function pullSharedDevEnv(options = {}) {
   if (existsSync(".infisical.json")) {
     throw new Error(
       "Infisical is linked but shared dev env could not be pulled. " +
-        "Run `infisical login` and check the dev /goat and /runner folders.",
+        "Run `infisical login` and check the dev /web and /runner folders.",
     );
   }
 
@@ -814,7 +846,7 @@ async function ensureGitHubIntegrationEnv(state) {
     throw new Error(
       `${source} env pull finished but GitHub integration app values are still placeholders: ${after.githubIntegrationMissingKeys.join(
         ", ",
-      )}. Add them in Infisical dev /goat, then run \`bun run env:pull\` again.`,
+      )}. Add them in Infisical dev /web, then run \`bun run env:pull\` again.`,
     );
   }
   ok(`GitHub integration app credentials configured from ${source}`);
@@ -857,10 +889,10 @@ async function ensureStripe(state) {
     return cliWebhookSecret;
   };
   const env = { ...readEffectiveLocalEnv(), ...updates };
-  if (isPlaceholder(env.GOAT_STRIPE_API_KEY)) {
+  if (isPlaceholder(env.OPENCOMPANY_STRIPE_API_KEY)) {
     const result = getCliCredentials();
     if (result.ok && (result.key.startsWith("rk_test_") || result.expiresAt)) {
-      updates.GOAT_STRIPE_API_KEY = result.key;
+      updates.OPENCOMPANY_STRIPE_API_KEY = result.key;
       if (result.key.startsWith("rk_test_")) {
         ok(
           `Will use restricted Stripe CLI profile "${result.projectName}" for local opencompany billing`,
@@ -872,17 +904,17 @@ async function ensureStripe(state) {
       }
     } else if (result.ok) {
       warn(
-        "Stripe CLI returned a non-restricted test key without an expiry. Run `stripe login` to refresh the CLI profile, or create a restricted test key for opencompany billing and store it in Infisical dev /goat.",
+        "Stripe CLI returned a non-restricted test key without an expiry. Run `stripe login` to refresh the CLI profile, or create a restricted test key for opencompany billing and store it in Infisical dev /web.",
       );
     } else {
-      warn(`GOAT_STRIPE_API_KEY is missing: ${result.message}`);
+      warn(`OPENCOMPANY_STRIPE_API_KEY is missing: ${result.message}`);
     }
   } else {
-    ok("GOAT_STRIPE_API_KEY is set");
+    ok("OPENCOMPANY_STRIPE_API_KEY is set");
   }
 
-  if (isPlaceholder(env.GOAT_STRIPE_CHECKOUT_ENABLED)) {
-    updates.GOAT_STRIPE_CHECKOUT_ENABLED = "false";
+  if (isPlaceholder(env.OPENCOMPANY_STRIPE_CHECKOUT_ENABLED)) {
+    updates.OPENCOMPANY_STRIPE_CHECKOUT_ENABLED = "false";
     ok("Will keep live opencompany Checkout disabled by default");
   }
 
@@ -894,15 +926,15 @@ async function ensureStripe(state) {
   }
 
   if (state.stripeWebhookSecret === "set") {
-    ok("GOAT_STRIPE_WEBHOOK_SECRET is set");
+    ok("OPENCOMPANY_STRIPE_WEBHOOK_SECRET is set");
   } else {
     const result = getCliWebhookSecret();
     if (result.ok) {
-      updates.GOAT_STRIPE_WEBHOOK_SECRET = result.secret;
-      ok("Will write GOAT_STRIPE_WEBHOOK_SECRET from Stripe CLI");
+      updates.OPENCOMPANY_STRIPE_WEBHOOK_SECRET = result.secret;
+      ok("Will write OPENCOMPANY_STRIPE_WEBHOOK_SECRET from Stripe CLI");
     } else {
       warn(
-        `GOAT_STRIPE_WEBHOOK_SECRET is missing and could not be read from Stripe CLI: ${result.message} ` +
+        `OPENCOMPANY_STRIPE_WEBHOOK_SECRET is missing and could not be read from Stripe CLI: ${result.message} ` +
           "Forwarded Stripe webhooks will fail signature verification until it is set.",
       );
     }
@@ -1058,7 +1090,7 @@ async function ensureWebLocalHttps() {
   step("Web local HTTPS");
 
   if (webHttpsDisabled(process.env)) {
-    warn("OPENCOMPANY_GOAT_HTTPS_DISABLED is set; web local dev will use HTTP.");
+    warn("OPENCOMPANY_HTTPS_DISABLED is set; web local dev will use HTTP.");
     return;
   }
 
@@ -1088,6 +1120,11 @@ async function ensureWebLocalHttps() {
 async function main() {
   if (PULL_ENV_MODE) {
     console.log("\n\x1b[1mPull shared dev env\x1b[0m");
+    if (initialEnvironmentMoves.length > 0) {
+      ok(
+        `Migrated local environment variables: ${formatEnvironmentMoves(initialEnvironmentMoves)}`,
+      );
+    }
     await ensureEnvFile(inspectState());
     const state = inspectState();
     const source = pullSharedDevEnv({
@@ -1102,6 +1139,11 @@ async function main() {
 
   if (STRIPE_MODE) {
     console.log("\n\x1b[1mStripe local credentials\x1b[0m");
+    if (initialEnvironmentMoves.length > 0) {
+      ok(
+        `Migrated local environment variables: ${formatEnvironmentMoves(initialEnvironmentMoves)}`,
+      );
+    }
     await ensureEnvFile(inspectState());
     await ensureLocalDevDefaults();
     await ensureStripe(inspectState());
@@ -1112,6 +1154,12 @@ async function main() {
   if (CHECK_MODE) {
     const state = inspectState();
     const nextSteps = [];
+    if (initialEnvironmentMoves.length > 0) {
+      nextSteps.push({
+        command: "bun run setup",
+        reason: `migrate moved environment variables (${formatEnvironmentMoves(initialEnvironmentMoves)})`,
+      });
+    }
     if (state.envFile === "missing") {
       nextSteps.push({ command: "bun run setup", reason: "create .env.local" });
     }
@@ -1137,7 +1185,7 @@ async function main() {
       });
     }
     if (state.stripeWebhookSecret === "placeholder") {
-      const missingStripe = ["GOAT_STRIPE_WEBHOOK_SECRET"];
+      const missingStripe = ["OPENCOMPANY_STRIPE_WEBHOOK_SECRET"];
       nextSteps.push({
         command: "bun run setup:stripe",
         reason: `copy local Stripe CLI credentials into .env.local (${missingStripe.join(", ")})`,
@@ -1216,6 +1264,10 @@ async function main() {
   console.log("\n\x1b[1mProject setup\x1b[0m");
   console.log("Wiring up your local env and running migrations.\n");
 
+  if (initialEnvironmentMoves.length > 0) {
+    ok(`Migrated local environment variables: ${formatEnvironmentMoves(initialEnvironmentMoves)}`);
+  }
+
   // Hard prerequisite — fail fast before touching env/db if the runtime that
   // local Electric needs isn't available.
   assertDocker();
@@ -1255,3 +1307,7 @@ main().catch((err) => {
   console.error(`\n\x1b[31m✗ Setup failed:\x1b[0m ${err.message}\n`);
   exit(1);
 });
+
+function formatEnvironmentMoves(moves) {
+  return [...new Set(moves.map(({ oldName, newName }) => `${oldName} → ${newName}`))].join(", ");
+}

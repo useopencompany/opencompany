@@ -17,7 +17,7 @@ export function verifyHubspotWebhookSignature(input: {
   timestampHeader: string | null;
   nowMs?: number;
 }): boolean {
-  const secret = process.env.GOAT_HUBSPOT_CLIENT_SECRET?.trim();
+  const secret = process.env.OPENCOMPANY_HUBSPOT_CLIENT_SECRET?.trim();
   if (!secret || !input.signature || !input.timestampHeader) return false;
   const timestampMs = Number(input.timestampHeader);
   if (!Number.isFinite(timestampMs)) return false;

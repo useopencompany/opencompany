@@ -40,9 +40,10 @@ export function selectWebDevPorts({
 
 function resolveConventionalWebDevPorts({ env }) {
   return {
-    app: optionalPort(env.GOAT_PORT, "GOAT_PORT") ?? DEFAULT_WEB_PORT,
+    app: optionalPort(env.OPENCOMPANY_PORT, "OPENCOMPANY_PORT") ?? DEFAULT_WEB_PORT,
     runner: configuredRunnerPort(env) ?? DEFAULT_RUNNER_PORT,
-    https: optionalPort(env.GOAT_HTTPS_PORT, "GOAT_HTTPS_PORT") ?? DEFAULT_WEB_HTTPS_PORT,
+    https:
+      optionalPort(env.OPENCOMPANY_HTTPS_PORT, "OPENCOMPANY_HTTPS_PORT") ?? DEFAULT_WEB_HTTPS_PORT,
     isolated: false,
   };
 }
@@ -55,10 +56,10 @@ export function isolatedWebDevEnvironment(ports, { httpsDisabled = false } = {})
   const runnerOrigin = `http://localhost:${ports.runner}`;
 
   return {
-    GOAT_PORT: ports.app,
-    GOAT_HTTPS_PORT: ports.https,
-    GOAT_NEXT_PUBLIC_APP_URL: appOrigin,
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: `${appOrigin}/auth/callback`,
+    OPENCOMPANY_PORT: ports.app,
+    OPENCOMPANY_HTTPS_PORT: ports.https,
+    OPENCOMPANY_NEXT_PUBLIC_APP_URL: appOrigin,
+    OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: `${appOrigin}/auth/callback`,
     PORT: ports.runner,
     RUNNER_INTERNAL_URL: runnerOrigin,
     RUNNER_PUBLIC_URL: runnerOrigin,

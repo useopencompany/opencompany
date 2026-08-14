@@ -18,7 +18,7 @@ export async function serverApiClient(options: { authorization?: string } = {}) 
     if (browserOrigin) forwarded.set("Origin", browserOrigin);
     return globalThis.fetch(input, { ...init, headers: forwarded, cache: "no-store" });
   };
-  return createApiClient(serverApiOrigin(process.env.GOAT_API_ORIGIN), {
+  return createApiClient(serverApiOrigin(process.env.OPENCOMPANY_API_ORIGIN), {
     fetch: fetchWithActor,
   });
 }
@@ -42,7 +42,7 @@ export async function emailLifecycleApiRequest(
   const secret = process.env.CRON_SECRET?.trim();
   if (!secret) throw new Error("Email lifecycle persistence is unavailable.");
   return globalThis.fetch(
-    `${serverApiOrigin(process.env.GOAT_API_ORIGIN)}/internal/onboarding-emails/${operation}`,
+    `${serverApiOrigin(process.env.OPENCOMPANY_API_ORIGIN)}/internal/onboarding-emails/${operation}`,
     {
       method: "POST",
       headers: {

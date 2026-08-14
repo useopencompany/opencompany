@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
 describe("GET /api/billing/reconcile relay", () => {
-  beforeEach(() => vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test"));
+  beforeEach(() => vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test"));
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();

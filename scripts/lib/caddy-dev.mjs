@@ -11,18 +11,18 @@ export const WEB_HTTPS_DISABLED_VALUES = new Set(["1", "true", "yes", "on"]);
 
 export function webHttpsDisabled(env = process.env) {
   return WEB_HTTPS_DISABLED_VALUES.has(
-    String(env.OPENCOMPANY_GOAT_HTTPS_DISABLED ?? "")
+    String(env.OPENCOMPANY_HTTPS_DISABLED ?? "")
       .trim()
       .toLowerCase(),
   );
 }
 
 export function webHttpsPort(env = process.env) {
-  return String(env.GOAT_HTTPS_PORT?.trim() || DEFAULT_WEB_HTTPS_PORT);
+  return String(env.OPENCOMPANY_HTTPS_PORT?.trim() || DEFAULT_WEB_HTTPS_PORT);
 }
 
 export function webHttpsOrigin(env = process.env) {
-  const configured = env.GOAT_NEXT_PUBLIC_APP_URL?.trim();
+  const configured = env.OPENCOMPANY_NEXT_PUBLIC_APP_URL?.trim();
   if (configured?.startsWith("https://localhost")) {
     try {
       return new URL(configured).origin;
@@ -79,7 +79,7 @@ export async function startWebLocalHttpsProxy({
   onWarning = console.warn,
 } = {}) {
   if (webHttpsDisabled(env)) {
-    onWarning("\nWeb local HTTPS is disabled by OPENCOMPANY_GOAT_HTTPS_DISABLED=1.\n");
+    onWarning("\nWeb local HTTPS is disabled by OPENCOMPANY_HTTPS_DISABLED=1.\n");
     return null;
   }
   if (!targetPort) {

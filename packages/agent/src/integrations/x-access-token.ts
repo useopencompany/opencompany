@@ -98,8 +98,8 @@ export async function getXAccessToken(
     throw new XAccessAuthError("Stored X credentials have no refresh token.");
   }
 
-  const clientId = process.env.GOAT_X_CLIENT_ID?.trim();
-  const clientSecret = process.env.GOAT_X_CLIENT_SECRET?.trim();
+  const clientId = process.env.OPENCOMPANY_X_CLIENT_ID?.trim();
+  const clientSecret = process.env.OPENCOMPANY_X_CLIENT_SECRET?.trim();
   if (!clientId || !clientSecret)
     throw new Error("The opencompany X integration is not configured.");
   const response = await fetch(X_TOKEN_ENDPOINT, {

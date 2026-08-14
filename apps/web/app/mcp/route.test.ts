@@ -12,7 +12,7 @@ describe("/mcp compatibility relay", () => {
     ["POST", POST],
     ["DELETE", DELETE],
   ] as const)("relays %s to the API-owned MCP endpoint", async (method, handler) => {
-    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
     const requests: Request[] = [];
     vi.stubGlobal(
       "fetch",
@@ -42,7 +42,7 @@ describe("/mcp compatibility relay", () => {
   });
 
   it("fails closed when the API origin is unavailable", async () => {
-    vi.stubEnv("GOAT_API_ORIGIN", "");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "");
     const response = await GET(new Request("https://app.example.test/mcp"));
     expect(response.status).toBe(503);
   });

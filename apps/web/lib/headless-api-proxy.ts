@@ -52,7 +52,7 @@ export async function proxyHeadlessApiRequest(
 export function headlessApiTarget(
   requestUrl: string,
   path: readonly string[],
-  configuredOrigin = process.env.GOAT_API_ORIGIN,
+  configuredOrigin = process.env.OPENCOMPANY_API_ORIGIN,
   // Client resources live under /v1; purpose-specific provider ingress (OAuth
   // callbacks, webhooks) relays to top-level API paths instead.
   basePath = "v1",

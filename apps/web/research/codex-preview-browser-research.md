@@ -174,8 +174,8 @@ profiles:
       healthPath: /api/healthz
       startPath: /
       env:
-        GOAT_NEXT_PUBLIC_APP_URL: $PREVIEW_ORIGIN
-        GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: $PREVIEW_ORIGIN/auth/callback
+        OPENCOMPANY_NEXT_PUBLIC_APP_URL: $PREVIEW_ORIGIN
+        OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: $PREVIEW_ORIGIN/auth/callback
       auth:
         mode: human-on-demand
         contextKey: opencompany-workos
@@ -317,8 +317,8 @@ and inject the per-sandbox traffic token server-side. The browser never needs to
 
 For WorkOS/AuthKit, the app should receive:
 
-- `GOAT_NEXT_PUBLIC_APP_URL=$PREVIEW_ORIGIN`
-- `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$PREVIEW_ORIGIN/auth/callback`
+- `OPENCOMPANY_NEXT_PUBLIC_APP_URL=$PREVIEW_ORIGIN`
+- `OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$PREVIEW_ORIGIN/auth/callback`
 - equivalent `NEXT_PUBLIC_*` variables when the app expects them
 
 The gateway must route the callback to the same active preview session. A signed preview-session
