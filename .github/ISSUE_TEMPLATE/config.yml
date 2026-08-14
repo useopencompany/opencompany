@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/useopencompany/opencompany-experimental/security/advisories/new
+    about: Share vulnerability details privately with the maintainers.
+  - name: Support policy
+    url: https://github.com/useopencompany/opencompany-experimental/blob/main/SUPPORT.md
+    about: Check what community support this project can provide.
