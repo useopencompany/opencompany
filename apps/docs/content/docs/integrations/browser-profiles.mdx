@@ -1,0 +1,20 @@
+---
+title: Browser profiles
+description: Save a site-specific login session for authenticated browser tasks.
+---
+
+## What connecting does
+
+Browser profiles are feature-gated personal connections. Create a named profile for a site, complete
+the login in the live handoff view, and reuse that saved session for authenticated browser tasks.
+
+## Scopes and permissions
+
+The site session carries whatever access the signed-in site account has. It is not a general OAuth
+scope that OpenCompany can narrow. Use a dedicated least-privilege account where practical. Detailed
+session lifetime, supported tasks, and recovery guidance are coming soon.
+
+## Brain ingestion
+
+Browser profiles are not Brain sources. Browser output is not saved as durable knowledge unless an
+explicit capture path is used.

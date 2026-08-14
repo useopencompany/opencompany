@@ -13,3 +13,6 @@ Start with:
 - [Environment variables](./env-vars.md) and [secret management](./secret-management.md).
 
 `docs/future-concepts` contains speculative research, not current operational guidance.
+
+User- and API-facing documentation lives in `apps/docs`; this directory remains the contributor,
+architecture, and operations reference.

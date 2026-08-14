@@ -31,6 +31,7 @@ See [Getting started](./docs/getting-started.md) for prerequisites and troublesh
 - `apps/web` — the OpenCompany Next.js presentation client and stable public relay surface.
 - `apps/api` — the canonical typed API, application services, and provider ingress handlers.
 - `apps/runner` — Goat background workers, durable turns, Brain ingestion, and cloud coding.
+- `apps/docs` — user and API documentation built with Fumadocs.
 - `apps/stripe-webhooks` — local Stripe CLI forwarding for Goat billing.
 - `apps/marketing` — the public marketing site.
 - `apps/design-system` and `packages/ui` — shared UI development.

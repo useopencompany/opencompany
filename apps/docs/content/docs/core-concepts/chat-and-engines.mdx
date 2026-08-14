@@ -1,0 +1,42 @@
+---
+title: Chat and engines
+description: Choose between OpenCompany, Codex, and Claude Code while keeping one durable Chat model.
+---
+
+Chat is the interactive surface for asking questions, using connected actions, working with Brain,
+and starting cloud coding sessions.
+
+Every Chat uses the same durable vocabulary: a Conversation contains Messages, and each accepted
+user Message creates a Run. Streaming output is a live view of that Run, not the only copy of the
+answer. If the browser reconnects, OpenCompany resumes from persisted state instead of sending your
+Message again.
+
+## OpenCompany
+
+The OpenCompany engine is the general workspace agent. It can work with enabled integrations,
+managed capabilities, Brain, attachments, and reusable Skills. The model picker can use **Auto** or
+a concrete available model. Some external actions pause for approval according to their current
+permission mode.
+
+## Codex
+
+Codex runs in a persistent cloud coding workspace. Connect Codex under **Settings → Integrations**
+before starting a coding Chat. The composer exposes Codex-specific reasoning, plan, and goal controls
+when they apply. A later Message in the same Conversation continues the same durable engine session
+when it remains available.
+
+## Claude Code
+
+Claude Code is the second cloud coding engine. It uses the same Conversation, Message, and Run
+surface while keeping its own provider authentication and runtime session. Connect it separately
+under **Settings → Integrations**.
+
+## Attachments, approvals, and cancellation
+
+Attachments become durable Message references after upload. Tool approvals and engine questions
+appear in the same transcript. Canceling targets the active Run; it does not archive the Conversation
+or erase earlier Messages.
+
+Choose an engine for the kind of work, not for where you want the result stored. Use Brain capture
+when a fact should become reusable knowledge, and use a Task when the work needs a tracked goal and
+outcome.

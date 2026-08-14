@@ -1,0 +1,27 @@
+---
+title: Workflows and schedules
+description: Define reusable ordered work, invoke it from Chat, or run it on a schedule.
+---
+
+A Workflow is a workspace-owned, reusable ordered definition. Each step has instructions and an
+engine/model configuration. Running the Workflow creates a Task, which gives that invocation its own
+Conversation, Run history, status, and outcome.
+
+Workspace admins create and edit Workflows. In Chat, type `#` to attach and fire an active Workflow.
+The resulting work appears under Tasks instead of being hidden inside the foreground Chat.
+
+## Manual and scheduled triggers
+
+A Workflow can be manual or scheduled. A schedule records a cron expression, timezone, prompt, and
+enabled state, along with its last and next run times. When a scheduled trigger is due, OpenCompany
+creates the same canonical Task and Run that a manual invocation would create.
+
+Recurring Tasks are actor-owned schedules for a repeated prompt. Workflow schedules are tied to the
+reusable Workflow definition. In both cases, disabling the schedule stops future invocations; it
+does not erase Tasks that were already accepted.
+
+## Editing safely
+
+Workflow definitions are versioned. An invocation records the version it used, so later edits do not
+rewrite an already-created Task. Keep instructions specific, use separate steps when the handoff is
+meaningful, and inspect a completed Task before placing a new Workflow on a recurring schedule.
