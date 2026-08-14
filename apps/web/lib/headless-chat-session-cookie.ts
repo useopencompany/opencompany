@@ -52,12 +52,12 @@ function normalizedCookieDomain(value: string | undefined) {
 }
 
 function configuredApiHostname(value: string | undefined) {
-  if (!value?.trim()) throw new Error("NEXT_PUBLIC_GOAT_API_ORIGIN is required.");
+  if (!value?.trim()) throw new Error("NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN is required.");
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new Error("NEXT_PUBLIC_GOAT_API_ORIGIN must be a valid HTTPS origin.");
+    throw new Error("NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN must be a valid HTTPS origin.");
   }
   if (
     url.protocol !== "https:" ||
@@ -67,7 +67,7 @@ function configuredApiHostname(value: string | undefined) {
     url.search ||
     url.hash
   ) {
-    throw new Error("NEXT_PUBLIC_GOAT_API_ORIGIN must be a valid HTTPS origin.");
+    throw new Error("NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN must be a valid HTTPS origin.");
   }
   return url.hostname;
 }

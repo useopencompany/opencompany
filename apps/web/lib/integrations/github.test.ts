@@ -68,7 +68,7 @@ beforeEach(() => {
   vi.stubEnv("GITHUB_INTEGRATION_STATE_SECRET", "test-state-secret");
   vi.stubEnv("GITHUB_INTEGRATION_APP_ID", "12345");
   vi.stubEnv("GITHUB_INTEGRATION_APP_PRIVATE_KEY", TEST_PRIVATE_KEY);
-  vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+  vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
 });
 
 afterEach(() => {

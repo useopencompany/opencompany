@@ -17,7 +17,7 @@ Task, and Brain-ingestion spans identify durable work.
 ## Configuration
 
 Better Stack/Sentry-compatible DSNs are optional; missing values disable remote error reporting.
-SigNoz export requires `GOAT_OBSERVABILITY_ENABLED` plus an OTLP endpoint and any required headers.
+SigNoz export requires `OPENCOMPANY_OBSERVABILITY_ENABLED` plus an OTLP endpoint and any required headers.
 Latitude full-content LLM tracing requires `LATITUDE_API_KEY` and `LATITUDE_PROJECT_SLUG` and can be
 disabled with `LATITUDE_TELEMETRY_DISABLED`.
 

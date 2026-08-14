@@ -28,7 +28,7 @@ const meta = { apiVersion: "v1", protocolVersion: "1.0.0" };
 describe("integration account adapters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
     vi.mocked(headers).mockResolvedValue(
       new Headers({ Cookie: "wos-session=sealed", Origin: "https://app.example.test" }) as never,
     );

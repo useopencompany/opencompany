@@ -40,7 +40,7 @@ The user usually keeps a dev server running. Do not start another one unless ask
 - Start in `apps/web` for product and API work.
 - `web` is the Next.js client and composition root. "opencompany runner" means the retained
   opencompany-domain execution paths inside `apps/runner`. Look first at Brain, task, and chat
-  modules, `/internal/goat/*` routes, and the `RUNNER_GOAT_TASK_WORKER_ENABLED` gate. There is no
+  modules, `/internal/goat/*` routes, and the `RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED` gate. There is no
   separate runner package.
 - Follow shared code into `packages/db/src/*`, `packages/brain`, and
   `packages/telemetry` as needed. Preserve the isolated legacy-billing and LLM-broker
@@ -73,7 +73,7 @@ The user usually keeps a dev server running. Do not start another one unless ask
 - Any change to `packages/db/src/schema.ts` needs a Drizzle migration.
 - Migration or data-destructive work gets extra scrutiny. Explain rollback implications before running one-way operations.
 - New env vars require `.env.example` and the relevant docs update.
-- Production env vars must be added to the runtime-specific Infisical path and verified in the hosted service before release: the web app retains the compatibility path `prod` + `/goat`, the runner uses `prod` + `/runner`, and release automation uses `prod` + `/release`. Add required variables to the matching release preflight so a missing sync fails the release instead of silently disabling behavior.
+- Production env vars must be added to the runtime-specific Infisical path and verified in the hosted service before release: the web app uses `prod` + `/web`, the runner uses `prod` + `/runner`, and release automation uses `prod` + `/release`. Add required variables to the matching release preflight so a missing sync fails the release instead of silently disabling behavior.
 - Local setup should use branch-isolated Neon DBs through `bun run setup`. Avoid shared database mode unless explicitly needed.
 - Do not run production migrations or production-affecting scripts unless the user explicitly asks.
 

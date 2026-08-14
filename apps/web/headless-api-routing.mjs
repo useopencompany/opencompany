@@ -5,9 +5,9 @@ const V1_SOURCE = "/v1/:path*";
  * configuration deliberately leaves the fail-closed App Router handler in control.
  */
 export function headlessApiRouting(
-  configuredOrigin = process.env.GOAT_API_ORIGIN,
+  configuredOrigin = process.env.OPENCOMPANY_API_ORIGIN,
   webOrigins = [
-    process.env.GOAT_NEXT_PUBLIC_APP_URL,
+    process.env.OPENCOMPANY_NEXT_PUBLIC_APP_URL,
     process.env.NEXT_PUBLIC_APP_URL,
     process.env.VERCEL_PROJECT_PRODUCTION_URL,
     process.env.VERCEL_URL,

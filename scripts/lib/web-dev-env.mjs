@@ -11,32 +11,40 @@ export function resolveWebDevEnv({
   const localHttpAppUrl = `http://localhost:${port}`;
   const configuredAppUrl = configuredWebAppUrl(processEnv, webHttpsEnv);
   const webAppUrl =
-    trimmed(webHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL) ||
-    trimmed(tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL) ||
+    trimmed(webHttpsEnv.OPENCOMPANY_NEXT_PUBLIC_APP_URL) ||
+    trimmed(tunnelEnv.OPENCOMPANY_NEXT_PUBLIC_APP_URL) ||
     trimmed(tunnelEnv.NEXT_PUBLIC_APP_URL) ||
     configuredAppUrl ||
     localHttpAppUrl;
 
   const localRedirectAppUrl =
-    trimmed(webHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL) || configuredAppUrl || localHttpAppUrl;
+    trimmed(webHttpsEnv.OPENCOMPANY_NEXT_PUBLIC_APP_URL) || configuredAppUrl || localHttpAppUrl;
   const webRedirectUri =
-    trimmed(webHttpsEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI) ||
+    trimmed(webHttpsEnv.OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI) ||
     configuredWebRedirectUri(processEnv, webHttpsEnv) ||
     `${localRedirectAppUrl}/auth/callback`;
+  const apiOrigin = trimmed(processEnv.OPENCOMPANY_API_ORIGIN) || "http://localhost:3001";
 
   return {
-    ...(trimmed(webHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL)
+    ...(trimmed(webHttpsEnv.OPENCOMPANY_NEXT_PUBLIC_APP_URL)
       ? { NODE_USE_SYSTEM_CA: trimmed(processEnv.NODE_USE_SYSTEM_CA) || "1" }
       : {}),
-    GOAT_NEXT_PUBLIC_APP_URL: webAppUrl,
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
+    OPENCOMPANY_NEXT_PUBLIC_APP_URL: webAppUrl,
+    OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
     NEXT_PUBLIC_APP_URL: webAppUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
     WORKOS_REDIRECT_URI: webRedirectUri,
-    RUNNER_GOAT_TASK_WORKER_ENABLED: "true",
+    OPENCOMPANY_API_ORIGIN: apiOrigin,
+    API_BROWSER_ORIGINS: appendCsvValues(
+      processEnv.API_BROWSER_ORIGINS,
+      [webAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.OPENCOMPANY_NEXT_PUBLIC_APP_URL].filter(
+        Boolean,
+      ),
+    ),
+    RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED: "true",
     RUNNER_ALLOWED_ORIGINS: appendCsvValues(
       processEnv.RUNNER_ALLOWED_ORIGINS,
-      [webAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.GOAT_NEXT_PUBLIC_APP_URL].filter(
+      [webAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.OPENCOMPANY_NEXT_PUBLIC_APP_URL].filter(
         Boolean,
       ),
     ),
@@ -83,20 +91,20 @@ function localPreviewBaseDomain(webAppUrl, runnerPublicUrl) {
 }
 
 function configuredWebAppUrl(env, webHttpsEnv) {
-  const configured = env.GOAT_NEXT_PUBLIC_APP_URL?.trim();
+  const configured = env.OPENCOMPANY_NEXT_PUBLIC_APP_URL?.trim();
   if (!configured) return null;
-  if (configured.startsWith("https://localhost") && !webHttpsEnv.GOAT_NEXT_PUBLIC_APP_URL) {
+  if (configured.startsWith("https://localhost") && !webHttpsEnv.OPENCOMPANY_NEXT_PUBLIC_APP_URL) {
     return null;
   }
   return configured;
 }
 
 function configuredWebRedirectUri(env, webHttpsEnv) {
-  const configured = env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim();
+  const configured = env.OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim();
   if (!configured) return null;
   if (
     configured.startsWith("https://localhost") &&
-    !webHttpsEnv.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI
+    !webHttpsEnv.OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI
   ) {
     return null;
   }

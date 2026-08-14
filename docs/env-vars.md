@@ -7,18 +7,18 @@ duplicating every optional provider variable.
 
 | Environment/path | Consumers | Contents |
 | --- | --- | --- |
-| `dev` `/goat` | local web/API stack | browser auth/presentation values plus shared local API inputs |
+| `dev` `/web` | local web/API stack | browser auth/presentation values plus shared local API inputs |
 | `dev` `/runner` | local runner | runner tokens, provider credentials, sandbox configuration |
-| `prod` `/goat` | Vercel web | browser auth, first-party origins, public URL and cron relays, email sender, and telemetry |
+| `prod` `/web` | Vercel web | browser auth, first-party origins, public URL and cron relays, email sender, and telemetry |
 | `prod` `/api` | Render product API | database, auth, billing/Stripe, provider ingress, managed capabilities, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
 
-The `/goat` path remains the Vercel deployment namespace; it no longer implies that web owns a
+The `/web` path is the Vercel deployment namespace; it does not imply that web owns a
 product backend. Values are scoped: API database, Electric, model, billing, integration, and
 provider-ingress secrets belong in `/api`; runner execution secrets belong in `/runner`. Do not
-mirror an API-owned secret into `/goat` unless a current thin relay actually consumes it.
+mirror an API-owned secret into `/web` unless a current thin relay actually consumes it.
 
 The names-only production audit is recorded in [#1243](https://github.com/useopencompany/opencompany-experimental/issues/1243).
 Two web exceptions remain deliberately classified as suspects rather than prune candidates:
@@ -48,12 +48,12 @@ release variables. Important contracts include:
 - Release: production DB URL, Vercel/Render credentials and project/service IDs, opencompany/API/runner
   URLs.
 
-Browser clients call the non-secret `NEXT_PUBLIC_GOAT_API_ORIGIN` directly for commands and
-authorized read models. Server Components use the server-only `GOAT_API_ORIGIN`. Configure both
+Browser clients call the non-secret `NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN` directly for commands and
+authorized read models. Server Components use the server-only `OPENCOMPANY_API_ORIGIN`. Configure both
 origins, the shared `WORKOS_COOKIE_DOMAIN`, and API `API_BROWSER_ORIGINS`. Chat recovery is
 fix-forward as documented in [Chat operations](./chat-operations.md).
 
-`CRON_SECRET` must have the same value in prod `/goat` and `/api`: web keeps the public cron URL
+`CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
 
 `REDIS_URL` is optional for correctness but required by the production activation preflight. When
@@ -62,7 +62,7 @@ enables the canonical Chat transient presentation lane; without it both services
 Postgres streaming and reconnect behavior. The value is server-only and must never be copied to a
 `NEXT_PUBLIC_*` variable.
 
-The Stripe endpoint secret is `GOAT_STRIPE_WEBHOOK_SECRET` in `prod` `/api`; it is not a web secret.
+The Stripe endpoint secret is `OPENCOMPANY_STRIPE_WEBHOOK_SECRET` in `prod` `/api`; it is not a web secret.
 Stripe still calls the unchanged web URL, which streams the signed raw body to the API-owned
 handler. Other provider URLs follow the same rule: a web relay may preserve a stable public URL,
 but provider state, signing, credentials, and persistence configuration belong to the API.
@@ -72,16 +72,16 @@ historical prefix: API billing and runner ingestion code still read them. Do not
 hosted copy until those readers are retired or the values are explicitly provisioned on the two
 owning runtimes.
 
-The marketing Vercel project uses `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` and
-`NEXT_PUBLIC_GOAT_POSTHOG_HOST` for basic page and conversion analytics in the same PostHog project
+The marketing Vercel project uses `NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN` and
+`NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST` for basic page and conversion analytics in the same PostHog project
 as the product. Both variables are required in production and optional for local marketing work.
 
 ## Local generated values
 
-`bun run setup` writes branch-specific `DATABASE_URL`, local ports/origins, runner tokens, and
-Electric configuration to `.env.local`. It mirrors only the web auth/proxy/compatibility and
-observability subset into `apps/web/.env.local`; API/runner provider credentials are not copied
-into that app-local file.
+`bun run setup` writes branch-specific `DATABASE_URL`, the local API listener/origin and browser
+allowlist, web ports/origins, runner tokens, and Electric configuration to `.env.local`. It mirrors
+only the web auth/proxy/compatibility and observability subset into `apps/web/.env.local`;
+API/runner provider credentials are not copied into that app-local file.
 Do not put branch database URLs or generated local tokens in Infisical. `.env.override.local` may
 override a developer's generated values and remains gitignored.
 

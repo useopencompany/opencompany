@@ -5,7 +5,7 @@ secrets, paste them into logs, or copy production values into tracked files.
 
 ## Local development
 
-Authenticate the Infisical CLI, then run `bun run setup`. The setup script pulls `dev` `/goat` and
+Authenticate the Infisical CLI, then run `bun run setup`. The setup script pulls `dev` `/web` and
 `/runner`, writes only gitignored local env files, generates branch-local values, and creates a
 branch-isolated Neon database. `bun run env:pull` refreshes shared values without replacing the
 branch database. `bun run setup -- --check` reports missing requirements without writing.
@@ -19,7 +19,7 @@ commit either file; the tracked `*.example` files contain placeholders only. Con
 
 Edit secrets in the runtime's Infisical path and verify the integration sync on the destination:
 
-- Web: deployment path `prod` `/goat` → Vercel product project.
+- Web: deployment path `prod` `/web` → Vercel product project.
 - API: `prod` `/api` → Render product API.
 - Runner: `prod` `/runner` → Render runner.
 - Release automation: `prod` `/release` → GitHub Actions through `infisical run`.

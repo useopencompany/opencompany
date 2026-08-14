@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       value: sealedSession,
       configuredDomain: process.env.WORKOS_COOKIE_DOMAIN,
       requestHostname: requestUrl.hostname,
-      apiOrigin: process.env.NEXT_PUBLIC_GOAT_API_ORIGIN,
+      apiOrigin: process.env.NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN,
       secure: requestUrl.protocol === "https:",
     });
   } catch {

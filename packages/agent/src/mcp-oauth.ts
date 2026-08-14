@@ -3,7 +3,7 @@ import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { generateProtectedResourceMetadata, getPublicUrl } from "mcp-handler";
 import { USER_MCP_ENDPOINT_PATH } from "./mcp-setup";
 
-export const AUTHKIT_DOMAIN_ENV = "GOAT_AUTHKIT_DOMAIN";
+export const AUTHKIT_DOMAIN_ENV = "OPENCOMPANY_AUTHKIT_DOMAIN";
 
 export const MCP_METADATA_CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",

@@ -3,10 +3,10 @@ import { isSlackBotConfigured, SLACK_BOT_SCOPES, slackBotScopesSatisfied } from 
 
 const REQUIRED_ENVS = {
   INTEGRATION_CREDENTIAL_ENCRYPTION_KEY: "encryption-key",
-  GOAT_SLACK_BOT_CLIENT_ID: "client-id",
-  GOAT_SLACK_BOT_CLIENT_SECRET: "client-secret",
-  GOAT_SLACK_BOT_SIGNING_SECRET: "signing-secret",
-  GOAT_SLACK_BOT_STATE_SECRET: "state-secret",
+  OPENCOMPANY_SLACK_BOT_CLIENT_ID: "client-id",
+  OPENCOMPANY_SLACK_BOT_CLIENT_SECRET: "client-secret",
+  OPENCOMPANY_SLACK_BOT_SIGNING_SECRET: "signing-secret",
+  OPENCOMPANY_SLACK_BOT_STATE_SECRET: "state-secret",
 } as const;
 
 describe("isSlackBotConfigured", () => {

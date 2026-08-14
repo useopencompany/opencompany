@@ -7,7 +7,7 @@ afterEach(() => {
 
 describe("GET /.well-known/oauth-protected-resource", () => {
   it("returns stable OAuth protected resource metadata for path-suffixed requests", async () => {
-    vi.stubEnv("GOAT_AUTHKIT_DOMAIN", "https://example.authkit.app");
+    vi.stubEnv("OPENCOMPANY_AUTHKIT_DOMAIN", "https://example.authkit.app");
 
     const response = GET(
       new Request("https://goat.example.com/.well-known/oauth-protected-resource/mcp"),

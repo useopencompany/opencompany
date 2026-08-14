@@ -12,7 +12,7 @@ const meta = { apiVersion: "v1", protocolVersion: "1.0.0" };
 
 describe("legacy browser profile route adapters", () => {
   beforeEach(() => {
-    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
   });
 
   afterEach(() => {
@@ -257,7 +257,7 @@ describe("legacy browser profile route adapters", () => {
   });
 
   it("fails closed with 503 when the canonical API origin is not configured", async () => {
-    vi.stubEnv("GOAT_API_ORIGIN", "");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "");
     const response = await legacyListBrowserProfiles(
       legacyRequest("https://my.opencompany.chat/api/browser-profiles"),
     );

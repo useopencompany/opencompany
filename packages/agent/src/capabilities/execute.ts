@@ -44,12 +44,12 @@ const DEFAULT_POLL_INTERVAL_MS = 1_500;
 const ACTION_QUOTE_TIMEOUT_MS = 20_000;
 
 export function isManagedCapabilitiesKilled() {
-  return process.env.GOAT_MANAGED_CAPABILITIES_KILL_SWITCH === "true";
+  return process.env.OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH === "true";
 }
 
 export function isManagedCapabilityActionKilled(actionId: string) {
   return new Set(
-    (process.env.GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS ?? "")
+    (process.env.OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS ?? "")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),

@@ -133,7 +133,7 @@ export async function getAvailableHarnessTools(userWorkosId: string): Promise<Ta
     getGitHubIntegrationState(userWorkosId),
   ]);
   const tools: TaskToolName[] = ["exa_search"];
-  if (process.env.RUNNER_GOAT_BROWSER_ENABLED?.trim().toLowerCase() === "true") {
+  if (process.env.RUNNER_OPENCOMPANY_BROWSER_ENABLED?.trim().toLowerCase() === "true") {
     tools.push(...BROWSER_TOOLS);
   }
   if (state.gmail.connected) {

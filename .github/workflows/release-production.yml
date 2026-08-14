@@ -1,9 +1,7 @@
 name: Release Production
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  push:
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -32,17 +30,16 @@ permissions:
 jobs:
   release:
     name: Migrate and deploy production
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     environment: production
     env:
       INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || secrets.INFISICAL_ENV_SLUG || 'prod' }}
       INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
-      RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      RELEASE_SHA: ${{ github.sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           ref: ${{ env.RELEASE_SHA }}
           fetch-depth: 0
@@ -55,7 +52,7 @@ jobs:
 
       - name: Check automatic release is still current
         id: current-release
-        if: ${{ github.event_name == 'workflow_run' }}
+        if: ${{ github.event_name == 'push' }}
         run: |
           git fetch --no-tags --depth=1 origin main
           latest_sha="$(git rev-parse refs/remotes/origin/main)"
@@ -68,13 +65,13 @@ jobs:
           echo "Release $RELEASE_SHA is current."
 
       - name: Skip stale automatic release
-        if: ${{ github.event_name == 'workflow_run' && steps.current-release.outputs.should_release == 'false' }}
+        if: ${{ github.event_name == 'push' && steps.current-release.outputs.should_release == 'false' }}
         run: echo "This automatic release was superseded before setup, so no deployment work will run."
 
       - name: Resolve previous successful production release
         id: release-base
-        if: ${{ github.event_name == 'workflow_run' && steps.current-release.outputs.should_release == 'true' }}
-        uses: actions/github-script@v7
+        if: ${{ github.event_name == 'push' && steps.current-release.outputs.should_release == 'true' }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
             try {
@@ -118,7 +115,7 @@ jobs:
 
       - name: Setup Bun
         if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.2
 
@@ -151,7 +148,7 @@ jobs:
 
       - name: Fetch release secrets from Infisical
         if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
-        uses: Infisical/secrets-action@v1.0.16
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
@@ -166,7 +163,7 @@ jobs:
 
       - name: Fetch canonical Chat API secrets from Infisical
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true') && steps.release-scope.outputs.api == 'true' }}
-        uses: Infisical/secrets-action@v1.0.16
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
@@ -181,7 +178,7 @@ jobs:
 
       - name: Fetch runner secrets from Infisical
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true') && steps.release-scope.outputs.runner == 'true' }}
-        uses: Infisical/secrets-action@v1.0.16
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
@@ -196,7 +193,7 @@ jobs:
 
       - name: Re-check automatic release before production changes
         id: production-release
-        if: ${{ github.event_name == 'workflow_run' && steps.current-release.outputs.should_release == 'true' }}
+        if: ${{ github.event_name == 'push' && steps.current-release.outputs.should_release == 'true' }}
         run: |
           git fetch --no-tags --depth=1 origin main
           latest_sha="$(git rev-parse refs/remotes/origin/main)"
@@ -209,13 +206,13 @@ jobs:
           echo "Release $RELEASE_SHA is still current before production changes."
 
       - name: Skip stale production changes
-        if: ${{ github.event_name == 'workflow_run' && steps.production-release.outputs.should_release == 'false' }}
+        if: ${{ github.event_name == 'push' && steps.production-release.outputs.should_release == 'false' }}
         run: echo "This automatic release was superseded before migrations/deploy, so production was not changed."
 
       - name: Create GitHub deployment
         id: github-deployment
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
             const releaseSha = process.env.RELEASE_SHA;
@@ -244,8 +241,8 @@ jobs:
               description: `Production release ${shortSha} is in progress.`,
             };
 
-            if (process.env.PRODUCTION_GOAT_URL) {
-              status.environment_url = process.env.PRODUCTION_GOAT_URL;
+            if (process.env.PRODUCTION_OPENCOMPANY_URL) {
+              status.environment_url = process.env.PRODUCTION_OPENCOMPANY_URL;
             }
 
             await github.rest.repos.createDeploymentStatus(status);
@@ -261,7 +258,7 @@ jobs:
 
       - name: Re-check automatic release before deploy
         id: deploy-release
-        if: ${{ github.event_name == 'workflow_run' && steps.production-release.outputs.should_release == 'true' }}
+        if: ${{ github.event_name == 'push' && steps.production-release.outputs.should_release == 'true' }}
         run: |
           git fetch --no-tags --depth=1 origin main
           latest_sha="$(git rev-parse refs/remotes/origin/main)"
@@ -274,7 +271,7 @@ jobs:
           echo "Release $RELEASE_SHA is still current before deploy."
 
       - name: Skip stale deploy
-        if: ${{ github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'false' }}
+        if: ${{ github.event_name == 'push' && steps.deploy-release.outputs.should_release == 'false' }}
         run: echo "This automatic release was superseded after build, so the planned production deploys were skipped."
 
       - name: Trigger canonical Chat API deploy
@@ -292,15 +289,15 @@ jobs:
       - name: Map web production app env
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
         run: |
-          web_url="${PRODUCTION_GOAT_URL%/}"
+          web_url="${PRODUCTION_OPENCOMPANY_URL%/}"
           if [ -z "$web_url" ]; then
-            echo "PRODUCTION_GOAT_URL is required to deploy the web app."
+            echo "PRODUCTION_OPENCOMPANY_URL is required to deploy the web app."
             exit 1
           fi
 
           {
-            echo "GOAT_NEXT_PUBLIC_APP_URL=$web_url"
-            echo "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$web_url/auth/callback"
+            echo "OPENCOMPANY_NEXT_PUBLIC_APP_URL=$web_url"
+            echo "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$web_url/auth/callback"
           } >> "$GITHUB_ENV"
 
       - name: Check Vercel web project config
@@ -312,12 +309,12 @@ jobs:
           const { mkdirSync, writeFileSync } = require("node:fs");
 
           async function main() {
-            const projectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const projectId = process.env.OPENCOMPANY_VERCEL_PROJECT_ID;
             const teamId = process.env.VERCEL_ORG_ID;
             const token = process.env.VERCEL_TOKEN;
 
             if (!projectId || !teamId || !token) {
-              throw new Error("GOAT_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
+              throw new Error("OPENCOMPANY_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
             }
 
             const response = await fetch(
@@ -332,7 +329,7 @@ jobs:
             const project = await response.json();
 
             if (project.id !== projectId) {
-              throw new Error("Fetched Vercel project id does not match GOAT_VERCEL_PROJECT_ID.");
+              throw new Error("Fetched Vercel project id does not match OPENCOMPANY_VERCEL_PROJECT_ID.");
             }
 
             if (project.rootDirectory !== "apps/web") {
@@ -389,14 +386,14 @@ jobs:
             "WORKOS_API_KEY",
             "WORKOS_COOKIE_PASSWORD",
             "WORKOS_COOKIE_DOMAIN",
-            "GOAT_NEXT_PUBLIC_APP_URL",
-            "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
-            "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-            "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+            "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
+            "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+            "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
+            "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
-            "GOAT_API_ORIGIN",
-            "NEXT_PUBLIC_GOAT_API_ORIGIN",
+            "OPENCOMPANY_API_ORIGIN",
+            "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN",
             "CRON_SECRET",
             "BLOB_READ_WRITE_TOKEN",
           ];
@@ -446,12 +443,12 @@ jobs:
           }
 
           async function main() {
-            const webProjectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const webProjectId = process.env.OPENCOMPANY_VERCEL_PROJECT_ID;
             const teamId = process.env.VERCEL_ORG_ID;
             const token = process.env.VERCEL_TOKEN;
 
             if (!webProjectId || !teamId || !token) {
-              throw new Error("GOAT_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
+              throw new Error("OPENCOMPANY_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
             }
 
             const webEnv = await listProductionEnv(webProjectId, "web", teamId, token);
@@ -464,13 +461,13 @@ jobs:
               throw new Error(`Missing web Vercel production env keys: ${missing.join(", ")}`);
             }
 
-            const expectedWebOrigin = new URL(process.env.PRODUCTION_GOAT_URL).origin;
+            const expectedWebOrigin = new URL(process.env.PRODUCTION_OPENCOMPANY_URL).origin;
             const expectedApiOrigin = new URL(process.env.PRODUCTION_API_URL).origin;
             const expectedValues = new Map([
-              ["GOAT_NEXT_PUBLIC_APP_URL", expectedWebOrigin],
-              ["GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedWebOrigin}/auth/callback`],
-              ["GOAT_API_ORIGIN", expectedApiOrigin],
-              ["NEXT_PUBLIC_GOAT_API_ORIGIN", expectedApiOrigin],
+              ["OPENCOMPANY_NEXT_PUBLIC_APP_URL", expectedWebOrigin],
+              ["OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedWebOrigin}/auth/callback`],
+              ["OPENCOMPANY_API_ORIGIN", expectedApiOrigin],
+              ["NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN", expectedApiOrigin],
               ["WORKOS_COOKIE_DOMAIN", "opencompany.chat"],
             ]);
             const configuredWebUrls = await Promise.all(
@@ -498,7 +495,7 @@ jobs:
 
       - name: Pull Vercel web production env
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: VERCEL_PROJECT_ID="$GOAT_VERCEL_PROJECT_ID" bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+        run: VERCEL_PROJECT_ID="$OPENCOMPANY_VERCEL_PROJECT_ID" bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
 
       - name: Build web
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
@@ -510,12 +507,12 @@ jobs:
           # and local builds pass with larger effective limits. The runner has
           # 16GB, so give the build real headroom.
           NODE_OPTIONS: --max-old-space-size=6144
-        run: VERCEL_PROJECT_ID="$GOAT_VERCEL_PROJECT_ID" bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$GOAT_VERCEL_PROJECT_ID"
+        run: VERCEL_PROJECT_ID="$OPENCOMPANY_VERCEL_PROJECT_ID" bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$OPENCOMPANY_VERCEL_PROJECT_ID"
 
       - name: Deploy web
         id: deploy-web
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: node scripts/release-vercel-deploy.mjs --label web --project-env GOAT_VERCEL_PROJECT_ID
+        run: node scripts/release-vercel-deploy.mjs --label web --project-env OPENCOMPANY_VERCEL_PROJECT_ID
 
       - name: Check Vercel marketing project config
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
@@ -527,7 +524,7 @@ jobs:
 
           async function main() {
             const projectId = process.env.MARKETING_VERCEL_PROJECT_ID;
-            const webProjectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const webProjectId = process.env.OPENCOMPANY_VERCEL_PROJECT_ID;
             const teamId = process.env.VERCEL_ORG_ID;
             const token = process.env.VERCEL_TOKEN;
 
@@ -579,8 +576,8 @@ jobs:
                 .map((env) => env.key),
             );
             const requiredAnalyticsKeys = [
-              "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-              "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+              "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
+              "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
             ];
             const missingAnalyticsKeys = requiredAnalyticsKeys.filter(
               (key) => !productionKeys.has(key),
@@ -669,15 +666,15 @@ jobs:
         run: bun run release:render -- --wait "${{ steps.trigger-runner.outputs.deploy_id }}"
 
       - name: Smoke check release
-        if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
+        if: ${{ (github.event_name == 'push' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
         env:
-          EXPECTED_GOAT_RELEASE: ${{ steps.release-scope.outputs.web == 'true' && env.RELEASE_SHA || '' }}
+          EXPECTED_WEB_RELEASE: ${{ steps.release-scope.outputs.web == 'true' && env.RELEASE_SHA || '' }}
           EXPECTED_API_RELEASE: ${{ steps.release-scope.outputs.api == 'true' && env.RELEASE_SHA || '' }}
           EXPECTED_RUNNER_RELEASE: ${{ steps.release-scope.outputs.runner == 'true' && env.RELEASE_SHA || '' }}
-          SMOKE_GOAT: "true"
+          SMOKE_WEB: "true"
           SMOKE_API: "true"
           SMOKE_RUNNER: "true"
-          SMOKE_GOAT_ATTEMPTS: "12"
+          SMOKE_WEB_ATTEMPTS: "12"
           SMOKE_API_ATTEMPTS: "12"
           SMOKE_RUNNER_ATTEMPTS: "12"
           SMOKE_DELAY_MS: "10000"
@@ -685,7 +682,7 @@ jobs:
 
       - name: Finalize GitHub deployment
         if: ${{ always() && steps.github-deployment.outputs.deployment_id != '' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         env:
           DEPLOYMENT_ID: ${{ steps.github-deployment.outputs.deployment_id }}
           DEPLOY_RELEASE_SHOULD_RELEASE: ${{ steps.deploy-release.outputs.should_release }}
@@ -697,7 +694,7 @@ jobs:
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const succeeded = process.env.JOB_STATUS === "success";
             const skippedBeforeDeploy =
-              process.env.GITHUB_EVENT_NAME === "workflow_run" &&
+              process.env.GITHUB_EVENT_NAME === "push" &&
               process.env.DEPLOY_RELEASE_SHOULD_RELEASE === "false";
 
             const state = skippedBeforeDeploy
@@ -721,8 +718,8 @@ jobs:
               description,
             };
 
-            if (process.env.PRODUCTION_GOAT_URL) {
-              status.environment_url = process.env.PRODUCTION_GOAT_URL;
+            if (process.env.PRODUCTION_OPENCOMPANY_URL) {
+              status.environment_url = process.env.PRODUCTION_OPENCOMPANY_URL;
             }
 
             await github.rest.repos.createDeploymentStatus(status);

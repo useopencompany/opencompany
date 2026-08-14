@@ -45,7 +45,7 @@ export async function listHeadlessTaskSchedules(): Promise<TaskScheduleDto[]> {
 }
 
 async function serverAutomationClient() {
-  const origin = serverApiOrigin(process.env.GOAT_API_ORIGIN);
+  const origin = serverApiOrigin(process.env.OPENCOMPANY_API_ORIGIN);
   const incoming = await headers();
   const cookie = incoming.get("cookie");
   const authorization = incoming.get("authorization");

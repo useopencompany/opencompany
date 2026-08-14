@@ -85,7 +85,7 @@ function ingress(overrides: { role?: string; noWorkspaces?: boolean; authError?:
 describe("GitHub ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
     vi.stubEnv("GITHUB_INTEGRATION_APP_ID", "1234");
     vi.stubEnv("GITHUB_INTEGRATION_APP_PRIVATE_KEY", "key");
     vi.stubEnv("GITHUB_INTEGRATION_APP_SLUG", "goat-app");

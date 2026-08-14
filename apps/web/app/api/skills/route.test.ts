@@ -4,7 +4,7 @@ import { GET } from "./route";
 const meta = { apiVersion: "v1", protocolVersion: "1.0.0" };
 
 describe("/api/skills compatibility adapter", () => {
-  beforeEach(() => vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test"));
+  beforeEach(() => vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test"));
 
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -51,7 +51,7 @@ describe("/api/skills compatibility adapter", () => {
   });
 
   it("fails closed when the canonical API origin is unavailable", async () => {
-    vi.stubEnv("GOAT_API_ORIGIN", "");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "");
     const fetchMock = vi.spyOn(globalThis, "fetch");
 
     const response = await GET(request());

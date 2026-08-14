@@ -2,5 +2,5 @@
 
 [scripts]
 setup = "bun install && bun run mcp:configure"
-run = "PORT=${CONDUCTOR_PORT:-3000} OPENCOMPANY_NGROK_DISABLED=1 bun run dev:stream"
+run = "OPENCOMPANY_NGROK_DISABLED=1 bun run dev:stream"
 run_mode = "nonconcurrent"

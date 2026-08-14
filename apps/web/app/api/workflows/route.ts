@@ -108,7 +108,7 @@ export async function POST(request: Request) {
 }
 
 function compatibilityClient(request: Request) {
-  const origin = configuredApiOrigin(process.env.GOAT_API_ORIGIN);
+  const origin = configuredApiOrigin(process.env.OPENCOMPANY_API_ORIGIN);
   if (!origin) return null;
   const cookie = request.headers.get("cookie");
   const authorization = request.headers.get("authorization");

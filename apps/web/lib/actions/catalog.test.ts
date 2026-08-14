@@ -101,11 +101,11 @@ afterEach(() => {
 
 describe("isChatActionsKilled", () => {
   it("is off unless the env var is exactly true", () => {
-    vi.stubEnv("GOAT_CHAT_ACTIONS_KILL_SWITCH", "");
+    vi.stubEnv("OPENCOMPANY_CHAT_ACTIONS_KILL_SWITCH", "");
     expect(isChatActionsKilled()).toBe(false);
-    vi.stubEnv("GOAT_CHAT_ACTIONS_KILL_SWITCH", "1");
+    vi.stubEnv("OPENCOMPANY_CHAT_ACTIONS_KILL_SWITCH", "1");
     expect(isChatActionsKilled()).toBe(false);
-    vi.stubEnv("GOAT_CHAT_ACTIONS_KILL_SWITCH", "true");
+    vi.stubEnv("OPENCOMPANY_CHAT_ACTIONS_KILL_SWITCH", "true");
     expect(isChatActionsKilled()).toBe(true);
   });
 });
@@ -217,7 +217,7 @@ describe("resolveActionCatalog", () => {
 
   it("adds enabled managed sources to the same compact catalog", async () => {
     vi.stubEnv("MONID_API_KEY", "monid_test");
-    vi.stubEnv("GOAT_MANAGED_CAPABILITIES_KILL_SWITCH", "");
+    vi.stubEnv("OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH", "");
     mocks.resolveSlackActions.mockResolvedValue(null);
     mocks.resolveGmailActions.mockResolvedValue(null);
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
@@ -261,7 +261,7 @@ describe("resolveActionCatalog", () => {
       maxResultChars: 256_000,
     });
 
-    vi.stubEnv("GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS", "x.search_posts");
+    vi.stubEnv("OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS", "x.search_posts");
     const endpointDisabledCatalog = await resolveActionCatalog({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
@@ -277,7 +277,7 @@ describe("resolveActionCatalog", () => {
 
   it("removes managed sources behind the dedicated global kill switch", async () => {
     vi.stubEnv("MONID_API_KEY", "monid_test");
-    vi.stubEnv("GOAT_MANAGED_CAPABILITIES_KILL_SWITCH", "true");
+    vi.stubEnv("OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH", "true");
     mocks.resolveSlackActions.mockResolvedValue(providerCatalog("slack"));
     mocks.resolveGmailActions.mockResolvedValue(null);
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);

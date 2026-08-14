@@ -17,18 +17,18 @@ const groups = {
       "WORKOS_API_KEY",
       "WORKOS_COOKIE_PASSWORD",
       "WORKOS_COOKIE_DOMAIN",
-      "GOAT_NEXT_PUBLIC_APP_URL",
-      "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+      "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
+      "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
-      "GOAT_API_ORIGIN",
-      "NEXT_PUBLIC_GOAT_API_ORIGIN",
+      "OPENCOMPANY_API_ORIGIN",
+      "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN",
       "CRON_SECRET",
       // Cached clients may still mint private Brain-asset upload tokens through
       // the retained compatibility route.
       "BLOB_READ_WRITE_TOKEN",
-      "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-      "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+      "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
+      "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
     ],
     optional: [
       "RUNNER_INTERNAL_URL",
@@ -51,9 +51,9 @@ const groups = {
       "NEXT_PUBLIC_OBSERVABILITY_ENV",
       "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
       "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
-      "GOAT_OBSERVABILITY_ENABLED",
-      "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
-      "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+      "OPENCOMPANY_OBSERVABILITY_ENABLED",
+      "OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT",
+      "OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS",
     ],
   },
   api: {
@@ -64,11 +64,11 @@ const groups = {
       "WORKOS_API_KEY",
       "WORKOS_COOKIE_PASSWORD",
       "WORKOS_COOKIE_DOMAIN",
-      "GOAT_STRIPE_API_KEY",
+      "OPENCOMPANY_STRIPE_API_KEY",
       "CRON_SECRET",
       "API_BROWSER_ORIGINS",
-      "GOAT_AUTHKIT_DOMAIN",
-      "GOAT_API_OAUTH_AUDIENCE",
+      "OPENCOMPANY_AUTHKIT_DOMAIN",
+      "OPENCOMPANY_API_OAUTH_AUDIENCE",
       "VERCEL_AI_GATEWAY_API_KEY",
       "BLOB_READ_WRITE_TOKEN",
       "ELECTRIC_URL",
@@ -76,7 +76,7 @@ const groups = {
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
       // GitHub App OAuth + webhook ingress (#1203 4a1). The API redirects back
       // to the web origin, so it also needs the canonical app URL.
-      "GOAT_NEXT_PUBLIC_APP_URL",
+      "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
       "GITHUB_INTEGRATION_APP_ID",
       "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
       "GITHUB_INTEGRATION_APP_SLUG",
@@ -89,37 +89,37 @@ const groups = {
       "GOOGLE_OAUTH_CLIENT_SECRET",
       "GOOGLE_INTEGRATION_STATE_SECRET",
       // Slack ingestion + Linear ingest OAuth/webhook ingress (#1203 4b1).
-      "GOAT_SLACK_CLIENT_ID",
-      "GOAT_SLACK_CLIENT_SECRET",
-      "GOAT_SLACK_SIGNING_SECRET",
-      "GOAT_SLACK_STATE_SECRET",
-      "GOAT_LINEAR_CLIENT_ID",
-      "GOAT_LINEAR_CLIENT_SECRET",
-      "GOAT_LINEAR_WEBHOOK_SECRET",
-      "GOAT_LINEAR_STATE_SECRET",
+      "OPENCOMPANY_SLACK_CLIENT_ID",
+      "OPENCOMPANY_SLACK_CLIENT_SECRET",
+      "OPENCOMPANY_SLACK_SIGNING_SECRET",
+      "OPENCOMPANY_SLACK_STATE_SECRET",
+      "OPENCOMPANY_LINEAR_CLIENT_ID",
+      "OPENCOMPANY_LINEAR_CLIENT_SECRET",
+      "OPENCOMPANY_LINEAR_WEBHOOK_SECRET",
+      "OPENCOMPANY_LINEAR_STATE_SECRET",
       // Remote-MCP, X account, and Slack bot OAuth/webhook ingress.
       "MCP_OAUTH_STATE_SECRET",
-      "GOAT_X_CLIENT_ID",
-      "GOAT_X_CLIENT_SECRET",
-      "GOAT_X_STATE_SECRET",
-      "GOAT_SLACK_BOT_CLIENT_ID",
-      "GOAT_SLACK_BOT_CLIENT_SECRET",
-      "GOAT_SLACK_BOT_SIGNING_SECRET",
-      "GOAT_SLACK_BOT_STATE_SECRET",
+      "OPENCOMPANY_X_CLIENT_ID",
+      "OPENCOMPANY_X_CLIENT_SECRET",
+      "OPENCOMPANY_X_STATE_SECRET",
+      "OPENCOMPANY_SLACK_BOT_CLIENT_ID",
+      "OPENCOMPANY_SLACK_BOT_CLIENT_SECRET",
+      "OPENCOMPANY_SLACK_BOT_SIGNING_SECRET",
+      "OPENCOMPANY_SLACK_BOT_STATE_SECRET",
       // Engine auth control calls use the runner's internal transport. The
       // public URL is the guaranteed fallback; the internal URL is optional.
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
       // Billing/usage and Stripe ingress.
-      "GOAT_STRIPE_WEBHOOK_SECRET",
-      "GOAT_STRIPE_CHECKOUT_ENABLED",
+      "OPENCOMPANY_STRIPE_WEBHOOK_SECRET",
+      "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
       "MONID_API_KEY",
     ],
     // Browser profiles are feature-flag gated: the Browserbase credentials are
-    // required only when GOAT_BROWSER_PROFILES_ENABLED is "true" in this env.
+    // required only when OPENCOMPANY_BROWSER_PROFILES_ENABLED is "true" in this env.
     conditional: [
       {
-        when: "GOAT_BROWSER_PROFILES_ENABLED",
+        when: "OPENCOMPANY_BROWSER_PROFILES_ENABLED",
         equals: "true",
         require: ["BROWSERBASE_API_KEY"],
       },
@@ -129,23 +129,23 @@ const groups = {
       // HubSpot app is unprovisioned in production; Attio and Jamie verify
       // against per-integration credentials and need no env. Promote these to
       // required when the HubSpot app is set up.
-      "GOAT_HUBSPOT_CLIENT_ID",
-      "GOAT_HUBSPOT_CLIENT_SECRET",
-      "GOAT_HUBSPOT_STATE_SECRET",
+      "OPENCOMPANY_HUBSPOT_CLIENT_ID",
+      "OPENCOMPANY_HUBSPOT_CLIENT_SECRET",
+      "OPENCOMPANY_HUBSPOT_STATE_SECRET",
       "API_DB_POOL_MAX",
       "WORKOS_COOKIE_NAME",
-      "GOAT_DEFAULT_CHAT_MODEL",
-      "GOAT_BROWSER_PROFILES_ENABLED",
-      "GOAT_BROWSER_PROFILES_KILL_SWITCH",
+      "OPENCOMPANY_DEFAULT_CHAT_MODEL",
+      "OPENCOMPANY_BROWSER_PROFILES_ENABLED",
+      "OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH",
       "BROWSERBASE_API_KEY",
       "BROWSERBASE_PROJECT_ID",
       "APIFY_API_TOKEN",
-      "RUNNER_GOAT_BROWSER_ENABLED",
-      "GOAT_BRAIN_GATEWAY_BASE_URL",
-      "GOAT_BRAIN_EMBEDDING_MODEL",
-      "GOAT_BRAIN_VECTOR_MAX_DISTANCE",
-      "GOAT_MANAGED_CAPABILITIES_KILL_SWITCH",
-      "GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS",
+      "RUNNER_OPENCOMPANY_BROWSER_ENABLED",
+      "OPENCOMPANY_BRAIN_GATEWAY_BASE_URL",
+      "OPENCOMPANY_BRAIN_EMBEDDING_MODEL",
+      "OPENCOMPANY_BRAIN_VECTOR_MAX_DISTANCE",
+      "OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH",
+      "OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS",
       "ELECTRIC_SOURCE_ID",
       "ELECTRIC_SOURCE_SECRET",
       "ELECTRIC_SECRET",
@@ -155,11 +155,11 @@ const groups = {
       "OBSERVABILITY_RELEASE",
       "OBSERVABILITY_LOG_LEVEL",
       "OBSERVABILITY_TIMING",
-      "GOAT_OBSERVABILITY_ENABLED",
-      "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
-      "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
-      "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-      "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+      "OPENCOMPANY_OBSERVABILITY_ENABLED",
+      "OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT",
+      "OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS",
+      "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
+      "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
       // Retained billing/ingestion compatibility analytics still emit to the
       // generic PostHog project from the API composition root.
       "NEXT_PUBLIC_POSTHOG_TOKEN",
@@ -172,17 +172,17 @@ const groups = {
       // Optional (mirrors the retired web behavior): without these, feedback
       // submission fails with a clear error and nothing else degrades.
       "LINEAR_API_KEY",
-      "GOAT_FEEDBACK_LINEAR_TEAM_ID",
-      "GOAT_FEEDBACK_LINEAR_LABELS",
-      "GOAT_FEEDBACK_LINEAR_PROJECT_ID",
+      "OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID",
+      "OPENCOMPANY_FEEDBACK_LINEAR_LABELS",
+      "OPENCOMPANY_FEEDBACK_LINEAR_PROJECT_ID",
       // iMessage pairing (#1203 5a2) moved behind /v1: the API sends the
       // verification text. Optional (mirrors the web group's classification):
       // without a provider, pairing fails with a clear "not configured" error.
       "LINQ_API_TOKEN",
       "LINQ_FROM_NUMBER",
       "LINQ_API_BASE_URL",
-      "GOAT_IMESSAGE_PROVIDER",
-      "GOAT_IMESSAGE_KILL_SWITCH",
+      "OPENCOMPANY_IMESSAGE_PROVIDER",
+      "OPENCOMPANY_IMESSAGE_KILL_SWITCH",
       // Optional internal-network override for runner control calls.
       "RUNNER_INTERNAL_URL",
     ],
@@ -192,7 +192,7 @@ const groups = {
     required: [
       "DATABASE_URL",
       "RUNNER_INTERNAL_TOKEN",
-      "GOAT_NEXT_PUBLIC_APP_URL",
+      "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
       "RUNNER_STREAM_TOKEN_SECRET",
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
       "RUNNER_ALLOWED_ORIGINS",
@@ -204,13 +204,13 @@ const groups = {
       "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
       "GOOGLE_OAUTH_CLIENT_ID",
       "GOOGLE_OAUTH_CLIENT_SECRET",
-      "GOAT_X_CLIENT_ID",
-      "GOAT_X_CLIENT_SECRET",
+      "OPENCOMPANY_X_CLIENT_ID",
+      "OPENCOMPANY_X_CLIENT_SECRET",
       "MONID_API_KEY",
-      "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-      "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+      "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
+      "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
       "REDIS_URL",
-      "RUNNER_GOAT_TASK_WORKER_ENABLED",
+      "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
     ],
     optional: [
       "EXA_API_KEY",
@@ -224,27 +224,27 @@ const groups = {
       "RUNNER_CODEX_MODEL",
       "RUNNER_CODEX_TIMEOUT_MS",
       "RUNNER_CODEX_API_KEY_FALLBACK_ENABLED",
-      "RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS",
-      "RUNNER_GOAT_CODEX_CHAT_LEASE_TTL_MS",
-      "RUNNER_GOAT_BROWSER_ENABLED",
+      "RUNNER_OPENCOMPANY_CODEX_CHAT_IDLE_TIMEOUT_MS",
+      "RUNNER_OPENCOMPANY_CODEX_CHAT_LEASE_TTL_MS",
+      "RUNNER_OPENCOMPANY_BROWSER_ENABLED",
       "RUNNER_INSTANCE_ID",
       "RUNNER_PREVIEW_BASE_DOMAIN",
       "RUNNER_PREVIEW_PROTOCOL",
-      "GOAT_BRAIN_GATEWAY_BASE_URL",
-      "GOAT_BRAIN_EMBEDDING_MODEL",
-      "GOAT_BRAIN_VECTOR_MAX_DISTANCE",
-      "GOAT_CHAT_ACTIONS_KILL_SWITCH",
-      "GOAT_CHAT_SANDBOX_IMAGE",
-      "GOAT_MANAGED_CAPABILITIES_KILL_SWITCH",
-      "GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS",
-      "GOAT_REVOLUT_BUSINESS_WORKSPACE_ID",
-      "GOAT_REVOLUT_BUSINESS_API_TOKEN",
-      "GOAT_REVOLUT_BUSINESS_ACCOUNT_LABEL",
-      "GOAT_REVOLUT_BUSINESS_API_BASE_URL",
-      "GOAT_HUBSPOT_CLIENT_ID",
-      "GOAT_HUBSPOT_CLIENT_SECRET",
-      "GOAT_DICTATION_REALTIME_MODEL",
-      "GOAT_DICTATION_FINAL_MODEL",
+      "OPENCOMPANY_BRAIN_GATEWAY_BASE_URL",
+      "OPENCOMPANY_BRAIN_EMBEDDING_MODEL",
+      "OPENCOMPANY_BRAIN_VECTOR_MAX_DISTANCE",
+      "OPENCOMPANY_CHAT_ACTIONS_KILL_SWITCH",
+      "OPENCOMPANY_CHAT_SANDBOX_IMAGE",
+      "OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH",
+      "OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS",
+      "OPENCOMPANY_REVOLUT_BUSINESS_WORKSPACE_ID",
+      "OPENCOMPANY_REVOLUT_BUSINESS_API_TOKEN",
+      "OPENCOMPANY_REVOLUT_BUSINESS_ACCOUNT_LABEL",
+      "OPENCOMPANY_REVOLUT_BUSINESS_API_BASE_URL",
+      "OPENCOMPANY_HUBSPOT_CLIENT_ID",
+      "OPENCOMPANY_HUBSPOT_CLIENT_SECRET",
+      "OPENCOMPANY_DICTATION_REALTIME_MODEL",
+      "OPENCOMPANY_DICTATION_FINAL_MODEL",
       "OPENAI_API_KEY",
       "BETTER_STACK_ERRORS_DSN",
       "OBSERVABILITY_ENABLED",
@@ -256,15 +256,15 @@ const groups = {
       "BRAINTRUST_API_KEY",
       "BRAINTRUST_PROJECT_ID",
       "BRAINTRUST_PROJECT_NAME",
-      "GOAT_OBSERVABILITY_ENABLED",
-      "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
-      "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+      "OPENCOMPANY_OBSERVABILITY_ENABLED",
+      "OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT",
+      "OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS",
       "LINQ_API_TOKEN",
       "LINQ_FROM_NUMBER",
       "LINQ_API_BASE_URL",
-      "GOAT_IMESSAGE_PROVIDER",
-      "GOAT_IMESSAGE_KILL_SWITCH",
-      "GOAT_IMESSAGE_DAILY_CAP",
+      "OPENCOMPANY_IMESSAGE_PROVIDER",
+      "OPENCOMPANY_IMESSAGE_KILL_SWITCH",
+      "OPENCOMPANY_IMESSAGE_DAILY_CAP",
       "LATITUDE_API_KEY",
       "LATITUDE_PROJECT_SLUG",
       "LATITUDE_SERVICE_NAME",
@@ -280,12 +280,12 @@ const groups = {
       "PRODUCTION_DATABASE_URL",
       "VERCEL_TOKEN",
       "VERCEL_ORG_ID",
-      "GOAT_VERCEL_PROJECT_ID",
+      "OPENCOMPANY_VERCEL_PROJECT_ID",
       "MARKETING_VERCEL_PROJECT_ID",
       "RENDER_SERVICE_ID",
       "RENDER_API_SERVICE_ID",
       "RENDER_API_KEY",
-      "PRODUCTION_GOAT_URL",
+      "PRODUCTION_OPENCOMPANY_URL",
       "PRODUCTION_API_URL",
       "RUNNER_PUBLIC_URL",
     ],
@@ -300,7 +300,7 @@ const groups = {
 // build and runtime. Presence in project metadata is therefore the truth for
 // "is it set" — readability is not required for the deploy to work.
 const VERCEL_PROJECT_BY_GROUP = {
-  web: process.env.GOAT_VERCEL_PROJECT_ID,
+  web: process.env.OPENCOMPANY_VERCEL_PROJECT_ID,
 };
 
 async function vercelProductionEnvKeys(projectId) {
@@ -386,9 +386,9 @@ if (selected.includes("runner")) {
       "\nLATITUDE_API_KEY and LATITUDE_PROJECT_SLUG must either both be set or both be unset.",
     );
   }
-  if (process.env.RUNNER_GOAT_TASK_WORKER_ENABLED?.trim().toLowerCase() !== "true") {
+  if (process.env.RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED?.trim().toLowerCase() !== "true") {
     failed = true;
-    console.log("\nRUNNER_GOAT_TASK_WORKER_ENABLED must be true in the production runner.");
+    console.log("\nRUNNER_OPENCOMPANY_TASK_WORKER_ENABLED must be true in the production runner.");
   }
 }
 
@@ -404,7 +404,7 @@ if (!isUnset(githubIntegrationStateSecret) && githubIntegrationStateSecret.lengt
   console.log("\nGITHUB_INTEGRATION_STATE_SECRET must be at least 32 characters.");
 }
 
-const webRedirectUri = process.env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI;
+const webRedirectUri = process.env.OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI;
 if (
   webRedirectUri &&
   !webRedirectUri.startsWith("https://") &&
@@ -412,16 +412,16 @@ if (
 ) {
   failed = true;
   console.log(
-    "\nGOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI should be https:// outside local development.",
+    "\nOPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI should be https:// outside local development.",
   );
 }
 
-if (selected.includes("web") && !isUnset(process.env.NEXT_PUBLIC_GOAT_API_ORIGIN)) {
-  const configuredApiOrigin = httpOrigin(process.env.NEXT_PUBLIC_GOAT_API_ORIGIN);
+if (selected.includes("web") && !isUnset(process.env.NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN)) {
+  const configuredApiOrigin = httpOrigin(process.env.NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN);
   const expectedApiOrigin = httpOrigin(process.env.PRODUCTION_API_URL);
   if (!configuredApiOrigin || (expectedApiOrigin && configuredApiOrigin !== expectedApiOrigin)) {
     failed = true;
-    console.log("\nNEXT_PUBLIC_GOAT_API_ORIGIN must match the production API HTTPS origin.");
+    console.log("\nNEXT_PUBLIC_OPENCOMPANY_API_ORIGIN must match the production API HTTPS origin.");
   }
 }
 
@@ -429,7 +429,7 @@ if (selected.includes("api") && !isUnset(process.env.API_BROWSER_ORIGINS)) {
   const browserOrigins = process.env.API_BROWSER_ORIGINS.split(",").map((value) =>
     httpOrigin(value),
   );
-  const expectedWebOrigin = httpOrigin(process.env.PRODUCTION_GOAT_URL);
+  const expectedWebOrigin = httpOrigin(process.env.PRODUCTION_OPENCOMPANY_URL);
   if (
     browserOrigins.some((origin) => !origin) ||
     (expectedWebOrigin && !browserOrigins.includes(expectedWebOrigin))
@@ -441,7 +441,7 @@ if (selected.includes("api") && !isUnset(process.env.API_BROWSER_ORIGINS)) {
 
 if (selected.some((name) => name === "web" || name === "api")) {
   const cookieDomain = process.env.WORKOS_COOKIE_DOMAIN?.trim().replace(/^\./u, "");
-  const webHostname = hostname(process.env.PRODUCTION_GOAT_URL);
+  const webHostname = hostname(process.env.PRODUCTION_OPENCOMPANY_URL);
   const apiHostname = hostname(process.env.PRODUCTION_API_URL);
   if (
     cookieDomain &&

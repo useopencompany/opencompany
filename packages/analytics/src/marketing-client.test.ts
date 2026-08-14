@@ -17,8 +17,8 @@ describe("marketing analytics", () => {
   });
 
   it("captures page traffic and only explicit conversion events", async () => {
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
-    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+    vi.stubEnv("NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST", "https://eu.i.posthog.com");
     const { captureMarketingEvent, initMarketingAnalytics } = await import("./marketing-client");
 
     initMarketingAnalytics();

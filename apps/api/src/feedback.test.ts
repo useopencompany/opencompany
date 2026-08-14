@@ -72,15 +72,15 @@ function routeLinear(overrides: { issue?: unknown } = {}) {
 describe("feedback service", () => {
   beforeEach(() => {
     process.env.LINEAR_API_KEY = "lin_api_test";
-    process.env.GOAT_FEEDBACK_LINEAR_TEAM_ID = "team_1";
+    process.env.OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID = "team_1";
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     delete process.env.LINEAR_API_KEY;
-    delete process.env.GOAT_FEEDBACK_LINEAR_TEAM_ID;
-    delete process.env.GOAT_FEEDBACK_LINEAR_PROJECT_ID;
-    delete process.env.GOAT_FEEDBACK_LINEAR_LABELS;
+    delete process.env.OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID;
+    delete process.env.OPENCOMPANY_FEEDBACK_LINEAR_PROJECT_ID;
+    delete process.env.OPENCOMPANY_FEEDBACK_LINEAR_LABELS;
   });
 
   it("creates a triaged Linear issue with the actor's identity in the description", async () => {

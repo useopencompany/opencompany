@@ -69,12 +69,12 @@ function mintState(overrides: Record<string, unknown> = {}) {
 describe("Slack bot ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
-    vi.stubEnv("GOAT_SLACK_BOT_CLIENT_ID", "slack-bot-client");
-    vi.stubEnv("GOAT_SLACK_BOT_CLIENT_SECRET", "slack-bot-secret");
-    vi.stubEnv("GOAT_SLACK_BOT_SIGNING_SECRET", "slack-bot-signing");
-    vi.stubEnv("GOAT_SLACK_BOT_STATE_SECRET", "slack-bot-state-secret");
+    vi.stubEnv("OPENCOMPANY_SLACK_BOT_CLIENT_ID", "slack-bot-client");
+    vi.stubEnv("OPENCOMPANY_SLACK_BOT_CLIENT_SECRET", "slack-bot-secret");
+    vi.stubEnv("OPENCOMPANY_SLACK_BOT_SIGNING_SECRET", "slack-bot-signing");
+    vi.stubEnv("OPENCOMPANY_SLACK_BOT_STATE_SECRET", "slack-bot-state-secret");
     vi.mocked(claimSlackBotEvent).mockResolvedValue({
       eventId: "Ev123",
       claimId: "gsbec_claim",

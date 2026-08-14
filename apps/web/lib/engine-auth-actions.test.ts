@@ -60,7 +60,7 @@ function errorEnvelope(message: string, status: number) {
 describe("engine auth command adapters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
     vi.mocked(headers).mockResolvedValue(
       new Headers({ Cookie: "wos-session=sealed", Origin: "https://app.example.test" }) as never,
     );

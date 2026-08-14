@@ -136,7 +136,7 @@ async function serverImportClient() {
     if (browserOrigin) forwarded.set("Origin", browserOrigin);
     return globalThis.fetch(input, { ...init, headers: forwarded, cache: "no-store" });
   };
-  return createApiClient(apiOrigin(process.env.GOAT_API_ORIGIN), {
+  return createApiClient(apiOrigin(process.env.OPENCOMPANY_API_ORIGIN), {
     fetch: fetchWithActor,
   });
 }

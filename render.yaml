@@ -27,11 +27,11 @@ services:
         sync: false
       - key: WORKOS_COOKIE_DOMAIN
         sync: false
-      - key: GOAT_AUTHKIT_DOMAIN
+      - key: OPENCOMPANY_AUTHKIT_DOMAIN
         sync: false
-      - key: GOAT_API_OAUTH_AUDIENCE
+      - key: OPENCOMPANY_API_OAUTH_AUDIENCE
         sync: false
-      - key: GOAT_DEFAULT_CHAT_MODEL
+      - key: OPENCOMPANY_DEFAULT_CHAT_MODEL
         sync: false
       # Brain source option listing decrypts stored provider credentials in the API since the
       # #1214 cutover, so the API runtime needs the same key as web and runner.
@@ -43,15 +43,15 @@ services:
       # GitHub App OAuth + webhook ingress moved to the API in the #1203 4a1
       # cutover. Redirects and install/callback URLs stay on the web origin,
       # which is why the API also needs the canonical app URL.
-      - key: GOAT_NEXT_PUBLIC_APP_URL
+      - key: OPENCOMPANY_NEXT_PUBLIC_APP_URL
         sync: false
       # Billing/usage commands and read models, the Stripe webhook, and the
       # hourly reconcile handler moved to the API in the #1203 5b1 cutover.
-      - key: GOAT_STRIPE_API_KEY
+      - key: OPENCOMPANY_STRIPE_API_KEY
         sync: false
-      - key: GOAT_STRIPE_WEBHOOK_SECRET
+      - key: OPENCOMPANY_STRIPE_WEBHOOK_SECRET
         sync: false
-      - key: GOAT_STRIPE_CHECKOUT_ENABLED
+      - key: OPENCOMPANY_STRIPE_CHECKOUT_ENABLED
         sync: false
       # Shared with the web cron/unsubscribe relays. It authenticates only the
       # API's internal onboarding-email persistence endpoints.
@@ -83,48 +83,48 @@ services:
         sync: false
       # Slack ingestion + Linear ingest OAuth/webhook ingress moved to the API
       # in the #1203 4b1 cutover.
-      - key: GOAT_SLACK_CLIENT_ID
+      - key: OPENCOMPANY_SLACK_CLIENT_ID
         sync: false
-      - key: GOAT_SLACK_CLIENT_SECRET
+      - key: OPENCOMPANY_SLACK_CLIENT_SECRET
         sync: false
-      - key: GOAT_SLACK_SIGNING_SECRET
+      - key: OPENCOMPANY_SLACK_SIGNING_SECRET
         sync: false
-      - key: GOAT_SLACK_STATE_SECRET
+      - key: OPENCOMPANY_SLACK_STATE_SECRET
         sync: false
-      - key: GOAT_LINEAR_CLIENT_ID
+      - key: OPENCOMPANY_LINEAR_CLIENT_ID
         sync: false
-      - key: GOAT_LINEAR_CLIENT_SECRET
+      - key: OPENCOMPANY_LINEAR_CLIENT_SECRET
         sync: false
-      - key: GOAT_LINEAR_WEBHOOK_SECRET
+      - key: OPENCOMPANY_LINEAR_WEBHOOK_SECRET
         sync: false
-      - key: GOAT_LINEAR_STATE_SECRET
+      - key: OPENCOMPANY_LINEAR_STATE_SECRET
         sync: false
       # HubSpot OAuth + webhook ingress moved to the API in the #1203 4c
       # cutover. Attio and Jamie webhooks moved too but verify against
       # per-integration credentials, so they need no env.
-      - key: GOAT_HUBSPOT_CLIENT_ID
+      - key: OPENCOMPANY_HUBSPOT_CLIENT_ID
         sync: false
-      - key: GOAT_HUBSPOT_CLIENT_SECRET
+      - key: OPENCOMPANY_HUBSPOT_CLIENT_SECRET
         sync: false
-      - key: GOAT_HUBSPOT_STATE_SECRET
+      - key: OPENCOMPANY_HUBSPOT_STATE_SECRET
         sync: false
       # #1203 4d1 cutover: remote-MCP (Linear/PostHog/Neon/Latitude), X account,
       # and Slack answer-bot OAuth/webhook ingress moved to the API.
       - key: MCP_OAUTH_STATE_SECRET
         sync: false
-      - key: GOAT_X_CLIENT_ID
+      - key: OPENCOMPANY_X_CLIENT_ID
         sync: false
-      - key: GOAT_X_CLIENT_SECRET
+      - key: OPENCOMPANY_X_CLIENT_SECRET
         sync: false
-      - key: GOAT_X_STATE_SECRET
+      - key: OPENCOMPANY_X_STATE_SECRET
         sync: false
-      - key: GOAT_SLACK_BOT_CLIENT_ID
+      - key: OPENCOMPANY_SLACK_BOT_CLIENT_ID
         sync: false
-      - key: GOAT_SLACK_BOT_CLIENT_SECRET
+      - key: OPENCOMPANY_SLACK_BOT_CLIENT_SECRET
         sync: false
-      - key: GOAT_SLACK_BOT_SIGNING_SECRET
+      - key: OPENCOMPANY_SLACK_BOT_SIGNING_SECRET
         sync: false
-      - key: GOAT_SLACK_BOT_STATE_SECRET
+      - key: OPENCOMPANY_SLACK_BOT_STATE_SECRET
         sync: false
       # Feedback submission moved behind POST /v1/feedback in the #1203 5a1
       # cutover: the API dispatches sidebar feedback to Linear. Optional — when
@@ -132,16 +132,16 @@ services:
       # degrades.
       - key: LINEAR_API_KEY
         sync: false
-      - key: GOAT_FEEDBACK_LINEAR_TEAM_ID
+      - key: OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID
         sync: false
-      - key: GOAT_FEEDBACK_LINEAR_LABELS
+      - key: OPENCOMPANY_FEEDBACK_LINEAR_LABELS
         sync: false
-      - key: GOAT_FEEDBACK_LINEAR_PROJECT_ID
+      - key: OPENCOMPANY_FEEDBACK_LINEAR_PROJECT_ID
         sync: false
       # Server-side integration analytics (fire-and-forget; safe when unset).
-      - key: NEXT_PUBLIC_GOAT_POSTHOG_TOKEN
+      - key: NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN
         sync: false
-      - key: NEXT_PUBLIC_GOAT_POSTHOG_HOST
+      - key: NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST
         sync: false
       # iMessage pairing moved behind /v1 in the #1203 5a2 cutover: the API
       # sends the verification text through the Linq (or log) provider.
@@ -153,9 +153,9 @@ services:
         sync: false
       - key: LINQ_API_BASE_URL
         sync: false
-      - key: GOAT_IMESSAGE_PROVIDER
+      - key: OPENCOMPANY_IMESSAGE_PROVIDER
         sync: false
-      - key: GOAT_IMESSAGE_KILL_SWITCH
+      - key: OPENCOMPANY_IMESSAGE_KILL_SWITCH
         sync: false
       # Engine auth (Codex device flow, Infisical browser login) moved behind
       # /v1 in the #1203 5a3 cutover: the API now makes the sanctioned control
@@ -170,10 +170,10 @@ services:
         sync: false
       # Browser profiles moved behind /v1 in the #1203 3e cutover. The feature is
       # flag-gated; the Browserbase credentials are only exercised when
-      # GOAT_BROWSER_PROFILES_ENABLED is "true".
-      - key: GOAT_BROWSER_PROFILES_ENABLED
+      # OPENCOMPANY_BROWSER_PROFILES_ENABLED is "true".
+      - key: OPENCOMPANY_BROWSER_PROFILES_ENABLED
         sync: false
-      - key: GOAT_BROWSER_PROFILES_KILL_SWITCH
+      - key: OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH
         sync: false
       - key: BROWSERBASE_API_KEY
         sync: false
@@ -183,18 +183,18 @@ services:
       # optional and must match the runner when their capabilities are enabled.
       - key: APIFY_API_TOKEN
         sync: false
-      - key: RUNNER_GOAT_BROWSER_ENABLED
+      - key: RUNNER_OPENCOMPANY_BROWSER_ENABLED
         sync: false
-      - key: GOAT_MANAGED_CAPABILITIES_KILL_SWITCH
+      - key: OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH
         sync: false
-      - key: GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS
+      - key: OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS
         sync: false
       # Optional Brain retrieval/model tuning; defaults are safe when unset.
-      - key: GOAT_BRAIN_GATEWAY_BASE_URL
+      - key: OPENCOMPANY_BRAIN_GATEWAY_BASE_URL
         sync: false
-      - key: GOAT_BRAIN_EMBEDDING_MODEL
+      - key: OPENCOMPANY_BRAIN_EMBEDDING_MODEL
         sync: false
-      - key: GOAT_BRAIN_VECTOR_MAX_DISTANCE
+      - key: OPENCOMPANY_BRAIN_VECTOR_MAX_DISTANCE
         sync: false
       - key: BLOB_READ_WRITE_TOKEN
         sync: false
@@ -210,11 +210,11 @@ services:
         sync: false
       - key: REDIS_URL
         sync: false
-      - key: GOAT_OBSERVABILITY_ENABLED
+      - key: OPENCOMPANY_OBSERVABILITY_ENABLED
         sync: false
-      - key: GOAT_OTEL_EXPORTER_OTLP_ENDPOINT
+      - key: OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT
         sync: false
-      - key: GOAT_OTEL_EXPORTER_OTLP_HEADERS
+      - key: OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS
         sync: false
       - key: OBSERVABILITY_ENABLED
         sync: false
@@ -276,11 +276,11 @@ services:
         sync: false
       # This service is the production execution composition root. The release
       # preflight requires the worker gate to be explicitly enabled.
-      - key: RUNNER_GOAT_TASK_WORKER_ENABLED
+      - key: RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED
         sync: false
-      - key: NEXT_PUBLIC_GOAT_POSTHOG_TOKEN
+      - key: NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN
         sync: false
-      - key: NEXT_PUBLIC_GOAT_POSTHOG_HOST
+      - key: NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST
         sync: false
       # Retained ingestion analytics still emit to the generic PostHog project.
       - key: NEXT_PUBLIC_POSTHOG_TOKEN
@@ -289,7 +289,7 @@ services:
         sync: false
       # Canonical opencompany origin used when shared integrations construct web callback URLs.
       # The origin is not an execution transport and is never injected into E2B.
-      - key: GOAT_NEXT_PUBLIC_APP_URL
+      - key: OPENCOMPANY_NEXT_PUBLIC_APP_URL
         sync: false
       # Claude MCP uses Render's automatic RENDER_EXTERNAL_URL. RUNNER_PUBLIC_URL remains an
       # explicit override for non-Render deployments and local development, so it is not synced.
@@ -311,11 +311,11 @@ services:
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
       # Optional opencompany OpenTelemetry export to SigNoz. Populated from Infisical prod `/runner`.
-      - key: GOAT_OBSERVABILITY_ENABLED
+      - key: OPENCOMPANY_OBSERVABILITY_ENABLED
         sync: false
-      - key: GOAT_OTEL_EXPORTER_OTLP_ENDPOINT
+      - key: OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT
         sync: false
-      - key: GOAT_OTEL_EXPORTER_OTLP_HEADERS
+      - key: OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS
         sync: false
       # Server-side upstream credential for the LLM broker's `openai` provider. Use a
       # budget-capped OpenAI project key.
@@ -346,14 +346,14 @@ services:
       - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
       # X OAuth client, used by the runner to refresh access tokens before posting.
-      - key: GOAT_X_CLIENT_ID
+      - key: OPENCOMPANY_X_CLIENT_ID
         sync: false
-      - key: GOAT_X_CLIENT_SECRET
+      - key: OPENCOMPANY_X_CLIENT_SECRET
         sync: false
       # HubSpot snapshots refresh short-lived OAuth tokens in the runner.
-      - key: GOAT_HUBSPOT_CLIENT_ID
+      - key: OPENCOMPANY_HUBSPOT_CLIENT_ID
         sync: false
-      - key: GOAT_HUBSPOT_CLIENT_SECRET
+      - key: OPENCOMPANY_HUBSPOT_CLIENT_SECRET
         sync: false
       # Optional iMessage delivery through Linq.
       - key: LINQ_API_TOKEN
@@ -362,14 +362,14 @@ services:
         sync: false
       - key: LINQ_API_BASE_URL
         sync: false
-      - key: GOAT_IMESSAGE_PROVIDER
+      - key: OPENCOMPANY_IMESSAGE_PROVIDER
         sync: false
-      - key: GOAT_IMESSAGE_KILL_SWITCH
+      - key: OPENCOMPANY_IMESSAGE_KILL_SWITCH
         sync: false
-      - key: GOAT_IMESSAGE_DAILY_CAP
+      - key: OPENCOMPANY_IMESSAGE_DAILY_CAP
         sync: false
       # Optional opencompany rendered-browser task tools.
-      - key: RUNNER_GOAT_BROWSER_ENABLED
+      - key: RUNNER_OPENCOMPANY_BROWSER_ENABLED
         sync: false
       - key: OPENCOMPANY_CODEX_E2B_TEMPLATE
         sync: false
@@ -379,39 +379,39 @@ services:
         sync: false
       - key: RUNNER_CODEX_API_KEY_FALLBACK_ENABLED
         sync: false
-      - key: RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS
+      - key: RUNNER_OPENCOMPANY_CODEX_CHAT_IDLE_TIMEOUT_MS
         sync: false
-      - key: RUNNER_GOAT_CODEX_CHAT_LEASE_TTL_MS
+      - key: RUNNER_OPENCOMPANY_CODEX_CHAT_LEASE_TTL_MS
         sync: false
       # Optional upstream key for the runner's OpenAI provider and voice models.
       - key: OPENAI_API_KEY
         sync: false
-      - key: GOAT_DICTATION_REALTIME_MODEL
+      - key: OPENCOMPANY_DICTATION_REALTIME_MODEL
         sync: false
-      - key: GOAT_DICTATION_FINAL_MODEL
+      - key: OPENCOMPANY_DICTATION_FINAL_MODEL
         sync: false
       # Optional Brain/model/action tuning and emergency controls.
-      - key: GOAT_BRAIN_GATEWAY_BASE_URL
+      - key: OPENCOMPANY_BRAIN_GATEWAY_BASE_URL
         sync: false
-      - key: GOAT_BRAIN_EMBEDDING_MODEL
+      - key: OPENCOMPANY_BRAIN_EMBEDDING_MODEL
         sync: false
-      - key: GOAT_BRAIN_VECTOR_MAX_DISTANCE
+      - key: OPENCOMPANY_BRAIN_VECTOR_MAX_DISTANCE
         sync: false
-      - key: GOAT_CHAT_ACTIONS_KILL_SWITCH
+      - key: OPENCOMPANY_CHAT_ACTIONS_KILL_SWITCH
         sync: false
-      - key: GOAT_CHAT_SANDBOX_IMAGE
+      - key: OPENCOMPANY_CHAT_SANDBOX_IMAGE
         sync: false
-      - key: GOAT_MANAGED_CAPABILITIES_KILL_SWITCH
+      - key: OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH
         sync: false
-      - key: GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS
+      - key: OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS
         sync: false
-      - key: GOAT_REVOLUT_BUSINESS_WORKSPACE_ID
+      - key: OPENCOMPANY_REVOLUT_BUSINESS_WORKSPACE_ID
         sync: false
-      - key: GOAT_REVOLUT_BUSINESS_API_TOKEN
+      - key: OPENCOMPANY_REVOLUT_BUSINESS_API_TOKEN
         sync: false
-      - key: GOAT_REVOLUT_BUSINESS_ACCOUNT_LABEL
+      - key: OPENCOMPANY_REVOLUT_BUSINESS_ACCOUNT_LABEL
         sync: false
-      - key: GOAT_REVOLUT_BUSINESS_API_BASE_URL
+      - key: OPENCOMPANY_REVOLUT_BUSINESS_API_BASE_URL
         sync: false
       - key: RUNNER_INSTANCE_ID
         sync: false
