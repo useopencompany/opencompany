@@ -689,14 +689,16 @@ export function GoatSurface({
     ({ conversationId, assistantMessageId }: HeadlessMessageAccepted) => {
       activeTurnAssistantMessageIdRef.current = assistantMessageId;
       if (routedChatSessionIdRef.current === conversationId) {
+        const acceptedPendingConversation = pendingNewSessionIdRef.current === conversationId;
         setPersistedChatSessionId(conversationId);
-        if (pendingNewSessionIdRef.current === conversationId) {
+        if (acceptedPendingConversation) {
           pendingNewSessionIdRef.current = null;
+          router.replace(chatHref(conversationId), { scroll: false });
         }
       }
       setEngineSubmitting(false);
     },
-    [],
+    [router],
   );
   const handleHeadlessReconciled = useCallback(
     ({ conversationId }: Pick<HeadlessMessageAccepted, "conversationId">) =>
@@ -1885,7 +1887,6 @@ export function GoatSurface({
       setChatModelOverride(model);
       setChatSessionId(newSessionId);
       setPersistedChatSessionId(null);
-      window.history.replaceState(null, "", chatHref(newSessionId));
     }
     if (newSessionId) {
       addOptimisticGoatChatSummary({

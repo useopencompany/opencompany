@@ -23,6 +23,7 @@ import {
 } from "@/lib/chat-ui";
 import { CLAUDE_CHAT_DEFAULT_MODEL_ID } from "@/lib/claude-chat-constants";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
+import { HeadlessChatTransport } from "@/lib/headless-chat-transport";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import {
   buildGoatOnboardingKickoffPrompt,
@@ -316,6 +317,22 @@ function requestChatSessionId(init: RequestInit | undefined, fallback: string) {
   return fallback;
 }
 
+function acceptHeadlessConversation(conversationId: string) {
+  const handlers = vi
+    .mocked(HeadlessChatTransport.prototype.setEventHandlers)
+    .mock.calls.at(-1)
+    ?.at(0);
+  if (!handlers?.onAccepted) throw new Error("Headless Chat accepted handler is not registered.");
+  act(() =>
+    handlers.onAccepted?.({
+      conversationId,
+      runId: "run_accepted_1",
+      assistantMessageId: "assistant_accepted_1",
+      transactionId: "transaction_accepted_1",
+    }),
+  );
+}
+
 class MockDictationWebSocket extends EventTarget {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -413,6 +430,7 @@ describe("GoatSurface chat streaming UI", () => {
     routerMock.replace.mockReset();
     historyMock.replaceState.mockReset();
     vi.spyOn(window.history, "replaceState").mockImplementation(historyMock.replaceState);
+    vi.spyOn(HeadlessChatTransport.prototype, "setEventHandlers");
     headlessChatCommandMocks.cancel.mockClear();
     headlessChatCommandMocks.getRuntimeStatus.mockClear();
     headlessChatCommandMocks.resolveQuestions.mockClear();
@@ -1191,7 +1209,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("updates the URL without a server navigation and sends the reserved id", async () => {
+  it("renders a new chat immediately and navigates only after the reserved id is accepted", async () => {
     const user = userEvent.setup();
     render(
       <>
@@ -1208,12 +1226,9 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start now");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    const optimisticHref = historyMock.replaceState.mock.calls[0]?.[2];
-    expect(optimisticHref).toMatch(
-      /^\/chat\/goat_chat_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
-    expect(historyMock.replaceState).toHaveBeenCalledWith(null, "", optimisticHref);
-    const optimisticSessionId = String(optimisticHref).slice("/chat/".length);
+    await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
+    const optimisticSessionId = (chatMock.preparedRequestBodies[0] as { newSessionId: string })
+      .newSessionId;
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       sessionId: null,
       newSessionId: optimisticSessionId,
@@ -1222,8 +1237,15 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
       `${optimisticSessionId}:Start now`,
     );
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
+
+    acceptHeadlessConversation(optimisticSessionId);
+
+    expect(routerMock.replace).toHaveBeenCalledWith(`/chat/${optimisticSessionId}`, {
+      scroll: false,
+    });
   });
 
   it("keeps Shift+Enter as a newline in the main composer", async () => {
@@ -1241,7 +1263,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.push).not.toHaveBeenCalled();
   });
 
-  it("keeps the reserved detail URL and reuses its id when the first send is retried", async () => {
+  it("keeps a new chat local and reuses its reserved id when the first send is retried", async () => {
     const user = userEvent.setup();
     chatMock.sendError = new Error("network failed");
     render(
@@ -1261,7 +1283,8 @@ describe("GoatSurface chat streaming UI", () => {
 
     await waitFor(() => expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Try again"));
     const firstRequest = chatMock.preparedRequestBodies[0] as { newSessionId: string };
-    expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    expect(routerMock.replace).not.toHaveBeenCalled();
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent("none");
 
     chatMock.sendError = null;
@@ -1275,9 +1298,15 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
       `${firstRequest.newSessionId}:Try again`,
     );
-    expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
+
+    acceptHeadlessConversation(firstRequest.newSessionId);
+
+    expect(routerMock.replace).toHaveBeenCalledWith(`/chat/${firstRequest.newSessionId}`, {
+      scroll: false,
+    });
   });
 
   it("resets and focuses the blank composer immediately when Home is requested", async () => {
@@ -1410,12 +1439,14 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
+    const request = chatMock.preparedRequestBodies[0] as { newSessionId: string };
     act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
-    act(() => chatMock.finishWithSessionId?.("goat_chat_returned_late"));
+    acceptHeadlessConversation(request.newSessionId);
 
     expect(screen.getByPlaceholderText("Ask Goat anything...")).toHaveFocus();
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
-    expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
@@ -1716,9 +1747,15 @@ describe("GoatSurface chat streaming UI", () => {
       },
       model: "openai/gpt-5.6-sol",
     });
-    expect(historyMock.replaceState).toHaveBeenCalledWith(null, "", `/chat/${body.newSessionId}`);
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
+
+    acceptHeadlessConversation(String(body.newSessionId));
+
+    expect(routerMock.replace).toHaveBeenCalledWith(`/chat/${body.newSessionId}`, {
+      scroll: false,
+    });
   });
 
   it("selects a Claude model and submits per-turn reasoning effort", async () => {
@@ -2326,6 +2363,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
     const firstRequest = chatMock.preparedRequestBodies[0] as { newSessionId: string };
+    acceptHeadlessConversation(firstRequest.newSessionId);
     act(() => chatMock.finishWithSessionId?.(firstRequest.newSessionId));
 
     await user.type(screen.getByPlaceholderText("Reply..."), "Second message");
@@ -2341,8 +2379,11 @@ describe("GoatSurface chat streaming UI", () => {
       sessionId: firstRequest.newSessionId,
       model: DEFAULT_GOAT_MODEL,
     });
-    expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
-    expect(routerMock.replace).not.toHaveBeenCalled();
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    expect(routerMock.replace).toHaveBeenCalledTimes(1);
+    expect(routerMock.replace).toHaveBeenCalledWith(`/chat/${firstRequest.newSessionId}`, {
+      scroll: false,
+    });
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
@@ -4051,7 +4092,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("does not navigate or refresh when the stream confirms the reserved session id", async () => {
+  it("does not navigate again when the stream confirms an accepted session id", async () => {
     const user = userEvent.setup();
 
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
@@ -4061,10 +4102,14 @@ describe("GoatSurface chat streaming UI", () => {
 
     await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
     const request = chatMock.preparedRequestBodies[0] as { newSessionId: string };
+    acceptHeadlessConversation(request.newSessionId);
     act(() => chatMock.finishWithSessionId?.(request.newSessionId));
 
-    expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
-    expect(routerMock.replace).not.toHaveBeenCalled();
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    expect(routerMock.replace).toHaveBeenCalledTimes(1);
+    expect(routerMock.replace).toHaveBeenCalledWith(`/chat/${request.newSessionId}`, {
+      scroll: false,
+    });
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
