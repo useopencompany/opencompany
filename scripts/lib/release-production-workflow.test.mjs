@@ -66,6 +66,19 @@ test("requires PostHog configuration in the marketing Vercel project", async () 
   assert.match(step, /Missing marketing Vercel production env keys/u);
 });
 
+test("pins every release action to an immutable commit", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+  const actionReferences = Array.from(
+    workflow.matchAll(/^\s*uses:\s*(?<reference>\S+)/gmu),
+    (match) => match.groups.reference,
+  );
+
+  assert.ok(actionReferences.length > 0, "release workflow must use at least one action");
+  for (const reference of actionReferences) {
+    assert.match(reference, /@[a-f0-9]{40}$/u, `${reference} must use a full commit SHA`);
+  }
+});
+
 function assertStepOrder(workflow, stepNames) {
   let previousIndex = -1;
 
