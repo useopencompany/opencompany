@@ -9,6 +9,8 @@
     "./goat/client": "./src/goat-client.tsx",
     "./goat/events": "./src/goat-events.ts",
     "./goat/server": "./src/goat-server.ts",
+    "./marketing/client": "./src/marketing-client.ts",
+    "./marketing/events": "./src/marketing-events.ts",
     "./server": "./src/server.ts"
   },
   "scripts": {

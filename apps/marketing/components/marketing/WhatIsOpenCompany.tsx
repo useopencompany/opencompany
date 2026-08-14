@@ -58,7 +58,9 @@ export function WhatIsOpenCompany() {
         </ul>
 
         <div className="mt-10">
-          <Cta href="https://my.opencompany.chat">Sign up →</Cta>
+          <Cta href="https://my.opencompany.chat" analyticsIntent="signup">
+            Sign up →
+          </Cta>
         </div>
       </div>
     </section>

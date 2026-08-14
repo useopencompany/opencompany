@@ -558,6 +558,40 @@ jobs:
               throw new Error(`Marketing Vercel project rootDirectory must be apps/marketing, got ${project.rootDirectory ?? "<unset>"}.`);
             }
 
+            const envResponse = await fetch(
+              `https://api.vercel.com/v10/projects/${projectId}/env?teamId=${teamId}&target=production`,
+              { headers: { Authorization: `Bearer ${token}` } },
+            );
+
+            if (!envResponse.ok) {
+              throw new Error(`Could not fetch marketing Vercel env metadata: ${envResponse.status} ${envResponse.statusText}`);
+            }
+
+            const { envs } = await envResponse.json();
+            const productionKeys = new Set(
+              envs
+                .filter(
+                  (env) =>
+                    Array.isArray(env.target) &&
+                    env.target.includes("production") &&
+                    !env.gitBranch,
+                )
+                .map((env) => env.key),
+            );
+            const requiredAnalyticsKeys = [
+              "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
+              "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
+            ];
+            const missingAnalyticsKeys = requiredAnalyticsKeys.filter(
+              (key) => !productionKeys.has(key),
+            );
+
+            if (missingAnalyticsKeys.length > 0) {
+              throw new Error(
+                `Missing marketing Vercel production env keys: ${missingAnalyticsKeys.join(", ")}`,
+              );
+            }
+
             mkdirSync(".vercel", { recursive: true });
             writeFileSync(
               ".vercel/project.json",
@@ -582,7 +616,9 @@ jobs:
               )}\n`,
             );
 
-            console.log(`Verified Vercel project ${project.name} with root ${project.rootDirectory}.`);
+            console.log(
+              `Verified Vercel project ${project.name}, root ${project.rootDirectory}, and marketing analytics env.`,
+            );
           }
 
           main().catch((error) => {

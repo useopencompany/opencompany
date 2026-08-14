@@ -72,6 +72,10 @@ historical prefix: API billing and runner ingestion code still read them. Do not
 hosted copy until those readers are retired or the values are explicitly provisioned on the two
 owning runtimes.
 
+The marketing Vercel project uses `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` and
+`NEXT_PUBLIC_GOAT_POSTHOG_HOST` for basic page and conversion analytics in the same PostHog project
+as the product. Both variables are required in production and optional for local marketing work.
+
 ## Local generated values
 
 `bun run setup` writes branch-specific `DATABASE_URL`, local ports/origins, runner tokens, and
