@@ -9,6 +9,7 @@ import {
 test("web dev keeps conventional ports outside Conductor", () => {
   assert.deepEqual(resolveWebDevPorts({ env: {} }), {
     app: "3002",
+    api: "3001",
     runner: "3040",
     https: "3443",
     isolated: false,
@@ -19,6 +20,7 @@ test("web dev respects explicitly configured fixed ports outside Conductor", () 
   assert.deepEqual(
     resolveWebDevPorts({
       env: {
+        GOAT_API_ORIGIN: "http://localhost:3101",
         GOAT_PORT: "3102",
         GOAT_HTTPS_PORT: "3543",
         RUNNER_INTERNAL_URL: "http://localhost:3140",
@@ -26,6 +28,7 @@ test("web dev respects explicitly configured fixed ports outside Conductor", () 
     }),
     {
       app: "3102",
+      api: "3101",
       runner: "3140",
       https: "3543",
       isolated: false,
@@ -45,12 +48,15 @@ test("Conductor allocation provides isolated ports for every web-stack service",
 
   assert.deepEqual(ports, {
     app: "55010",
+    api: "55014",
     runner: "55011",
     https: "55012",
     electric: "55013",
     isolated: true,
   });
   assert.deepEqual(isolatedWebDevEnvironment(ports), {
+    API_BROWSER_ORIGINS: "https://localhost:55012",
+    GOAT_API_ORIGIN: "http://localhost:55014",
     GOAT_PORT: "55010",
     GOAT_HTTPS_PORT: "55012",
     GOAT_NEXT_PUBLIC_APP_URL: "https://localhost:55012",
@@ -75,6 +81,7 @@ test("Conductor keeps conventional ports when they are available", () => {
 
   assert.deepEqual(ports, {
     app: "3002",
+    api: "3001",
     runner: "3040",
     https: "3443",
     isolated: false,
@@ -89,6 +96,7 @@ test("Conductor falls back to its isolated range when a conventional port is bus
 
   assert.deepEqual(ports, {
     app: "55010",
+    api: "55014",
     runner: "55011",
     https: "55012",
     electric: "55013",
