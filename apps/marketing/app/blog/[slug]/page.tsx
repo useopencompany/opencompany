@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MDXRemote } from "next-mdx-remote/rsc";
@@ -20,6 +21,17 @@ const dateFormatter = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
   timeZone: "UTC",
 });
+
+const authorProfileByName: Record<string, { avatar: string; title?: string }> = {
+  "Louis Morgner": {
+    avatar: "/images/authors/louis-morgner.jpg",
+    title: "Founder & CEO",
+  },
+};
+
+function formatCategory(category: string): string {
+  return category.replaceAll("-", " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
 
 export const dynamicParams = false;
 
@@ -69,6 +81,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
   if (!post) notFound();
 
   const headings = extractTableOfContents(post.content);
+  const authorProfile = authorProfileByName[post.author];
 
   return (
     <BlogShell>
@@ -90,29 +103,42 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
       />
 
       <div className="mx-auto max-w-5xl px-6 pt-12 pb-24 sm:pt-16">
-        <Link
-          href="/blog"
-          className="font-mono text-[12px] text-ink-subtle transition-colors hover:text-violet-700"
-        >
-          ← Blog
-        </Link>
-
-        <header className="mt-10 max-w-3xl border-border border-b pb-10 sm:pb-12">
-          <p className="font-mono text-[11px] text-ink-subtle uppercase tracking-[0.1em]">
-            <time dateTime={post.date}>
-              {dateFormatter.format(new Date(`${post.date}T00:00:00Z`))}
-            </time>
+        <header className="max-w-3xl">
+          <nav aria-label="Breadcrumb" className="text-[15px] text-ink-muted">
+            <Link href="/blog" className="transition-colors hover:text-violet-700">
+              Blog
+            </Link>
             <span className="mx-2" aria-hidden="true">
-              ·
+              /
             </span>
-            {post.author}
-          </p>
-          <h1 className="mt-5 font-medium text-4xl text-ink leading-[1.08] tracking-tight sm:text-5xl">
+            <span>{formatCategory(post.cluster)}</span>
+          </nav>
+          <h1 className="mt-8 font-medium text-4xl text-ink leading-[1.08] tracking-[-0.035em] sm:text-5xl">
             {post.title}
           </h1>
-          <p className="mt-5 max-w-2xl text-[15px] text-ink-muted leading-7 sm:text-base">
-            {post.description}
-          </p>
+          <div className="mt-6 flex items-center gap-2">
+            {authorProfile ? (
+              <Image
+                src={authorProfile.avatar}
+                alt=""
+                width={20}
+                height={20}
+                className="size-5 rounded-full object-cover"
+              />
+            ) : null}
+            <p className="text-[13px] text-ink-muted">
+              {post.author}
+              {authorProfile?.title ? (
+                <span className="ml-2 opacity-60">{authorProfile.title}</span>
+              ) : null}
+              <span className="mx-2" aria-hidden="true">
+                ·
+              </span>
+              <time dateTime={post.date} className="opacity-60">
+                {dateFormatter.format(new Date(`${post.date}T00:00:00Z`))}
+              </time>
+            </p>
+          </div>
         </header>
 
         {headings.length > 0 ? (
@@ -126,7 +152,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
           </details>
         ) : null}
 
-        <div className="mt-10 lg:grid lg:grid-cols-[minmax(0,1fr)_15rem] lg:gap-16">
+        <div className="mt-12 lg:grid lg:grid-cols-[minmax(0,1fr)_15rem] lg:gap-16">
           <article className="blog-prose min-w-0 max-w-3xl">
             <MDXRemote
               source={post.content}
