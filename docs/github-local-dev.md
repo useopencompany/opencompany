@@ -12,7 +12,7 @@ https://your-domain.example/auth/callback
 ```
 
 Store the GitHub App OAuth, state, and webhook values with the local API inputs in Infisical `dev`
-`/goat`; the runner also needs the App ID and private key for coding operations. `bun run setup`
+`/web`; the runner also needs the App ID and private key for coding operations. `bun run setup`
 distributes the local values to the API, runner, and web relay configuration. In production the full
 provider-ingress set belongs to `prod` `/api`, while the runner keeps only its execution credentials.
 

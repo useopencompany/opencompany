@@ -26,7 +26,7 @@ Manual dispatch can force surfaces and health checks. Do not bypass preflight or
 
 ## Configuration ownership
 
-- Web: retained Infisical deployment path `prod` `/goat`, synced to the existing Vercel project.
+- Web: Infisical deployment path `prod` `/web`, synced to the existing Vercel project.
 - API: Infisical `prod` `/api`, synced to the `opencompany-api` Render service.
 - Runner: Infisical `prod` `/runner`, synced to the runner Render service.
 - Release: Infisical `prod` `/release`, containing deployment credentials, service/project IDs,
@@ -59,8 +59,8 @@ Canonical Chat is fix-forward. Existing Runs continue to settle through the API 
 corrective release is prepared. Production browser traffic connects directly to
 `https://api.opencompany.chat`; the web and API runtimes share
 `WORKOS_COOKIE_DOMAIN=opencompany.chat`, and the API allows credentialed CORS only from the
-production web origin. `NEXT_PUBLIC_GOAT_API_ORIGIN` is compiled into the browser bundle, while
-Server Components use `GOAT_API_ORIGIN`. Message commands require the matching
+production web origin. `NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN` is compiled into the browser bundle, while
+Server Components use `OPENCOMPANY_API_ORIGIN`. Message commands require the matching
 `X-OpenCompany-Protocol-Version` header. A hard protocol cutover intentionally rejects already-open
 stale tabs with a refresh instruction; it does not normalize their payload through retired schemas.
 
@@ -70,7 +70,7 @@ call out any provider URL change and its recovery plan in the pull request.
 
 ## Stripe production endpoint
 
-Stripe calls `${PRODUCTION_GOAT_URL}/api/stripe/webhook`. The web route streams the signed raw body
-to the API-owned handler; it does not verify or persist the event. `GOAT_STRIPE_WEBHOOK_SECRET`
+Stripe calls `${PRODUCTION_OPENCOMPANY_URL}/api/stripe/webhook`. The web route streams the signed raw body
+to the API-owned handler; it does not verify or persist the event. `OPENCOMPANY_STRIPE_WEBHOOK_SECRET`
 lives in Infisical `prod` `/api`. The API owns subscription, credit-ledger, auto-refill, and webhook
 idempotency while preserving the retained billing tables required by current contracts.

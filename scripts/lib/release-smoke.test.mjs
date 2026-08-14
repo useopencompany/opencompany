@@ -7,7 +7,7 @@ test("uses a surface-specific expected release", () => {
   assert.equal(
     expectedReleaseFor("web", {
       EXPECTED_RELEASE: "fallback",
-      EXPECTED_GOAT_RELEASE: "web-sha",
+      EXPECTED_WEB_RELEASE: "web-sha",
     }),
     "web-sha",
   );
@@ -27,7 +27,7 @@ test("an explicit empty surface release disables the global fallback", () => {
   assert.equal(
     expectedReleaseFor("web", {
       EXPECTED_RELEASE: "fallback",
-      EXPECTED_GOAT_RELEASE: "",
+      EXPECTED_WEB_RELEASE: "",
     }),
     "",
   );

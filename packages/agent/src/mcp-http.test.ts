@@ -7,7 +7,7 @@ afterEach(() => {
 
 describe("API-owned MCP service", () => {
   it("challenges missing bearer tokens against the public forwarded resource", async () => {
-    vi.stubEnv("GOAT_AUTHKIT_DOMAIN", "https://example.authkit.app");
+    vi.stubEnv("OPENCOMPANY_AUTHKIT_DOMAIN", "https://example.authkit.app");
     const response = await createMcpService({ gatewayApiKey: "gateway_test" }).handle(
       new Request("http://api.internal/mcp", {
         headers: {
@@ -24,7 +24,7 @@ describe("API-owned MCP service", () => {
   });
 
   it("reports missing AuthKit configuration before authentication", async () => {
-    vi.stubEnv("GOAT_AUTHKIT_DOMAIN", "");
+    vi.stubEnv("OPENCOMPANY_AUTHKIT_DOMAIN", "");
     const response = await createMcpService({ gatewayApiKey: "gateway_test" }).handle(
       new Request("https://app.example.test/mcp"),
     );

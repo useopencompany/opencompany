@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
 describe("POST /api/webhooks/slack-bot/events relay", () => {
-  beforeEach(() => vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test"));
+  beforeEach(() => vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test"));
 
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -43,7 +43,7 @@ describe("POST /api/webhooks/slack-bot/events relay", () => {
   });
 
   it("fails closed when the API origin is unset", async () => {
-    vi.stubEnv("GOAT_API_ORIGIN", "");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "");
     const response = await POST(
       new Request("https://my.opencompany.chat/api/webhooks/slack-bot/events", {
         method: "POST",

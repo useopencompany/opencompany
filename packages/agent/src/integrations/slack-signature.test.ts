@@ -14,10 +14,10 @@ describe("verifySlackEventSignature", () => {
   const timestamp = String(Math.floor(nowMs / 1000));
 
   beforeEach(() => {
-    process.env.GOAT_SLACK_SIGNING_SECRET = DEFAULT_SECRET;
+    process.env.OPENCOMPANY_SLACK_SIGNING_SECRET = DEFAULT_SECRET;
   });
   afterEach(() => {
-    delete process.env.GOAT_SLACK_SIGNING_SECRET;
+    delete process.env.OPENCOMPANY_SLACK_SIGNING_SECRET;
   });
 
   it("verifies against the env secret by default", () => {
@@ -57,7 +57,7 @@ describe("verifySlackEventSignature", () => {
 
   it("rejects when the explicit secret is missing or empty", () => {
     const rawBody = "{}";
-    delete process.env.GOAT_SLACK_SIGNING_SECRET;
+    delete process.env.OPENCOMPANY_SLACK_SIGNING_SECRET;
     expect(
       verifySlackEventSignature({
         rawBody,

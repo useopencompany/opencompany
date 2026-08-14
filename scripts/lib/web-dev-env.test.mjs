@@ -10,17 +10,17 @@ test("web local HTTPS WorkOS redirect wins over the ngrok tunnel", () => {
     },
     tunnelEnv: {
       NEXT_PUBLIC_APP_URL: "https://public.ngrok-free.app",
-      GOAT_NEXT_PUBLIC_APP_URL: "https://public.ngrok-free.app",
-      GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://public.ngrok-free.app/auth/callback",
+      OPENCOMPANY_NEXT_PUBLIC_APP_URL: "https://public.ngrok-free.app",
+      OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://public.ngrok-free.app/auth/callback",
     },
     webHttpsEnv: {
-      GOAT_NEXT_PUBLIC_APP_URL: "https://localhost:3443",
-      GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://localhost:3443/auth/callback",
+      OPENCOMPANY_NEXT_PUBLIC_APP_URL: "https://localhost:3443",
+      OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://localhost:3443/auth/callback",
     },
   });
 
-  assert.equal(env.GOAT_NEXT_PUBLIC_APP_URL, "https://localhost:3443");
-  assert.equal(env.GOAT_API_ORIGIN, "http://localhost:3001");
+  assert.equal(env.OPENCOMPANY_NEXT_PUBLIC_APP_URL, "https://localhost:3443");
+  assert.equal(env.OPENCOMPANY_API_ORIGIN, "http://localhost:3001");
   assert.equal(env.API_BROWSER_ORIGINS, "https://localhost:3443,https://public.ngrok-free.app");
   assert.equal(env.NODE_USE_SYSTEM_CA, "1");
   assert.equal(env.NEXT_PUBLIC_WORKOS_REDIRECT_URI, "https://localhost:3443/auth/callback");
@@ -36,17 +36,17 @@ test("web redirect falls back to localhost when Caddy is unavailable", () => {
   const env = resolveWebDevEnv({
     port: "3002",
     processEnv: {
-      GOAT_NEXT_PUBLIC_APP_URL: "https://localhost:3443",
-      GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://localhost:3443/auth/callback",
+      OPENCOMPANY_NEXT_PUBLIC_APP_URL: "https://localhost:3443",
+      OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://localhost:3443/auth/callback",
     },
     tunnelEnv: {
       NEXT_PUBLIC_APP_URL: "https://public.ngrok-free.app",
-      GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://public.ngrok-free.app/auth/callback",
+      OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://public.ngrok-free.app/auth/callback",
     },
   });
 
-  assert.equal(env.GOAT_NEXT_PUBLIC_APP_URL, "https://public.ngrok-free.app");
-  assert.equal(env.GOAT_API_ORIGIN, "http://localhost:3001");
+  assert.equal(env.OPENCOMPANY_NEXT_PUBLIC_APP_URL, "https://public.ngrok-free.app");
+  assert.equal(env.OPENCOMPANY_API_ORIGIN, "http://localhost:3001");
   assert.equal(env.NODE_USE_SYSTEM_CA, undefined);
   assert.equal(env.NEXT_PUBLIC_WORKOS_REDIRECT_URI, "http://localhost:3002/auth/callback");
   assert.equal(env.RUNNER_PREVIEW_BASE_DOMAIN, "preview.localhost:3040");
@@ -56,15 +56,15 @@ test("web redirect falls back to localhost when Caddy is unavailable", () => {
 test("web dev preserves the API origin selected for an isolated workspace", () => {
   const env = resolveWebDevEnv({
     processEnv: {
-      GOAT_API_ORIGIN: "http://localhost:55014",
-      GOAT_NEXT_PUBLIC_APP_URL: "https://localhost:55012",
+      OPENCOMPANY_API_ORIGIN: "http://localhost:55014",
+      OPENCOMPANY_NEXT_PUBLIC_APP_URL: "https://localhost:55012",
     },
     webHttpsEnv: {
-      GOAT_NEXT_PUBLIC_APP_URL: "https://localhost:55012",
-      GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://localhost:55012/auth/callback",
+      OPENCOMPANY_NEXT_PUBLIC_APP_URL: "https://localhost:55012",
+      OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://localhost:55012/auth/callback",
     },
   });
 
-  assert.equal(env.GOAT_API_ORIGIN, "http://localhost:55014");
+  assert.equal(env.OPENCOMPANY_API_ORIGIN, "http://localhost:55014");
   assert.equal(env.API_BROWSER_ORIGINS, "https://localhost:55012");
 });

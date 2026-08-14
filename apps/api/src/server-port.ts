@@ -1,7 +1,9 @@
 export function resolveApiPort(env: Record<string, string | undefined>) {
-  const value = Number(localApiPort(env.GOAT_API_ORIGIN) ?? env.PORT ?? "3001");
+  const value = Number(localApiPort(env.OPENCOMPANY_API_ORIGIN) ?? env.PORT ?? "3001");
   if (!Number.isInteger(value) || value < 1 || value > 65_535) {
-    throw new Error("The local GOAT_API_ORIGIN port or PORT must be an integer from 1 to 65535.");
+    throw new Error(
+      "The local OPENCOMPANY_API_ORIGIN port or PORT must be an integer from 1 to 65535.",
+    );
   }
   return value;
 }

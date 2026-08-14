@@ -29,8 +29,8 @@ jobs:
       WORKOS_CLIENT_ID: client_ci
       WORKOS_API_KEY: sk_test_ci_placeholder
       WORKOS_COOKIE_PASSWORD: replace-with-at-least-32-characters
-      GOAT_NEXT_PUBLIC_APP_URL: http://localhost:3002
-      GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3002/auth/callback
+      OPENCOMPANY_NEXT_PUBLIC_APP_URL: http://localhost:3002
+      OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3002/auth/callback
       TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
     steps:
@@ -75,8 +75,8 @@ jobs:
       WORKOS_CLIENT_ID: client_ci
       WORKOS_API_KEY: sk_test_ci_placeholder
       WORKOS_COOKIE_PASSWORD: replace-with-at-least-32-characters
-      GOAT_NEXT_PUBLIC_APP_URL: http://localhost:3002
-      GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3002/auth/callback
+      OPENCOMPANY_NEXT_PUBLIC_APP_URL: http://localhost:3002
+      OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3002/auth/callback
       TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
     steps:
@@ -105,8 +105,8 @@ jobs:
       WORKOS_CLIENT_ID: client_ci
       WORKOS_API_KEY: sk_test_ci_placeholder
       WORKOS_COOKIE_PASSWORD: replace-with-at-least-32-characters
-      GOAT_NEXT_PUBLIC_APP_URL: http://localhost:3002
-      GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3002/auth/callback
+      OPENCOMPANY_NEXT_PUBLIC_APP_URL: http://localhost:3002
+      OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3002/auth/callback
       TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
     steps:

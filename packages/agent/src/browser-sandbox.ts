@@ -39,7 +39,7 @@ export function chatSandboxName(chatSessionId: string) {
 }
 
 export async function getChatSandbox(input: { chatSessionId: string; signal: AbortSignal }) {
-  const image = process.env.GOAT_CHAT_SANDBOX_IMAGE?.trim();
+  const image = process.env.OPENCOMPANY_CHAT_SANDBOX_IMAGE?.trim();
   return Sandbox.getOrCreate({
     name: chatSandboxName(input.chatSessionId),
     ...(image ? { image } : { runtime: "node24" as const }),

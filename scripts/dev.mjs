@@ -33,7 +33,7 @@ if (webDevPorts?.isolated) {
     isolatedWebDevEnvironment(webDevPorts, { httpsDisabled: webHttpsDisabled() }),
   );
 }
-const defaultPort = process.env.GOAT_PORT ?? "3002";
+const defaultPort = process.env.OPENCOMPANY_PORT ?? "3002";
 const port = valueFor(turboArgs, "--port") ?? defaultPort;
 const isCI = process.env.CI === "true" || process.env.CI === "1";
 const tunnelDisabled = process.env.OPENCOMPANY_NGROK_DISABLED === "1" || isCI;
@@ -277,8 +277,8 @@ async function startWebHttps(targetPort) {
 
   const webRedirectUri = `${proxy.url}/auth/callback`;
   webHttpsEnv = {
-    GOAT_NEXT_PUBLIC_APP_URL: proxy.url,
-    GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
+    OPENCOMPANY_NEXT_PUBLIC_APP_URL: proxy.url,
+    OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
     NEXT_PUBLIC_APP_URL: proxy.url,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
     WORKOS_REDIRECT_URI: webRedirectUri,
@@ -362,7 +362,7 @@ async function startDefaultTunnel(
     if (exposesRunnerCallbacks) {
       tunnelEnv = {
         ...tunnelEnv,
-        GOAT_NEXT_PUBLIC_APP_URL: publicUrl,
+        OPENCOMPANY_NEXT_PUBLIC_APP_URL: publicUrl,
         NEXT_PUBLIC_APP_URL: publicUrl,
       };
     }

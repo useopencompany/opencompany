@@ -18,7 +18,7 @@ const conversation = {
 describe("canonical Chat server reads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
     vi.mocked(headers).mockResolvedValue(new Headers({ Cookie: "wos-session=session" }) as never);
   });
 

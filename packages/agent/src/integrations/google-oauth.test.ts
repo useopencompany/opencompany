@@ -11,7 +11,7 @@ describe("opencompany Google OAuth", () => {
   beforeEach(() => {
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "client-id");
     vi.stubEnv("GOOGLE_INTEGRATION_STATE_SECRET", "state-secret");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
   });
 
   afterEach(() => {
@@ -66,7 +66,7 @@ describe("opencompany Google OAuth", () => {
   });
 
   it("uses direct opencompany callbacks", () => {
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.chat");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.chat");
 
     expect(
       Object.values(GOOGLE_PROVIDER_CONFIG).map((config) => googleOAuthRedirectUri(config)),

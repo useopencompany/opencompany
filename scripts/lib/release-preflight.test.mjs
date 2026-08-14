@@ -19,10 +19,10 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   assertExcludes(
     [...groups.web.required, ...groups.web.optional],
     [
-      "GOAT_AUTHKIT_DOMAIN",
-      "GOAT_STRIPE_API_KEY",
-      "GOAT_STRIPE_CHECKOUT_ENABLED",
-      "GOAT_STRIPE_WEBHOOK_SECRET",
+      "OPENCOMPANY_AUTHKIT_DOMAIN",
+      "OPENCOMPANY_STRIPE_API_KEY",
+      "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
+      "OPENCOMPANY_STRIPE_WEBHOOK_SECRET",
       "ELECTRIC_URL",
       "VERCEL_AI_GATEWAY_API_KEY",
     ],
@@ -35,15 +35,15 @@ test("production preflight follows the deployed runtime boundaries", async () =>
     "GOOGLE_OAUTH_CLIENT_ID",
     "GOOGLE_OAUTH_CLIENT_SECRET",
     "MONID_API_KEY",
-    "RUNNER_GOAT_TASK_WORKER_ENABLED",
+    "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
   ]);
   assertExcludes(
     [...groups.runner.required, ...groups.runner.optional],
     [
       "BROWSERBASE_API_KEY",
       "BROWSERBASE_PROJECT_ID",
-      "GOAT_BROWSER_PROFILES_ENABLED",
-      "GOAT_BROWSER_PROFILES_KILL_SWITCH",
+      "OPENCOMPANY_BROWSER_PROFILES_ENABLED",
+      "OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH",
     ],
   );
   assert.equal(groups.runner.conditional, undefined);

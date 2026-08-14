@@ -4,7 +4,7 @@ import { GET, POST } from "./route";
 const meta = { apiVersion: "v1", protocolVersion: "1.0.0" };
 
 describe("/api/workflows compatibility adapter", () => {
-  beforeEach(() => vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test"));
+  beforeEach(() => vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test"));
   afterEach(() => vi.unstubAllEnvs());
 
   it("projects the canonical catalog into the legacy response shape", async () => {

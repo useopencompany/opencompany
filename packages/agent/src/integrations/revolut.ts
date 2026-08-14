@@ -43,17 +43,17 @@ export class RevolutApiError extends Error {
 export function loadRevolutBusinessConnection(
   workspaceId: string,
 ): RevolutBusinessConnection | null {
-  const allowedWorkspaceId = process.env.GOAT_REVOLUT_BUSINESS_WORKSPACE_ID?.trim();
+  const allowedWorkspaceId = process.env.OPENCOMPANY_REVOLUT_BUSINESS_WORKSPACE_ID?.trim();
   if (!allowedWorkspaceId || allowedWorkspaceId !== workspaceId) return null;
 
-  const apiToken = process.env.GOAT_REVOLUT_BUSINESS_API_TOKEN?.trim();
+  const apiToken = process.env.OPENCOMPANY_REVOLUT_BUSINESS_API_TOKEN?.trim();
   if (!apiToken || !isPlausibleRevolutBusinessApiToken(apiToken)) return null;
 
   const apiBaseUrl = normalizeRevolutApiBaseUrl(
-    process.env.GOAT_REVOLUT_BUSINESS_API_BASE_URL,
+    process.env.OPENCOMPANY_REVOLUT_BUSINESS_API_BASE_URL,
     apiToken,
   );
-  const accountLabel = cleanRevolutLabel(process.env.GOAT_REVOLUT_BUSINESS_ACCOUNT_LABEL);
+  const accountLabel = cleanRevolutLabel(process.env.OPENCOMPANY_REVOLUT_BUSINESS_ACCOUNT_LABEL);
   return {
     workspaceId,
     accountLabel: accountLabel ?? "Revolut Business",

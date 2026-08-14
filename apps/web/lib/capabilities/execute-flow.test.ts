@@ -56,7 +56,7 @@ import {
 describe("executeManagedCapability", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
-    vi.stubEnv("GOAT_MANAGED_CAPABILITIES_KILL_SWITCH", "");
+    vi.stubEnv("OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH", "");
     mocks.getBalance.mockResolvedValue(10_000_000);
     mocks.getBudget.mockResolvedValue(5_000_000);
     mocks.sumSpend.mockResolvedValue(0);
@@ -415,7 +415,7 @@ describe("executeManagedCapability", () => {
   });
 
   it("fails closed before inspection when the global kill switch is enabled", async () => {
-    vi.stubEnv("GOAT_MANAGED_CAPABILITIES_KILL_SWITCH", "true");
+    vi.stubEnv("OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH", "true");
     const client = fakeClient({
       inspection: inspectPrice(0.0015),
       run: providerRun(),
@@ -434,7 +434,7 @@ describe("executeManagedCapability", () => {
 
   it("fails closed before inspection when the exact reviewed action is disabled", async () => {
     vi.stubEnv(
-      "GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS",
+      "OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS",
       "linkedin.list_comments, x.search_posts",
     );
     const client = fakeClient({

@@ -90,11 +90,11 @@ function messageEnvelope(event: Record<string, unknown> = {}) {
 describe("Slack ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
-    vi.stubEnv("GOAT_SLACK_SIGNING_SECRET", SIGNING_SECRET);
-    vi.stubEnv("GOAT_SLACK_CLIENT_ID", "slack-client");
-    vi.stubEnv("GOAT_SLACK_CLIENT_SECRET", "slack-secret");
-    vi.stubEnv("GOAT_SLACK_STATE_SECRET", "slack-state-secret-slack-state-secret");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+    vi.stubEnv("OPENCOMPANY_SLACK_SIGNING_SECRET", SIGNING_SECRET);
+    vi.stubEnv("OPENCOMPANY_SLACK_CLIENT_ID", "slack-client");
+    vi.stubEnv("OPENCOMPANY_SLACK_CLIENT_SECRET", "slack-secret");
+    vi.stubEnv("OPENCOMPANY_SLACK_STATE_SECRET", "slack-state-secret-slack-state-secret");
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", "a".repeat(44));
     vi.mocked(listSlackIntegrationsForTeam).mockResolvedValue([
       { id: "gint_1", userWorkosId: "user_1", status: "connected" },

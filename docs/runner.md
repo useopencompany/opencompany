@@ -23,7 +23,7 @@ under `/internal/goat/*`; `/healthz` is public for Render and release checks. Pr
 also rechecks persisted Conversation, Run, Attempt, lease, and membership authority for every
 operation.
 
-`RUNNER_GOAT_TASK_WORKER_ENABLED` controls the durable task worker. Worker concurrency, DB pool,
+`RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED` controls the durable task worker. Worker concurrency, DB pool,
 lease, and sandbox timeouts are documented beside their values in `.env.example` and `render.yaml`.
 
 ## Worker admission

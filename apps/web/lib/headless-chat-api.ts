@@ -5,19 +5,19 @@ const SESSION_BRIDGE_PATH = "/api/auth/share-api-session";
 let sessionPreparation: { key: string; promise: Promise<void> } | null = null;
 
 export function headlessChatApiBaseUrl(
-  configured = process.env.NEXT_PUBLIC_GOAT_API_ORIGIN,
+  configured = process.env.NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN,
   fallback = headlessChatWebBaseUrl(),
 ) {
   if (!configured?.trim()) {
     if (!fallback) throw new Error("The canonical Chat API base URL is unavailable.");
     return parseHttpOrigin(fallback, "web fallback");
   }
-  return parseHttpOrigin(configured, "NEXT_PUBLIC_GOAT_API_ORIGIN");
+  return parseHttpOrigin(configured, "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN");
 }
 
 export function headlessChatWebBaseUrl() {
   if (typeof window !== "undefined") return window.location.origin;
-  return process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim() ?? "";
+  return process.env.OPENCOMPANY_NEXT_PUBLIC_APP_URL?.trim() ?? "";
 }
 
 export function createHeadlessChatApiFetch(

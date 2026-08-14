@@ -25,7 +25,7 @@ SIGNOZ_MCP_URL="https://mcp.eu2.signoz.cloud/mcp"
 ```
 
 If neither value is set, `bun run mcp:configure` tries to infer the region from
-`GOAT_OTEL_EXPORTER_OTLP_ENDPOINT`, for example `https://ingest.eu2.signoz.cloud:443`, and then
+`OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT`, for example `https://ingest.eu2.signoz.cloud:443`, and then
 falls back to the project default `eu2`.
 
 Then run:
