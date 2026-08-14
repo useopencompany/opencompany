@@ -1,5 +1,5 @@
 import { PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "@opencompany/protocol";
-import type { UIMessage, UIMessageChunk } from "ai";
+import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
 import { HeadlessChatTransport, startHeadlessBackgroundChat } from "./headless-chat-transport";
@@ -242,7 +242,10 @@ describe("canonical Chat transport", () => {
             content: "Working",
             complete: false,
           }),
-          event(4, "tool.started", { toolCallId: "tool_1", name: "use_action" }),
+          event(4, "tool.started", {
+            toolCallId: "tool_1",
+            name: "use_action",
+          }),
           event(5, "approval.requested", {
             approvalId: "approval_1",
             toolCallId: "tool_1",
@@ -295,11 +298,17 @@ describe("canonical Chat transport", () => {
     expect(idempotencyKey).toBe("web-message:ui_message_1");
     expect(protocolVersion).toBe(PROTOCOL_VERSION);
     expect(accepted).toHaveBeenCalledWith(
-      expect.objectContaining({ conversationId: "conversation_1", transactionId: "42" }),
+      expect.objectContaining({
+        conversationId: "conversation_1",
+        transactionId: "42",
+      }),
     );
     await vi.waitFor(() =>
       expect(reconciled).toHaveBeenCalledWith(
-        expect.objectContaining({ conversationId: "conversation_1", transactionId: "42" }),
+        expect.objectContaining({
+          conversationId: "conversation_1",
+          transactionId: "42",
+        }),
       ),
     );
     expect(awaitHeadlessChatTransaction).toHaveBeenCalledWith({
@@ -308,9 +317,19 @@ describe("canonical Chat transport", () => {
     });
     expect(chunks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: "start", messageId: "message_assistant_1" }),
-        { type: "text-delta", id: "text_message_assistant_1_1", delta: "Working" },
-        expect.objectContaining({ type: "tool-input-available", toolCallId: "tool_1" }),
+        expect.objectContaining({
+          type: "start",
+          messageId: "message_assistant_1",
+        }),
+        {
+          type: "text-delta",
+          id: "text_message_assistant_1_1",
+          delta: "Working",
+        },
+        expect.objectContaining({
+          type: "tool-input-available",
+          toolCallId: "tool_1",
+        }),
         {
           type: "tool-approval-request",
           approvalId: "approval_1",
@@ -323,7 +342,10 @@ describe("canonical Chat transport", () => {
 
   it("replays offset deltas without duplicating content across a reconnect", async () => {
     let eventRequests = 0;
-    const replayQueries: Array<{ durable: string | null; presentation: string | null }> = [];
+    const replayQueries: Array<{
+      durable: string | null;
+      presentation: string | null;
+    }> = [];
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
       const url = requestUrl(input);
       if (url.pathname === "/v1/messages") {
@@ -491,10 +513,161 @@ describe("canonical Chat transport", () => {
     expect(eventCursors).toEqual([null, "v1:3"]);
     expect(chunks).toEqual(
       expect.arrayContaining([
-        { type: "text-delta", id: "text_message_assistant_1_2", delta: " done" },
+        expect.objectContaining({
+          type: "tool-input-available",
+          toolCallId: "tool_1",
+          toolName: "use_action",
+        }),
+        {
+          type: "text-delta",
+          id: "text_message_assistant_1_2",
+          delta: " done",
+        },
         expect.objectContaining({ type: "finish", finishReason: "stop" }),
       ]),
     );
+  });
+
+  it("rehydrates an active tool invocation before consuming its result after reconnect", async () => {
+    const toolCallId = "tool_reconnected_1";
+    sessionStorage.setItem(
+      "opencompany:headless-chat:v1:conversation_1",
+      JSON.stringify({
+        checkpointVersion: 2,
+        runId: "run_1",
+        conversationId: "conversation_1",
+        assistantMessageId: "message_assistant_1",
+        model: "model_1",
+        activeToolCalls: [{ toolCallId, toolName: "brain_search", input: {} }],
+        cursor: "v1:1",
+        status: "running",
+      }),
+    );
+    const eventCursors: Array<string | null> = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/v1/runs/run_1") return runResponse("running");
+      if (url.pathname.endsWith("/events")) {
+        eventCursors.push(url.searchParams.get("cursor"));
+        return sse([
+          event(2, "tool.completed", { toolCallId }),
+          event(3, "run.completed", { messageId: "message_assistant_1" }),
+        ]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const transport = new HeadlessChatTransport<UIMessage>({
+      baseUrl: "https://app.example.test",
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const resumed = await transport.reconnectToStream({
+      chatId: "conversation_1",
+    });
+    expect(resumed).not.toBeNull();
+    const { message, errors } = await consumeUiMessage(resumed!);
+
+    expect(eventCursors).toEqual(["v1:1"]);
+    expect(errors).toEqual([]);
+    expect(
+      message?.parts.find((part) => "toolCallId" in part && part.toolCallId === toolCallId),
+    ).toMatchObject({
+      type: "tool-brain_search",
+      toolCallId,
+      state: "output-available",
+      output: { ok: true },
+    });
+  });
+
+  it("replays legacy checkpoints from the beginning to rebuild tool state safely", async () => {
+    const toolCallId = "tool_reconnected_1";
+    sessionStorage.setItem(
+      "opencompany:headless-chat:v1:conversation_1",
+      JSON.stringify({
+        runId: "run_1",
+        conversationId: "conversation_1",
+        assistantMessageId: "message_assistant_1",
+        model: "model_1",
+        content: "",
+        textSegment: 0,
+        startedToolCallIds: [toolCallId],
+        cursor: "v1:1",
+        status: "running",
+      }),
+    );
+    const eventCursors: Array<string | null> = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/v1/runs/run_1") return runResponse("running");
+      if (url.pathname.endsWith("/events")) {
+        eventCursors.push(url.searchParams.get("cursor"));
+        return sse([
+          event(1, "tool.started", { toolCallId, name: "brain_search" }),
+          event(2, "tool.completed", { toolCallId }),
+          event(3, "run.completed", { messageId: "message_assistant_1" }),
+        ]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const transport = new HeadlessChatTransport<UIMessage>({
+      baseUrl: "https://app.example.test",
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const resumed = await transport.reconnectToStream({
+      chatId: "conversation_1",
+    });
+    expect(resumed).not.toBeNull();
+    const { message, errors } = await consumeUiMessage(resumed!);
+
+    expect(eventCursors).toEqual([null]);
+    expect(errors).toEqual([]);
+    expect(
+      message?.parts.find((part) => "toolCallId" in part && part.toolCallId === toolCallId),
+    ).toMatchObject({
+      type: "tool-brain_search",
+      toolCallId,
+      state: "output-available",
+    });
+  });
+
+  it("does not advance a checkpoint past an event that cannot be projected", async () => {
+    sessionStorage.setItem(
+      "opencompany:headless-chat:v1:conversation_1",
+      JSON.stringify({
+        checkpointVersion: 2,
+        runId: "run_1",
+        conversationId: "conversation_1",
+        assistantMessageId: "message_assistant_1",
+        model: "model_1",
+        activeToolCalls: [],
+        cursor: "v1:1",
+        status: "running",
+      }),
+    );
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/v1/runs/run_1") return runResponse("running");
+      if (url.pathname.endsWith("/events")) {
+        return sse([event(2, "tool.completed", { toolCallId: "tool_missing" })]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const transport = new HeadlessChatTransport<UIMessage>({
+      baseUrl: "https://app.example.test",
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const resumed = await transport.reconnectToStream({
+      chatId: "conversation_1",
+    });
+    expect(resumed).not.toBeNull();
+    await expect(collect(resumed!)).rejects.toThrow(
+      "tool.completed was received before tool.started for tool call tool_missing.",
+    );
+    expect(
+      JSON.parse(sessionStorage.getItem("opencompany:headless-chat:v1:conversation_1") ?? "null"),
+    ).toMatchObject({ cursor: "v1:1", activeToolCalls: [] });
   });
 
   it("recovers a paused approval without session storage and reconnects to its Run", async () => {
@@ -563,12 +736,18 @@ describe("canonical Chat transport", () => {
       assistantMessageId: "message_assistant_1",
       model: "model_1",
     });
-    const resumed = await transport.reconnectToStream({ chatId: "conversation_1" });
+    const resumed = await transport.reconnectToStream({
+      chatId: "conversation_1",
+    });
     expect(resumed).not.toBeNull();
     const chunks = await collect(resumed!);
 
     expect(chunks.filter((chunk) => chunk.type === "text-delta")).toEqual([
-      { type: "text-delta", id: "text_message_assistant_1_1", delta: "Working" },
+      {
+        type: "text-delta",
+        id: "text_message_assistant_1_1",
+        delta: "Working",
+      },
       { type: "text-delta", id: "text_message_assistant_1_2", delta: " done" },
     ]);
     expect(chunks.at(-1)).toEqual(
@@ -602,7 +781,9 @@ describe("canonical Chat transport", () => {
       if (url.pathname.endsWith("/events")) {
         return sse([
           {
-            ...event(1, "run.completed", { messageId: "message_assistant_background" }),
+            ...event(1, "run.completed", {
+              messageId: "message_assistant_background",
+            }),
             runId: "run_background",
           },
         ]);
@@ -618,7 +799,10 @@ describe("canonical Chat transport", () => {
           clientMessageId: "message_background",
           model: "model_1",
         },
-        { baseUrl: "https://app.example.test", fetch: fetchMock as typeof fetch },
+        {
+          baseUrl: "https://app.example.test",
+          fetch: fetchMock as typeof fetch,
+        },
       ),
     ).resolves.toMatchObject({ runId: "run_background" });
     expect(paths).toEqual(["/v1/messages", "/v1/runs/run_background/events"]);
@@ -636,4 +820,34 @@ async function collect(stream: ReadableStream<UIMessageChunk>) {
   const chunks: UIMessageChunk[] = [];
   for await (const chunk of stream) chunks.push(chunk);
   return chunks;
+}
+
+async function consumeUiMessage(stream: ReadableStream<UIMessageChunk>) {
+  const errors: unknown[] = [];
+  let message: UIMessage | undefined;
+  for await (const value of readUIMessageStream<UIMessage>({
+    stream,
+    terminateOnError: true,
+    onError: (error) => errors.push(error),
+  })) {
+    message = value;
+  }
+  return { message, errors };
+}
+
+function runResponse(status: "queued" | "running" | "paused" | "completed") {
+  return Response.json({
+    data: {
+      id: "run_1",
+      conversationId: "conversation_1",
+      triggerMessageId: "message_user_1",
+      status,
+      engine: "opencompany",
+      model: "model_1",
+      attemptCount: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    },
+    meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+  });
 }

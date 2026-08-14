@@ -1,25 +1,29 @@
 import type { RunStreamEventDto } from "@opencompany/protocol";
 import type { UIMessageChunk } from "ai";
 
+export type HeadlessToolCallCheckpoint = {
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+};
+
 export class HeadlessChatUiProjector {
   private text: string;
   private activeTextId: string | null = null;
   private textSegment: number;
-  private readonly startedToolCalls: Set<string>;
+  private readonly activeToolCalls: Map<string, HeadlessToolCallCheckpoint>;
 
   constructor(
     private readonly assistantMessageId: string,
     initialContent = "",
     initialTextSegment = 0,
-    initialStartedToolCallIds: readonly string[] = [],
+    initialActiveToolCalls: readonly HeadlessToolCallCheckpoint[] = [],
   ) {
     this.text = typeof initialContent === "string" ? initialContent : "";
     this.textSegment =
       Number.isSafeInteger(initialTextSegment) && initialTextSegment >= 0 ? initialTextSegment : 0;
-    this.startedToolCalls = new Set(
-      (Array.isArray(initialStartedToolCallIds) ? initialStartedToolCallIds : []).filter(
-        (value) => typeof value === "string" && value.length > 0,
-      ),
+    this.activeToolCalls = new Map(
+      initialActiveToolCalls.map((call) => [call.toolCallId, { ...call }]),
     );
   }
 
@@ -31,8 +35,21 @@ export class HeadlessChatUiProjector {
     return this.textSegment;
   }
 
-  get startedToolCallIds() {
-    return [...this.startedToolCalls];
+  get toolCallCheckpoint() {
+    return [...this.activeToolCalls.values()].map((call) => ({ ...call }));
+  }
+
+  /**
+   * Seeds a fresh AI SDK message projection before applying events after a durable cursor.
+   * Every resumed approval/result must have its invocation in the same consumer state.
+   */
+  rehydrate(): UIMessageChunk[] {
+    return this.toolCallCheckpoint.map((call) => ({
+      type: "tool-input-available",
+      toolCallId: call.toolCallId,
+      toolName: call.toolName,
+      input: call.input,
+    }));
   }
 
   project(event: RunStreamEventDto): UIMessageChunk[] {
@@ -54,19 +71,24 @@ export class HeadlessChatUiProjector {
     }
 
     if (event.type === "tool.started") {
-      this.startedToolCalls.add(event.payload.toolCallId);
+      const toolCall = {
+        toolCallId: event.payload.toolCallId,
+        toolName: event.payload.name,
+        input: {},
+      };
+      this.activeToolCalls.set(toolCall.toolCallId, toolCall);
       return [
         ...this.endText(),
         {
           type: "tool-input-available",
-          toolCallId: event.payload.toolCallId,
-          toolName: event.payload.name,
-          input: {},
+          ...toolCall,
         },
       ];
     }
 
     if (event.type === "tool.completed") {
+      this.requireActiveToolCall(event.payload.toolCallId, event.type);
+      this.activeToolCalls.delete(event.payload.toolCallId);
       return [
         {
           type: "tool-output-available",
@@ -77,6 +99,8 @@ export class HeadlessChatUiProjector {
     }
 
     if (event.type === "tool.failed") {
+      this.requireActiveToolCall(event.payload.toolCallId, event.type);
+      this.activeToolCalls.delete(event.payload.toolCallId);
       return [
         {
           type: "tool-output-error",
@@ -89,13 +113,16 @@ export class HeadlessChatUiProjector {
     if (event.type === "approval.requested") {
       const toolCallId = event.payload.toolCallId ?? event.payload.approvalId;
       const chunks: UIMessageChunk[] = [];
-      if (!this.startedToolCalls.has(toolCallId)) {
-        this.startedToolCalls.add(toolCallId);
-        chunks.push(...this.endText(), {
-          type: "tool-input-available",
+      if (!this.activeToolCalls.has(toolCallId)) {
+        const toolCall = {
           toolCallId,
           toolName: event.payload.kind,
           input: { action: event.payload.action ?? event.payload.kind },
+        };
+        this.activeToolCalls.set(toolCallId, toolCall);
+        chunks.push(...this.endText(), {
+          type: "tool-input-available",
+          ...toolCall,
         });
       }
       chunks.push({
@@ -119,6 +146,11 @@ export class HeadlessChatUiProjector {
 
   finish(): UIMessageChunk[] {
     return this.endText();
+  }
+
+  private requireActiveToolCall(toolCallId: string, eventType: "tool.completed" | "tool.failed") {
+    if (this.activeToolCalls.has(toolCallId)) return;
+    throw new Error(`${eventType} was received before tool.started for tool call ${toolCallId}.`);
   }
 
   private appendText(delta: string): UIMessageChunk[] {
