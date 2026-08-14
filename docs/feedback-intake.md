@@ -4,16 +4,17 @@ This app sends authenticated user feedback directly to Linear.
 
 ## App Configuration
 
-Set these environment variables in Vercel and locally:
+Set these environment variables in the canonical API runtime (Infisical `prod` `/api`) and locally:
 
 ```bash
 LINEAR_API_KEY="lin_api_..."
-LINEAR_TEAM_ID="..."
-LINEAR_FEEDBACK_PROJECT_ID=""
-LINEAR_FEEDBACK_LABELS="customer-feedback"
+GOAT_FEEDBACK_LINEAR_TEAM_ID="..."
+GOAT_FEEDBACK_LINEAR_PROJECT_ID=""
+GOAT_FEEDBACK_LINEAR_LABELS="customer-feedback"
 ```
 
-`LINEAR_API_KEY` and `LINEAR_TEAM_ID` are required.
+`LINEAR_API_KEY` and `GOAT_FEEDBACK_LINEAR_TEAM_ID` are required for feedback dispatch. The API
+fails only the feedback request when they are unset; the rest of the product remains available.
 
 The app creates labels on demand when the Linear API key has permission. If label creation is not allowed, feedback still creates an issue and Linear Triage Intelligence can suggest labels.
 

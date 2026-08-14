@@ -5,8 +5,8 @@ surfaces:
 
 | Surface | Host | Responsibility |
 | --- | --- | --- |
-| Web | Vercel | product UI, APIs, callbacks, webhooks, cron routes |
-| Canonical Chat API | Render | Hono `/v1`, SSE, attachment commands, authorized read models |
+| Web | Vercel | product UI, auth shell, thin compatibility relays, cron entrypoints |
+| Canonical API | Render | Hono `/v1`, provider ingress, SSE, attachment commands, authorized read models |
 | Runner | Render | durable workers, internal transports, LLM broker |
 | Marketing | Vercel | public marketing site |
 
