@@ -1,6 +1,6 @@
 import { normalizeScheduleTimezone } from "@opencompany/agent-runtime";
 import type { Actor } from "@opencompany/core";
-import { type GoatMcpClient, type GoatTaskViewMode, goatUsers } from "@opencompany/db/goat-schema";
+import { type McpClient, type TaskViewMode, users } from "@opencompany/db/product-schema";
 import { eq } from "drizzle-orm";
 import { ApiError } from "./errors";
 
@@ -12,7 +12,7 @@ export type UserPreferenceSet = {
   timezone: string;
   taskSpawningEnabled: boolean;
   wikiEnabled: boolean;
-  taskViewMode: GoatTaskViewMode;
+  taskViewMode: TaskViewMode;
   imessageEnabled: boolean;
   autoModelRoutingEnabled: boolean;
 };
@@ -20,7 +20,7 @@ export type UserPreferenceSet = {
 export type UpdateUserPreferencesCommand = Partial<UserPreferenceSet>;
 
 export type McpSetupStatus = {
-  preferredClient: GoatMcpClient | null;
+  preferredClient: McpClient | null;
   complete: boolean;
   completedAt: Date | null;
 };
@@ -31,16 +31,16 @@ export type UserSettingsService = {
     command: UpdateUserPreferencesCommand,
   ): Promise<UserPreferenceSet>;
   getMcpSetup(actor: Actor): Promise<McpSetupStatus>;
-  setPreferredMcpClient(actor: Actor, client: GoatMcpClient): Promise<McpSetupStatus>;
+  setPreferredMcpClient(actor: Actor, client: McpClient): Promise<McpSetupStatus>;
 };
 
 const PREFERENCE_COLUMNS = {
-  timezone: goatUsers.timezone,
-  taskSpawningEnabled: goatUsers.taskSpawningEnabled,
-  wikiEnabled: goatUsers.wikiEnabled,
-  taskViewMode: goatUsers.taskViewMode,
-  imessageEnabled: goatUsers.imessageEnabled,
-  autoModelRoutingEnabled: goatUsers.autoModelRoutingEnabled,
+  timezone: users.timezone,
+  taskSpawningEnabled: users.taskSpawningEnabled,
+  wikiEnabled: users.wikiEnabled,
+  taskViewMode: users.taskViewMode,
+  imessageEnabled: users.imessageEnabled,
+  autoModelRoutingEnabled: users.autoModelRoutingEnabled,
 };
 
 export function createUserSettingsService(input: {
@@ -74,9 +74,9 @@ export function createUserSettingsService(input: {
       if (Object.keys(changes).length === 0) return current;
 
       const [updated] = await input.db
-        .update(goatUsers)
+        .update(users)
         .set({ ...changes, updatedAt: now() })
-        .where(eq(goatUsers.workosUserId, actor.userId))
+        .where(eq(users.workosUserId, actor.userId))
         .returning(PREFERENCE_COLUMNS);
       if (!updated) throw missingUser();
       return updated as UserPreferenceSet;
@@ -85,11 +85,11 @@ export function createUserSettingsService(input: {
     async getMcpSetup(actor) {
       const [row] = await input.db
         .select({
-          preferredClient: goatUsers.preferredMcpClient,
-          completedAt: goatUsers.mcpSetupCompletedAt,
+          preferredClient: users.preferredMcpClient,
+          completedAt: users.mcpSetupCompletedAt,
         })
-        .from(goatUsers)
-        .where(eq(goatUsers.workosUserId, actor.userId))
+        .from(users)
+        .where(eq(users.workosUserId, actor.userId))
         .limit(1);
       if (!row) throw missingUser();
       return mcpSetupStatus(row);
@@ -97,12 +97,12 @@ export function createUserSettingsService(input: {
 
     async setPreferredMcpClient(actor, client) {
       const [updated] = await input.db
-        .update(goatUsers)
+        .update(users)
         .set({ preferredMcpClient: client, updatedAt: now() })
-        .where(eq(goatUsers.workosUserId, actor.userId))
+        .where(eq(users.workosUserId, actor.userId))
         .returning({
-          preferredClient: goatUsers.preferredMcpClient,
-          completedAt: goatUsers.mcpSetupCompletedAt,
+          preferredClient: users.preferredMcpClient,
+          completedAt: users.mcpSetupCompletedAt,
         });
       if (!updated) throw missingUser();
       return mcpSetupStatus(updated);
@@ -113,15 +113,15 @@ export function createUserSettingsService(input: {
 async function currentPreferences(db: DbLike, actor: Actor): Promise<UserPreferenceSet> {
   const [row] = await db
     .select(PREFERENCE_COLUMNS)
-    .from(goatUsers)
-    .where(eq(goatUsers.workosUserId, actor.userId))
+    .from(users)
+    .where(eq(users.workosUserId, actor.userId))
     .limit(1);
   if (!row) throw missingUser();
   return row as UserPreferenceSet;
 }
 
 function mcpSetupStatus(row: {
-  preferredClient: GoatMcpClient | null;
+  preferredClient: McpClient | null;
   completedAt: Date | null;
 }): McpSetupStatus {
   return {

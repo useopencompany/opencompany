@@ -1,18 +1,18 @@
-import type { GoatHarnessSpec } from "@opencompany/goat-agent/task-runtime-types";
+import type { HarnessSpec } from "@opencompany/agent/task-runtime-types";
 
 const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
 const CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS = 5_000;
 const CODING_WORKSPACE_RUNTIME_ACCESS_TIMEOUT_MS = 10_000;
-const GOAT_DICTATION_ACCESS_TIMEOUT_MS = 10_000;
+const DICTATION_ACCESS_TIMEOUT_MS = 10_000;
 
-export type GoatCodexSandboxStatus = "running" | "sleeping" | "deleted";
-export type GoatCodingWorkspaceRuntimeAccess = {
+export type CodexSandboxStatus = "running" | "sleeping" | "deleted";
+export type CodingWorkspaceRuntimeAccess = {
   websocketUrl: string;
   ticket: string;
   expiresAt: number;
-  sandboxStatus: Exclude<GoatCodexSandboxStatus, "deleted">;
+  sandboxStatus: Exclude<CodexSandboxStatus, "deleted">;
 };
-export type GoatDictationAccess = {
+export type DictationAccess = {
   websocketUrl: string;
   ticket: string;
   expiresAt: number;
@@ -30,17 +30,17 @@ function runnerToken() {
 
 function runnerPublicBaseUrl() {
   const publicUrl = process.env.RUNNER_PUBLIC_URL?.trim().replace(/\/+$/, "");
-  const goatUrl = process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
-  if (!publicUrl || !goatUrl) return publicUrl;
+  const url = process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
+  if (!publicUrl || !url) return publicUrl;
   try {
     const runner = new URL(publicUrl);
-    const goat = new URL(goatUrl);
+    const app = new URL(url);
     if (
-      goat.protocol === "https:" &&
+      app.protocol === "https:" &&
       runner.protocol === "http:" &&
       (runner.hostname === "localhost" || runner.hostname === "127.0.0.1")
     ) {
-      return goatUrl;
+      return url;
     }
   } catch {
     return publicUrl;
@@ -48,14 +48,14 @@ function runnerPublicBaseUrl() {
   return publicUrl;
 }
 
-export async function planGoatTaskHarness(input: {
+export async function planTaskHarness(input: {
   userWorkosId: string;
   prompt: string;
-}): Promise<GoatHarnessSpec> {
+}): Promise<HarnessSpec> {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
-    throw new Error("Goat runner is not configured.");
+    throw new Error("opencompany runner is not configured.");
   }
 
   const response = await fetch(`${baseUrl}/internal/goat/task-harness/plan`, {
@@ -68,21 +68,21 @@ export async function planGoatTaskHarness(input: {
   });
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Goat harness planning failed with ${response.status}: ${details}`);
+    throw new Error(`opencompany harness planning failed with ${response.status}: ${details}`);
   }
 
   const body = (await response.json()) as { harnessSpec?: unknown };
-  if (!isGoatHarnessSpec(body.harnessSpec)) {
-    throw new Error("Goat harness planning returned an invalid harness.");
+  if (!isHarnessSpec(body.harnessSpec)) {
+    throw new Error("opencompany harness planning returned an invalid harness.");
   }
   return body.harnessSpec;
 }
 
-export async function triggerGoatCodexChatWake() {
+export async function triggerCodexChatWake() {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
-    console.warn("Goat codex chat wake skipped because the runner is not configured.", {
+    console.warn("opencompany codex chat wake skipped because the runner is not configured.", {
       event: "goat.codex_chat_wake_unconfigured",
     });
     return;
@@ -105,17 +105,15 @@ export async function triggerGoatCodexChatWake() {
 
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Goat codex chat wake failed with ${response.status}: ${details}`);
+    throw new Error(`opencompany codex chat wake failed with ${response.status}: ${details}`);
   }
 }
 
-export async function getGoatCodexSandboxStatus(
-  sandboxId: string,
-): Promise<GoatCodexSandboxStatus> {
+export async function getCodexSandboxStatus(sandboxId: string): Promise<CodexSandboxStatus> {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
-    throw new Error("Goat runner is not configured.");
+    throw new Error("opencompany runner is not configured.");
   }
 
   const controller = new AbortController();
@@ -138,25 +136,25 @@ export async function getGoatCodexSandboxStatus(
 
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Goat codex sandbox status failed with ${response.status}: ${details}`);
+    throw new Error(`opencompany codex sandbox status failed with ${response.status}: ${details}`);
   }
 
   const body = (await response.json()) as { status?: unknown };
   if (body.status !== "running" && body.status !== "sleeping" && body.status !== "deleted") {
-    throw new Error("Goat codex sandbox status returned an invalid status.");
+    throw new Error("opencompany codex sandbox status returned an invalid status.");
   }
   return body.status;
 }
 
-export async function requestGoatCodingWorkspaceRuntimeAccess(input: {
+export async function requestCodingWorkspaceRuntimeAccess(input: {
   codingSessionId: string;
   userWorkosId: string;
-}): Promise<GoatCodingWorkspaceRuntimeAccess> {
+}): Promise<CodingWorkspaceRuntimeAccess> {
   const internalBaseUrl = runnerInternalBaseUrl();
   const publicBaseUrl = runnerPublicBaseUrl();
   const token = runnerToken();
   if (!internalBaseUrl || !publicBaseUrl || !token) {
-    throw new Error("Goat runner runtime access is not configured.");
+    throw new Error("opencompany runner runtime access is not configured.");
   }
 
   const controller = new AbortController();
@@ -182,7 +180,7 @@ export async function requestGoatCodingWorkspaceRuntimeAccess(input: {
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
     const message = typeof body?.error === "string" ? body.error : "Runtime access is unavailable.";
-    throw new GoatCodingWorkspaceRequestError(message, response.status);
+    throw new CodingWorkspaceRequestError(message, response.status);
   }
 
   const body = (await response.json()) as Record<string, unknown>;
@@ -191,7 +189,7 @@ export async function requestGoatCodingWorkspaceRuntimeAccess(input: {
     typeof body.expiresAt !== "number" ||
     (body.sandboxStatus !== "running" && body.sandboxStatus !== "sleeping")
   ) {
-    throw new Error("Goat runner returned invalid runtime access.");
+    throw new Error("opencompany runner returned invalid runtime access.");
   }
   const websocketUrl = new URL("/goat/runtime", `${publicBaseUrl}/`);
   websocketUrl.protocol = websocketUrl.protocol === "https:" ? "wss:" : "ws:";
@@ -204,18 +202,18 @@ export async function requestGoatCodingWorkspaceRuntimeAccess(input: {
   };
 }
 
-export async function requestGoatDictationAccess(input: {
+export async function requestDictationAccess(input: {
   userWorkosId: string;
-}): Promise<GoatDictationAccess> {
+}): Promise<DictationAccess> {
   const internalBaseUrl = runnerInternalBaseUrl();
   const publicBaseUrl = runnerPublicBaseUrl();
   const token = runnerToken();
   if (!internalBaseUrl || !publicBaseUrl || !token) {
-    throw new Error("Goat runner dictation access is not configured.");
+    throw new Error("opencompany runner dictation access is not configured.");
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), GOAT_DICTATION_ACCESS_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), DICTATION_ACCESS_TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetch(`${internalBaseUrl}/internal/goat/dictation/access`, {
@@ -239,7 +237,7 @@ export async function requestGoatDictationAccess(input: {
 
   const body = (await response.json()) as Record<string, unknown>;
   if (typeof body.ticket !== "string" || typeof body.expiresAt !== "number") {
-    throw new Error("Goat runner returned invalid dictation access.");
+    throw new Error("opencompany runner returned invalid dictation access.");
   }
   const websocketUrl = new URL("/goat/dictation", `${publicBaseUrl}/`);
   websocketUrl.protocol = websocketUrl.protocol === "https:" ? "wss:" : "ws:";
@@ -251,21 +249,21 @@ export async function requestGoatDictationAccess(input: {
   };
 }
 
-export class GoatCodingWorkspaceRequestError extends Error {
+export class CodingWorkspaceRequestError extends Error {
   constructor(
     message: string,
     readonly statusCode: number,
   ) {
     super(message);
-    this.name = "GoatCodingWorkspaceRequestError";
+    this.name = "CodingWorkspaceRequestError";
   }
 }
 
-export async function killGoatCodexSandbox(sandboxId: string): Promise<boolean> {
+export async function killCodexSandbox(sandboxId: string): Promise<boolean> {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
   if (!baseUrl || !token) {
-    throw new Error("Goat runner is not configured.");
+    throw new Error("opencompany runner is not configured.");
   }
 
   const controller = new AbortController();
@@ -288,14 +286,14 @@ export async function killGoatCodexSandbox(sandboxId: string): Promise<boolean> 
 
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Goat codex sandbox kill failed with ${response.status}: ${details}`);
+    throw new Error(`opencompany codex sandbox kill failed with ${response.status}: ${details}`);
   }
 
   const body = (await response.json()) as { killed?: unknown };
   return body.killed === true;
 }
 
-function isGoatHarnessSpec(value: unknown): value is GoatHarnessSpec {
+function isHarnessSpec(value: unknown): value is HarnessSpec {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   return (

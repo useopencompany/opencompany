@@ -1,15 +1,15 @@
 import { shellQuote } from "@opencompany/agent-runtime";
 import {
-  GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
-  type GoatInfisicalAuthBundle,
-  type GoatInfisicalHost,
-  isGoatInfisicalHost,
-  isGoatInfisicalSessionDomain,
-  newGoatInfisicalAuthFlowId,
-  saveGoatInfisicalConnection,
-} from "@opencompany/db/goat-infisical-auth";
-import { goatInfisicalAuthFlows } from "@opencompany/db/goat-schema";
-import { requireGoatWorkspaceAdmin } from "@opencompany/db/goat-workspaces";
+  INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
+  type InfisicalAuthBundle,
+  type InfisicalHost,
+  isInfisicalHost,
+  isInfisicalSessionDomain,
+  newInfisicalAuthFlowId,
+  saveInfisicalConnection,
+} from "@opencompany/db/infisical-auth";
+import { infisicalAuthFlows } from "@opencompany/db/product-schema";
+import { requireWorkspaceAdmin } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, inArray } from "drizzle-orm";
 import { Sandbox } from "e2b";
@@ -53,14 +53,14 @@ export type InfisicalAuthFlowStatus = {
   expiresAt: string;
 };
 
-export async function startGoatInfisicalAuthFlow(input: {
+export async function startInfisicalAuthFlow(input: {
   workspaceId: string;
   requestedByWorkosId: string;
-  host: GoatInfisicalHost;
+  host: InfisicalHost;
   env: RunnerEnv;
 }): Promise<InfisicalAuthFlowStatus> {
-  await requireWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
-  if (!isGoatInfisicalHost(input.host)) {
+  await requireRunnerWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
+  if (!isInfisicalHost(input.host)) {
     throw new Error("Unsupported Infisical host.");
   }
   let failureStage: InfisicalAuthStartStage = "supersede_active_flows";
@@ -99,11 +99,11 @@ export async function startGoatInfisicalAuthFlow(input: {
       throw new Error("Infisical did not provide a browser login link.");
     }
 
-    const id = newGoatInfisicalAuthFlowId();
+    const id = newInfisicalAuthFlowId();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + INFISICAL_AUTH_FLOW_TTL_MS);
     failureStage = "persist_flow";
-    await getDb().insert(goatInfisicalAuthFlows).values({
+    await getDb().insert(infisicalAuthFlows).values({
       id,
       workspaceId: input.workspaceId,
       requestedByWorkosId: input.requestedByWorkosId,
@@ -141,13 +141,13 @@ export async function startGoatInfisicalAuthFlow(input: {
   }
 }
 
-export async function completeGoatInfisicalAuthFlow(input: {
+export async function completeInfisicalAuthFlow(input: {
   workspaceId: string;
   requestedByWorkosId: string;
   flowId: string;
   browserToken: string;
 }): Promise<InfisicalAuthFlowStatus | null> {
-  await requireWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
+  await requireRunnerWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
   const flow = await loadFlow(input.workspaceId, input.requestedByWorkosId, input.flowId);
   if (!flow) return null;
   if (isTerminalStatus(flow.status)) return flowStatus(flow);
@@ -217,7 +217,7 @@ export async function completeGoatInfisicalAuthFlow(input: {
       browserCredentials.refreshToken,
       browserCredentials.privateKey,
     ]);
-    await saveGoatInfisicalConnection({
+    await saveInfisicalConnection({
       db: getDb(),
       workspaceId: input.workspaceId,
       authBundle,
@@ -269,8 +269,8 @@ export async function completeGoatInfisicalAuthFlow(input: {
   }
 }
 
-export function parseInfisicalLoginUrl(output: string, expectedHost: GoatInfisicalHost) {
-  if (!isGoatInfisicalHost(expectedHost)) return null;
+export function parseInfisicalLoginUrl(output: string, expectedHost: InfisicalHost) {
+  if (!isInfisicalHost(expectedHost)) return null;
   const unwrappedOutput = output.replace(/\r?\n/g, "");
   const escapedHost = expectedHost.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = unwrappedOutput.match(new RegExp(`${escapedHost}/login\\?callback_port=\\d+`));
@@ -286,11 +286,11 @@ export function parseInfisicalLoginUrl(output: string, expectedHost: GoatInfisic
   }
 }
 
-export function infisicalHostFromLoginUrl(loginUrl: string | null): GoatInfisicalHost | null {
+export function infisicalHostFromLoginUrl(loginUrl: string | null): InfisicalHost | null {
   if (!loginUrl) return null;
   try {
     const url = new URL(loginUrl);
-    return url.pathname === "/login" && isGoatInfisicalHost(url.origin) ? url.origin : null;
+    return url.pathname === "/login" && isInfisicalHost(url.origin) ? url.origin : null;
   } catch {
     return null;
   }
@@ -324,21 +324,18 @@ export function decodeInfisicalBrowserToken(browserToken: string) {
   return { email, jwt, refreshToken, privateKey };
 }
 
-async function requireWorkspaceAdmin(workspaceId: string, requestedByWorkosId: string) {
-  await requireGoatWorkspaceAdmin(
-    { workspaceId, userWorkosId: requestedByWorkosId },
-    { db: getDb() },
-  );
+async function requireRunnerWorkspaceAdmin(workspaceId: string, requestedByWorkosId: string) {
+  await requireWorkspaceAdmin({ workspaceId, userWorkosId: requestedByWorkosId }, { db: getDb() });
 }
 
 async function supersedeActiveFlows(workspaceId: string) {
   const activeFlows = await getDb()
-    .select({ id: goatInfisicalAuthFlows.id, sandboxId: goatInfisicalAuthFlows.sandboxId })
-    .from(goatInfisicalAuthFlows)
+    .select({ id: infisicalAuthFlows.id, sandboxId: infisicalAuthFlows.sandboxId })
+    .from(infisicalAuthFlows)
     .where(
       and(
-        eq(goatInfisicalAuthFlows.workspaceId, workspaceId),
-        inArray(goatInfisicalAuthFlows.status, ["pending", "link_ready"]),
+        eq(infisicalAuthFlows.workspaceId, workspaceId),
+        inArray(infisicalAuthFlows.status, ["pending", "link_ready"]),
       ),
     );
   const now = new Date();
@@ -389,7 +386,7 @@ export async function ensureInfisicalTmuxInstalled(sandbox: SandboxHandle) {
   );
 }
 
-async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle, host: GoatInfisicalHost) {
+async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle, host: InfisicalHost) {
   await sandbox.commands.run(
     [
       `rm -rf ${shellQuote(INFISICAL_AUTH_HOME)} ${shellQuote("/home/user/.infisical")} ${shellQuote(INFISICAL_KEYRING_ROOT)}`,
@@ -421,7 +418,7 @@ async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle, host: GoatInf
   );
 }
 
-async function waitForLoginUrl(sandbox: SandboxHandle, host: GoatInfisicalHost) {
+async function waitForLoginUrl(sandbox: SandboxHandle, host: InfisicalHost) {
   const deadline = Date.now() + INFISICAL_LINK_WAIT_MS;
   while (Date.now() < deadline) {
     const output = await captureLoginPane(sandbox);
@@ -489,7 +486,7 @@ async function waitForLoginExit(sandbox: SandboxHandle) {
   throw new Error("Infisical authentication timed out.");
 }
 
-async function validateInfisicalLogin(sandbox: SandboxHandle, host: GoatInfisicalHost) {
+async function validateInfisicalLogin(sandbox: SandboxHandle, host: InfisicalHost) {
   const result = await sandbox.commands.run("HOME=/home/user infisical login status --json", {
     user: "user",
     timeoutMs: 30_000,
@@ -512,7 +509,7 @@ async function validateInfisicalLogin(sandbox: SandboxHandle, host: GoatInfisica
         typeof candidate === "object" &&
         (candidate as Record<string, unknown>).principalType === "user" &&
         (candidate as Record<string, unknown>).status === "authenticated" &&
-        isGoatInfisicalSessionDomain((candidate as Record<string, unknown>).domain, host),
+        isInfisicalSessionDomain((candidate as Record<string, unknown>).domain, host),
     ),
   );
   const email = typeof session?.email === "string" ? session.email.trim() : "";
@@ -528,7 +525,7 @@ async function validateInfisicalLogin(sandbox: SandboxHandle, host: GoatInfisica
 async function captureInfisicalAuthBundle(
   sandbox: SandboxHandle,
   initialRedactionValues: string[],
-): Promise<GoatInfisicalAuthBundle> {
+): Promise<InfisicalAuthBundle> {
   const configContents = sandboxFileText(await sandbox.files.read(INFISICAL_CONFIG_PATH));
   const listing = await sandbox.commands.run(
     `find ${shellQuote(INFISICAL_KEYRING_ROOT)} -mindepth 1 -maxdepth 1 -type f -printf '%f\\n'`,
@@ -570,7 +567,7 @@ async function captureInfisicalAuthBundle(
     throw new Error("Infisical produced an unexpectedly large authentication bundle.");
   }
   return {
-    formatVersion: GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
+    formatVersion: INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
     files,
     redactionValues: [...redactionValues],
   };
@@ -579,12 +576,12 @@ async function captureInfisicalAuthBundle(
 async function loadFlow(workspaceId: string, requestedByWorkosId: string, flowId: string) {
   const [flow] = await getDb()
     .select()
-    .from(goatInfisicalAuthFlows)
+    .from(infisicalAuthFlows)
     .where(
       and(
-        eq(goatInfisicalAuthFlows.workspaceId, workspaceId),
-        eq(goatInfisicalAuthFlows.requestedByWorkosId, requestedByWorkosId),
-        eq(goatInfisicalAuthFlows.id, flowId),
+        eq(infisicalAuthFlows.workspaceId, workspaceId),
+        eq(infisicalAuthFlows.requestedByWorkosId, requestedByWorkosId),
+        eq(infisicalAuthFlows.id, flowId),
       ),
     )
     .limit(1);
@@ -599,17 +596,17 @@ async function markFlowTerminal(input: {
   now: Date;
 }) {
   await getDb()
-    .update(goatInfisicalAuthFlows)
+    .update(infisicalAuthFlows)
     .set({ status: input.status, statusReason: input.statusReason, updatedAt: input.now })
     .where(
       and(
-        eq(goatInfisicalAuthFlows.workspaceId, input.workspaceId),
-        eq(goatInfisicalAuthFlows.id, input.flowId),
+        eq(infisicalAuthFlows.workspaceId, input.workspaceId),
+        eq(infisicalAuthFlows.id, input.flowId),
       ),
     );
 }
 
-function flowStatus(flow: typeof goatInfisicalAuthFlows.$inferSelect): InfisicalAuthFlowStatus {
+function flowStatus(flow: typeof infisicalAuthFlows.$inferSelect): InfisicalAuthFlowStatus {
   return {
     id: flow.id,
     status: flow.status,

@@ -7,8 +7,8 @@ import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OpenCompany Design System",
-  description: "Components, tokens, and foundations for the OpenCompany product.",
+  title: "opencompany Design System",
+  description: "Components, tokens, and foundations for the opencompany product.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

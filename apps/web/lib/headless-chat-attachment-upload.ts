@@ -1,6 +1,6 @@
 "use client";
 
-import { createOpenCompanyClient } from "@opencompany/protocol";
+import { createApiClient } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 
 export async function uploadHeadlessChatAttachment(
@@ -8,7 +8,7 @@ export async function uploadHeadlessChatAttachment(
   options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
 ) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
-  const client = createOpenCompanyClient(baseUrl, {
+  const client = createApiClient(baseUrl, {
     fetch: createHeadlessChatApiFetch({
       baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),

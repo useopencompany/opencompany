@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
-  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
   getAgentModelDefinition,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
@@ -29,7 +29,7 @@ import {
   type ResolvedChatAttachments,
   RUN_EVENT_NOTIFY_CHANNEL,
 } from "./chat-repository";
-import type { GoatHarnessSpec } from "./goat-schema";
+import type { HarnessSpec } from "./product-schema";
 
 export type TaskRepositoryIdFactory = {
   command(): string;
@@ -57,7 +57,7 @@ type PostgresTaskRepositoryOptions = {
   resolveHarness?: (input: {
     actor: Actor;
     command: CreateTaskCommand & { model: AgentModelId };
-  }) => Promise<GoatHarnessSpec>;
+  }) => Promise<HarnessSpec>;
   compatibility?: {
     resolvedAttachments?: ResolvedChatAttachments;
     brainRef?: string | null;
@@ -612,9 +612,7 @@ export class PostgresTaskRepository implements TaskRepository {
           SELECT
             winner.runtime_id, ${input.actor.userId}, task.session_id, ${input.command.engine},
             ${runtimeModel}, (SELECT id FROM resolved_brain), ${input.actor.workspaceId},
-            ${
-              input.command.engine === "opencompany" ? null : GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION
-            },
+            ${input.command.engine === "opencompany" ? null : ACTION_HOST_TOOL_CONTRACT_VERSION},
             winner.run_id, 'queued', ${now}, ${now}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
@@ -1097,7 +1095,7 @@ function runtimeModelName(engine: CreateTaskCommand["engine"], model: string) {
   return model;
 }
 
-function defaultHarness(command: CreateTaskCommand & { model: AgentModelId }): GoatHarnessSpec {
+function defaultHarness(command: CreateTaskCommand & { model: AgentModelId }): HarnessSpec {
   return {
     schemaVersion: "goat.harness.v1",
     engine: command.engine,
@@ -1112,7 +1110,7 @@ function defaultHarness(command: CreateTaskCommand & { model: AgentModelId }): G
 }
 
 function validateHarness(
-  harness: GoatHarnessSpec,
+  harness: HarnessSpec,
   command: CreateTaskCommand,
   initialMessageContent: string,
 ) {
@@ -1126,7 +1124,7 @@ function validateHarness(
   }
 }
 
-function turnSettingsFromHarness(harness: GoatHarnessSpec) {
+function turnSettingsFromHarness(harness: HarnessSpec) {
   return {
     ...(harness.codex?.reasoningEffort ? { reasoningEffort: harness.codex.reasoningEffort } : {}),
     ...(harness.codex?.goalMode ? { goalMode: harness.codex.goalMode } : {}),

@@ -1,13 +1,13 @@
 import {
-  captureToGoatBrainInbox as captureToSharedGoatBrainInbox,
-  type GoatBrainCaptureResult,
-  type GoatBrainCaptureSource,
-} from "@opencompany/goat-agent/brain-capture";
-import { nextAvailableGoatBrainId } from "@opencompany/goat-agent/brain-files";
+  type BrainCaptureResult,
+  type BrainCaptureSource,
+  captureToBrainInbox as captureToSharedBrainInbox,
+} from "@opencompany/agent/brain-capture";
+import { nextAvailableBrainId } from "@opencompany/agent/brain-files";
 
-export * from "@opencompany/goat-agent/brain-capture";
+export * from "@opencompany/agent/brain-capture";
 
-export function captureToGoatBrainInbox(input: {
+export function captureToBrainInbox(input: {
   brainRef: string;
   userWorkosId: string;
   text?: string;
@@ -16,13 +16,13 @@ export function captureToGoatBrainInbox(input: {
   sourceRef?: string;
   integrationId?: string;
   fallbackText?: string;
-  source: GoatBrainCaptureSource;
-}): Promise<GoatBrainCaptureResult> {
+  source: BrainCaptureSource;
+}): Promise<BrainCaptureResult> {
   const { userWorkosId, ...command } = input;
-  return captureToSharedGoatBrainInbox(
+  return captureToSharedBrainInbox(
     { ...command, actorId: userWorkosId },
     {
-      nextAvailableBrainId: nextAvailableGoatBrainId,
+      nextAvailableBrainId: nextAvailableBrainId,
     },
   );
 }

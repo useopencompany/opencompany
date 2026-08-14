@@ -266,7 +266,7 @@ services:
         sync: false
       # Optional: runner DB pool size (default 10). Size it as RUNNER_WORKER_CONCURRENCY plus
       # headroom for HTTP routes, the poller, and lease heartbeats. Hard ceiling is Neon's
-      # max_connections (~901), shared with Goat and support services: keep instances * max well
+      # max_connections (~901), shared with opencompany and support services: keep instances * max well
       # under it.
       - key: RUNNER_DB_POOL_MAX
         sync: false
@@ -287,7 +287,7 @@ services:
         sync: false
       - key: NEXT_PUBLIC_POSTHOG_HOST
         sync: false
-      # Canonical Goat origin used when shared integrations construct web callback URLs.
+      # Canonical opencompany origin used when shared integrations construct web callback URLs.
       # The origin is not an execution transport and is never injected into E2B.
       - key: GOAT_NEXT_PUBLIC_APP_URL
         sync: false
@@ -310,7 +310,7 @@ services:
         sync: false
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
-      # Optional Goat OpenTelemetry export to SigNoz. Populated from Infisical prod `/runner`.
+      # Optional opencompany OpenTelemetry export to SigNoz. Populated from Infisical prod `/runner`.
       - key: GOAT_OBSERVABILITY_ENABLED
         sync: false
       - key: GOAT_OTEL_EXPORTER_OTLP_ENDPOINT
@@ -368,7 +368,7 @@ services:
         sync: false
       - key: GOAT_IMESSAGE_DAILY_CAP
         sync: false
-      # Optional Goat rendered-browser task tools.
+      # Optional opencompany rendered-browser task tools.
       - key: RUNNER_GOAT_BROWSER_ENABLED
         sync: false
       - key: OPENCOMPANY_CODEX_E2B_TEMPLATE

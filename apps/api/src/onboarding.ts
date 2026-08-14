@@ -1,26 +1,23 @@
+import { onboardingFoldersForRole } from "@opencompany/agent/onboarding-profile";
+import { ensureWorkspaceOrganization } from "@opencompany/agent/workspaces/organizations";
 import {
-  createGoatBrainFolderRow,
-  deleteGoatBrainFolderRow,
-} from "@opencompany/db/goat-brain-files";
-import type { GoatWorkspaceWithRole } from "@opencompany/db/goat-workspaces";
+  provisionWorkspace,
+  WorkspaceProvisioningError,
+} from "@opencompany/agent/workspaces/provisioning";
+import { ADJUSTABLE_DEFAULT_BRAIN_FOLDERS } from "@opencompany/brain/schema";
+import { createBrainFolderRow, deleteBrainFolderRow } from "@opencompany/db/brain-files";
+import type { WorkspaceWithRole } from "@opencompany/db/workspaces";
 import {
-  DEFAULT_GOAT_BRAIN_SLUG,
-  getGoatOnboarding,
-  hasOwnedGoatHobbyWorkspace,
-  isGoatWorkspaceSlugAvailable,
-  listAccessibleGoatBrains,
-  listGoatWorkspacesForUser,
-  markGoatUserOnboarded,
-  updateGoatWorkspaceNameAndSlug,
-  upsertGoatOnboarding,
-} from "@opencompany/db/goat-workspaces";
-import { goatOnboardingFoldersForRole } from "@opencompany/goat-agent/onboarding-profile";
-import { ensureGoatWorkspaceOrganization } from "@opencompany/goat-agent/workspaces/organizations";
-import {
-  GoatWorkspaceProvisioningError,
-  provisionGoatWorkspace,
-} from "@opencompany/goat-agent/workspaces/provisioning";
-import { ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS } from "@opencompany/goat-brain/schema";
+  DEFAULT_BRAIN_SLUG,
+  getOnboarding,
+  hasOwnedHobbyWorkspace,
+  isWorkspaceSlugAvailable,
+  listAccessibleBrains,
+  listWorkspacesForUser,
+  markUserOnboarded,
+  updateWorkspaceNameAndSlug,
+  upsertOnboarding,
+} from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import type { WorkOS } from "@workos-inc/node";
 import type { ApiIdentity } from "./auth";
@@ -70,7 +67,7 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
   return {
     async getState(identity) {
       const [onboarding, context] = await Promise.all([
-        getGoatOnboarding(identity.userId, { db }),
+        getOnboarding(identity.userId, { db }),
         resolveOnboardingContext(identity, db),
       ]);
       const brain = context ? await activeBrain(identity.userId, context.workspace.id, db) : null;
@@ -99,7 +96,7 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
       const slug = normalizeWorkspaceSlug(rawSlug);
       if (!slug) return { slug, available: false };
       const context = await resolveOnboardingContext(identity, db);
-      const available = await isGoatWorkspaceSlugAvailable(
+      const available = await isWorkspaceSlugAvailable(
         {
           slug,
           ...(context ? { excludeWorkspaceId: context.workspace.id } : {}),
@@ -113,7 +110,7 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
       const companyUrl = new URL(profile.companyUrl);
       const context = await resolveOnboardingContext(identity, db);
       try {
-        await upsertGoatOnboarding(
+        await upsertOnboarding(
           {
             userWorkosId: identity.userId,
             workspaceId: context?.workspace.id ?? null,
@@ -144,7 +141,7 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
         if (context && context.role !== "admin") {
           throw new ApiError(403, "forbidden", "Only workspace admins can set this up.");
         }
-        const available = await isGoatWorkspaceSlugAvailable(
+        const available = await isWorkspaceSlugAvailable(
           {
             slug,
             ...(context ? { excludeWorkspaceId: context.workspace.id } : {}),
@@ -160,16 +157,16 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
           if (!brain) {
             throw new ApiError(404, "not_found", "No brain is available for this workspace.");
           }
-          const organizationId = await ensureGoatWorkspaceOrganization(context.workspace, {
+          const organizationId = await ensureWorkspaceOrganization(context.workspace, {
             workos,
             db,
           });
           await workos.organizations.updateOrganization({ organization: organizationId, name });
-          await updateGoatWorkspaceNameAndSlug(
+          await updateWorkspaceNameAndSlug(
             { workspaceId: context.workspace.id, name, slug },
             { db },
           );
-          await upsertGoatOnboarding(
+          await upsertOnboarding(
             { userWorkosId: identity.userId, workspaceId: context.workspace.id },
             { db },
           );
@@ -182,10 +179,10 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
           };
         }
 
-        if (await hasOwnedGoatHobbyWorkspace(identity.userId, { db })) {
+        if (await hasOwnedHobbyWorkspace(identity.userId, { db })) {
           throw new ApiError(409, "conflict", "Your existing Hobby workspace could not be loaded.");
         }
-        const created = await provisionGoatWorkspace(
+        const created = await provisionWorkspace(
           {
             authUserId: identity.userId,
             userWorkosId: identity.userId,
@@ -199,7 +196,7 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
         if (!organizationId) {
           throw new ApiError(500, "internal_error", "The workspace organization is missing.", true);
         }
-        await upsertGoatOnboarding(
+        await upsertOnboarding(
           { userWorkosId: identity.userId, workspaceId: created.workspace.id },
           { db },
         );
@@ -233,7 +230,7 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
       }
       const referralSource = rawReferralSource?.trim() || null;
       try {
-        await upsertGoatOnboarding(
+        await upsertOnboarding(
           {
             userWorkosId: identity.userId,
             workspaceId: context.workspace.id,
@@ -241,7 +238,7 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
           },
           { db },
         );
-        await markGoatUserOnboarded(identity.userId, { db });
+        await markUserOnboarded(identity.userId, { db });
       } catch (error) {
         logFailure("finish", identity, error);
         throw new ApiError(503, "unavailable", "Could not finish onboarding.", true);
@@ -253,8 +250,8 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
 async function resolveOnboardingContext(
   identity: ApiIdentity,
   db: DbLike,
-): Promise<GoatWorkspaceWithRole | null> {
-  const workspaces = await listGoatWorkspacesForUser(identity.userId, { db });
+): Promise<WorkspaceWithRole | null> {
+  const workspaces = await listWorkspacesForUser(identity.userId, { db });
   return (
     workspaces.find(
       (entry) =>
@@ -267,16 +264,16 @@ async function resolveOnboardingContext(
 }
 
 async function activeBrain(userId: string, workspaceId: string, db: DbLike) {
-  const brains = await listAccessibleGoatBrains({ userWorkosId: userId, workspaceId }, { db });
-  return brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
+  const brains = await listAccessibleBrains({ userWorkosId: userId, workspaceId }, { db });
+  return brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
 }
 
 async function scaffoldOnboardingFolders(userId: string, brainId: string, db: DbLike) {
-  const onboarding = await getGoatOnboarding(userId, { db });
-  const target = new Set(goatOnboardingFoldersForRole(onboarding?.role));
-  const adjustable = new Set<string>(ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS);
+  const onboarding = await getOnboarding(userId, { db });
+  const target = new Set(onboardingFoldersForRole(onboarding?.role));
+  const adjustable = new Set<string>(ADJUSTABLE_DEFAULT_BRAIN_FOLDERS);
 
-  for (const folder of ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS) {
+  for (const folder of ADJUSTABLE_DEFAULT_BRAIN_FOLDERS) {
     await reconcileFolder(target.has(folder) ? "create" : "delete", userId, brainId, folder, db);
   }
   for (const folder of target) {
@@ -294,15 +291,9 @@ async function reconcileFolder(
 ) {
   try {
     if (operation === "create") {
-      await createGoatBrainFolderRow(
-        { brainRef: brainId, userWorkosId: userId, path: folder },
-        { db },
-      );
+      await createBrainFolderRow({ brainRef: brainId, userWorkosId: userId, path: folder }, { db });
     } else {
-      await deleteGoatBrainFolderRow(
-        { brainRef: brainId, userWorkosId: userId, path: folder },
-        { db },
-      );
+      await deleteBrainFolderRow({ brainRef: brainId, userWorkosId: userId, path: folder }, { db });
     }
   } catch (error) {
     // Folder tailoring was best-effort in the retired action. Keep onboarding
@@ -333,7 +324,7 @@ function logFailure(operation: string, identity: ApiIdentity, error: unknown) {
     operation,
     user_id: identity.userId,
     error_name:
-      error instanceof GoatWorkspaceProvisioningError
+      error instanceof WorkspaceProvisioningError
         ? error.name
         : error instanceof Error
           ? error.name

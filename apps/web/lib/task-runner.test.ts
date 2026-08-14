@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  getGoatCodexSandboxStatus,
-  requestGoatCodingWorkspaceRuntimeAccess,
-  requestGoatDictationAccess,
-  triggerGoatCodexChatWake,
+  getCodexSandboxStatus,
+  requestCodingWorkspaceRuntimeAccess,
+  requestDictationAccess,
+  triggerCodexChatWake,
 } from "@/lib/task-runner";
 
-describe("triggerGoatCodexChatWake", () => {
+describe("triggerCodexChatWake", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
@@ -20,7 +20,7 @@ describe("triggerGoatCodexChatWake", () => {
     const fetchMock = vi.fn(async () => new Response("{}", { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await triggerGoatCodexChatWake();
+    await triggerCodexChatWake();
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://runner.example.com/internal/goat/codex-chat/wake",
@@ -46,14 +46,14 @@ describe("triggerGoatCodexChatWake", () => {
       }),
     );
 
-    const wake = expect(triggerGoatCodexChatWake()).rejects.toThrow("aborted");
+    const wake = expect(triggerCodexChatWake()).rejects.toThrow("aborted");
     await vi.advanceTimersByTimeAsync(5_000);
 
     await wake;
   });
 });
 
-describe("getGoatCodexSandboxStatus", () => {
+describe("getCodexSandboxStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
@@ -68,7 +68,7 @@ describe("getGoatCodexSandboxStatus", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getGoatCodexSandboxStatus("sbx_123")).resolves.toBe("sleeping");
+    await expect(getCodexSandboxStatus("sbx_123")).resolves.toBe("sleeping");
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://runner.example.com/internal/goat/codex-chat/sandboxes/sbx_123/status",
@@ -81,14 +81,14 @@ describe("getGoatCodexSandboxStatus", () => {
   });
 });
 
-describe("requestGoatCodingWorkspaceRuntimeAccess", () => {
+describe("requestCodingWorkspaceRuntimeAccess", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
-  it("uses the same-origin dev proxy when Goat is HTTPS and the runner is local HTTP", async () => {
+  it("uses the same-origin dev proxy when opencompany is HTTPS and the runner is local HTTP", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "http://127.0.0.1:3040");
     vi.stubEnv("RUNNER_PUBLIC_URL", "http://localhost:3040");
     vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://localhost:3443");
@@ -105,7 +105,7 @@ describe("requestGoatCodingWorkspaceRuntimeAccess", () => {
     );
 
     await expect(
-      requestGoatCodingWorkspaceRuntimeAccess({
+      requestCodingWorkspaceRuntimeAccess({
         codingSessionId: "goat_codex_chat_1",
         userWorkosId: "user_1",
       }),
@@ -122,7 +122,7 @@ describe("requestGoatCodingWorkspaceRuntimeAccess", () => {
   it("uses the hosted runner URL in production-style environments", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "https://runner-internal.example.com");
     vi.stubEnv("RUNNER_PUBLIC_URL", "https://runner.example.com");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
     vi.stubGlobal(
       "fetch",
@@ -132,7 +132,7 @@ describe("requestGoatCodingWorkspaceRuntimeAccess", () => {
     );
 
     await expect(
-      requestGoatCodingWorkspaceRuntimeAccess({
+      requestCodingWorkspaceRuntimeAccess({
         codingSessionId: "goat_codex_chat_1",
         userWorkosId: "user_1",
       }),
@@ -140,14 +140,14 @@ describe("requestGoatCodingWorkspaceRuntimeAccess", () => {
   });
 });
 
-describe("requestGoatDictationAccess", () => {
+describe("requestDictationAccess", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
-  it("uses the same-origin dev proxy when Goat is HTTPS and the runner is local HTTP", async () => {
+  it("uses the same-origin dev proxy when opencompany is HTTPS and the runner is local HTTP", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "http://127.0.0.1:3040");
     vi.stubEnv("RUNNER_PUBLIC_URL", "http://localhost:3040");
     vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://localhost:3443");
@@ -157,7 +157,7 @@ describe("requestGoatDictationAccess", () => {
       vi.fn(async () => Response.json({ ticket: "ticket_1", expiresAt: 60_000 })),
     );
 
-    await expect(requestGoatDictationAccess({ userWorkosId: "user_1" })).resolves.toEqual({
+    await expect(requestDictationAccess({ userWorkosId: "user_1" })).resolves.toEqual({
       websocketUrl: "wss://localhost:3443/goat/dictation",
       ticket: "ticket_1",
       expiresAt: 60_000,
@@ -171,14 +171,14 @@ describe("requestGoatDictationAccess", () => {
   it("uses the hosted runner URL in production-style environments", async () => {
     vi.stubEnv("RUNNER_INTERNAL_URL", "https://runner-internal.example.com");
     vi.stubEnv("RUNNER_PUBLIC_URL", "https://runner.example.com");
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => Response.json({ ticket: "ticket_1", expiresAt: 60_000 })),
     );
 
-    await expect(requestGoatDictationAccess({ userWorkosId: "user_1" })).resolves.toMatchObject({
+    await expect(requestDictationAccess({ userWorkosId: "user_1" })).resolves.toMatchObject({
       websocketUrl: "wss://runner.example.com/goat/dictation",
     });
   });

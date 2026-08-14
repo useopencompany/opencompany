@@ -9,18 +9,15 @@ import { useHydrated } from "@/components/useHydrated";
 import {
   buildCursorMcpConfig,
   buildCursorMcpDeeplink,
-  buildGoatMcpFirstPrompt,
-  GOAT_USER_MCP_ENDPOINT_PATH,
-  type GoatMcpClient,
-  OPENCOMPANY_MCP_SERVER_NAME,
+  buildMcpFirstPrompt,
+  MCP_SERVER_NAME,
+  type McpClient,
+  USER_MCP_ENDPOINT_PATH,
 } from "@/lib/mcp-setup";
-import {
-  checkGoatMcpSetupStatusAction,
-  savePreferredGoatMcpClientAction,
-} from "@/lib/mcp-setup-actions";
+import { checkMcpSetupStatusAction, savePreferredMcpClientAction } from "@/lib/mcp-setup-actions";
 
 type ClientDefinition = {
-  id: GoatMcpClient;
+  id: McpClient;
   label: string;
   description: string;
   docsUrl: string;
@@ -40,8 +37,8 @@ const CLIENTS: ClientDefinition[] = [
     steps: [
       "Open Customize → Connectors.",
       "Choose + → Add custom connector and paste the connector URL below.",
-      "Add the connector, click Connect, and sign in with your OpenCompany account.",
-      "In a new chat, use + → Connectors to enable OpenCompany.",
+      "Add the connector, click Connect, and sign in with your opencompany account.",
+      "In a new chat, use + → Connectors to enable opencompany.",
     ],
     note: "On Claude Team and Enterprise, an owner must add the connector to the organization before members can connect it.",
   },
@@ -54,7 +51,7 @@ const CLIENTS: ClientDefinition[] = [
     steps: [
       "Open Settings → Apps → Advanced Settings and enable Developer mode if it is available.",
       "Choose Apps → Create and paste the connector URL below as the MCP endpoint.",
-      "Select OAuth, scan the tools, and complete the OpenCompany sign-in prompt.",
+      "Select OAuth, scan the tools, and complete the opencompany sign-in prompt.",
       "Create the app, then select it from the tools menu in a new chat.",
     ],
     note: "Custom MCP app availability depends on your ChatGPT plan and workspace permissions. If Create is unavailable, ask a ChatGPT workspace admin to publish the app first.",
@@ -67,9 +64,9 @@ const CLIENTS: ClientDefinition[] = [
     icon: Code2,
     steps: [
       "Use Add to Cursor below and approve the server configuration.",
-      "Open Cursor Settings → MCP and connect the new OpenCompany server.",
-      "Complete the OpenCompany sign-in prompt in your browser.",
-      "Open Agent and make sure the OpenCompany tools are enabled.",
+      "Open Cursor Settings → MCP and connect the new opencompany server.",
+      "Complete the opencompany sign-in prompt in your browser.",
+      "Open Agent and make sure the opencompany tools are enabled.",
     ],
   },
 ];
@@ -85,13 +82,13 @@ export function McpSetupGuide({
 }: {
   displayName: string;
   workspaceName: string;
-  initialClient: GoatMcpClient | null;
+  initialClient: McpClient | null;
   initialCompletedAt: string | null;
   hideHeader?: boolean;
 }) {
   const router = useRouter();
   const hydrated = useHydrated();
-  const [client, setClient] = useState<GoatMcpClient | null>(initialClient);
+  const [client, setClient] = useState<McpClient | null>(initialClient);
   const [copied, setCopied] = useState<CopiedValue>(null);
   const [waiting, setWaiting] = useState(false);
   const [completedAt, setCompletedAt] = useState(initialCompletedAt);
@@ -100,22 +97,16 @@ export function McpSetupGuide({
 
   const selectedClient = CLIENTS.find((definition) => definition.id === client) ?? null;
   const origin = hydrated ? window.location.origin.replace(/\/+$/, "") : "";
-  const connectorUrl = origin
-    ? `${origin}${GOAT_USER_MCP_ENDPOINT_PATH}`
-    : GOAT_USER_MCP_ENDPOINT_PATH;
+  const connectorUrl = origin ? `${origin}${USER_MCP_ENDPOINT_PATH}` : USER_MCP_ENDPOINT_PATH;
   const cursorConfig = useMemo(
     () =>
-      JSON.stringify(
-        buildCursorMcpConfig({ name: OPENCOMPANY_MCP_SERVER_NAME, url: connectorUrl }),
-        null,
-        2,
-      ),
+      JSON.stringify(buildCursorMcpConfig({ name: MCP_SERVER_NAME, url: connectorUrl }), null, 2),
     [connectorUrl],
   );
   const cursorDeeplink = hydrated
-    ? buildCursorMcpDeeplink({ name: OPENCOMPANY_MCP_SERVER_NAME, url: connectorUrl })
+    ? buildCursorMcpDeeplink({ name: MCP_SERVER_NAME, url: connectorUrl })
     : "";
-  const firstPrompt = buildGoatMcpFirstPrompt({ displayName, workspaceName });
+  const firstPrompt = buildMcpFirstPrompt({ displayName, workspaceName });
 
   useEffect(() => {
     if (!waiting || completedAt) return;
@@ -126,7 +117,7 @@ export function McpSetupGuide({
       if (pollInFlight || document.visibilityState === "hidden") return;
       pollInFlight = true;
       try {
-        const status = await checkGoatMcpSetupStatusAction();
+        const status = await checkMcpSetupStatusAction();
         if (!active) return;
         setPollError(false);
         if (status.complete) {
@@ -149,11 +140,11 @@ export function McpSetupGuide({
     };
   }, [completedAt, router, waiting]);
 
-  const chooseClient = (nextClient: GoatMcpClient) => {
+  const chooseClient = (nextClient: McpClient) => {
     const previousClient = client;
     setClient(nextClient);
     startSavingClient(async () => {
-      const result = await savePreferredGoatMcpClientAction(nextClient);
+      const result = await savePreferredMcpClientAction(nextClient);
       if (!result.ok) {
         setClient(previousClient);
         toast.error(result.error);
@@ -227,7 +218,7 @@ export function McpSetupGuide({
           <section className="mt-6" aria-labelledby="mcp-connect-heading">
             <div className="mb-2 flex items-center justify-between gap-3">
               <h2 id="mcp-connect-heading" className="text-[12px] font-medium text-ink">
-                2. Connect OpenCompany
+                2. Connect opencompany
               </h2>
               <a
                 href={selectedClient.docsUrl}
@@ -298,7 +289,7 @@ export function McpSetupGuide({
             </h2>
             <div className="rounded-xl border border-border bg-surface p-4">
               <p className="text-[12px] leading-5 text-ink-subtle">
-                Paste this into {selectedClient.label}. It starts with a Brain search so OpenCompany
+                Paste this into {selectedClient.label}. It starts with a Brain search so opencompany
                 can verify the connection.
               </p>
               <div className="mt-3 rounded-lg bg-surface-muted p-3">
@@ -333,7 +324,7 @@ function GuideHeader() {
         Use your brain where you already work
       </h1>
       <p className="text-[14px] leading-6 text-ink-muted">
-        Connect one AI client, then ask a real question so OpenCompany can verify everything works.
+        Connect one AI client, then ask a real question so opencompany can verify everything works.
       </p>
     </div>
   );
@@ -385,9 +376,9 @@ function SetupStatus({
       <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-success-border bg-success-bg px-4 py-3">
         <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-success" />
         <div>
-          <p className="text-[12.5px] font-semibold text-ink">OpenCompany is connected</p>
+          <p className="text-[12.5px] font-semibold text-ink">opencompany is connected</p>
           <p className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
-            Your first MCP query reached OpenCompany successfully.
+            Your first MCP query reached opencompany successfully.
           </p>
         </div>
       </div>
@@ -404,7 +395,7 @@ function SetupStatus({
           className={`mt-0.5 text-[11.5px] leading-4 ${pollError ? "text-warning" : "text-ink-subtle"}`}
         >
           {pollError
-            ? "OpenCompany could not check yet. Keep this page open and it will retry."
+            ? "opencompany could not check yet. Keep this page open and it will retry."
             : "Leave this page open, paste the question into your AI client, and approve the tool call."}
         </p>
       </div>

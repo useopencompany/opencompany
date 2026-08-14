@@ -3,7 +3,7 @@
 import {
   type AddWikiTimelineEntryBody,
   type CreateWikiPageBody,
-  createOpenCompanyClient,
+  createApiClient,
   type DeleteWikiPageBody,
   type UpdateWikiPageBody,
 } from "@opencompany/protocol";
@@ -65,7 +65,7 @@ export async function addWikiTimelineEntryRequest(
 
 function knowledgeClient(options: KnowledgeClientOptions) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
-  return createOpenCompanyClient(baseUrl, {
+  return createApiClient(baseUrl, {
     fetch: createHeadlessChatApiFetch({
       baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),

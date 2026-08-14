@@ -1,23 +1,23 @@
-# OpenCompany runner
+# opencompany runner
 
-`apps/runner` is OpenCompany's durable execution composition root. It is a Bun/Fastify process
+`apps/runner` is opencompany's durable execution composition root. It is a Bun/Fastify process
 deployed on Render and started locally by `bun run dev:web`.
 
 ## Responsibilities
 
 - claim, heartbeat, recover, cancel, and settle durable Runs and Attempts;
-- execute OpenCompany, Codex, and Claude Code engine adapters;
+- execute opencompany, Codex, and Claude Code engine adapters;
 - manage persistent E2B coding sandboxes, credentials, skills, attachments, and artifacts;
 - run Brain ingestion/import, integration poll/flush, and schedule workers;
 - serve dictation, coding-workspace, ticketed Claude MCP, and LLM-broker transports;
 - meter model usage and expose release-aware health checks.
 
-The runner does not own a separate product schema. It reads Goat tables plus the isolated
+The runner does not own a separate product schema. It reads opencompany tables plus the isolated
 LLM-broker and billing compatibility tables through `@opencompany/db`.
 
 ## Entry points
 
-`src/index.ts` builds the HTTP server and starts enabled workers. Goat-specific internal routes are
+`src/index.ts` builds the HTTP server and starts enabled workers. opencompany-specific internal routes are
 under `/internal/goat/*`; `/healthz` is public for Render and release checks. Private routes require
 `RUNNER_INTERNAL_TOKEN`. Browser and sandbox transports validate narrow signed tickets; Claude MCP
 also rechecks persisted Conversation, Run, Attempt, lease, and membership authority for every

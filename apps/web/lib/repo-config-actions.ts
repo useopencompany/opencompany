@@ -6,7 +6,7 @@ import { serverApiClient, serverApiError, serverApiErrorMessage } from "@/lib/se
 // Mirror the protocol's WorkspaceRepository/RepoConfig contracts with concrete
 // web-side types: the generated z.infer types collapse to `any` under this
 // app's tsconfig. Env values never appear here — only saved key names.
-export type GoatWorkspaceRepository = {
+export type WorkspaceRepository = {
   repositoryExternalId: string;
   repositoryFullName: string;
   private: boolean;
@@ -20,13 +20,13 @@ type RepoConfigDto = {
   updatedAt: string;
 };
 
-export type GoatRepoConfigView = Omit<RepoConfigDto, "updatedAt"> & { updatedAt: Date };
+export type RepoConfigView = Omit<RepoConfigDto, "updatedAt"> & { updatedAt: Date };
 
-export type GoatRepoConfigMutationResult =
-  | { ok: true; config: GoatRepoConfigView }
+export type RepoConfigMutationResult =
+  | { ok: true; config: RepoConfigView }
   | { ok: false; message: string };
 
-export type GoatRepoConfigDeleteResult =
+export type RepoConfigDeleteResult =
   | { ok: true; repositoryExternalId: string }
   | { ok: false; message: string };
 
@@ -46,16 +46,16 @@ function isValidRepositoryMutationInput(input: unknown): input is {
   );
 }
 
-export async function listGoatRepoConfigsAction(): Promise<{
-  repositories: GoatWorkspaceRepository[];
-  configs: GoatRepoConfigView[];
+export async function listRepoConfigsAction(): Promise<{
+  repositories: WorkspaceRepository[];
+  configs: RepoConfigView[];
 }> {
   const response = await (await serverApiClient()).v1["repo-configs"].$get();
   if (!response.ok) {
     throw await serverApiError(response, "Repository configurations could not be loaded.");
   }
   const data = (await response.json()).data as {
-    repositories: GoatWorkspaceRepository[];
+    repositories: WorkspaceRepository[];
     configs: RepoConfigDto[];
   };
   return {
@@ -64,10 +64,10 @@ export async function listGoatRepoConfigsAction(): Promise<{
   };
 }
 
-export async function saveGoatRepoEnvAction(input: {
+export async function saveRepoEnvAction(input: {
   repositoryExternalId: string;
   envContent: string;
-}): Promise<GoatRepoConfigMutationResult> {
+}): Promise<RepoConfigMutationResult> {
   if (!isValidRepositoryMutationInput(input) || typeof input.envContent !== "string") {
     return { ok: false, message: "Invalid repository environment." };
   }
@@ -81,9 +81,9 @@ export async function saveGoatRepoEnvAction(input: {
   );
 }
 
-export async function clearGoatRepoEnvAction(input: {
+export async function clearRepoEnvAction(input: {
   repositoryExternalId: string;
-}): Promise<GoatRepoConfigMutationResult> {
+}): Promise<RepoConfigMutationResult> {
   if (!isValidRepositoryMutationInput(input)) {
     return { ok: false, message: "Invalid repository." };
   }
@@ -97,10 +97,10 @@ export async function clearGoatRepoEnvAction(input: {
   );
 }
 
-export async function saveGoatRepoSetupInstructionsAction(input: {
+export async function saveRepoSetupInstructionsAction(input: {
   repositoryExternalId: string;
   setupInstructions: string;
-}): Promise<GoatRepoConfigMutationResult> {
+}): Promise<RepoConfigMutationResult> {
   if (!isValidRepositoryMutationInput(input) || typeof input.setupInstructions !== "string") {
     return { ok: false, message: "Invalid setup instructions." };
   }
@@ -114,9 +114,9 @@ export async function saveGoatRepoSetupInstructionsAction(input: {
   );
 }
 
-export async function deleteGoatRepoConfigAction(input: {
+export async function deleteRepoConfigAction(input: {
   repositoryExternalId: string;
-}): Promise<GoatRepoConfigDeleteResult> {
+}): Promise<RepoConfigDeleteResult> {
   if (!isValidRepositoryMutationInput(input)) {
     return { ok: false, message: "Invalid repository." };
   }
@@ -148,7 +148,7 @@ export async function deleteGoatRepoConfigAction(input: {
 async function mutateConfig(
   request: () => Promise<Response>,
   fallback: string,
-): Promise<GoatRepoConfigMutationResult> {
+): Promise<RepoConfigMutationResult> {
   try {
     const response = await request();
     if (!response.ok) {
@@ -162,6 +162,6 @@ async function mutateConfig(
   }
 }
 
-function configView(config: RepoConfigDto): GoatRepoConfigView {
+function configView(config: RepoConfigDto): RepoConfigView {
   return { ...config, updatedAt: new Date(config.updatedAt) };
 }

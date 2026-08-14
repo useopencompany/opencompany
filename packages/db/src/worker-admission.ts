@@ -1,20 +1,18 @@
-export const GOAT_BRAIN_WORKER_ADMISSION_CHANNEL = "goat_brain_worker_admission_v1";
+export const BRAIN_WORKER_ADMISSION_CHANNEL = "goat_brain_worker_admission_v1";
 
-export const GOAT_BRAIN_WORKERS = ["brain_import", "brain_ingest", "google_drive_sync"] as const;
+export const BRAIN_WORKERS = ["brain_import", "brain_ingest", "google_drive_sync"] as const;
 
-export type GoatBrainWorker = (typeof GOAT_BRAIN_WORKERS)[number];
+export type BrainWorker = (typeof BRAIN_WORKERS)[number];
 
-export function parseGoatBrainWorkerAdmission(value: string): GoatBrainWorker | null {
+export function parseBrainWorkerAdmission(value: string): BrainWorker | null {
   try {
     const parsed = JSON.parse(value) as { worker?: unknown };
-    return typeof parsed.worker === "string" && isGoatBrainWorker(parsed.worker)
-      ? parsed.worker
-      : null;
+    return typeof parsed.worker === "string" && isBrainWorker(parsed.worker) ? parsed.worker : null;
   } catch {
     return null;
   }
 }
 
-function isGoatBrainWorker(value: string): value is GoatBrainWorker {
-  return GOAT_BRAIN_WORKERS.some((worker) => worker === value);
+function isBrainWorker(value: string): value is BrainWorker {
+  return BRAIN_WORKERS.some((worker) => worker === value);
 }

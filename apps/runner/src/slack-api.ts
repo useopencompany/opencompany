@@ -1,7 +1,7 @@
 import type {
   NormalizedSlackConversationContent,
   NormalizedSlackConversationMessage,
-} from "@opencompany/goat-brain";
+} from "@opencompany/brain";
 import { createLogger } from "@opencompany/observability";
 
 // Read-only Slack Web API helpers for the flush worker's prompt enrichment

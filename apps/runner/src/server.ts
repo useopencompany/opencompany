@@ -1,27 +1,24 @@
-import { GOAT_INFISICAL_US_HOST, isGoatInfisicalHost } from "@opencompany/db/goat-infisical-auth";
-import { parseGoatSlackBotEventCommand } from "@opencompany/goat-agent/integrations/slack-bot-events";
+import { parseSlackBotEventCommand } from "@opencompany/agent/integrations/slack-bot-events";
+import { INFISICAL_US_HOST, isInfisicalHost } from "@opencompany/db/infisical-auth";
 import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
-import { pollGoatCodexDeviceAuthFlow, startGoatCodexDeviceAuthFlow } from "./codex-auth";
+import { alwaysAllowAction } from "./action-permissions";
+import { wakeBrainImportWorker } from "./brain-import-worker";
+import { wakeBrainIngestWorker } from "./brain-ingest-worker";
+import { registerClaudeActionsMcpRoute } from "./claude-actions-mcp";
+import { pollCodexDeviceAuthFlow, startCodexDeviceAuthFlow } from "./codex-auth";
+import { wakeCodexChatWorker } from "./codex-chat-worker";
+import { CodingWorkspaceAccessError, mintCodingWorkspaceAccess } from "./coding-workspace-runtime";
+import { createCodingWorkspaceTransport } from "./coding-workspace-runtime-transport";
+import { createDictationTicket } from "./dictation-auth";
 import type { RunnerEnv } from "./env";
-import { alwaysAllowGoatAction } from "./goat-action-permissions";
-import { wakeGoatBrainImportWorker } from "./goat-brain-import-worker";
-import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
-import { registerGoatClaudeActionsMcpRoute } from "./goat-claude-actions-mcp";
-import { wakeGoatCodexChatWorker } from "./goat-codex-chat-worker";
-import {
-  GoatCodingWorkspaceAccessError,
-  mintGoatCodingWorkspaceAccess,
-} from "./goat-coding-workspace-runtime";
-import { createGoatCodingWorkspaceTransport } from "./goat-coding-workspace-runtime-transport";
-import { createGoatDictationTicket } from "./goat-dictation-auth";
-import { wakeGoatGoogleDriveSyncWorker } from "./goat-google-drive-sync-worker";
-import { planGoatHarnessForTask } from "./goat-harness";
-import { getGoatHarnessPlannerContextForRunner } from "./goat-harness-planner";
-import { enqueueGoatSlackBotEvent } from "./goat-slack-bot-events";
-import { completeGoatInfisicalAuthFlow, startGoatInfisicalAuthFlow } from "./infisical-auth";
+import { wakeGoogleDriveSyncWorker } from "./google-drive-sync-worker";
+import { planHarnessForTask } from "./harness";
+import { getHarnessPlannerContextForRunner } from "./harness-planner";
+import { completeInfisicalAuthFlow, startInfisicalAuthFlow } from "./infisical-auth";
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
+import { enqueueSlackBotEvent } from "./slack-bot-events";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -32,11 +29,11 @@ export function createServer(
   env: RunnerEnv,
   options: {
     llmBroker?: Pick<LlmBrokerOptions, "store" | "fetchImpl">;
-    slackBotEvents?: { enqueue: typeof enqueueGoatSlackBotEvent };
-    actionPermissions?: { alwaysAllow: typeof alwaysAllowGoatAction };
+    slackBotEvents?: { enqueue: typeof enqueueSlackBotEvent };
+    actionPermissions?: { alwaysAllow: typeof alwaysAllowAction };
   } = {},
 ) {
-  const runtimeTransport = createGoatCodingWorkspaceTransport(env);
+  const runtimeTransport = createCodingWorkspaceTransport(env);
   const app = Fastify({
     logger: false,
     serverFactory: runtimeTransport.serverFactory,
@@ -65,7 +62,7 @@ export function createServer(
     }
   });
 
-  registerGoatClaudeActionsMcpRoute(app, env);
+  registerClaudeActionsMcpRoute(app, env);
 
   app.get("/healthz", async () => ({
     ok: true,
@@ -82,11 +79,11 @@ export function createServer(
 
   app.post("/internal/goat/codex-chat/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat workers are disabled." });
+    if (!env.taskWorkerEnabled) {
+      reply.status(503).send({ error: "opencompany workers are disabled." });
       return;
     }
-    wakeGoatCodexChatWorker();
+    wakeCodexChatWorker();
     reply.status(202).send({ ok: true });
   });
 
@@ -115,14 +112,14 @@ export function createServer(
       }
 
       try {
-        const access = await mintGoatCodingWorkspaceAccess({
+        const access = await mintCodingWorkspaceAccess({
           codingSessionId,
           userWorkosId,
           env,
         });
         reply.send(access);
       } catch (error) {
-        if (error instanceof GoatCodingWorkspaceAccessError) {
+        if (error instanceof CodingWorkspaceAccessError) {
           reply.status(error.statusCode).send({ error: error.message });
           return;
         }
@@ -140,7 +137,7 @@ export function createServer(
       return;
     }
 
-    reply.send(createGoatDictationTicket({ userWorkosId, secret: env.streamTokenSecret }));
+    reply.send(createDictationTicket({ userWorkosId, secret: env.streamTokenSecret }));
   });
 
   app.delete("/internal/goat/codex-chat/sandboxes/:sandboxId", async (request, reply) => {
@@ -157,33 +154,33 @@ export function createServer(
 
   app.post("/internal/goat/brain-ingest/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat workers are disabled." });
+    if (!env.taskWorkerEnabled) {
+      reply.status(503).send({ error: "opencompany workers are disabled." });
       return;
     }
-    wakeGoatBrainIngestWorker();
+    wakeBrainIngestWorker();
     reply.status(202).send({ ok: true });
   });
 
   app.post("/internal/goat/slack-bot/events", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat workers are disabled." });
+    if (!env.taskWorkerEnabled) {
+      reply.status(503).send({ error: "opencompany workers are disabled." });
       return;
     }
-    const command = parseGoatSlackBotEventCommand(request.body);
+    const command = parseSlackBotEventCommand(request.body);
     if (!command) {
       reply.status(400).send({ error: "A valid Slack bot event command is required." });
       return;
     }
-    (options.slackBotEvents?.enqueue ?? enqueueGoatSlackBotEvent)(command);
+    (options.slackBotEvents?.enqueue ?? enqueueSlackBotEvent)(command);
     reply.status(202).send({ ok: true });
   });
 
   app.post("/internal/goat/actions/always-allow", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat workers are disabled." });
+    if (!env.taskWorkerEnabled) {
+      reply.status(503).send({ error: "opencompany workers are disabled." });
       return;
     }
     const body = request.body as Record<string, unknown> | undefined;
@@ -194,7 +191,7 @@ export function createServer(
       reply.status(400).send({ error: "userWorkosId, workspaceId, and actionId are required." });
       return;
     }
-    const result = await (options.actionPermissions?.alwaysAllow ?? alwaysAllowGoatAction)({
+    const result = await (options.actionPermissions?.alwaysAllow ?? alwaysAllowAction)({
       userWorkosId,
       workspaceId,
       actionId,
@@ -204,28 +201,28 @@ export function createServer(
 
   app.post("/internal/goat/google-drive/sync", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat workers are disabled." });
+    if (!env.taskWorkerEnabled) {
+      reply.status(503).send({ error: "opencompany workers are disabled." });
       return;
     }
-    wakeGoatGoogleDriveSyncWorker();
+    wakeGoogleDriveSyncWorker();
     reply.status(202).send({ ok: true });
   });
 
   app.post("/internal/goat/brain-import/wake", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat workers are disabled." });
+    if (!env.taskWorkerEnabled) {
+      reply.status(503).send({ error: "opencompany workers are disabled." });
       return;
     }
-    wakeGoatBrainImportWorker();
+    wakeBrainImportWorker();
     reply.status(202).send({ ok: true });
   });
 
   app.post("/internal/goat/task-harness/plan", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat task worker is disabled." });
+    if (!env.taskWorkerEnabled) {
+      reply.status(503).send({ error: "opencompany task worker is disabled." });
       return;
     }
 
@@ -237,10 +234,10 @@ export function createServer(
       return;
     }
 
-    const plannerContext = await getGoatHarnessPlannerContextForRunner(userWorkosId, {
-      browserEnabled: env.goatBrowserEnabled,
+    const plannerContext = await getHarnessPlannerContextForRunner(userWorkosId, {
+      browserEnabled: env.browserEnabled,
     });
-    const planned = await planGoatHarnessForTask({
+    const planned = await planHarnessForTask({
       prompt,
       model: "moonshotai/kimi-k2.6",
       availableTools: plannerContext.availableTools,
@@ -260,12 +257,12 @@ export function createServer(
       reply.status(400).send({ error: "userWorkosId is required." });
       return;
     }
-    logger.info("Goat Codex device auth start route received", {
+    logger.info("opencompany Codex device auth start route received", {
       event: "opencompany.runner_goat_codex_auth_start_route_received",
       user_workos_id: userWorkosId,
     });
-    const flow = await startGoatCodexDeviceAuthFlow({ userWorkosId, env });
-    logger.info("Goat Codex device auth start route completed", {
+    const flow = await startCodexDeviceAuthFlow({ userWorkosId, env });
+    logger.info("opencompany Codex device auth start route completed", {
       event: "opencompany.runner_goat_codex_auth_start_route_completed",
       user_workos_id: userWorkosId,
       flow_id: flow.id,
@@ -283,21 +280,21 @@ export function createServer(
       reply.status(400).send({ error: "userWorkosId is required." });
       return;
     }
-    logger.debug("Goat Codex device auth poll route received", {
+    logger.debug("opencompany Codex device auth poll route received", {
       event: "opencompany.runner_goat_codex_auth_poll_route_received",
       user_workos_id: userWorkosId,
       flow_id: flowId,
     });
-    const flow = await pollGoatCodexDeviceAuthFlow({
+    const flow = await pollCodexDeviceAuthFlow({
       userWorkosId,
       flowId,
       env,
     });
     if (!flow) {
-      reply.status(404).send({ error: "Goat Codex device auth flow was not found." });
+      reply.status(404).send({ error: "opencompany Codex device auth flow was not found." });
       return;
     }
-    logger.debug("Goat Codex device auth poll route completed", {
+    logger.debug("opencompany Codex device auth poll route completed", {
       event: "opencompany.runner_goat_codex_auth_poll_route_completed",
       user_workos_id: userWorkosId,
       flow_id: flow.id,
@@ -316,16 +313,16 @@ export function createServer(
     const workspaceId = typeof body?.workspaceId === "string" ? body.workspaceId.trim() : "";
     const requestedByWorkosId =
       typeof body?.requestedByWorkosId === "string" ? body.requestedByWorkosId.trim() : "";
-    // Default omitted hosts to US while older Goat deployments drain during a rolling release.
-    const host = body?.host === undefined ? GOAT_INFISICAL_US_HOST : body.host;
-    if (!workspaceId || !requestedByWorkosId || !isGoatInfisicalHost(host)) {
+    // Default omitted hosts to US while older opencompany deployments drain during a rolling release.
+    const host = body?.host === undefined ? INFISICAL_US_HOST : body.host;
+    if (!workspaceId || !requestedByWorkosId || !isInfisicalHost(host)) {
       reply.status(400).send({
         error: "workspaceId, requestedByWorkosId, and a supported Infisical host are required.",
       });
       return;
     }
     try {
-      const flow = await startGoatInfisicalAuthFlow({
+      const flow = await startInfisicalAuthFlow({
         workspaceId,
         requestedByWorkosId,
         host,
@@ -360,7 +357,7 @@ export function createServer(
       return;
     }
     try {
-      const flow = await completeGoatInfisicalAuthFlow({
+      const flow = await completeInfisicalAuthFlow({
         workspaceId,
         requestedByWorkosId,
         flowId,

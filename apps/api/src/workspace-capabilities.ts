@@ -1,16 +1,13 @@
 import type { Actor } from "@opencompany/core";
 import {
-  getGoatCapabilityApproval,
-  getGoatCapabilityApprovalByToolCall,
-  getGoatCapabilitySessionBudgetUsdMicros,
-  listGoatWorkspaceCapabilities,
-  setGoatCapabilitySessionBudget,
-  setGoatWorkspaceCapability,
-} from "@opencompany/db/goat-capabilities";
-import type {
-  GoatCapabilityRunStatus,
-  GoatManagedCapabilitySource,
-} from "@opencompany/db/goat-schema";
+  getCapabilityApproval,
+  getCapabilityApprovalByToolCall,
+  getCapabilitySessionBudgetUsdMicros,
+  listWorkspaceCapabilities,
+  setCapabilitySessionBudget,
+  setWorkspaceCapability,
+} from "@opencompany/db/capabilities";
+import type { CapabilityRunStatus, ManagedCapabilitySource } from "@opencompany/db/product-schema";
 import { ApiError } from "./errors";
 
 // Follows the repo-wide injectable-db convention for services that only need a
@@ -18,15 +15,15 @@ import { ApiError } from "./errors";
 type DbLike = any;
 
 export type WorkspaceCapabilitySettings = {
-  capabilities: Array<{ source: GoatManagedCapabilitySource; enabled: boolean }>;
+  capabilities: Array<{ source: ManagedCapabilitySource; enabled: boolean }>;
   sessionBudgetUsdMicros: number;
 };
 
 export type CapabilityApprovalView = {
   runId: string;
-  source: GoatManagedCapabilitySource;
+  source: ManagedCapabilitySource;
   action: string;
-  status: GoatCapabilityRunStatus;
+  status: CapabilityRunStatus;
   maxCostUsdMicros: number;
   expiresAt: Date | null;
   settledCostUsdMicros: number | null;
@@ -37,9 +34,9 @@ export type WorkspaceCapabilityService = {
   getSettings(actor: Actor): Promise<WorkspaceCapabilitySettings>;
   setCapability(
     actor: Actor,
-    source: GoatManagedCapabilitySource,
+    source: ManagedCapabilitySource,
     enabled: boolean,
-  ): Promise<{ source: GoatManagedCapabilitySource; enabled: boolean }>;
+  ): Promise<{ source: ManagedCapabilitySource; enabled: boolean }>;
   setSessionBudget(actor: Actor, budgetUsd: number | null): Promise<number>;
   getApproval(actor: Actor, runId: string): Promise<CapabilityApprovalView>;
   getApprovalByToolCall(actor: Actor, toolCallId: string): Promise<CapabilityApprovalView>;
@@ -52,15 +49,15 @@ export function createWorkspaceCapabilityService(input: {
   return {
     async getSettings(actor) {
       const [capabilities, sessionBudgetUsdMicros] = await Promise.all([
-        listGoatWorkspaceCapabilities(actor.workspaceId, db),
-        getGoatCapabilitySessionBudgetUsdMicros(actor.workspaceId, db),
+        listWorkspaceCapabilities(actor.workspaceId, db),
+        getCapabilitySessionBudgetUsdMicros(actor.workspaceId, db),
       ]);
       return { capabilities, sessionBudgetUsdMicros };
     },
 
     async setCapability(actor, source, enabled) {
       requireAdmin(actor, "Only workspace admins can change paid capabilities.");
-      const row = await setGoatWorkspaceCapability({
+      const row = await setWorkspaceCapability({
         workspaceId: actor.workspaceId,
         source,
         enabled,
@@ -84,7 +81,7 @@ export function createWorkspaceCapabilityService(input: {
       }
       const budgetUsdMicros =
         budgetUsd === null ? null : Math.max(1, Math.round(budgetUsd * 1_000_000));
-      return setGoatCapabilitySessionBudget({
+      return setCapabilitySessionBudget({
         workspaceId: actor.workspaceId,
         budgetUsdMicros,
         db,
@@ -92,7 +89,7 @@ export function createWorkspaceCapabilityService(input: {
     },
 
     async getApproval(actor, runId) {
-      const row = await getGoatCapabilityApproval({
+      const row = await getCapabilityApproval({
         id: runId,
         userWorkosId: actor.userId,
         workspaceId: actor.workspaceId,
@@ -104,13 +101,13 @@ export function createWorkspaceCapabilityService(input: {
 
     async getApprovalByToolCall(actor, toolCallId) {
       const [row, sessionBudgetUsdMicros] = await Promise.all([
-        getGoatCapabilityApprovalByToolCall({
+        getCapabilityApprovalByToolCall({
           toolCallId,
           userWorkosId: actor.userId,
           workspaceId: actor.workspaceId,
           db,
         }),
-        getGoatCapabilitySessionBudgetUsdMicros(actor.workspaceId, db),
+        getCapabilitySessionBudgetUsdMicros(actor.workspaceId, db),
       ]);
       if (!row) throw new ApiError(404, "not_found", "Approval not found");
       return { ...approvalView(row), sessionBudgetUsdMicros };
@@ -124,9 +121,9 @@ function requireAdmin(actor: Actor, message: string) {
 
 function approvalView(row: {
   id: string;
-  source: GoatManagedCapabilitySource;
+  source: ManagedCapabilitySource;
   action: string;
-  status: GoatCapabilityRunStatus;
+  status: CapabilityRunStatus;
   quoteTotalCostUsdMicros: number;
   approvalExpiresAt: Date | null;
   totalCostUsdMicros: number | null;

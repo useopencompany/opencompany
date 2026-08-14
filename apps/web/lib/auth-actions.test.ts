@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { completeGoatAuthentication } from "@/lib/auth";
+import { completeAuthentication } from "@/lib/auth";
 import {
   requestMagicCode,
   restartAuthentication,
@@ -10,33 +10,33 @@ import {
   verifyMagicCode,
 } from "@/lib/auth-actions";
 import {
-  clearGoatOrganizationSelection,
+  clearOrganizationSelection,
   organizationSelectionFromError,
-  readPendingGoatOrganizationSelection,
-  setGoatOAuthStateCookie,
-  setGoatOrganizationSelection,
+  readPendingOrganizationSelection,
+  setOAuthStateCookie,
+  setOrganizationSelection,
 } from "@/lib/auth-methods";
-import { getGoatAppUrl, getGoatWorkOSRedirectUri } from "@/lib/workos";
+import { getAppUrl, getWorkOSRedirectUri } from "@/lib/workos";
 import { getWorkOSClient } from "@/lib/workos-client";
 
 vi.mock("@/lib/auth", () => ({
-  completeGoatAuthentication: vi.fn(),
+  completeAuthentication: vi.fn(),
 }));
 
 vi.mock("@/lib/auth-methods", () => ({
-  clearGoatOrganizationSelection: vi.fn(),
+  clearOrganizationSelection: vi.fn(),
   organizationSelectionFromError: vi.fn(() => null),
-  readPendingGoatOrganizationSelection: vi.fn(),
-  safeGoatReturnPathname: vi.fn((value) =>
+  readPendingOrganizationSelection: vi.fn(),
+  safeReturnPathname: vi.fn((value) =>
     typeof value === "string" && value.startsWith("/") ? value : "/",
   ),
-  setGoatOAuthStateCookie: vi.fn(),
-  setGoatOrganizationSelection: vi.fn(),
+  setOAuthStateCookie: vi.fn(),
+  setOrganizationSelection: vi.fn(),
 }));
 
 vi.mock("@/lib/workos", () => ({
-  getGoatAppUrl: vi.fn(() => "https://my.opencompany.chat"),
-  getGoatWorkOSRedirectUri: vi.fn(() => "https://my.opencompany.chat/auth/callback"),
+  getAppUrl: vi.fn(() => "https://my.opencompany.chat"),
+  getWorkOSRedirectUri: vi.fn(() => "https://my.opencompany.chat/auth/callback"),
 }));
 
 vi.mock("@/lib/workos-client", () => ({
@@ -51,14 +51,14 @@ vi.mock("next/navigation", () => ({
   redirect: vi.fn(),
 }));
 
-const completeGoatAuthenticationMock = vi.mocked(completeGoatAuthentication);
-const clearGoatOrganizationSelectionMock = vi.mocked(clearGoatOrganizationSelection);
+const completeAuthenticationMock = vi.mocked(completeAuthentication);
+const clearOrganizationSelectionMock = vi.mocked(clearOrganizationSelection);
 const organizationSelectionFromErrorMock = vi.mocked(organizationSelectionFromError);
-const readPendingGoatOrganizationSelectionMock = vi.mocked(readPendingGoatOrganizationSelection);
-const setGoatOAuthStateCookieMock = vi.mocked(setGoatOAuthStateCookie);
-const setGoatOrganizationSelectionMock = vi.mocked(setGoatOrganizationSelection);
-const getGoatAppUrlMock = vi.mocked(getGoatAppUrl);
-const getGoatWorkOSRedirectUriMock = vi.mocked(getGoatWorkOSRedirectUri);
+const readPendingOrganizationSelectionMock = vi.mocked(readPendingOrganizationSelection);
+const setOAuthStateCookieMock = vi.mocked(setOAuthStateCookie);
+const setOrganizationSelectionMock = vi.mocked(setOrganizationSelection);
+const getAppUrlMock = vi.mocked(getAppUrl);
+const getWorkOSRedirectUriMock = vi.mocked(getWorkOSRedirectUri);
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
 const headersMock = vi.mocked(headers);
 const redirectMock = vi.mocked(redirect);
@@ -73,7 +73,7 @@ describe("startGoogleAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     organizationSelectionFromErrorMock.mockReturnValue(null);
-    getGoatWorkOSRedirectUriMock.mockReturnValue("https://my.opencompany.chat/auth/callback");
+    getWorkOSRedirectUriMock.mockReturnValue("https://my.opencompany.chat/auth/callback");
   });
 
   it("stores a CSRF state cookie and redirects to WorkOS's GoogleOAuth authorization URL", async () => {
@@ -88,8 +88,8 @@ describe("startGoogleAuth", () => {
 
     await startGoogleAuth(formData);
 
-    expect(setGoatOAuthStateCookieMock).toHaveBeenCalledTimes(1);
-    const [storedPayload] = setGoatOAuthStateCookieMock.mock.calls[0] ?? [];
+    expect(setOAuthStateCookieMock).toHaveBeenCalledTimes(1);
+    const [storedPayload] = setOAuthStateCookieMock.mock.calls[0] ?? [];
     expect(storedPayload).toBeDefined();
     expect(storedPayload?.invitationToken).toBe("invite-token-123");
     expect(storedPayload?.returnPathname).toBe("/");
@@ -115,7 +115,7 @@ describe("startGoogleAuth", () => {
 
     await startGoogleAuth(formData);
 
-    const [storedPayload] = setGoatOAuthStateCookieMock.mock.calls[0] ?? [];
+    const [storedPayload] = setOAuthStateCookieMock.mock.calls[0] ?? [];
     expect(storedPayload?.returnPathname).toBe("/");
   });
 });
@@ -168,7 +168,7 @@ describe("verifyMagicCode", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     organizationSelectionFromErrorMock.mockReturnValue(null);
-    getGoatAppUrlMock.mockReturnValue("https://my.opencompany.chat");
+    getAppUrlMock.mockReturnValue("https://my.opencompany.chat");
     stubHeaders({ "x-forwarded-for": "203.0.113.5, 10.0.0.1", "user-agent": "vitest" });
   });
 
@@ -196,7 +196,7 @@ describe("verifyMagicCode", () => {
       ipAddress: "203.0.113.5",
       userAgent: "vitest",
     });
-    expect(completeGoatAuthenticationMock).toHaveBeenCalledWith(
+    expect(completeAuthenticationMock).toHaveBeenCalledWith(
       authResponse,
       "https://my.opencompany.chat",
     );
@@ -215,7 +215,7 @@ describe("verifyMagicCode", () => {
     const result = await verifyMagicCode({ email: "ada@example.com", code: "000000" });
 
     expect(result.ok).toBe(false);
-    expect(completeGoatAuthenticationMock).not.toHaveBeenCalled();
+    expect(completeAuthenticationMock).not.toHaveBeenCalled();
     expect(redirectMock).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalled();
   });
@@ -240,9 +240,9 @@ describe("verifyMagicCode", () => {
     const result = await verifyMagicCode({ email: "ada@example.com", code: "123456" });
 
     expect(organizationSelectionFromErrorMock).toHaveBeenCalledWith(error);
-    expect(setGoatOrganizationSelectionMock).toHaveBeenCalledWith(selection);
+    expect(setOrganizationSelectionMock).toHaveBeenCalledWith(selection);
     expect(redirectMock).toHaveBeenCalledWith("/signin");
-    expect(completeGoatAuthenticationMock).not.toHaveBeenCalled();
+    expect(completeAuthenticationMock).not.toHaveBeenCalled();
     expect(result).toBeUndefined();
   });
 
@@ -258,12 +258,12 @@ describe("selectOrganization", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     organizationSelectionFromErrorMock.mockReturnValue(null);
-    getGoatAppUrlMock.mockReturnValue("https://my.opencompany.chat");
+    getAppUrlMock.mockReturnValue("https://my.opencompany.chat");
     stubHeaders({ "x-forwarded-for": "203.0.113.5", "user-agent": "vitest" });
   });
 
   it("exchanges the pending challenge and completes the session", async () => {
-    readPendingGoatOrganizationSelectionMock.mockResolvedValue({
+    readPendingOrganizationSelectionMock.mockResolvedValue({
       pendingAuthenticationToken: "pending-token",
       organizations: [
         { id: "org_one", name: "One" },
@@ -290,8 +290,8 @@ describe("selectOrganization", () => {
       ipAddress: "203.0.113.5",
       userAgent: "vitest",
     });
-    expect(clearGoatOrganizationSelectionMock).toHaveBeenCalledOnce();
-    expect(completeGoatAuthenticationMock).toHaveBeenCalledWith(
+    expect(clearOrganizationSelectionMock).toHaveBeenCalledOnce();
+    expect(completeAuthenticationMock).toHaveBeenCalledWith(
       authResponse,
       "https://my.opencompany.chat",
     );
@@ -299,7 +299,7 @@ describe("selectOrganization", () => {
   });
 
   it("rejects an organization that was not in the WorkOS challenge", async () => {
-    readPendingGoatOrganizationSelectionMock.mockResolvedValue({
+    readPendingOrganizationSelectionMock.mockResolvedValue({
       pendingAuthenticationToken: "pending-token",
       organizations: [{ id: "org_one", name: "One" }],
       returnPathname: "/",
@@ -312,7 +312,7 @@ describe("selectOrganization", () => {
   });
 
   it("returns an expired-session error when no pending challenge exists", async () => {
-    readPendingGoatOrganizationSelectionMock.mockResolvedValue(null);
+    readPendingOrganizationSelectionMock.mockResolvedValue(null);
 
     const result = await selectOrganization({ organizationId: "org_one" });
 
@@ -327,7 +327,7 @@ describe("restartAuthentication", () => {
 
     await restartAuthentication();
 
-    expect(clearGoatOrganizationSelectionMock).toHaveBeenCalledOnce();
+    expect(clearOrganizationSelectionMock).toHaveBeenCalledOnce();
     expect(redirectMock).toHaveBeenCalledWith("/signin");
   });
 });

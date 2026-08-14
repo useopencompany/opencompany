@@ -1,15 +1,15 @@
 import type { Actor } from "@opencompany/core";
 import {
-  deleteGoatRepoConfig,
-  type GoatRepoConfigView,
-  type GoatWorkspaceRepository,
+  deleteRepoConfig,
   isValidGitHubRepositoryExternalId,
-  listGoatRepoConfigs,
-  listGoatWorkspaceRepositories,
-  normalizeGoatRepoSetupInstructions,
-  upsertGoatRepoConfig,
-  validateGoatRepoEnv,
-} from "@opencompany/db/goat-repo-configs";
+  listRepoConfigs,
+  listWorkspaceRepositories,
+  normalizeRepoSetupInstructions,
+  type RepoConfigView,
+  upsertRepoConfig,
+  validateRepoEnv,
+  type WorkspaceRepository,
+} from "@opencompany/db/repo-configs";
 import { createLogger } from "@opencompany/observability";
 import { ApiError } from "./errors";
 
@@ -19,8 +19,8 @@ type DbLike = any;
 
 export type RepoConfigService = {
   list(actor: Actor): Promise<{
-    repositories: GoatWorkspaceRepository[];
-    configs: GoatRepoConfigView[];
+    repositories: WorkspaceRepository[];
+    configs: RepoConfigView[];
   }>;
   // content replaces the stored env file; null clears it. Responses only ever
   // carry env key names — stored values are write-only.
@@ -28,12 +28,12 @@ export type RepoConfigService = {
     actor: Actor,
     repositoryExternalId: string,
     content: string | null,
-  ): Promise<GoatRepoConfigView>;
+  ): Promise<RepoConfigView>;
   setSetupInstructions(
     actor: Actor,
     repositoryExternalId: string,
     setupInstructions: string,
-  ): Promise<GoatRepoConfigView>;
+  ): Promise<RepoConfigView>;
   remove(actor: Actor, repositoryExternalId: string): Promise<void>;
 };
 
@@ -41,8 +41,8 @@ export function createRepoConfigService(input: { db: DbLike }): RepoConfigServic
   return {
     async list(actor) {
       const [repositories, configs] = await Promise.all([
-        listGoatWorkspaceRepositories({ db: input.db, workspaceId: actor.workspaceId }),
-        listGoatRepoConfigs({ db: input.db, workspaceId: actor.workspaceId }),
+        listWorkspaceRepositories({ db: input.db, workspaceId: actor.workspaceId }),
+        listRepoConfigs({ db: input.db, workspaceId: actor.workspaceId }),
       ]);
       return { repositories, configs };
     },
@@ -51,7 +51,7 @@ export function createRepoConfigService(input: { db: DbLike }): RepoConfigServic
       requireAdmin(actor);
       requireValidRepositoryId(repositoryExternalId);
       if (content !== null) {
-        const validation = validateGoatRepoEnv(content);
+        const validation = validateRepoEnv(content);
         if (!validation.ok) throw new ApiError(400, "invalid_request", validation.message);
       }
       const repository = await resolveConfigurableRepository(input.db, {
@@ -68,7 +68,7 @@ export function createRepoConfigService(input: { db: DbLike }): RepoConfigServic
         );
       }
       try {
-        return await upsertGoatRepoConfig({
+        return await upsertRepoConfig({
           db: input.db,
           workspaceId: actor.workspaceId,
           ...repository,
@@ -91,7 +91,7 @@ export function createRepoConfigService(input: { db: DbLike }): RepoConfigServic
     async setSetupInstructions(actor, repositoryExternalId, setupInstructions) {
       requireAdmin(actor);
       requireValidRepositoryId(repositoryExternalId);
-      const normalized = normalizeGoatRepoSetupInstructions(setupInstructions);
+      const normalized = normalizeRepoSetupInstructions(setupInstructions);
       if (!normalized.ok) throw new ApiError(400, "invalid_request", normalized.message);
       const repository = await resolveConfigurableRepository(input.db, {
         workspaceId: actor.workspaceId,
@@ -101,7 +101,7 @@ export function createRepoConfigService(input: { db: DbLike }): RepoConfigServic
         throw new ApiError(404, "not_found", "This repository is not available to the workspace.");
       }
       try {
-        return await upsertGoatRepoConfig({
+        return await upsertRepoConfig({
           db: input.db,
           workspaceId: actor.workspaceId,
           ...repository,
@@ -124,7 +124,7 @@ export function createRepoConfigService(input: { db: DbLike }): RepoConfigServic
       requireValidRepositoryId(repositoryExternalId);
       let deleted: boolean;
       try {
-        deleted = await deleteGoatRepoConfig({
+        deleted = await deleteRepoConfig({
           db: input.db,
           workspaceId: actor.workspaceId,
           repositoryExternalId,
@@ -167,7 +167,7 @@ async function resolveConfigurableRepository(
   db: DbLike,
   input: { workspaceId: string; repositoryExternalId: string },
 ): Promise<{ repositoryExternalId: string; repositoryFullName: string } | null> {
-  const repositories = await listGoatWorkspaceRepositories({
+  const repositories = await listWorkspaceRepositories({
     db,
     workspaceId: input.workspaceId,
   });

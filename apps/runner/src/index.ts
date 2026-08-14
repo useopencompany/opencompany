@@ -1,10 +1,5 @@
 import "./load-env";
 import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
-import { flushLatitude } from "@opencompany/goat-observability/latitude";
-import {
-  registerGoatNodeObservability,
-  shutdownGoatNodeObservability,
-} from "@opencompany/goat-observability/node";
 import {
   captureException,
   createLogger,
@@ -13,48 +8,47 @@ import {
   setExceptionReporter,
 } from "@opencompany/observability";
 import { flushBraintrust } from "@opencompany/observability/braintrust";
+import { flushLatitude } from "@opencompany/telemetry/latitude";
+import { registerNodeObservability, shutdownNodeObservability } from "@opencompany/telemetry/node";
 import * as Sentry from "@sentry/bun";
+import { startAttioFlushWorker } from "./attio-flush-worker";
+import { setBrainImportWakeup, startBrainImportWorker } from "./brain-import-worker";
+import { setBrainIngestWakeup, startBrainIngestWorker } from "./brain-ingest-worker";
+import { startBrainWorkerAdmissionListener } from "./brain-worker-admission";
+import {
+  setCodexChatWakeup,
+  startCodexChatWorker,
+  sweepTerminalCodexChatSandboxes,
+} from "./codex-chat-worker";
 import { assertRunnerDbConfig, closeDb, getDbPool } from "./db";
 import { loadEnv } from "./env";
-import { startGoatAttioFlushWorker } from "./goat-attio-flush-worker";
-import { setGoatBrainImportWakeup, startGoatBrainImportWorker } from "./goat-brain-import-worker";
-import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
-import { startGoatBrainWorkerAdmissionListener } from "./goat-brain-worker-admission";
-import {
-  setGoatCodexChatWakeup,
-  startGoatCodexChatWorker,
-  sweepTerminalGoatCodexChatSandboxes,
-} from "./goat-codex-chat-worker";
-import { startGoatFathomPollWorker } from "./goat-fathom-poll-worker";
-import { startGoatGitHubFlushWorker } from "./goat-github-flush-worker";
-import { startGoatGmailFlushWorker } from "./goat-gmail-flush-worker";
-import { startGoatGmailPollWorker } from "./goat-gmail-poll-worker";
-import {
-  setGoatGoogleDriveSyncWakeup,
-  startGoatGoogleDriveSyncWorker,
-} from "./goat-google-drive-sync-worker";
-import { startGoatGranolaPollWorker } from "./goat-granola-poll-worker";
-import { startGoatHubspotFlushWorker } from "./goat-hubspot-flush-worker";
-import { startGoatLinearFlushWorker } from "./goat-linear-flush-worker";
-import { startGoatTaskScheduleWorker } from "./goat-scheduler";
-import { activeGoatSlackBotEventCount, drainGoatSlackBotEvents } from "./goat-slack-bot-events";
-import { startGoatSlackFlushWorker } from "./goat-slack-flush-worker";
+import { startFathomPollWorker } from "./fathom-poll-worker";
+import { startGitHubFlushWorker } from "./github-flush-worker";
+import { startGmailFlushWorker } from "./gmail-flush-worker";
+import { startGmailPollWorker } from "./gmail-poll-worker";
+import { setGoogleDriveSyncWakeup, startGoogleDriveSyncWorker } from "./google-drive-sync-worker";
+import { startGranolaPollWorker } from "./granola-poll-worker";
+import { startHubspotFlushWorker } from "./hubspot-flush-worker";
+import { startLinearFlushWorker } from "./linear-flush-worker";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
+import { startTaskScheduleWorker } from "./scheduler";
 import { createServer } from "./server";
+import { activeSlackBotEventCount, drainSlackBotEvents } from "./slack-bot-events";
+import { startSlackFlushWorker } from "./slack-flush-worker";
 
 const logger = createLogger({
   service: "opencompany-runner",
   runtime: "index",
 });
 // Render sends SIGTERM on deploy and SIGKILLs after `maxShutdownDelaySeconds` (300s,
-// render.yaml). Workers stop claiming immediately, then active runner jobs and durable Goat Codex
+// render.yaml). Workers stop claiming immediately, then active runner jobs and durable opencompany Codex
 // turns get most of that window to finish in place. The remaining minute covers interruption or
 // handoff, stream/telemetry flushes, and closing the DB pool before Render's hard kill.
 const RENDER_SHUTDOWN_DRAIN_MS = 240_000;
 const RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS = 30_000;
 
 initializeExceptionReporting();
-registerGoatNodeObservability({ serviceName: "opencompany-runner-goat" });
+registerNodeObservability({ serviceName: "opencompany-runner-goat" });
 installProcessErrorBackstop();
 
 const env = loadEnv();
@@ -81,60 +75,58 @@ const llmBrokerSweepTimer = setInterval(() => {
       });
     });
 }, LLM_BROKER_SWEEP_INTERVAL_MS);
-const goatCodexChatWorker = env.goatTaskWorkerEnabled
-  ? startGoatCodexChatWorker(env, {
+const codexChatWorker = env.taskWorkerEnabled
+  ? startCodexChatWorker(env, {
       sandboxSweep: () =>
-        sweepTerminalGoatCodexChatSandboxes({
-          idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
+        sweepTerminalCodexChatSandboxes({
+          idleTimeoutMs: env.codexChatIdleTimeoutMs,
         }),
       ...(chatPresentation ? { presentationPublisher: chatPresentation } : {}),
     })
   : null;
-const goatBrainIngestWorker = env.goatTaskWorkerEnabled ? startGoatBrainIngestWorker(env) : null;
-const goatBrainImportWorker = env.goatTaskWorkerEnabled ? startGoatBrainImportWorker(env) : null;
-const goatSlackFlushWorker = env.goatTaskWorkerEnabled ? startGoatSlackFlushWorker() : null;
-const goatLinearFlushWorker = env.goatTaskWorkerEnabled ? startGoatLinearFlushWorker() : null;
-const goatGitHubFlushWorker = env.goatTaskWorkerEnabled ? startGoatGitHubFlushWorker() : null;
-const goatHubspotFlushWorker = env.goatTaskWorkerEnabled ? startGoatHubspotFlushWorker(env) : null;
-const goatAttioFlushWorker = env.goatTaskWorkerEnabled ? startGoatAttioFlushWorker() : null;
-const goatGmailPollWorker = env.goatTaskWorkerEnabled ? startGoatGmailPollWorker(env) : null;
-const goatGmailFlushWorker = env.goatTaskWorkerEnabled ? startGoatGmailFlushWorker(env) : null;
-const goatGranolaPollWorker = env.goatTaskWorkerEnabled ? startGoatGranolaPollWorker() : null;
-const goatFathomPollWorker = env.goatTaskWorkerEnabled ? startGoatFathomPollWorker() : null;
-const goatGoogleDriveSyncWorker = env.goatTaskWorkerEnabled
-  ? startGoatGoogleDriveSyncWorker(env)
-  : null;
-const goatTaskScheduleWorker = goatCodexChatWorker
-  ? startGoatTaskScheduleWorker({
+const brainIngestWorker = env.taskWorkerEnabled ? startBrainIngestWorker(env) : null;
+const brainImportWorker = env.taskWorkerEnabled ? startBrainImportWorker(env) : null;
+const slackFlushWorker = env.taskWorkerEnabled ? startSlackFlushWorker() : null;
+const linearFlushWorker = env.taskWorkerEnabled ? startLinearFlushWorker() : null;
+const gitHubFlushWorker = env.taskWorkerEnabled ? startGitHubFlushWorker() : null;
+const hubspotFlushWorker = env.taskWorkerEnabled ? startHubspotFlushWorker(env) : null;
+const attioFlushWorker = env.taskWorkerEnabled ? startAttioFlushWorker() : null;
+const gmailPollWorker = env.taskWorkerEnabled ? startGmailPollWorker(env) : null;
+const gmailFlushWorker = env.taskWorkerEnabled ? startGmailFlushWorker(env) : null;
+const granolaPollWorker = env.taskWorkerEnabled ? startGranolaPollWorker() : null;
+const fathomPollWorker = env.taskWorkerEnabled ? startFathomPollWorker() : null;
+const googleDriveSyncWorker = env.taskWorkerEnabled ? startGoogleDriveSyncWorker(env) : null;
+const taskScheduleWorker = codexChatWorker
+  ? startTaskScheduleWorker({
       onTaskCreated: () => {
-        goatCodexChatWorker.notify();
+        codexChatWorker.notify();
       },
     })
   : null;
-if (!goatCodexChatWorker) {
-  logger.info("Goat task worker disabled", {
+if (!codexChatWorker) {
+  logger.info("opencompany task worker disabled", {
     event: "opencompany.goat_task_worker_disabled",
   });
 }
-setGoatBrainIngestWakeup(() => {
-  goatBrainIngestWorker?.notify();
+setBrainIngestWakeup(() => {
+  brainIngestWorker?.notify();
 });
-setGoatGoogleDriveSyncWakeup(() => {
-  goatGoogleDriveSyncWorker?.notify();
+setGoogleDriveSyncWakeup(() => {
+  googleDriveSyncWorker?.notify();
 });
-setGoatBrainImportWakeup(() => {
-  goatBrainImportWorker?.notify();
+setBrainImportWakeup(() => {
+  brainImportWorker?.notify();
 });
-setGoatCodexChatWakeup(() => {
-  goatCodexChatWorker?.notify();
+setCodexChatWakeup(() => {
+  codexChatWorker?.notify();
 });
-const goatBrainWorkerAdmissionListener = env.goatTaskWorkerEnabled
-  ? startGoatBrainWorkerAdmissionListener({
+const brainWorkerAdmissionListener = env.taskWorkerEnabled
+  ? startBrainWorkerAdmissionListener({
       pool: getDbPool(),
       callbacks: {
-        brain_import: () => goatBrainImportWorker?.notify(),
-        brain_ingest: () => goatBrainIngestWorker?.notify(),
-        google_drive_sync: () => goatGoogleDriveSyncWorker?.notify(),
+        brain_import: () => brainImportWorker?.notify(),
+        brain_ingest: () => brainIngestWorker?.notify(),
+        google_drive_sync: () => googleDriveSyncWorker?.notify(),
       },
     })
   : null;
@@ -145,41 +137,41 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     logger.info("Runner shutdown started", {
       event: "opencompany.runner_shutdown_started",
       signal,
-      active_goat_brain_ingest_count: goatBrainIngestWorker?.activeCount() ?? 0,
-      active_goat_google_drive_sync_count: goatGoogleDriveSyncWorker?.activeCount() ?? 0,
-      active_goat_brain_import_count: goatBrainImportWorker?.activeCount() ?? 0,
-      active_goat_codex_chat_count: goatCodexChatWorker?.activeCount() ?? 0,
-      active_goat_slack_bot_event_count: activeGoatSlackBotEventCount(),
+      active_goat_brain_ingest_count: brainIngestWorker?.activeCount() ?? 0,
+      active_goat_google_drive_sync_count: googleDriveSyncWorker?.activeCount() ?? 0,
+      active_goat_brain_import_count: brainImportWorker?.activeCount() ?? 0,
+      active_goat_codex_chat_count: codexChatWorker?.activeCount() ?? 0,
+      active_goat_slack_bot_event_count: activeSlackBotEventCount(),
     });
     clearInterval(llmBrokerSweepTimer);
     // Stop accepting work and drain in-flight requests first, then close the DB pool so
     // no checked-out connection is cut mid-query, then flush telemetry.
     void Promise.allSettled([
-      goatTaskScheduleWorker?.stop() ?? Promise.resolve(),
-      goatCodexChatWorker?.stop({
+      taskScheduleWorker?.stop() ?? Promise.resolve(),
+      codexChatWorker?.stop({
         handoffAfterMs: RENDER_SHUTDOWN_DRAIN_MS,
         postHandoffWaitMs: RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS,
         onHandoff: (activeCount) => {
-          logger.info("Runner shutdown handing off Goat Codex chat turns", {
+          logger.info("Runner shutdown handing off opencompany Codex chat turns", {
             event: "opencompany.runner_shutdown_handing_off_goat_codex_chat",
             active_goat_codex_chat_count: activeCount,
           });
         },
       }) ?? Promise.resolve(),
-      goatBrainIngestWorker?.stop() ?? Promise.resolve(),
-      goatBrainImportWorker?.stop() ?? Promise.resolve(),
-      goatSlackFlushWorker?.stop() ?? Promise.resolve(),
-      drainGoatSlackBotEvents(),
-      goatLinearFlushWorker?.stop() ?? Promise.resolve(),
-      goatGitHubFlushWorker?.stop() ?? Promise.resolve(),
-      goatHubspotFlushWorker?.stop() ?? Promise.resolve(),
-      goatAttioFlushWorker?.stop() ?? Promise.resolve(),
-      goatGmailPollWorker?.stop() ?? Promise.resolve(),
-      goatGmailFlushWorker?.stop() ?? Promise.resolve(),
-      goatGranolaPollWorker?.stop() ?? Promise.resolve(),
-      goatFathomPollWorker?.stop() ?? Promise.resolve(),
-      goatGoogleDriveSyncWorker?.stop() ?? Promise.resolve(),
-      goatBrainWorkerAdmissionListener?.stop() ?? Promise.resolve(),
+      brainIngestWorker?.stop() ?? Promise.resolve(),
+      brainImportWorker?.stop() ?? Promise.resolve(),
+      slackFlushWorker?.stop() ?? Promise.resolve(),
+      drainSlackBotEvents(),
+      linearFlushWorker?.stop() ?? Promise.resolve(),
+      gitHubFlushWorker?.stop() ?? Promise.resolve(),
+      hubspotFlushWorker?.stop() ?? Promise.resolve(),
+      attioFlushWorker?.stop() ?? Promise.resolve(),
+      gmailPollWorker?.stop() ?? Promise.resolve(),
+      gmailFlushWorker?.stop() ?? Promise.resolve(),
+      granolaPollWorker?.stop() ?? Promise.resolve(),
+      fathomPollWorker?.stop() ?? Promise.resolve(),
+      googleDriveSyncWorker?.stop() ?? Promise.resolve(),
+      brainWorkerAdmissionListener?.stop() ?? Promise.resolve(),
       server.close(),
       chatPresentation?.close() ?? Promise.resolve(),
     ])
@@ -193,7 +185,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           flushObservability(),
           flushBraintrust(),
           flushLatitude(),
-          shutdownGoatNodeObservability(),
+          shutdownNodeObservability(),
         ]);
       })
       .finally(() => {

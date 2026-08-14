@@ -1,12 +1,12 @@
-export const GOAT_PUBLISH_ARTIFACT_TOOL_NAME = "publish_artifact";
-export const GOAT_CHAT_ARTIFACT_DATA_PART_TYPE = "data-artifact-file" as const;
-export const GOAT_CHAT_ARTIFACT_MAX_BYTES = 20 * 1024 * 1024;
-export const GOAT_CHAT_ARTIFACT_MAX_PER_TURN = 5;
+export const PUBLISH_ARTIFACT_TOOL_NAME = "publish_artifact";
+export const CHAT_ARTIFACT_DATA_PART_TYPE = "data-artifact-file" as const;
+export const CHAT_ARTIFACT_MAX_BYTES = 20 * 1024 * 1024;
+export const CHAT_ARTIFACT_MAX_PER_TURN = 5;
 
-export const GOAT_PUBLISH_ARTIFACT_TOOL_DESCRIPTION =
+export const PUBLISH_ARTIFACT_TOOL_DESCRIPTION =
   "Publish a finished file from the current sandbox into the chat as a durable user-visible file. Call this only for outputs the user should receive, not source files, repository diffs, logs, or temporary work.";
 
-export const GOAT_PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA = {
+export const PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
@@ -35,7 +35,7 @@ export const GOAT_PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA = {
   required: ["path"],
 } as const;
 
-export type GoatPublishedChatArtifact = {
+export type PublishedChatArtifact = {
   artifactId: string;
   artifactVersionId: string;
   version: number;
@@ -47,11 +47,11 @@ export type GoatPublishedChatArtifact = {
   state: "ready" | "deleted";
 };
 
-export type GoatPublishArtifactToolResponse =
-  | { ok: true; artifact: GoatPublishedChatArtifact }
+export type PublishArtifactToolResponse =
+  | { ok: true; artifact: PublishedChatArtifact }
   | { ok: false; error: string };
 
-export function parseGoatPublishedChatArtifact(value: unknown): GoatPublishedChatArtifact | null {
+export function parsePublishedChatArtifact(value: unknown): PublishedChatArtifact | null {
   const response = readRecord(value);
   const artifact = readRecord(response?.artifact);
   if (response?.ok !== true || !artifact) return null;
@@ -63,7 +63,7 @@ export function parseGoatPublishedChatArtifact(value: unknown): GoatPublishedCha
     !nonEmptyString(artifact.filename) ||
     !nonEmptyString(artifact.mediaType) ||
     !nonNegativeInteger(artifact.sizeBytes) ||
-    artifact.sizeBytes > GOAT_CHAT_ARTIFACT_MAX_BYTES ||
+    artifact.sizeBytes > CHAT_ARTIFACT_MAX_BYTES ||
     (artifact.state !== "ready" && artifact.state !== "deleted")
   ) {
     return null;

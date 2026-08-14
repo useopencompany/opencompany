@@ -1,14 +1,14 @@
-# Goat Brain v1 Implementation Tracker
+# opencompany Brain v1 Implementation Tracker
 
 Current phase: implementation complete; ready for review/discussion.
 
 ## Completed Changes
 
 - Created this tracker.
-- Updated `@opencompany/goat-brain` to the v1 taxonomy, schema-pack constant, evidence subtype
+- Updated `@opencompany/brain` to the v1 taxonomy, schema-pack constant, evidence subtype
   contract, structured timeline evidence ids, citation extraction, active-record citation
   validation, and richer query hits.
-- Rebuilt the generated Goat Brain CLI bundle.
+- Rebuilt the generated opencompany Brain CLI bundle.
 - Replaced the DB Brain helper internals with `goat.brain_documents` reads/writes and inline
   timeline, edge, folder, and version projections.
 - Added migration `0088_goat_brain_v1_documents.sql` for legacy backfill, evidence ids, v1
@@ -16,9 +16,9 @@ Current phase: implementation complete; ready for review/discussion.
 - Added migration `0090_goat_brain_evidence_taxonomy.sql` to move legacy conversations/docs/
   references into `evidence/<kind>/`, remove `daily` as a first-class type, and enforce
   `evidence_kind`/folder alignment.
-- Updated Goat chat and runner materialization to operate on `goat.brain_documents` through the
+- Updated opencompany chat and runner materialization to operate on `goat.brain_documents` through the
   existing agent-facing bundled CLI path.
-- Updated Goat Electric scoping and collections for `brain_documents`, `brain_timeline_entries`,
+- Updated opencompany Electric scoping and collections for `brain_documents`, `brain_timeline_entries`,
   `brain_edges`, and `brain_folders`.
 - Updated the Brain UI into a trust-panel MVP over the v1 taxonomy, live timeline evidence ids,
   citation copy text, and projected graph edges.
@@ -32,11 +32,11 @@ Current phase: implementation complete; ready for review/discussion.
 
 ## Verification Commands
 
-- Passed: `bun run --filter @opencompany/goat-brain test`
+- Passed: `bun run --filter @opencompany/brain test`
 - Passed: `bun run --filter @opencompany/db test`
-- Passed: `bunx vitest run packages/db/src/goat-brain-files.test.ts`
-- Passed: `bun run --filter @opencompany/runner test -- goat-brain`
-- Passed: `bun run --filter @opencompany/goat test`
+- Passed: `bunx vitest run packages/db/src/brain-files.test.ts`
+- Passed: `bun run --filter @opencompany/runner test -- brain`
+- Passed: `bun run --filter @useopencompany/opencompany test`
 - Passed: `bun run typecheck`
 - Passed: `bun run lint` (no errors; existing warnings remain in `apps/web`)
 - Passed: `bun run format:check`
@@ -45,8 +45,8 @@ Current phase: implementation complete; ready for review/discussion.
 
 ## Prior Manual CLI/DB Verification Log
 
-- Generated the bundled CLI from `packages/goat-brain/src/generated/cli-bundle.ts` into a temporary
-  root and executed a full scenario with `node goat-brain.mjs`.
+- Generated the bundled CLI from `packages/brain/src/generated/cli-bundle.ts` into a temporary
+  root and executed a full scenario with `node opencompany-brain.mjs`.
 - Verified `folder list` returns the v1 folder taxonomy, including `evidence/chat`,
   `evidence/email`, `evidence/correction`, and `evidence/document`.
 - Created an active company record with `--evidence-id ev-user-note`; the resulting Markdown used

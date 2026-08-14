@@ -3,8 +3,8 @@
 How brain writers cite external sources. This is design principle 6 of the brain foundation
 (issue #597): the brain keeps claims and pointers, and copies content only when it has to.
 
-The prompt-ready form of this rule is `GOAT_BRAIN_POINTER_COPY_RULE` in
-`packages/goat-brain/src/pointer-copy.ts`. Every brain writing agent embeds that constant in its
+The prompt-ready form of this rule is `BRAIN_POINTER_COPY_RULE` in
+`packages/brain/src/pointer-copy.ts`. Every brain writing agent embeds that constant in its
 system prompt; edit the rule there and here together.
 
 ## The rule
@@ -41,22 +41,22 @@ A source ref is `provider:id`:
   no whitespace, brackets, or pipes, so the ref stays inline-link safe. Whole ref caps at 256
   characters.
 
-Validation and parsing live in `packages/goat-brain/src/schema.ts`
-(`isValidGoatBrainSourceRef`, `parseGoatBrainSourceRef`).
+Validation and parsing live in `packages/brain/src/schema.ts`
+(`isValidBrainSourceRef`, `parseBrainSourceRef`).
 
 ## Enforcement
 
 - `[[source:...]]` inline links are shape-validated by
-  `packages/goat-brain/src/inline-links.ts`; malformed targets are validation errors on document
-  writes (`validate.ts`) and `invalid_source_link` findings in `goat-brain doctor` (`health.ts`).
+  `packages/brain/src/inline-links.ts`; malformed targets are validation errors on document
+  writes (`validate.ts`) and `invalid_source_link` findings in `opencompany-brain doctor` (`health.ts`).
 - A valid `[[source:...]]` link in compiled truth satisfies the provenance gate for promotion to
   `active`, just like a valid `[[evidence:...]]` link. This lets pointer-only sources such as
   tracked work items remain curated without creating stale evidence snapshots.
 - Frontmatter `sources[].ref` values that are not `provider:id` shaped surface as
-  `nonstandard_source_ref` warnings in `goat-brain doctor` (warning, not error, so legacy refs do
+  `nonstandard_source_ref` warnings in `opencompany-brain doctor` (warning, not error, so legacy refs do
   not break existing brains).
-- The ingestion agent's system prompt embeds `GOAT_BRAIN_POINTER_COPY_RULE`
-  (`apps/runner/src/goat-brain-agent-ingest.ts`), so ingesting a source with a live canonical
+- The ingestion agent's system prompt embeds `BRAIN_POINTER_COPY_RULE`
+  (`apps/runner/src/brain-agent-ingest.ts`), so ingesting a source with a live canonical
   home produces a pointer plus a one-line state summary, not a body copy.
 
 ## Future seam: source resolvers
@@ -64,12 +64,12 @@ Validation and parsing live in `packages/goat-brain/src/schema.ts`
 Pointers are hydrated at **read time** through the integrations layer by *source resolvers* —
 per-provider adapters that take a parsed ref and return the source's current title, canonical
 URL, and one-line state. The interface shape is defined (and only defined — nothing implements
-or invokes it yet) in `packages/goat-brain/src/source-resolvers.ts`:
+or invokes it yet) in `packages/brain/src/source-resolvers.ts`:
 
 ```ts
-type GoatBrainSourceResolver = {
+type BrainSourceResolver = {
   provider: string; // e.g. "linear"
-  resolve(ref: ParsedGoatBrainSourceRef): Promise<GoatBrainResolvedSource | null>;
+  resolve(ref: ParsedBrainSourceRef): Promise<BrainResolvedSource | null>;
 };
 ```
 
@@ -77,4 +77,4 @@ When resolvers land, a reader (deterministic read plane or the librarian agent, 
 can turn `[[source:linear:issue_ABC-12]]` into a live link with fresh state instead of trusting
 the one-line summary frozen at write time. Implementations belong behind the API/runner integration
 boundary, registered per provider and passed to shared Brain behavior — never embedded in
-`packages/goat-brain`.
+`packages/brain`.

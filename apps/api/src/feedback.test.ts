@@ -42,10 +42,10 @@ function routeLinear(overrides: { issue?: unknown } = {}) {
       variables: Record<string, unknown>;
     };
     calls.push(body);
-    if (body.query.includes("GoatFeedbackTriageState")) {
+    if (body.query.includes("FeedbackTriageState")) {
       return linearOk({ team: { states: { nodes: [{ id: "st_triage", type: "triage" }] } } });
     }
-    if (body.query.includes("GoatFeedbackLabels")) {
+    if (body.query.includes("FeedbackLabels")) {
       return linearOk({
         team: {
           labels: {
@@ -57,12 +57,12 @@ function routeLinear(overrides: { issue?: unknown } = {}) {
         },
       });
     }
-    if (body.query.includes("GoatFeedbackCreateLabel")) {
+    if (body.query.includes("FeedbackCreateLabel")) {
       return linearOk({ issueLabelCreate: { success: false, issueLabel: null } });
     }
     return linearOk(
       overrides.issue ?? {
-        issueCreate: { success: true, issue: { id: "iss_1", identifier: "GOAT-1" } },
+        issueCreate: { success: true, issue: { id: "iss_1", identifier: "opencompany-1" } },
       },
     );
   });
@@ -89,7 +89,7 @@ describe("feedback service", () => {
 
     await service.submit(actor, { kind: "bug", message: "The board drops my column order." });
 
-    const issueCall = calls.find((call) => call.query.includes("GoatFeedbackCreateIssue"));
+    const issueCall = calls.find((call) => call.query.includes("FeedbackCreateIssue"));
     expect(issueCall).toBeDefined();
     const input = issueCall?.variables.input as {
       teamId: string;

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import type { OpenAPIV3_2 } from "fumadocs-openapi";
 import { createOpenAPI } from "fumadocs-openapi/server";
 
-export const openCompanyOpenApiPath = resolve(
+export const protocolOpenApiPath = resolve(
   process.cwd(),
   "../../packages/protocol/openapi/openapi.v1.json",
 );
@@ -12,7 +12,7 @@ export const openapi = createOpenAPI({
   input: {
     "opencompany-v1": async () => {
       const document: OpenAPIV3_2.Document = JSON.parse(
-        await readFile(openCompanyOpenApiPath, "utf8"),
+        await readFile(protocolOpenApiPath, "utf8"),
       );
 
       // The protocol is served from the product origin today. The docs site may be
@@ -22,7 +22,7 @@ export const openapi = createOpenAPI({
         servers: [
           {
             url: "https://api.opencompany.chat",
-            description: "OpenCompany production API",
+            description: "opencompany production API",
           },
         ],
       };

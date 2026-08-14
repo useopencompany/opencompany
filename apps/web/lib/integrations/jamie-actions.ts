@@ -1,13 +1,13 @@
 "use server";
 
-import type { GoatJamieWebhookSetup } from "@opencompany/goat-agent/integrations/jamie";
+import type { JamieWebhookSetup } from "@opencompany/agent/integrations/jamie";
 import { revalidatePath } from "next/cache";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export type JamieWebhookEndpointActionResult =
   | {
       ok: true;
-      setup: GoatJamieWebhookSetup;
+      setup: JamieWebhookSetup;
     }
   | {
       ok: false;
@@ -25,11 +25,11 @@ export async function createOrResetJamieWebhookEndpointAction(): Promise<JamieWe
         error: await serverApiErrorMessage(response, "Could not create a Jamie webhook endpoint."),
       };
     }
-    const data = (await response.json()).data as { setup: GoatJamieWebhookSetup };
+    const data = (await response.json()).data as { setup: JamieWebhookSetup };
     revalidatePath("/", "layout");
     return { ok: true, setup: data.setup };
   } catch (error) {
-    console.error("[goat-jamie] Failed to create Jamie webhook endpoint", error);
+    console.error("[opencompany-jamie] Failed to create Jamie webhook endpoint", error);
     return { ok: false, error: "Could not create a Jamie webhook endpoint." };
   }
 }
@@ -50,11 +50,11 @@ export async function saveJamieWebhookApiKeyAction(
         error: await serverApiErrorMessage(response, "Could not save the Jamie API key."),
       };
     }
-    const data = (await response.json()).data as { setup: GoatJamieWebhookSetup };
+    const data = (await response.json()).data as { setup: JamieWebhookSetup };
     revalidatePath("/", "layout");
     return { ok: true, setup: data.setup };
   } catch (error) {
-    console.error("[goat-jamie] Failed to save Jamie webhook API key", error);
+    console.error("[opencompany-jamie] Failed to save Jamie webhook API key", error);
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Could not save the Jamie API key.",

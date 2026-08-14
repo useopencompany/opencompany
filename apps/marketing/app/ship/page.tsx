@@ -57,7 +57,7 @@ const SHIP_FAQS = [
   },
   {
     q: "How much does it cost?",
-    a: "Ship is in early access. Pricing will follow OpenCompany's usage-based model — no per-seat licensing. Get early access and we'll confirm details before anything's charged.",
+    a: "Ship is in early access. Pricing will follow opencompany's usage-based model — no per-seat licensing. Get early access and we'll confirm details before anything's charged.",
   },
   {
     q: "Is this for non-technical founders?",

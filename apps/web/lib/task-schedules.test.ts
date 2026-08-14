@@ -1,10 +1,10 @@
-import type { GoatHarnessSpec } from "@opencompany/goat-agent/task-runtime-types";
+import type { HarnessSpec } from "@opencompany/agent/task-runtime-types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createGoatTaskScheduleForUser } from "@/lib/task-schedules";
+import { createTaskScheduleForUser } from "@/lib/task-schedules";
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
-  planGoatTaskHarness: vi.fn(),
+  planTaskHarness: vi.fn(),
   select: vi.fn(),
   transaction: vi.fn(),
 }));
@@ -18,14 +18,14 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  currentGoatUser: vi.fn(),
+  currentUser: vi.fn(),
 }));
 
 vi.mock("@/lib/task-runner", () => ({
-  planGoatTaskHarness: mocks.planGoatTaskHarness,
+  planTaskHarness: mocks.planTaskHarness,
 }));
 
-const harnessSpec: GoatHarnessSpec = {
+const harnessSpec: HarnessSpec = {
   schemaVersion: "goat.harness.v1",
   engine: "opencompany",
   model: "moonshotai/kimi-k2.6",
@@ -37,10 +37,10 @@ const harnessSpec: GoatHarnessSpec = {
   resultMode: "assistant_final",
 };
 
-describe("createGoatTaskScheduleForUser", () => {
+describe("createTaskScheduleForUser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.planGoatTaskHarness.mockResolvedValue(harnessSpec);
+    mocks.planTaskHarness.mockResolvedValue(harnessSpec);
     mocks.transaction.mockImplementation(() => {
       throw new Error("No transactions support in neon-http driver");
     });
@@ -55,7 +55,7 @@ describe("createGoatTaskScheduleForUser", () => {
   });
 
   it("plans and stores a recurring task schedule", async () => {
-    const schedule = await createGoatTaskScheduleForUser({
+    const schedule = await createTaskScheduleForUser({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
       name: "Daily briefing",
@@ -66,7 +66,7 @@ describe("createGoatTaskScheduleForUser", () => {
       now: new Date("2026-06-01T15:00:00.000Z"),
     });
 
-    expect(mocks.planGoatTaskHarness).toHaveBeenCalledWith({
+    expect(mocks.planTaskHarness).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       prompt: "Send a daily briefing.",
     });
@@ -81,7 +81,7 @@ describe("createGoatTaskScheduleForUser", () => {
 
   it("rejects invalid cron expressions", async () => {
     await expect(
-      createGoatTaskScheduleForUser({
+      createTaskScheduleForUser({
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
         name: "Bad",
@@ -90,7 +90,7 @@ describe("createGoatTaskScheduleForUser", () => {
         prompt: "Run.",
       }),
     ).rejects.toThrow("valid 5-field cron");
-    expect(mocks.planGoatTaskHarness).not.toHaveBeenCalled();
+    expect(mocks.planTaskHarness).not.toHaveBeenCalled();
   });
 
   it("rejects schedule creation when Tasks & Workflows is disabled", async () => {
@@ -104,7 +104,7 @@ describe("createGoatTaskScheduleForUser", () => {
     });
 
     await expect(
-      createGoatTaskScheduleForUser({
+      createTaskScheduleForUser({
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
         name: "Daily briefing",
@@ -113,7 +113,7 @@ describe("createGoatTaskScheduleForUser", () => {
         prompt: "Send a daily briefing.",
       }),
     ).rejects.toThrow("Tasks & Workflows is disabled");
-    expect(mocks.planGoatTaskHarness).not.toHaveBeenCalled();
+    expect(mocks.planTaskHarness).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
@@ -122,7 +122,7 @@ describe("createGoatTaskScheduleForUser", () => {
     mocks.execute.mockResolvedValue([]);
 
     await expect(
-      createGoatTaskScheduleForUser({
+      createTaskScheduleForUser({
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
         name: "Daily briefing",
@@ -131,7 +131,7 @@ describe("createGoatTaskScheduleForUser", () => {
         prompt: "Send a daily briefing.",
       }),
     ).rejects.toThrow("Tasks & Workflows is disabled");
-    expect(mocks.planGoatTaskHarness).toHaveBeenCalledOnce();
+    expect(mocks.planTaskHarness).toHaveBeenCalledOnce();
     expect(mocks.execute).toHaveBeenCalledOnce();
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(sqlTextFromExecuteCall(0)).toContain("task_user.task_spawning_enabled = true");

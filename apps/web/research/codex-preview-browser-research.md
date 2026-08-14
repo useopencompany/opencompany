@@ -5,8 +5,8 @@ Status: research notes and architecture recommendation.
 Date: 2026-07-07
 
 This document captures the research and reasoning around adding a cloud coding-session preview
-browser to Goat when Codex is the coding engine. The concrete motivating case is this repo itself:
-a coding run should be able to execute setup, start the Goat dev command, open the running app in a
+browser to opencompany when Codex is the coding engine. The concrete motivating case is this repo itself:
+a coding run should be able to execute setup, start the opencompany dev command, open the running app in a
 browser, navigate it, take screenshots or recordings, and ask the human to take over only when auth
 blocks progress.
 
@@ -61,13 +61,13 @@ Primary sources and docs used:
 
 Local repo files inspected:
 
-- `apps/goat/docs/README.md`
-- `packages/db/src/goat-schema.ts`
-- `apps/runner/src/goat-harness.ts`
-- `apps/runner/src/goat-codex.ts`
+- `apps/web/docs/README.md`
+- `packages/db/src/product-schema.ts`
+- `apps/runner/src/harness.ts`
+- `apps/runner/src/codex.ts`
 - `apps/runner/src/codex-session.ts`
 - `apps/runner/src/codex-app-server.ts`
-- `apps/goat/lib/sandbox/browser-tools.ts`
+- `apps/web/lib/sandbox/browser-tools.ts`
 - `apps/runner/e2b/codex/template.ts`
 - `scripts/dev.mjs`
 - `scripts/next-goat.mjs`
@@ -77,19 +77,19 @@ Local repo files inspected:
 
 ## Current Repo State
 
-Goat tasks already have a Codex engine path.
+opencompany tasks already have a Codex engine path.
 
-The harness spec in `packages/db/src/goat-schema.ts` currently supports:
+The harness spec in `packages/db/src/product-schema.ts` currently supports:
 
 - `engine: "opencompany" | "codex"`
 - model, system prompt, tools, skills, result mode, and max model steps
 - Codex-specific fields for repository, PR creation, reasoning effort, and goal mode
 
-The runner's Goat Codex path lives in `apps/runner/src/goat-codex.ts`:
+The runner's opencompany Codex path lives in `apps/runner/src/codex.ts`:
 
 - creates or connects an E2B sandbox
-- optionally clones a connected GitHub repo into `/home/user/opencompany-goat/codex`
-- writes Codex auth into `/home/user/.opencompany-goat/codex-home/auth.json`
+- optionally clones a connected GitHub repo into `/home/user/opencompany/codex`
+- writes Codex auth into `/home/user/.opencompany/codex-home/auth.json`
 - runs Codex through `codex app-server`
 - persists refreshed Codex auth
 - collects diff/PR output
@@ -105,15 +105,15 @@ running coding sessions:
 - persists sandbox id on the session row
 - reuses Codex App Server across turns
 - records runtime events
-- uses the same App Server machinery as Goat
+- uses the same App Server machinery as opencompany
 
-Goat should converge toward that model for coding-session lifecycle instead of keeping a special
+opencompany should converge toward that model for coding-session lifecycle instead of keeping a special
 single-run Codex path.
 
 ## Existing Browser Tooling
 
-Goat's foreground chat browser implementation lives in
-`apps/goat/lib/sandbox/browser-tools.ts`. Background OpenCompany tasks share the main-chat tool
+opencompany's foreground chat browser implementation lives in
+`apps/web/lib/sandbox/browser-tools.ts`. Background opencompany tasks share the main-chat tool
 context instead of carrying a separate runner-only browser wrapper.
 
 It wraps `agent-browser` and exposes:
@@ -144,17 +144,17 @@ This is useful precedent, but it is not enough for Codex preview browser work:
 
 The new feature should reuse its policy mindset, but not overload this generic browser tool surface.
 
-## Concrete Goat Dev Flow
+## Concrete opencompany Dev Flow
 
-The repo's local Goat flow today is:
+The repo's local opencompany flow today is:
 
 - root script: `bun run setup`
-- root script: `bun run dev:goat`
-- `dev:goat` runs `scripts/dev.mjs --app=goat --ui=tui --filter=@opencompany/goat --filter=@opencompany/runner`
-- Goat defaults to internal port `3002`
-- local Caddy exposes Goat at `https://localhost:3443` when available
-- `scripts/dev.mjs` injects Goat WorkOS redirect variables and enables the runner Goat task worker
-- `apps/goat/app/api/healthz/route.ts` provides a health endpoint
+- root script: `bun run dev:web`
+- `dev:web` runs `scripts/dev.mjs --app=opencompany --ui=tui --filter=@useopencompany/opencompany --filter=@opencompany/runner`
+- opencompany defaults to internal port `3002`
+- local Caddy exposes opencompany at `https://localhost:3443` when available
+- `scripts/dev.mjs` injects opencompany WorkOS redirect variables and enables the runner opencompany task worker
+- `apps/web/app/api/healthz/route.ts` provides a health endpoint
 
 For cloud Codex preview work, this should become data rather than hardcoded product knowledge.
 
@@ -164,9 +164,9 @@ The default profile for this repo should express:
 version: 1
 
 profiles:
-  goat:
+  opencompany:
     setupCommand: bun run setup
-    devCommand: OPENCOMPANY_NGROK_DISABLED=1 OPENCOMPANY_GOAT_HTTPS_DISABLED=1 bun run dev:goat
+    devCommand: OPENCOMPANY_NGROK_DISABLED=1 HTTPS_DISABLED=1 bun run dev:web
     workingDirectory: .
     preview:
       enabled: true
@@ -174,22 +174,22 @@ profiles:
       healthPath: /api/healthz
       startPath: /
       env:
-        GOAT_NEXT_PUBLIC_APP_URL: $OPENCOMPANY_PREVIEW_ORIGIN
-        GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: $OPENCOMPANY_PREVIEW_ORIGIN/auth/callback
+        GOAT_NEXT_PUBLIC_APP_URL: $PREVIEW_ORIGIN
+        GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: $PREVIEW_ORIGIN/auth/callback
       auth:
         mode: human-on-demand
-        contextKey: goat-workos
+        contextKey: opencompany-workos
       artifacts:
         screenshots: auto-and-agent
         video: final
 ```
 
 The exact file name can be decided, but `.opencompany.yaml` is a good default because it is
-product-owned, checked into the repo, easy for agents to read, and naturally extends beyond Goat.
+product-owned, checked into the repo, easy for agents to read, and naturally extends beyond opencompany.
 
 ## Why File-Based Repo Profiles
 
-A Goat UI for profiles would be less appropriate as the v1 source of truth.
+A opencompany UI for profiles would be less appropriate as the v1 source of truth.
 
 Reasons:
 
@@ -197,7 +197,7 @@ Reasons:
   `.cursor/environment.json`.
 - It needs to travel with branches and PRs.
 - Coding agents should be able to inspect and modify it in code review.
-- It should work for other projects, not only Goat.
+- It should work for other projects, not only opencompany.
 - It avoids a hidden database setting that makes cloud runs differ from the checked-out repo.
 
 The UI can later display the effective profile, validate it, and offer a guided editor, but the
@@ -230,7 +230,7 @@ Cursor's public materials give strong architectural signals:
    product shape is not "guess the dev command every time"; it is "define or derive an environment
    contract and reuse it."
 
-The lesson for Goat is: do not make screenshots a narrow Playwright afterthought. Build a coding
+The lesson for opencompany is: do not make screenshots a narrow Playwright afterthought. Build a coding
 runtime that contains a preview surface and artifact pipeline.
 
 ## Codex Surface Choice
@@ -239,7 +239,7 @@ Codex App Server is the right base integration.
 
 Reasons:
 
-- The repo already uses `codex app-server` for both normal Codex sessions and Goat Codex tasks.
+- The repo already uses `codex app-server` for both normal Codex sessions and opencompany Codex tasks.
 - It supports long-running thread/session behavior.
 - It lets the runner stream Codex runtime events and preserve session identity.
 - It is the documented programmatic integration surface for embedding Codex behavior in another app.
@@ -249,12 +249,12 @@ make preview work look like a batch job and would fight against browser iteratio
 session continuity.
 
 Codex's built-in in-app browser is also not the right primitive for this cloud use case. The Codex
-manual describes Codex browser and Computer Use surfaces, but the cloud GOAT architecture needs:
+manual describes Codex browser and Computer Use surfaces, but the cloud opencompany architecture needs:
 
 - persistent WorkOS cookies across sessions
 - human takeover during auth
 - stable app preview origins
-- screenshots/videos attached to Goat task artifacts
+- screenshots/videos attached to opencompany task artifacts
 - runner-controlled policy and storage
 
 Those are product/runtime concerns outside a generic Codex-local browser pane.
@@ -275,7 +275,7 @@ Reasons:
 Playwright alone can persist storage state, but it does not solve cloud Live View takeover,
 provider-managed browser lifecycle, observability, or easy handoff UX.
 
-Browserless is plausible, especially because existing Goat browser env names reference Browserless,
+Browserless is plausible, especially because existing opencompany browser env names reference Browserless,
 but the research points to Browserbase as a cleaner first implementation for persistent identity and
 human-in-the-loop auth.
 
@@ -283,7 +283,7 @@ E2B can run browsers and expose ports, but the best v1 separation is:
 
 - E2B owns coding compute and dev server.
 - Browserbase owns preview browser and Live View.
-- OpenCompany owns the gateway, policy, artifacts, and session records.
+- opencompany owns the gateway, policy, artifacts, and session records.
 
 A later v2 could support E2B desktop or self-hosted remote desktops for full computer-use parity with
 Cursor.
@@ -300,7 +300,7 @@ fragile:
 - cookies are origin-scoped
 - persisted contexts are much less useful if the origin changes every run
 
-The preview browser should navigate to an OpenCompany-controlled HTTPS origin, for example:
+The preview browser should navigate to an opencompany-controlled HTTPS origin, for example:
 
 ```text
 https://preview.opencompany.cloud/p/<preview-session-id>/
@@ -317,8 +317,8 @@ and inject the per-sandbox traffic token server-side. The browser never needs to
 
 For WorkOS/AuthKit, the app should receive:
 
-- `GOAT_NEXT_PUBLIC_APP_URL=$OPENCOMPANY_PREVIEW_ORIGIN`
-- `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$OPENCOMPANY_PREVIEW_ORIGIN/auth/callback`
+- `GOAT_NEXT_PUBLIC_APP_URL=$PREVIEW_ORIGIN`
+- `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$PREVIEW_ORIGIN/auth/callback`
 - equivalent `NEXT_PUBLIC_*` variables when the app expects them
 
 The gateway must route the callback to the same active preview session. A signed preview-session
@@ -336,8 +336,8 @@ Recommended flow:
 2. Codex opens the preview URL through its preview browser tool.
 3. If the app is already authenticated, Codex continues.
 4. If the app redirects to WorkOS/AuthKit, Codex calls `auth-request`.
-5. Runner pauses agent browser actions and emits a Goat event.
-6. Goat UI shows a "Take over preview browser" action.
+5. Runner pauses agent browser actions and emits an opencompany event.
+6. opencompany UI shows a "Take over preview browser" action.
 7. User opens Browserbase Live View and completes WorkOS, MFA, passkey, or magic-link flow.
 8. User releases control.
 9. Browserbase persists the context.
@@ -362,7 +362,7 @@ The clean abstraction is a runner-owned Preview Browser service exposed to the C
 
 Preferred v1 shape:
 
-- Add a small OpenCompany Preview MCP server or app-server-accessible tool bridge for Codex.
+- Add a small opencompany Preview MCP server or app-server-accessible tool bridge for Codex.
 - Also install a CLI mirror, `opencompany-preview`, inside the sandbox for transparency and fallback.
 - The MCP/CLI talks to a runner callback API using a short-lived preview token scoped to one
   PreviewSession.
@@ -381,7 +381,7 @@ Tool operations:
 - `preview_current_url()`
 
 The tool should not expose raw CDP or unconstrained eval. It should look more like the existing
-Goat browser policy: enough interaction for app verification, with dangerous browser/system
+opencompany browser policy: enough interaction for app verification, with dangerous browser/system
 operations denied.
 
 The CLI mirror matters because Codex is naturally strong at terminal workflows. A visible command
@@ -389,7 +389,7 @@ such as this is easy for the model and humans to reason about:
 
 ```bash
 opencompany-preview open /
-opencompany-preview screenshot --label "goat-home-authenticated"
+opencompany-preview screenshot --label "opencompany-home-authenticated"
 opencompany-preview snapshot
 opencompany-preview auth-request "WorkOS login required"
 ```
@@ -400,7 +400,7 @@ them.
 
 ## Artifact Model
 
-Screenshots and recordings should be first-class Goat task artifacts.
+Screenshots and recordings should be first-class opencompany task artifacts.
 
 Recommended automatic captures:
 
@@ -425,7 +425,7 @@ Artifact fields should include:
 
 These artifacts should appear in:
 
-- Goat task detail
+- opencompany task detail
 - task event stream
 - final task summary
 - PR/check output when a PR is created
@@ -434,7 +434,7 @@ This is the Cursor lesson applied directly: artifacts are how the developer vali
 
 ## Repo Profile Schema
 
-The profile should be general enough for non-Goat repos.
+The profile should be general enough for non-opencompany repos.
 
 Proposed v1:
 
@@ -488,7 +488,7 @@ The runner should execute profile commands in this order:
 2. Read `.opencompany.yaml`.
 3. Select profile from task input or default profile.
 4. Validate profile.
-5. Prepare environment variables, including `OPENCOMPANY_PREVIEW_ORIGIN`.
+5. Prepare environment variables, including `PREVIEW_ORIGIN`.
 6. Run `setupCommand` in `workingDirectory`.
 7. Start `devCommand` as a managed background process.
 8. Wait for `preview.healthPath` on `preview.port`.
@@ -510,9 +510,9 @@ Likely new data concepts:
 - preview browser context
 - preview artifact
 
-This can be implemented either as Goat schema first or shared runner/web schema first. Because the
-abstraction is meant to outlive Goat, the domain model should avoid names like `goat_preview_*`
-unless there is a deliberate decision to keep the first implementation Goat-only.
+This can be implemented either as opencompany schema first or shared runner/web schema first. Because the
+abstraction is meant to outlive opencompany, the domain model should avoid names like `goat_preview_*`
+unless there is a deliberate decision to keep the first implementation opencompany-only.
 
 New task/runtime event types should include:
 
@@ -529,7 +529,7 @@ New task/runtime event types should include:
 - `preview.artifact_created`
 - `preview.failed`
 
-The existing Goat event stream already supports task status and artifact creation. The new events
+The existing opencompany event stream already supports task status and artifact creation. The new events
 should integrate with that pattern rather than adding a parallel UI channel.
 
 ## Security Model
@@ -569,7 +569,7 @@ Some decisions still need product/infra ownership:
 - Should video recording be on by default for all preview sessions, or only final/explicit?
 - Should authenticated browser context reuse be per user and repo, or per user, repo, profile, and
   branch?
-- Should Goat expose `.opencompany.yaml` validation errors in chat, task detail, or settings?
+- Should opencompany expose `.opencompany.yaml` validation errors in chat, task detail, or settings?
 - How long should preview artifacts and browser contexts be retained?
 - Should the agent be able to request human takeover for non-auth reasons, such as visual judgment?
 
@@ -580,7 +580,7 @@ The recommendation for v1:
 - Browser context reuse key is `{user, repository, profileName, auth.contextKey}`.
 - Video is `final` only by default.
 - Human takeover is allowed for auth only in v1.
-- Artifacts follow the same retention policy as other Goat task artifacts.
+- Artifacts follow the same retention policy as other opencompany task artifacts.
 
 ## Why This Is Architecturally Sound
 
@@ -592,9 +592,9 @@ This design avoids glue code because it separates responsibilities cleanly:
 - Preview Gateway owns stable network ingress to the app.
 - Browserbase owns cloud browser, persistent context, and Live View.
 - Runner owns policy, lifecycle, secrets, and artifacts.
-- Goat UI owns task visibility and human takeover UX.
+- opencompany UI owns task visibility and human takeover UX.
 
-The result is reusable beyond Goat. Any repo can define a profile. Any engine that can call the
+The result is reusable beyond opencompany. Any repo can define a profile. Any engine that can call the
 Preview Browser API can use the same preview session and artifacts. Codex is the first engine, not
 the only possible one.
 
@@ -603,7 +603,7 @@ the only possible one.
 Phase 1: profile and command lifecycle.
 
 - Add `.opencompany.yaml` parser/validator.
-- Add profile selection to Goat Codex tasks.
+- Add profile selection to opencompany Codex tasks.
 - Run setup command, dev command, and health check before Codex turn.
 - Keep screenshots out of scope for this phase except maybe a placeholder event.
 
@@ -624,7 +624,7 @@ Phase 3: Codex control surface.
 Phase 4: human auth takeover.
 
 - Detect auth-required state through agent request and basic URL heuristics.
-- Add Goat UI event and takeover action.
+- Add opencompany UI event and takeover action.
 - Pause agent browser actions during takeover.
 - Resume Codex after user releases control.
 - Verify context reuse across a second session.
@@ -650,30 +650,30 @@ Unit tests:
 Integration tests:
 
 - clone repo, load profile, run setup command, start dev command
-- wait for Goat `/api/healthz`
+- wait for opencompany `/api/healthz`
 - open preview start path
 - capture screenshot artifact through mocked Browserbase provider
 - auth-request event appears when requested
 
 Manual acceptance test:
 
-- Start Goat Codex task for this repo with profile `goat`.
+- Start opencompany Codex task for this repo with profile `goat`.
 - Runner runs `bun run setup`.
-- Runner runs `bun run dev:goat`.
+- Runner runs `bun run dev:web`.
 - Codex opens the preview browser.
 - Browser reaches WorkOS.
 - Codex requests human takeover.
 - User completes WorkOS in Live View.
-- Codex resumes and screenshots authenticated Goat UI.
+- Codex resumes and screenshots authenticated opencompany UI.
 - A second task reuses the same browser context without requiring login again.
 
 ## Final Recommendation
 
-Build this as a general coding runtime feature, not as a Goat-only screenshot script.
+Build this as a general coding runtime feature, not as an opencompany-only screenshot script.
 
 Use `.opencompany.yaml` for repo profiles. Use Codex App Server as the coding engine integration.
 Use Browserbase for v1 preview browser, persistent contexts, and auth takeover. Put a stable
-OpenCompany preview gateway between Browserbase and E2B. Expose preview browser control to Codex as a
+opencompany preview gateway between Browserbase and E2B. Expose preview browser control to Codex as a
 first-class tool/CLI, and store screenshots/videos/logs as task artifacts.
 
 This matches the direction Cursor is publicly taking, fits the current runner architecture, handles

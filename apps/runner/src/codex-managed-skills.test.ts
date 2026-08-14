@@ -95,7 +95,7 @@ describe("materializeCodexSkillSnapshotsForSession", () => {
     expect(commands).toHaveLength(3);
   });
 
-  it("reconciles only OpenCompany-managed Codex skill ids from the manifest", async () => {
+  it("reconciles only opencompany-managed Codex skill ids from the manifest", async () => {
     const sandbox = fakeSandbox();
     sandbox.files.read.mockResolvedValue(
       JSON.stringify({ version: 1, skillIds: ["old-managed", "brand-voice"] }),

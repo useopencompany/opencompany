@@ -2,46 +2,46 @@ import { createHash } from "node:crypto";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import type { Actor } from "@opencompany/core";
 import {
-  ensureGoatMonthlyIncludedUsage,
-  isGoatCreditsEnforcementEnabled,
-  loadGoatBillingOverview,
-  setGoatAutoRefillConfig,
-  setGoatStripeCustomerId,
-} from "@opencompany/db/goat-billing";
+  ensureMonthlyIncludedUsage,
+  isCreditsEnforcementEnabled,
+  loadBillingOverview,
+  setAutoRefillConfig,
+  setStripeCustomerId,
+} from "@opencompany/db/billing";
 import {
-  GOAT_AUTO_REFILL_MONTHLY_MAX_USD_CENTS,
-  GOAT_DEFAULT_TOP_UP_USD_CENTS,
-  GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS,
-  GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS,
-  GOAT_LOW_BALANCE_WARN_USD_MICROS,
-  GOAT_MAX_TOP_UP_USD_CENTS,
-  GOAT_MIN_TOP_UP_USD_CENTS,
-  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
-  GOAT_PRO_STRIPE_PRODUCT_KEY,
-  GOAT_TOP_UP_AMOUNTS_USD_CENTS,
-  goatWorkspaceMemberCap,
-} from "@opencompany/db/goat-billing-constants";
+  AUTO_REFILL_MONTHLY_MAX_USD_CENTS,
+  DEFAULT_TOP_UP_USD_CENTS,
+  HOBBY_INCLUDED_USAGE_USD_CENTS,
+  INCLUDED_USAGE_PER_SEAT_USD_CENTS,
+  LOW_BALANCE_WARN_USD_MICROS,
+  MAX_TOP_UP_USD_CENTS,
+  MIN_TOP_UP_USD_CENTS,
+  PRO_MONTHLY_PRICE_USD_CENTS,
+  PRO_STRIPE_PRODUCT_KEY,
+  TOP_UP_AMOUNTS_USD_CENTS,
+  workspaceMemberCap,
+} from "@opencompany/db/billing-constants";
 import {
-  createGoatPendingCheckoutRecord,
-  getGoatCreditBalanceUsdMicros,
-  loadGoatCreditOverview,
-  loadGoatSpendBreakdown,
-  markGoatCheckoutRecordFailed,
-  markGoatCheckoutRecordOpen,
-} from "@opencompany/db/goat-credits";
+  createPendingCheckoutRecord,
+  getCreditBalanceUsdMicros,
+  loadCreditOverview,
+  loadSpendBreakdown,
+  markCheckoutRecordFailed,
+  markCheckoutRecordOpen,
+} from "@opencompany/db/credits";
 import {
-  type GoatBillingCommandOperation,
-  goatBillingCommandIdempotency,
-  goatUsers,
-  goatWorkspaces,
-} from "@opencompany/db/goat-schema";
+  type BillingCommandOperation,
+  billingCommandIdempotency,
+  users,
+  workspaces,
+} from "@opencompany/db/product-schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type Stripe from "stripe";
-import { assertGoatCheckoutEnabled } from "./stripe";
+import { assertCheckoutEnabled } from "./stripe";
 
 type DbLike = any;
 
-export type GoatBillingOverviewData = {
+export type BillingOverviewData = {
   creditBalanceUsdMicros: number;
   includedBalanceUsdMicros: number;
   topUpBalanceUsdMicros: number;
@@ -88,7 +88,7 @@ export type GoatBillingOverviewData = {
   isAdmin: boolean;
 };
 
-export type GoatUsageData = {
+export type UsageData = {
   breakdown: Array<{
     day: string;
     category: "chat" | "ingestion" | "capabilities" | "other";
@@ -109,9 +109,9 @@ export type GoatUsageData = {
   }>;
 };
 
-export type GoatBillingApplicationService = {
-  getOverview(actor: Actor): Promise<GoatBillingOverviewData>;
-  getUsage(actor: Actor): Promise<GoatUsageData>;
+export type BillingApplicationService = {
+  getOverview(actor: Actor): Promise<BillingOverviewData>;
+  getUsage(actor: Actor): Promise<UsageData>;
   getBalance(actor: Actor): Promise<{
     balanceUsdMicros: number;
     lowBalanceWarnUsdMicros: number;
@@ -135,21 +135,21 @@ export type GoatBillingApplicationService = {
   ): Promise<{ updated: true }>;
 };
 
-export class GoatBillingApplicationError extends Error {
+export class BillingApplicationError extends Error {
   constructor(
     readonly code: "forbidden" | "invalid_argument" | "idempotency_conflict" | "unavailable",
     message: string,
   ) {
     super(message);
-    this.name = "GoatBillingApplicationError";
+    this.name = "BillingApplicationError";
   }
 }
 
-export function createGoatBillingApplicationService(input: {
+export function createBillingApplicationService(input: {
   db: DbLike;
   stripe: Stripe;
   appUrl: string;
-}): GoatBillingApplicationService {
+}): BillingApplicationService {
   const db = input.db;
   const stripe = input.stripe;
   const appUrl = normalizedAppUrl(input.appUrl);
@@ -157,8 +157,8 @@ export function createGoatBillingApplicationService(input: {
   return {
     async getOverview(actor) {
       const [overview, credit] = await Promise.all([
-        loadGoatBillingOverview(actor.workspaceId, { db }),
-        loadGoatCreditOverview(actor.workspaceId, { db }),
+        loadBillingOverview(actor.workspaceId, { db }),
+        loadCreditOverview(actor.workspaceId, { db }),
       ]);
       return {
         creditBalanceUsdMicros: overview.creditBalanceUsdMicros,
@@ -171,10 +171,10 @@ export function createGoatBillingApplicationService(input: {
         cancelAtPeriodEnd: overview.billing.cancelAtPeriodEnd,
         currentPeriodEnd: overview.billing.currentPeriodEnd?.toISOString() ?? null,
         paymentNeedsAttention: overview.billing.paymentNeedsAttention,
-        proMonthlyPriceCents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
-        hobbyIncludedUsageCents: GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS,
+        proMonthlyPriceCents: PRO_MONTHLY_PRICE_USD_CENTS,
+        hobbyIncludedUsageCents: HOBBY_INCLUDED_USAGE_USD_CENTS,
         memberCount: overview.memberCount,
-        memberCap: goatWorkspaceMemberCap(overview.billing.plan),
+        memberCap: workspaceMemberCap(overview.billing.plan),
         spendThisMonthUsdMicros: credit.spendThisMonthUsdMicros,
         spendThisMonthByCategory: credit.spendThisMonthByCategory,
         recentActivity: credit.recentEntries.map((entry) => ({
@@ -190,13 +190,13 @@ export function createGoatBillingApplicationService(input: {
           isAutoRefill: entry.metadata.kind === "auto_refill",
           createdAt: entry.createdAt.toISOString(),
         })),
-        lowBalanceWarnUsdMicros: GOAT_LOW_BALANCE_WARN_USD_MICROS,
-        includedUsagePerSeatCents: GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS,
-        topUpAmountsCents: [...GOAT_TOP_UP_AMOUNTS_USD_CENTS],
-        defaultTopUpCents: GOAT_DEFAULT_TOP_UP_USD_CENTS,
-        minTopUpCents: GOAT_MIN_TOP_UP_USD_CENTS,
-        maxTopUpCents: GOAT_MAX_TOP_UP_USD_CENTS,
-        autoRefillMonthlyMaxCents: GOAT_AUTO_REFILL_MONTHLY_MAX_USD_CENTS,
+        lowBalanceWarnUsdMicros: LOW_BALANCE_WARN_USD_MICROS,
+        includedUsagePerSeatCents: INCLUDED_USAGE_PER_SEAT_USD_CENTS,
+        topUpAmountsCents: [...TOP_UP_AMOUNTS_USD_CENTS],
+        defaultTopUpCents: DEFAULT_TOP_UP_USD_CENTS,
+        minTopUpCents: MIN_TOP_UP_USD_CENTS,
+        maxTopUpCents: MAX_TOP_UP_USD_CENTS,
+        autoRefillMonthlyMaxCents: AUTO_REFILL_MONTHLY_MAX_USD_CENTS,
         autoRefill: overview.autoRefill,
         isAdmin: actor.role === "admin",
       };
@@ -204,8 +204,8 @@ export function createGoatBillingApplicationService(input: {
 
     async getUsage(actor) {
       const [overview, breakdown] = await Promise.all([
-        loadGoatBillingOverview(actor.workspaceId, { db }),
-        loadGoatSpendBreakdown(actor.workspaceId, { days: 30, db }),
+        loadBillingOverview(actor.workspaceId, { db }),
+        loadSpendBreakdown(actor.workspaceId, { days: 30, db }),
       ]);
       return {
         breakdown,
@@ -232,11 +232,11 @@ export function createGoatBillingApplicationService(input: {
     },
 
     async getBalance(actor) {
-      await ensureGoatMonthlyIncludedUsage(actor.workspaceId, { db });
+      await ensureMonthlyIncludedUsage(actor.workspaceId, { db });
       return {
-        balanceUsdMicros: await getGoatCreditBalanceUsdMicros(actor.workspaceId, db),
-        lowBalanceWarnUsdMicros: GOAT_LOW_BALANCE_WARN_USD_MICROS,
-        enforcementEnabled: isGoatCreditsEnforcementEnabled(),
+        balanceUsdMicros: await getCreditBalanceUsdMicros(actor.workspaceId, db),
+        lowBalanceWarnUsdMicros: LOW_BALANCE_WARN_USD_MICROS,
+        enforcementEnabled: isCreditsEnforcementEnabled(),
       };
     },
 
@@ -244,7 +244,7 @@ export function createGoatBillingApplicationService(input: {
       requireAdmin(actor, "Only workspace admins can add credits.");
       validateAmount(
         command.amountCents,
-        `Credit top-ups must be between $${GOAT_MIN_TOP_UP_USD_CENTS / 100} and $${GOAT_MAX_TOP_UP_USD_CENTS / 100}.`,
+        `Credit top-ups must be between $${MIN_TOP_UP_USD_CENTS / 100} and $${MAX_TOP_UP_USD_CENTS / 100}.`,
       );
       const reservation = await reserveCommand(db, actor, {
         operation: "credit_topup.create",
@@ -257,16 +257,16 @@ export function createGoatBillingApplicationService(input: {
       const checkoutRecordId = deterministicId("goat_chk", actor, reservation.idempotencyKey);
       try {
         const [overview, billingActor] = await Promise.all([
-          loadGoatBillingOverview(actor.workspaceId, { db }),
+          loadBillingOverview(actor.workspaceId, { db }),
           loadBillingActor(db, actor),
         ]);
         if (overview.billing.plan !== "pro") {
-          throw new GoatBillingApplicationError(
+          throw new BillingApplicationError(
             "invalid_argument",
             "Upgrade this workspace to Pro before adding credits.",
           );
         }
-        assertGoatCheckoutEnabled();
+        assertCheckoutEnabled();
         const customerId = await ensureStripeCustomer({
           db,
           stripe,
@@ -275,7 +275,7 @@ export function createGoatBillingApplicationService(input: {
           existingCustomerId: overview.billing.stripeCustomerId,
           idempotencyKey: reservation.idempotencyKey,
         });
-        await createGoatPendingCheckoutRecord({
+        await createPendingCheckoutRecord({
           id: checkoutRecordId,
           workspaceId: actor.workspaceId,
           userWorkosId: actor.userId,
@@ -300,7 +300,7 @@ export function createGoatBillingApplicationService(input: {
                   unit_amount: command.amountCents,
                   tax_behavior: "exclusive",
                   product_data: {
-                    name: "OpenCompany credits",
+                    name: "opencompany credits",
                     description: "Usage credits for chat and brain ingestion",
                   },
                 },
@@ -309,7 +309,7 @@ export function createGoatBillingApplicationService(input: {
             ],
             metadata: {
               billingProduct: "goat_topup",
-              goatWorkspaceId: actor.workspaceId,
+              workspaceId: actor.workspaceId,
               userWorkosId: actor.userId,
               checkoutRecordId,
               amountCents: String(command.amountCents),
@@ -318,16 +318,13 @@ export function createGoatBillingApplicationService(input: {
           { idempotencyKey: stripeCommandKey("topup", actor, reservation.idempotencyKey) },
         );
         if (!session.url) {
-          throw new GoatBillingApplicationError(
-            "unavailable",
-            "Stripe did not return a Checkout URL.",
-          );
+          throw new BillingApplicationError("unavailable", "Stripe did not return a Checkout URL.");
         }
-        await markGoatCheckoutRecordOpen({
+        await markCheckoutRecordOpen({
           id: checkoutRecordId,
           stripeCheckoutSessionId: session.id,
           metadata: {
-            goatWorkspaceId: actor.workspaceId,
+            workspaceId: actor.workspaceId,
             userWorkosId: actor.userId,
             checkoutRecordId,
             amountCents: String(command.amountCents),
@@ -345,7 +342,7 @@ export function createGoatBillingApplicationService(input: {
         }
         return response;
       } catch (error) {
-        await markGoatCheckoutRecordFailed({
+        await markCheckoutRecordFailed({
           id: checkoutRecordId,
           error: error instanceof Error ? error.message : "Top-up checkout failed to start.",
           db,
@@ -365,13 +362,13 @@ export function createGoatBillingApplicationService(input: {
       if (replay) return replay;
 
       try {
-        assertGoatCheckoutEnabled();
+        assertCheckoutEnabled();
         const [overview, billingActor] = await Promise.all([
-          loadGoatBillingOverview(actor.workspaceId, { db }),
+          loadBillingOverview(actor.workspaceId, { db }),
           loadBillingActor(db, actor),
         ]);
         if (overview.billing.plan === "pro") {
-          throw new GoatBillingApplicationError(
+          throw new BillingApplicationError(
             "invalid_argument",
             "This workspace already has an active seat subscription.",
           );
@@ -381,7 +378,7 @@ export function createGoatBillingApplicationService(input: {
           overview.billing.subscriptionStatus !== "canceled" &&
           overview.billing.subscriptionStatus !== "incomplete_expired"
         ) {
-          throw new GoatBillingApplicationError(
+          throw new BillingApplicationError(
             "invalid_argument",
             "This workspace already has a Stripe subscription. Open billing management instead.",
           );
@@ -401,12 +398,12 @@ export function createGoatBillingApplicationService(input: {
         });
         const existingPro = subscriptions.data.find(
           (subscription) =>
-            subscription.metadata.billingProduct === GOAT_PRO_STRIPE_PRODUCT_KEY &&
+            subscription.metadata.billingProduct === PRO_STRIPE_PRODUCT_KEY &&
             subscription.status !== "canceled" &&
             subscription.status !== "incomplete_expired",
         );
         if (existingPro) {
-          throw new GoatBillingApplicationError(
+          throw new BillingApplicationError(
             "invalid_argument",
             "This workspace already has a seat subscription. Open billing management instead.",
           );
@@ -427,11 +424,11 @@ export function createGoatBillingApplicationService(input: {
               {
                 price_data: {
                   currency: "usd",
-                  unit_amount: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+                  unit_amount: PRO_MONTHLY_PRICE_USD_CENTS,
                   tax_behavior: "exclusive",
                   recurring: { interval: "month" },
                   product_data: {
-                    name: "OpenCompany seat",
+                    name: "opencompany seat",
                     description: "$20/month with $20/month of included at-cost usage",
                   },
                 },
@@ -439,13 +436,13 @@ export function createGoatBillingApplicationService(input: {
               },
             ],
             metadata: {
-              billingProduct: GOAT_PRO_STRIPE_PRODUCT_KEY,
-              goatWorkspaceId: actor.workspaceId,
+              billingProduct: PRO_STRIPE_PRODUCT_KEY,
+              workspaceId: actor.workspaceId,
             },
             subscription_data: {
               metadata: {
-                billingProduct: GOAT_PRO_STRIPE_PRODUCT_KEY,
-                goatWorkspaceId: actor.workspaceId,
+                billingProduct: PRO_STRIPE_PRODUCT_KEY,
+                workspaceId: actor.workspaceId,
               },
             },
           },
@@ -457,10 +454,7 @@ export function createGoatBillingApplicationService(input: {
           },
         );
         if (!session.url) {
-          throw new GoatBillingApplicationError(
-            "unavailable",
-            "Stripe did not return a Checkout URL.",
-          );
+          throw new BillingApplicationError("unavailable", "Stripe did not return a Checkout URL.");
         }
         const response = { redirectUrl: session.url };
         const firstCompletion = await completeCommand(db, reservation.commandId, response);
@@ -468,7 +462,7 @@ export function createGoatBillingApplicationService(input: {
           await captureServerEvent("goat_billing_pro_checkout_started", actor.userId, {
             user_id: actor.userId,
             workspace_id: actor.workspaceId,
-            monthly_price_usd_cents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+            monthly_price_usd_cents: PRO_MONTHLY_PRICE_USD_CENTS,
           }).catch(() => undefined);
         }
         return response;
@@ -487,9 +481,9 @@ export function createGoatBillingApplicationService(input: {
       const replay = redirectReplay(reservation.response);
       if (replay) return replay;
       try {
-        const { billing } = await loadGoatBillingOverview(actor.workspaceId, { db });
+        const { billing } = await loadBillingOverview(actor.workspaceId, { db });
         if (!billing.stripeCustomerId) {
-          throw new GoatBillingApplicationError(
+          throw new BillingApplicationError(
             "invalid_argument",
             "This workspace does not have a Stripe billing account yet.",
           );
@@ -513,7 +507,7 @@ export function createGoatBillingApplicationService(input: {
       requireAdmin(actor, "Only workspace admins can manage auto-refill.");
       validateAmount(
         command.amountCents,
-        `Auto-refill amounts must be between $${GOAT_MIN_TOP_UP_USD_CENTS / 100} and $${GOAT_MAX_TOP_UP_USD_CENTS / 100}.`,
+        `Auto-refill amounts must be between $${MIN_TOP_UP_USD_CENTS / 100} and $${MAX_TOP_UP_USD_CENTS / 100}.`,
       );
       const reservation = await reserveCommand(db, actor, {
         operation: "auto_refill.update",
@@ -522,14 +516,14 @@ export function createGoatBillingApplicationService(input: {
       });
       if (reservation.response?.updated === true) return { updated: true };
       try {
-        const overview = await loadGoatBillingOverview(actor.workspaceId, { db });
+        const overview = await loadBillingOverview(actor.workspaceId, { db });
         if (overview.billing.plan !== "pro") {
-          throw new GoatBillingApplicationError(
+          throw new BillingApplicationError(
             "invalid_argument",
             "Upgrade this workspace to Pro before enabling auto-refill.",
           );
         }
-        const updated = await setGoatAutoRefillConfig(
+        const updated = await setAutoRefillConfig(
           {
             workspaceId: actor.workspaceId,
             enabled: command.enabled,
@@ -538,7 +532,7 @@ export function createGoatBillingApplicationService(input: {
           { db },
         );
         if (!updated) {
-          throw new GoatBillingApplicationError(
+          throw new BillingApplicationError(
             "invalid_argument",
             "Add credits once first — auto-refill charges the card saved during a top-up.",
           );
@@ -554,34 +548,34 @@ export function createGoatBillingApplicationService(input: {
 }
 
 function requireAdmin(actor: Actor, message: string) {
-  if (actor.role !== "admin") throw new GoatBillingApplicationError("forbidden", message);
+  if (actor.role !== "admin") throw new BillingApplicationError("forbidden", message);
 }
 
 function validateAmount(amountCents: number, message: string) {
   if (
     !Number.isSafeInteger(amountCents) ||
-    amountCents < GOAT_MIN_TOP_UP_USD_CENTS ||
-    amountCents > GOAT_MAX_TOP_UP_USD_CENTS
+    amountCents < MIN_TOP_UP_USD_CENTS ||
+    amountCents > MAX_TOP_UP_USD_CENTS
   ) {
-    throw new GoatBillingApplicationError("invalid_argument", message);
+    throw new BillingApplicationError("invalid_argument", message);
   }
 }
 
 async function loadBillingActor(db: DbLike, actor: Actor) {
   const [[user], [workspace]] = await Promise.all([
     db
-      .select({ email: goatUsers.email })
-      .from(goatUsers)
-      .where(eq(goatUsers.workosUserId, actor.userId))
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.workosUserId, actor.userId))
       .limit(1),
     db
-      .select({ name: goatWorkspaces.name })
-      .from(goatWorkspaces)
-      .where(eq(goatWorkspaces.id, actor.workspaceId))
+      .select({ name: workspaces.name })
+      .from(workspaces)
+      .where(eq(workspaces.id, actor.workspaceId))
       .limit(1),
   ]);
   if (!user?.email || !workspace?.name) {
-    throw new GoatBillingApplicationError(
+    throw new BillingApplicationError(
       "unavailable",
       "The workspace billing identity is unavailable.",
     );
@@ -602,14 +596,14 @@ async function ensureStripeCustomer(input: {
     {
       email: input.billingActor.email,
       name: input.billingActor.workspaceName,
-      metadata: { goatWorkspaceId: input.actor.workspaceId },
+      metadata: { workspaceId: input.actor.workspaceId },
     },
     {
       idempotencyKey: stripeCommandKey("customer", input.actor, input.idempotencyKey),
     },
   );
   return (
-    (await setGoatStripeCustomerId(
+    (await setStripeCustomerId(
       { workspaceId: input.actor.workspaceId, stripeCustomerId: customer.id },
       { db: input.db },
     )) ?? customer.id
@@ -620,22 +614,19 @@ async function reserveCommand(
   db: DbLike,
   actor: Actor,
   input: {
-    operation: GoatBillingCommandOperation;
+    operation: BillingCommandOperation;
     idempotencyKey: string;
     request: Record<string, unknown>;
   },
 ) {
   const idempotencyKey = input.idempotencyKey.trim();
   if (!idempotencyKey || idempotencyKey.length > 200) {
-    throw new GoatBillingApplicationError(
-      "invalid_argument",
-      "A valid Idempotency-Key is required.",
-    );
+    throw new BillingApplicationError("invalid_argument", "A valid Idempotency-Key is required.");
   }
   const requestHash = sha256(JSON.stringify({ operation: input.operation, ...input.request }));
   const commandId = deterministicId("gbcmd", actor, idempotencyKey);
   const [inserted] = await db
-    .insert(goatBillingCommandIdempotency)
+    .insert(billingCommandIdempotency)
     .values({
       commandId,
       userWorkosId: actor.userId,
@@ -651,24 +642,21 @@ async function reserveCommand(
     (
       await db
         .select()
-        .from(goatBillingCommandIdempotency)
+        .from(billingCommandIdempotency)
         .where(
           and(
-            eq(goatBillingCommandIdempotency.userWorkosId, actor.userId),
-            eq(goatBillingCommandIdempotency.workspaceId, actor.workspaceId),
-            eq(goatBillingCommandIdempotency.idempotencyKey, idempotencyKey),
+            eq(billingCommandIdempotency.userWorkosId, actor.userId),
+            eq(billingCommandIdempotency.workspaceId, actor.workspaceId),
+            eq(billingCommandIdempotency.idempotencyKey, idempotencyKey),
           ),
         )
         .limit(1)
     )[0];
   if (!row) {
-    throw new GoatBillingApplicationError(
-      "unavailable",
-      "The billing command could not be reserved.",
-    );
+    throw new BillingApplicationError("unavailable", "The billing command could not be reserved.");
   }
   if (row.operation !== input.operation || row.requestHash !== requestHash) {
-    throw new GoatBillingApplicationError(
+    throw new BillingApplicationError(
       "idempotency_conflict",
       "The Idempotency-Key was already used for another billing command.",
     );
@@ -686,15 +674,15 @@ async function reserveCommand(
 
 async function completeCommand(db: DbLike, commandId: string, response: Record<string, unknown>) {
   const [completed] = await db
-    .update(goatBillingCommandIdempotency)
+    .update(billingCommandIdempotency)
     .set({ response, completedAt: new Date(), touchedAt: new Date() })
     .where(
       and(
-        eq(goatBillingCommandIdempotency.commandId, commandId),
-        isNull(goatBillingCommandIdempotency.completedAt),
+        eq(billingCommandIdempotency.commandId, commandId),
+        isNull(billingCommandIdempotency.completedAt),
       ),
     )
-    .returning({ commandId: goatBillingCommandIdempotency.commandId });
+    .returning({ commandId: billingCommandIdempotency.commandId });
   return Boolean(completed);
 }
 
@@ -705,9 +693,9 @@ function redirectReplay(response: Record<string, unknown> | null) {
 }
 
 function billingFailure(error: unknown, fallback: string) {
-  return error instanceof GoatBillingApplicationError
+  return error instanceof BillingApplicationError
     ? error
-    : new GoatBillingApplicationError("unavailable", fallback);
+    : new BillingApplicationError("unavailable", fallback);
 }
 
 function normalizedAppUrl(value: string) {

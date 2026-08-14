@@ -10,18 +10,18 @@ const dependencyMocks = vi.hoisted(() => ({
   getById: vi.fn(),
 }));
 
-vi.mock("@opencompany/db/goat-brain-files", () => ({
-  getGoatBrainFile: dependencyMocks.getScoped,
-  getGoatBrainFileById: dependencyMocks.getById,
+vi.mock("@opencompany/db/brain-files", () => ({
+  getBrainFile: dependencyMocks.getScoped,
+  getBrainFileById: dependencyMocks.getById,
 }));
 
-vi.mock("@opencompany/goat-agent/brain-assets", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@opencompany/goat-agent/brain-assets")>()),
-  createGoatBrainAssetForUser: dependencyMocks.create,
-  replaceGoatBrainAssetForUser: dependencyMocks.replace,
+vi.mock("@opencompany/agent/brain-assets", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencompany/agent/brain-assets")>()),
+  createBrainAssetForUser: dependencyMocks.create,
+  replaceBrainAssetForUser: dependencyMocks.replace,
 }));
 
-vi.mock("@opencompany/goat-agent/brain-files", () => ({
+vi.mock("@opencompany/agent/brain-files", () => ({
   documentViewFromFileRow: (row: AssetRow) => documentView(row),
 }));
 

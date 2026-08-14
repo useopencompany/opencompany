@@ -1,16 +1,16 @@
-import { connectGoatXAccountIntegration } from "@opencompany/db/goat-integrations";
-import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
-import { captureGoatIntegrationAddedAnalytics } from "@opencompany/goat-agent/integrations/analytics";
+import { getAppUrl } from "@opencompany/agent/app-url";
+import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import {
-  appendGoatXAccountIntegrationStatus,
-  buildGoatXAccountAuthorizationUrl,
-  createGoatXAccountIntegrationState,
-  createGoatXAccountPkce,
-  exchangeGoatXAccountCode,
-  fetchGoatXAccountIdentity,
-  isGoatXAccountIntegrationConfigured,
-  verifyGoatXAccountIntegrationState,
-} from "@opencompany/goat-agent/integrations/x-account";
+  appendXAccountIntegrationStatus,
+  buildXAccountAuthorizationUrl,
+  createXAccountIntegrationState,
+  createXAccountPkce,
+  exchangeXAccountCode,
+  fetchXAccountIdentity,
+  isXAccountIntegrationConfigured,
+  verifyXAccountIntegrationState,
+} from "@opencompany/agent/integrations/x-account";
+import { connectXAccountIntegration } from "@opencompany/db/integrations";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -52,18 +52,18 @@ async function handleStart(input: IngressInput, request: Request): Promise<Respo
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
 
-  if (!isGoatXAccountIntegrationConfigured()) {
+  if (!isXAccountIntegrationConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");
   }
 
-  const state = createGoatXAccountIntegrationState({
+  const state = createXAccountIntegrationState({
     userWorkosId: session.userId,
     returnTo,
   });
-  const { codeVerifier, codeChallenge } = createGoatXAccountPkce();
+  const { codeVerifier, codeChallenge } = createXAccountPkce();
 
   return withSetCookie(
-    sessionRedirect(session, buildGoatXAccountAuthorizationUrl(state, codeChallenge)),
+    sessionRedirect(session, buildXAccountAuthorizationUrl(state, codeChallenge)),
     pkceCookie(codeVerifier),
   );
 }
@@ -77,17 +77,14 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   // The verifier cookie is one-shot: every callback outcome deletes it.
   const consumed = (response: Response) => withSetCookie(response, pkceDeletionCookie());
 
-  let state: ReturnType<typeof verifyGoatXAccountIntegrationState>;
+  let state: ReturnType<typeof verifyXAccountIntegrationState>;
   try {
-    state = verifyGoatXAccountIntegrationState(stateValue);
+    state = verifyXAccountIntegrationState(stateValue);
   } catch {
     return consumed(
       sessionRedirect(
         session,
-        new URL(
-          "/settings?integration=x_account&setup=error&reason=invalid_state",
-          getGoatAppUrl(),
-        ),
+        new URL("/settings?integration=x_account&setup=error&reason=invalid_state", getAppUrl()),
       ),
     );
   }
@@ -95,7 +92,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   if (state.userWorkosId !== session.userId) {
     return consumed(statusRedirect(session, state.returnTo, "error", "session_mismatch"));
   }
-  if (!isGoatXAccountIntegrationConfigured()) {
+  if (!isXAccountIntegrationConfigured()) {
     return consumed(statusRedirect(session, state.returnTo, "error", "not_configured"));
   }
   if (url.searchParams.get("error")) {
@@ -107,10 +104,10 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   }
 
   try {
-    const oauth = await exchangeGoatXAccountCode(code, codeVerifier);
-    const identity = await fetchGoatXAccountIdentity(oauth.accessToken);
+    const oauth = await exchangeXAccountCode(code, codeVerifier);
+    const identity = await fetchXAccountIdentity(oauth.accessToken);
 
-    await connectGoatXAccountIntegration({
+    await connectXAccountIntegration({
       userWorkosId: session.userId,
       xUserId: identity.id,
       username: identity.username,
@@ -121,7 +118,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
       scopes: oauth.scopes,
       db: input.db,
     });
-    await captureGoatIntegrationAddedAnalytics({
+    await captureIntegrationAddedAnalytics({
       userWorkosId: session.userId,
       workspaceId: session.workspaceId,
       provider: "x_account",
@@ -183,6 +180,6 @@ function statusRedirect(
 ) {
   return sessionRedirect(
     session,
-    new URL(appendGoatXAccountIntegrationStatus(returnTo, status, reason), getGoatAppUrl()),
+    new URL(appendXAccountIntegrationStatus(returnTo, status, reason), getAppUrl()),
   );
 }

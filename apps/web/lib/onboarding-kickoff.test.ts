@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildGoatOnboardingKickoffPrompt } from "./onboarding-kickoff";
+import { buildOnboardingKickoffPrompt } from "./onboarding-kickoff";
 
-describe("buildGoatOnboardingKickoffPrompt", () => {
+describe("buildOnboardingKickoffPrompt", () => {
   it("creates the transparent first Brain-seeding run with the company URL", () => {
-    const prompt = buildGoatOnboardingKickoffPrompt("https://opencompany.ai/");
+    const prompt = buildOnboardingKickoffPrompt("https://opencompany.ai/");
 
     expect(prompt).toContain("Keep this workflow in main chat");
     expect(prompt).toContain("Survey breadth before depth");

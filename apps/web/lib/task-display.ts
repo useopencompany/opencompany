@@ -1,1 +1,1 @@
-export * from "@opencompany/goat-agent/task-display";
+export * from "@opencompany/agent/task-display";

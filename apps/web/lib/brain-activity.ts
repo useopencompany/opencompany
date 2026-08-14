@@ -1,10 +1,7 @@
-import {
-  type GoatBrainIngestTrace,
-  normalizeGoatBrainIngestTrace,
-} from "@opencompany/goat-brain/ingest-trace";
+import { type BrainIngestTrace, normalizeBrainIngestTrace } from "@opencompany/brain/ingest-trace";
 import type { BrainIngestJobReadModel, BrainSourceItemDto } from "@opencompany/protocol";
 
-export type GoatBrainActivityKind =
+export type BrainActivityKind =
   | "captured"
   | "filing"
   | "filed"
@@ -13,37 +10,37 @@ export type GoatBrainActivityKind =
   | "failed"
   | "skipped";
 
-export type GoatBrainActivityPageAction = "created" | "updated" | "conflict_created";
+export type BrainActivityPageAction = "created" | "updated" | "conflict_created";
 
-export type GoatBrainActivityPage = {
+export type BrainActivityPage = {
   brainId: string;
   folderPath: string;
   title: string;
-  action: GoatBrainActivityPageAction;
+  action: BrainActivityPageAction;
 };
 
-export type GoatBrainActivityEvent = {
+export type BrainActivityEvent = {
   id: string;
   traceId: string;
-  kind: GoatBrainActivityKind;
+  kind: BrainActivityKind;
   at: string;
   title: string;
   detail: string | null;
   sourceTitle: string;
   brainId: string | null;
-  pages: GoatBrainActivityPage[];
-  trace: GoatBrainIngestTrace | null;
+  pages: BrainActivityPage[];
+  trace: BrainIngestTrace | null;
   durationMs: number | null;
 };
 
-type GoatBrainActivityEventOptions = {
-  kinds?: readonly GoatBrainActivityKind[];
+type BrainActivityEventOptions = {
+  kinds?: readonly BrainActivityKind[];
 };
 
-export type GoatBrainDraftIngestStateKind = "queued" | "paused" | "running" | "retrying" | "failed";
+export type BrainDraftIngestStateKind = "queued" | "paused" | "running" | "retrying" | "failed";
 
-export type GoatBrainDraftIngestState = {
-  kind: GoatBrainDraftIngestStateKind;
+export type BrainDraftIngestState = {
+  kind: BrainDraftIngestStateKind;
   jobId: string;
   title: string;
   detail: string | null;
@@ -57,13 +54,13 @@ const MAX_DETAIL_LENGTH = 180;
 
 // Flattens the ingest pipeline into a human activity feed: one event for the
 // capture landing, plus one for the current state of its curation job.
-export function buildGoatBrainActivityEvents(
+export function buildBrainActivityEvents(
   jobs: readonly BrainIngestJobReadModel[],
   sourceItems: readonly BrainSourceItemDto[],
-  options: GoatBrainActivityEventOptions = {},
-): GoatBrainActivityEvent[] {
+  options: BrainActivityEventOptions = {},
+): BrainActivityEvent[] {
   const itemsById = new Map(sourceItems.map((item) => [item.id, item]));
-  const events: GoatBrainActivityEvent[] = [];
+  const events: BrainActivityEvent[] = [];
 
   for (const job of jobs) {
     const item = itemsById.get(job.sourceItemId) ?? null;
@@ -166,16 +163,16 @@ export function buildGoatBrainActivityEvents(
     .slice(0, MAX_ACTIVITY_EVENTS);
 }
 
-export function buildGoatBrainDraftIngestStates(
+export function buildBrainDraftIngestStates(
   jobs: readonly BrainIngestJobReadModel[],
   sourceItems: readonly BrainSourceItemDto[],
-): ReadonlyMap<string, GoatBrainDraftIngestState> {
+): ReadonlyMap<string, BrainDraftIngestState> {
   const captureItemsById = new Map(
     sourceItems
       .filter((item) => item.sourceProvider === "goat-chat" && item.sourceType === "capture")
       .map((item) => [item.id, item]),
   );
-  const states = new Map<string, GoatBrainDraftIngestState>();
+  const states = new Map<string, BrainDraftIngestState>();
 
   for (const job of jobs) {
     if (job.kind !== "brain_agent_ingest" || job.sourceProvider !== "goat-chat") continue;
@@ -205,7 +202,7 @@ function capturedTitle(provider: string) {
 function draftIngestStateForJob(
   job: BrainIngestJobReadModel,
   item: BrainSourceItemDto,
-): GoatBrainDraftIngestState {
+): BrainDraftIngestState {
   const title = item.title?.trim() || "Untitled";
   if (job.status === "failed") {
     return {
@@ -262,8 +259,8 @@ function jobResultSkipped(job: BrainIngestJobReadModel): boolean {
   return job.status === "skipped" || job.result?.skipped === true;
 }
 
-function jobResultTrace(job: BrainIngestJobReadModel): GoatBrainIngestTrace | null {
-  return normalizeGoatBrainIngestTrace(job.result?.trace);
+function jobResultTrace(job: BrainIngestJobReadModel): BrainIngestTrace | null {
+  return normalizeBrainIngestTrace(job.result?.trace);
 }
 
 function jobRunDurationMs(job: BrainIngestJobReadModel): number | null {
@@ -279,11 +276,11 @@ function jobRunDurationMs(job: BrainIngestJobReadModel): number | null {
   return Math.round(completedAt - startedAt);
 }
 
-function jobResultPages(job: BrainIngestJobReadModel): GoatBrainActivityPage[] {
+function jobResultPages(job: BrainIngestJobReadModel): BrainActivityPage[] {
   const value = job.result?.pages;
   if (!Array.isArray(value)) return [];
 
-  const pages: GoatBrainActivityPage[] = [];
+  const pages: BrainActivityPage[] = [];
   const seen = new Set<string>();
   for (const item of value) {
     const page = parseActivityPage(item);
@@ -297,7 +294,7 @@ function jobResultPages(job: BrainIngestJobReadModel): GoatBrainActivityPage[] {
   return pages;
 }
 
-function parseActivityPage(value: unknown): GoatBrainActivityPage | null {
+function parseActivityPage(value: unknown): BrainActivityPage | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   const brainId = normalizedText(record.brainId);
@@ -312,7 +309,7 @@ function parseActivityPage(value: unknown): GoatBrainActivityPage | null {
   };
 }
 
-function normalizedActivityPageAction(value: unknown): GoatBrainActivityPageAction | null {
+function normalizedActivityPageAction(value: unknown): BrainActivityPageAction | null {
   if (value === "created" || value === "updated" || value === "conflict_created") return value;
   return null;
 }

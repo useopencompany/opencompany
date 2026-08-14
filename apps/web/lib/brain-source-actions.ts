@@ -1,27 +1,25 @@
 "use server";
 
 import type {
-  GoatBrainSourceCommand,
-  GoatBrainSourceOptions,
-  GoatBrainSourceOptionsCommand,
-  GoatBrainSourcesDetails as ServiceBrainSourcesDetails,
-} from "@opencompany/goat-agent/brain-sources";
+  BrainSourceCommand,
+  BrainSourceOptions,
+  BrainSourceOptionsCommand,
+  BrainSourcesDetails as ServiceBrainSourcesDetails,
+} from "@opencompany/agent/brain-sources";
 import { revalidatePath } from "next/cache";
 import { serverApiClient } from "@/lib/server-api-client";
-import type { GoatWorkspaceActionResult } from "@/lib/workspace-actions";
+import type { WorkspaceActionResult } from "@/lib/workspace-actions";
 
-export type GoatBrainSourceView = ServiceBrainSourcesDetails["sources"][number];
-export type GoatOwnSourceAccount = ServiceBrainSourcesDetails["ownAccounts"]["slack"][number];
-export type GoatBrainSourcesDetails = ServiceBrainSourcesDetails;
+export type BrainSourceView = ServiceBrainSourcesDetails["sources"][number];
+export type OwnSourceAccount = ServiceBrainSourcesDetails["ownAccounts"]["slack"][number];
+export type BrainSourcesDetails = ServiceBrainSourcesDetails;
 
-type ConfigureBody<TProvider extends GoatBrainSourceCommand["provider"]> = Extract<
-  GoatBrainSourceCommand,
+type ConfigureBody<TProvider extends BrainSourceCommand["provider"]> = Extract<
+  BrainSourceCommand,
   { operation: "configure"; provider: TProvider }
 >;
 
-export async function getGoatBrainSourcesAction(
-  brainRef: string,
-): Promise<GoatBrainSourcesDetails | null> {
+export async function getBrainSourcesAction(brainRef: string): Promise<BrainSourcesDetails | null> {
   const response = await (await serverApiClient()).v1.brains[":brainId"].sources.$get({
     param: { brainId: brainRef },
   });
@@ -30,10 +28,10 @@ export async function getGoatBrainSourcesAction(
   return (await response.json()).data;
 }
 
-export async function removeGoatBrainSourceAction(input: {
+export async function removeBrainSourceAction(input: {
   brainRef: string;
   integrationId: string;
-}): Promise<GoatWorkspaceActionResult> {
+}): Promise<WorkspaceActionResult> {
   return mutateSource(
     async () =>
       (await serverApiClient()).v1.brains[":brainId"].sources[":integrationId"].$delete({
@@ -43,12 +41,12 @@ export async function removeGoatBrainSourceAction(input: {
   );
 }
 
-export async function setGoatBrainSourceEnabledAction(input: {
+export async function setBrainSourceEnabledAction(input: {
   brainRef: string;
-  provider: GoatBrainSourceCommand["provider"];
+  provider: BrainSourceCommand["provider"];
   integrationId: string;
   enabled: boolean;
-}): Promise<GoatWorkspaceActionResult> {
+}): Promise<WorkspaceActionResult> {
   return setSource(input.brainRef, input.integrationId, {
     operation: "set_enabled",
     provider: input.provider,
@@ -56,12 +54,12 @@ export async function setGoatBrainSourceEnabledAction(input: {
   });
 }
 
-export async function setGoatBrainSlackSourceAction(
+export async function setBrainSlackSourceAction(
   input: Omit<ConfigureBody<"slack">, "operation" | "provider"> & {
     brainRef: string;
     integrationId: string;
   },
-): Promise<GoatWorkspaceActionResult> {
+): Promise<WorkspaceActionResult> {
   const { brainRef, integrationId, ...configuration } = input;
   return setSource(brainRef, integrationId, {
     operation: "configure",
@@ -70,12 +68,12 @@ export async function setGoatBrainSlackSourceAction(
   });
 }
 
-export async function setGoatBrainLinearSourceAction(
+export async function setBrainLinearSourceAction(
   input: Omit<ConfigureBody<"linear">, "operation" | "provider"> & {
     brainRef: string;
     integrationId: string;
   },
-): Promise<GoatWorkspaceActionResult> {
+): Promise<WorkspaceActionResult> {
   const { brainRef, integrationId, ...configuration } = input;
   return setSource(brainRef, integrationId, {
     operation: "configure",
@@ -84,12 +82,12 @@ export async function setGoatBrainLinearSourceAction(
   });
 }
 
-export async function setGoatBrainHubspotSourceAction(
+export async function setBrainHubspotSourceAction(
   input: Omit<ConfigureBody<"hubspot">, "operation" | "provider"> & {
     brainRef: string;
     integrationId: string;
   },
-): Promise<GoatWorkspaceActionResult> {
+): Promise<WorkspaceActionResult> {
   const { brainRef, integrationId, ...configuration } = input;
   return setSource(brainRef, integrationId, {
     operation: "configure",
@@ -98,12 +96,12 @@ export async function setGoatBrainHubspotSourceAction(
   });
 }
 
-export async function setGoatBrainAttioSourceAction(
+export async function setBrainAttioSourceAction(
   input: Omit<ConfigureBody<"attio">, "operation" | "provider"> & {
     brainRef: string;
     integrationId: string;
   },
-): Promise<GoatWorkspaceActionResult> {
+): Promise<WorkspaceActionResult> {
   const { brainRef, integrationId, ...configuration } = input;
   return setSource(brainRef, integrationId, {
     operation: "configure",
@@ -112,12 +110,12 @@ export async function setGoatBrainAttioSourceAction(
   });
 }
 
-export async function setGoatBrainGitHubSourceAction(
+export async function setBrainGitHubSourceAction(
   input: Omit<ConfigureBody<"github">, "operation" | "provider"> & {
     brainRef: string;
     integrationId: string;
   },
-): Promise<GoatWorkspaceActionResult> {
+): Promise<WorkspaceActionResult> {
   const { brainRef, integrationId, ...configuration } = input;
   return setSource(brainRef, integrationId, {
     operation: "configure",
@@ -126,12 +124,12 @@ export async function setGoatBrainGitHubSourceAction(
   });
 }
 
-export async function setGoatBrainGmailSourceAction(
+export async function setBrainGmailSourceAction(
   input: Omit<ConfigureBody<"gmail">, "operation" | "provider"> & {
     brainRef: string;
     integrationId: string;
   },
-): Promise<GoatWorkspaceActionResult> {
+): Promise<WorkspaceActionResult> {
   const { brainRef, integrationId, ...configuration } = input;
   return setSource(brainRef, integrationId, {
     operation: "configure",
@@ -140,12 +138,12 @@ export async function setGoatBrainGmailSourceAction(
   });
 }
 
-export async function setGoatBrainGoogleDriveSourceAction(
+export async function setBrainGoogleDriveSourceAction(
   input: Omit<ConfigureBody<"google_drive">, "operation" | "provider"> & {
     brainRef: string;
     integrationId: string;
   },
-): Promise<GoatWorkspaceActionResult> {
+): Promise<WorkspaceActionResult> {
   const { brainRef, integrationId, ...configuration } = input;
   return setSource(brainRef, integrationId, {
     operation: "configure",
@@ -154,13 +152,13 @@ export async function setGoatBrainGoogleDriveSourceAction(
   });
 }
 
-export type GoatSlackConversationListResult =
-  | (Omit<Extract<GoatBrainSourceOptions, { provider: "slack" }>, "provider"> & { ok: true })
+export type SlackConversationListResult =
+  | (Omit<Extract<BrainSourceOptions, { provider: "slack" }>, "provider"> & { ok: true })
   | { ok: false; error: string };
 
-export async function listGoatSlackConversationsAction(
+export async function listSlackConversationsAction(
   integrationId: string,
-): Promise<GoatSlackConversationListResult> {
+): Promise<SlackConversationListResult> {
   const result = await listSourceOptions(integrationId, { provider: "slack" });
   if (!result.ok) return result;
   if (result.data.provider !== "slack") {
@@ -174,13 +172,11 @@ export async function listGoatSlackConversationsAction(
   };
 }
 
-export type GoatLinearTeamListResult =
-  | (Omit<Extract<GoatBrainSourceOptions, { provider: "linear" }>, "provider"> & { ok: true })
+export type LinearTeamListResult =
+  | (Omit<Extract<BrainSourceOptions, { provider: "linear" }>, "provider"> & { ok: true })
   | { ok: false; error: string };
 
-export async function listGoatLinearTeamsAction(
-  integrationId: string,
-): Promise<GoatLinearTeamListResult> {
+export async function listLinearTeamsAction(integrationId: string): Promise<LinearTeamListResult> {
   const result = await listSourceOptions(integrationId, { provider: "linear" });
   if (!result.ok) return result;
   if (result.data.provider !== "linear") {
@@ -189,13 +185,13 @@ export async function listGoatLinearTeamsAction(
   return { ok: true, teams: result.data.teams, partial: result.data.partial };
 }
 
-export type GoatGitHubRepositoryListResult =
-  | (Omit<Extract<GoatBrainSourceOptions, { provider: "github" }>, "provider"> & { ok: true })
+export type GitHubRepositoryListResult =
+  | (Omit<Extract<BrainSourceOptions, { provider: "github" }>, "provider"> & { ok: true })
   | { ok: false; error: string };
 
-export async function listGoatGitHubRepositoriesAction(
+export async function listGitHubRepositoriesAction(
   integrationId: string,
-): Promise<GoatGitHubRepositoryListResult> {
+): Promise<GitHubRepositoryListResult> {
   const result = await listSourceOptions(integrationId, { provider: "github" });
   if (!result.ok) return result;
   if (result.data.provider !== "github") {
@@ -204,17 +200,17 @@ export async function listGoatGitHubRepositoriesAction(
   return { ok: true, repos: result.data.repos };
 }
 
-export type GoatGoogleDriveResourceListResult =
-  | (Omit<Extract<GoatBrainSourceOptions, { provider: "google_drive" }>, "provider"> & {
+export type GoogleDriveResourceListResult =
+  | (Omit<Extract<BrainSourceOptions, { provider: "google_drive" }>, "provider"> & {
       ok: true;
     })
   | { ok: false; error: string };
 
-export async function listGoatGoogleDriveResourcesAction(
-  input: Omit<Extract<GoatBrainSourceOptionsCommand, { provider: "google_drive" }>, "provider"> & {
+export async function listGoogleDriveResourcesAction(
+  input: Omit<Extract<BrainSourceOptionsCommand, { provider: "google_drive" }>, "provider"> & {
     integrationId: string;
   },
-): Promise<GoatGoogleDriveResourceListResult> {
+): Promise<GoogleDriveResourceListResult> {
   const { integrationId, ...options } = input;
   const result = await listSourceOptions(integrationId, {
     provider: "google_drive",
@@ -234,8 +230,8 @@ export async function listGoatGoogleDriveResourcesAction(
 async function setSource(
   brainId: string,
   integrationId: string,
-  body: GoatBrainSourceCommand,
-): Promise<GoatWorkspaceActionResult> {
+  body: BrainSourceCommand,
+): Promise<WorkspaceActionResult> {
   return mutateSource(
     async () =>
       (await serverApiClient()).v1.brains[":brainId"].sources[":integrationId"].$put({
@@ -249,7 +245,7 @@ async function setSource(
 async function mutateSource(
   request: () => Promise<Response>,
   fallback: string,
-): Promise<GoatWorkspaceActionResult> {
+): Promise<WorkspaceActionResult> {
   try {
     const response = await request();
     if (!response.ok)
@@ -263,8 +259,8 @@ async function mutateSource(
 
 async function listSourceOptions(
   integrationId: string,
-  body: GoatBrainSourceOptionsCommand,
-): Promise<{ ok: true; data: GoatBrainSourceOptions } | { ok: false; error: string }> {
+  body: BrainSourceOptionsCommand,
+): Promise<{ ok: true; data: BrainSourceOptions } | { ok: false; error: string }> {
   try {
     const response = await (await serverApiClient()).v1.integrations[":integrationId"][
       "brain-source-options"
@@ -293,7 +289,7 @@ async function responseError(response: Response, fallback: string) {
   return new Error(`${message}${requestId ? ` (request ${requestId})` : ""}`);
 }
 
-function sourceLabel(provider: GoatBrainSourceCommand["provider"]) {
+function sourceLabel(provider: BrainSourceCommand["provider"]) {
   switch (provider) {
     case "google_drive":
       return "Google Drive";

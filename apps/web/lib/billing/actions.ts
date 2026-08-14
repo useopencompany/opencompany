@@ -4,12 +4,12 @@ import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
-export type GoatBillingActionResult = { ok: false; error: string } | never;
+export type BillingActionResult = { ok: false; error: string } | never;
 
-export async function createGoatCreditTopUpAction(
+export async function createCreditTopUpAction(
   amountCents: number,
   idempotencyKey: string = randomUUID(),
-): Promise<GoatBillingActionResult> {
+): Promise<BillingActionResult> {
   const client = await serverApiClient();
   const response = await client.v1.billing["top-ups"].$post({
     header: { "idempotency-key": idempotencyKey },
@@ -24,9 +24,9 @@ export async function createGoatCreditTopUpAction(
   redirect((await response.json()).data.redirectUrl);
 }
 
-export async function createGoatProCheckoutAction(
+export async function createProCheckoutAction(
   idempotencyKey: string = randomUUID(),
-): Promise<GoatBillingActionResult> {
+): Promise<BillingActionResult> {
   const client = await serverApiClient();
   const response = await client.v1.billing["subscription-checkouts"].$post({
     header: { "idempotency-key": idempotencyKey },
@@ -40,7 +40,7 @@ export async function createGoatProCheckoutAction(
   redirect((await response.json()).data.redirectUrl);
 }
 
-export async function setGoatAutoRefillAction(
+export async function setAutoRefillAction(
   input: { enabled: boolean; amountCents: number },
   idempotencyKey: string = randomUUID(),
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -59,9 +59,9 @@ export async function setGoatAutoRefillAction(
   return { ok: true };
 }
 
-export async function createGoatBillingPortalAction(
+export async function createBillingPortalAction(
   idempotencyKey: string = randomUUID(),
-): Promise<GoatBillingActionResult> {
+): Promise<BillingActionResult> {
   const client = await serverApiClient();
   const response = await client.v1.billing["portal-sessions"].$post({
     header: { "idempotency-key": idempotencyKey },

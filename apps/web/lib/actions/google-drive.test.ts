@@ -17,27 +17,25 @@ vi.mock("@opencompany/db/client", () => ({
     }),
   }),
 }));
-vi.mock("@opencompany/goat-agent/integrations/google-access-token", async (importOriginal) => {
+vi.mock("@opencompany/agent/integrations/google-access-token", async (importOriginal) => {
   const original =
-    await importOriginal<
-      typeof import("@opencompany/goat-agent/integrations/google-access-token")
-    >();
+    await importOriginal<typeof import("@opencompany/agent/integrations/google-access-token")>();
   return { ...original, googleApiCall: mocks.googleApiCall };
 });
 
-import { GoogleAccessAuthError } from "@opencompany/goat-agent/integrations/google-access-token";
+import { GoogleAccessAuthError } from "@opencompany/agent/integrations/google-access-token";
 import { resolveGoogleDriveActions } from "@/lib/actions/google-drive";
 import {
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionPermissionError,
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionPermissionError,
 } from "@/lib/actions/types";
 
 const DRIVE_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 const DOCS_WRITE_SCOPE = "https://www.googleapis.com/auth/documents";
 const SHEETS_WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
-const CONTEXT: GoatActionExecuteContext = {
+const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-22T00:00:00.000Z"),
@@ -703,18 +701,18 @@ describe("google_drive.create_document", () => {
     mocks.dbRows = [connectedRow("louis@example.com", { scopes: [DRIVE_READ_SCOPE] })];
 
     await expect(action.execute({ title: "Plan" }, CONTEXT)).rejects.toMatchObject({
-      name: "GoatActionAuthError",
+      name: "ActionAuthError",
       code: "auth_expired",
       provider: "google_drive",
       message: expect.stringContaining("enable editing Google Docs"),
-    } satisfies Partial<GoatActionAuthError>);
+    } satisfies Partial<ActionAuthError>);
 
     mocks.dbRows = [connectedRow()];
     action = findAction(await resolveGoogleDriveActions("user_1"), "google_drive.create_document");
     mocks.dbRows = [connectedRow("louis@example.com", { capabilityModes: { write: "off" } })];
 
     await expect(action.execute({ title: "Plan" }, CONTEXT)).rejects.toBeInstanceOf(
-      GoatActionPermissionError,
+      ActionPermissionError,
     );
     expect(mocks.googleApiCall).not.toHaveBeenCalled();
   });
@@ -838,11 +836,11 @@ describe("google_drive.replace_document_text", () => {
     await expect(
       action.execute({ file_id: "doc_1", find: "Q3", replace: "Q4" }, CONTEXT),
     ).rejects.toMatchObject({
-      name: "GoatActionAuthError",
+      name: "ActionAuthError",
       code: "auth_expired",
       provider: "google_drive",
       message: expect.stringContaining("enable editing Google Docs"),
-    } satisfies Partial<GoatActionAuthError>);
+    } satisfies Partial<ActionAuthError>);
 
     mocks.dbRows = [connectedRow()];
     action = findAction(
@@ -853,7 +851,7 @@ describe("google_drive.replace_document_text", () => {
 
     await expect(
       action.execute({ file_id: "doc_1", find: "Q3", replace: "Q4" }, CONTEXT),
-    ).rejects.toBeInstanceOf(GoatActionPermissionError);
+    ).rejects.toBeInstanceOf(ActionPermissionError);
     expect(mocks.googleApiCall).not.toHaveBeenCalled();
   });
 });
@@ -983,11 +981,11 @@ describe("google_drive.update_spreadsheet_values", () => {
     await expect(
       action.execute({ file_id: "sheet_1", range: "KPI!B2", values: [[123]] }, CONTEXT),
     ).rejects.toMatchObject({
-      name: "GoatActionAuthError",
+      name: "ActionAuthError",
       code: "auth_expired",
       provider: "google_drive",
       message: expect.stringContaining("enable editing Google Sheets"),
-    } satisfies Partial<GoatActionAuthError>);
+    } satisfies Partial<ActionAuthError>);
 
     mocks.dbRows = [connectedRow()];
     action = findAction(
@@ -998,7 +996,7 @@ describe("google_drive.update_spreadsheet_values", () => {
 
     await expect(
       action.execute({ file_id: "sheet_1", range: "KPI!B2", values: [[123]] }, CONTEXT),
-    ).rejects.toBeInstanceOf(GoatActionPermissionError);
+    ).rejects.toBeInstanceOf(ActionPermissionError);
     expect(mocks.googleApiCall).not.toHaveBeenCalled();
   });
 });
@@ -1080,11 +1078,11 @@ describe("Google Drive account and auth handling", () => {
     );
 
     await expect(action.execute({ query: "roadmap" }, CONTEXT)).rejects.toMatchObject({
-      name: "GoatActionAuthError",
+      name: "ActionAuthError",
       code: "auth_expired",
       provider: "google_drive",
       message: expect.stringContaining("Settings → Integrations"),
-    } satisfies Partial<GoatActionAuthError>);
+    } satisfies Partial<ActionAuthError>);
   });
 
   it("surfaces provider API failures", async () => {

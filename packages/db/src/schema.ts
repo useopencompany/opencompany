@@ -113,7 +113,7 @@ export const users = pgTable(
     // (a tiny boolean) so the auth hot path loads it for free, mirroring `proMode`.
     companySurfaceEnabled: boolean("company_surface_enabled").notNull().default(false),
     // Per-user feature flag for the Codex runtime. When true the agent editor shows the engine
-    // selector so an agent can be switched from the default OpenCompany runtime to Codex; off for
+    // selector so an agent can be switched from the default opencompany runtime to Codex; off for
     // everyone until they opt in from Settings → Feature flags. Kept on `users` (a tiny boolean)
     // so the auth hot path loads it for free, mirroring `proMode`/`companySurfaceEnabled`.
     codexEngineEnabled: boolean("codex_engine_enabled").notNull().default(false),

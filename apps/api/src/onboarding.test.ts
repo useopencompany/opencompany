@@ -1,47 +1,44 @@
+import { ensureWorkspaceOrganization } from "@opencompany/agent/workspaces/organizations";
+import { provisionWorkspace } from "@opencompany/agent/workspaces/provisioning";
+import { createBrainFolderRow, deleteBrainFolderRow } from "@opencompany/db/brain-files";
 import {
-  createGoatBrainFolderRow,
-  deleteGoatBrainFolderRow,
-} from "@opencompany/db/goat-brain-files";
-import {
-  getGoatOnboarding,
-  hasOwnedGoatHobbyWorkspace,
-  isGoatWorkspaceSlugAvailable,
-  listAccessibleGoatBrains,
-  listGoatWorkspacesForUser,
-  markGoatUserOnboarded,
-  updateGoatWorkspaceNameAndSlug,
-  upsertGoatOnboarding,
-} from "@opencompany/db/goat-workspaces";
-import { ensureGoatWorkspaceOrganization } from "@opencompany/goat-agent/workspaces/organizations";
-import { provisionGoatWorkspace } from "@opencompany/goat-agent/workspaces/provisioning";
+  getOnboarding,
+  hasOwnedHobbyWorkspace,
+  isWorkspaceSlugAvailable,
+  listAccessibleBrains,
+  listWorkspacesForUser,
+  markUserOnboarded,
+  updateWorkspaceNameAndSlug,
+  upsertOnboarding,
+} from "@opencompany/db/workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiIdentity } from "./auth";
 import { createOnboardingService } from "./onboarding";
 
-vi.mock("@opencompany/db/goat-brain-files", () => ({
-  createGoatBrainFolderRow: vi.fn(async () => undefined),
-  deleteGoatBrainFolderRow: vi.fn(async () => undefined),
+vi.mock("@opencompany/db/brain-files", () => ({
+  createBrainFolderRow: vi.fn(async () => undefined),
+  deleteBrainFolderRow: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/db/goat-workspaces", async (importOriginal) => ({
+vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  getGoatOnboarding: vi.fn(),
-  hasOwnedGoatHobbyWorkspace: vi.fn(async () => false),
-  isGoatWorkspaceSlugAvailable: vi.fn(async () => true),
-  listAccessibleGoatBrains: vi.fn(),
-  listGoatWorkspacesForUser: vi.fn(),
-  markGoatUserOnboarded: vi.fn(async () => undefined),
-  updateGoatWorkspaceNameAndSlug: vi.fn(async () => undefined),
-  upsertGoatOnboarding: vi.fn(async () => undefined),
+  getOnboarding: vi.fn(),
+  hasOwnedHobbyWorkspace: vi.fn(async () => false),
+  isWorkspaceSlugAvailable: vi.fn(async () => true),
+  listAccessibleBrains: vi.fn(),
+  listWorkspacesForUser: vi.fn(),
+  markUserOnboarded: vi.fn(async () => undefined),
+  updateWorkspaceNameAndSlug: vi.fn(async () => undefined),
+  upsertOnboarding: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/goat-agent/workspaces/organizations", () => ({
-  ensureGoatWorkspaceOrganization: vi.fn(async () => "org_current"),
+vi.mock("@opencompany/agent/workspaces/organizations", () => ({
+  ensureWorkspaceOrganization: vi.fn(async () => "org_current"),
 }));
 
-vi.mock("@opencompany/goat-agent/workspaces/provisioning", async (importOriginal) => ({
+vi.mock("@opencompany/agent/workspaces/provisioning", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  provisionGoatWorkspace: vi.fn(),
+  provisionWorkspace: vi.fn(),
 }));
 
 const identity: ApiIdentity = {
@@ -69,14 +66,14 @@ const workos = {
 describe("onboarding service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getGoatOnboarding).mockResolvedValue({ role: "founder" } as never);
-    vi.mocked(hasOwnedGoatHobbyWorkspace).mockResolvedValue(false);
-    vi.mocked(isGoatWorkspaceSlugAvailable).mockResolvedValue(true);
-    vi.mocked(listGoatWorkspacesForUser).mockResolvedValue([] as never);
-    vi.mocked(listAccessibleGoatBrains).mockResolvedValue([
+    vi.mocked(getOnboarding).mockResolvedValue({ role: "founder" } as never);
+    vi.mocked(hasOwnedHobbyWorkspace).mockResolvedValue(false);
+    vi.mocked(isWorkspaceSlugAvailable).mockResolvedValue(true);
+    vi.mocked(listWorkspacesForUser).mockResolvedValue([] as never);
+    vi.mocked(listAccessibleBrains).mockResolvedValue([
       { id: "brain_general", slug: "general" },
     ] as never);
-    vi.mocked(provisionGoatWorkspace).mockResolvedValue({
+    vi.mocked(provisionWorkspace).mockResolvedValue({
       workspace: {
         ...workspace,
         id: "goat_ws_new",
@@ -92,7 +89,7 @@ describe("onboarding service", () => {
       role: "founder",
       companyUrl: "https://opencompany.ai/",
     });
-    expect(upsertGoatOnboarding).toHaveBeenCalledWith(
+    expect(upsertOnboarding).toHaveBeenCalledWith(
       {
         userWorkosId: "user_1",
         workspaceId: null,
@@ -120,7 +117,7 @@ describe("onboarding service", () => {
       brainId: "brain_new",
       createdByCaller: true,
     });
-    expect(provisionGoatWorkspace).toHaveBeenCalledWith(
+    expect(provisionWorkspace).toHaveBeenCalledWith(
       {
         authUserId: "user_1",
         userWorkosId: "user_1",
@@ -130,16 +127,14 @@ describe("onboarding service", () => {
       },
       { db, workos },
     );
-    expect(upsertGoatOnboarding).toHaveBeenCalledWith(
+    expect(upsertOnboarding).toHaveBeenCalledWith(
       { userWorkosId: "user_1", workspaceId: "goat_ws_new" },
       { db },
     );
   });
 
   it("authorizes an existing workspace before renaming its WorkOS organization", async () => {
-    vi.mocked(listGoatWorkspacesForUser).mockResolvedValue([
-      { workspace, role: "member" },
-    ] as never);
+    vi.mocked(listWorkspacesForUser).mockResolvedValue([{ workspace, role: "member" }] as never);
     const service = createOnboardingService({ db: {}, workos: workos as never });
     await expect(
       service.saveWorkspace(identity, {
@@ -148,14 +143,14 @@ describe("onboarding service", () => {
         slug: "renamed",
       }),
     ).rejects.toMatchObject({ status: 403 });
-    expect(ensureGoatWorkspaceOrganization).not.toHaveBeenCalled();
+    expect(ensureWorkspaceOrganization).not.toHaveBeenCalled();
     expect(workos.organizations.updateOrganization).not.toHaveBeenCalled();
-    expect(updateGoatWorkspaceNameAndSlug).not.toHaveBeenCalled();
+    expect(updateWorkspaceNameAndSlug).not.toHaveBeenCalled();
   });
 
   it("updates an authorized existing workspace and returns activation resources", async () => {
     const db = {};
-    vi.mocked(listGoatWorkspacesForUser).mockResolvedValue([{ workspace, role: "admin" }] as never);
+    vi.mocked(listWorkspacesForUser).mockResolvedValue([{ workspace, role: "admin" }] as never);
     const service = createOnboardingService({ db, workos: workos as never });
     await expect(
       service.saveWorkspace(identity, {
@@ -173,7 +168,7 @@ describe("onboarding service", () => {
       organization: "org_current",
       name: "Renamed",
     });
-    expect(updateGoatWorkspaceNameAndSlug).toHaveBeenCalledWith(
+    expect(updateWorkspaceNameAndSlug).toHaveBeenCalledWith(
       { workspaceId: "goat_ws_current", name: "Renamed", slug: "renamed" },
       { db },
     );
@@ -184,9 +179,9 @@ describe("onboarding service", () => {
     const service = createOnboardingService({ db, workos: workos as never });
     await expect(service.finish(identity, "friend")).rejects.toMatchObject({ status: 409 });
 
-    vi.mocked(listGoatWorkspacesForUser).mockResolvedValue([{ workspace, role: "admin" }] as never);
+    vi.mocked(listWorkspacesForUser).mockResolvedValue([{ workspace, role: "admin" }] as never);
     await service.finish(identity, " friend ");
-    expect(upsertGoatOnboarding).toHaveBeenCalledWith(
+    expect(upsertOnboarding).toHaveBeenCalledWith(
       {
         userWorkosId: "user_1",
         workspaceId: "goat_ws_current",
@@ -194,11 +189,11 @@ describe("onboarding service", () => {
       },
       { db },
     );
-    expect(markGoatUserOnboarded).toHaveBeenCalledWith("user_1", { db });
+    expect(markUserOnboarded).toHaveBeenCalledWith("user_1", { db });
   });
 
   it("keeps optional Brain folder tailoring from blocking onboarding", async () => {
-    vi.mocked(createGoatBrainFolderRow).mockRejectedValueOnce(new Error("folder conflict"));
+    vi.mocked(createBrainFolderRow).mockRejectedValueOnce(new Error("folder conflict"));
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     const service = createOnboardingService({ db: {}, workos: workos as never });
     await expect(
@@ -208,7 +203,7 @@ describe("onboarding service", () => {
         slug: "analytical-co",
       }),
     ).resolves.toMatchObject({ workspaceId: "goat_ws_new" });
-    expect(deleteGoatBrainFolderRow).toHaveBeenCalled();
+    expect(deleteBrainFolderRow).toHaveBeenCalled();
     warning.mockRestore();
   });
 });

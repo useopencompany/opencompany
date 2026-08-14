@@ -1,15 +1,15 @@
 import { revalidatePath } from "next/cache";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { currentGoatIdentity } from "@/lib/auth";
+import { currentIdentity } from "@/lib/auth";
 import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
 import { serverApiErrorMessage } from "@/lib/server-api-client";
-import { activateGoatWorkspace } from "@/lib/workspace-session";
+import { activateWorkspace } from "@/lib/workspace-session";
 import {
-  checkGoatWorkspaceSlugAction,
-  finishGoatOnboardingAction,
-  getGoatOnboardingState,
-  saveGoatOnboardingProfileAction,
-  saveGoatOnboardingWorkspaceAction,
+  checkWorkspaceSlugAction,
+  finishOnboardingAction,
+  getOnboardingState,
+  saveOnboardingProfileAction,
+  saveOnboardingWorkspaceAction,
 } from "./onboarding-actions";
 
 const mocks = vi.hoisted(() => ({
@@ -24,7 +24,7 @@ vi.mock("node:crypto", () => ({
   randomUUID: vi.fn(() => "00000000-0000-4000-8000-000000000123"),
 }));
 
-vi.mock("@/lib/auth", () => ({ currentGoatIdentity: vi.fn() }));
+vi.mock("@/lib/auth", () => ({ currentIdentity: vi.fn() }));
 vi.mock("@/lib/email/onboarding-emails", () => ({
   enrollOwnerInOnboardingEmails: vi.fn(),
 }));
@@ -43,7 +43,7 @@ vi.mock("@/lib/server-api-client", () => ({
   serverApiError: vi.fn(async (_response: Response, fallback: string) => new Error(fallback)),
   serverApiErrorMessage: vi.fn(async (_response: Response, fallback: string) => fallback),
 }));
-vi.mock("@/lib/workspace-session", () => ({ activateGoatWorkspace: vi.fn() }));
+vi.mock("@/lib/workspace-session", () => ({ activateWorkspace: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({
   unstable_rethrow(error: unknown) {
@@ -51,9 +51,9 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-const currentGoatIdentityMock = vi.mocked(currentGoatIdentity);
+const currentIdentityMock = vi.mocked(currentIdentity);
 const enrollOwnerInOnboardingEmailsMock = vi.mocked(enrollOwnerInOnboardingEmails);
-const activateGoatWorkspaceMock = vi.mocked(activateGoatWorkspace);
+const activateWorkspaceMock = vi.mocked(activateWorkspace);
 const revalidatePathMock = vi.mocked(revalidatePath);
 const serverApiErrorMessageMock = vi.mocked(serverApiErrorMessage);
 
@@ -64,14 +64,14 @@ const activation = {
   createdByCaller: true,
 };
 
-describe("Goat onboarding API adapters", () => {
+describe("opencompany onboarding API adapters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    currentGoatIdentityMock.mockResolvedValue({
+    currentIdentityMock.mockResolvedValue({
       user: { workosUserId: "user_123", email: "ada@example.com" },
     } as never);
     enrollOwnerInOnboardingEmailsMock.mockResolvedValue(undefined);
-    activateGoatWorkspaceMock.mockResolvedValue(undefined);
+    activateWorkspaceMock.mockResolvedValue(undefined);
     mocks.checkSlug.mockResolvedValue(
       Response.json({ data: { slug: "analytical-co", available: true } }),
     );
@@ -87,18 +87,18 @@ describe("Goat onboarding API adapters", () => {
       activeBrainId: null,
     };
     mocks.getState.mockResolvedValue(Response.json({ data: state }));
-    await expect(getGoatOnboardingState()).resolves.toEqual(state);
+    await expect(getOnboardingState()).resolves.toEqual(state);
     expect(mocks.getState).toHaveBeenCalledOnce();
   });
 
   it("normalizes and checks workspace slugs through /v1", async () => {
-    await expect(checkGoatWorkspaceSlugAction("  Analytical Co  ")).resolves.toEqual({
+    await expect(checkWorkspaceSlugAction("  Analytical Co  ")).resolves.toEqual({
       slug: "analytical-co",
       available: true,
     });
     expect(mocks.checkSlug).toHaveBeenCalledWith({ json: { slug: "analytical-co" } });
 
-    await expect(checkGoatWorkspaceSlugAction("---")).resolves.toEqual({
+    await expect(checkWorkspaceSlugAction("---")).resolves.toEqual({
       slug: "",
       available: false,
     });
@@ -107,7 +107,7 @@ describe("Goat onboarding API adapters", () => {
 
   it("normalizes the profile before sending the canonical command", async () => {
     await expect(
-      saveGoatOnboardingProfileAction({ role: "founder", companyUrl: "opencompany.ai" }),
+      saveOnboardingProfileAction({ role: "founder", companyUrl: "opencompany.ai" }),
     ).resolves.toEqual({ ok: true });
     expect(mocks.saveProfile).toHaveBeenCalledWith({
       json: { role: "founder", companyUrl: "https://opencompany.ai/" },
@@ -116,7 +116,7 @@ describe("Goat onboarding API adapters", () => {
 
   it("creates through /v1, retains web email enrollment, and activates AuthKit", async () => {
     await expect(
-      saveGoatOnboardingWorkspaceAction({ name: "  Analytical Co  ", slug: "analytical-co" }),
+      saveOnboardingWorkspaceAction({ name: "  Analytical Co  ", slug: "analytical-co" }),
     ).resolves.toEqual({
       ok: true,
       workspaceId: "goat_ws_new",
@@ -130,7 +130,7 @@ describe("Goat onboarding API adapters", () => {
       },
     });
     expect(enrollOwnerInOnboardingEmailsMock).toHaveBeenCalledWith({ workosUserId: "user_123" });
-    expect(activateGoatWorkspaceMock).toHaveBeenCalledWith({
+    expect(activateWorkspaceMock).toHaveBeenCalledWith({
       workspaceId: "goat_ws_new",
       workosOrganizationId: "org_new",
       brainId: "brain_general",
@@ -142,8 +142,8 @@ describe("Goat onboarding API adapters", () => {
     mocks.saveWorkspace.mockResolvedValueOnce(
       Response.json({ data: { ...activation, createdByCaller: false } }),
     );
-    await saveGoatOnboardingWorkspaceAction({ name: "Analytical Co", slug: "analytical-co" });
-    expect(currentGoatIdentityMock).not.toHaveBeenCalled();
+    await saveOnboardingWorkspaceAction({ name: "Analytical Co", slug: "analytical-co" });
+    expect(currentIdentityMock).not.toHaveBeenCalled();
     expect(enrollOwnerInOnboardingEmailsMock).not.toHaveBeenCalled();
   });
 
@@ -151,13 +151,13 @@ describe("Goat onboarding API adapters", () => {
     mocks.saveWorkspace.mockResolvedValueOnce(Response.json({}, { status: 409 }));
     serverApiErrorMessageMock.mockResolvedValueOnce("That workspace URL is taken.");
     await expect(
-      saveGoatOnboardingWorkspaceAction({ name: "Analytical Co", slug: "analytical-co" }),
+      saveOnboardingWorkspaceAction({ name: "Analytical Co", slug: "analytical-co" }),
     ).resolves.toEqual({ ok: false, error: "That workspace URL is taken." });
-    expect(activateGoatWorkspaceMock).not.toHaveBeenCalled();
+    expect(activateWorkspaceMock).not.toHaveBeenCalled();
   });
 
   it("completes through the identity tier and revalidates the app shell", async () => {
-    await expect(finishGoatOnboardingAction({ referralSource: "  friend  " })).resolves.toEqual({
+    await expect(finishOnboardingAction({ referralSource: "  friend  " })).resolves.toEqual({
       ok: true,
     });
     expect(mocks.finish).toHaveBeenCalledWith({ json: { referralSource: "friend" } });

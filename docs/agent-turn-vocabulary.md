@@ -1,6 +1,6 @@
 # Agent turn vocabulary
 
-OpenCompany's canonical execution terms are `Conversation`, `Message`, `Run`, `Attempt`, and
+opencompany's canonical execution terms are `Conversation`, `Message`, `Run`, `Attempt`, and
 `Event`. The versioned contract in `packages/protocol` and the application services in
 `packages/core` define their behavior. See
 [ADR 0001](./adr/0001-headless-chat-v1-foundation.md) for the authoritative Chat model.

@@ -1,6 +1,6 @@
 import { get } from "@vercel/blob";
 
-// Downloads goat chat attachment bytes so a turn can materialize them inside the sandbox.
+// Downloads opencompany chat attachment bytes so a turn can materialize them inside the sandbox.
 export async function downloadBlobBytes(
   blobUrl: string,
   blobToken: string | undefined,

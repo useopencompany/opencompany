@@ -1,3 +1,8 @@
+import { generateChatTitle } from "@opencompany/agent/chat-title";
+import { normalizeScheduleDefinition } from "@opencompany/agent/schedule-rules";
+import { SkillMentionError } from "@opencompany/agent/skills";
+import { prepareWorkflowRunForUser } from "@opencompany/agent/workflow-tasks";
+import { validateWorkflowFields, WorkflowMentionError } from "@opencompany/agent/workflows";
 import {
   type Actor,
   type AutomationExecutionPlan,
@@ -9,21 +14,13 @@ import {
   WorkflowApplicationService,
 } from "@opencompany/core";
 import type { ResolvedChatAttachments } from "@opencompany/db/chat-repository";
-import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
+import type { HarnessSpec } from "@opencompany/db/product-schema";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import {
   PostgresTaskScheduleRepository,
   PostgresWorkflowRepository,
   type WorkflowSqlExecute,
 } from "@opencompany/db/workflow-repository";
-import { generateGoatChatTitle } from "@opencompany/goat-agent/chat-title";
-import { normalizeGoatScheduleDefinition } from "@opencompany/goat-agent/schedule-rules";
-import { GoatSkillMentionError } from "@opencompany/goat-agent/skills";
-import { prepareGoatWorkflowRunForUser } from "@opencompany/goat-agent/workflow-tasks";
-import {
-  GoatWorkflowMentionError,
-  validateGoatWorkflowFields,
-} from "@opencompany/goat-agent/workflows";
 
 type AutomationServicesInput = {
   execute: WorkflowSqlExecute;
@@ -110,7 +107,7 @@ export function createAutomationServices(input: AutomationServicesInput) {
     },
   };
   const options = {
-    scheduleRules: { normalize: normalizeGoatScheduleDefinition },
+    scheduleRules: { normalize: normalizeScheduleDefinition },
     planner,
     taskCreator,
     ...(input.now ? { now: input.now } : {}),
@@ -119,7 +116,7 @@ export function createAutomationServices(input: AutomationServicesInput) {
     workflows: new WorkflowApplicationService(new PostgresWorkflowRepository(input.execute), {
       ...options,
       validateDefinition: (definition) =>
-        validateGoatWorkflowFields({
+        validateWorkflowFields({
           ...definition,
           steps: definition.steps as never,
           trigger: definition.trigger as never,
@@ -140,11 +137,11 @@ export async function refineWorkflowTaskTitle(input: {
   workflowName: string;
   description: string;
   apiKey?: string;
-  generateTitle?: typeof generateGoatChatTitle;
+  generateTitle?: typeof generateChatTitle;
 }) {
   if (!input.apiKey?.trim()) return;
   try {
-    const title = await (input.generateTitle ?? generateGoatChatTitle)({
+    const title = await (input.generateTitle ?? generateChatTitle)({
       content: input.description,
       fallbackTitle: input.workflowName,
       apiKey: input.apiKey,
@@ -166,7 +163,7 @@ async function prepareWorkflow(
   input: Parameters<AutomationExecutionPlanner["prepareWorkflow"]>[0],
 ) {
   try {
-    return await prepareGoatWorkflowRunForUser({
+    return await prepareWorkflowRunForUser({
       userWorkosId: input.actor.userId,
       workspaceId: input.actor.workspaceId,
       workflow: {
@@ -179,7 +176,7 @@ async function prepareWorkflow(
       ...(input.skillIds?.length ? { skillMentions: input.skillIds.map((id) => ({ id })) } : {}),
     });
   } catch (error) {
-    if (error instanceof GoatSkillMentionError || error instanceof GoatWorkflowMentionError) {
+    if (error instanceof SkillMentionError || error instanceof WorkflowMentionError) {
       throw new CoreError("invalid_argument", error.message);
     }
     throw error;
@@ -211,7 +208,7 @@ async function planTaskScheduleHarness(
   return { engine: harness.engine, model: harness.model, payload: harness };
 }
 
-function harnessSpec(value: unknown): GoatHarnessSpec {
+function harnessSpec(value: unknown): HarnessSpec {
   if (!isRecord(value)) throw new Error("Automation planning returned an invalid execution plan.");
   if (
     value.engine !== "opencompany" &&
@@ -223,7 +220,7 @@ function harnessSpec(value: unknown): GoatHarnessSpec {
   if (typeof value.model !== "string" || !value.model.trim()) {
     throw new Error("Automation planning returned an invalid execution model.");
   }
-  return value as GoatHarnessSpec;
+  return value as HarnessSpec;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

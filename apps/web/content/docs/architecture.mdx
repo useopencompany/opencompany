@@ -7,7 +7,7 @@ description: The current browser, API, and durable runner topology.
 
 ```text
 Browser
-  GoatSurface
+  Surface
     typed /v1 Message, Conversation, Run, approval, attachment, and runtime commands
     semantic Run event stream
     authorized API-owned Electric read models
@@ -19,19 +19,19 @@ API
 
 Runner
   claim queued Runs with fenced leases and per-Conversation FIFO
-  execute OpenCompany, Codex, or Claude Code
+  execute opencompany, Codex, or Claude Code
   settle Messages, Events, artifacts, usage, approvals, and terminal state
 ```
 
 ## Chat
 
-`apps/web/components/GoatSurface.tsx` uses the typed protocol client through
+`apps/web/components/Surface.tsx` uses the typed protocol client through
 `headless-chat-transport.ts` and `headless-chat-commands.ts`. Sending a Message creates a stable Run
 under an idempotency key. Engine choice and settings are versioned descriptors on that same command.
 Closing the browser does not end execution; the runner continues from Postgres and the UI reconnects
 through durable read models and semantic Events.
 
-Shared tools and provider-neutral behavior live in `packages/goat-agent`. Public command handling is
+Shared tools and provider-neutral behavior live in `packages/agent`. Public command handling is
 composed in `apps/api`; durable engine execution is composed in `apps/runner`.
 
 ## Tasks

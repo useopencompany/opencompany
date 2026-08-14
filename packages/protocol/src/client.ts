@@ -14,13 +14,13 @@ export {
   parseRunStreamEvent,
 } from "./events";
 
-export type OpenCompanyClientOptions = Parameters<typeof hc>[1];
+export type ApiClientOptions = Parameters<typeof hc>[1];
 
-export function createOpenCompanyClient(baseUrl: string, options?: OpenCompanyClientOptions) {
+export function createApiClient(baseUrl: string, options?: ApiClientOptions) {
   return hc<V1AppType>(baseUrl, options);
 }
 
-export type OpenCompanyClient = ReturnType<typeof createOpenCompanyClient>;
+export type ApiClient = ReturnType<typeof createApiClient>;
 
 const STREAM_END_EVENT_TYPES = new Set<RunEventDto["type"]>([
   "run.paused",

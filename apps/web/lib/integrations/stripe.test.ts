@@ -1,8 +1,8 @@
 import {
-  GOAT_STRIPE_API_VERSION,
-  isValidGoatStripeRestrictedApiKey,
-  validateGoatStripeRestrictedApiKey,
-} from "@opencompany/goat-agent/integrations/stripe";
+  isValidStripeRestrictedApiKey,
+  STRIPE_API_VERSION,
+  validateStripeRestrictedApiKey,
+} from "@opencompany/agent/integrations/stripe";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
@@ -11,10 +11,10 @@ afterEach(() => {
 
 describe("Stripe restricted-key validation", () => {
   it("accepts restricted test/live keys and rejects unrestricted secret keys", () => {
-    expect(isValidGoatStripeRestrictedApiKey(`rk_test_${"a".repeat(24)}`)).toBe(true);
-    expect(isValidGoatStripeRestrictedApiKey(`rk_live_${"b".repeat(24)}`)).toBe(true);
-    expect(isValidGoatStripeRestrictedApiKey(`sk_live_${"c".repeat(24)}`)).toBe(false);
-    expect(isValidGoatStripeRestrictedApiKey("rk_live_contains whitespace")).toBe(false);
+    expect(isValidStripeRestrictedApiKey(`rk_test_${"a".repeat(24)}`)).toBe(true);
+    expect(isValidStripeRestrictedApiKey(`rk_live_${"b".repeat(24)}`)).toBe(true);
+    expect(isValidStripeRestrictedApiKey(`sk_live_${"c".repeat(24)}`)).toBe(false);
+    expect(isValidStripeRestrictedApiKey("rk_live_contains whitespace")).toBe(false);
   });
 
   it("validates identity and every read endpoint before accepting a key", async () => {
@@ -32,7 +32,7 @@ describe("Stripe restricted-key validation", () => {
     vi.stubGlobal("fetch", fetchMock);
     const apiKey = `rk_live_${"a".repeat(24)}`;
 
-    await expect(validateGoatStripeRestrictedApiKey(apiKey)).resolves.toEqual({
+    await expect(validateStripeRestrictedApiKey(apiKey)).resolves.toEqual({
       ok: true,
       identity: {
         accountId: "acct_123",
@@ -53,7 +53,7 @@ describe("Stripe restricted-key validation", () => {
     ]);
     for (const [, init] of fetchMock.mock.calls) {
       expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${apiKey}`);
-      expect(new Headers(init?.headers).get("Stripe-Version")).toBe(GOAT_STRIPE_API_VERSION);
+      expect(new Headers(init?.headers).get("Stripe-Version")).toBe(STRIPE_API_VERSION);
     }
   });
 
@@ -70,7 +70,7 @@ describe("Stripe restricted-key validation", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(validateGoatStripeRestrictedApiKey(`rk_test_${"a".repeat(24)}`)).resolves.toEqual({
+    await expect(validateStripeRestrictedApiKey(`rk_test_${"a".repeat(24)}`)).resolves.toEqual({
       ok: false,
       error:
         "This restricted key needs read access to Balance (including balance transactions). Update the key's permissions in Stripe and try again.",

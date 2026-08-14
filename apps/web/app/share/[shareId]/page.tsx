@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { SharedChatView } from "@/components/chat/SharedChatView";
-import { getGoatAppUrl } from "@/lib/app-url";
-import { loadPublicGoatChat } from "@/lib/chat-sharing";
+import { getAppUrl } from "@/lib/app-url";
+import { loadPublicChat } from "@/lib/chat-sharing";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -21,7 +21,7 @@ const privateShareMetadata = {
   referrer: "no-referrer",
 } satisfies Metadata;
 
-const loadSharedChat = cache(loadPublicGoatChat);
+const loadSharedChat = cache(loadPublicChat);
 
 export async function generateMetadata({ params }: SharedChatPageProps): Promise<Metadata> {
   const { shareId } = await params;
@@ -32,7 +32,7 @@ export async function generateMetadata({ params }: SharedChatPageProps): Promise
   const shareSubject = sharedChatSubject(chat);
   const description = `${title} — a read-only ${shareSubject} shared from opencompany.`;
   const sharePath = `/share/${encodeURIComponent(chat.shareId)}`;
-  const appUrl = getGoatAppUrl();
+  const appUrl = getAppUrl();
   const shareUrl = new URL(sharePath, appUrl);
   const imageUrl = new URL(`${sharePath}/opengraph-image`, appUrl);
   const imageAlt = `${title} — shared ${shareSubject} on opencompany`;

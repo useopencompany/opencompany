@@ -1,85 +1,85 @@
 import { randomInt } from "node:crypto";
+import {
+  isCapabilityId,
+  isCapabilityMode,
+  providerCapability,
+} from "@opencompany/agent/actions/capabilities";
+import {
+  connectImessageIntegration,
+  getImessageIntegrationState,
+  hashImessagePairingCode,
+  normalizeImessagePhoneE164,
+  verifyImessagePairingCode,
+} from "@opencompany/agent/imessage/connect";
+import {
+  type ImessageProvider,
+  resolveImessageProvider,
+} from "@opencompany/agent/imessage/provider";
+import type {
+  AttioProviderState,
+  FathomProviderState,
+  GranolaProviderState,
+  ImessageProviderState,
+  JamieProviderState,
+  StripeProviderState,
+} from "@opencompany/agent/integration-state";
+import { personalAccountsFromRows } from "@opencompany/agent/integration-state";
+import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
+import {
+  connectAttioIntegration,
+  deleteAttioWebhook,
+  getAttioIntegrationState,
+  hasAttioCommentWriteScopes,
+  hasAttioListConfigurationWriteScope,
+  hasAttioListReadScopes,
+  hasAttioListWriteScopes,
+  hasAttioRecordWriteScopes,
+  isValidAttioApiKey,
+  validateAttioApiKey,
+} from "@opencompany/agent/integrations/attio";
+import {
+  connectFathomIntegration,
+  getFathomIntegrationState,
+  isValidFathomApiKey,
+  validateFathomApiKey,
+} from "@opencompany/agent/integrations/fathom";
+import {
+  connectGranolaIntegration,
+  getGranolaIntegrationState,
+  isValidGranolaApiKey,
+  validateGranolaApiKey,
+} from "@opencompany/agent/integrations/granola";
+import {
+  createOrResetJamieWebhookEndpoint,
+  type JamieWebhookSetup,
+  saveJamieWebhookApiKey,
+} from "@opencompany/agent/integrations/jamie";
+import {
+  connectStripeIntegration,
+  disconnectStripeIntegration,
+  getStripeIntegrationState,
+  isValidStripeRestrictedApiKey,
+  validateStripeRestrictedApiKey,
+} from "@opencompany/agent/integrations/stripe";
 import type { Actor } from "@opencompany/core";
 import {
-  GOAT_ATTIO_CREDENTIAL_KIND,
-  GOAT_ATTIO_PROVIDER,
-  type GoatAttioApiKeyCredentialPayload,
-} from "@opencompany/db/goat-attio";
+  ATTIO_CREDENTIAL_KIND,
+  ATTIO_PROVIDER,
+  type AttioApiKeyCredentialPayload,
+} from "@opencompany/db/attio";
 import {
-  consumeGoatImessageChallenge,
-  getGoatImessagePairingChallenge,
-  incrementGoatImessageChallengeAttempts,
-  recordGoatImessageSend,
-  upsertGoatImessagePairingChallenge,
-} from "@opencompany/db/goat-imessage";
+  consumeImessageChallenge,
+  getImessagePairingChallenge,
+  incrementImessageChallengeAttempts,
+  recordImessageSend,
+  upsertImessagePairingChallenge,
+} from "@opencompany/db/imessage";
 import {
-  applyGoatIntegrationCapabilityMode,
-  disconnectGoatPersonalIntegration,
-  loadGoatIntegrationCredential,
-} from "@opencompany/db/goat-integrations";
-import { goatBrainSources, goatIntegrations, goatUsers } from "@opencompany/db/goat-schema";
-import {
-  isGoatCapabilityId,
-  isGoatCapabilityMode,
-  providerCapability,
-} from "@opencompany/goat-agent/actions/capabilities";
-import {
-  connectGoatImessageIntegration,
-  getGoatImessageIntegrationState,
-  hashGoatImessagePairingCode,
-  normalizeImessagePhoneE164,
-  verifyGoatImessagePairingCode,
-} from "@opencompany/goat-agent/imessage/connect";
-import {
-  type GoatImessageProvider,
-  resolveGoatImessageProvider,
-} from "@opencompany/goat-agent/imessage/provider";
-import type {
-  GoatAttioProviderState,
-  GoatFathomProviderState,
-  GoatGranolaProviderState,
-  GoatImessageProviderState,
-  GoatJamieProviderState,
-  GoatStripeProviderState,
-} from "@opencompany/goat-agent/integration-state";
-import { goatPersonalAccountsFromRows } from "@opencompany/goat-agent/integration-state";
-import { captureGoatIntegrationAddedAnalytics } from "@opencompany/goat-agent/integrations/analytics";
-import {
-  connectGoatAttioIntegration,
-  deleteGoatAttioWebhook,
-  getGoatAttioIntegrationState,
-  hasGoatAttioCommentWriteScopes,
-  hasGoatAttioListConfigurationWriteScope,
-  hasGoatAttioListReadScopes,
-  hasGoatAttioListWriteScopes,
-  hasGoatAttioRecordWriteScopes,
-  isValidAttioApiKey,
-  validateGoatAttioApiKey,
-} from "@opencompany/goat-agent/integrations/attio";
-import {
-  connectGoatFathomIntegration,
-  getGoatFathomIntegrationState,
-  isValidFathomApiKey,
-  validateGoatFathomApiKey,
-} from "@opencompany/goat-agent/integrations/fathom";
-import {
-  connectGoatGranolaIntegration,
-  getGoatGranolaIntegrationState,
-  isValidGranolaApiKey,
-  validateGoatGranolaApiKey,
-} from "@opencompany/goat-agent/integrations/granola";
-import {
-  createOrResetGoatJamieWebhookEndpoint,
-  type GoatJamieWebhookSetup,
-  saveGoatJamieWebhookApiKey,
-} from "@opencompany/goat-agent/integrations/jamie";
-import {
-  connectGoatStripeIntegration,
-  disconnectGoatStripeIntegration,
-  getGoatStripeIntegrationState,
-  isValidGoatStripeRestrictedApiKey,
-  validateGoatStripeRestrictedApiKey,
-} from "@opencompany/goat-agent/integrations/stripe";
+  applyIntegrationCapabilityMode,
+  disconnectPersonalIntegration,
+  loadIntegrationCredential,
+} from "@opencompany/db/integrations";
+import { brainSources, integrations, users } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import type { IntegrationAccountDto } from "@opencompany/protocol";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
@@ -100,7 +100,7 @@ const IMESSAGE_CODE_TTL_MS = 10 * 60 * 1000;
 const IMESSAGE_RESEND_COOLDOWN_MS = 30 * 1000;
 const IMESSAGE_MAX_CONFIRM_ATTEMPTS = 5;
 
-export { type GoatJamieWebhookSetup };
+export { type JamieWebhookSetup };
 
 export type IntegrationAccountService = {
   list(actor: Actor): Promise<IntegrationAccountDto[]>;
@@ -113,29 +113,29 @@ export type IntegrationAccountService = {
     mode: string,
   ): Promise<void>;
   alwaysAllowAction(actor: Actor, actionId: string): Promise<void>;
-  connectAttio(actor: Actor, apiKey: string): Promise<GoatAttioProviderState>;
+  connectAttio(actor: Actor, apiKey: string): Promise<AttioProviderState>;
   disconnectAttio(actor: Actor, integrationId: string): Promise<void>;
-  connectFathom(actor: Actor, apiKey: string): Promise<GoatFathomProviderState>;
-  connectGranola(actor: Actor, apiKey: string): Promise<GoatGranolaProviderState>;
+  connectFathom(actor: Actor, apiKey: string): Promise<FathomProviderState>;
+  connectGranola(actor: Actor, apiKey: string): Promise<GranolaProviderState>;
   startImessagePairing(actor: Actor, phone: string): Promise<void>;
-  confirmImessagePairing(actor: Actor, code: string): Promise<GoatImessageProviderState>;
-  connectStripe(actor: Actor, apiKey: string): Promise<GoatStripeProviderState>;
+  confirmImessagePairing(actor: Actor, code: string): Promise<ImessageProviderState>;
+  connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
   disconnectStripe(actor: Actor): Promise<void>;
-  createOrResetJamieWebhookEndpoint(actor: Actor): Promise<GoatJamieWebhookSetup>;
-  saveJamieWebhookApiKey(actor: Actor, apiKey: string): Promise<GoatJamieWebhookSetup>;
+  createOrResetJamieWebhookEndpoint(actor: Actor): Promise<JamieWebhookSetup>;
+  saveJamieWebhookApiKey(actor: Actor, apiKey: string): Promise<JamieWebhookSetup>;
 };
 
 export function createIntegrationAccountService(input: {
   db: DbLike;
   now?: () => Date;
   // Injectable so tests can exercise the pairing flow without Linq credentials.
-  resolveImessageProvider?: () => GoatImessageProvider | null;
+  resolveImessageProvider?: () => ImessageProvider | null;
   generatePairingCode?: () => string;
   runner?: RunnerClient;
 }): IntegrationAccountService {
   const db = input.db;
   const now = input.now ?? (() => new Date());
-  const resolveImessageProvider = input.resolveImessageProvider ?? resolveGoatImessageProvider;
+  const imessageProviderResolver = input.resolveImessageProvider ?? resolveImessageProvider;
   const generatePairingCode =
     input.generatePairingCode ?? (() => String(randomInt(100000, 1000000)));
 
@@ -143,28 +143,28 @@ export function createIntegrationAccountService(input: {
     async list(actor) {
       const rows = await db
         .select({
-          id: goatIntegrations.id,
-          provider: goatIntegrations.provider,
-          workspaceId: goatIntegrations.workspaceId,
-          externalId: goatIntegrations.externalId,
-          accountEmail: goatIntegrations.accountEmail,
-          accountName: goatIntegrations.accountName,
-          connectionLabel: goatIntegrations.connectionLabel,
-          statusReason: goatIntegrations.statusReason,
-          status: goatIntegrations.status,
-          scopes: goatIntegrations.scopes,
-          capabilityModes: goatIntegrations.capabilityModes,
+          id: integrations.id,
+          provider: integrations.provider,
+          workspaceId: integrations.workspaceId,
+          externalId: integrations.externalId,
+          accountEmail: integrations.accountEmail,
+          accountName: integrations.accountName,
+          connectionLabel: integrations.connectionLabel,
+          statusReason: integrations.statusReason,
+          status: integrations.status,
+          scopes: integrations.scopes,
+          capabilityModes: integrations.capabilityModes,
         })
-        .from(goatIntegrations)
+        .from(integrations)
         .where(
           and(
-            eq(goatIntegrations.userWorkosId, actor.userId),
-            isNull(goatIntegrations.workspaceId),
-            ne(goatIntegrations.status, "disconnected"),
+            eq(integrations.userWorkosId, actor.userId),
+            isNull(integrations.workspaceId),
+            ne(integrations.status, "disconnected"),
           ),
         )
-        .orderBy(goatIntegrations.createdAt);
-      return Object.values(goatPersonalAccountsFromRows(rows))
+        .orderBy(integrations.createdAt);
+      return Object.values(personalAccountsFromRows(rows))
         .flat()
         .map((account) => ({
           ...account,
@@ -177,8 +177,8 @@ export function createIntegrationAccountService(input: {
       try {
         const [row] = await db
           .select({ count: sql<number>`count(*)::integer` })
-          .from(goatBrainSources)
-          .where(eq(goatBrainSources.integrationId, integrationId));
+          .from(brainSources)
+          .where(eq(brainSources.integrationId, integrationId));
         return { affectedBrainSourceCount: Number(row?.count ?? 0) };
       } catch (error) {
         throw commandFailure(error, "Could not check account usage.", "usage_check");
@@ -186,25 +186,25 @@ export function createIntegrationAccountService(input: {
     },
 
     async disconnect(actor, integrationId) {
-      await disconnectPersonalIntegration(db, actor, integrationId);
+      await disconnectOwnedPersonalIntegration(db, actor, integrationId);
     },
 
     async setCapabilityMode(actor, integrationId, capabilityId, mode) {
-      if (!isGoatCapabilityMode(mode) || !isGoatCapabilityId(capabilityId)) {
+      if (!isCapabilityMode(mode) || !isCapabilityId(capabilityId)) {
         throw new ApiError(400, "invalid_request", "Unknown permission mode.");
       }
       await requireOwnPersonalIntegration(db, actor, integrationId);
       const [row] = await db
-        .select({ provider: goatIntegrations.provider })
-        .from(goatIntegrations)
-        .where(eq(goatIntegrations.id, integrationId))
+        .select({ provider: integrations.provider })
+        .from(integrations)
+        .where(eq(integrations.id, integrationId))
         .limit(1);
       const capability = row ? providerCapability(row.provider, capabilityId) : undefined;
       if (!capability) {
         throw new ApiError(400, "invalid_request", "This integration has no such permission.");
       }
       try {
-        await applyGoatIntegrationCapabilityMode({
+        await applyIntegrationCapabilityMode({
           integrationIds: [integrationId],
           capabilityId,
           mode,
@@ -249,14 +249,14 @@ export function createIntegrationAccountService(input: {
         );
       }
       try {
-        const validation = await validateGoatAttioApiKey(trimmed);
+        const validation = await validateAttioApiKey(trimmed);
         if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
         if (
-          !hasGoatAttioListReadScopes(validation.identity.scopes) ||
-          !hasGoatAttioListConfigurationWriteScope(validation.identity.scopes) ||
-          !hasGoatAttioRecordWriteScopes(validation.identity.scopes) ||
-          !hasGoatAttioListWriteScopes(validation.identity.scopes) ||
-          !hasGoatAttioCommentWriteScopes(validation.identity.scopes)
+          !hasAttioListReadScopes(validation.identity.scopes) ||
+          !hasAttioListConfigurationWriteScope(validation.identity.scopes) ||
+          !hasAttioRecordWriteScopes(validation.identity.scopes) ||
+          !hasAttioListWriteScopes(validation.identity.scopes) ||
+          !hasAttioCommentWriteScopes(validation.identity.scopes)
         ) {
           throw new ApiError(
             400,
@@ -264,13 +264,13 @@ export function createIntegrationAccountService(input: {
             "This Attio API key needs object_configuration:read, record_permission:read-write, list_configuration:read-write, list_entry:read-write, and comment:read-write so Chat can read and operate CRM records, lists, pipeline fields, and comments.",
           );
         }
-        await connectGoatAttioIntegration({
+        await connectAttioIntegration({
           userWorkosId: actor.userId,
           apiKey: trimmed,
           identity: validation.identity,
           db,
         });
-        return await getGoatAttioIntegrationState(actor.userId, db);
+        return await getAttioIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(
           error,
@@ -284,18 +284,18 @@ export function createIntegrationAccountService(input: {
       // Attio disconnect removes the webhook Attio-side first (best effort —
       // the key may already be revoked), then hard-deletes the integration
       // like every other personal account.
-      const credential = await loadGoatIntegrationCredential({
+      const credential = await loadIntegrationCredential({
         userWorkosId: actor.userId,
         integrationId,
-        provider: GOAT_ATTIO_PROVIDER,
-        kind: GOAT_ATTIO_CREDENTIAL_KIND,
+        provider: ATTIO_PROVIDER,
+        kind: ATTIO_CREDENTIAL_KIND,
         db,
       }).catch(() => null);
-      const payload = credential?.payload as GoatAttioApiKeyCredentialPayload | undefined;
+      const payload = credential?.payload as AttioApiKeyCredentialPayload | undefined;
       if (payload?.apiKey && payload.webhookId) {
-        await deleteGoatAttioWebhook({ apiKey: payload.apiKey, webhookId: payload.webhookId });
+        await deleteAttioWebhook({ apiKey: payload.apiKey, webhookId: payload.webhookId });
       }
-      await disconnectPersonalIntegration(db, actor, integrationId);
+      await disconnectOwnedPersonalIntegration(db, actor, integrationId);
     },
 
     async connectFathom(actor, apiKey) {
@@ -308,10 +308,10 @@ export function createIntegrationAccountService(input: {
         );
       }
       try {
-        const validation = await validateGoatFathomApiKey(trimmed);
+        const validation = await validateFathomApiKey(trimmed);
         if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
-        await connectGoatFathomIntegration({ userWorkosId: actor.userId, apiKey: trimmed, db });
-        return await getGoatFathomIntegrationState(actor.userId, db);
+        await connectFathomIntegration({ userWorkosId: actor.userId, apiKey: trimmed, db });
+        return await getFathomIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(error, "Could not save the Fathom API key.", "fathom_connect");
       }
@@ -327,16 +327,16 @@ export function createIntegrationAccountService(input: {
         );
       }
       try {
-        const validation = await validateGoatGranolaApiKey(trimmed);
+        const validation = await validateGranolaApiKey(trimmed);
         if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
-        await connectGoatGranolaIntegration({
+        await connectGranolaIntegration({
           userWorkosId: actor.userId,
           apiKey: trimmed,
           accountEmail: validation.accountEmail,
           accountName: validation.accountName,
           db,
         });
-        return await getGoatGranolaIntegrationState(actor.userId, db);
+        return await getGranolaIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(error, "Could not save the Granola API key.", "granola_connect");
       }
@@ -344,9 +344,9 @@ export function createIntegrationAccountService(input: {
 
     async startImessagePairing(actor, phone) {
       const [user] = await db
-        .select({ imessageEnabled: goatUsers.imessageEnabled })
-        .from(goatUsers)
-        .where(eq(goatUsers.workosUserId, actor.userId))
+        .select({ imessageEnabled: users.imessageEnabled })
+        .from(users)
+        .where(eq(users.workosUserId, actor.userId))
         .limit(1);
       if (!user?.imessageEnabled) {
         throw new ApiError(
@@ -355,7 +355,7 @@ export function createIntegrationAccountService(input: {
           "Enable iMessage notifications in Preferences first.",
         );
       }
-      const provider = resolveImessageProvider();
+      const provider = imessageProviderResolver();
       if (!provider) {
         throw new ApiError(
           503,
@@ -374,7 +374,7 @@ export function createIntegrationAccountService(input: {
       }
 
       try {
-        const existing = await getGoatImessagePairingChallenge(actor.userId, db);
+        const existing = await getImessagePairingChallenge(actor.userId, db);
         if (
           existing &&
           !existing.consumedAt &&
@@ -389,11 +389,11 @@ export function createIntegrationAccountService(input: {
         }
 
         const code = generatePairingCode();
-        await upsertGoatImessagePairingChallenge(
+        await upsertImessagePairingChallenge(
           {
             userWorkosId: actor.userId,
             phoneE164,
-            codeHash: hashGoatImessagePairingCode({
+            codeHash: hashImessagePairingCode({
               code,
               userWorkosId: actor.userId,
               phoneE164,
@@ -405,9 +405,9 @@ export function createIntegrationAccountService(input: {
 
         const sendResult = await provider.send({
           to: phoneE164,
-          text: `Your OpenCompany verification code is ${code}. It expires in 10 minutes.`,
+          text: `Your opencompany verification code is ${code}. It expires in 10 minutes.`,
         });
-        await recordGoatImessageSend(
+        await recordImessageSend(
           {
             userWorkosId: actor.userId,
             source: "pairing",
@@ -430,7 +430,7 @@ export function createIntegrationAccountService(input: {
         throw new ApiError(400, "invalid_request", "Enter the 6-digit code from the message.");
       }
       try {
-        const challenge = await getGoatImessagePairingChallenge(actor.userId, db);
+        const challenge = await getImessagePairingChallenge(actor.userId, db);
         if (!challenge || challenge.consumedAt) {
           throw new ApiError(
             400,
@@ -445,14 +445,14 @@ export function createIntegrationAccountService(input: {
           throw new ApiError(429, "rate_limited", "Too many attempts. Request a new code.");
         }
         if (
-          !verifyGoatImessagePairingCode({
+          !verifyImessagePairingCode({
             code: trimmed,
             userWorkosId: actor.userId,
             phoneE164: challenge.phoneE164,
             expectedHash: challenge.codeHash,
           })
         ) {
-          await incrementGoatImessageChallengeAttempts(challenge.id, db);
+          await incrementImessageChallengeAttempts(challenge.id, db);
           const remaining = IMESSAGE_MAX_CONFIRM_ATTEMPTS - challenge.attemptCount - 1;
           throw new ApiError(
             400,
@@ -463,13 +463,13 @@ export function createIntegrationAccountService(input: {
           );
         }
 
-        await consumeGoatImessageChallenge(challenge.id, db);
-        await connectGoatImessageIntegration({
+        await consumeImessageChallenge(challenge.id, db);
+        await connectImessageIntegration({
           userWorkosId: actor.userId,
           phoneE164: challenge.phoneE164,
           db,
         });
-        return await getGoatImessageIntegrationState(actor.userId, db);
+        return await getImessageIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(error, "Could not verify the code.", "imessage_confirm");
       }
@@ -478,7 +478,7 @@ export function createIntegrationAccountService(input: {
     async connectStripe(actor, apiKey) {
       requireAdmin(actor, STRIPE_ADMIN_ONLY_MESSAGE);
       const trimmed = apiKey.trim();
-      if (!isValidGoatStripeRestrictedApiKey(trimmed)) {
+      if (!isValidStripeRestrictedApiKey(trimmed)) {
         throw new ApiError(
           400,
           "invalid_request",
@@ -486,16 +486,16 @@ export function createIntegrationAccountService(input: {
         );
       }
       try {
-        const validation = await validateGoatStripeRestrictedApiKey(trimmed);
+        const validation = await validateStripeRestrictedApiKey(trimmed);
         if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
-        await connectGoatStripeIntegration({
+        await connectStripeIntegration({
           userWorkosId: actor.userId,
           workspaceId: actor.workspaceId,
           apiKey: trimmed,
           identity: validation.identity,
           db,
         });
-        return await getGoatStripeIntegrationState(actor.workspaceId, db);
+        return await getStripeIntegrationState(actor.workspaceId, db);
       } catch (error) {
         throw commandFailure(
           error,
@@ -509,7 +509,7 @@ export function createIntegrationAccountService(input: {
       requireAdmin(actor, STRIPE_ADMIN_ONLY_MESSAGE);
       let disconnected: boolean;
       try {
-        disconnected = await disconnectGoatStripeIntegration(actor.workspaceId, db);
+        disconnected = await disconnectStripeIntegration(actor.workspaceId, db);
       } catch (error) {
         throw commandFailure(error, "Could not disconnect Stripe.", "stripe_disconnect");
       }
@@ -522,7 +522,7 @@ export function createIntegrationAccountService(input: {
       // Jamie webhooks are workspace-owned plumbing; only admins manage them.
       requireAdmin(actor, JAMIE_ADMIN_ONLY_MESSAGE);
       try {
-        return await createOrResetGoatJamieWebhookEndpoint({
+        return await createOrResetJamieWebhookEndpoint({
           userWorkosId: actor.userId,
           workspaceId: actor.workspaceId,
           db,
@@ -535,12 +535,12 @@ export function createIntegrationAccountService(input: {
     async saveJamieWebhookApiKey(actor, apiKey) {
       requireAdmin(actor, JAMIE_ADMIN_ONLY_MESSAGE);
       try {
-        const setup = await saveGoatJamieWebhookApiKey({
+        const setup = await saveJamieWebhookApiKey({
           workspaceId: actor.workspaceId,
           apiKey,
           db,
         });
-        await captureGoatIntegrationAddedAnalytics({
+        await captureIntegrationAddedAnalytics({
           userWorkosId: actor.userId,
           workspaceId: actor.workspaceId,
           provider: "jamie",
@@ -567,23 +567,23 @@ export function createIntegrationAccountService(input: {
 
 async function requireOwnPersonalIntegration(db: DbLike, actor: Actor, integrationId: string) {
   const [row] = await db
-    .select({ id: goatIntegrations.id })
-    .from(goatIntegrations)
+    .select({ id: integrations.id })
+    .from(integrations)
     .where(
       and(
-        eq(goatIntegrations.id, integrationId),
-        eq(goatIntegrations.userWorkosId, actor.userId),
-        isNull(goatIntegrations.workspaceId),
+        eq(integrations.id, integrationId),
+        eq(integrations.userWorkosId, actor.userId),
+        isNull(integrations.workspaceId),
       ),
     )
     .limit(1);
   if (!row) throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
 }
 
-async function disconnectPersonalIntegration(db: DbLike, actor: Actor, integrationId: string) {
+async function disconnectOwnedPersonalIntegration(db: DbLike, actor: Actor, integrationId: string) {
   let deleted: boolean;
   try {
-    deleted = await disconnectGoatPersonalIntegration({
+    deleted = await disconnectPersonalIntegration({
       userWorkosId: actor.userId,
       integrationId,
       db,

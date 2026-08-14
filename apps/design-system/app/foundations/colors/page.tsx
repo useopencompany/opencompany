@@ -59,7 +59,7 @@ export default function ColorsPage() {
     <article>
       <PageHeader
         title="Colors"
-        description="Tokens follow shadcn naming with OpenCompany values. They adapt automatically to light and dark — toggle the theme to preview. Use them via Tailwind utilities like bg-primary or text-muted-foreground."
+        description="Tokens follow shadcn naming with opencompany values. They adapt automatically to light and dark — toggle the theme to preview. Use them via Tailwind utilities like bg-primary or text-muted-foreground."
       />
       <SectionTitle>Core</SectionTitle>
       <SwatchGrid swatches={CORE} />

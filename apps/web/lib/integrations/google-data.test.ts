@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
+import { getAvailableHarnessTools } from "@/lib/integrations/google-data";
 
 const mocks = vi.hoisted(() => ({
   orderBy: vi.fn(),
-  getGoatGitHubIntegrationState: vi.fn(),
-  getGoatLatitudeIntegrationState: vi.fn(),
-  getGoatLinearIntegrationState: vi.fn(),
-  goatGoogleIntegrationStateFromRows: vi.fn(),
+  getGitHubIntegrationState: vi.fn(),
+  getLatitudeIntegrationState: vi.fn(),
+  getLinearIntegrationState: vi.fn(),
+  googleIntegrationStateFromRows: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -21,35 +21,35 @@ vi.mock("@opencompany/db/client", () => ({
   }),
 }));
 
-vi.mock("@opencompany/goat-agent/integration-state", () => ({
-  goatGoogleIntegrationStateFromRows: mocks.goatGoogleIntegrationStateFromRows,
+vi.mock("@opencompany/agent/integration-state", () => ({
+  googleIntegrationStateFromRows: mocks.googleIntegrationStateFromRows,
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/github", () => ({
-  getGoatGitHubIntegrationState: mocks.getGoatGitHubIntegrationState,
+vi.mock("@opencompany/agent/integrations/github", () => ({
+  getGitHubIntegrationState: mocks.getGitHubIntegrationState,
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/linear-mcp", () => ({
-  getGoatLinearIntegrationState: mocks.getGoatLinearIntegrationState,
+vi.mock("@opencompany/agent/integrations/linear-mcp", () => ({
+  getLinearIntegrationState: mocks.getLinearIntegrationState,
 }));
 
-vi.mock("@opencompany/goat-agent/integrations/latitude-mcp", () => ({
-  getGoatLatitudeIntegrationState: mocks.getGoatLatitudeIntegrationState,
+vi.mock("@opencompany/agent/integrations/latitude-mcp", () => ({
+  getLatitudeIntegrationState: mocks.getLatitudeIntegrationState,
 }));
 
-describe("getGoatAvailableHarnessTools", () => {
+describe("getAvailableHarnessTools", () => {
   const originalApifyToken = process.env.APIFY_API_TOKEN;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.orderBy.mockResolvedValue([]);
-    mocks.goatGoogleIntegrationStateFromRows.mockReturnValue({
+    mocks.googleIntegrationStateFromRows.mockReturnValue({
       gmail: { connected: false },
       google_calendar: { connected: false },
     });
-    mocks.getGoatLinearIntegrationState.mockResolvedValue({ connected: false });
-    mocks.getGoatLatitudeIntegrationState.mockResolvedValue({ connected: false });
-    mocks.getGoatGitHubIntegrationState.mockResolvedValue({ connected: false });
+    mocks.getLinearIntegrationState.mockResolvedValue({ connected: false });
+    mocks.getLatitudeIntegrationState.mockResolvedValue({ connected: false });
+    mocks.getGitHubIntegrationState.mockResolvedValue({ connected: false });
     delete process.env.APIFY_API_TOKEN;
   });
 
@@ -62,11 +62,11 @@ describe("getGoatAvailableHarnessTools", () => {
   });
 
   it("includes X tools only when APIFY_API_TOKEN is configured", async () => {
-    await expect(getGoatAvailableHarnessTools("user_1")).resolves.toEqual(["exa_search"]);
+    await expect(getAvailableHarnessTools("user_1")).resolves.toEqual(["exa_search"]);
 
     process.env.APIFY_API_TOKEN = "apify";
 
-    await expect(getGoatAvailableHarnessTools("user_1")).resolves.toEqual([
+    await expect(getAvailableHarnessTools("user_1")).resolves.toEqual([
       "exa_search",
       "x_search_posts",
       "x_get_profile",

@@ -20,25 +20,25 @@ vi.mock("@opencompany/db/client", () => ({
     }),
   }),
 }));
-vi.mock("@opencompany/db/goat-integrations", () => ({
-  loadGoatIntegrationCredential: mocks.loadCredential,
-  refreshGoatIntegrationCredential: mocks.refreshCredential,
-  markGoatIntegrationStatus: mocks.markStatus,
+vi.mock("@opencompany/db/integrations", () => ({
+  loadIntegrationCredential: mocks.loadCredential,
+  refreshIntegrationCredential: mocks.refreshCredential,
+  markIntegrationStatus: mocks.markStatus,
 }));
 
-import { executeGoatAction } from "@/lib/actions/execute";
+import { executeAction } from "@/lib/actions/execute";
 import { resolveGmailActions } from "@/lib/actions/gmail";
 import {
-  GoatActionAuthError,
-  type GoatActionExecuteContext,
-  GoatActionPermissionError,
+  ActionAuthError,
+  type ActionExecuteContext,
+  ActionPermissionError,
 } from "@/lib/actions/types";
 
 const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
 const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 
-const CONTEXT: GoatActionExecuteContext = {
+const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
@@ -312,7 +312,7 @@ describe("gmail.search_messages", () => {
     const providerCatalog = await resolveGmailActions("user_1");
     if (!providerCatalog) throw new Error("missing Gmail catalog");
 
-    const result = await executeGoatAction({
+    const result = await executeAction({
       catalog: {
         providers: [
           {
@@ -374,7 +374,7 @@ describe("gmail.search_messages", () => {
     const catalog = await resolveGmailActions("user_1");
     const search = findAction(catalog, "gmail.search_messages");
     await expect(search.execute({ query: "is:unread" }, CONTEXT)).rejects.toBeInstanceOf(
-      GoatActionAuthError,
+      ActionAuthError,
     );
     expect(mocks.markStatus).toHaveBeenCalledWith(
       expect.objectContaining({ status: "needs_reauth" }),
@@ -444,7 +444,7 @@ describe("gmail.create_draft", () => {
 
     mocks.dbRows = [{ ...connectedRow(), capabilityModes: { draft: "off" } }];
     const execution = createDraft.execute(EMAIL, CONTEXT);
-    await expect(execution).rejects.toBeInstanceOf(GoatActionPermissionError);
+    await expect(execution).rejects.toBeInstanceOf(ActionPermissionError);
     await expect(execution).rejects.toMatchObject({
       message: expect.stringContaining("Creating drafts is turned off"),
     });
@@ -457,7 +457,7 @@ describe("gmail.create_draft", () => {
 
     mocks.dbRows = [{ ...connectedRow(), scopes: [GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE] }];
     const execution = createDraft.execute(EMAIL, CONTEXT);
-    await expect(execution).rejects.toBeInstanceOf(GoatActionAuthError);
+    await expect(execution).rejects.toBeInstanceOf(ActionAuthError);
     await expect(execution).rejects.toMatchObject({
       message: expect.stringContaining("enable drafts"),
     });
@@ -560,7 +560,7 @@ describe("gmail.send_email", () => {
 
     mocks.dbRows = [{ ...connectedRow(), capabilityModes: { write: "off" } }];
     const execution = send.execute(EMAIL, CONTEXT);
-    await expect(execution).rejects.toBeInstanceOf(GoatActionPermissionError);
+    await expect(execution).rejects.toBeInstanceOf(ActionPermissionError);
     await expect(execution).rejects.toMatchObject({
       message: expect.stringContaining("turned off"),
     });
@@ -573,7 +573,7 @@ describe("gmail.send_email", () => {
 
     mocks.dbRows = [{ ...connectedRow(), scopes: [GMAIL_READ_SCOPE] }];
     const execution = send.execute(EMAIL, CONTEXT);
-    await expect(execution).rejects.toBeInstanceOf(GoatActionAuthError);
+    await expect(execution).rejects.toBeInstanceOf(ActionAuthError);
     await expect(execution).rejects.toMatchObject({
       message: expect.stringContaining("enable sending"),
     });

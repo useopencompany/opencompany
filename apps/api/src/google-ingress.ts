@@ -1,23 +1,23 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { getAppUrl } from "@opencompany/agent/app-url";
+import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import {
-  loadGoatGoogleDriveWatchChannel,
-  requestGoatGoogleDriveCursorWake,
-} from "@opencompany/db/goat-google-drive";
-import { connectGoatGoogleIntegration } from "@opencompany/db/goat-integrations";
-import { getGoatAppUrl } from "@opencompany/goat-agent/app-url";
-import { captureGoatIntegrationAddedAnalytics } from "@opencompany/goat-agent/integrations/analytics";
+  appendGoogleIntegrationStatus,
+  buildGoogleAuthorizationUrl,
+  createGoogleIntegrationState,
+  exchangeGoogleCode,
+  fetchGoogleUserInfo,
+  GOOGLE_PROVIDER_CONFIG,
+  type GoogleIntegrationProvider,
+  googleOAuthRedirectUri,
+  isGoogleIntegrationConfigured,
+  verifyGoogleIntegrationState,
+} from "@opencompany/agent/integrations/google-oauth";
 import {
-  appendGoatGoogleIntegrationStatus,
-  buildGoatGoogleAuthorizationUrl,
-  createGoatGoogleIntegrationState,
-  exchangeGoatGoogleCode,
-  fetchGoatGoogleUserInfo,
-  GOAT_GOOGLE_PROVIDER_CONFIG,
-  type GoatGoogleIntegrationProvider,
-  goatGoogleOAuthRedirectUri,
-  isGoatGoogleIntegrationConfigured,
-  verifyGoatGoogleIntegrationState,
-} from "@opencompany/goat-agent/integrations/google-oauth";
+  loadGoogleDriveWatchChannel,
+  requestGoogleDriveCursorWake,
+} from "@opencompany/db/google-drive";
+import { connectGoogleIntegration } from "@opencompany/db/integrations";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -31,8 +31,8 @@ type DbLike = any;
 // webhook. Public URLs stay on the web origin — web relays the exact request
 // here — so no Google Cloud console or Drive watch configuration changes.
 export type GoogleIngressService = {
-  start(provider: GoatGoogleIntegrationProvider, request: Request): Promise<Response>;
-  callback(provider: GoatGoogleIntegrationProvider, request: Request): Promise<Response>;
+  start(provider: GoogleIntegrationProvider, request: Request): Promise<Response>;
+  callback(provider: GoogleIntegrationProvider, request: Request): Promise<Response>;
   driveWebhook(request: Request): Promise<Response>;
 };
 
@@ -51,42 +51,42 @@ type IngressInput = { db: DbLike; identify: ApiIdentityVerifier };
 
 async function handleStart(
   input: IngressInput,
-  provider: GoatGoogleIntegrationProvider,
+  provider: GoogleIntegrationProvider,
   request: Request,
 ): Promise<Response> {
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
-  const config = GOAT_GOOGLE_PROVIDER_CONFIG[provider];
-  const oauthRedirectUri = goatGoogleOAuthRedirectUri(config);
+  const config = GOOGLE_PROVIDER_CONFIG[provider];
+  const oauthRedirectUri = googleOAuthRedirectUri(config);
 
-  if (!isGoatGoogleIntegrationConfigured()) {
+  if (!isGoogleIntegrationConfigured()) {
     return statusRedirect(session, returnTo, provider, "error");
   }
 
-  const state = createGoatGoogleIntegrationState({
+  const state = createGoogleIntegrationState({
     provider,
     userWorkosId: session.userId,
     returnTo,
   });
-  return sessionRedirect(session, buildGoatGoogleAuthorizationUrl(config, state, oauthRedirectUri));
+  return sessionRedirect(session, buildGoogleAuthorizationUrl(config, state, oauthRedirectUri));
 }
 
 async function handleCallback(
   input: IngressInput,
-  provider: GoatGoogleIntegrationProvider,
+  provider: GoogleIntegrationProvider,
   request: Request,
 ): Promise<Response> {
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
-  const config = GOAT_GOOGLE_PROVIDER_CONFIG[provider];
+  const config = GOOGLE_PROVIDER_CONFIG[provider];
   const errorRedirect = (returnTo: string) => statusRedirect(session, returnTo, provider, "error");
 
-  let state: ReturnType<typeof verifyGoatGoogleIntegrationState>;
+  let state: ReturnType<typeof verifyGoogleIntegrationState>;
   try {
-    state = verifyGoatGoogleIntegrationState(url.searchParams.get("state") ?? "");
+    state = verifyGoogleIntegrationState(url.searchParams.get("state") ?? "");
   } catch (error) {
     logger.warn("Google integration callback failed with invalid state", {
       event: "goat.google_integration_callback_failed",
@@ -106,7 +106,7 @@ async function handleCallback(
     return errorRedirect(state.returnTo);
   }
 
-  if (!isGoatGoogleIntegrationConfigured()) {
+  if (!isGoogleIntegrationConfigured()) {
     return errorRedirect(state.returnTo);
   }
 
@@ -127,13 +127,13 @@ async function handleCallback(
   }
 
   try {
-    const { tokens, expiresAt } = await exchangeGoatGoogleCode(
+    const { tokens, expiresAt } = await exchangeGoogleCode(
       config,
       code,
-      goatGoogleOAuthRedirectUri(config),
+      googleOAuthRedirectUri(config),
     );
-    const userInfo = await fetchGoatGoogleUserInfo(tokens.access_token);
-    await connectGoatGoogleIntegration({
+    const userInfo = await fetchGoogleUserInfo(tokens.access_token);
+    await connectGoogleIntegration({
       provider,
       userWorkosId: session.userId,
       externalId: userInfo.sub,
@@ -144,7 +144,7 @@ async function handleCallback(
       scopes: readScopes(tokens.scope, config.scopes),
       db: input.db,
     });
-    await captureGoatIntegrationAddedAnalytics({
+    await captureIntegrationAddedAnalytics({
       userWorkosId: session.userId,
       workspaceId: session.workspaceId,
       provider,
@@ -170,7 +170,7 @@ async function handleDriveWebhook(input: IngressInput, request: Request): Promis
   if (!channelId || !channelToken || !resourceId || !resourceState) {
     return new Response("Missing Google Drive notification headers.", { status: 400 });
   }
-  const channel = await loadGoatGoogleDriveWatchChannel(channelId, input.db);
+  const channel = await loadGoogleDriveWatchChannel(channelId, input.db);
   if (
     !channel ||
     channel.status === "stopped" ||
@@ -186,7 +186,7 @@ async function handleDriveWebhook(input: IngressInput, request: Request): Promis
   // it here is safe even while resource_id is not populated yet. The durable
   // cursor wake propagates to the runner through the admission triggers.
   if (resourceState === "sync" || resourceState === "change") {
-    await requestGoatGoogleDriveCursorWake(channel.cursorId, new Date(), input.db);
+    await requestGoogleDriveCursorWake(channel.cursorId, new Date(), input.db);
   }
   return new Response(null, { status: 204 });
 }
@@ -194,12 +194,12 @@ async function handleDriveWebhook(input: IngressInput, request: Request): Promis
 function statusRedirect(
   session: Extract<Awaited<ReturnType<typeof resolveIngressSession>>, { kind: "actor" }>,
   returnTo: string,
-  provider: GoatGoogleIntegrationProvider,
+  provider: GoogleIntegrationProvider,
   status: "connected" | "error",
 ) {
   return sessionRedirect(
     session,
-    new URL(appendGoatGoogleIntegrationStatus(returnTo, provider, status), getGoatAppUrl()),
+    new URL(appendGoogleIntegrationStatus(returnTo, provider, status), getAppUrl()),
   );
 }
 

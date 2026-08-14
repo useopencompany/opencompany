@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GoatActionInvalidParamsError } from "@/lib/actions/types";
+import { ActionInvalidParamsError } from "@/lib/actions/types";
 import {
   MANAGED_CAPABILITY_ACTIONS,
   MANAGED_CAPABILITY_SOURCE_DETAILS,
@@ -54,7 +54,7 @@ describe("managed capability catalog", () => {
           ...managedCapabilityContractProbeParams(action.id),
           arbitraryProviderField: "blocked",
         }),
-      ).toThrow(GoatActionInvalidParamsError);
+      ).toThrow(ActionInvalidParamsError);
     }
   });
 

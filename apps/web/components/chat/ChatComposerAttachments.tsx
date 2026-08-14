@@ -3,11 +3,11 @@
 import { cn } from "@opencompany/ui/lib/utils";
 import { FileText, Upload, X } from "lucide-react";
 
-export type PendingGoatChatAttachment = {
+export type PendingChatAttachment = {
   id: string;
   filename: string;
   mediaType: string;
-  kind: GoatChatAttachmentKind;
+  kind: ChatAttachmentKind;
   sizeBytes: number;
   status: "uploading" | "ready" | "error";
   previewUrl?: string;
@@ -17,7 +17,7 @@ export type PendingGoatChatAttachment = {
   error?: string;
 };
 
-type GoatChatAttachmentKind =
+type ChatAttachmentKind =
   | "image"
   | "pdf"
   | "docx"
@@ -30,7 +30,7 @@ type GoatChatAttachmentKind =
 
 // "Drop files to attach" overlay shown over the composer while a file drag is
 // active. Adapted from the original composer overlay.
-export function GoatComposerDropOverlay({ className }: { className?: string }) {
+export function ComposerDropOverlay({ className }: { className?: string }) {
   return (
     <div
       className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
@@ -54,7 +54,7 @@ export function GoatComposerDropOverlay({ className }: { className?: string }) {
 
 // Short type label shown under the filename. Prefer the extension since it's
 // the most recognizable; fall back to the kind.
-function attachmentTypeLabel(kind: GoatChatAttachmentKind, filename: string): string {
+function attachmentTypeLabel(kind: ChatAttachmentKind, filename: string): string {
   const ext = filename.includes(".") ? filename.split(".").pop()?.toUpperCase() : undefined;
   if (ext && ext.length <= 5) return ext;
   if (kind === "image") return "Image";
@@ -70,7 +70,7 @@ function attachmentTypeLabel(kind: GoatChatAttachmentKind, filename: string): st
 
 // One compact attachment card — used in the composer (remove button + upload
 // status) and on sent user messages (optionally wrapped in a link).
-export function GoatChatAttachmentCard({
+export function ChatAttachmentCard({
   kind,
   filename,
   src,
@@ -78,7 +78,7 @@ export function GoatChatAttachmentCard({
   error,
   onRemove,
 }: {
-  kind: GoatChatAttachmentKind;
+  kind: ChatAttachmentKind;
   filename: string;
   /** Thumbnail source for images (object URL in the composer, served URL in the thread). */
   src?: string | undefined;
@@ -127,18 +127,18 @@ export function GoatChatAttachmentCard({
   );
 }
 
-export function GoatComposerAttachments({
+export function ComposerAttachments({
   attachments,
   onRemove,
 }: {
-  attachments: PendingGoatChatAttachment[];
+  attachments: PendingChatAttachment[];
   onRemove: (id: string) => void;
 }) {
   if (attachments.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-2 px-1 pb-2">
       {attachments.map((att) => (
-        <GoatChatAttachmentCard
+        <ChatAttachmentCard
           key={att.id}
           kind={att.kind}
           filename={att.filename}

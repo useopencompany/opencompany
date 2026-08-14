@@ -1,75 +1,74 @@
 import { createHash } from "node:crypto";
 import { shellQuote } from "@opencompany/agent-runtime";
 import {
-  type DecryptedGoatRepoConfig,
+  type DecryptedRepoConfig,
   isValidGitHubRepositoryExternalId,
-  listDecryptedGoatRepoConfigs,
-} from "@opencompany/db/goat-repo-configs";
-import { getGoatWorkspaceRole } from "@opencompany/db/goat-workspaces";
+  listDecryptedRepoConfigs,
+} from "@opencompany/db/repo-configs";
+import { getWorkspaceRole } from "@opencompany/db/workspaces";
 import { parse } from "dotenv";
 import { getDb } from "./db";
 import type { SandboxHandle } from "./sandbox";
 
-export const GOAT_REPO_CONFIG_ROOT = "/opt/oc/repos";
-const GOAT_REPO_CONFIG_FINGERPRINT_PATH = `${GOAT_REPO_CONFIG_ROOT}/.fingerprint`;
+export const REPO_CONFIG_ROOT = "/opt/oc/repos";
+const REPO_CONFIG_FINGERPRINT_PATH = `${REPO_CONFIG_ROOT}/.fingerprint`;
 const SECRET_LIKE_ENV_KEY = /(secret|token|key|passw|pwd|credential|auth|cert|private|dsn|salt)/i;
 
-export type GoatRepositoryBootstrap = {
-  configs: DecryptedGoatRepoConfig[];
+export type RepositoryBootstrap = {
+  configs: DecryptedRepoConfig[];
   promptFragment: string;
   secretValues: string[];
 };
 
-export async function loadGoatRepositoryBootstrap(
+export async function loadRepositoryBootstrap(
   workspaceId: string | null,
   userWorkosId: string,
-): Promise<GoatRepositoryBootstrap> {
+): Promise<RepositoryBootstrap> {
   if (!workspaceId) {
     return emptyRepositoryBootstrap();
   }
 
   const db = getDb();
-  const role = await getGoatWorkspaceRole({ userWorkosId, workspaceId }, { db });
+  const role = await getWorkspaceRole({ userWorkosId, workspaceId }, { db });
   if (role === null) {
-    console.error("[goat] Repository bootstrap denied for non-member", {
+    console.error("[opencompany] Repository bootstrap denied for non-member", {
       workspaceId,
       userWorkosId,
     });
     return emptyRepositoryBootstrap();
   }
 
-  const configs = await listDecryptedGoatRepoConfigs({
+  const configs = await listDecryptedRepoConfigs({
     db,
     workspaceId,
   });
   return {
     configs,
-    promptFragment: buildGoatRepositoryBootstrapPrompt(configs),
+    promptFragment: buildRepositoryBootstrapPrompt(configs),
     secretValues: repositoryBootstrapSecretValues(configs),
   };
 }
 
-export async function stageGoatRepositoryBootstrap(input: {
+export async function stageRepositoryBootstrap(input: {
   sandbox: SandboxHandle;
-  bootstrap: GoatRepositoryBootstrap;
+  bootstrap: RepositoryBootstrap;
 }) {
   const envConfigs = input.bootstrap.configs.filter(
-    (config): config is DecryptedGoatRepoConfig & { envContent: string } =>
-      config.envContent !== null,
+    (config): config is DecryptedRepoConfig & { envContent: string } => config.envContent !== null,
   );
   const directories = envConfigs.map((config) =>
     repositoryConfigDirectory(config.repositoryExternalId),
   );
   const fingerprint = repositoryBootstrapFingerprint(input.bootstrap.configs);
   const reconcileCommands = [
-    `find ${shellQuote(GOAT_REPO_CONFIG_ROOT)} -mindepth 1 -maxdepth 2 -type f -name .env -delete`,
-    `find ${shellQuote(GOAT_REPO_CONFIG_ROOT)} -mindepth 1 -maxdepth 1 -type d -empty -delete`,
+    `find ${shellQuote(REPO_CONFIG_ROOT)} -mindepth 1 -maxdepth 2 -type f -name .env -delete`,
+    `find ${shellQuote(REPO_CONFIG_ROOT)} -mindepth 1 -maxdepth 1 -type d -empty -delete`,
     ...directories.map((directory) => `install -d -m 700 -o user -g user ${shellQuote(directory)}`),
   ].join(" &&\n  ");
 
   const reconcile = await input.sandbox.commands.run(
-    `${`install -d -m 700 -o user -g user ${shellQuote(GOAT_REPO_CONFIG_ROOT)}`} &&
-if [ "$(cat ${shellQuote(GOAT_REPO_CONFIG_FINGERPRINT_PATH)} 2>/dev/null)" = ${shellQuote(fingerprint)} ]; then
+    `${`install -d -m 700 -o user -g user ${shellQuote(REPO_CONFIG_ROOT)}`} &&
+if [ "$(cat ${shellQuote(REPO_CONFIG_FINGERPRINT_PATH)} 2>/dev/null)" = ${shellQuote(fingerprint)} ]; then
   echo UNCHANGED
 else
   ${reconcileCommands} &&
@@ -81,7 +80,7 @@ fi`,
   if (reconcile.stdout.trim().endsWith("UNCHANGED")) return;
 
   if (envConfigs.length === 0) {
-    await input.sandbox.files.write(GOAT_REPO_CONFIG_FINGERPRINT_PATH, fingerprint, {
+    await input.sandbox.files.write(REPO_CONFIG_FINGERPRINT_PATH, fingerprint, {
       user: "user",
     });
     return;
@@ -99,14 +98,12 @@ fi`,
       .join(" ")}`,
     { user: "user", timeoutMs: 30_000 },
   );
-  await input.sandbox.files.write(GOAT_REPO_CONFIG_FINGERPRINT_PATH, fingerprint, {
+  await input.sandbox.files.write(REPO_CONFIG_FINGERPRINT_PATH, fingerprint, {
     user: "user",
   });
 }
 
-export function buildGoatRepositoryBootstrapPrompt(
-  configs: readonly DecryptedGoatRepoConfig[],
-): string {
+export function buildRepositoryBootstrapPrompt(configs: readonly DecryptedRepoConfig[]): string {
   const lines = configs.flatMap((config) => {
     const envPath =
       config.envContent === null
@@ -138,10 +135,10 @@ export function repositoryConfigDirectory(repositoryExternalId: string): string 
   if (!isValidGitHubRepositoryExternalId(repositoryExternalId)) {
     throw new Error("Invalid repository configuration path.");
   }
-  return `${GOAT_REPO_CONFIG_ROOT}/${repositoryExternalId}`;
+  return `${REPO_CONFIG_ROOT}/${repositoryExternalId}`;
 }
 
-function repositoryBootstrapSecretValues(configs: readonly DecryptedGoatRepoConfig[]): string[] {
+function repositoryBootstrapSecretValues(configs: readonly DecryptedRepoConfig[]): string[] {
   const values = new Set<string>();
   for (const config of configs) {
     if (config.envContent === null) continue;
@@ -157,7 +154,7 @@ function repositoryBootstrapSecretValues(configs: readonly DecryptedGoatRepoConf
   return [...values];
 }
 
-function repositoryBootstrapFingerprint(configs: readonly DecryptedGoatRepoConfig[]): string {
+function repositoryBootstrapFingerprint(configs: readonly DecryptedRepoConfig[]): string {
   const fingerprintInput = configs
     .map((config) => [
       config.repositoryExternalId,
@@ -171,7 +168,7 @@ function repositoryBootstrapFingerprint(configs: readonly DecryptedGoatRepoConfi
   return createHash("sha256").update(JSON.stringify(fingerprintInput)).digest("hex");
 }
 
-function emptyRepositoryBootstrap(): GoatRepositoryBootstrap {
+function emptyRepositoryBootstrap(): RepositoryBootstrap {
   return { configs: [], promptFragment: "", secretValues: [] };
 }
 

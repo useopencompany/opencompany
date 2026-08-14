@@ -1,18 +1,18 @@
 import {
-  ensureGoatWorkspaceOrganizationsForEntries as ensureGoatWorkspaceOrganizationsForEntriesWithClient,
-  ensureGoatWorkspaceOrganization as ensureGoatWorkspaceOrganizationWithClient,
-  type GoatWorkspace,
-} from "@opencompany/goat-agent/workspaces/organizations";
+  ensureWorkspaceOrganizationsForEntries as ensureWorkspaceOrganizationsForEntriesWithClient,
+  ensureWorkspaceOrganization as ensureWorkspaceOrganizationWithClient,
+  type Workspace,
+} from "@opencompany/agent/workspaces/organizations";
 import { getWorkOSClient } from "@/lib/workos-client";
 
-export function ensureGoatWorkspaceOrganization(workspace: GoatWorkspace): Promise<string> {
-  return ensureGoatWorkspaceOrganizationWithClient(workspace, { workos: getWorkOSClient() });
+export function ensureWorkspaceOrganization(workspace: Workspace): Promise<string> {
+  return ensureWorkspaceOrganizationWithClient(workspace, { workos: getWorkOSClient() });
 }
 
-export function ensureGoatWorkspaceOrganizationsForEntries<T extends { workspace: GoatWorkspace }>(
+export function ensureWorkspaceOrganizationsForEntries<T extends { workspace: Workspace }>(
   entries: T[],
 ): Promise<T[]> {
-  return ensureGoatWorkspaceOrganizationsForEntriesWithClient(entries, {
+  return ensureWorkspaceOrganizationsForEntriesWithClient(entries, {
     workos: getWorkOSClient(),
   });
 }

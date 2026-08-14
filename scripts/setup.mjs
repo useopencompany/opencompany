@@ -50,11 +50,7 @@ const GOOGLE_INTEGRATION_ENV_KEYS = [
   "GOOGLE_OAUTH_CLIENT_SECRET",
   "GOOGLE_INTEGRATION_STATE_SECRET",
 ];
-const GOAT_X_INTEGRATION_ENV_KEYS = [
-  "GOAT_X_CLIENT_ID",
-  "GOAT_X_CLIENT_SECRET",
-  "GOAT_X_STATE_SECRET",
-];
+const X_INTEGRATION_ENV_KEYS = ["GOAT_X_CLIENT_ID", "GOAT_X_CLIENT_SECRET", "GOAT_X_STATE_SECRET"];
 const RUNNER_ENV_KEYS = [
   "RUNNER_PUBLIC_URL",
   "RUNNER_INTERNAL_URL",
@@ -121,7 +117,7 @@ const STRIPE_OPTIONAL_ENV_KEYS = [
   "STRIPE_LISTEN_EVENTS",
   "STRIPE_CLI_PROJECT_NAME",
 ];
-const GOAT_BILLING_LOCAL_ENV_KEYS = [
+const BILLING_LOCAL_ENV_KEYS = [
   "GOAT_STRIPE_API_KEY",
   "GOAT_STRIPE_WEBHOOK_SECRET",
   "GOAT_STRIPE_CHECKOUT_ENABLED",
@@ -144,7 +140,7 @@ const OBSERVABILITY_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
 ];
-const GOAT_OBSERVABILITY_ENV_KEYS = [
+const OBSERVABILITY_ENV_KEYS = [
   "GOAT_OBSERVABILITY_ENABLED",
   "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
   "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
@@ -172,11 +168,11 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "OPENCOMPANY_NGROK_URL",
   "NGROK_AUTHTOKEN",
   ...STRIPE_OPTIONAL_ENV_KEYS,
-  ...GOAT_X_INTEGRATION_ENV_KEYS,
+  ...X_INTEGRATION_ENV_KEYS,
   ...LINEAR_ENV_KEYS,
   ...RUNNER_ENV_KEYS,
   ...OBSERVABILITY_ENV_KEYS,
-  ...GOAT_OBSERVABILITY_ENV_KEYS,
+  ...OBSERVABILITY_ENV_KEYS,
   ...AGENT_MCP_ENV_KEYS,
 ];
 const SHARED_DEV_ENV_KEYS = [
@@ -240,7 +236,7 @@ const WEB_LOCAL_ENV_KEYS = [
   "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
   "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
   "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
-  ...GOAT_OBSERVABILITY_ENV_KEYS,
+  ...OBSERVABILITY_ENV_KEYS,
 ];
 
 function assertNodeVersion() {
@@ -374,7 +370,7 @@ function inspectState() {
   const githubIntegrationMissing = GITHUB_WORK_INTEGRATION_ENV_KEYS.filter((k) =>
     isPlaceholder(env[k]),
   );
-  const goatBillingMissing = GOAT_BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(env[key]));
+  const billingMissing = BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(env[key]));
 
   return {
     databaseMode: SHARED_DATABASE_MODE ? "shared" : "branch",
@@ -391,8 +387,8 @@ function inspectState() {
     neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
     stripeWebhookSecret: isPlaceholder(env.GOAT_STRIPE_WEBHOOK_SECRET) ? "placeholder" : "set",
-    goatBilling: goatBillingMissing.length === 0 ? "ready" : "placeholder",
-    goatBillingMissingKeys: goatBillingMissing,
+    billing: billingMissing.length === 0 ? "ready" : "placeholder",
+    billingMissingKeys: billingMissing,
   };
 }
 
@@ -684,11 +680,11 @@ function pullSharedDevEnvFromInfisical({
   );
 }
 
-function pullGoatBillingDevEnvFromInfisical() {
+function pullBillingDevEnvFromInfisical() {
   if (!existsSync(".infisical.json")) return [];
 
   const current = readEffectiveLocalEnv();
-  const missing = GOAT_BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(current[key]));
+  const missing = BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(current[key]));
   if (missing.length === 0) return [];
 
   const result = spawnSync(
@@ -844,9 +840,9 @@ async function ensureSharedDatabaseUrl(state) {
 async function ensureStripe(state) {
   step("Stripe local credentials");
 
-  const pulledGoatBillingKeys = pullGoatBillingDevEnvFromInfisical();
-  if (pulledGoatBillingKeys.length > 0) {
-    ok(`Loaded Goat billing values from Infisical dev: ${pulledGoatBillingKeys.join(", ")}`);
+  const pulledBillingKeys = pullBillingDevEnvFromInfisical();
+  if (pulledBillingKeys.length > 0) {
+    ok(`Loaded opencompany billing values from Infisical dev: ${pulledBillingKeys.join(", ")}`);
   }
 
   const updates = {};
@@ -866,15 +862,17 @@ async function ensureStripe(state) {
     if (result.ok && (result.key.startsWith("rk_test_") || result.expiresAt)) {
       updates.GOAT_STRIPE_API_KEY = result.key;
       if (result.key.startsWith("rk_test_")) {
-        ok(`Will use restricted Stripe CLI profile "${result.projectName}" for local Goat billing`);
+        ok(
+          `Will use restricted Stripe CLI profile "${result.projectName}" for local opencompany billing`,
+        );
       } else {
         warn(
-          `Will use the expiring Stripe CLI test key from profile "${result.projectName}" for local Goat billing only. Hosted environments still require a dedicated restricted key.`,
+          `Will use the expiring Stripe CLI test key from profile "${result.projectName}" for local opencompany billing only. Hosted environments still require a dedicated restricted key.`,
         );
       }
     } else if (result.ok) {
       warn(
-        "Stripe CLI returned a non-restricted test key without an expiry. Run `stripe login` to refresh the CLI profile, or create a restricted test key for Goat billing and store it in Infisical dev /goat.",
+        "Stripe CLI returned a non-restricted test key without an expiry. Run `stripe login` to refresh the CLI profile, or create a restricted test key for opencompany billing and store it in Infisical dev /goat.",
       );
     } else {
       warn(`GOAT_STRIPE_API_KEY is missing: ${result.message}`);
@@ -885,7 +883,7 @@ async function ensureStripe(state) {
 
   if (isPlaceholder(env.GOAT_STRIPE_CHECKOUT_ENABLED)) {
     updates.GOAT_STRIPE_CHECKOUT_ENABLED = "false";
-    ok("Will keep live Goat Checkout disabled by default");
+    ok("Will keep live opencompany Checkout disabled by default");
   }
 
   if (isPlaceholder(env.CRON_SECRET)) {
@@ -912,7 +910,7 @@ async function ensureStripe(state) {
 
   if (Object.keys(updates).length > 0) {
     writeEnvValues(".env.local", updates);
-    ok("Updated .env.local with local Stripe and Goat billing credentials");
+    ok("Updated .env.local with local Stripe and opencompany billing credentials");
   }
 }
 
@@ -1145,10 +1143,10 @@ async function main() {
         reason: `copy local Stripe CLI credentials into .env.local (${missingStripe.join(", ")})`,
       });
     }
-    if (state.goatBilling === "placeholder") {
+    if (state.billing === "placeholder") {
       nextSteps.push({
         command: "bun run setup:stripe",
-        reason: `configure local Goat billing (${state.goatBillingMissingKeys.join(", ")})`,
+        reason: `configure local opencompany billing (${state.billingMissingKeys.join(", ")})`,
       });
     }
     if (!SHARED_DATABASE_MODE && state.neonProject === "set") {

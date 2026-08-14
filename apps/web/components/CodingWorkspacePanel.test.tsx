@@ -6,7 +6,7 @@ import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodingWorkspacePanel, type CodingWorkspacePanelHandle } from "./CodingWorkspacePanel";
 
-// The panel no longer owns its own open/close trigger — a host (GoatSurface's header
+// The panel no longer owns its own open/close trigger — a host (Surface's header
 // button, in production) drives it through the imperative handle. This harness stands
 // in for that host.
 function Harness({

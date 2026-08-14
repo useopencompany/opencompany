@@ -1,0 +1,35 @@
+{
+  "uid": "goat_brain_hubspot_public_app",
+  "type": "app",
+  "config": {
+    "description": "Feeds HubSpot CRM activity (contacts, companies, deals) into opencompany Brain via read-only OAuth and webhooks.",
+    "name": "opencompany Brain",
+    "distribution": "marketplace",
+    "auth": {
+      "type": "oauth",
+      "redirectUrls": [
+        "https://my.opencompany.chat/api/integrations/hubspot/callback",
+        "https://localhost:3443/api/integrations/hubspot/callback"
+      ],
+      "requiredScopes": [
+        "oauth",
+        "crm.objects.contacts.read",
+        "crm.objects.companies.read",
+        "crm.objects.deals.read"
+      ],
+      "optionalScopes": [],
+      "conditionallyRequiredScopes": []
+    },
+    "permittedUrls": {
+      "fetch": ["https://api.hubapi.com"],
+      "iframe": [],
+      "img": []
+    },
+    "support": {
+      "supportEmail": "support@opencompany.cloud",
+      "documentationUrl": "https://my.opencompany.chat/docs",
+      "supportUrl": "https://my.opencompany.chat",
+      "supportPhone": "+18005555555"
+    }
+  }
+}

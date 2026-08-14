@@ -3,18 +3,9 @@
 import { toast } from "@opencompany/ui/components/sonner";
 import { BookOpen, Check, ExternalLink, LoaderCircle, Settings2 } from "lucide-react";
 import { useTransition } from "react";
-import {
-  goatBrainSourceHasScope,
-  resolveGoatBrainSourceState,
-} from "@/components/GoatBrainSourceCards";
-import {
-  type GoatBrainSourcesDetails,
-  setGoatBrainSourceEnabledAction,
-} from "@/lib/brain-source-actions";
-import {
-  type GoatBrainSourceProviderDef,
-  goatBrainSourceNeedsConfig,
-} from "@/lib/brain-sources/registry";
+import { brainSourceHasScope, resolveBrainSourceState } from "@/components/BrainSourceCards";
+import { type BrainSourcesDetails, setBrainSourceEnabledAction } from "@/lib/brain-source-actions";
+import { type BrainSourceProviderDef, brainSourceNeedsConfig } from "@/lib/brain-sources/registry";
 
 // Compact onboarding row for a single source. Unlike the full settings card
 // (multi-account, per-member rows, pause toggles), onboarding only needs to move
@@ -35,8 +26,8 @@ export function OnboardingSourceCard({
   connectDisabled,
 }: {
   brainRef: string;
-  provider: GoatBrainSourceProviderDef;
-  details: GoatBrainSourcesDetails | null;
+  provider: BrainSourceProviderDef;
+  details: BrainSourcesDetails | null;
   onConnect: () => void;
   onConfigure: () => void;
   onChanged: () => Promise<void>;
@@ -45,10 +36,10 @@ export function OnboardingSourceCard({
 }) {
   const Icon = provider.icon;
   const [isEnabling, startEnabling] = useTransition();
-  const state = resolveGoatBrainSourceState(provider.id, details);
+  const state = resolveBrainSourceState(provider.id, details);
   const { connected, integrationId } = state;
-  const needsConfig = goatBrainSourceNeedsConfig(provider.id);
-  const feeding = state.enabled && goatBrainSourceHasScope(provider.id, state.source?.config);
+  const needsConfig = brainSourceNeedsConfig(provider.id);
+  const feeding = state.enabled && brainSourceHasScope(provider.id, state.source?.config);
   const needsSetup = connected && !feeding;
 
   // No-scope providers (Jamie / Granola / Fathom) are enabled directly on
@@ -56,7 +47,7 @@ export function OnboardingSourceCard({
   const turnOn = () => {
     if (!integrationId) return;
     startEnabling(async () => {
-      const result = await setGoatBrainSourceEnabledAction({
+      const result = await setBrainSourceEnabledAction({
         brainRef,
         provider: provider.id,
         integrationId,

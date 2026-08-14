@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { legacyGoatHarnessRunToChatMessages } from "@/lib/legacy-task-chat-messages";
-import { buildGoatHarnessRun } from "@/lib/task-harness-run";
+import { legacyHarnessRunToChatMessages } from "@/lib/legacy-task-chat-messages";
+import { buildHarnessRun } from "@/lib/task-harness-run";
 
-describe("legacyGoatHarnessRunToChatMessages", () => {
+describe("legacyHarnessRunToChatMessages", () => {
   it("maps a durable run into a user message and an assistant turn with tool + text parts", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task(),
       messages: [
         message({ id: "user_msg", role: "user", content: "Run the morning test" }),
@@ -35,7 +35,7 @@ describe("legacyGoatHarnessRunToChatMessages", () => {
       ],
     });
 
-    const messages = legacyGoatHarnessRunToChatMessages(run);
+    const messages = legacyHarnessRunToChatMessages(run);
 
     expect(messages).toHaveLength(2);
     expect(messages[0]?.role).toBe("user");
@@ -54,13 +54,13 @@ describe("legacyGoatHarnessRunToChatMessages", () => {
   });
 
   it("falls back to the stored result when there is no durable transcript", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task({ result: "Hello world as a test." }),
       messages: [],
       events: [],
     });
 
-    const messages = legacyGoatHarnessRunToChatMessages(run);
+    const messages = legacyHarnessRunToChatMessages(run);
 
     expect(messages[0]).toMatchObject({ role: "user" });
     expect(messages.at(-1)).toMatchObject({
@@ -70,20 +70,20 @@ describe("legacyGoatHarnessRunToChatMessages", () => {
   });
 
   it("keeps the stored result when only the initial user row is durable", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task({ result: "Legacy result." }),
       messages: [message({ id: "user_msg", role: "user", content: "Run the morning test" })],
       events: [],
     });
 
-    expect(legacyGoatHarnessRunToChatMessages(run).at(-1)).toMatchObject({
+    expect(legacyHarnessRunToChatMessages(run).at(-1)).toMatchObject({
       role: "assistant",
       parts: [{ type: "text", text: "Legacy result." }],
     });
   });
 
   it("preserves every user and assistant turn in a continued task", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task(),
       messages: [
         message({ id: "user_1", role: "user", content: "Run the morning test" }),
@@ -109,7 +109,7 @@ describe("legacyGoatHarnessRunToChatMessages", () => {
       events: [],
     });
 
-    expect(legacyGoatHarnessRunToChatMessages(run).map((entry) => entry.parts[0])).toEqual([
+    expect(legacyHarnessRunToChatMessages(run).map((entry) => entry.parts[0])).toEqual([
       { type: "text", text: "Run the morning test" },
       { type: "text", text: "Morning is clear." },
       { type: "text", text: "Check the afternoon too." },
@@ -118,7 +118,7 @@ describe("legacyGoatHarnessRunToChatMessages", () => {
   });
 
   it("marks a failed tool call as an output error", () => {
-    const run = buildGoatHarnessRun({
+    const run = buildHarnessRun({
       task: task(),
       messages: [message({ id: "user_msg", role: "user", content: "go" })],
       events: [
@@ -131,7 +131,7 @@ describe("legacyGoatHarnessRunToChatMessages", () => {
       ],
     });
 
-    const assistant = legacyGoatHarnessRunToChatMessages(run).at(-1);
+    const assistant = legacyHarnessRunToChatMessages(run).at(-1);
     expect(assistant?.parts[0]).toMatchObject({
       type: "tool-update_task_status",
       state: "output-error",

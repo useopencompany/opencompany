@@ -1,9 +1,9 @@
 "use client";
 
-import type { GoatTaskStatus } from "@opencompany/goat-agent/task-runtime-types";
+import type { TaskStatus } from "@opencompany/agent/task-runtime-types";
 import { AlertCircle, CheckCircle2, CircleDotDashed, Clock, FileText, X } from "lucide-react";
 import Link from "next/link";
-import { GOAT_STATUS_COPY } from "@/lib/task-display";
+import { STATUS_COPY } from "@/lib/task-display";
 import type { ChatTaskCardView } from "./assistant-items";
 
 export function TaskCard({
@@ -51,7 +51,7 @@ export function TaskCard({
   );
 }
 
-export function getChatTaskCardMeta(status: GoatTaskStatus | null): {
+export function getChatTaskCardMeta(status: TaskStatus | null): {
   icon: typeof FileText;
   className: string;
   label: string;
@@ -61,7 +61,7 @@ export function getChatTaskCardMeta(status: GoatTaskStatus | null): {
     return {
       icon: AlertCircle,
       className: "text-danger",
-      label: GOAT_STATUS_COPY.failed,
+      label: STATUS_COPY.failed,
       spin: false,
     };
   }
@@ -69,7 +69,7 @@ export function getChatTaskCardMeta(status: GoatTaskStatus | null): {
     return {
       icon: X,
       className: "text-ink-subtle",
-      label: GOAT_STATUS_COPY.canceled,
+      label: STATUS_COPY.canceled,
       spin: false,
     };
   }
@@ -77,7 +77,7 @@ export function getChatTaskCardMeta(status: GoatTaskStatus | null): {
     return {
       icon: CheckCircle2,
       className: "text-emerald-600",
-      label: GOAT_STATUS_COPY.succeeded,
+      label: STATUS_COPY.succeeded,
       spin: false,
     };
   }
@@ -85,7 +85,7 @@ export function getChatTaskCardMeta(status: GoatTaskStatus | null): {
     return {
       icon: CircleDotDashed,
       className: "text-amber-500",
-      label: GOAT_STATUS_COPY.running,
+      label: STATUS_COPY.running,
       spin: true,
     };
   }
@@ -93,7 +93,7 @@ export function getChatTaskCardMeta(status: GoatTaskStatus | null): {
     return {
       icon: Clock,
       className: "text-ink-subtle",
-      label: GOAT_STATUS_COPY.queued,
+      label: STATUS_COPY.queued,
       spin: false,
     };
   }

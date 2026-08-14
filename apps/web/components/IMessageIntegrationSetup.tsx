@@ -3,8 +3,8 @@
 import { Check } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { disconnectGoatIntegrationAccountAction } from "@/lib/integration-account-actions";
-import type { GoatImessageProviderState } from "@/lib/integration-state";
+import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
+import type { ImessageProviderState } from "@/lib/integration-state";
 import {
   confirmImessagePairingAction,
   startImessagePairingAction,
@@ -13,7 +13,7 @@ import {
 export function IMessageIntegrationSetup({
   initialState,
 }: {
-  initialState: GoatImessageProviderState;
+  initialState: ImessageProviderState;
 }) {
   const router = useRouter();
   const [state, setState] = useState(initialState);
@@ -57,7 +57,7 @@ export function IMessageIntegrationSetup({
     if (!state.integrationId) return;
     setError(null);
     startTransition(async () => {
-      const result = await disconnectGoatIntegrationAccountAction(state.integrationId as string);
+      const result = await disconnectIntegrationAccountAction(state.integrationId as string);
       if (!result.ok) {
         setError(result.error);
         return;
@@ -106,7 +106,7 @@ export function IMessageIntegrationSetup({
                   {state.phoneE164 ?? "Phone paired"}
                 </span>
                 <span className="block text-[12px] leading-4 text-ink-subtle">
-                  Goat can text this number. Disconnect to pair a different one.
+                  opencompany can text this number. Disconnect to pair a different one.
                 </span>
               </div>
             </div>
@@ -206,30 +206,30 @@ export function IMessageIntegrationSetup({
           <li>Enter your phone number and we text you a verification code over iMessage.</li>
           <li>Enter the code to pair the number.</li>
           <li>
-            Once paired, ask Goat to text you — for example &quot;text me when this task
+            Once paired, ask opencompany to text you — for example &quot;text me when this task
             finishes&quot; — and it can send you one-way updates.
           </li>
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
-          Messages are one-way for now: Goat can text you, but replies to those messages are not
-          read.
+          Messages are one-way for now: opencompany can text you, but replies to those messages are
+          not read.
         </p>
       </section>
     </div>
   );
 }
 
-function setupStatus(state: GoatImessageProviderState) {
+function setupStatus(state: ImessageProviderState) {
   if (state.connected) {
     return {
       label: state.phoneE164 ? `Paired with ${state.phoneE164}` : "iMessage is paired",
-      detail: "Goat can text you important updates on this number.",
+      detail: "opencompany can text you important updates on this number.",
       badge: "Connected",
     };
   }
   return {
     label: "Not paired",
-    detail: "Verify your phone number so Goat can text you updates.",
+    detail: "Verify your phone number so opencompany can text you updates.",
     badge: "Setup",
   };
 }

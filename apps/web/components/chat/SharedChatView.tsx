@@ -1,28 +1,28 @@
 "use client";
 
-import type { GoatPublishedChatArtifact } from "@opencompany/agent-runtime";
+import type { PublishedChatArtifact } from "@opencompany/agent-runtime";
 import { Link2 } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 import { buildChatTaskLookup } from "@/components/chat/assistant-items";
 import { MessageBubble } from "@/components/chat/MessageBubble";
-import type { PublicGoatChatView } from "@/lib/chat-sharing";
-import type { GoatChatUiAttachment } from "@/lib/chat-ui";
+import type { PublicChatView } from "@/lib/chat-sharing";
+import type { ChatUiAttachment } from "@/lib/chat-ui";
 
-export function SharedChatView({ chat }: { chat: PublicGoatChatView }) {
+export function SharedChatView({ chat }: { chat: PublicChatView }) {
   const shareSubject = sharedChatSubject(chat);
   const taskLookup = useMemo(
     () => buildChatTaskLookup({ messages: chat.messages, tasks: [], liveTasks: null }),
     [chat.messages],
   );
 
-  const attachmentSrc = (messageId: string, attachment: GoatChatUiAttachment) =>
+  const attachmentSrc = (messageId: string, attachment: ChatUiAttachment) =>
     attachment.kind === "image"
       ? `/share/${encodeURIComponent(chat.shareId)}/attachments/${encodeURIComponent(
           messageId,
         )}/${encodeURIComponent(attachment.id)}`
       : undefined;
-  const artifactHref = (artifact: GoatPublishedChatArtifact) =>
+  const artifactHref = (artifact: PublishedChatArtifact) =>
     `/share/${encodeURIComponent(chat.shareId)}/artifacts/${encodeURIComponent(
       artifact.artifactId,
     )}/versions/${encodeURIComponent(artifact.artifactVersionId)}`;

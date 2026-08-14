@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { GOAT_BRAIN_WORKER_ADMISSION_CHANNEL } from "./worker-admission";
+import { BRAIN_WORKER_ADMISSION_CHANNEL } from "./worker-admission";
 
 const migrationPath = path.resolve(
   import.meta.dirname,
@@ -10,7 +10,7 @@ const migrationPath = path.resolve(
   "drizzle/0211_goat_brain_worker_admission.sql",
 );
 
-describe("Goat Brain worker admission migration", () => {
+describe("opencompany Brain worker admission migration", () => {
   let database: PGlite;
   let unlisten: () => Promise<void>;
   const hints: string[] = [];
@@ -22,7 +22,7 @@ describe("Goat Brain worker admission migration", () => {
     for (const statement of migration.split("--> statement-breakpoint")) {
       if (statement.trim()) await database.exec(statement);
     }
-    unlisten = await database.listen(GOAT_BRAIN_WORKER_ADMISSION_CHANNEL, (payload) => {
+    unlisten = await database.listen(BRAIN_WORKER_ADMISSION_CHANNEL, (payload) => {
       hints.push(payload);
     });
   });

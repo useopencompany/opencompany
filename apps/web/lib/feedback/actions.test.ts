@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { submitGoatFeedback } from "./actions";
+import { submitFeedback } from "./actions";
 
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
 
@@ -22,7 +22,7 @@ function stubApi(response: () => Response) {
   return requests;
 }
 
-describe("submitGoatFeedback", () => {
+describe("submitFeedback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
@@ -48,7 +48,7 @@ describe("submitGoatFeedback", () => {
     );
 
     await expect(
-      submitGoatFeedback(null, form({ kind: "bug", message: "  The board drops columns.  " })),
+      submitFeedback(null, form({ kind: "bug", message: "  The board drops columns.  " })),
     ).resolves.toEqual({ ok: true });
 
     const request = requests[0] as Request;
@@ -70,7 +70,7 @@ describe("submitGoatFeedback", () => {
       }),
     );
 
-    await submitGoatFeedback(null, form({ kind: "rant", message: "Needs dark mode charts." }));
+    await submitFeedback(null, form({ kind: "rant", message: "Needs dark mode charts." }));
     await expect((requests[0] as Request).json()).resolves.toMatchObject({ kind: "feedback" });
   });
 
@@ -78,12 +78,12 @@ describe("submitGoatFeedback", () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
-    await expect(submitGoatFeedback(null, form({ kind: "bug", message: "no" }))).resolves.toEqual({
+    await expect(submitFeedback(null, form({ kind: "bug", message: "no" }))).resolves.toEqual({
       ok: false,
       error: "Enter a bit more detail.",
     });
     await expect(
-      submitGoatFeedback(null, form({ kind: "bug", message: "x".repeat(4_001) })),
+      submitFeedback(null, form({ kind: "bug", message: "x".repeat(4_001) })),
     ).resolves.toEqual({ ok: false, error: "Keep feedback under 4,000 characters." });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -105,7 +105,7 @@ describe("submitGoatFeedback", () => {
     );
 
     await expect(
-      submitGoatFeedback(null, form({ kind: "idea", message: "Add a weekly digest." })),
+      submitFeedback(null, form({ kind: "idea", message: "Add a weekly digest." })),
     ).resolves.toEqual({ ok: false, error: "Linear did not create an issue." });
   });
 });

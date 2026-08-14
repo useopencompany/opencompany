@@ -1,0 +1,1688 @@
+#!/usr/bin/env bun
+import { realpathSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  BRAIN_ENTITY_TYPES,
+  BRAIN_EVIDENCE_ZONE,
+  type BrainDocument,
+  type BrainKind,
+  type BrainRelation,
+  type BrainSource,
+  brainFolderKindError,
+  brainFolderSourceForPath,
+  brainKindForFolder,
+  brainTimelineBody,
+  brainTimelineEntryFromParts,
+  checkBrainHealth,
+  compareBrainFolderPaths,
+  DEFAULT_BRAIN_RELATION_TYPE,
+  defaultBrainFolder,
+  deterministicEvidenceId,
+  formatBrainEvidenceLink,
+  ingestBrain,
+  isBrainSkillFolder,
+  isBuiltInBrainEntityType,
+  isHardDefaultBrainFolder,
+  isValidBrainFolder,
+  isValidBrainId,
+  isValidBrainKind,
+  isValidBrainRelationType,
+  normalizeBrainFolderForV1,
+  normalizeBrainId,
+  normalizeBuiltInBrainEntityType,
+  normalizeEvidenceId,
+  nowIso,
+  parseBrainDocument,
+  pathForBrainDocument,
+  queryBrain,
+  removeBrainFile,
+  resolveBrainRoot,
+  serializeBrainDocument,
+  validateBrainDocument,
+  writeBrainDocumentText,
+} from "../index";
+import { createGateway } from "../retrieval/gateway";
+import { loadProviders } from "../retrieval/providers";
+import {
+  findBrainFile,
+  listBrainFiles,
+  readBrainFolders,
+  removeBrainFolder,
+  upsertBrainFolder,
+  writeBrainFolders,
+} from "../store";
+import { type BrainUsageEntry, formatBrainUsageReport } from "../usage";
+import { parseArgs, readStdin } from "./args";
+import { type CommandContext, type CommandResult, fail, notFound, ok, render } from "./io";
+
+type Handler = (ctx: CommandContext) => Promise<CommandResult>;
+
+const DEFAULT_QUERY_LIMIT = 10;
+const MAX_QUERY_LIMIT = 50;
+
+const COMMANDS: Record<string, Handler> = {
+  help: helpCommand,
+  create,
+  list,
+  get,
+  timeline,
+  query,
+  ingest,
+  rewrite,
+  set,
+  "timeline-add": appendTimeline,
+  "append-timeline": appendTimeline,
+  "append-evidence": appendEvidence,
+  alias,
+  link,
+  merge,
+  move,
+  delete: del,
+  folder,
+  doctor,
+};
+
+const GLOBAL_FLAGS = ["root", "json", "report-usage", "help"] as const;
+const COMMAND_FLAGS: Record<string, readonly string[]> = {
+  help: [],
+  create: [
+    "folder",
+    "id",
+    "title",
+    "type",
+    "kind",
+    "truth",
+    "truth-stdin",
+    "alias",
+    "relation",
+    "source-ref",
+    "source-title",
+    "evidence-id",
+    "status",
+  ],
+  list: ["folder", "limit", "include-merged", "include-conflicts"],
+  rewrite: ["id", "truth", "truth-stdin"],
+  set: ["id", "title", "type", "status"],
+  timeline: ["id", "limit", "since"],
+  "timeline-add": [
+    "id",
+    "at",
+    "body",
+    "body-stdin",
+    "detail",
+    "detail-stdin",
+    "source-ref",
+    "source-title",
+    "evidence-id",
+  ],
+  "append-timeline": [
+    "id",
+    "at",
+    "body",
+    "body-stdin",
+    "detail",
+    "detail-stdin",
+    "source-ref",
+    "source-title",
+    "evidence-id",
+  ],
+  "append-evidence": [
+    "id",
+    "type",
+    "folder",
+    "at",
+    "title",
+    "body",
+    "body-stdin",
+    "detail",
+    "detail-stdin",
+    "source-ref",
+    "source-title",
+    "evidence-id",
+    "relation",
+  ],
+  alias: ["id", "add", "remove"],
+  link: ["id", "to", "as", "remove"],
+  merge: ["from", "into"],
+  move: ["id", "folder"],
+  delete: ["id", "force", "dry-run"],
+  folder: ["path", "from", "to"],
+  doctor: [],
+  get: ["id", "section"],
+  ingest: ["text", "text-stdin", "source-ref", "source-title", "at", "dry-run", "model"],
+  query: [
+    "text",
+    "folder",
+    "kind",
+    "since",
+    "limit",
+    "offset",
+    "hops",
+    "graph-direction",
+    "lexical-only",
+    "include-invalid",
+    "include-merged",
+    "include-archived",
+    "include-conflicts",
+  ],
+};
+
+export const HELP = `opencompany-brain - folder-first personal brain CLI
+
+Usage: opencompany-brain <command> [options]
+       opencompany-brain help [command]
+
+Commands:
+  help              Show global help or command-specific usage.
+  create            Create a markdown brain doc in a folder.
+  list              List brain docs without retrieval or model calls.
+  ingest            Graph-first LLM ingest from source text.
+  get               Read a doc by id (--section truth|timeline|frontmatter|all).
+  timeline          Read dated evidence entries for a doc.
+  query             Hybrid retrieval over docs (--folder, --since, --hops, --limit).
+  rewrite           Replace compiled truth for a doc.
+  set               Update a doc's title, type, or status.
+  timeline-add      Add a dated evidence entry and optional source ref.
+  append-timeline   Compatibility alias for timeline-add.
+  append-evidence   Create a first-class evidence record and link it to a subject.
+  alias             Add/remove aliases for a doc.
+  link              Add/remove related edges.
+  merge             Mark one doc as merged into another.
+  move              Move a doc to another folder.
+  delete            Delete a doc (--dry-run, --force).
+  folder            folder list | create | delete | rename.
+  doctor            Check validation, links, folder shape, and weak provenance.
+
+Global options:
+  --root <path>     Brain root (default: opencompany-brain; GOAT_BRAIN_ROOT pins it).
+  --json            Machine-readable output.
+  --help            Show help for a command.
+
+Run "opencompany-brain help <command>" for command-specific examples.
+`;
+
+const COMMAND_HELP: Record<string, string> = {
+  help: `Usage: opencompany-brain help [command]
+
+Show global help or command-specific usage.
+
+Examples:
+  opencompany-brain help
+  opencompany-brain help create
+  opencompany-brain query --help`,
+  create: `Usage: opencompany-brain create --type <type> --id <id> --title <title> (--truth <text> | --truth-stdin) [options]
+
+Create a new Markdown brain document. Types classify documents; folders are free-form navigation.
+
+Required:
+  --type <type>       Entity type: ${BRAIN_ENTITY_TYPES.join(", ")}.
+  --id <id>           Lowercase brain slug.
+  --title <title>     Human-readable title.
+  --truth <text>      Compiled truth, or pass --truth-stdin and write truth to stdin.
+
+Common options:
+  --folder <path>     Any folder path. Defaults to the type's suggested folder.
+                      "${BRAIN_EVIDENCE_ZONE}/" is reserved for evidence documents.
+  --kind <kind>       "page" (default) or "evidence". Evidence docs must live under
+                      "${BRAIN_EVIDENCE_ZONE}/"; inferred from --folder when omitted.
+  --alias <text>      Repeatable alias.
+  --relation <type:id>
+  --source-ref <ref>  Provenance reference for the initial evidence entry.
+  --json
+
+Examples:
+  opencompany-brain create --type company --folder companies --id opencompany --title opencompany --truth "opencompany builds agent infrastructure."
+  opencompany-brain create --type person --folder team/gtm --id ada --title Ada --truth "Ada leads GTM."
+  opencompany-brain create --type source --kind evidence --id ev-acme-email --title "Acme email" --truth "Acme asked for pricing."`,
+  list: `Usage: opencompany-brain list [--folder <path>] [--limit <n>] [--include-merged] [--include-conflicts] [--json]
+
+List existing brain docs without retrieval or model calls.
+
+Examples:
+  opencompany-brain list
+  opencompany-brain list --folder projects --limit 20 --json`,
+  get: `Usage: opencompany-brain get <id> [--section all|truth|timeline|frontmatter] [--json]
+
+Read a known brain document by id.
+
+Examples:
+  opencompany-brain get opencompany
+  opencompany-brain get opencompany --section truth
+  opencompany-brain get opencompany --section timeline --json`,
+  timeline: `Usage: opencompany-brain timeline <id> [--since <duration-or-iso>] [--limit <n>] [--json]
+
+Read dated evidence entries for a document. Relative --since values use m, h, d, or w.
+
+Examples:
+  opencompany-brain timeline opencompany
+  opencompany-brain timeline opencompany --since 30d --limit 10 --json`,
+  query: `Usage: opencompany-brain query <text> [options]
+       opencompany-brain query --text <text> [options]
+
+Search and retrieve relevant brain docs. Use list for inventory/enumeration instead of wildcard queries.
+Curated pages are searched by default; use --kind evidence for an explicit raw-source lookup.
+Merged, archived, and conflict-copy docs are excluded unless explicitly included.
+
+Options:
+  --folder <path>
+  --kind page|evidence
+  --since <duration-or-iso>
+  --limit <n>            Results per page (default 10, max 50)
+  --offset <n>           Zero-based continuation offset
+  --hops <n>
+  --graph-direction out|in|both
+  --lexical-only
+  --include-invalid
+  --include-merged
+  --include-archived
+  --include-conflicts
+  --json
+
+Examples:
+  opencompany-brain query "hiring plan" --limit 5
+  opencompany-brain query "hiring plan" --offset 10
+  opencompany-brain query "pricing source" --kind evidence
+  opencompany-brain query --text "Ada launch sequencing" --hops 2 --graph-direction both --json`,
+  ingest: `Usage: opencompany-brain ingest (--text <text> | --text-stdin) --source-ref <ref> [options]
+
+Use the LLM ingest pipeline to plan graph-first brain changes from source text.
+
+Required:
+  --source-ref <ref>  Stable provenance reference.
+  --text <text>       Source text, or pass --text-stdin and write text to stdin.
+
+Options:
+  --source-title <title>
+  --at <iso-date>
+  --dry-run
+  --model <gateway-model>
+  --json
+
+Example:
+  cat note.md | opencompany-brain ingest --text-stdin --source-ref chat:message_123 --source-title "Chat note" --dry-run`,
+  rewrite: `Usage: opencompany-brain rewrite <id> (--truth <text> | --truth-stdin) [--json]
+
+Replace the compiled truth section for a document.
+
+Examples:
+  opencompany-brain rewrite opencompany --truth "opencompany builds company-owned AI agents."
+  cat truth.md | opencompany-brain rewrite opencompany --truth-stdin --json`,
+  set: `Usage: opencompany-brain set <id> [--title <title>] [--type <type>] [--status <status>] [--json]
+
+Update frontmatter fields for an existing document. Provide at least one of
+--title, --type, or --status. Promoting a page to --status active requires its
+compiled truth to cite provenance with [[evidence:<evidence-id>]] or
+[[source:<provider>:<id>]].
+
+Options:
+  --title <title>     New human-readable title.
+  --type <type>       Entity type: ${BRAIN_ENTITY_TYPES.join(", ")}.
+  --status <status>   draft, active, archived, or merged.
+
+Examples:
+  opencompany-brain set quick-note --title "Pricing idea" --type concept
+  opencompany-brain set pricing-idea --status active`,
+  "timeline-add": `Usage: opencompany-brain timeline-add <id> [--at <iso-date>] (--body <text> | --body-stdin) [options]
+
+Add a dated evidence entry to a document.
+
+Options:
+  --detail <text> or --detail-stdin
+  --source-ref <ref>
+  --source-title <title>
+  --evidence-id <id>
+  --json
+
+Examples:
+  opencompany-brain timeline-add opencompany --body "User said opencompany is hiring."
+  opencompany-brain timeline-add opencompany --at 2026-07-06 --body "Met Ada." --source-ref chat:message_123`,
+  "append-timeline": `Usage: opencompany-brain append-timeline <id> [--at <iso-date>] (--body <text> | --body-stdin) [options]
+
+Compatibility alias for timeline-add.
+
+Example:
+  opencompany-brain append-timeline opencompany --body "Updated launch plan."`,
+  "append-evidence": `Usage: opencompany-brain append-evidence <subject-id> --source-ref <ref> [--at <iso-date>] (--body <text> | --body-stdin) [options]
+
+Create an immutable evidence record in the ${BRAIN_EVIDENCE_ZONE}/ zone and link it to the subject document.
+
+Options:
+  --type <type>        Entity type for the record. Defaults to source.
+  --folder <path>      Folder inside "${BRAIN_EVIDENCE_ZONE}/". Defaults to "${BRAIN_EVIDENCE_ZONE}".
+  --title <title>
+  --detail <text> or --detail-stdin
+  --source-title <title>
+  --evidence-id <id>   Optional ev-* record id. Generated when omitted.
+  --relation <type>    Relation from evidence to subject. Defaults to about.
+  --json
+
+Example:
+  opencompany-brain append-evidence opencompany --type source --body "Acme asked for pricing." --source-ref gmail:thread_123`,
+  alias: `Usage: opencompany-brain alias <id> [--add <alias>] [--remove <alias>] [--json]
+
+Add or remove aliases for a document. Repeat --add or --remove as needed.
+
+Example:
+  opencompany-brain alias opencompany --add OC --add "Open Company" --json`,
+  link: `Usage: opencompany-brain link <id> [--to <target-id>] [--as <relation>] [--remove <target-id>] [--json]
+
+Add or remove related edges from one document to another.
+
+Examples:
+  opencompany-brain link launch-plan --to ada --as owner
+  opencompany-brain link launch-plan --remove old-owner --json`,
+  merge: `Usage: opencompany-brain merge --from <id> --into <id> [--json]
+       opencompany-brain merge <from-id> <into-id> [--json]
+
+Mark one document as merged into another.
+
+Example:
+  opencompany-brain merge --from acme-old --into acme`,
+  move: `Usage: opencompany-brain move <id> --folder <path> [--json]
+
+Move a document to a different folder. Evidence documents stay inside "${BRAIN_EVIDENCE_ZONE}/"; pages stay outside it.
+
+Example:
+  opencompany-brain move launch-plan --folder projects/launch`,
+  delete: `Usage: opencompany-brain delete <id> --dry-run
+       opencompany-brain delete <id> --force
+
+Preview or delete a document. In chat, deletes should use --dry-run only.
+
+Examples:
+  opencompany-brain delete old-note --dry-run
+  opencompany-brain delete old-note --force`,
+  folder: `Usage: opencompany-brain folder list [--json]
+       opencompany-brain folder create --path <folder> [--json]
+       opencompany-brain folder delete --path <folder> [--json]
+       opencompany-brain folder rename --from <folder> --to <folder> [--json]
+
+List folders in use, create an empty adjustable folder, delete an empty adjustable folder,
+or rename an adjustable folder and the documents under it. Required folders
+(inbox, skills, people, companies, evidence) cannot be renamed or removed.
+
+Examples:
+  opencompany-brain folder list
+  opencompany-brain folder create --path projects/launch
+  opencompany-brain folder delete --path meetings
+  opencompany-brain folder rename --from research --to market-research`,
+  doctor: `Usage: opencompany-brain doctor [--json]
+
+Check validation, links, folder shape, and weak provenance.
+
+Example:
+  opencompany-brain doctor --json`,
+};
+
+export function commandHelp(commandName: string): string {
+  return COMMAND_HELP[commandName] ?? HELP;
+}
+
+export function helpResult(message: string, commandName?: string): CommandResult {
+  const help = commandName ? commandHelp(commandName) : HELP;
+  return fail(`${message}\n\n${help}`, 1, { help });
+}
+
+export function validateCommandArgs(commandName: string, args: ReturnType<typeof parseArgs>) {
+  const allowed = Object.hasOwn(COMMAND_FLAGS, commandName)
+    ? COMMAND_FLAGS[commandName]
+    : undefined;
+  if (!allowed) return null;
+  const allowedSet = new Set([...GLOBAL_FLAGS, ...allowed]);
+  const unknown = args.names().find((name) => !allowedSet.has(name));
+  return unknown ? `Unknown option "--${unknown}".` : null;
+}
+
+async function helpCommand(ctx: CommandContext): Promise<CommandResult> {
+  const commandName = ctx.args.positionals[0];
+  if (!commandName) return ok(HELP, { help: HELP });
+  if (!Object.hasOwn(COMMANDS, commandName)) {
+    return helpResult(`Unknown command "${commandName}".`);
+  }
+  const help = commandHelp(commandName);
+  return ok(help, { command: commandName, help });
+}
+
+async function create(ctx: CommandContext): Promise<CommandResult> {
+  const typeInput = ctx.args.get("type")?.trim();
+  if (!typeInput) {
+    return fail(`\`--type\` is required. Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`);
+  }
+  if (!isBuiltInBrainEntityType(typeInput)) {
+    return fail(
+      `Unsupported opencompany Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(
+        ", ",
+      )}.`,
+    );
+  }
+  const kindInput = ctx.args.get("kind")?.trim();
+  if (kindInput && !isValidBrainKind(kindInput)) {
+    return fail('`--kind` must be "page" or "evidence".');
+  }
+  const folderInput = ctx.args.get("folder")?.trim();
+  const kind: BrainKind =
+    kindInput && isValidBrainKind(kindInput)
+      ? kindInput
+      : folderInput
+        ? brainKindForFolder(folderInput)
+        : "page";
+  const folder = normalizeBrainFolderForV1(folderInput ?? defaultBrainFolder(typeInput, kind));
+  if (!isValidBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
+  const folderKindError = brainFolderKindError(folder, kind);
+  if (folderKindError) {
+    return fail(`\`--folder\` "${folder}" does not match kind "${kind}". ${folderKindError}`);
+  }
+  const rawId = ctx.args.get("id") ?? ctx.args.get("title") ?? "untitled";
+  const id = normalizeBrainId(rawId);
+  if (!isValidBrainId(id)) return fail("`--id` must resolve to a lowercase slug.");
+  if (await findBrainFile(ctx.root, id)) return fail(`A brain doc with id "${id}" already exists.`);
+
+  const now = nowIso();
+  const title = ctx.args.get("title")?.trim() || titleFromId(id);
+  const type = typeInput;
+  const status = ctx.args.get("status")?.trim() ?? "draft";
+  if (status !== "draft" && status !== "active" && status !== "archived" && status !== "merged") {
+    return fail("`--status` must be draft, active, archived, or merged.");
+  }
+  const truth = (
+    ctx.args.has("truth-stdin") ? await readStdin() : (ctx.args.get("truth") ?? "")
+  ).trim();
+  if (!truth) return fail("`--truth` or `--truth-stdin` is required.");
+  const relations = readRelations(ctx.args.getAll("relation"));
+  if (!relations.ok) return fail(relations.error);
+  const sourceRef = ctx.args.get("source-ref")?.trim();
+  const sourceTitle = ctx.args.get("source-title")?.trim();
+  const evidenceId = ctx.args.get("evidence-id")?.trim();
+  const evidenceEntry = sourceRef
+    ? brainTimelineEntryFromParts({
+        at: now,
+        summary: `Created ${title}.`,
+        sourceRef,
+        sourceTitle: sourceTitle ?? "",
+        ...(evidenceId ? { evidenceId } : {}),
+      })
+    : null;
+  const possibleDuplicates = await findPossibleDuplicates(ctx.root, {
+    id,
+    title,
+    truth,
+  });
+  const doc: BrainDocument = {
+    frontmatter: {
+      id,
+      folder,
+      kind,
+      type,
+      status,
+      title,
+      createdAt: now,
+      updatedAt: now,
+      relations: relations.value,
+      ...(ctx.args.getAll("alias").length > 0 ? { aliases: ctx.args.getAll("alias") } : {}),
+      ...(sourceRef
+        ? {
+            sources: [
+              {
+                ref: sourceRef,
+                capturedAt: now,
+                ...(sourceTitle ? { title: sourceTitle } : {}),
+              },
+            ],
+          }
+        : {}),
+    },
+    title,
+    compiledTruth: truth,
+    timeline: evidenceEntry ? [evidenceEntry] : [],
+  };
+  const relativePath = await persist(ctx.root, doc);
+  return ok(
+    `Created "${id}" at ${relativePath} (status ${doc.frontmatter.status}; timeline entries ${doc.timeline.length}).`,
+    {
+      id,
+      folder,
+      path: relativePath,
+      status: doc.frontmatter.status,
+      timelineEntryCount: doc.timeline.length,
+      ...(evidenceEntry ? { evidenceId: evidenceEntry.evidenceId } : {}),
+      ...(possibleDuplicates.length > 0 ? { warnings: { possibleDuplicates } } : {}),
+    },
+  );
+}
+
+async function get(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  const { file, doc } = loaded;
+  const section = ctx.args.get("section") ?? "all";
+  if (!["all", "frontmatter", "truth", "timeline"].includes(section)) {
+    return fail("`--section` must be all, frontmatter, truth, or timeline.");
+  }
+  if (section === "frontmatter") {
+    return ok(JSON.stringify(doc.frontmatter, null, 2), {
+      id: file.id,
+      path: file.relativePath,
+      frontmatter: doc.frontmatter,
+    });
+  }
+  if (section === "truth") {
+    return ok(doc.compiledTruth || "_No compiled truth yet._", {
+      id: file.id,
+      path: file.relativePath,
+      compiledTruth: doc.compiledTruth,
+    });
+  }
+  if (section === "timeline") {
+    const text = doc.timeline.length
+      ? doc.timeline.map((entry) => `### ${entry.at}\n${entry.body}`).join("\n\n")
+      : "_No timeline yet._";
+    return ok(text, {
+      id: file.id,
+      path: file.relativePath,
+      timeline: doc.timeline,
+    });
+  }
+  return ok(file.source, { id: file.id, path: file.relativePath, doc });
+}
+
+async function list(ctx: CommandContext): Promise<CommandResult> {
+  const folderInput = ctx.args.get("folder");
+  const folder = folderInput ? normalizeBrainFolderForV1(folderInput) : null;
+  if (folderInput && !isValidBrainFolder(folder ?? "")) {
+    return fail("`--folder` must be a safe folder path.");
+  }
+
+  const limit = Math.max(1, ctx.args.number("limit") ?? Number.POSITIVE_INFINITY);
+  const docs = (
+    await Promise.all(
+      (
+        await listBrainFiles(ctx.root)
+      ).map(async (file) => {
+        try {
+          const doc = parseBrainDocument(file.source);
+          const folderPath = doc.frontmatter.folder;
+          if (
+            !folderPath ||
+            (folder && folderPath !== folder && !folderPath.startsWith(`${folder}/`))
+          ) {
+            return null;
+          }
+          if (!folder && isBrainSkillFolder(folderPath)) return null;
+          if (!ctx.args.has("include-merged") && doc.frontmatter.status === "merged") return null;
+          if (
+            !ctx.args.has("include-conflicts") &&
+            (doc.frontmatter.relations ?? []).some((relation) => relation.type === "conflicts_with")
+          ) {
+            return null;
+          }
+          const type = isBuiltInBrainEntityType(doc.frontmatter.type) ? doc.frontmatter.type : null;
+          if (!type) return null;
+          return {
+            id: file.id,
+            path: file.relativePath,
+            folder: folderPath,
+            title: doc.frontmatter.title ?? doc.title ?? file.id,
+            type,
+            updatedAt: doc.frontmatter.updatedAt ?? "",
+          };
+        } catch {
+          return null;
+        }
+      }),
+    )
+  )
+    .filter((doc): doc is NonNullable<typeof doc> => doc !== null)
+    .sort((a, b) => {
+      const updated = b.updatedAt.localeCompare(a.updatedAt);
+      return updated !== 0 ? updated : a.path.localeCompare(b.path);
+    })
+    .slice(0, limit);
+
+  const rendered = docs.length
+    ? docs
+        .map(
+          (doc) =>
+            `[${doc.folder}] ${doc.title} (${doc.id}, updated ${doc.updatedAt || "unknown"})`,
+        )
+        .join("\n")
+    : "No brain docs found.";
+  return ok(rendered, { count: docs.length, docs });
+}
+
+async function timeline(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  const sinceInput = ctx.args.get("since");
+  const since = sinceInput ? resolveSince(sinceInput) : undefined;
+  if (sinceInput && !since) {
+    return fail(`Invalid --since value "${sinceInput}". Use 30m, 24h, 7d, 2w, or ISO-8601.`);
+  }
+  const limit = Math.max(1, ctx.args.number("limit") ?? 100);
+  const entries = sortedTimelineEntries(loaded.doc.timeline)
+    .filter((entry) => !since || entry.at >= since)
+    .slice(0, limit);
+  const text = entries.length
+    ? entries.map((entry) => `### ${entry.at}\n${entry.body}`).join("\n\n")
+    : "_No timeline yet._";
+  return ok(text, {
+    id: loaded.file.id,
+    path: loaded.file.relativePath,
+    timeline: entries,
+  });
+}
+
+async function query(ctx: CommandContext): Promise<CommandResult> {
+  const text = (ctx.args.get("text") ?? ctx.args.positionals.join(" ")).trim();
+  const usage: BrainUsageEntry[] = [];
+  const providers = ctx.args.has("lexical-only")
+    ? {}
+    : await loadProviders(process.env, (entry) => usage.push(entry));
+  const sinceInput = ctx.args.get("since");
+  const since = sinceInput ? resolveSince(sinceInput) : undefined;
+  if (sinceInput && !since) {
+    return fail(`Invalid --since value "${sinceInput}". Use 30m, 24h, 7d, 2w, or ISO-8601.`);
+  }
+  const graphDirectionInput = ctx.args.get("graph-direction");
+  const graphDirection = readGraphDirection(graphDirectionInput);
+  if (graphDirectionInput && !graphDirection) {
+    return fail('Invalid --graph-direction value. Use "out", "in", or "both".');
+  }
+  const kindInput = ctx.args.get("kind");
+  if (kindInput && !isValidBrainKind(kindInput)) {
+    return fail('Invalid --kind value. Use "page" or "evidence".');
+  }
+  const kind: BrainKind = kindInput && isValidBrainKind(kindInput) ? kindInput : "page";
+  const limitInput = ctx.args.get("limit");
+  const limit = limitInput === undefined ? DEFAULT_QUERY_LIMIT : Number(limitInput);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_QUERY_LIMIT) {
+    return fail(`Invalid --limit value. Use an integer from 1 to ${MAX_QUERY_LIMIT}.`);
+  }
+  const offsetInput = ctx.args.get("offset");
+  const offset = offsetInput === undefined ? 0 : Number(offsetInput);
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    return fail("Invalid --offset value. Use a non-negative integer.");
+  }
+  const candidates = await queryBrain(
+    ctx.root,
+    {
+      text,
+      ...(ctx.args.get("folder")
+        ? { folder: normalizeBrainFolderForV1(ctx.args.get("folder") ?? "") }
+        : {}),
+      kind,
+      ...(since ? { since } : {}),
+      ...(ctx.args.number("hops") !== undefined
+        ? { hops: Math.max(0, ctx.args.number("hops") ?? 0) }
+        : {}),
+      ...(graphDirection ? { graphDirection } : {}),
+      limit: limit + 1,
+      offset,
+      lexicalOnly: ctx.args.has("lexical-only"),
+      ...(ctx.args.has("include-invalid") ? { includeInvalid: true } : {}),
+      ...(ctx.args.has("include-merged") ? { includeMerged: true } : {}),
+      ...(ctx.args.has("include-archived") ? { includeArchived: true } : {}),
+      ...(ctx.args.has("include-conflicts") ? { includeConflicts: true } : {}),
+    },
+    providers,
+  );
+  const hasMore = candidates.length > limit;
+  const hits = candidates.slice(0, limit);
+  const nextOffset = hasMore ? offset + hits.length : undefined;
+  const instruction =
+    nextOffset !== undefined
+      ? `More matches are available. Repeat the same query with all filters unchanged and --offset ${nextOffset}.`
+      : undefined;
+  const rendered = hits.length
+    ? hits
+        .map(
+          (hit, index) =>
+            `${offset + index + 1}. [${hit.folder}] ${hit.title} (${hit.id}, score ${hit.score}, updated ${hit.updatedAt})\n${hit.snippet}\nNext: opencompany-brain get ${hit.id}`,
+        )
+        .join("\n\n")
+    : "No matching brain docs found.";
+  return {
+    ...ok([rendered, instruction].filter(Boolean).join("\n\n"), {
+      count: hits.length,
+      hits,
+      scope: { kind },
+      pagination: {
+        limit,
+        offset,
+        returned: hits.length,
+        hasMore,
+        ...(nextOffset !== undefined ? { nextOffset, instruction } : {}),
+      },
+    }),
+    usage,
+  };
+}
+
+async function ingest(ctx: CommandContext): Promise<CommandResult> {
+  const text = (
+    ctx.args.has("text-stdin") ? await readStdin() : (ctx.args.get("text") ?? "")
+  ).trim();
+  if (!text) return fail("`--text` or `--text-stdin` is required.");
+  const sourceRef = ctx.args.get("source-ref")?.trim();
+  if (!sourceRef) return fail("`--source-ref` is required.");
+  const apiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
+  if (!apiKey) return fail("VERCEL_AI_GATEWAY_API_KEY is required for ingest.");
+  const usage: BrainUsageEntry[] = [];
+  const reporting = gatewayReportingFromEnv(process.env);
+  const gateway = createGateway({
+    apiKey,
+    ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
+      ? { baseUrl: process.env.GOAT_BRAIN_GATEWAY_BASE_URL }
+      : {}),
+    ...(reporting ? { reporting } : {}),
+    chatModel:
+      ctx.args.get("model")?.trim() ||
+      process.env.GOAT_BRAIN_INGEST_MODEL?.trim() ||
+      "openai/gpt-5.5",
+    onUsage: (entry) => usage.push(entry),
+  });
+  const sourceTitle = ctx.args.get("source-title")?.trim();
+  const at = ctx.args.get("at")?.trim();
+  const result = await ingestBrain(
+    ctx.root,
+    {
+      text,
+      sourceRef,
+      ...(sourceTitle ? { sourceTitle } : {}),
+      ...(at ? { at } : {}),
+      ...(ctx.args.has("dry-run") ? { dryRun: true } : {}),
+    },
+    gateway,
+  );
+  const rendered = result.dryRun
+    ? `Dry run planned ${result.plan.length} brain change(s).`
+    : result.failed.length > 0
+      ? `Ingested ${result.applied.length} brain change(s); ${result.failed.length} failed.`
+      : `Ingested ${result.applied.length} brain change(s).`;
+  return {
+    ...ok(rendered, result),
+    usage,
+    code: ingestCommandExitCode(result),
+  };
+}
+
+function gatewayReportingFromEnv(env: NodeJS.ProcessEnv) {
+  const user = env.GATEWAY_REPORTING_USER?.trim();
+  const tags = (env.GATEWAY_REPORTING_TAGS ?? "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  if (!user && tags.length === 0) return null;
+  return {
+    ...(user ? { user } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+  };
+}
+
+export function ingestCommandExitCode(result: {
+  applied: Array<{ id: string }>;
+  failed?: unknown[];
+  health: {
+    findings: Array<{ severity: "error" | "warn"; id: string }>;
+  } | null;
+}): number {
+  if (result.failed && result.failed.length > 0) return 1;
+  if (!result.health) return 0;
+  const appliedIds = new Set(result.applied.map((change) => change.id));
+  return result.health.findings.some(
+    (finding) => finding.severity === "error" && appliedIds.has(finding.id),
+  )
+    ? 1
+    : 0;
+}
+
+async function rewrite(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  const truth = (
+    ctx.args.has("truth-stdin") ? await readStdin() : (ctx.args.get("truth") ?? "")
+  ).trim();
+  if (!truth) return fail("`--truth` or `--truth-stdin` is required.");
+  loaded.doc.compiledTruth = truth;
+  loaded.doc.frontmatter.updatedAt = nowIso();
+  const relativePath = await persist(ctx.root, loaded.doc);
+  return ok(
+    `Rewrote compiled truth for "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
+}
+
+async function set(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const title = ctx.args.get("title")?.trim();
+  const typeInput = ctx.args.get("type")?.trim();
+  const statusInput = ctx.args.get("status")?.trim();
+  if (!title && !typeInput && !statusInput) {
+    return fail("Provide at least one of `--title`, `--type`, or `--status`.");
+  }
+  const type = typeInput ? normalizeBuiltInBrainEntityType(typeInput) : undefined;
+  if (typeInput && !type) {
+    return fail(
+      `Unsupported opencompany Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(
+        ", ",
+      )}.`,
+    );
+  }
+  const status =
+    statusInput === "draft" || statusInput === "active" || statusInput === "archived"
+      ? statusInput
+      : undefined;
+  if (statusInput && !status) {
+    return fail(
+      "`--status` must be draft, active, or archived. Use the merge command to mark a doc merged.",
+    );
+  }
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  if (loaded.doc.frontmatter.status === "merged") {
+    return fail(`"${id}" is merged into "${loaded.doc.frontmatter.mergedInto ?? "?"}".`);
+  }
+  if (title) {
+    loaded.doc.title = title;
+    loaded.doc.frontmatter.title = title;
+  }
+  if (type) loaded.doc.frontmatter.type = type;
+  if (status) loaded.doc.frontmatter.status = status;
+  loaded.doc.frontmatter.updatedAt = nowIso();
+  const relativePath = await persist(ctx.root, loaded.doc);
+  return ok(
+    `Updated "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      title: loaded.doc.frontmatter.title,
+      type: loaded.doc.frontmatter.type,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
+}
+
+async function appendTimeline(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  if (ctx.args.has("body-stdin") && ctx.args.has("detail-stdin")) {
+    return fail("Use only one stdin flag: `--body-stdin` or `--detail-stdin`.");
+  }
+  const summary = (
+    ctx.args.has("body-stdin")
+      ? await readStdin()
+      : (ctx.args.get("body") ?? ctx.args.positionals.slice(2).join(" "))
+  ).trim();
+  if (!summary) return fail("`--body` or `--body-stdin` is required.");
+  const detail = (
+    ctx.args.has("detail-stdin") ? await readStdin() : (ctx.args.get("detail") ?? "")
+  ).trim();
+  const at = ctx.args.get("at") ?? ctx.args.positionals[1] ?? nowIso();
+  const parsedAt = Date.parse(at);
+  if (Number.isNaN(parsedAt)) return fail("`--at` must be an ISO-8601 timestamp.");
+  const entryAt = new Date(parsedAt).toISOString();
+  const evidenceId = ctx.args.get("evidence-id")?.trim();
+  const entry = brainTimelineEntryFromParts({
+    at: entryAt,
+    summary,
+    detail,
+    sourceRef: ctx.args.get("source-ref")?.trim() ?? "",
+    sourceTitle: ctx.args.get("source-title")?.trim() ?? "",
+    ...(evidenceId ? { evidenceId } : {}),
+  });
+  loaded.doc.timeline.push(entry);
+  loaded.doc.frontmatter.updatedAt = nowIso();
+  const sourceRef = ctx.args.get("source-ref")?.trim();
+  if (sourceRef) {
+    const sources = loaded.doc.frontmatter.sources ?? [];
+    const source: BrainSource = {
+      ref: sourceRef,
+      capturedAt: entryAt,
+    };
+    const sourceTitle = ctx.args.get("source-title")?.trim();
+    if (sourceTitle) source.title = sourceTitle;
+    sources.push(source);
+    loaded.doc.frontmatter.sources = sources;
+  }
+  const relativePath = await persist(ctx.root, loaded.doc);
+  return ok(
+    `Appended timeline entry to "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}; evidence ${entry.evidenceId}).`,
+    {
+      id,
+      path: relativePath,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+      evidenceId: entry.evidenceId,
+    },
+  );
+}
+
+async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
+  const subjectId = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!subjectId) return fail("Provide a subject brain id.");
+  if (!isValidBrainId(subjectId)) return fail("Subject id must be a lowercase brain slug.");
+  const typeInput = ctx.args.get("type")?.trim() || "source";
+  if (!isBuiltInBrainEntityType(typeInput)) {
+    return fail(
+      `Unsupported opencompany Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
+    );
+  }
+  const folder = normalizeBrainFolderForV1(ctx.args.get("folder")?.trim() || BRAIN_EVIDENCE_ZONE);
+  if (!isValidBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
+  const folderKindError = brainFolderKindError(folder, "evidence");
+  if (folderKindError) return fail(`\`--folder\` "${folder}" is invalid. ${folderKindError}`);
+  const subject = await loadDoc(ctx.root, subjectId);
+  if (!subject) return notFound(`No brain doc found with id "${subjectId}".`);
+  if (ctx.args.has("body-stdin") && ctx.args.has("detail-stdin")) {
+    return fail("Use only one stdin flag: `--body-stdin` or `--detail-stdin`.");
+  }
+
+  const summary = (
+    ctx.args.has("body-stdin")
+      ? await readStdin()
+      : (ctx.args.get("body") ?? ctx.args.positionals.slice(2).join(" "))
+  ).trim();
+  if (!summary) return fail("`--body` or `--body-stdin` is required.");
+  const sourceRef = ctx.args.get("source-ref")?.trim();
+  if (!sourceRef) return fail("`--source-ref` is required for evidence records.");
+  const detail = (
+    ctx.args.has("detail-stdin") ? await readStdin() : (ctx.args.get("detail") ?? "")
+  ).trim();
+  const at = ctx.args.get("at") ?? ctx.args.positionals[1] ?? nowIso();
+  const parsedAt = Date.parse(at);
+  if (Number.isNaN(parsedAt)) return fail("`--at` must be an ISO-8601 timestamp.");
+  const capturedAt = new Date(parsedAt).toISOString();
+  const evidenceIdInput = ctx.args.get("evidence-id")?.trim();
+  const evidenceId = evidenceIdInput
+    ? normalizeEvidenceRecordId(evidenceIdInput)
+    : deterministicEvidenceId({ at: capturedAt, summary, sourceRef });
+  if (!evidenceId) return fail("`--evidence-id` must be a valid ev-* brain id.");
+  if (await findBrainFile(ctx.root, evidenceId)) {
+    return fail(`A brain doc with id "${evidenceId}" already exists.`);
+  }
+  const sourceTitle = ctx.args.get("source-title")?.trim();
+  const title = ctx.args.get("title")?.trim() || evidenceTitle(sourceTitle, summary);
+  const evidenceBody = brainTimelineBody({
+    summary,
+    detail,
+    sourceRef,
+    sourceTitle: sourceTitle ?? "",
+  });
+  const evidenceDoc: BrainDocument = {
+    frontmatter: {
+      id: evidenceId,
+      folder,
+      kind: "evidence",
+      type: typeInput,
+      status: "active",
+      title,
+      createdAt: capturedAt,
+      updatedAt: capturedAt,
+      relations: [{ type: ctx.args.get("relation")?.trim() || "about", to: subjectId }],
+      sources: [
+        {
+          ref: sourceRef,
+          capturedAt,
+          ...(sourceTitle ? { title: sourceTitle } : {}),
+        },
+      ],
+    },
+    title,
+    compiledTruth: evidenceBody,
+    timeline: [],
+  };
+
+  subject.doc.frontmatter.updatedAt = nowIso();
+  const timelineEntry = brainTimelineEntryFromParts({
+    evidenceId,
+    at: capturedAt,
+    summary: `${formatBrainEvidenceLink(evidenceId, title)}: ${summary}`,
+    detail,
+    sourceRef,
+    sourceTitle: sourceTitle ?? "",
+  });
+  if (!subject.doc.timeline.some((entry) => entry.evidenceId === evidenceId)) {
+    subject.doc.timeline = [...subject.doc.timeline, timelineEntry];
+  }
+
+  const evidencePath = await persist(ctx.root, evidenceDoc);
+  const subjectPath = await persist(ctx.root, subject.doc);
+  return ok(
+    `Created active evidence "${evidenceId}" and linked it to "${subjectId}" (subject status ${subject.doc.frontmatter.status}; timeline entries ${subject.doc.timeline.length}).`,
+    {
+      id: subjectId,
+      path: subjectPath,
+      status: subject.doc.frontmatter.status,
+      timelineEntryCount: subject.doc.timeline.length,
+      evidenceId,
+      evidencePath,
+      evidenceStatus: evidenceDoc.frontmatter.status,
+    },
+  );
+}
+
+function sortedTimelineEntries(entries: BrainDocument["timeline"]) {
+  return [...entries].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+}
+
+function normalizeEvidenceRecordId(value: string | undefined): string | null {
+  if (!value) return null;
+  return normalizeEvidenceId(value);
+}
+
+function evidenceTitle(sourceTitle: string | undefined, summary: string) {
+  if (sourceTitle?.trim()) return sourceTitle.trim();
+  const clipped = summary.replace(/\s+/g, " ").trim().slice(0, 80);
+  return clipped ? `Evidence: ${clipped}` : "Evidence";
+}
+
+async function alias(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  const aliases = new Set(loaded.doc.frontmatter.aliases ?? []);
+  for (const value of ctx.args.getAll("remove")) aliases.delete(value.trim());
+  for (const value of ctx.args.getAll("add")) {
+    const alias = value.trim();
+    if (alias) aliases.add(alias);
+  }
+  loaded.doc.frontmatter.aliases = [...aliases].sort((a, b) => a.localeCompare(b));
+  loaded.doc.frontmatter.updatedAt = nowIso();
+  const relativePath = await persist(ctx.root, loaded.doc);
+  return ok(
+    `Updated aliases for "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      aliases: loaded.doc.frontmatter.aliases,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
+}
+
+async function link(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  const remove = new Set(ctx.args.getAll("remove"));
+  const relationType = ctx.args.get("as") ?? DEFAULT_BRAIN_RELATION_TYPE;
+  if (!isValidBrainRelationType(relationType))
+    return fail("`--as` must be a lowercase relation type.");
+  const byKey = new Map(
+    (loaded.doc.frontmatter.relations ?? []).map((relation) => [relationKey(relation), relation]),
+  );
+  for (const target of remove) {
+    if (!isValidBrainId(target)) return fail(`Invalid related id "${target}".`);
+    for (const key of [...byKey.keys()]) {
+      if (key.endsWith(`:${target}`)) byKey.delete(key);
+    }
+  }
+  for (const target of ctx.args.getAll("to")) {
+    if (!isValidBrainId(target)) return fail(`Invalid related id "${target}".`);
+    byKey.set(relationKey({ type: relationType, to: target }), {
+      type: relationType,
+      to: target,
+    });
+  }
+  loaded.doc.frontmatter.relations = [...byKey.values()].sort((a, b) =>
+    relationKey(a).localeCompare(relationKey(b)),
+  );
+  loaded.doc.frontmatter.updatedAt = nowIso();
+  const relativePath = await persist(ctx.root, loaded.doc);
+  return ok(
+    `Updated related links for "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      relations: loaded.doc.frontmatter.relations,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
+}
+
+async function merge(ctx: CommandContext): Promise<CommandResult> {
+  const from = ctx.args.get("from") ?? ctx.args.positionals[0];
+  const into = ctx.args.get("into") ?? ctx.args.positionals[1];
+  if (!from || !into) return fail("Provide --from and --into brain ids.");
+  if (!isValidBrainId(from) || !isValidBrainId(into)) {
+    return fail("Merge ids must be lowercase brain slugs.");
+  }
+  if (from === into) return fail("Cannot merge a brain doc into itself.");
+  const source = await loadDoc(ctx.root, from);
+  if (!source) return notFound(`No brain doc found with id "${from}".`);
+  const target = await loadDoc(ctx.root, into);
+  if (!target) return notFound(`No brain doc found with id "${into}".`);
+
+  const targetAliases = new Set(target.doc.frontmatter.aliases ?? []);
+  if (source.doc.title) targetAliases.add(source.doc.title);
+  for (const alias of source.doc.frontmatter.aliases ?? []) targetAliases.add(alias);
+  target.doc.frontmatter.aliases = [...targetAliases].sort((a, b) => a.localeCompare(b));
+  target.doc.frontmatter.updatedAt = nowIso();
+
+  const sourceRelations = new Map(
+    (source.doc.frontmatter.relations ?? []).map((relation) => [relationKey(relation), relation]),
+  );
+  sourceRelations.set(relationKey({ type: "merged_into", to: into }), {
+    type: "merged_into",
+    to: into,
+  });
+  source.doc.frontmatter.relations = [...sourceRelations.values()].sort((a, b) =>
+    relationKey(a).localeCompare(relationKey(b)),
+  );
+  source.doc.frontmatter.status = "merged";
+  source.doc.frontmatter.mergedInto = into;
+  source.doc.frontmatter.updatedAt = nowIso();
+
+  const targetPath = await persist(ctx.root, target.doc);
+  const sourcePath = await persist(ctx.root, source.doc);
+  return ok(
+    `Marked "${from}" as merged into "${into}" (target status ${target.doc.frontmatter.status}; timeline entries ${target.doc.timeline.length}).`,
+    {
+      from,
+      into,
+      sourcePath,
+      targetPath,
+      sourceStatus: source.doc.frontmatter.status,
+      sourceTimelineEntryCount: source.doc.timeline.length,
+      targetStatus: target.doc.frontmatter.status,
+      targetTimelineEntryCount: target.doc.timeline.length,
+    },
+  );
+}
+
+async function move(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  const folder = normalizeBrainFolderForV1(ctx.args.get("folder") ?? "");
+  if (!id) return fail("Provide a brain id.");
+  if (!isValidBrainFolder(folder)) return fail("`--folder` must be a safe folder path.");
+  const loaded = await loadDoc(ctx.root, id);
+  if (!loaded) return notFound(`No brain doc found with id "${id}".`);
+  const kind = loaded.doc.frontmatter.kind;
+  if (!isValidBrainKind(kind)) {
+    return fail(`Cannot move "${id}" because frontmatter.kind is missing or invalid.`);
+  }
+  const folderKindError = brainFolderKindError(folder, kind);
+  if (folderKindError) {
+    return fail(`\`--folder\` "${folder}" does not match kind "${kind}". ${folderKindError}`);
+  }
+  const oldPath = loaded.file.relativePath;
+  loaded.doc.frontmatter.folder = folder;
+  loaded.doc.frontmatter.updatedAt = nowIso();
+  const newPath = await persist(ctx.root, loaded.doc);
+  if (newPath !== oldPath) await removeBrainFile(ctx.root, oldPath);
+  return ok(
+    `Moved "${id}" to ${folder} (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: newPath,
+      oldPath,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
+}
+
+async function del(ctx: CommandContext): Promise<CommandResult> {
+  const id = ctx.args.positionals[0] ?? ctx.args.get("id");
+  if (!id) return fail("Provide a brain id.");
+  const file = await findBrainFile(ctx.root, id);
+  if (!file) return notFound(`No brain doc found with id "${id}".`);
+  if (ctx.args.has("dry-run"))
+    return ok(`Would delete "${id}" at ${file.relativePath}.`, {
+      id,
+      path: file.relativePath,
+    });
+  if (!ctx.args.has("force")) return fail("Deletion requires --force.");
+  await removeBrainFile(ctx.root, file.relativePath);
+  return ok(`Deleted "${id}".`, { id, path: file.relativePath });
+}
+
+async function folder(ctx: CommandContext): Promise<CommandResult> {
+  const subcommand = ctx.args.positionals[0] ?? "list";
+  if (subcommand === "list") {
+    const folders = await listFoldersWithDocuments(ctx.root);
+    const values = folders.map((folder) => folder.path);
+    return ok(values.join("\n"), { folders: values, folderRows: folders });
+  }
+  if (subcommand === "create") {
+    const folderPath = normalizeBrainFolderForV1(ctx.args.get("path") ?? "");
+    if (!isValidBrainFolder(folderPath)) return fail("`--path` must be a safe folder path.");
+    if (isHardDefaultBrainFolder(folderPath)) {
+      return fail(`Folder "${folderPath}" is required and already exists.`);
+    }
+    await upsertBrainFolder(ctx.root, {
+      path: folderPath,
+      source: brainFolderSourceForPath(folderPath),
+    });
+    return ok(`Folder "${folderPath}" is available.`, { folder: folderPath });
+  }
+  if (subcommand === "delete") {
+    const folderPath = normalizeBrainFolderForV1(ctx.args.get("path") ?? "");
+    if (!isValidBrainFolder(folderPath)) return fail("`--path` must be a safe folder path.");
+    if (isHardDefaultBrainFolder(folderPath)) {
+      return fail(`Folder "${folderPath}" is required and cannot be removed.`);
+    }
+    const folders = await readBrainFolders(ctx.root);
+    const docs = await docsUnderFolder(ctx.root, folderPath);
+    const child = folders.find((entry) => entry.path.startsWith(`${folderPath}/`));
+    if (docs.length > 0 || child) return fail(`Folder "${folderPath}" is not empty.`);
+    await removeBrainFolder(ctx.root, folderPath);
+    return ok(`Deleted folder "${folderPath}".`, { folder: folderPath });
+  }
+  if (subcommand === "rename") {
+    const fromPath = normalizeBrainFolderForV1(ctx.args.get("from") ?? "");
+    const toPath = normalizeBrainFolderForV1(ctx.args.get("to") ?? "");
+    if (!isValidBrainFolder(fromPath)) return fail("`--from` must be a safe folder path.");
+    if (!isValidBrainFolder(toPath)) return fail("`--to` must be a safe folder path.");
+    if (fromPath === toPath)
+      return ok(`Folder "${fromPath}" is already named "${toPath}".`, {
+        from: fromPath,
+        to: toPath,
+        movedDocuments: 0,
+      });
+    if (isHardDefaultBrainFolder(fromPath) || isHardDefaultBrainFolder(toPath)) {
+      return fail("Required folders cannot be renamed.");
+    }
+    if (toPath.startsWith(`${fromPath}/`)) {
+      return fail("Cannot rename a folder into one of its own children.");
+    }
+    if (brainKindForFolder(fromPath) !== brainKindForFolder(toPath)) {
+      return fail("Cannot rename folders across the evidence boundary.");
+    }
+    const existingFolders = await readBrainFolders(ctx.root);
+    const targetDocs = await docsUnderFolder(ctx.root, toPath);
+    const targetFolder = existingFolders.find(
+      (entry) => entry.path === toPath || entry.path.startsWith(`${toPath}/`),
+    );
+    if (targetDocs.length > 0 || targetFolder) return fail(`Folder "${toPath}" already exists.`);
+    const sourceFolders = existingFolders.filter(
+      (entry) => entry.path === fromPath || entry.path.startsWith(`${fromPath}/`),
+    );
+    const sourceDocs = await docsUnderFolder(ctx.root, fromPath);
+    if (sourceFolders.length === 0 && sourceDocs.length === 0) {
+      return fail(`Folder "${fromPath}" does not exist.`);
+    }
+    let movedDocuments = 0;
+    for (const loaded of sourceDocs) {
+      const oldPath = loaded.file.relativePath;
+      loaded.doc.frontmatter.folder = replaceFolderPrefix(
+        loaded.doc.frontmatter.folder ?? fromPath,
+        fromPath,
+        toPath,
+      );
+      loaded.doc.frontmatter.updatedAt = nowIso();
+      const newPath = await persist(ctx.root, loaded.doc);
+      if (newPath !== oldPath) await removeBrainFile(ctx.root, oldPath);
+      movedDocuments += 1;
+    }
+    const nextFolders = [
+      ...existingFolders.filter(
+        (entry) => entry.path !== fromPath && !entry.path.startsWith(`${fromPath}/`),
+      ),
+      ...sourceFolders.map((entry) => {
+        const path = replaceFolderPrefix(entry.path, fromPath, toPath);
+        return { path, source: brainFolderSourceForPath(path) };
+      }),
+    ];
+    await writeBrainFolders(ctx.root, nextFolders);
+    return ok(`Renamed folder "${fromPath}" to "${toPath}".`, {
+      from: fromPath,
+      to: toPath,
+      movedDocuments,
+    });
+  }
+  return fail('folder command must be "list", "create", "delete", or "rename".');
+}
+
+async function listFoldersWithDocuments(root: string) {
+  const byPath = new Map((await readBrainFolders(root)).map((entry) => [entry.path, entry]));
+  for (const loaded of await docsUnderFolder(root, "")) {
+    const folder = loaded.doc.frontmatter.folder;
+    if (!folder) continue;
+    for (const path of ancestorFolders(folder)) {
+      if (!byPath.has(path)) {
+        byPath.set(path, { path, source: brainFolderSourceForPath(path) });
+      }
+    }
+  }
+  return [...byPath.values()].toSorted((a, b) => compareBrainFolderPaths(a.path, b.path));
+}
+
+async function docsUnderFolder(root: string, folderPath: string) {
+  const files = await listBrainFiles(root);
+  return files.flatMap((file) => {
+    let doc: ReturnType<typeof parseBrainDocument>;
+    try {
+      doc = parseBrainDocument(file.source);
+    } catch {
+      return [];
+    }
+    const folder = doc.frontmatter.folder;
+    if (!folder) return [];
+    if (folderPath && folder !== folderPath && !folder.startsWith(`${folderPath}/`)) return [];
+    return [{ file, doc }];
+  });
+}
+
+function ancestorFolders(folderPath: string): string[] {
+  const parts = folderPath.split("/").filter(Boolean);
+  return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
+function replaceFolderPrefix(pathName: string, fromPath: string, toPath: string) {
+  if (pathName === fromPath) return toPath;
+  return pathName.startsWith(`${fromPath}/`)
+    ? `${toPath}/${pathName.slice(fromPath.length + 1)}`
+    : pathName;
+}
+
+async function doctor(ctx: CommandContext): Promise<CommandResult> {
+  const report = await checkBrainHealth(ctx.root);
+  const summary = `${report.files} files checked - ${report.errors} error(s), ${report.warnings} warning(s).`;
+  const text = [
+    summary,
+    ...report.findings.map(
+      (finding) =>
+        `${finding.severity.toUpperCase()} ${finding.code} ${finding.id}: ${finding.message}`,
+    ),
+  ].join("\n");
+  return {
+    ...ok(text, {
+      files: report.files,
+      errors: report.errors,
+      warnings: report.warnings,
+      findings: report.findings,
+    }),
+    code: report.errors > 0 ? 1 : 0,
+  };
+}
+
+async function persist(
+  root: string,
+  doc: ReturnType<typeof parseBrainDocument> | BrainDocument,
+): Promise<string> {
+  const normalized = toWritableDocument(doc);
+  const source = serializeBrainDocument(normalized);
+  const validation = validateBrainDocument(
+    parseBrainDocument(source),
+    normalized.frontmatter.id,
+    source,
+  );
+  if (!validation.ok) throw new Error(validation.errors.join(" "));
+  const relativePath = pathForBrainDocument(normalized);
+  await writeBrainDocumentText(root, relativePath, source);
+  return relativePath;
+}
+
+function toWritableDocument(
+  doc: ReturnType<typeof parseBrainDocument> | BrainDocument,
+): BrainDocument {
+  const fm = doc.frontmatter;
+  if (!fm.id || !fm.folder || !fm.createdAt || !fm.updatedAt || !fm.type) {
+    throw new Error("Cannot write an invalid brain document.");
+  }
+  if (!isBuiltInBrainEntityType(fm.type)) {
+    throw new Error("Cannot write a brain document without a valid type.");
+  }
+  if (!isValidBrainKind(fm.kind)) {
+    throw new Error("Cannot write a brain document without a valid kind.");
+  }
+  return {
+    title: doc.title,
+    compiledTruth: doc.compiledTruth,
+    timeline: doc.timeline,
+    frontmatter: {
+      id: fm.id,
+      folder: fm.folder,
+      kind: fm.kind,
+      type: fm.type,
+      status: fm.status ?? "draft",
+      createdAt: fm.createdAt,
+      updatedAt: fm.updatedAt,
+      relations: fm.relations ?? [],
+      ...(fm.title ? { title: fm.title } : {}),
+      ...(fm.description ? { description: fm.description } : {}),
+      ...(fm.aliases ? { aliases: fm.aliases } : {}),
+      ...(fm.sources ? { sources: fm.sources } : {}),
+      ...(fm.mergedInto ? { mergedInto: fm.mergedInto } : {}),
+    },
+  };
+}
+
+async function loadDoc(root: string, id: string) {
+  const file = await findBrainFile(root, id);
+  if (!file) return null;
+  const doc = parseBrainDocument(file.source);
+  return { file, doc };
+}
+
+function readRelations(
+  values: string[],
+): { ok: true; value: BrainRelation[] } | { ok: false; error: string } {
+  const out: BrainRelation[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const [rawType, rawTo, ...rest] = value.split(":");
+    if (!rawType || !rawTo || rest.length > 0) {
+      return { ok: false, error: '`--relation` must use "type:brain-id".' };
+    }
+    const type = rawType.trim() || DEFAULT_BRAIN_RELATION_TYPE;
+    const to = rawTo.trim();
+    if (!isValidBrainRelationType(type))
+      return { ok: false, error: `Invalid relation type "${type}".` };
+    if (!isValidBrainId(to)) return { ok: false, error: `Invalid relation target "${to}".` };
+    const key = `${type}:${to}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push({ type, to });
+    }
+  }
+  return { ok: true, value: out };
+}
+
+function relationKey(relation: BrainRelation): string {
+  return `${relation.type}:${relation.to}`;
+}
+
+function titleFromId(id: string): string {
+  return id
+    .split("-")
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+const RELATIVE_SINCE = /^(\d+)([mhdw])$/;
+const SINCE_UNIT_MS: Record<string, number> = {
+  m: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+  w: 604_800_000,
+};
+
+function resolveSince(raw: string, now = Date.now()): string | null {
+  const trimmed = raw.trim();
+  const relative = RELATIVE_SINCE.exec(trimmed);
+  if (relative) {
+    const amount = Number(relative[1]);
+    const unitMs = SINCE_UNIT_MS[relative[2] ?? ""];
+    if (!unitMs || !Number.isFinite(amount) || amount <= 0) return null;
+    return new Date(now - amount * unitMs).toISOString();
+  }
+  const parsed = Date.parse(trimmed);
+  return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
+}
+
+function readGraphDirection(raw: string | undefined) {
+  if (raw === "out" || raw === "in" || raw === "both") return raw;
+  return undefined;
+}
+
+async function findPossibleDuplicates(
+  root: string,
+  input: { id: string; title: string; truth: string },
+) {
+  const nextText = `${input.title}\n${input.truth}`;
+  const files = await listBrainFiles(root);
+  return files
+    .flatMap((file) => {
+      if (file.id === input.id) return [];
+      try {
+        const doc = parseBrainDocument(file.source);
+        if (doc.frontmatter.status === "merged") return [];
+        const score = duplicateScore(nextText, `${doc.title}\n${doc.compiledTruth}`);
+        if (score < 0.45) return [];
+        return [
+          {
+            id: file.id,
+            title: doc.frontmatter.title ?? doc.title ?? file.id,
+            score: Number(score.toFixed(2)),
+          },
+        ];
+      } catch {
+        return [];
+      }
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
+
+function duplicateScore(a: string, b: string) {
+  const aTokens = meaningfulTokens(a);
+  const bTokens = meaningfulTokens(b);
+  if (aTokens.size === 0 || bTokens.size === 0) return 0;
+  let shared = 0;
+  for (const token of aTokens) {
+    if (bTokens.has(token)) shared += 1;
+  }
+  return shared / Math.min(aTokens.size, bTokens.size);
+}
+
+const DUPLICATE_STOP_WORDS = new Set([
+  "and",
+  "for",
+  "from",
+  "the",
+  "with",
+  "this",
+  "that",
+  "into",
+  "note",
+]);
+
+function meaningfulTokens(value: string) {
+  return new Set(
+    value
+      .toLowerCase()
+      .split(/[^a-z0-9]+/g)
+      .filter((token) => token.length >= 3 && !DUPLICATE_STOP_WORDS.has(token)),
+  );
+}
+
+async function main(): Promise<void> {
+  const argv = process.argv.slice(2);
+  const commandName = argv[0];
+  if (!commandName || commandName === "--help" || commandName === "-h") {
+    process.stdout.write(HELP);
+    process.exit(commandName ? 0 : 1);
+  }
+
+  const args = parseArgs(argv.slice(1));
+  const json = args.has("json");
+  const handler = Object.hasOwn(COMMANDS, commandName) ? COMMANDS[commandName] : undefined;
+  if (!handler) {
+    render(helpResult(`Unknown command "${commandName}".`), json);
+    process.exit(1);
+  }
+  if (args.has("help")) {
+    render(
+      ok(commandHelp(commandName), {
+        command: commandName,
+        help: commandHelp(commandName),
+      }),
+      json,
+    );
+    process.exit(0);
+  }
+  const invalidArgs = validateCommandArgs(commandName, args);
+  if (invalidArgs) {
+    render(helpResult(invalidArgs, commandName), json);
+    process.exit(1);
+  }
+
+  try {
+    const result = withCommandHelpOnFailure(
+      await handler({
+        root: resolveBrainRoot(args.get("root")),
+        json,
+        args,
+      }),
+      commandName,
+    );
+    render(result, json);
+    if (args.has("report-usage") && result.usage && result.usage.length > 0) {
+      process.stderr.write(`${formatBrainUsageReport(result.usage)}\n`);
+    }
+    process.exit(result.code);
+  } catch (error) {
+    render(
+      fail(`Unexpected error: ${error instanceof Error ? error.message : String(error)}`),
+      json,
+    );
+    process.exit(1);
+  }
+}
+
+function withCommandHelpOnFailure(result: CommandResult, commandName: string): CommandResult {
+  if (result.code === 0 || !isFailureData(result.data) || result.text.includes("Usage:")) {
+    return result;
+  }
+  const help = commandHelp(commandName);
+  return {
+    ...result,
+    text: `${result.text}\n\n${help}`,
+    data: {
+      ...result.data,
+      help,
+    },
+  };
+}
+
+function isFailureData(data: unknown): data is { ok: false } & Record<string, unknown> {
+  return Boolean(data && typeof data === "object" && (data as { ok?: unknown }).ok === false);
+}
+
+function isCliEntrypoint() {
+  if (!process.argv[1]) return false;
+  const modulePath = fileURLToPath(import.meta.url);
+  const argvPath = path.resolve(process.argv[1]);
+  if (modulePath === argvPath) return true;
+  try {
+    return realpathSync(modulePath) === realpathSync(argvPath);
+  } catch {
+    return false;
+  }
+}
+
+if (isCliEntrypoint()) {
+  void main();
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  createOpenCompanyClient,
+  createApiClient,
   type EngineRuntimeAccess,
   type EngineRuntimeStatus,
   type UpdateConversationBody,
@@ -15,7 +15,7 @@ export async function updateHeadlessChatConversation(
   options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
 ) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
-  const client = createOpenCompanyClient(baseUrl, {
+  const client = createApiClient(baseUrl, {
     fetch: createHeadlessChatApiFetch({
       baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),
@@ -84,7 +84,7 @@ export async function createEngineRuntimeAccess(
 
 function clientFor(options: { baseUrl?: string; fetch?: typeof globalThis.fetch }) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
-  return createOpenCompanyClient(baseUrl, {
+  return createApiClient(baseUrl, {
     fetch: createHeadlessChatApiFetch({
       baseUrl,
       ...(options.fetch ? { fetch: options.fetch } : {}),

@@ -1,4 +1,4 @@
-import { GOAT_ACTION_EFFECTS_READ } from "@opencompany/goat-agent/actions/types";
+import { ACTION_EFFECTS_READ } from "@opencompany/agent/actions/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -14,52 +14,52 @@ const mocks = vi.hoisted(() => ({
   resolveGitHubActions: vi.fn(),
   resolveStripeActions: vi.fn(),
   resolveRevolutActions: vi.fn(),
-  listGoatWorkspaceCapabilities: vi.fn(),
+  listWorkspaceCapabilities: vi.fn(),
 }));
 
-vi.mock("@opencompany/db/goat-capabilities", () => ({
-  listGoatWorkspaceCapabilities: mocks.listGoatWorkspaceCapabilities,
+vi.mock("@opencompany/db/capabilities", () => ({
+  listWorkspaceCapabilities: mocks.listWorkspaceCapabilities,
 }));
 
-vi.mock("@opencompany/goat-agent/actions/attio", () => ({
+vi.mock("@opencompany/agent/actions/attio", () => ({
   resolveAttioActions: mocks.resolveAttioActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/slack", () => ({
+vi.mock("@opencompany/agent/actions/slack", () => ({
   resolveSlackActions: mocks.resolveSlackActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/gmail", () => ({
+vi.mock("@opencompany/agent/actions/gmail", () => ({
   resolveGmailActions: mocks.resolveGmailActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/google-calendar", () => ({
+vi.mock("@opencompany/agent/actions/google-calendar", () => ({
   resolveGoogleCalendarActions: mocks.resolveGoogleCalendarActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/google-drive", () => ({
+vi.mock("@opencompany/agent/actions/google-drive", () => ({
   resolveGoogleDriveActions: mocks.resolveGoogleDriveActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/latitude", () => ({
+vi.mock("@opencompany/agent/actions/latitude", () => ({
   resolveLatitudeActions: mocks.resolveLatitudeActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/linear", () => ({
+vi.mock("@opencompany/agent/actions/linear", () => ({
   resolveLinearActions: mocks.resolveLinearActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/neon", () => ({
+vi.mock("@opencompany/agent/actions/neon", () => ({
   resolveNeonActions: mocks.resolveNeonActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/posthog", () => ({
+vi.mock("@opencompany/agent/actions/posthog", () => ({
   resolvePostHogActions: mocks.resolvePostHogActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/github", () => ({
+vi.mock("@opencompany/agent/actions/github", () => ({
   resolveGitHubActions: mocks.resolveGitHubActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/stripe", () => ({
+vi.mock("@opencompany/agent/actions/stripe", () => ({
   resolveStripeActions: mocks.resolveStripeActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/revolut", () => ({
+vi.mock("@opencompany/agent/actions/revolut", () => ({
   resolveRevolutActions: mocks.resolveRevolutActions,
 }));
 
-import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
-import type { GoatActionProviderCatalog } from "@/lib/actions/types";
+import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
+import type { ActionProviderCatalog } from "@/lib/actions/types";
 
 function providerCatalog(
   id:
@@ -75,7 +75,7 @@ function providerCatalog(
     | "github"
     | "stripe"
     | "revolut",
-): GoatActionProviderCatalog {
+): ActionProviderCatalog {
   return {
     id,
     label: `${id} label`,
@@ -85,7 +85,7 @@ function providerCatalog(
         id: `${id}.read_something`,
         provider: id,
         capability: "read",
-        effects: GOAT_ACTION_EFFECTS_READ,
+        effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
         description: "read",
         params: { type: "object" },
@@ -99,18 +99,18 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("isGoatChatActionsKilled", () => {
+describe("isChatActionsKilled", () => {
   it("is off unless the env var is exactly true", () => {
     vi.stubEnv("GOAT_CHAT_ACTIONS_KILL_SWITCH", "");
-    expect(isGoatChatActionsKilled()).toBe(false);
+    expect(isChatActionsKilled()).toBe(false);
     vi.stubEnv("GOAT_CHAT_ACTIONS_KILL_SWITCH", "1");
-    expect(isGoatChatActionsKilled()).toBe(false);
+    expect(isChatActionsKilled()).toBe(false);
     vi.stubEnv("GOAT_CHAT_ACTIONS_KILL_SWITCH", "true");
-    expect(isGoatChatActionsKilled()).toBe(true);
+    expect(isChatActionsKilled()).toBe(true);
   });
 });
 
-describe("resolveGoatActionCatalog", () => {
+describe("resolveActionCatalog", () => {
   it("includes only connected providers", async () => {
     mocks.resolveSlackActions.mockResolvedValue(providerCatalog("slack"));
     mocks.resolveGmailActions.mockResolvedValue(null);
@@ -125,7 +125,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveStripeActions.mockResolvedValue(providerCatalog("stripe"));
     mocks.resolveRevolutActions.mockResolvedValue(providerCatalog("revolut"));
 
-    const catalog = await resolveGoatActionCatalog({
+    const catalog = await resolveActionCatalog({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
@@ -187,7 +187,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveStripeActions.mockResolvedValue(null);
     mocks.resolveRevolutActions.mockResolvedValue(null);
 
-    const catalog = await resolveGoatActionCatalog({
+    const catalog = await resolveActionCatalog({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
@@ -208,7 +208,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveStripeActions.mockResolvedValue(null);
     mocks.resolveRevolutActions.mockResolvedValue(null);
 
-    const catalog = await resolveGoatActionCatalog({
+    const catalog = await resolveActionCatalog({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
@@ -230,7 +230,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
     mocks.resolveRevolutActions.mockResolvedValue(null);
-    mocks.listGoatWorkspaceCapabilities.mockResolvedValue([
+    mocks.listWorkspaceCapabilities.mockResolvedValue([
       { source: "x", enabled: true },
       { source: "linkedin", enabled: false },
       { source: "youtube", enabled: true },
@@ -240,7 +240,7 @@ describe("resolveGoatActionCatalog", () => {
       { source: "seo", enabled: true },
     ]);
 
-    const catalog = await resolveGoatActionCatalog({
+    const catalog = await resolveActionCatalog({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
@@ -262,7 +262,7 @@ describe("resolveGoatActionCatalog", () => {
     });
 
     vi.stubEnv("GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS", "x.search_posts");
-    const endpointDisabledCatalog = await resolveGoatActionCatalog({
+    const endpointDisabledCatalog = await resolveActionCatalog({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
@@ -291,11 +291,11 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveStripeActions.mockResolvedValue(null);
     mocks.resolveRevolutActions.mockResolvedValue(null);
 
-    const catalog = await resolveGoatActionCatalog({
+    const catalog = await resolveActionCatalog({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
     expect(catalog.providers.map((source) => source.id)).toEqual(["slack"]);
-    expect(mocks.listGoatWorkspaceCapabilities).not.toHaveBeenCalled();
+    expect(mocks.listWorkspaceCapabilities).not.toHaveBeenCalled();
   });
 });

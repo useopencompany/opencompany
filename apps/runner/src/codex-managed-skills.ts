@@ -9,7 +9,7 @@ const MANAGED_SKILLS_MANIFEST = ".opencompany-managed-skills.json";
 export type NativeSkillSnapshot = { id: string; files: AgentSkillFile[] };
 
 // Materialize skill snapshots into the Codex-managed `.agents/skills` tree inside the sandbox.
-// A root-owned manifest records which skill directories are OpenCompany-managed so the next
+// A root-owned manifest records which skill directories are opencompany-managed so the next
 // reconcile can remove stale managed skills without touching user-authored ones. The tree is
 // locked read-only (dirs 555, files 444) so the sandboxed agent can read but never edit skills.
 export async function materializeCodexSkillSnapshotsForSession(input: {

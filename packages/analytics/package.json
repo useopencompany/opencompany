@@ -5,10 +5,10 @@
   "type": "module",
   "exports": {
     "./events": "./src/events.ts",
-    "./goat": "./src/goat.ts",
-    "./goat/client": "./src/goat-client.tsx",
-    "./goat/events": "./src/goat-events.ts",
-    "./goat/server": "./src/goat-server.ts",
+    "./product": "./src/product.ts",
+    "./product/client": "./src/product-client.tsx",
+    "./product/events": "./src/product-events.ts",
+    "./product/server": "./src/product-server.ts",
     "./marketing/client": "./src/marketing-client.ts",
     "./marketing/events": "./src/marketing-events.ts",
     "./server": "./src/server.ts"

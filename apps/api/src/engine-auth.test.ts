@@ -1,17 +1,14 @@
 import type { Actor } from "@opencompany/core";
 import {
-  deleteGoatClaudeCodeCredential,
-  loadGoatClaudeCodeAuthStatus,
-  saveGoatClaudeCodeCredential,
-} from "@opencompany/db/goat-claude-code-auth";
+  deleteClaudeCodeCredential,
+  loadClaudeCodeAuthStatus,
+  saveClaudeCodeCredential,
+} from "@opencompany/db/claude-code-auth";
+import { deleteCodexCredential, loadCodexAuthStatus } from "@opencompany/db/codex-auth";
 import {
-  deleteGoatCodexCredential,
-  loadGoatCodexAuthStatus,
-} from "@opencompany/db/goat-codex-auth";
-import {
-  disconnectGoatInfisicalConnection,
-  loadGoatInfisicalConnectionMetadata,
-} from "@opencompany/db/goat-infisical-auth";
+  disconnectInfisicalConnection,
+  loadInfisicalConnectionMetadata,
+} from "@opencompany/db/infisical-auth";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createEngineAuthService } from "./engine-auth";
 import type { RunnerClient } from "./runner-client";
@@ -20,23 +17,23 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-vi.mock("@opencompany/db/goat-claude-code-auth", async (importOriginal) => ({
+vi.mock("@opencompany/db/claude-code-auth", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  loadGoatClaudeCodeAuthStatus: vi.fn(async () => null),
-  saveGoatClaudeCodeCredential: vi.fn(async () => ({ userWorkosId: "user_1" })),
-  deleteGoatClaudeCodeCredential: vi.fn(async () => undefined),
+  loadClaudeCodeAuthStatus: vi.fn(async () => null),
+  saveClaudeCodeCredential: vi.fn(async () => ({ userWorkosId: "user_1" })),
+  deleteClaudeCodeCredential: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/db/goat-codex-auth", async (importOriginal) => ({
+vi.mock("@opencompany/db/codex-auth", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  loadGoatCodexAuthStatus: vi.fn(async () => null),
-  deleteGoatCodexCredential: vi.fn(async () => undefined),
+  loadCodexAuthStatus: vi.fn(async () => null),
+  deleteCodexCredential: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/db/goat-infisical-auth", async (importOriginal) => ({
+vi.mock("@opencompany/db/infisical-auth", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  loadGoatInfisicalConnectionMetadata: vi.fn(async () => null),
-  disconnectGoatInfisicalConnection: vi.fn(async () => undefined),
+  loadInfisicalConnectionMetadata: vi.fn(async () => null),
+  disconnectInfisicalConnection: vi.fn(async () => undefined),
 }));
 
 const admin: Actor = {
@@ -102,14 +99,14 @@ describe("engine auth service", () => {
       lastValidatedAt: null,
       lastRotatedAt: null,
     });
-    expect(loadGoatClaudeCodeAuthStatus).toHaveBeenCalledWith({
+    expect(loadClaudeCodeAuthStatus).toHaveBeenCalledWith({
       db: dbSentinel,
       userWorkosId: "user_1",
     });
   });
 
   it("serializes credential status rows to ISO strings", async () => {
-    vi.mocked(loadGoatCodexAuthStatus).mockResolvedValueOnce({
+    vi.mocked(loadCodexAuthStatus).mockResolvedValueOnce({
       status: "needs_reauth",
       statusReason: "Token expired.",
       lastValidatedAt: new Date("2026-08-01T00:00:00.000Z"),
@@ -121,7 +118,7 @@ describe("engine auth service", () => {
       lastValidatedAt: "2026-08-01T00:00:00.000Z",
       lastRotatedAt: null,
     });
-    expect(loadGoatCodexAuthStatus).toHaveBeenCalledWith({
+    expect(loadCodexAuthStatus).toHaveBeenCalledWith({
       db: dbSentinel,
       userWorkosId: "user_1",
     });
@@ -136,12 +133,12 @@ describe("engine auth service", () => {
       status: 400,
       message: "That doesn't look like a Claude Code token (expected it to start with sk-ant-oat).",
     });
-    expect(saveGoatClaudeCodeCredential).not.toHaveBeenCalled();
+    expect(saveClaudeCodeCredential).not.toHaveBeenCalled();
   });
 
   it("persists a normalized Claude Code token with an unvalidated status", async () => {
     const token = "sk-ant-oat01-abcdefghijklmnopqrstuvwxyz";
-    vi.mocked(loadGoatClaudeCodeAuthStatus).mockResolvedValueOnce({
+    vi.mocked(loadClaudeCodeAuthStatus).mockResolvedValueOnce({
       status: "connected",
       statusReason: null,
       lastValidatedAt: null,
@@ -151,7 +148,7 @@ describe("engine auth service", () => {
       status: "connected",
       lastValidatedAt: null,
     });
-    expect(saveGoatClaudeCodeCredential).toHaveBeenCalledWith({
+    expect(saveClaudeCodeCredential).toHaveBeenCalledWith({
       db: dbSentinel,
       userWorkosId: "user_1",
       authJson: { token },
@@ -161,12 +158,12 @@ describe("engine auth service", () => {
 
   it("disconnects Claude Code and Codex through the threaded db handle", async () => {
     await expect(service().disconnectClaudeCode(member)).resolves.toBeUndefined();
-    expect(deleteGoatClaudeCodeCredential).toHaveBeenCalledWith({
+    expect(deleteClaudeCodeCredential).toHaveBeenCalledWith({
       db: dbSentinel,
       userWorkosId: "user_1",
     });
     await expect(service().disconnectCodex(member)).resolves.toBeUndefined();
-    expect(deleteGoatCodexCredential).toHaveBeenCalledWith({
+    expect(deleteCodexCredential).toHaveBeenCalledWith({
       db: dbSentinel,
       userWorkosId: "user_1",
     });
@@ -215,11 +212,11 @@ describe("engine auth service", () => {
       forbidden,
     );
     await expect(service().disconnectInfisical(member)).rejects.toMatchObject(forbidden);
-    expect(disconnectGoatInfisicalConnection).not.toHaveBeenCalled();
+    expect(disconnectInfisicalConnection).not.toHaveBeenCalled();
   });
 
   it("keeps the Infisical status read member-visible", async () => {
-    vi.mocked(loadGoatInfisicalConnectionMetadata).mockResolvedValueOnce({
+    vi.mocked(loadInfisicalConnectionMetadata).mockResolvedValueOnce({
       status: "connected",
       statusReason: null,
       accountEmail: "ops@example.com",
@@ -233,7 +230,7 @@ describe("engine auth service", () => {
       host: "https://eu.infisical.com",
       lastValidatedAt: "2026-08-12T08:00:00.000Z",
     });
-    expect(loadGoatInfisicalConnectionMetadata).toHaveBeenCalledWith({
+    expect(loadInfisicalConnectionMetadata).toHaveBeenCalledWith({
       db: dbSentinel,
       workspaceId: "workspace_1",
     });
@@ -307,7 +304,7 @@ describe("engine auth service", () => {
 
   it("disconnects Infisical through the threaded db handle", async () => {
     await expect(service().disconnectInfisical(admin)).resolves.toBeUndefined();
-    expect(disconnectGoatInfisicalConnection).toHaveBeenCalledWith({
+    expect(disconnectInfisicalConnection).toHaveBeenCalledWith({
       db: dbSentinel,
       workspaceId: "workspace_1",
     });

@@ -44,7 +44,7 @@ type VerifiedIdentity = {
 // Verified caller identity plus the requested workspace, before any local
 // actor/onboarding resolution. Provider-ingress routes use this directly so
 // mid-onboarding users can still finish OAuth connect flows, matching the
-// retired web routes' currentGoatUser() semantics.
+// retired web routes' currentUser() semantics.
 export type ApiIdentity = VerifiedIdentity & {
   activeWorkspaceId: string | null;
   activeBrainId: string | null;

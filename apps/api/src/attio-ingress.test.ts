@@ -1,22 +1,22 @@
 import { createHmac } from "node:crypto";
 import {
-  insertGoatAttioObjectEvents,
-  listEnabledGoatAttioBrainSourceRoutes,
-  listGoatAttioIntegrationsForWorkspace,
-} from "@opencompany/db/goat-attio";
-import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
+  insertAttioObjectEvents,
+  listAttioIntegrationsForWorkspace,
+  listEnabledAttioBrainSourceRoutes,
+} from "@opencompany/db/attio";
+import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAttioIngress } from "./attio-ingress";
 
-vi.mock("@opencompany/db/goat-attio", async (importOriginal) => ({
+vi.mock("@opencompany/db/attio", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  insertGoatAttioObjectEvents: vi.fn(),
-  listEnabledGoatAttioBrainSourceRoutes: vi.fn(),
-  listGoatAttioIntegrationsForWorkspace: vi.fn(),
+  insertAttioObjectEvents: vi.fn(),
+  listEnabledAttioBrainSourceRoutes: vi.fn(),
+  listAttioIntegrationsForWorkspace: vi.fn(),
 }));
-vi.mock("@opencompany/db/goat-integrations", async (importOriginal) => ({
+vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  loadGoatIntegrationCredential: vi.fn(),
+  loadIntegrationCredential: vi.fn(),
 }));
 
 const WORKSPACE_ID = "14beef7a-99f7-4534-a87e-70b564330a4c";
@@ -33,10 +33,10 @@ function ingress() {
 describe("Attio ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(listGoatAttioIntegrationsForWorkspace).mockResolvedValue([
+    vi.mocked(listAttioIntegrationsForWorkspace).mockResolvedValue([
       { id: "gint_attio_1", userWorkosId: "user_1", status: "connected" },
     ] as never);
-    vi.mocked(loadGoatIntegrationCredential).mockResolvedValue({
+    vi.mocked(loadIntegrationCredential).mockResolvedValue({
       payload: {
         apiKey: "attio-key",
         workspaceId: WORKSPACE_ID,
@@ -50,7 +50,7 @@ describe("Attio ingress", () => {
       updatedAt: new Date(),
       encryptionKeyVersion: 1,
     } as never);
-    vi.mocked(listEnabledGoatAttioBrainSourceRoutes).mockResolvedValue([
+    vi.mocked(listEnabledAttioBrainSourceRoutes).mockResolvedValue([
       {
         integrationId: "gint_attio_1",
         brainRef: "gbrain_1",
@@ -60,7 +60,7 @@ describe("Attio ingress", () => {
         },
       },
     ] as never);
-    vi.mocked(insertGoatAttioObjectEvents).mockImplementation(
+    vi.mocked(insertAttioObjectEvents).mockImplementation(
       async (events: readonly unknown[]) => events.length,
     );
   });
@@ -74,14 +74,14 @@ describe("Attio ingress", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, buffered: 1 });
-    expect(listGoatAttioIntegrationsForWorkspace).toHaveBeenCalledWith(
+    expect(listAttioIntegrationsForWorkspace).toHaveBeenCalledWith(
       WORKSPACE_ID,
       expect.objectContaining({ sentinel: "db" }),
     );
-    expect(loadGoatIntegrationCredential).toHaveBeenCalledWith(
+    expect(loadIntegrationCredential).toHaveBeenCalledWith(
       expect.objectContaining({ integrationId: "gint_attio_1", db: sentinelDb }),
     );
-    expect(insertGoatAttioObjectEvents).toHaveBeenCalledWith(
+    expect(insertAttioObjectEvents).toHaveBeenCalledWith(
       [
         expect.objectContaining({
           integrationId: "gint_attio_1",
@@ -105,17 +105,17 @@ describe("Attio ingress", () => {
 
     expect(ignored.status).toBe(200);
     await expect(ignored.json()).resolves.toEqual({ ok: true, buffered: 0 });
-    expect(insertGoatAttioObjectEvents).toHaveBeenLastCalledWith([], sentinelDb);
+    expect(insertAttioObjectEvents).toHaveBeenLastCalledWith([], sentinelDb);
   });
 
   it("uses Attio's idempotency key as the stable retry identity", async () => {
     await ingress().webhook(attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID), "retry-stable"));
     await ingress().webhook(attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID), "retry-stable"));
 
-    const first = vi.mocked(insertGoatAttioObjectEvents).mock.calls[0]?.[0]?.[0] as
+    const first = vi.mocked(insertAttioObjectEvents).mock.calls[0]?.[0]?.[0] as
       | { deliveryId?: string }
       | undefined;
-    const second = vi.mocked(insertGoatAttioObjectEvents).mock.calls[1]?.[0]?.[0] as
+    const second = vi.mocked(insertAttioObjectEvents).mock.calls[1]?.[0]?.[0] as
       | { deliveryId?: string }
       | undefined;
     expect(first?.deliveryId).toBe("delivery:retry-stable:0");
@@ -134,7 +134,7 @@ describe("Attio ingress", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(insertGoatAttioObjectEvents).toHaveBeenCalledWith(
+    expect(insertAttioObjectEvents).toHaveBeenCalledWith(
       [
         expect.objectContaining({
           action: "note",
@@ -151,16 +151,16 @@ describe("Attio ingress", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, buffered: 0 });
-    expect(insertGoatAttioObjectEvents).toHaveBeenCalledWith([], sentinelDb);
+    expect(insertAttioObjectEvents).toHaveBeenCalledWith([], sentinelDb);
   });
 
   it("rejects deliveries whose webhook id matches no integration", async () => {
-    vi.mocked(loadGoatIntegrationCredential).mockResolvedValue(null);
+    vi.mocked(loadIntegrationCredential).mockResolvedValue(null);
 
     const response = await ingress().webhook(attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID)));
 
     expect(response.status).toBe(401);
-    expect(insertGoatAttioObjectEvents).not.toHaveBeenCalled();
+    expect(insertAttioObjectEvents).not.toHaveBeenCalled();
   });
 
   it("rejects deliveries with an invalid signature", async () => {
@@ -169,11 +169,11 @@ describe("Attio ingress", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(insertGoatAttioObjectEvents).not.toHaveBeenCalled();
+    expect(insertAttioObjectEvents).not.toHaveBeenCalled();
   });
 
   it("returns a retryable response when buffering fails", async () => {
-    vi.mocked(insertGoatAttioObjectEvents).mockRejectedValueOnce(new Error("database unavailable"));
+    vi.mocked(insertAttioObjectEvents).mockRejectedValueOnce(new Error("database unavailable"));
 
     const response = await ingress().webhook(attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID)));
 

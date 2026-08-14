@@ -5,9 +5,9 @@ retrieval behavior, but they are not hosted by the web app.
 
 ## Shared read surface
 
-`packages/goat-agent/src/brain-surface.ts` defines the read-only command contract used by Chat and
-MCP. `packages/goat-agent/src/brain-cli.ts` authorizes a Brain, records tool traces, and routes
-indexed reads to `packages/db/src/goat-brain-read.ts`. Search, list, point reads, and timelines do not
+`packages/agent/src/brain-surface.ts` defines the read-only command contract used by Chat and
+MCP. `packages/agent/src/brain-cli.ts` authorizes a Brain, records tool traces, and routes
+indexed reads to `packages/db/src/brain-read.ts`. Search, list, point reads, and timelines do not
 materialize the whole Brain or spawn the filesystem CLI.
 
 The read surface supports `query`, `list`, `get`, and `timeline`, with bounded filters and pagination.
@@ -15,10 +15,10 @@ The read surface supports `query`, `list`, `get`, and `timeline`, with bounded f
 materialized root. Public callers cannot request a table, predicate, filesystem path, or database
 credential.
 
-## OpenCompany Chat
+## opencompany Chat
 
-The runner composes Brain reads and `save_to_brain` into the OpenCompany engine through shared
-`packages/goat-agent` application services. Reads are available for the Brain or Brains authorized
+The runner composes Brain reads and `save_to_brain` into the opencompany engine through shared
+`packages/agent` application services. Reads are available for the Brain or Brains authorized
 for the Conversation. A save creates an immediate draft plus a durable curation job; it does not
 give the model arbitrary document mutation commands.
 
@@ -29,7 +29,7 @@ Brain-wide write credential.
 ## MCP
 
 `apps/api` hosts the authenticated MCP endpoint at `/mcp` using
-`packages/goat-agent/src/mcp-http.ts` and `mcp-server.ts`. The web `/mcp` route is a stable relay.
+`packages/agent/src/mcp-http.ts` and `mcp-server.ts`. The web `/mcp` route is a stable relay.
 
 The everyday MCP surface is:
 
@@ -51,7 +51,7 @@ OAuth alone does not mark setup complete.
 
 ## Filesystem CLI
 
-`packages/goat-brain/src/cli/index.ts` operates on a filesystem root. It is used by runner ingestion
+`packages/brain/src/cli/index.ts` operates on a filesystem root. It is used by runner ingestion
 agents that need read-your-own-writes before a job syncs, and by explicit local/offline work. In
 production the runner materializes one authorized Brain into a temporary directory and syncs only
 validated changes back.
@@ -65,7 +65,7 @@ needs. Chat and MCP do not expose this mutation set.
 
 | Consumer | Read path | Write path |
 | --- | --- | --- |
-| OpenCompany Chat | runner-composed shared read surface | capture, then durable curation |
+| opencompany Chat | runner-composed shared read surface | capture, then durable curation |
 | Codex | runner tools scoped to the Conversation | persisted capture capability when a Brain is pinned |
 | External MCP client | API-hosted shared read surface | admin-only capture, then durable curation |
 | Runner ingestion agent | temporary filesystem CLI | allowlisted CLI mutations synced at job completion |

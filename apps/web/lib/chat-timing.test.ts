@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatGoatChatDuration } from "@/lib/chat-timing";
+import { formatChatDuration } from "@/lib/chat-timing";
 
-describe("formatGoatChatDuration", () => {
+describe("formatChatDuration", () => {
   it("formats sub-minute durations with tenths", () => {
-    expect(formatGoatChatDuration(3_240)).toBe("3.2s");
+    expect(formatChatDuration(3_240)).toBe("3.2s");
   });
 
   it("formats minute durations like the chat timer", () => {
-    expect(formatGoatChatDuration(153_400)).toBe("2m, 33.4s");
+    expect(formatChatDuration(153_400)).toBe("2m, 33.4s");
   });
 });
