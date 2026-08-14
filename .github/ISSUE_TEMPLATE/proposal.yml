@@ -1,0 +1,67 @@
+name: Proposal
+description: Propose a scoped product, documentation, integration, or developer-experience change.
+title: "proposal: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with the problem and desired outcome. Maintainers must approve the design before work begins on architecture, schema, authentication, billing, deployment, or broad refactors.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and proposals.
+          required: true
+        - label: I have not included credentials, private data, or vulnerability details.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who encounters this problem, and what can they not do today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the observable result without prescribing an implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Include the smallest useful scope and any compatibility constraints.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: sensitive-areas
+    attributes:
+      label: Design-sensitive areas
+      description: Select every area this proposal may change. Selection means approval is required before implementation.
+      options:
+        - label: Architecture or service boundaries
+        - label: Database schema or migrations
+        - label: Authentication or authorization
+        - label: Billing or payments
+        - label: Deployment or production operations
+        - label: Broad or cross-cutting refactor
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: textarea
+    id: contribution
+    attributes:
+      label: Contribution plan
+      description: If you want to implement this, describe the slice you would take on after approval.
