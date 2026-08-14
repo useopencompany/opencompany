@@ -1,6 +1,22 @@
 # Getting started
 
-## Prerequisites
+## Choose a setup path
+
+Community contributors need only Bun `1.3.2` and Node `20.20.0` or newer:
+
+```bash
+bun install --frozen-lockfile
+bun run dev:community
+```
+
+That one command after install boots embedded Postgres, web, API, and runner without opencompany
+provider access. Verify the backends from another terminal with `bun run smoke:local`. See
+[Community development](./community-development.md) for the deliberately disabled provider-backed
+capabilities and platform verification status.
+
+The rest of this page describes the internal maintainer path.
+
+## Internal prerequisites
 
 - Bun `1.3.2`
 - Node `20.20.0` or newer
@@ -17,7 +33,7 @@ it creates the gitignored `.vercel/project.json`. The tracked `.infisical.exampl
 account or project IDs. Conductor copies existing bindings from the repository root into new
 workspaces through `.worktreeinclude`.
 
-## Bootstrap
+## Internal bootstrap
 
 ```bash
 bun install --frozen-lockfile
@@ -37,7 +53,7 @@ directly from the branch database.
 Use `bun run setup -- --check` for a read-only readiness report. `bun run env:pull` refreshes shared
 development values, and `bun run setup:stripe` refreshes local Stripe configuration.
 
-## Local stack
+## Internal local stack
 
 `bun run dev` and `bun run dev:web` start the same current stack:
 

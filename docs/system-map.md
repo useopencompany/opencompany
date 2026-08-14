@@ -80,14 +80,17 @@ permanent browser-authentication shell. Production web code has zero `@opencompa
 Use the repository scripts from the root:
 
 ```bash
-bun run setup
-bun run dev:web
+bun run dev:community # credential-free web/API/runner + embedded Postgres
+bun run smoke:local   # API and runner health
 bun run format:check
 bun run lint
 bun run typecheck
 bun run test
 bun run build
 ```
+
+Internal maintainers use `bun run setup` followed by `bun run dev:web` when the change requires
+opencompany provider projects. Community mode reports provider-backed capabilities as disabled.
 
 Do not start a second development server if one is already running. For UI changes, verify a real
 message round-trip, reload durability, one obvious failure state, and the relevant Task or coding

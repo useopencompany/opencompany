@@ -12,6 +12,8 @@
       },
       "devDependencies": {
         "@biomejs/biome": "^2.4.15",
+        "@electric-sql/pglite": "0.3.16",
+        "@electric-sql/pglite-socket": "0.0.22",
         "@testing-library/jest-dom": "^6.9.1",
         "@testing-library/react": "^16.3.2",
         "@testing-library/user-event": "^14.6.1",
@@ -243,6 +245,16 @@
         "tailwindcss": "^4.3.0",
         "typescript": "^6.0.3",
         "vitest": "^4.1.7",
+      },
+    },
+    "examples/api-client": {
+      "name": "@opencompany/example-api-client",
+      "dependencies": {
+        "@opencompany/protocol": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^25.9.1",
+        "typescript": "^6.0.3",
       },
     },
     "packages/agent": {
@@ -678,6 +690,8 @@
 
     "@electric-sql/pglite": ["@electric-sql/pglite@0.3.16", "", {}, "sha512-mZkZfOd9OqTMHsK+1cje8OSzfAQcpD7JmILXTl5ahdempjUDdmg4euf1biDex5/LfQIDJ3gvCu6qDgdnDxfJmA=="],
 
+    "@electric-sql/pglite-socket": ["@electric-sql/pglite-socket@0.0.22", "", { "peerDependencies": { "@electric-sql/pglite": "0.3.16" }, "bin": { "pglite-server": "dist/scripts/server.js" } }, "sha512-JOW+vY6H2y9sh9VJKy2dQ/JzRlMy7jISLUxuaONk7Nt2wFsxBlgH0V2uBFd+IowGvXl5HU4zGTiePYXASGpdww=="],
+
     "@emnapi/core": ["@emnapi/core@1.10.0", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.1", "tslib": "^2.4.0" } }, "sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw=="],
 
     "@emnapi/runtime": ["@emnapi/runtime@1.10.0", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-ewvYlk86xUoGI0zQRNq/mC+16R1QeDlKQy21Ki3oSYXNgLb45GV1P6A0M+/s6nyCuNDqe5VpaY84BzXGwVbwFA=="],
@@ -1005,6 +1019,8 @@
     "@opencompany/design-system": ["@opencompany/design-system@workspace:apps/design-system"],
 
     "@opencompany/docs": ["@opencompany/docs@workspace:apps/docs"],
+
+    "@opencompany/example-api-client": ["@opencompany/example-api-client@workspace:examples/api-client"],
 
     "@opencompany/file-extract": ["@opencompany/file-extract@workspace:packages/file-extract"],
 

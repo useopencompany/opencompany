@@ -41,7 +41,8 @@ export function resolveWebDevEnv({
         Boolean,
       ),
     ),
-    RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED: "true",
+    RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED:
+      trimmed(processEnv.OPENCOMPANY_COMMUNITY_MODE) === "1" ? "false" : "true",
     RUNNER_ALLOWED_ORIGINS: appendCsvValues(
       processEnv.RUNNER_ALLOWED_ORIGINS,
       [webAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.OPENCOMPANY_NEXT_PUBLIC_APP_URL].filter(

@@ -19,7 +19,7 @@ opencompany is a modular monolith with three product composition roots: `web` pr
 - `apps/marketing` is released independently from the product.
 
 The detailed product flow is maintained in
-[the opencompany system map](../apps/web/docs/README.md). Operational behavior is in
+[the opencompany system map](./system-map.md). Operational behavior is in
 [Chat operations](./chat-operations.md), and the permanent ownership decision is
 [ADR 0003](./adr/0003-headless-workflow-and-schedule-foundation.md).
 

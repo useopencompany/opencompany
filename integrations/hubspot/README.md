@@ -24,6 +24,10 @@ Deploy changes with the HubSpot CLI (`hs auth` once, then from this directory):
 hs project upload
 ```
 
+This changes an external provider project. The integrations maintainer owns review; confirm the
+selected HubSpot account and project with a read-only CLI command before upload, and do not deploy
+from an unreviewed branch.
+
 The OAuth client id/secret live in the app's Auth tab (not exported here);
 they map to `OPENCOMPANY_HUBSPOT_CLIENT_ID` / `OPENCOMPANY_HUBSPOT_CLIENT_SECRET` in both the
 web and runner environments. `OPENCOMPANY_HUBSPOT_STATE_SECRET` is generated, not from

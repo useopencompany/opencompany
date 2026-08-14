@@ -85,6 +85,13 @@ API/runner provider credentials are not copied into that app-local file.
 Do not put branch database URLs or generated local tokens in Infisical. `.env.override.local` may
 override a developer's generated values and remains gitignored.
 
+`bun run dev:community` does not write provider placeholders to env files. It sets
+`OPENCOMPANY_COMMUNITY_MODE` and safe process-local defaults in memory, owns a PGlite database, and
+keeps provider workers disabled. `OPENCOMPANY_COMMUNITY_DATABASE_PORT`, `OPENCOMPANY_API_URL`,
+`OPENCOMPANY_RUNNER_URL`, and the smoke timing values are local tool overrides; they do not belong
+in Infisical or release preflight. The launcher supplies the local `OPENCOMPANY_API_ORIGIN`; setup and
+Conductor allocation own that listener/origin for the internal path.
+
 ## Adding or removing a variable
 
 Update the runtime reader, `.env.example`, setup/export code, Turbo env configuration, hosted

@@ -3,11 +3,17 @@
 `apps/docs` is the user- and API-facing Fumadocs site. Contributor and operational documentation
 stays in the repository root `docs/` directory.
 
+It may depend on `@opencompany/protocol` for the reviewed OpenAPI artifact and generated client
+contract. It must not import `@opencompany/core`, `@opencompany/db`, or any app composition root.
+Hand-written content under `content/docs/`, the generated reference described below, and the root
+layout in `app/` are its stable entry points.
+
 Run it from the repository root:
 
 ```bash
 bun run dev:docs
 bun run build:docs
+bun --filter @opencompany/docs typecheck
 ```
 
 The app owns normal `dev`, `build`, `lint`, and `typecheck` Turbo tasks. `build` and `typecheck`

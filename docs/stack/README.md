@@ -16,4 +16,4 @@
 | Observability | Better Stack/Sentry, SigNoz, Latitude | errors, logs, traces, and LLM telemetry |
 
 Package-level responsibilities are described in [Architecture](../architecture.md), while current
-opencompany execution paths are documented in [the system map](../../apps/web/docs/README.md).
+opencompany execution paths are documented in [the system map](../system-map.md).

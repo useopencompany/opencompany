@@ -8,6 +8,7 @@
   },
   "workspaces": [
     "apps/*",
+    "examples/*",
     "packages/*"
   ],
   "scripts": {
@@ -22,6 +23,8 @@
     "dev:docs": "turbo dev --ui=tui --filter=@opencompany/docs",
     "dev:marketing": "turbo dev --ui=tui --filter=@opencompany/marketing",
     "dev:runner": "turbo dev --ui=stream --filter=@opencompany/runner",
+    "dev:community": "node scripts/community-dev.mjs",
+    "smoke:local": "node scripts/local-health-smoke.mjs",
     "dev:kill-port": "node scripts/kill-port.mjs",
     "dev:kill-3000": "node scripts/kill-port.mjs 3000",
     "build": "bun --bun turbo build",
@@ -65,7 +68,7 @@
     "db:branch:create": "node scripts/neon-branch.mjs create",
     "db:branch:delete": "node scripts/neon-branch.mjs delete",
     "electric:dev": "node scripts/electric-dev.mjs",
-    "measure:chat-presentation": "bun scripts/measure-headless-chat-presentation.ts"
+    "measure:chat-presentation": "bun scripts/maintenance/measure-headless-chat-presentation.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
@@ -78,6 +81,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
+    "@electric-sql/pglite": "0.3.16",
+    "@electric-sql/pglite-socket": "0.0.22",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

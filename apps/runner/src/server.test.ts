@@ -99,6 +99,29 @@ describe("runner server CORS", () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers["access-control-allow-origin"]).toBeUndefined();
   });
+
+  it("reports durable execution as disabled in community mode", async () => {
+    const previousMode = process.env.OPENCOMPANY_COMMUNITY_MODE;
+    process.env.OPENCOMPANY_COMMUNITY_MODE = "1";
+    try {
+      const server = createServer(env);
+      servers.push(server);
+
+      const response = await server.inject({ method: "GET", url: "/healthz" });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        mode: "community",
+        capabilities: { durableExecution: { status: "disabled" } },
+      });
+    } finally {
+      if (previousMode === undefined) {
+        delete process.env.OPENCOMPANY_COMMUNITY_MODE;
+      } else {
+        process.env.OPENCOMPANY_COMMUNITY_MODE = previousMode;
+      }
+    }
+  });
 });
 
 describe("runner execution transport surface", () => {

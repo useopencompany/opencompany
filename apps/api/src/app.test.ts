@@ -94,6 +94,30 @@ describe("canonical Hono API", () => {
     }
   });
 
+  it("reports provider-backed capabilities as disabled in community mode", async () => {
+    const previousMode = process.env.OPENCOMPANY_COMMUNITY_MODE;
+    process.env.OPENCOMPANY_COMMUNITY_MODE = "1";
+    try {
+      const response = await testApp(fakeRepository()).request("/healthz");
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        mode: "community",
+        capabilities: {
+          authentication: { status: "disabled" },
+          execution: { status: "disabled" },
+          liveReads: { status: "disabled" },
+        },
+      });
+    } finally {
+      if (previousMode === undefined) {
+        delete process.env.OPENCOMPANY_COMMUNITY_MODE;
+      } else {
+        process.env.OPENCOMPANY_COMMUNITY_MODE = previousMode;
+      }
+    }
+  });
+
   it("returns versioned structured authentication and validation errors", async () => {
     const repository = fakeRepository();
     const unauthenticated = createApiApp({

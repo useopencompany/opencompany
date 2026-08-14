@@ -3,11 +3,24 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { migratedEnvironmentName } from "./lib/env-name-migration.mjs";
-
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const historicalRoots = ["drizzle/", "docs/adr/"];
 const historicalFiles = new Set(["docs/future-concepts/oss-readiness.md"]);
+const removedObsoletePaths = [
+  "packages/db/src/wiki-migrate.test.ts",
+  "packages/db/src/wiki-migrate.ts",
+  "scripts/backfill-workflows-skills.ts",
+  "scripts/cleanup-brain-workflows-skills.mjs",
+  "scripts/migrate-brain-to-wiki.ts",
+];
+const layoutLocalEnvKeys = [
+  "OPENCOMPANY_API_URL",
+  "OPENCOMPANY_COMMUNITY_DATABASE_PORT",
+  "OPENCOMPANY_COMMUNITY_MODE",
+  "OPENCOMPANY_RUNNER_URL",
+  "OPENCOMPANY_SMOKE_ATTEMPTS",
+  "OPENCOMPANY_SMOKE_DELAY_MS",
+];
 const expectedPackages = new Map([
   ["packages/agent/package.json", "@opencompany/agent"],
   ["packages/brain/package.json", "@opencompany/brain"],
@@ -173,9 +186,9 @@ const baseEnvKeys = envKeys(
     encoding: "utf8",
   }),
 );
-const expectedEnvKeys = baseEnvKeys.map((key) => migratedEnvironmentName(key) ?? key).sort();
+const expectedEnvKeys = [...new Set([...baseEnvKeys, ...layoutLocalEnvKeys])].sort();
 if (currentEnvKeys.join("\n") !== expectedEnvKeys.join("\n")) {
-  failures.push(".env.example: environment keys do not match the accepted hard-cut mapping");
+  failures.push(".env.example: unexpected operational key set change");
 }
 
 if (failures.length > 0) {
@@ -217,6 +230,7 @@ function gitMatchCount(pattern) {
         ":(exclude)docs/adr/**",
         ":(exclude)docs/future-concepts/oss-readiness.md",
         ":(exclude)scripts/check-naming-boundary.mjs",
+        ...removedObsoletePaths.map((relativePath) => `:(exclude)${relativePath}`),
       ],
       { cwd: repositoryRoot, encoding: "utf8" },
     )

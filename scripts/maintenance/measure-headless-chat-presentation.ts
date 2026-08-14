@@ -1,11 +1,11 @@
-import { createApiApp } from "../apps/api/src/app";
+import { createApiApp } from "../../apps/api/src/app";
 import {
   consumeProductChatStream,
   type ProductChatProjection,
-} from "../apps/runner/src/opencompany-chat";
-import { RedisChatPresentationStream } from "../packages/chat-presentation/src/index";
-import type { RunEvent } from "../packages/core/src/chat";
-import { streamRunEvents } from "../packages/protocol/src/client";
+} from "../../apps/runner/src/opencompany-chat";
+import { RedisChatPresentationStream } from "../../packages/chat-presentation/src/index";
+import type { RunEvent } from "../../packages/core/src/chat";
+import { streamRunEvents } from "../../packages/protocol/src/client";
 
 const redisUrl = process.env.REDIS_URL?.trim();
 if (!redisUrl) throw new Error("REDIS_URL is required for the presentation cadence measurement.");

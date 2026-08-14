@@ -68,3 +68,12 @@ test("web dev preserves the API origin selected for an isolated workspace", () =
   assert.equal(env.OPENCOMPANY_API_ORIGIN, "http://localhost:55014");
   assert.equal(env.API_BROWSER_ORIGINS, "https://localhost:55012");
 });
+
+test("community mode keeps provider-backed runner workers disabled", () => {
+  const env = resolveWebDevEnv({
+    port: "3002",
+    processEnv: { OPENCOMPANY_COMMUNITY_MODE: "1" },
+  });
+
+  assert.equal(env.RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED, "false");
+});

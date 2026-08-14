@@ -80,10 +80,6 @@
       "types": "./src/wiki.ts",
       "default": "./src/wiki.ts"
     },
-    "./wiki-migrate": {
-      "types": "./src/wiki-migrate.ts",
-      "default": "./src/wiki-migrate.ts"
-    },
     "./brain-sources": {
       "types": "./src/brain-sources.ts",
       "default": "./src/brain-sources.ts"

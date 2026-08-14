@@ -67,7 +67,18 @@ export function createServer(
   app.get("/healthz", async () => ({
     ok: true,
     service: "opencompany-runner",
-    capabilities: { claudeActionsMcp: "v2", brainWorkerAdmission: "postgres-v1" },
+    mode: process.env.OPENCOMPANY_COMMUNITY_MODE === "1" ? "community" : "standard",
+    capabilities: {
+      claudeActionsMcp: "v2",
+      brainWorkerAdmission: "postgres-v1",
+      durableExecution: env.taskWorkerEnabled
+        ? { status: "enabled" }
+        : {
+            status: "disabled",
+            reason:
+              "Runner workers are disabled; configure model and sandbox providers before enabling them.",
+          },
+    },
     environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
     release:
       process.env.RENDER_GIT_COMMIT ??

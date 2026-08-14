@@ -94,7 +94,11 @@ const devEnvironment = {
   ...resolveWebDevEnv({ port, processEnv: process.env, tunnelEnv, webHttpsEnv }),
   OPENCOMPANY_DEV_APP: "web",
 };
-useLocalElectric(devEnvironment);
+if (process.env.OPENCOMPANY_COMMUNITY_MODE === "1") {
+  disableElectric(devEnvironment);
+} else {
+  useLocalElectric(devEnvironment);
+}
 dev = spawn(turboBin, ["dev", ...turboArgs], {
   stdio: "inherit",
   env: devEnvironment,
@@ -106,6 +110,14 @@ function useLocalElectric(env) {
   // paired with the branch-local Electric service started by `bun run setup`.
   delete env.ELECTRIC_SOURCE_ID;
   delete env.ELECTRIC_SOURCE_SECRET;
+  delete env.ELECTRIC_TOKEN;
+}
+
+function disableElectric(env) {
+  delete env.ELECTRIC_URL;
+  delete env.ELECTRIC_SOURCE_ID;
+  delete env.ELECTRIC_SOURCE_SECRET;
+  delete env.ELECTRIC_SECRET;
   delete env.ELECTRIC_TOKEN;
 }
 
@@ -235,6 +247,7 @@ function assertWebDevPortsAvailable() {
 
   const ports = [
     { label: "web app", port },
+    { label: "API", port: localApiPort() },
     { label: "runner", port: localRunnerPort() },
   ];
   if (!webHttpsDisabled()) {
@@ -257,6 +270,11 @@ function assertWebDevPortsAvailable() {
       "processes owned by another workspace.\n",
   );
   exit(1);
+}
+
+function localApiPort() {
+  if (webDevPorts) return webDevPorts.api;
+  return "3001";
 }
 
 function dedupePorts(ports) {

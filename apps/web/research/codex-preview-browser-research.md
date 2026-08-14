@@ -61,7 +61,7 @@ Primary sources and docs used:
 
 Local repo files inspected:
 
-- `apps/web/docs/README.md`
+- `docs/system-map.md`
 - `packages/db/src/product-schema.ts`
 - `apps/runner/src/harness.ts`
 - `apps/runner/src/codex.ts`

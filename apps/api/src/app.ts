@@ -2248,6 +2248,28 @@ export function createApiApp(input: CreateApiAppInput) {
     c.json({
       ok: true,
       service: "opencompany-api",
+      mode: process.env.OPENCOMPANY_COMMUNITY_MODE === "1" ? "community" : "standard",
+      capabilities:
+        process.env.OPENCOMPANY_COMMUNITY_MODE === "1"
+          ? {
+              authentication: {
+                status: "disabled",
+                reason: "Configure a WorkOS project to enable authenticated product routes.",
+              },
+              execution: {
+                status: "disabled",
+                reason: "Configure model and sandbox providers, then enable runner workers.",
+              },
+              liveReads: {
+                status: "disabled",
+                reason: "Configure Electric to enable synchronized product read models.",
+              },
+            }
+          : {
+              authentication: { status: "configured" },
+              execution: { status: "configured" },
+              liveReads: { status: process.env.ELECTRIC_URL ? "configured" : "disabled" },
+            },
       environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
       protocolVersion: PROTOCOL_VERSION,
       release:

@@ -1,0 +1,15 @@
+{
+  "name": "@opencompany/example-api-client",
+  "private": true,
+  "scripts": {
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit --project tsconfig.json"
+  },
+  "dependencies": {
+    "@opencompany/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3"
+  }
+}
