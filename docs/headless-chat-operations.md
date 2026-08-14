@@ -22,7 +22,7 @@ apps/runner ---- fenced Run execution -----------+------------> browser read mod
 - `apps/runner` claims queued Runs, creates Attempts, heartbeats fenced leases, executes the selected
   engine, and transactionally settles Messages, Events, approvals, artifacts, usage, and state.
 - `apps/web` is the presentation and Server Component composition root. Its Chat readers and
-  mutations use the typed first-party client.
+  mutations use the typed first-party client; it has no Chat database or execution fallback.
 - Postgres is authoritative. Notifications and Redis reduce latency but do not own execution.
 
 ## Configuration
@@ -46,13 +46,13 @@ After a Chat-affecting deploy:
 5. Check API and runner error telemetry for authorization, idempotency, lease, and settlement
    failures.
 
-For the final compatibility deletion, also confirm the removed web endpoints return 404 and the web
-domain-boundary ratchet decreased.
+Confirm retired `/api/chat`, bespoke engine Message routes, and the generic web Electric selector
+remain absent. `bun run boundary:check` must report the permanent zero-import rule.
 
 ## Failure handling
 
-- Do not route accepted canonical work into an older queue. Runs keep their IDs and original
-  idempotency reservations.
+- Do not route accepted canonical work into an older queue or reintroduce a first-party rollback
+  adapter. Runs keep their IDs and original idempotency reservations.
 - Fix authentication, CORS, worker, or read-model faults forward and deploy through the normal
   protected release workflow.
 - A stalled browser stream does not imply lost work. Read the Run and durable Events, then reconnect
@@ -60,7 +60,7 @@ domain-boundary ratchet decreased.
 - A dead worker loses its lease; another Attempt reclaims the Run after expiry. Fence checks prevent
   the old Attempt from settling.
 - Database migrations are forward-only and additive. Never use an incident response to drop or
-  rewrite compatibility history.
+  rewrite source or retained historical data.
 
-The sessionless historical Task adapter remains a separate ADR 0002 retention gate and must not be
-removed as part of Chat operations.
+The sessionless historical Task read-only resources remain a separate ADR 0002 retention gate and
+must not be removed as part of Chat operations. They do not provide a Chat execution fallback.

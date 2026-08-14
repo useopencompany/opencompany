@@ -23,6 +23,10 @@ and `/runner`, creates or reuses a Neon child branch named for the current Git b
 checked-in migrations, starts local Electric, and mirrors the required values to
 `apps/web/.env.local`. It is safe to rerun.
 
+The local web app is a presentation client. Product commands, identity persistence, and authorized
+read models are served by the local API; the runner claims durable execution/background work
+directly from the branch database. Setup does not enable a legacy Chat or web-database mode.
+
 Use `bun run setup -- --check` for a read-only readiness report. `bun run env:pull` refreshes shared
 development values, and `bun run setup:stripe` refreshes local Stripe configuration.
 
@@ -37,6 +41,10 @@ development values, and `bun run setup:stripe` refreshes local Stripe configurat
   the API-owned handler;
 - Electric and the local HTTPS/tunnel helpers used by integrations.
 
+The browser uses the web origin for pages and the configured API origin for `/v1` commands, streams,
+and named read models. Historical provider callback URLs may pass through thin web relays before the
+API handles them; this does not create a second local backend.
+
 Use `bun run dev:logs -- --source web --tail 100` or `--source runner` to inspect the gitignored
 Turbo log. Do not paste unredacted local logs into issues because provider output can be sensitive.
 
@@ -48,7 +56,8 @@ Delete an abandoned branch with `bun run db:branch:delete` after resolving its e
 
 ## First verification
 
-Open the web app, sign in through WorkOS, send a foreground chat message, and confirm live updates arrive.
+Open the web app and sign in through WorkOS. Confirm the API-backed identity resolves, send a
+foreground chat message, reload during or after the Run, and confirm the durable result converges.
 For changes touching the runner, create the relevant task or cloud coding turn and verify its
 durable status in the UI. For billing work, run `bun run setup:stripe` and confirm the local Stripe
-listener forwards a signed event to `/api/stripe/webhook`.
+listener forwards a signed event through `/api/stripe/webhook` to the API-owned handler.

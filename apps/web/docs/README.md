@@ -51,9 +51,8 @@ their retention gate.
 ## Knowledge and integrations
 
 Brain, Wiki, Skills, and integration commands are API- or runner-owned. Browser reads use fixed
-authorized API read models. The only physical collection still selected through the web Electric
-proxy is the scoped integration status collection; Conversation and Task state use canonical read
-models.
+authorized API read models, including `integration-accounts-v1`. The generic web Electric shape
+proxy is deleted; clients cannot select physical tables or predicates.
 
 ## Ownership rules
 
@@ -68,6 +67,10 @@ models.
 All `/v1` routes require Actor authentication. Browser cookie mutations additionally enforce the
 allowed `Origin`. Command retries retain existing idempotency semantics, and schema changes require
 additive Drizzle migrations.
+
+The web WorkOS routes, cached API-backed identity resolver, and `activateGoatWorkspace` remain the
+permanent browser-authentication shell. Production web code has zero `@opencompany/db` and zero
+`drizzle-orm` imports; the boundary check has no exception list or migration baseline.
 
 ## Local verification
 

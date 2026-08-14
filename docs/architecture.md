@@ -1,61 +1,71 @@
 # Architecture
 
-OpenCompany has one product application. Chat and Task are the headless execution slice: `web` is
-the Next.js client, `api` is the public HTTP composition root, and `runner` owns durable execution.
-Unmigrated product domains continue to use the existing web/runner boundaries.
+OpenCompany is a modular monolith with three product composition roots: `web` presents the product,
+`api` owns the public product boundary, and `runner` owns durable execution and background work.
 
 ## Runtime boundaries
 
-- `apps/web` owns the Next.js UI, authenticated server actions for unmigrated domains, public
-  integration callbacks/webhooks, and the same-origin `/v1` proxy. Its ordinary-Chat compatibility
-  route is rollback-only; it owns no canonical or coding-agent capability transport.
-- `apps/api` owns the versioned Hono `/v1` Chat, Task, Workflow, schedule, Brain, Wiki, and Skill
-  API, WorkOS session/bearer authentication, authorization, canonical Auto model resolution,
-  OpenAPI, semantic SSE, and authorized Electric read-model proxying.
-- `apps/runner` owns durable chat/task turns, cloud coding sandboxes, in-process execution
-  capabilities, the ticketed Claude MCP transport, Brain ingestion and import, integration
-  polling/flush, schedules, dictation transport, billing usage, and the LLM broker.
-- `apps/stripe-webhooks` is a local-only Stripe CLI process that forwards Goat billing events.
+- `apps/web` owns the Next.js UI, Server Component composition, optimistic browser state, WorkOS
+  browser-authentication routes, `activateGoatWorkspace`, health/static delivery, and narrow
+  same-origin or provider-URL continuity proxies. It owns no product persistence or execution.
+- `apps/api` owns authenticated `/v1` resources for Chat, Tasks, Workflows, schedules, Brain, Wiki,
+  Skills, integrations, workspace/identity settings, onboarding, billing, usage, feedback, and MCP.
+  It also owns authorization, OpenAPI, semantic SSE, fixed Electric read models, and provider OAuth
+  and webhook processing behind any retained URL relay.
+- `apps/runner` owns durable chat/task turns, cloud coding sandboxes, in-process capabilities, Brain
+  ingestion/import, integration polling/flush, due schedules, dictation transport, usage settlement,
+  and the LLM broker. It composes repositories directly and does not depend on web availability.
+- `apps/stripe-webhooks` is a local-only Stripe CLI process that forwards test billing events.
 - `apps/marketing` is released independently from the product.
 
-The detailed turn and message flow is maintained in [the OpenCompany system map](../apps/web/docs/README.md).
-Operational topology and rollout gates are in [Headless Chat operations](./headless-chat-operations.md).
+The detailed product flow is maintained in
+[the OpenCompany system map](../apps/web/docs/README.md). Operational behavior is in
+[Headless Chat operations](./headless-chat-operations.md), and the permanent ownership decision is
+[ADR 0003](./adr/0003-headless-workflow-and-schedule-foundation.md).
 
-## Data
+## Data and client boundary
 
-`packages/db/src/goat-schema.ts` is the current product schema. The Drizzle client composes it with
-two narrow public-schema compatibility modules:
+`packages/db/src/goat-schema.ts` is the current product schema. The Drizzle client also composes two
+narrow public-schema compatibility modules:
 
 - `legacy-billing-schema.ts` preserves existing customer, subscription, credit, and webhook-event
-  tables still written by Goat's billing compatibility path.
+  tables still used behind the billing application boundary.
 - `llm-broker-schema.ts` preserves token and usage tables used by the runner broker.
 
-Those modules model existing tables; they are not a license to expand the retired product. Checked-in
-migration history remains authoritative and is never rewritten. Canonical web collections consume
-fixed, authorized Electric read models through the API; domains that have not been cut over retain
-their same-origin compatibility shapes temporarily.
+Those modules model retained physical contracts; they are not a license to expand retired product
+paths. Applied migrations remain authoritative and are never rewritten.
 
-Production code in `apps/web` may not add direct `@opencompany/db` or `drizzle-orm` imports. The
-checked-in boundary baseline is a temporary migration ratchet: each domain cutover removes entries,
-and completion requires zero. API and runner composition roots continue to use shared repositories.
+Browser writes use the generated `/v1` client. Browser reads use versioned API resources or fixed,
+authorized API-owned Electric read models. The API selects each model's physical table, columns,
+Actor/workspace predicate, and allowed parameters; the browser cannot select physical storage.
 
-## Durable execution
+Production code in `apps/web` must have zero direct `@opencompany/db` and `drizzle-orm` imports.
+`scripts/check-web-domain-boundary.mjs` enforces this final rule in CI with no baseline or exception
+list. API and runner composition roots continue to use shared application services and repositories.
 
-Goat creates durable sessions and turns in Postgres. Runner workers claim them with fenced leases,
-heartbeat while executing, persist messages/events/artifacts/usage, and settle the projection
-atomically. Current engine adapters support OpenCompany, Codex, and Claude Code. E2B provides
-persistent coding sandboxes; Vercel Sandbox supports browser-capable foreground work.
+## Identity and durable execution
 
-Brain import, Brain ingestion, and Google Drive sync use the same durable admission principle.
-Transactions write their existing import, ingest-job, source, and cursor rows, then publish a
-versioned Postgres notification as a latency hint. The runner listens directly to Postgres and
-wakes the existing internal workers; polling and fenced claims remain the recovery and correctness
-authority. This does not create a second queue, and the runner does not call the public API for
-execution or persistence.
+WorkOS authenticates browser sessions. The web auth shell manages framework-specific redirects,
+session re-sealing, and workspace activation; the API owns identity synchronization, membership
+adoption, Actor/workspace resolution, and product persistence. The cached web identity resolver calls
+the API so Server Components retain one request-scoped result without creating a second data path.
+
+OpenCompany creates durable Runs in Postgres. Runner workers claim them with fenced leases,
+heartbeat while executing, persist Messages, Events, artifacts, approvals, and usage, and settle the
+projection transactionally. OpenCompany, Codex, and Claude Code are engines on the same canonical
+Conversation/Message/Run protocol.
+
+Brain import, Brain ingestion, Google Drive sync, polling, and schedules follow the same admission
+principle: database state is authoritative, notifications reduce latency, and fenced claims provide
+recovery. The runner never calls the public API for execution persistence.
 
 ## Integrations and security
 
-WorkOS sessions authenticate the web app. OAuth state and integration credentials are signed/encrypted at
-the application boundary. General runner routes remain private behind `RUNNER_INTERNAL_TOKEN`; its
-public sandbox/browser transports accept only scoped signed capabilities. Provider keys remain
-server-side; sandboxed CLIs use short-lived broker credentials or workspace-scoped injected auth.
+OAuth state and integration credentials are signed or encrypted at the backend boundary. Historical
+public callback/webhook URLs may terminate at a thin web relay, but verification, tenant binding,
+replay protection, idempotency, credentials, and persistence live in API/runner code.
+
+General runner routes remain private behind `RUNNER_INTERNAL_TOKEN`; browser-reachable runner
+transports accept scoped signed capabilities. Provider keys remain server-side, and sandboxed CLIs
+use short-lived broker credentials or workspace-scoped injected auth. Credential columns and raw
+tokens never enter client DTOs or logs.
