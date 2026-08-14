@@ -22,6 +22,7 @@ import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { ApiError } from "./errors";
 
 const ACTIVE_WORKSPACE_COOKIE = "goat-active-workspace";
+const ACTIVE_BRAIN_COOKIE = "goat-active-brain";
 const DEFAULT_SESSION_COOKIE = "wos-session";
 const SESSION_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
 
@@ -44,7 +45,10 @@ type VerifiedIdentity = {
 // actor/onboarding resolution. Provider-ingress routes use this directly so
 // mid-onboarding users can still finish OAuth connect flows, matching the
 // retired web routes' currentGoatUser() semantics.
-export type ApiIdentity = VerifiedIdentity & { activeWorkspaceId: string | null };
+export type ApiIdentity = VerifiedIdentity & {
+  activeWorkspaceId: string | null;
+  activeBrainId: string | null;
+};
 
 export type ApiIdentityVerifier = (request: Request) => Promise<ApiIdentity>;
 
@@ -112,10 +116,12 @@ export function createWorkOsApiIdentityVerifier(
       });
     }
 
-    const workspaceCookie = parseCookies(request.headers.get("cookie")).get(
-      ACTIVE_WORKSPACE_COOKIE,
-    );
-    return { ...identity, activeWorkspaceId: workspaceCookie ?? null };
+    const cookies = parseCookies(request.headers.get("cookie"));
+    return {
+      ...identity,
+      activeWorkspaceId: cookies.get(ACTIVE_WORKSPACE_COOKIE) ?? null,
+      activeBrainId: cookies.get(ACTIVE_BRAIN_COOKIE) ?? null,
+    };
   };
 }
 
@@ -126,6 +132,9 @@ export function createWorkOsApiAuthenticator(
   const identify = createWorkOsApiIdentityVerifier(options);
   return async (request) => {
     const identity = await identify(request);
+    if (identity.method === "oauth" && !identity.organizationId) {
+      throw unauthorized("Invalid bearer token claims.");
+    }
     const actor = await resolveLocalActor(execute, identity, identity.activeWorkspaceId);
     return {
       actor,
@@ -183,7 +192,7 @@ function identityFromJwt(payload: JWTPayload): VerifiedIdentity {
   const userId = stringClaim(payload.sub);
   const organizationId = stringClaim(payload.org_id);
   const sessionId = stringClaim(payload.sid);
-  if (!userId || !organizationId) throw unauthorized("Invalid bearer token claims.");
+  if (!userId) throw unauthorized("Invalid bearer token claims.");
   return {
     userId,
     organizationId,

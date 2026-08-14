@@ -48,6 +48,7 @@ function ingress(overrides: { role?: string } = {}) {
       organizationId: null,
       method: "session",
       activeWorkspaceId: null,
+      activeBrainId: null,
     }),
     runner: {
       requestJson: runnerRequest as RunnerClient["requestJson"],

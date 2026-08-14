@@ -9,6 +9,7 @@ const baselinePath = path.join(repositoryRoot, "scripts/web-domain-boundary-base
 const sourceExtensions = new Set([".ts", ".tsx"]);
 const excludedDirectories = new Set([".next", "node_modules", "__tests__"]);
 const excludedFilePattern = /\.(?:test|spec)\.[^.]+$/u;
+const writeBaseline = process.argv.includes("--write");
 const importPatterns = {
   dbImports:
     /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)["']@opencompany\/db(?:\/[^"']*)?["']/u,
@@ -19,7 +20,6 @@ const forbiddenPatterns = {
   brainWorkerControl:
     /\btriggerGoat(?:BrainIngestWake|BrainImportWake|GoogleDriveSyncWake)\b|\/internal\/goat\/(?:brain-ingest\/wake|brain-import\/wake|google-drive\/sync)/u,
 };
-const updateBaseline = process.argv.includes("--update");
 
 const baseline = JSON.parse(await readFile(baselinePath, "utf8"));
 const sourceFiles = await listSourceFiles(webRoot);
@@ -37,38 +37,15 @@ for (const absolutePath of sourceFiles) {
   }
 }
 
-for (const boundary of Object.keys(importPatterns)) actual[boundary].sort();
-
-if (updateBaseline) {
-  const additions = Object.keys(importPatterns).flatMap((boundary) => {
-    const expected = baseline[boundary] ?? [];
-    return actual[boundary]
-      .filter((file) => !expected.includes(file))
-      .map((file) => `${boundary}: ${file}`);
-  });
-  const forbiddenCallers = Object.entries(forbidden).flatMap(([boundary, files]) =>
-    files.map((file) => `${boundary}: ${file}`),
-  );
-  if (additions.length || forbiddenCallers.length) {
-    for (const addition of additions) console.error(`Unexpected boundary addition: ${addition}`);
-    for (const caller of forbiddenCallers) console.error(`Forbidden boundary caller: ${caller}`);
-    console.error("The baseline updater only accepts removals from a clean boundary scan.");
-    process.exit(1);
-  }
-
-  await writeFile(baselinePath, `${JSON.stringify(actual, null, 2)}\n`, "utf8");
-  console.log(
-    `Updated the web domain boundary baseline (${actual.dbImports.length} @opencompany/db files, ${actual.drizzleImports.length} drizzle-orm files).`,
-  );
-  process.exit(0);
-}
-
 let failed = false;
+const changes = {};
 for (const boundary of Object.keys(importPatterns)) {
   const expected = [...(baseline[boundary] ?? [])].sort();
   const additions = actual[boundary].filter((file) => !expected.includes(file));
   const stale = expected.filter((file) => !actual[boundary].includes(file));
+  changes[boundary] = { additions, stale };
   if (additions.length || stale.length) {
+    if (writeBaseline && additions.length === 0) continue;
     failed = true;
     console.error(`Web domain boundary changed for ${boundary}:`);
     for (const file of additions) console.error(`  + ${file}`);
@@ -82,12 +59,24 @@ for (const [boundary, files] of Object.entries(forbidden)) {
   for (const file of files) console.error(`  + ${file}`);
 }
 
+if (writeBaseline && !failed) {
+  const removed = Object.values(changes).reduce((count, change) => count + change.stale.length, 0);
+  if (removed === 0) {
+    console.log("Web domain boundary baseline is already current.");
+  } else {
+    await writeFile(baselinePath, `${JSON.stringify(actual, null, 2)}\n`);
+    console.log(
+      `Web domain boundary baseline tightened (${actual.dbImports.length} @opencompany/db files, ${actual.drizzleImports.length} drizzle-orm files; ${removed} entries removed).`,
+    );
+  }
+}
+
 if (failed) {
   console.error(
     "Move new data access behind the canonical API, or update the baseline only when a cutover removes legacy imports.",
   );
   process.exitCode = 1;
-} else {
+} else if (!writeBaseline) {
   console.log(
     `Web domain boundary unchanged (${actual.dbImports.length} @opencompany/db files, ${actual.drizzleImports.length} drizzle-orm files).`,
   );

@@ -2655,6 +2655,72 @@ export const OnboardingEmailClaimEnvelopeSchema = z
 export const TaskViewModeSchema = z.enum(["board", "list"]);
 export const McpClientSchema = z.enum(["claude", "chatgpt", "cursor"]);
 
+// Authenticated browser identity read model. Provider organization ids and raw
+// persistence rows stay server-side; the web auth shell only receives the
+// presentation fields its request-cached resolver needs.
+export const IdentityUserSchema = z
+  .object({
+    id: ResourceIdSchema,
+    email: z.email().max(320),
+    firstName: z.string().max(128).nullable(),
+    lastName: z.string().max(128).nullable(),
+    avatarUrl: z.string().max(4_096).nullable(),
+    timezone: z.string().min(1).max(100),
+    taskSpawningEnabled: z.boolean(),
+    autoModelRoutingEnabled: z.boolean(),
+    chatCapabilitiesBetaEnabled: z.boolean(),
+    imessageEnabled: z.boolean(),
+    wikiEnabled: z.boolean(),
+    taskViewMode: TaskViewModeSchema,
+    preferredMcpClient: McpClientSchema.nullable(),
+    mcpSetupCompletedAt: TimestampSchema.nullable(),
+    onboardedAt: TimestampSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("IdentityUser");
+
+export const IdentityWorkspaceSchema = z
+  .object({
+    id: ResourceIdSchema,
+    name: z.string().min(1).max(80),
+    slug: z.string().max(40).nullable(),
+    role: z.enum(["admin", "member"]),
+  })
+  .strict()
+  .openapi("IdentityWorkspace");
+
+export const IdentityBrainSchema = z
+  .object({
+    id: ResourceIdSchema,
+    workspaceId: ResourceIdSchema,
+    name: z.string().min(1).max(80),
+    slug: z.string().min(1).max(256),
+    description: z.string().nullable(),
+    visibility: BrainVisibilitySchema,
+    enrichmentEnabled: z.boolean(),
+    intelligence: BrainIntelligenceSchema,
+  })
+  .strict()
+  .openapi("IdentityBrain");
+
+export const IdentitySchema = z
+  .object({
+    user: IdentityUserSchema,
+    workspaces: z.array(IdentityWorkspaceSchema).max(1_000),
+    activeWorkspaceId: ResourceIdSchema.nullable(),
+    brains: z.array(IdentityBrainSchema).max(1_000),
+    activeBrainId: ResourceIdSchema.nullable(),
+  })
+  .strict()
+  .openapi("Identity");
+
+export const IdentityEnvelopeSchema = z
+  .object({ data: IdentitySchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("IdentityEnvelope");
+
 export const UserPreferencesSchema = z
   .object({
     timezone: z.string().min(1).max(100),
@@ -3270,6 +3336,7 @@ export type OnboardingEmailClaimDto = {
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;
 export type TaskViewMode = z.infer<typeof TaskViewModeSchema>;
 export type McpClient = z.infer<typeof McpClientSchema>;
+export type IdentityDto = z.infer<typeof IdentitySchema>;
 export type UserPreferencesDto = z.infer<typeof UserPreferencesSchema>;
 export type UpdateUserPreferencesBody = z.infer<typeof UpdateUserPreferencesBodySchema>;
 export type McpSetupDto = z.infer<typeof McpSetupSchema>;

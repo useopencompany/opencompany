@@ -4297,6 +4297,266 @@
         ],
         "additionalProperties": false
       },
+      "IdentityEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "Identity": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/IdentityUser"
+          },
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IdentityWorkspace"
+            },
+            "maxItems": 1000
+          },
+          "activeWorkspaceId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "brains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IdentityBrain"
+            },
+            "maxItems": 1000
+          },
+          "activeBrainId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          }
+        },
+        "required": [
+          "user",
+          "workspaces",
+          "activeWorkspaceId",
+          "brains",
+          "activeBrainId"
+        ],
+        "additionalProperties": false
+      },
+      "IdentityUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
+          },
+          "firstName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 128
+          },
+          "lastName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 128
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 4096
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "taskSpawningEnabled": {
+            "type": "boolean"
+          },
+          "autoModelRoutingEnabled": {
+            "type": "boolean"
+          },
+          "chatCapabilitiesBetaEnabled": {
+            "type": "boolean"
+          },
+          "imessageEnabled": {
+            "type": "boolean"
+          },
+          "wikiEnabled": {
+            "type": "boolean"
+          },
+          "taskViewMode": {
+            "type": "string",
+            "enum": [
+              "board",
+              "list"
+            ]
+          },
+          "preferredMcpClient": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "claude",
+              "chatgpt",
+              "cursor",
+              null
+            ]
+          },
+          "mcpSetupCompletedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "onboardedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "firstName",
+          "lastName",
+          "avatarUrl",
+          "timezone",
+          "taskSpawningEnabled",
+          "autoModelRoutingEnabled",
+          "chatCapabilitiesBetaEnabled",
+          "imessageEnabled",
+          "wikiEnabled",
+          "taskViewMode",
+          "preferredMcpClient",
+          "mcpSetupCompletedAt",
+          "onboardedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "IdentityWorkspace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "slug": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 40
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "member"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "role"
+        ],
+        "additionalProperties": false
+      },
+      "IdentityBrain": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "restricted"
+            ]
+          },
+          "enrichmentEnabled": {
+            "type": "boolean"
+          },
+          "intelligence": {
+            "type": "string",
+            "enum": [
+              "basic",
+              "frontier"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "name",
+          "slug",
+          "description",
+          "visibility",
+          "enrichmentEnabled",
+          "intelligence"
+        ],
+        "additionalProperties": false
+      },
       "WorkspaceSettingsEnvelope": {
         "type": "object",
         "properties": {
@@ -13160,6 +13420,80 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BrainIntelligenceEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/identity": {
+      "get": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated identity, accessible workspaces, and the selected workspace Brain list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/identity/sync": {
+      "post": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated identity profile and accepted organization memberships synchronized, then resolved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityEnvelope"
                 }
               }
             }

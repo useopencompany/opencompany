@@ -103,6 +103,7 @@ describe("canonical Hono API", () => {
       billing: fakeBilling(),
       workspaceCapabilities: fakeWorkspaceCapabilities(),
       workspaceControl: fakeWorkspaceControl(),
+      identity: fakeIdentity(),
       onboarding: fakeOnboarding(),
       onboardingEmails: fakeOnboardingEmails(),
       authenticate: async () => {
@@ -2909,11 +2910,36 @@ describe("canonical Hono API", () => {
     expect(switchWorkspace).toHaveBeenCalledWith(actor, "goat_ws_next");
   });
 
+  it("routes identity reads and synchronization through the pre-onboarding identity tier", async () => {
+    const identity = {
+      userId: "user_mid_onboarding",
+      organizationId: null,
+      activeWorkspaceId: null,
+      activeBrainId: null,
+      method: "session" as const,
+    };
+    const authenticate = vi.fn(async () => {
+      throw new Error("The actor tier must not run for identity.");
+    });
+    const identify = vi.fn(async () => identity);
+    const service = fakeIdentity();
+    const get = vi.spyOn(service, "get");
+    const sync = vi.spyOn(service, "sync");
+    const app = testApp(fakeRepository(), { authenticate, identify, identity: service });
+
+    expect((await app.request("/v1/identity")).status).toBe(200);
+    expect((await app.request("/v1/identity/sync", { method: "POST" })).status).toBe(200);
+    expect(get).toHaveBeenCalledWith(identity);
+    expect(sync).toHaveBeenCalledWith(identity);
+    expect(authenticate).not.toHaveBeenCalled();
+  });
+
   it("routes onboarding through verified identity without the onboarded actor gate", async () => {
     const identity = {
       userId: "user_mid_onboarding",
       organizationId: null,
       activeWorkspaceId: null,
+      activeBrainId: null,
       method: "session" as const,
       refreshedSessionCookie: "wos-session=refreshed; Path=/; HttpOnly",
     };
@@ -3083,6 +3109,7 @@ function testApp(
     billing: fakeBilling(),
     workspaceCapabilities: fakeWorkspaceCapabilities(),
     workspaceControl: fakeWorkspaceControl(),
+    identity: fakeIdentity(),
     onboarding: fakeOnboarding(),
     onboardingEmails: fakeOnboardingEmails(),
     authenticate: async () => ({ actor }),
@@ -3090,6 +3117,7 @@ function testApp(
       userId: actor.userId,
       organizationId: null,
       activeWorkspaceId: actor.workspaceId,
+      activeBrainId: null,
       method: actor.authenticationMethod,
     }),
     defaultModel: "provider/default",
@@ -3215,6 +3243,45 @@ function fakeWorkspaceControl(): Parameters<typeof createApiApp>[0]["workspaceCo
     switch: async () => {
       throw new Error("Unexpected workspace switch.");
     },
+  };
+}
+
+function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
+  const data = {
+    user: {
+      id: actor.userId,
+      email: "owner@example.com",
+      firstName: "Owner",
+      lastName: null,
+      avatarUrl: null,
+      timezone: "UTC",
+      taskSpawningEnabled: true,
+      autoModelRoutingEnabled: false,
+      chatCapabilitiesBetaEnabled: false,
+      imessageEnabled: false,
+      wikiEnabled: true,
+      taskViewMode: "board" as const,
+      preferredMcpClient: null,
+      mcpSetupCompletedAt: null,
+      onboardedAt: "2026-08-13T12:00:00.000Z",
+      createdAt: "2026-08-13T12:00:00.000Z",
+      updatedAt: "2026-08-13T12:00:00.000Z",
+    },
+    workspaces: [
+      {
+        id: actor.workspaceId,
+        name: "Workspace",
+        slug: "workspace",
+        role: "admin" as const,
+      },
+    ],
+    activeWorkspaceId: actor.workspaceId,
+    brains: [],
+    activeBrainId: null,
+  };
+  return {
+    get: async () => data,
+    sync: async () => data,
   };
 }
 

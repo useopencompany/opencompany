@@ -1,31 +1,11 @@
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
-import { getDb } from "@opencompany/db/client";
-import {
-  type GoatBrain,
-  type GoatWorkspace,
-  type GoatWorkspaceRole,
-  goatUsers,
-} from "@opencompany/db/goat-schema";
-import {
-  adoptGoatWorkspaceMembershipsFromOrgs,
-  DEFAULT_GOAT_BRAIN_SLUG,
-  type GoatWorkspaceWithRole,
-  getGoatBrainAccess,
-  listAccessibleGoatBrains,
-  listGoatWorkspacesForUser,
-} from "@opencompany/db/goat-workspaces";
-import { recordGoatSignup } from "@opencompany/goat-observability";
+import type { IdentityDto } from "@opencompany/protocol";
 import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
 import type { AuthenticationResponse, User as WorkOSUser } from "@workos-inc/node";
-import { eq } from "drizzle-orm";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { NextRequest } from "next/server";
 import { cache } from "react";
 import { recordLastGoatAuthMethod } from "@/lib/auth-methods";
-import { syncGoatStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
-import { getWorkOSClient } from "@/lib/workos-client";
-import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
+import { serverApiClient, serverApiError } from "@/lib/server-api-client";
 import {
   GOAT_ACTIVE_BRAIN_COOKIE,
   GOAT_ACTIVE_WORKSPACE_COOKIE,
@@ -34,155 +14,77 @@ import {
 
 export { GOAT_ACTIVE_BRAIN_COOKIE, GOAT_ACTIVE_WORKSPACE_COOKIE };
 
+export type GoatIdentityUser = {
+  workosUserId: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  avatarUrl: string | null;
+  timezone: string;
+  taskSpawningEnabled: boolean;
+  autoModelRoutingEnabled: boolean;
+  chatCapabilitiesBetaEnabled: boolean;
+  imessageEnabled: boolean;
+  wikiEnabled: boolean;
+  taskViewMode: "board" | "list";
+  preferredMcpClient: "claude" | "chatgpt" | "cursor" | null;
+  mcpSetupCompletedAt: Date | null;
+  onboardedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type GoatIdentityWorkspace = {
+  id: string;
+  name: string;
+  slug: string | null;
+};
+
+export type GoatWorkspaceWithRole = {
+  workspace: GoatIdentityWorkspace;
+  role: "admin" | "member";
+};
+
+export type GoatIdentityBrain = IdentityDto["brains"][number];
+
 export type GoatIdentityContext = {
   authUser: WorkOSUser;
   organizationId: string | null;
-  user: typeof goatUsers.$inferSelect;
+  user: GoatIdentityUser;
   workspaces: GoatWorkspaceWithRole[];
 };
 
 export type GoatAuthContext = {
   authUser: WorkOSUser;
-  user: typeof goatUsers.$inferSelect;
-  workspace: GoatWorkspace;
-  role: GoatWorkspaceRole;
+  organizationId: string | null;
+  user: GoatIdentityUser;
+  workspace: GoatIdentityWorkspace;
+  role: "admin" | "member";
   workspaces: GoatWorkspaceWithRole[];
-  brains: GoatBrain[];
-  activeBrain: GoatBrain | null;
+  brains: GoatIdentityBrain[];
+  activeBrain: GoatIdentityBrain | null;
 };
 
-export async function syncGoatUser(authUser: WorkOSUser) {
-  const db = getDb();
-  const now = new Date();
-  const values = {
-    workosUserId: authUser.id,
-    email: authUser.email,
-    firstName: authUser.firstName,
-    lastName: authUser.lastName,
-    avatarUrl: authUser.profilePictureUrl,
-    updatedAt: now,
-  };
-
-  const [insertedUser] = await db
-    .insert(goatUsers)
-    .values(values)
-    .onConflictDoNothing({ target: goatUsers.workosUserId })
-    .returning();
-
-  if (insertedUser) {
-    recordGoatSignup({ source: "user_sync" });
-    await captureGoatServerEvent(
-      "signup_completed",
-      insertedUser.workosUserId,
-      {
-        source: "user_sync",
-      },
-      {
-        email: insertedUser.email,
-        firstName: insertedUser.firstName,
-        lastName: insertedUser.lastName,
-      },
-    );
-    return insertedUser;
-  }
-
-  const [updatedUser] = await db
-    .update(goatUsers)
-    .set({
-      email: values.email,
-      firstName: values.firstName,
-      lastName: values.lastName,
-      avatarUrl: values.avatarUrl,
-      updatedAt: values.updatedAt,
-    })
-    .where(eq(goatUsers.workosUserId, authUser.id))
-    .returning();
-
-  if (!updatedUser) {
-    throw new Error("Unable to sync the Goat user.");
-  }
-
-  return updatedUser;
-}
-
-// Reconciles memberships for WorkOS organizations the user accepted an
-// invitation to. Authentication calls this even when the user already has a
-// workspace; otherwise existing local membership can hide newly accepted
-// invitations. Failures are swallowed: sign-in must not depend on WorkOS API
-// health.
-export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
-  try {
-    const memberships = await getWorkOSClient().userManagement.listOrganizationMemberships({
-      userId: authUser.id,
-      statuses: ["active"],
-    });
-    const adopted = await adoptGoatWorkspaceMembershipsFromOrgs({
-      userWorkosId: authUser.id,
-      memberships: memberships.data.map((membership) => ({
-        organizationId: membership.organizationId,
-        role: membership.role?.slug === "admin" ? ("admin" as const) : ("member" as const),
-      })),
-    });
-    if (adopted > 0) {
-      const workspaces = await listGoatWorkspacesForUser(authUser.id);
-      await Promise.all(
-        workspaces.map((entry) =>
-          syncGoatStripeSeatQuantityForWorkspace(entry.workspace.id).catch((error) => {
-            console.error(
-              "[goat] Failed to sync Stripe seat quantity after invite adoption",
-              error,
-            );
-          }),
-        ),
-      );
-    }
-  } catch (error) {
-    console.error("[goat] Failed to adopt WorkOS organization memberships", error);
-  }
-}
-
-export async function activateGoatWorkspaceForOrganization(input: {
-  userWorkosId: string;
-  organizationId: string;
-}): Promise<boolean> {
-  const workspaces = await listGoatWorkspacesForUser(input.userWorkosId);
-  const target = workspaces.find(
-    (entry) => entry.workspace.workosOrganizationId === input.organizationId,
-  );
-  if (!target) return false;
-
-  const brains = await listAccessibleGoatBrains({
-    userWorkosId: input.userWorkosId,
-    workspaceId: target.workspace.id,
-  });
-  const activeBrain =
-    brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
-
-  await rememberActiveGoatWorkspace({
-    workspaceId: target.workspace.id,
-    brainId: activeBrain?.id ?? null,
-  });
-
-  return true;
-}
-
-// Shared by both custom sign-in surfaces (Google OAuth callback and the magic-link
-// server action): seals the WorkOS session into the same cookie withAuth() reads,
-// then runs the same sync/adopt/activate side effects the old hosted-AuthKit
-// onSuccess callback used to run.
+// Shared by both custom sign-in surfaces. WorkOS session sealing and browser
+// preference cookies remain in Next.js; all identity persistence and membership
+// adoption run through the authenticated API identity tier.
 export async function completeGoatAuthentication(
   authResponse: AuthenticationResponse,
   request: NextRequest | string,
 ) {
   await saveSession(authResponse, request);
   await recordLastGoatAuthMethod(authResponse.authenticationMethod);
-  await syncGoatUser(authResponse.user);
-  await adoptWorkOSOrganizationMemberships(authResponse.user);
-  if (authResponse.organizationId) {
+  const client = await serverApiClient({ authorization: `Bearer ${authResponse.accessToken}` });
+  const response = await client.v1.identity.sync.$post();
+  if (!response.ok) {
+    throw await serverApiError(response, "Could not synchronize the authenticated identity.");
+  }
+  const { data } = await response.json();
+  if (authResponse.organizationId && data.activeWorkspaceId) {
     try {
-      await activateGoatWorkspaceForOrganization({
-        userWorkosId: authResponse.user.id,
-        organizationId: authResponse.organizationId,
+      await rememberActiveGoatWorkspace({
+        workspaceId: data.activeWorkspaceId,
+        brainId: data.activeBrainId,
       });
     } catch (error) {
       console.error("[goat] Failed to activate the authenticated workspace", error);
@@ -190,75 +92,57 @@ export async function completeGoatAuthentication(
   }
 }
 
-// Authentication and workspace provisioning are separate product states. A
-// newly authenticated owner legitimately has zero workspaces until the
-// onboarding workspace step creates one; invited users receive memberships in
-// completeGoatAuthentication() before this resolver runs.
+// React cache() preserves the request-local semantics relied on by the RSC and
+// route callers: every consumer shares one AuthKit read and one API identity read.
+const resolveGoatSession = cache(
+  async (): Promise<{
+    authUser: WorkOSUser;
+    organizationId: string | null;
+    data: IdentityDto;
+  } | null> => {
+    const session = await withAuth();
+    if (!session.user) return null;
+    const response = await (await serverApiClient()).v1.identity.$get();
+    if (!response.ok) throw await serverApiError(response, "Could not load your workspace.");
+    const data = (await response.json()).data as IdentityDto;
+    return {
+      authUser: session.user,
+      organizationId: session.organizationId ?? null,
+      data,
+    };
+  },
+);
+
 const resolveGoatIdentity = cache(async (): Promise<GoatIdentityContext | null> => {
-  const session = await withAuth();
-  if (!session.user) return null;
-
-  const db = getDb();
-  const [existingUser] = await db
-    .select()
-    .from(goatUsers)
-    .where(eq(goatUsers.workosUserId, session.user.id))
-    .limit(1);
-  const user = existingUser ?? (await syncGoatUser(session.user));
-  let accessibleWorkspaces = await listGoatWorkspacesForUser(user.workosUserId);
-  if (accessibleWorkspaces.length === 0 && session.organizationId) {
-    // The auth callback normally adopts invitations. Retry only when AuthKit
-    // selected an organization but no local membership is visible, covering a
-    // transient callback-side WorkOS/DB failure without penalizing new owners.
-    await adoptWorkOSOrganizationMemberships(session.user);
-    accessibleWorkspaces = await listGoatWorkspacesForUser(user.workosUserId);
-  }
-  const workspaces = await ensureGoatWorkspaceOrganizationsForEntries(accessibleWorkspaces);
-
+  const session = await resolveGoatSession();
+  if (!session) return null;
   return {
-    authUser: session.user,
-    organizationId: session.organizationId ?? null,
-    user,
-    workspaces,
+    authUser: session.authUser,
+    organizationId: session.organizationId,
+    user: identityUser(session.data.user),
+    workspaces: session.data.workspaces.map((entry: IdentityDto["workspaces"][number]) => ({
+      workspace: { id: entry.id, name: entry.name, slug: entry.slug },
+      role: entry.role,
+    })),
   };
 });
 
 const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> => {
-  const identity = await resolveGoatIdentity();
-  if (!identity) return null;
-
-  const first = identity.workspaces[0];
-  if (!first) return null;
-
-  const cookieStore = await cookies();
-  const requestedWorkspaceId = cookieStore.get(GOAT_ACTIVE_WORKSPACE_COOKIE)?.value;
-  const active =
-    identity.workspaces.find(
-      (entry) =>
-        identity.organizationId && entry.workspace.workosOrganizationId === identity.organizationId,
-    ) ??
-    identity.workspaces.find((entry) => entry.workspace.id === requestedWorkspaceId) ??
-    first;
-
-  const brains = await listAccessibleGoatBrains({
-    userWorkosId: identity.user.workosUserId,
-    workspaceId: active.workspace.id,
-  });
-  const requestedBrainId = cookieStore.get(GOAT_ACTIVE_BRAIN_COOKIE)?.value;
-  const activeBrain =
-    brains.find((brain) => brain.id === requestedBrainId) ??
-    brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ??
-    brains[0] ??
-    null;
-
+  const [session, identity] = await Promise.all([resolveGoatSession(), resolveGoatIdentity()]);
+  if (!session || !identity || !session.data.activeWorkspaceId) return null;
+  const active = identity.workspaces.find(
+    (entry) => entry.workspace.id === session.data.activeWorkspaceId,
+  );
+  if (!active) return null;
   return {
-    authUser: identity.authUser,
-    user: identity.user,
+    ...identity,
     workspace: active.workspace,
     role: active.role,
-    workspaces: identity.workspaces,
-    brains,
-    activeBrain,
+    brains: session.data.brains,
+    activeBrain:
+      session.data.brains.find(
+        (brain: IdentityDto["brains"][number]) => brain.id === session.data.activeBrainId,
+      ) ?? null,
   };
 });
 
@@ -293,9 +177,10 @@ export async function currentGoatUser(options: { optional?: boolean } = {}) {
   return context;
 }
 
-// The active brain, or a thrown error when the user cannot access any brain
-// in the active workspace (e.g. every brain is restricted to other members).
-export async function currentGoatBrain(): Promise<{ context: GoatAuthContext; brain: GoatBrain }> {
+export async function currentGoatBrain(): Promise<{
+  context: GoatAuthContext;
+  brain: GoatIdentityBrain;
+}> {
   const context = await currentGoatUser();
   if (!context.activeBrain) {
     throw new Error("You do not have access to any brain in this workspace.");
@@ -305,14 +190,35 @@ export async function currentGoatBrain(): Promise<{ context: GoatAuthContext; br
 
 export async function currentGoatBrainByRef(
   brainRef: string,
-): Promise<{ context: GoatAuthContext; brain: GoatBrain }> {
+): Promise<{ context: GoatAuthContext; brain: GoatIdentityBrain }> {
   const context = await currentGoatUser();
-  const access = await getGoatBrainAccess({
-    userWorkosId: context.user.workosUserId,
-    brainRef,
-  });
-  if (!access || access.brain.workspaceId !== context.workspace.id) {
+  const brain = context.brains.find(
+    (candidate) => candidate.id === brainRef || candidate.slug === brainRef,
+  );
+  if (!brain || brain.workspaceId !== context.workspace.id) {
     throw new Error("You do not have access to that brain.");
   }
-  return { context, brain: access.brain };
+  return { context, brain };
+}
+
+function identityUser(user: IdentityDto["user"]): GoatIdentityUser {
+  return {
+    workosUserId: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    avatarUrl: user.avatarUrl,
+    timezone: user.timezone,
+    taskSpawningEnabled: user.taskSpawningEnabled,
+    autoModelRoutingEnabled: user.autoModelRoutingEnabled,
+    chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
+    imessageEnabled: user.imessageEnabled,
+    wikiEnabled: user.wikiEnabled,
+    taskViewMode: user.taskViewMode,
+    preferredMcpClient: user.preferredMcpClient,
+    mcpSetupCompletedAt: user.mcpSetupCompletedAt ? new Date(user.mcpSetupCompletedAt) : null,
+    onboardedAt: user.onboardedAt ? new Date(user.onboardedAt) : null,
+    createdAt: new Date(user.createdAt),
+    updatedAt: new Date(user.updatedAt),
+  };
 }
