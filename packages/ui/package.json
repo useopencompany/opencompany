@@ -20,11 +20,11 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
-    "@central-icons-react/round-outlined-radius-2-stroke-2": "^1.1.257",
+    "@central-icons-react/round-outlined-radius-2-stroke-2": "^1.1.306",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "sonner": "^2.0.7",
+    "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0"
   },
   "peerDependencies": {
@@ -32,14 +32,14 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.3.0",
-    "@types/node": "^25.9.1",
-    "@types/react": "19.2.15",
-    "@types/react-dom": "19.2.3",
-    "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
-    "postcss": "8.5.15",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^26.2.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "eslint": "10.8.1",
+    "eslint-config-next": "16.3.0",
+    "postcss": "8.5.26",
     "tailwindcss": "^4.3.0",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   }
 }
