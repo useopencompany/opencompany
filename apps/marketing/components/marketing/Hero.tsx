@@ -46,7 +46,8 @@ export function Hero() {
           </a>
 
           <h1 className="text-balance font-medium font-mono text-3xl text-ink leading-[1.1] tracking-[-0.05em] sm:text-5xl">
-            The open source <span className="text-violet-600 dark:text-violet-400">AI workspace</span>
+            The open source{" "}
+            <span className="text-violet-600 dark:text-violet-400">AI workspace</span>
           </h1>
 
           <p className="mt-6 max-w-2xl text-pretty font-medium text-[15px] text-muted-foreground leading-7 sm:text-base">
@@ -67,7 +68,7 @@ export function Hero() {
               href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
               variant="secondary"
             >
-              Book demo
+              Get a Demo
             </Cta>
             <Cta href="https://my.opencompany.chat">Sign up</Cta>
           </div>
