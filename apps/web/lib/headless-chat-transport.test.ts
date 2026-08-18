@@ -1,3 +1,4 @@
+import { captureException } from "@opencompany/observability";
 import { PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "@opencompany/protocol";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +7,10 @@ import { HeadlessChatTransport, startHeadlessBackgroundChat } from "./headless-c
 
 vi.mock("./headless-chat-collections", () => ({
   awaitHeadlessChatTransaction: vi.fn(async () => undefined),
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  captureException: vi.fn(),
 }));
 
 const occurredAt = "2026-08-10T20:00:00.000Z";
@@ -69,7 +74,11 @@ class MemoryStorage {
 }
 
 describe("canonical Chat transport", () => {
-  beforeEach(() => vi.stubGlobal("sessionStorage", new MemoryStorage()));
+  beforeEach(() => {
+    vi.stubGlobal("sessionStorage", new MemoryStorage());
+    vi.mocked(awaitHeadlessChatTransaction).mockReset().mockResolvedValue(undefined);
+    vi.mocked(captureException).mockReset();
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("sends Auto to the canonical API and adopts its authoritative model", async () => {
@@ -807,6 +816,71 @@ describe("canonical Chat transport", () => {
     ).resolves.toMatchObject({ runId: "run_background" });
     expect(paths).toEqual(["/v1/messages", "/v1/runs/run_background/events"]);
     expect(protocolVersion).toBe(PROTOCOL_VERSION);
+  });
+
+  it("keeps an accepted background Run alive when read-model reconciliation times out", async () => {
+    const paths: string[] = [];
+    const timeout = new Error(
+      "[headless-chat:messages:v1:conversation_background] Timeout waiting for txId: 42",
+    );
+    vi.mocked(awaitHeadlessChatTransaction).mockRejectedValueOnce(timeout);
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = requestUrl(input);
+      paths.push(url.pathname);
+      if (url.pathname === "/v1/messages") {
+        return Response.json(
+          {
+            data: {
+              conversationId: "conversation_background",
+              messageId: "message_background",
+              assistantMessageId: "message_assistant_background",
+              runId: "run_background",
+              transactionId: "42",
+              replayed: false,
+            },
+            meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+          },
+          { status: 202 },
+        );
+      }
+      if (url.pathname.endsWith("/events")) {
+        return sse([
+          {
+            ...event(1, "run.completed", {
+              messageId: "message_assistant_background",
+            }),
+            runId: "run_background",
+          },
+        ]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    await expect(
+      startHeadlessBackgroundChat(
+        {
+          content: "Work in the background",
+          clientConversationId: "conversation_background",
+          clientMessageId: "message_background",
+          model: "model_1",
+        },
+        {
+          baseUrl: "https://app.example.test",
+          fetch: fetchMock as typeof fetch,
+        },
+      ),
+    ).resolves.toMatchObject({ runId: "run_background" });
+
+    expect(paths).toEqual(["/v1/messages", "/v1/runs/run_background/events"]);
+    await vi.waitFor(() =>
+      expect(captureException).toHaveBeenCalledWith(timeout, {
+        event: "opencompany.chat_read_model_reconciliation_failed",
+        session_id: "conversation_background",
+        run_id: "run_background",
+        message_id: "message_assistant_background",
+        transaction_id: "42",
+      }),
+    );
   });
 });
 
