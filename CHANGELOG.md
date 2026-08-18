@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-08-17
+
+### Fixed
+- If your connection drops or you reload the page while a tool call, like a browser action, is still running, the reply now reliably picks back up instead of risking a broken or duplicated result (#1269) — @louis.
+
 ## [1.14.0] - 2026-08-14
 
 ### Changed
