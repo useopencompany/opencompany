@@ -43,15 +43,15 @@ vi.mock("@opencompany/db/credits", () => ({
 
 describe("Stripe ingress", () => {
   const db = { marker: "api-db" };
-  const constructEvent = vi.fn();
+  const constructEventAsync = vi.fn();
   const stripe = {
-    webhooks: { constructEvent },
+    webhooks: { constructEventAsync },
     paymentIntents: { retrieve: vi.fn() },
   } as never;
 
   beforeEach(() => vi.clearAllMocks());
 
-  it("requires a signature and verifies the exact raw body", async () => {
+  it("requires a signature and verifies the exact raw body asynchronously", async () => {
     const ingress = createStripeIngress({ db, stripe, webhookSecret: "whsec_test" });
     const missing = await ingress.webhook(
       new Request("https://api.test/webhooks/stripe", { method: "POST", body: "{}" }),
@@ -59,7 +59,7 @@ describe("Stripe ingress", () => {
     expect(missing.status).toBe(400);
 
     const rawBody = '{\n  "id": "evt_raw"\n}';
-    constructEvent.mockReturnValue({
+    constructEventAsync.mockResolvedValue({
       id: "evt_raw",
       type: "customer.created",
       data: { object: {} },
@@ -72,11 +72,9 @@ describe("Stripe ingress", () => {
       }),
     );
     expect(accepted.status).toBe(200);
-    expect(constructEvent).toHaveBeenCalledWith(rawBody, "t=1,v1=raw", "whsec_test");
+    expect(constructEventAsync).toHaveBeenCalledWith(rawBody, "t=1,v1=raw", "whsec_test");
 
-    constructEvent.mockImplementationOnce(() => {
-      throw new Error("bad signature");
-    });
+    constructEventAsync.mockRejectedValueOnce(new Error("bad signature"));
     const invalid = await ingress.webhook(
       new Request("https://api.test/webhooks/stripe", {
         method: "POST",
@@ -88,7 +86,7 @@ describe("Stripe ingress", () => {
   });
 
   it("delegates opencompany top-up retries to the idempotent ledger fulfillment", async () => {
-    constructEvent.mockReturnValue({
+    constructEventAsync.mockResolvedValue({
       id: "evt_topup_1",
       type: "checkout.session.completed",
       data: {
@@ -122,7 +120,7 @@ describe("Stripe ingress", () => {
   });
 
   it("records delayed top-up failures idempotently in the API database", async () => {
-    constructEvent.mockReturnValue({
+    constructEventAsync.mockResolvedValue({
       id: "evt_failed_1",
       type: "checkout.session.async_payment_failed",
       data: {
@@ -143,7 +141,7 @@ describe("Stripe ingress", () => {
   });
 
   it("preserves top-up fulfillment, resume, and saved-card behavior", async () => {
-    constructEvent.mockReturnValue({
+    constructEventAsync.mockResolvedValue({
       id: "evt_topup_success",
       type: "checkout.session.completed",
       data: {
@@ -182,7 +180,7 @@ describe("Stripe ingress", () => {
   });
 
   it("keeps subscription event ids authoritative in the projection", async () => {
-    constructEvent.mockReturnValue({
+    constructEventAsync.mockResolvedValue({
       id: "evt_subscription_1",
       type: "customer.subscription.updated",
       created: 1_786_636_800,
@@ -226,7 +224,7 @@ describe("Stripe ingress", () => {
   });
 
   it("keeps auto-refill crediting idempotent and injects the API database", async () => {
-    constructEvent.mockReturnValue({
+    constructEventAsync.mockResolvedValue({
       id: "evt_refill_1",
       type: "payment_intent.succeeded",
       data: {
@@ -253,7 +251,7 @@ describe("Stripe ingress", () => {
   });
 
   it("keeps legacy setup-mode events on the shared compatibility tables", async () => {
-    constructEvent.mockReturnValue({
+    constructEventAsync.mockResolvedValue({
       id: "evt_legacy_setup",
       type: "checkout.session.completed",
       data: { object: { id: "cs_setup", mode: "setup", metadata: {} } },
