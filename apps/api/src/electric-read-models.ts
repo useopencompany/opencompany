@@ -214,7 +214,17 @@ function readModelShape(input: {
     case "engine-sessions-v1":
       return {
         table: "goat.codex_chat_sessions",
-        columns: ["chat_session_id", "engine", "status", "active_turn_id", "error", "updated_at"],
+        // Electric requires every physical primary-key column even when the public projection
+        // deliberately omits that implementation id.
+        columns: [
+          "id",
+          "chat_session_id",
+          "engine",
+          "status",
+          "active_turn_id",
+          "error",
+          "updated_at",
+        ],
         where: `"user_workos_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
         params: [input.actor.userId, input.actor.workspaceId],
       };
@@ -889,6 +899,7 @@ const READ_MODEL_COLUMN_NAMES = {
     updated_at: "updatedAt",
   },
   "engine-sessions-v1": {
+    id: "",
     chat_session_id: "conversationId",
     engine: "engine",
     status: "status",

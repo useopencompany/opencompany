@@ -155,14 +155,19 @@ for (const [manifestPath, packageName] of expectedPackages) {
 
 const immutableChanges = gitLines([
   "diff",
-  "--name-only",
+  "--name-status",
   "origin/main",
   "--",
   "drizzle",
   "docs/adr",
   "docs/future-concepts/oss-readiness.md",
 ]);
-for (const changedPath of immutableChanges) {
+for (const change of immutableChanges) {
+  const [status, ...paths] = change.split("\t");
+  const changedPath = paths.at(-1);
+  if (status === "A" || (status === "M" && changedPath === "drizzle/meta/_journal.json")) {
+    continue;
+  }
   failures.push(`${changedPath}: immutable migration or ADR history changed`);
 }
 

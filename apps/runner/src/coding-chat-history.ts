@@ -70,13 +70,25 @@ export async function loadCodingChatHistory(
            user_message.attachments AS user_attachments,
            (
              SELECT jsonb_object_agg(entry.key, LEFT(entry.value, ${CODING_CHAT_HISTORY_MAX_ATTACHMENT_TEXT_BYTES + 1}))
-             FROM jsonb_each_text(user_message.attachment_texts) AS entry(key, value)
+             FROM jsonb_each_text(
+               CASE
+                 WHEN jsonb_typeof(user_message.attachment_texts) = 'object'
+                   THEN user_message.attachment_texts
+                 ELSE '{}'::jsonb
+               END
+             ) AS entry(key, value)
            ) AS user_attachment_texts,
            LEFT(assistant_message.content, ${CODING_CHAT_HISTORY_MAX_MESSAGE_BYTES + 1}) AS assistant_content,
            assistant_message.attachments AS assistant_attachments,
            (
              SELECT jsonb_object_agg(entry.key, LEFT(entry.value, ${CODING_CHAT_HISTORY_MAX_ATTACHMENT_TEXT_BYTES + 1}))
-             FROM jsonb_each_text(assistant_message.attachment_texts) AS entry(key, value)
+             FROM jsonb_each_text(
+               CASE
+                 WHEN jsonb_typeof(assistant_message.attachment_texts) = 'object'
+                   THEN assistant_message.attachment_texts
+                 ELSE '{}'::jsonb
+               END
+             ) AS entry(key, value)
            ) AS assistant_attachment_texts,
            recent_history.history_turn_count
     FROM recent_history

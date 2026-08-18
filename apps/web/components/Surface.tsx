@@ -886,6 +886,12 @@ export function Surface({
     if (initialChat && initialChat.id === chatSessionId) return initialChat.messages;
     return [];
   }, [chatSessionId, initialChat, liveChat]);
+  const persistedTranscriptLoading = Boolean(
+    chatSessionId &&
+      persistedChatSessionId === chatSessionId &&
+      liveChat?.sessionId !== chatSessionId &&
+      !(initialChat?.id === chatSessionId && initialChat.messages.length > 0),
+  );
   useEffect(() => {
     persistedMessageIdsRef.current = new Set(persistedMessages.map((message) => message.id));
     for (const message of persistedMessages) {
@@ -2611,6 +2617,8 @@ export function Surface({
                   ))}
                   {isTaskConversationStopping ? (
                     <PendingActivityIndicator label="Stopping task…" />
+                  ) : chatMessages.length === 0 && persistedTranscriptLoading ? (
+                    <PendingActivityIndicator label="Loading conversation…" />
                   ) : isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
                     <ThinkingIndicator
                       startedAtMs={activeTurnTimerStartedAtMs}
@@ -5508,10 +5516,7 @@ function HeadlessLiveChatMessageSubscriber({
     (q) => q.from({ message: messagesCollection }),
     [messagesCollection],
   );
-  const { data: runRows, isLoading: runsLoading } = useLiveQuery(
-    (q) => q.from({ run: runsCollection }),
-    [runsCollection],
-  );
+  const { data: runRows } = useLiveQuery((q) => q.from({ run: runsCollection }), [runsCollection]);
   const liveMessages = useMemo(() => {
     const runsByAssistantMessage = new Map(
       ((runRows ?? []) as HeadlessChatRunReadModel[]).map((run) => [run.assistantMessageId, run]),
@@ -5527,9 +5532,9 @@ function HeadlessLiveChatMessageSubscriber({
   }, [rows, runRows]);
 
   useEffect(() => {
-    if (messagesLoading || runsLoading) return;
+    if (messagesLoading) return;
     onChange({ sessionId, messages: liveMessages });
-  }, [liveMessages, messagesLoading, onChange, runsLoading, sessionId]);
+  }, [liveMessages, messagesLoading, onChange, sessionId]);
 
   return null;
 }

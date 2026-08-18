@@ -6,6 +6,7 @@ import {
   CodexChatRetryableInfrastructureError,
 } from "./codex-chat-errors";
 import {
+  CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS,
   claimNextCodexChatTurn,
   codexChatLeaseTtlMs,
   codexChatRetryAt,
@@ -689,6 +690,38 @@ describe("runClaimedTurn", () => {
     expect(deferred).toContain("lease_expires_at");
     expect(deferred).toContain("SET status = 'queued'");
     expect(eventMocks.fail).not.toHaveBeenCalled();
+  });
+
+  it("settles unexpected execution failures instead of leaving the lease to expire", async () => {
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(new Error("history projection failed"));
+
+    await expect(runClaimedTurn(turn(), env())).resolves.toBeUndefined();
+
+    expect(eventMocks.fail).toHaveBeenCalledWith(
+      "This chat run failed before the coding engine could finish. Send your message again to retry.",
+      { sessionStatus: "failed" },
+    );
+  });
+
+  it("terminally settles retryable infrastructure failures after the retry budget", async () => {
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(
+      new CodexChatRetryableInfrastructureError(
+        "Temporary infrastructure failure.",
+        new Error("provider unavailable"),
+      ),
+    );
+
+    await expect(
+      runClaimedTurn(turn({ attempts: CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS }), env()),
+    ).resolves.toBeUndefined();
+
+    expect(eventMocks.fail).toHaveBeenCalledWith(
+      "This chat run could not start after several infrastructure retries. Send your message again to retry.",
+      { sessionStatus: "failed" },
+    );
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH deferred AS")),
+    ).toBe(false);
   });
 
   it("caps infrastructure retry backoff at one minute", () => {

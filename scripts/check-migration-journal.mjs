@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { execFileSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +20,25 @@ const journal = JSON.parse(await readFile(journalPath, "utf8"));
 const entries = Array.isArray(journal.entries) ? journal.entries : [];
 const journalTags = entries.map((entry) => entry.tag);
 const errors = [];
+
+const baseJournal = JSON.parse(
+  execFileSync("git", ["show", "origin/main:drizzle/meta/_journal.json"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  }),
+);
+const baseEntries = Array.isArray(baseJournal.entries) ? baseJournal.entries : [];
+if (entries.length < baseEntries.length) {
+  errors.push("The migration journal cannot remove entries from origin/main.");
+} else {
+  for (let index = 0; index < baseEntries.length; index += 1) {
+    if (JSON.stringify(entries[index]) !== JSON.stringify(baseEntries[index])) {
+      errors.push(
+        `Migration journal entry ${index} differs from origin/main; history is append-only.`,
+      );
+    }
+  }
+}
 
 const duplicateTags = journalTags.filter((tag, index) => journalTags.indexOf(tag) !== index);
 if (duplicateTags.length > 0) {
