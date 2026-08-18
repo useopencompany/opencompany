@@ -61,9 +61,10 @@ bun run secrets:check
 ```
 
 TruffleHog must be installed for the local secret scan. The pull request gate scans the exact PR
-commit range without repository credentials. `boundary:check` enforces the permanent application
-and naming boundaries. For focused development, use Turborepo filters such as
-`bun run test --filter @opencompany/web`, but run the full gate before review.
+commit range without repository credentials. It also checks every non-merge commit for a valid DCO
+trailer and reviews new high- or critical-severity dependency vulnerabilities. `boundary:check`
+enforces the permanent application and naming boundaries. For focused development, use Turborepo
+filters such as `bun run test --filter @opencompany/web`, but run the full gate before review.
 
 ## Schema and Environment Changes
 
@@ -79,7 +80,7 @@ and naming boundaries. For focused development, use Turborepo filters such as
 Biome owns formatting and import ordering. ESLint owns lint rules. Tests use Vitest. Prefer existing
 components, helpers, and fixture styles over new abstractions.
 
-External pull requests require one maintainer approval, passing required CI, and resolved review
-conversations. New commits dismiss stale approvals. The repository owner may use the configured,
-auditable bypass only for owner-authored changes and only after required CI passes. Mandatory
-critical-path CODEOWNER approval remains deferred until a second active maintainer is assigned.
+External pull requests require one maintainer approval, the `PR gate` and CodeQL, and resolved review
+conversations. New commits dismiss stale approvals. The main rules apply to administrators; do not
+bypass them. Mandatory critical-path CODEOWNER approval remains deferred until a second active
+maintainer is assigned.

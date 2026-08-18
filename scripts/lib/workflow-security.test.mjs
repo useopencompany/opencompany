@@ -4,6 +4,7 @@ import test from "node:test";
 
 const workflowDirectory = new URL("../../.github/workflows/", import.meta.url);
 const pullRequestWorkflowUrl = new URL("ci.yml", workflowDirectory);
+const verifyWorkflowUrl = new URL("verify.yml", workflowDirectory);
 const releaseWorkflowUrl = new URL("release-production.yml", workflowDirectory);
 
 test("every third-party workflow action is pinned to a full commit SHA", async () => {
@@ -26,16 +27,17 @@ test("every third-party workflow action is pinned to a full commit SHA", async (
   }
 });
 
-test("the pull request gate is isolated and credential-free", async () => {
-  const workflow = await readFile(pullRequestWorkflowUrl, "utf8");
+test("the pull request path remains credential-free", async () => {
+  const caller = await readFile(pullRequestWorkflowUrl, "utf8");
+  const verifier = await readFile(verifyWorkflowUrl, "utf8");
+  const combined = `${caller}\n${verifier}`;
 
-  assert.match(workflow, /^on:\n\s+pull_request:\n\s+branches: \[main\]/mu);
-  assert.match(workflow, /^permissions:\n\s+contents: read$/mu);
-  assert.match(workflow, /persist-credentials: false/u);
+  assert.match(caller, /^on:\n\s+pull_request:\n\s+branches: \[main\]/mu);
+  assert.match(verifier, /^on:\n\s+workflow_call:/mu);
+  assert.match(caller, /^permissions:\n\s+contents: read$/mu);
+  assert.match(verifier, /^permissions:\n\s+contents: read$/mu);
+  assert.match(combined, /persist-credentials: false/u);
 
-  // The workflow may run on Blacksmith for speed, but never on a raw self-hosted
-  // runner, and never with any credential that could reach deploy or the cache
-  // remote. Speed comes from `--affected` and the token-free Blacksmith cache.
   for (const forbidden of [
     /pull_request_target:/u,
     /workflow_run:/u,
@@ -44,11 +46,11 @@ test("the pull request gate is isolated and credential-free", async () => {
     /\bdeployments:\s*write\b/u,
     /^\s*environment:/mu,
     /runs-on:\s*self-hosted/u,
-    /actions\/cache@/u,
     /TURBO_TOKEN/u,
     /TURBO_TEAM/u,
+    /useblacksmith\/cache@/u,
   ]) {
-    assert.doesNotMatch(workflow, forbidden);
+    assert.doesNotMatch(combined, forbidden);
   }
 
   for (const command of [
@@ -59,26 +61,27 @@ test("the pull request gate is isolated and credential-free", async () => {
     "bun run format:check",
     "bun run boundary:check",
     "bun --filter @opencompany/protocol openapi:check",
-    "bun --bun turbo run lint typecheck build test --affected",
+    "bun --bun turbo run lint typecheck --concurrency=2",
+    "bun --bun turbo run test --concurrency=2",
+    "-- --maxWorkers=2",
+    "bun --bun turbo run build --concurrency=2",
     "node --test scripts/lib/*.test.mjs",
+    "node scripts/check-dco.mjs",
   ]) {
-    assert.ok(workflow.includes(command), `PR gate must run: ${command}`);
+    assert.ok(combined.includes(command), `PR verification must run: ${command}`);
   }
 
-  // The persistent cache must be the token-free Blacksmith cache, pinned to a SHA.
-  assert.match(workflow, /useblacksmith\/cache@[a-f0-9]{40}/u);
-
-  assert.match(workflow, /trufflesecurity\/trufflehog@[a-f0-9]{40}/u);
-  assert.match(workflow, /base: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/u);
-  assert.match(workflow, /head: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/u);
+  assert.match(caller, /actions\/dependency-review-action@[a-f0-9]{40}/u);
+  assert.match(verifier, /actions\/cache\/restore@[a-f0-9]{40}/u);
+  assert.match(verifier, /actions\/cache\/save@[a-f0-9]{40}/u);
+  assert.match(verifier, /inputs\.cache_write/u);
+  assert.match(verifier, /github\.ref == 'refs\/heads\/main'/u);
+  assert.match(verifier, /trufflesecurity\/trufflehog@[a-f0-9]{40}/u);
+  assert.doesNotMatch(verifier, /^\s+version:/mu);
 });
 
-test("the PR gate aggregates every job into one required status check", async () => {
+test("the PR gate aggregates every direct gate job", async () => {
   const workflow = await readFile(pullRequestWorkflowUrl, "utf8");
-
-  // Top-level job ids are the two-space-indented keys inside the `jobs:` block.
-  // Branch protection requires only the `gate` check, so every other job must be
-  // a dependency of `gate`; otherwise a job could fail without blocking merges.
   const jobsBlock = workflow.slice(workflow.indexOf("\njobs:\n"));
   const jobIds = [...jobsBlock.matchAll(/^ {2}([a-z][\w-]*):\n/gmu)].map((match) => match[1]);
   assert.ok(jobIds.includes("gate"), "the workflow must define a `gate` job");
@@ -86,7 +89,6 @@ test("the PR gate aggregates every job into one required status check", async ()
   const needsMatch = jobsBlock.match(/^ {2}gate:[\s\S]*?\n {4}needs: \[([^\]]+)\]/mu);
   assert.ok(needsMatch, "the gate job must declare `needs`");
   const gateNeeds = needsMatch[1].split(",").map((name) => name.trim());
-
   for (const jobId of jobIds) {
     if (jobId === "gate") continue;
     assert.ok(gateNeeds.includes(jobId), `the gate job must depend on the ${jobId} job`);
@@ -97,12 +99,13 @@ test("the PR gate aggregates every job into one required status check", async ()
   assert.match(workflow, /join\(needs\.\*\.result/u);
 });
 
-test("production can only run from a trusted post-merge event", async () => {
+test("production verifies main before entering the privileged release job", async () => {
   const workflow = await readFile(releaseWorkflowUrl, "utf8");
 
   assert.match(workflow, /^on:\n\s+push:\n\s+branches: \[main\]\n\s+workflow_dispatch:/mu);
-  assert.match(workflow, /RELEASE_SHA: \$\{\{ github\.sha \}\}/u);
-  assert.match(workflow, /ref: \$\{\{ env\.RELEASE_SHA \}\}/u);
+  assert.match(workflow, /uses: \.\/\.github\/workflows\/verify\.yml/u);
+  assert.match(workflow, /head_sha: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /environment: Production/u);
   assert.doesNotMatch(workflow, /pull_request_target:/u);
   assert.doesNotMatch(workflow, /pull_request:/u);
   assert.doesNotMatch(workflow, /workflow_run:/u);
