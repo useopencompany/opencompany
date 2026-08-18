@@ -105,7 +105,7 @@ test("production verifies main before entering the privileged release job", asyn
   assert.match(workflow, /^on:\n\s+push:\n\s+branches: \[main\]\n\s+workflow_dispatch:/mu);
   assert.match(workflow, /uses: \.\/\.github\/workflows\/verify\.yml/u);
   assert.match(workflow, /head_sha: \$\{\{ github\.sha \}\}/u);
-  assert.match(workflow, /environment: Production/u);
+  assert.match(workflow, /environment: production/u);
   assert.doesNotMatch(workflow, /pull_request_target:/u);
   assert.doesNotMatch(workflow, /pull_request:/u);
   assert.doesNotMatch(workflow, /workflow_run:/u);
