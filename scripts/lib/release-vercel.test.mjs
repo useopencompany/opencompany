@@ -102,7 +102,6 @@ test("preserves relative function symlinks through prepare and restore", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
-
 test("scopes Vercel smoke requests to the deployment team", () => {
   assert.deepEqual(
     vercelCurlArgs("/api/healthz", "https://web.example.vercel.app", {
