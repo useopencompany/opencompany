@@ -96,11 +96,11 @@ export function restorePreparedVercelDirectory(source, destination = ".vercel") 
   copyDirectoryContents(source, destination);
 }
 
-export function vercelCurlArgs(path, deploymentUrl, { token = "", teamId = "" } = {}) {
-  const args = ["vercel", "curl", path, "--deployment", deploymentUrl];
-  if (token.trim()) args.push("--token", token.trim());
-  if (teamId.trim()) args.push("--scope", teamId.trim());
-  return args;
+export function vercelCurlArgs(path, deploymentUrl) {
+  // Vercel CLI 54.5 forwards global auth/scope flags to the underlying curl process. A full
+  // deployment URL lets the CLI resolve the owning team while authentication stays in VERCEL_TOKEN.
+  const target = new URL(path, `${deploymentUrl.replace(/\/+$/, "")}/`).toString();
+  return ["vercel", "curl", target, "--yes"];
 }
 
 function copyDirectoryContents(source, destination) {

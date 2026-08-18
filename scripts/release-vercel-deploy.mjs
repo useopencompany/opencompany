@@ -100,7 +100,7 @@ async function deployPreparedOutput(options, { token, teamId, projectId }) {
     await runCommand(
       "bunx",
       [
-        ...vercelCurlArgs(options.smokePath, `https://${deployment.url}`, { token, teamId }),
+        ...vercelCurlArgs(options.smokePath, `https://${deployment.url}`),
         "--",
         "--fail-with-body",
         "--silent",

@@ -102,22 +102,11 @@ test("preserves relative function symlinks through prepare and restore", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
-test("scopes Vercel smoke requests to the deployment team", () => {
-  assert.deepEqual(
-    vercelCurlArgs("/api/healthz", "https://web.example.vercel.app", {
-      token: " token ",
-      teamId: " team ",
-    }),
-    [
-      "vercel",
-      "curl",
-      "/api/healthz",
-      "--deployment",
-      "https://web.example.vercel.app",
-      "--token",
-      "token",
-      "--scope",
-      "team",
-    ],
-  );
+test("targets an immutable Vercel URL without forwarding global flags to curl", () => {
+  assert.deepEqual(vercelCurlArgs("/api/healthz", "https://web.example.vercel.app"), [
+    "vercel",
+    "curl",
+    "https://web.example.vercel.app/api/healthz",
+    "--yes",
+  ]);
 });
