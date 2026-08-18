@@ -54,8 +54,8 @@ test("production credentials are scoped to the release job", async () => {
   const release = workflow.slice(releaseStart);
 
   assert.doesNotMatch(beforeRelease, /id-token: write/u);
-  assert.doesNotMatch(beforeRelease, /environment: Production/u);
-  assert.match(release, /environment: Production/u);
+  assert.doesNotMatch(beforeRelease, /environment: production/u);
+  assert.match(release, /environment: production/u);
   assert.match(release, /id-token: write/u);
   assert.match(release, /deployments: write/u);
 });

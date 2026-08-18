@@ -25,7 +25,7 @@ After verification, the workflow calculates each surface from its own last succe
 deployment. This means an API success remains recorded even when the runner fails, and the next run
 retries only the runner and any downstream web release that was blocked. The five deployment-state
 environments are `production-database`, `production-api`, `production-runner`, `production-web`, and
-`production-marketing`. They are state records created inside the protected `Production` job; they
+`production-marketing`. They are state records created inside the protected `production` job; they
 do not hold production credentials.
 
 The workflow loads release credentials from Infisical `prod` `/release`, validates selected

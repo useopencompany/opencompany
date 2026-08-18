@@ -121,7 +121,7 @@ jobs:
     if: ${{ needs.plan.outputs.any == 'true' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
-    environment: Production
+    environment: production
     permissions:
       contents: read
       deployments: write
