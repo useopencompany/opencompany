@@ -415,8 +415,22 @@ export async function executeManagedCapability(input: {
     throw error;
   }
 
-  let payload = currentRun.output;
-  if (input.spec.mapOutput) {
+  const noResults = pdlPersonEnrichmentFoundNoResults(currentRun);
+  if (!providerRunCompletedSuccessfully(currentRun) && !noResults) {
+    const settlement = await settleManagedCapabilityRun({
+      auditRun,
+      providerRun: currentRun,
+    });
+    throw new ActionExecutionError("provider_error", settlement.message);
+  }
+
+  let payload: unknown = noResults
+    ? {
+        status: "not_found",
+        message: "No qualifying work email was found for this person.",
+      }
+    : currentRun.output;
+  if (!noResults && input.spec.mapOutput) {
     try {
       payload = input.spec.mapOutput(currentRun.output, input.params);
     } catch (error) {
@@ -484,8 +498,8 @@ export async function settleManagedCapabilityRun(input: {
   const providerHttpStatus = input.providerRun.providerResponse?.httpStatus ?? null;
   const success =
     !input.forceFailure &&
-    input.providerRun.status === "COMPLETED" &&
-    (providerHttpStatus === null || (providerHttpStatus >= 200 && providerHttpStatus < 400));
+    (providerRunCompletedSuccessfully(input.providerRun) ||
+      pdlPersonEnrichmentFoundNoResults(input.providerRun));
   const providerCostUsdMicros = providerRunCostUsdMicros(input.providerRun);
 
   if (providerCostUsdMicros === null) {
@@ -826,6 +840,24 @@ function providerRunErrorCode(run: MonidRun) {
     return `provider_http_${run.providerResponse.httpStatus}`;
   }
   return run.status.toLowerCase();
+}
+
+function providerRunCompletedSuccessfully(run: MonidRun) {
+  const providerHttpStatus = run.providerResponse?.httpStatus;
+  return (
+    run.status === "COMPLETED" &&
+    (providerHttpStatus === undefined || (providerHttpStatus >= 200 && providerHttpStatus < 400))
+  );
+}
+
+function pdlPersonEnrichmentFoundNoResults(run: MonidRun) {
+  return (
+    run.status === "COMPLETED" &&
+    run.provider === "pdl" &&
+    run.endpoint === "/v5/person/enrich" &&
+    run.providerResponse?.httpStatus === 404 &&
+    run.resultCount === 0
+  );
 }
 
 function abortableDelay(ms: number, signal: AbortSignal) {
