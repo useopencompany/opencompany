@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-08-18
+
+### Fixed
+- Coding chats that hit a rare internal error no longer get stuck endlessly retrying, and reopening one mid-run now shows your messages right away instead of a blank "Connecting" screen (#1283) — @louis.
+- Asking opencompany to find someone's work email now tells you plainly when there isn't one, instead of showing a failed step and trying again (#1285) — @louis.
+
 ## [1.15.0] - 2026-08-17
 
 ### Fixed
