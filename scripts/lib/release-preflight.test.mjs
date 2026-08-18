@@ -3,14 +3,14 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
+import { surfaceConfig } from "./release-vercel.mjs";
+
 const preflightUrl = new URL("../release-preflight.mjs", import.meta.url);
-const workflowUrl = new URL("../../.github/workflows/release-production.yml", import.meta.url);
 const renderUrl = new URL("../../render.yaml", import.meta.url);
 
 test("production preflight follows the deployed runtime boundaries", async () => {
-  const [source, workflow, render] = await Promise.all([
+  const [source, render] = await Promise.all([
     readFile(preflightUrl, "utf8"),
-    readFile(workflowUrl, "utf8"),
     readFile(renderUrl, "utf8"),
   ]);
   const groups = readGroups(source);
@@ -53,7 +53,7 @@ test("production preflight follows the deployed runtime boundaries", async () =>
     assert.equal(new Set(keys).size, keys.length, `${name} preflight keys must be unique`);
   }
 
-  assert.deepEqual(readWorkflowWebRequired(workflow).sort(), [...groups.web.required].sort());
+  assert.deepEqual([...surfaceConfig("web").requiredEnv].sort(), [...groups.web.required].sort());
   assert.deepEqual(readRenderKeys(render, "opencompany-api").sort(), groupKeys(groups.api).sort());
   assert.deepEqual(
     readRenderKeys(render, "opencompany-runner").sort(),
@@ -80,19 +80,6 @@ function assertIncludes(actual, expected) {
 
 function assertExcludes(actual, expected) {
   for (const key of expected) assert.ok(!actual.includes(key), `${key} should not be in the group`);
-}
-
-function readWorkflowWebRequired(workflow) {
-  const stepStart = workflow.indexOf("- name: Check Vercel web env");
-  const stepEnd = workflow.indexOf("- name: Pull Vercel web production env", stepStart);
-  assert.notEqual(stepStart, -1, "web env workflow step is missing");
-  assert.notEqual(stepEnd, -1, "web env workflow step terminator is missing");
-
-  const arraySource = workflow
-    .slice(stepStart, stepEnd)
-    .match(/const required = (?<keys>\[[\s\S]*?\n\s*\]);/u)?.groups?.keys;
-  assert.ok(arraySource, "web workflow required keys are missing");
-  return [...vm.runInNewContext(arraySource)];
 }
 
 function readRenderKeys(render, serviceName) {

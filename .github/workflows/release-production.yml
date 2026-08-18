@@ -6,15 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       deploy_api:
-        description: "Trigger the Render canonical Chat API deploy"
+        description: Deploy the Render product API
         type: boolean
         default: true
       deploy_runner:
-        description: "Trigger the Render runner deploy"
-        type: boolean
-        default: true
-      smoke:
-        description: "Run production health checks after deploy"
+        description: Deploy the Render runner
         type: boolean
         default: true
 
@@ -24,130 +20,137 @@ concurrency:
 
 permissions:
   contents: read
-  deployments: write
-  id-token: write
 
 jobs:
-  release:
-    name: Migrate and deploy production
+  context:
+    name: Resolve release context
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 20
-    environment: production
+    timeout-minutes: 5
+    outputs:
+      base_sha: ${{ steps.base.outputs.base_sha }}
     env:
-      INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || secrets.INFISICAL_ENV_SLUG || 'prod' }}
-      INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
       RELEASE_SHA: ${{ github.sha }}
     steps:
-      - name: Checkout
+      - name: Require manual releases to run from main
+        if: ${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Production releases must run from main. Current ref: $GITHUB_REF"
+          exit 1
+
+      - name: Checkout release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Resolve verification base
+        id: base
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          base_sha="$EVENT_BEFORE"
+          if [[ ! "$base_sha" =~ ^[a-f0-9]{40}$ || "$base_sha" == "0000000000000000000000000000000000000000" ]]; then
+            base_sha="$(git rev-parse "$RELEASE_SHA^" 2>/dev/null || printf '%s' "$RELEASE_SHA")"
+          fi
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Verify main
+    needs: context
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify.yml
+    with:
+      base_sha: ${{ needs.context.outputs.base_sha }}
+      head_sha: ${{ github.sha }}
+      requested_scope: affected
+      cache_write: true
+
+  plan:
+    name: Plan production release
+    needs: verify
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      deployments: read
+    outputs:
+      any: ${{ steps.plan.outputs.any }}
+      database: ${{ steps.plan.outputs.database }}
+      api: ${{ steps.plan.outputs.api }}
+      runner: ${{ steps.plan.outputs.runner }}
+      web: ${{ steps.plan.outputs.web }}
+      marketing: ${{ steps.plan.outputs.marketing }}
+    env:
+      RELEASE_SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout verified main commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.RELEASE_SHA }}
           fetch-depth: 0
-
-      - name: Require main branch
-        if: ${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
-        run: |
-          echo "Production releases must run from main. Current ref: $GITHUB_REF"
-          exit 1
-
-      - name: Check automatic release is still current
-        id: current-release
-        if: ${{ github.event_name == 'push' }}
-        run: |
-          git fetch --no-tags --depth=1 origin main
-          latest_sha="$(git rev-parse refs/remotes/origin/main)"
-          if [ "$RELEASE_SHA" != "$latest_sha" ]; then
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping release for $RELEASE_SHA because origin/main is now $latest_sha."
-            exit 0
-          fi
-          echo "should_release=true" >> "$GITHUB_OUTPUT"
-          echo "Release $RELEASE_SHA is current."
-
-      - name: Skip stale automatic release
-        if: ${{ github.event_name == 'push' && steps.current-release.outputs.should_release == 'false' }}
-        run: echo "This automatic release was superseded before setup, so no deployment work will run."
-
-      - name: Resolve previous successful production release
-        id: release-base
-        if: ${{ github.event_name == 'push' && steps.current-release.outputs.should_release == 'true' }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            try {
-              const { data: deployments } = await github.rest.repos.listDeployments({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                environment: "production",
-                per_page: 100,
-              });
-
-              for (const deployment of deployments) {
-                if (
-                  deployment.sha === process.env.RELEASE_SHA ||
-                  !/^[a-f0-9]{40}$/i.test(deployment.sha) ||
-                  !deployment.description?.startsWith("Production release ")
-                ) {
-                  continue;
-                }
-
-                const { data: statuses } = await github.rest.repos.listDeploymentStatuses({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  deployment_id: deployment.id,
-                  per_page: 100,
-                });
-
-                if (statuses.some((status) => status.state === "success")) {
-                  core.setOutput("base_sha", deployment.sha);
-                  core.info(`Using production release ${deployment.sha.slice(0, 7)} as the scope base.`);
-                  return;
-                }
-              }
-
-              core.warning("No previous successful production release was found; every surface will deploy.");
-              core.setOutput("base_sha", "");
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error);
-              core.warning(`Could not resolve the previous production release: ${message}`);
-              core.setOutput("base_sha", "");
-            }
+          persist-credentials: false
 
       - name: Setup Bun
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.2
 
-      - name: Install dependencies
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
+      - name: Install dependencies from the lockfile
         run: bun install --frozen-lockfile
 
-      - name: Plan production release scope
-        id: release-scope
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
+      - name: Calculate per-surface release scope
+        id: plan
         env:
-          RELEASE_BASE_SHA: ${{ steps.release-base.outputs.base_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
           DEPLOY_API_INPUT: ${{ inputs.deploy_api }}
           DEPLOY_RUNNER_INPUT: ${{ inputs.deploy_runner }}
         run: |
+          args=()
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            scope_args=(--all)
-            if [[ "$DEPLOY_API_INPUT" != "true" ]]; then
-              scope_args+=(--skip-api)
-            fi
-            if [[ "$DEPLOY_RUNNER_INPUT" != "true" ]]; then
-              scope_args+=(--skip-runner)
-            fi
-            bun run release:scope -- "${scope_args[@]}"
-          elif [[ -n "$RELEASE_BASE_SHA" ]]; then
-            bun run release:scope -- --base "$RELEASE_BASE_SHA" --head "$RELEASE_SHA"
-          else
-            bun run release:scope -- --all
+            args+=(--all)
+            if [[ "$DEPLOY_API_INPUT" != "true" ]]; then args+=(--skip-api); fi
+            if [[ "$DEPLOY_RUNNER_INPUT" != "true" ]]; then args+=(--skip-runner); fi
           fi
+          node scripts/release-plan.mjs "${args[@]}"
+
+  release:
+    name: Deploy production surfaces
+    needs: plan
+    if: ${{ needs.plan.outputs.any == 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 45
+    environment: production
+    permissions:
+      contents: read
+      deployments: write
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ github.sha }}
+      GITHUB_TOKEN: ${{ github.token }}
+      INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || secrets.INFISICAL_ENV_SLUG || 'prod' }}
+      INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
+      RENDER_DEPLOY_TIMEOUT_MS: "1200000"
+      VERCEL_DEPLOY_TIMEOUT_MS: "600000"
+      VERCEL_READY_TIMEOUT_MS: "600000"
+    steps:
+      - name: Checkout verified release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.2
+
+      - name: Install dependencies from the lockfile
+        run: bun install --frozen-lockfile
 
       - name: Fetch release secrets from Infisical
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
@@ -158,11 +161,10 @@ jobs:
           secret-path: /release
 
       - name: Check release automation env
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
         run: bun run release:preflight -- --release
 
-      - name: Fetch canonical Chat API secrets from Infisical
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true') && steps.release-scope.outputs.api == 'true' }}
+      - name: Fetch API secrets from Infisical
+        if: ${{ needs.plan.outputs.api == 'true' }}
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
@@ -172,12 +174,12 @@ jobs:
           domain: ${{ env.INFISICAL_DOMAIN }}
           secret-path: /api
 
-      - name: Check canonical Chat API env
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true') && steps.release-scope.outputs.api == 'true' }}
+      - name: Check API env
+        if: ${{ needs.plan.outputs.api == 'true' }}
         run: bun run release:preflight -- --api
 
       - name: Fetch runner secrets from Infisical
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true') && steps.release-scope.outputs.runner == 'true' }}
+        if: ${{ needs.plan.outputs.runner == 'true' }}
         uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
         with:
           method: oidc
@@ -188,538 +190,199 @@ jobs:
           secret-path: /runner
 
       - name: Check runner env
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true') && steps.release-scope.outputs.runner == 'true' }}
+        if: ${{ needs.plan.outputs.runner == 'true' }}
         run: bun run release:preflight -- --runner
 
-      - name: Re-check automatic release before production changes
-        id: production-release
-        if: ${{ github.event_name == 'push' && steps.current-release.outputs.should_release == 'true' }}
+      - name: Map production database and web env
         run: |
-          git fetch --no-tags --depth=1 origin main
-          latest_sha="$(git rev-parse refs/remotes/origin/main)"
-          if [ "$RELEASE_SHA" != "$latest_sha" ]; then
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping production changes for $RELEASE_SHA because origin/main is now $latest_sha."
-            exit 0
+          if [[ "${{ needs.plan.outputs.database }}" == "true" ]]; then
+            echo "DATABASE_URL=$PRODUCTION_DATABASE_URL" >> "$GITHUB_ENV"
           fi
-          echo "should_release=true" >> "$GITHUB_OUTPUT"
-          echo "Release $RELEASE_SHA is still current before production changes."
+          if [[ "${{ needs.plan.outputs.web }}" == "true" ]]; then
+            web_url="${PRODUCTION_OPENCOMPANY_URL%/}"
+            if [[ -z "$web_url" ]]; then
+              echo "::error::PRODUCTION_OPENCOMPANY_URL is required to deploy web."
+              exit 1
+            fi
+            echo "OPENCOMPANY_NEXT_PUBLIC_APP_URL=$web_url" >> "$GITHUB_ENV"
+            echo "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$web_url/auth/callback" >> "$GITHUB_ENV"
+          fi
 
-      - name: Skip stale production changes
-        if: ${{ github.event_name == 'push' && steps.production-release.outputs.should_release == 'false' }}
-        run: echo "This automatic release was superseded before migrations/deploy, so production was not changed."
+      # Vercel outputs remain runner-local. They are built before migrations so
+      # application build failures cannot follow a production schema change.
+      - name: Prepare web deployment
+        id: prepare-web
+        if: ${{ needs.plan.outputs.web == 'true' }}
+        run: node scripts/release-vercel-prepare.mjs --surface web
 
-      - name: Create GitHub deployment
-        id: github-deployment
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const releaseSha = process.env.RELEASE_SHA;
-            const shortSha = releaseSha.slice(0, 7);
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+      - name: Prepare marketing deployment
+        id: prepare-marketing
+        if: ${{ needs.plan.outputs.marketing == 'true' }}
+        run: node scripts/release-vercel-prepare.mjs --surface marketing
 
-            const { data: deployment } = await github.rest.repos.createDeployment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: releaseSha,
-              environment: "production",
-              auto_merge: false,
-              required_contexts: [],
-              transient_environment: false,
-              production_environment: true,
-              description: `Production release ${shortSha}`,
-            });
+      - name: Confirm release is current before production changes
+        id: current-before-migration
+        run: node scripts/check-release-current.mjs
 
-            const status = {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              deployment_id: deployment.id,
-              state: "in_progress",
-              log_url: runUrl,
-              environment: "production",
-              description: `Production release ${shortSha} is in progress.`,
-            };
+      - name: Create database deployment
+        id: deployment-database
+        if: ${{ steps.current-before-migration.outputs.should_release == 'true' && needs.plan.outputs.database == 'true' }}
+        continue-on-error: true
+        run: node scripts/release-deployment.mjs create --surface database
 
-            if (process.env.PRODUCTION_OPENCOMPANY_URL) {
-              status.environment_url = process.env.PRODUCTION_OPENCOMPANY_URL;
-            }
+      - name: Create API deployment
+        id: deployment-api
+        if: ${{ steps.current-before-migration.outputs.should_release == 'true' && needs.plan.outputs.api == 'true' }}
+        continue-on-error: true
+        run: node scripts/release-deployment.mjs create --surface api
 
-            await github.rest.repos.createDeploymentStatus(status);
-            core.setOutput("deployment_id", String(deployment.id));
+      - name: Create runner deployment
+        id: deployment-runner
+        if: ${{ steps.current-before-migration.outputs.should_release == 'true' && needs.plan.outputs.runner == 'true' }}
+        continue-on-error: true
+        run: node scripts/release-deployment.mjs create --surface runner
 
-      - name: Map production database URL
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
-        run: echo "DATABASE_URL=$PRODUCTION_DATABASE_URL" >> "$GITHUB_ENV"
+      - name: Create web deployment
+        id: deployment-web
+        if: ${{ steps.current-before-migration.outputs.should_release == 'true' && needs.plan.outputs.web == 'true' }}
+        continue-on-error: true
+        run: node scripts/release-deployment.mjs create --surface web
+
+      - name: Create marketing deployment
+        id: deployment-marketing
+        if: ${{ steps.current-before-migration.outputs.should_release == 'true' && needs.plan.outputs.marketing == 'true' }}
+        continue-on-error: true
+        run: node scripts/release-deployment.mjs create --surface marketing
 
       - name: Run production migrations
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
+        id: migrate
+        if: ${{ steps.current-before-migration.outputs.should_release == 'true' && needs.plan.outputs.database == 'true' && steps.deployment-database.outputs.deployment_id != '' }}
         run: bun run db:migrate
 
-      - name: Re-check automatic release before deploy
-        id: deploy-release
-        if: ${{ github.event_name == 'push' && steps.production-release.outputs.should_release == 'true' }}
+      - name: Confirm release is current before provider deploys
+        id: current-before-deploy
+        if: ${{ always() && !cancelled() && steps.current-before-migration.outputs.should_release == 'true' }}
+        run: node scripts/check-release-current.mjs
+
+      - name: Deploy and smoke marketing
+        id: deploy-marketing
+        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && needs.plan.outputs.marketing == 'true' && steps.deployment-marketing.outputs.deployment_id != '' }}
+        run: >-
+          node scripts/release-vercel-deploy.mjs
+          --label marketing
+          --project-env MARKETING_VERCEL_PROJECT_ID
+          --prepared-dir "${{ steps.prepare-marketing.outputs.prepared_dir }}"
+          --smoke-path /
+
+      - name: Deploy and smoke Render services
+        id: deploy-render
+        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && ((needs.plan.outputs.api == 'true' && steps.deployment-api.outputs.deployment_id != '') || (needs.plan.outputs.runner == 'true' && steps.deployment-runner.outputs.deployment_id != '')) && (needs.plan.outputs.database != 'true' || steps.migrate.outcome == 'success') }}
         run: |
-          git fetch --no-tags --depth=1 origin main
-          latest_sha="$(git rev-parse refs/remotes/origin/main)"
-          if [ "$RELEASE_SHA" != "$latest_sha" ]; then
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping deploy for $RELEASE_SHA because origin/main is now $latest_sha."
-            exit 0
-          fi
-          echo "should_release=true" >> "$GITHUB_OUTPUT"
-          echo "Release $RELEASE_SHA is still current before deploy."
-
-      - name: Skip stale deploy
-        if: ${{ github.event_name == 'push' && steps.deploy-release.outputs.should_release == 'false' }}
-        run: echo "This automatic release was superseded after build, so the planned production deploys were skipped."
-
-      - name: Trigger canonical Chat API deploy
-        id: trigger-api
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.api == 'true' }}
-        env:
-          RENDER_SERVICE_ID: ${{ env.RENDER_API_SERVICE_ID }}
-        run: bun run release:render -- --trigger-only
-
-      - name: Trigger runner deploy
-        id: trigger-runner
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.runner == 'true' }}
-        run: bun run release:render -- --trigger-only
-
-      - name: Map web production app env
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: |
-          web_url="${PRODUCTION_OPENCOMPANY_URL%/}"
-          if [ -z "$web_url" ]; then
-            echo "PRODUCTION_OPENCOMPANY_URL is required to deploy the web app."
-            exit 1
-          fi
-
-          {
-            echo "OPENCOMPANY_NEXT_PUBLIC_APP_URL=$web_url"
-            echo "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI=$web_url/auth/callback"
-          } >> "$GITHUB_ENV"
-
-      - name: Check Vercel web project config
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: |
-          rm -rf .vercel
-
-          node <<'NODE'
-          const { mkdirSync, writeFileSync } = require("node:fs");
-
-          async function main() {
-            const projectId = process.env.OPENCOMPANY_VERCEL_PROJECT_ID;
-            const teamId = process.env.VERCEL_ORG_ID;
-            const token = process.env.VERCEL_TOKEN;
-
-            if (!projectId || !teamId || !token) {
-              throw new Error("OPENCOMPANY_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
-            }
-
-            const response = await fetch(
-              `https://api.vercel.com/v9/projects/${projectId}?teamId=${teamId}`,
-              { headers: { Authorization: `Bearer ${token}` } },
-            );
-
-            if (!response.ok) {
-              throw new Error(`Could not fetch web Vercel project metadata: ${response.status} ${response.statusText}`);
-            }
-
-            const project = await response.json();
-
-            if (project.id !== projectId) {
-              throw new Error("Fetched Vercel project id does not match OPENCOMPANY_VERCEL_PROJECT_ID.");
-            }
-
-            if (project.rootDirectory !== "apps/web") {
-              throw new Error(`Web Vercel project rootDirectory must be apps/web, got ${project.rootDirectory ?? "<unset>"}.`);
-            }
-
-            const minimumSkewProtectionMaxAge = 7 * 24 * 60 * 60;
-            if ((project.skewProtectionMaxAge ?? 0) < minimumSkewProtectionMaxAge) {
-              throw new Error(
-                `Web Vercel Skew Protection maximum age must be at least ${minimumSkewProtectionMaxAge} seconds, got ${project.skewProtectionMaxAge ?? "<unset>"}.`,
-              );
-            }
-
-            mkdirSync(".vercel", { recursive: true });
-            writeFileSync(
-              ".vercel/project.json",
-              `${JSON.stringify(
-                {
-                  projectId: project.id,
-                  orgId: teamId,
-                  projectName: project.name,
-                  settings: {
-                    framework: project.framework ?? "nextjs",
-                    devCommand: project.devCommand ?? null,
-                    installCommand: project.installCommand ?? null,
-                    buildCommand: project.buildCommand ?? null,
-                    outputDirectory: project.outputDirectory ?? null,
-                    rootDirectory: project.rootDirectory ?? null,
-                    directoryListing: project.directoryListing ?? false,
-                    nodeVersion: project.nodeVersion ?? "24.x",
-                  },
-                },
-                null,
-                2,
-              )}\n`,
-            );
-
-            console.log(`Verified Vercel project ${project.name} with root ${project.rootDirectory}.`);
-          }
-
-          main().catch((error) => {
-            console.error(error);
-            process.exit(1);
-          });
-          NODE
-
-      - name: Check Vercel web env
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: |
-          node <<'NODE'
-          const required = [
-            "DATABASE_URL",
-            "WORKOS_CLIENT_ID",
-            "WORKOS_API_KEY",
-            "WORKOS_COOKIE_PASSWORD",
-            "WORKOS_COOKIE_DOMAIN",
-            "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
-            "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
-            "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
-            "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
-            "RUNNER_PUBLIC_URL",
-            "RUNNER_INTERNAL_TOKEN",
-            "OPENCOMPANY_API_ORIGIN",
-            "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN",
-            "CRON_SECRET",
-            "BLOB_READ_WRITE_TOKEN",
-          ];
-
-          async function listProductionEnv(projectId, label, teamId, token) {
-            const response = await fetch(
-              `https://api.vercel.com/v10/projects/${projectId}/env?teamId=${teamId}&target=production`,
-              { headers: { Authorization: `Bearer ${token}` } },
-            );
-
-            if (!response.ok) {
-              throw new Error(`Could not fetch ${label} Vercel env metadata: ${response.status} ${response.statusText}`);
-            }
-
-            const { envs } = await response.json();
-            return envs.filter(
-              (env) =>
-                Array.isArray(env.target) &&
-                env.target.includes("production") &&
-                !env.gitBranch,
-            );
-          }
-
-          async function readEnvValue(projectId, envs, key, label, teamId, token) {
-            const matches = envs.filter((env) => env.key === key);
-
-            if (matches.length !== 1) {
-              throw new Error(`${label} must have exactly one production ${key}; found ${matches.length}.`);
-            }
-
-            const response = await fetch(
-              `https://api.vercel.com/v1/projects/${projectId}/env/${matches[0].id}?teamId=${teamId}`,
-              { headers: { Authorization: `Bearer ${token}` } },
-            );
-
-            if (!response.ok) {
-              throw new Error(`Could not read ${label} ${key}: ${response.status} ${response.statusText}`);
-            }
-
-            const env = await response.json();
-
-            if (env.decrypted !== true || typeof env.value !== "string" || env.value.length === 0) {
-              throw new Error(`${label} ${key} could not be decrypted.`);
-            }
-
-            return env.value;
-          }
-
-          async function main() {
-            const webProjectId = process.env.OPENCOMPANY_VERCEL_PROJECT_ID;
-            const teamId = process.env.VERCEL_ORG_ID;
-            const token = process.env.VERCEL_TOKEN;
-
-            if (!webProjectId || !teamId || !token) {
-              throw new Error("OPENCOMPANY_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
-            }
-
-            const webEnv = await listProductionEnv(webProjectId, "web", teamId, token);
-            const productionKeys = new Set(webEnv.map((env) => env.key));
-            const missing = required.filter((key) => !productionKeys.has(key));
-
-            console.log(`Vercel web production env keys: ${required.length - missing.length}/${required.length} required present.`);
-
-            if (missing.length > 0) {
-              throw new Error(`Missing web Vercel production env keys: ${missing.join(", ")}`);
-            }
-
-            const expectedWebOrigin = new URL(process.env.PRODUCTION_OPENCOMPANY_URL).origin;
-            const expectedApiOrigin = new URL(process.env.PRODUCTION_API_URL).origin;
-            const expectedValues = new Map([
-              ["OPENCOMPANY_NEXT_PUBLIC_APP_URL", expectedWebOrigin],
-              ["OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedWebOrigin}/auth/callback`],
-              ["OPENCOMPANY_API_ORIGIN", expectedApiOrigin],
-              ["NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN", expectedApiOrigin],
-              ["WORKOS_COOKIE_DOMAIN", "opencompany.chat"],
-            ]);
-            const configuredWebUrls = await Promise.all(
-              Array.from(expectedValues.keys(), (key) =>
-                readEnvValue(webProjectId, webEnv, key, "web", teamId, token),
-              ),
-            );
-            const mismatched = Array.from(expectedValues.entries())
-              .filter(([, expected], index) => configuredWebUrls[index].trim() !== expected)
-              .map(([key]) => key);
-
-            if (mismatched.length > 0) {
-              throw new Error(
-                `Web Vercel production origins do not match the release contract: ${mismatched.join(", ")}`,
-              );
-            }
-
-          }
-
-          main().catch((error) => {
-            console.error(error);
-            process.exit(1);
-          });
-          NODE
-
-      - name: Pull Vercel web production env
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: VERCEL_PROJECT_ID="$OPENCOMPANY_VERCEL_PROJECT_ID" bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
-
-      - name: Build web
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        env:
-          OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
-          NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
-          # The typed /v1 client's inferred router type grew Next's type-check
-          # memory past Node's ~2GB default heap on the release runner; PR CI
-          # and local builds pass with larger effective limits. The runner has
-          # 16GB, so give the build real headroom.
-          NODE_OPTIONS: --max-old-space-size=6144
-        run: VERCEL_PROJECT_ID="$OPENCOMPANY_VERCEL_PROJECT_ID" bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$OPENCOMPANY_VERCEL_PROJECT_ID"
+          args=()
+          if [[ "${{ needs.plan.outputs.api }}" == "true" && -n "${{ steps.deployment-api.outputs.deployment_id }}" ]]; then args+=(--api); fi
+          if [[ "${{ needs.plan.outputs.runner }}" == "true" && -n "${{ steps.deployment-runner.outputs.deployment_id }}" ]]; then args+=(--runner); fi
+          node scripts/release-render-services.mjs "${args[@]}"
 
       - name: Deploy web
         id: deploy-web
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
-        run: node scripts/release-vercel-deploy.mjs --label web --project-env OPENCOMPANY_VERCEL_PROJECT_ID
+        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && needs.plan.outputs.web == 'true' && steps.deployment-web.outputs.deployment_id != '' && (needs.plan.outputs.database != 'true' || steps.migrate.outcome == 'success') && (needs.plan.outputs.api != 'true' || steps.deploy-render.outputs.api_result == 'success') && (needs.plan.outputs.runner != 'true' || steps.deploy-render.outputs.runner_result == 'success') }}
+        run: >-
+          node scripts/release-vercel-deploy.mjs
+          --label web
+          --project-env OPENCOMPANY_VERCEL_PROJECT_ID
+          --prepared-dir "${{ steps.prepare-web.outputs.prepared_dir }}"
 
-      - name: Check Vercel marketing project config
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
-        run: |
-          rm -rf .vercel
-
-          node <<'NODE'
-          const { mkdirSync, writeFileSync } = require("node:fs");
-
-          async function main() {
-            const projectId = process.env.MARKETING_VERCEL_PROJECT_ID;
-            const webProjectId = process.env.OPENCOMPANY_VERCEL_PROJECT_ID;
-            const teamId = process.env.VERCEL_ORG_ID;
-            const token = process.env.VERCEL_TOKEN;
-
-            if (!projectId || !teamId || !token) {
-              throw new Error("MARKETING_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
-            }
-
-            if (projectId === webProjectId) {
-              throw new Error("Marketing must use a separate Vercel project from web.");
-            }
-
-            const response = await fetch(
-              `https://api.vercel.com/v9/projects/${projectId}?teamId=${teamId}`,
-              { headers: { Authorization: `Bearer ${token}` } },
-            );
-
-            if (!response.ok) {
-              throw new Error(`Could not fetch marketing Vercel project metadata: ${response.status} ${response.statusText}`);
-            }
-
-            const project = await response.json();
-
-            if (project.id !== projectId) {
-              throw new Error("Fetched Vercel project id does not match MARKETING_VERCEL_PROJECT_ID.");
-            }
-
-            if (project.rootDirectory !== "apps/marketing") {
-              throw new Error(`Marketing Vercel project rootDirectory must be apps/marketing, got ${project.rootDirectory ?? "<unset>"}.`);
-            }
-
-            const envResponse = await fetch(
-              `https://api.vercel.com/v10/projects/${projectId}/env?teamId=${teamId}&target=production`,
-              { headers: { Authorization: `Bearer ${token}` } },
-            );
-
-            if (!envResponse.ok) {
-              throw new Error(`Could not fetch marketing Vercel env metadata: ${envResponse.status} ${envResponse.statusText}`);
-            }
-
-            const { envs } = await envResponse.json();
-            const productionKeys = new Set(
-              envs
-                .filter(
-                  (env) =>
-                    Array.isArray(env.target) &&
-                    env.target.includes("production") &&
-                    !env.gitBranch,
-                )
-                .map((env) => env.key),
-            );
-            const requiredAnalyticsKeys = [
-              "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
-              "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
-            ];
-            const missingAnalyticsKeys = requiredAnalyticsKeys.filter(
-              (key) => !productionKeys.has(key),
-            );
-
-            if (missingAnalyticsKeys.length > 0) {
-              throw new Error(
-                `Missing marketing Vercel production env keys: ${missingAnalyticsKeys.join(", ")}`,
-              );
-            }
-
-            mkdirSync(".vercel", { recursive: true });
-            writeFileSync(
-              ".vercel/project.json",
-              `${JSON.stringify(
-                {
-                  projectId: project.id,
-                  orgId: teamId,
-                  projectName: project.name,
-                  settings: {
-                    framework: project.framework ?? "nextjs",
-                    devCommand: project.devCommand ?? null,
-                    installCommand: project.installCommand ?? null,
-                    buildCommand: project.buildCommand ?? null,
-                    outputDirectory: project.outputDirectory ?? null,
-                    rootDirectory: project.rootDirectory ?? null,
-                    directoryListing: project.directoryListing ?? false,
-                    nodeVersion: project.nodeVersion ?? "24.x",
-                  },
-                },
-                null,
-                2,
-              )}\n`,
-            );
-
-            console.log(
-              `Verified Vercel project ${project.name}, root ${project.rootDirectory}, and marketing analytics env.`,
-            );
-          }
-
-          main().catch((error) => {
-            console.error(error);
-            process.exit(1);
-          });
-          NODE
-
-      - name: Pull Vercel marketing production env
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
-        run: VERCEL_PROJECT_ID="$MARKETING_VERCEL_PROJECT_ID" bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
-
-      - name: Build marketing
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
+      - name: Smoke web release
+        id: smoke-web
+        if: ${{ always() && !cancelled() && steps.deploy-web.outcome == 'success' }}
         env:
-          OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
-          NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
-        run: VERCEL_PROJECT_ID="$MARKETING_VERCEL_PROJECT_ID" bunx vercel build --prod --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$MARKETING_VERCEL_PROJECT_ID"
-
-      - name: Deploy marketing
-        id: deploy-marketing
-        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
-        run: node scripts/release-vercel-deploy.mjs --label marketing --project-env MARKETING_VERCEL_PROJECT_ID
-
-      - name: Cancel runner deploy after orchestration failure
-        if: ${{ failure() && steps.trigger-runner.outputs.deploy_id != '' }}
-        run: bun run release:render -- --cancel "${{ steps.trigger-runner.outputs.deploy_id }}"
-
-      - name: Cancel API deploy after orchestration failure
-        if: ${{ failure() && steps.trigger-api.outputs.deploy_id != '' }}
-        env:
-          RENDER_SERVICE_ID: ${{ env.RENDER_API_SERVICE_ID }}
-        run: bun run release:render -- --cancel "${{ steps.trigger-api.outputs.deploy_id }}"
-
-      - name: Wait for canonical Chat API deploy
-        id: wait-api
-        if: ${{ steps.trigger-api.outputs.deploy_id != '' }}
-        env:
-          RENDER_SERVICE_ID: ${{ env.RENDER_API_SERVICE_ID }}
-        run: bun run release:render -- --wait "${{ steps.trigger-api.outputs.deploy_id }}"
-
-      - name: Cancel runner deploy after API failure
-        if: ${{ failure() && steps.wait-api.outcome == 'failure' && steps.trigger-runner.outputs.deploy_id != '' }}
-        run: bun run release:render -- --cancel "${{ steps.trigger-runner.outputs.deploy_id }}"
-
-      - name: Wait for runner deploy
-        if: ${{ steps.trigger-runner.outputs.deploy_id != '' }}
-        run: bun run release:render -- --wait "${{ steps.trigger-runner.outputs.deploy_id }}"
-
-      - name: Smoke check release
-        if: ${{ (github.event_name == 'push' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
-        env:
-          EXPECTED_WEB_RELEASE: ${{ steps.release-scope.outputs.web == 'true' && env.RELEASE_SHA || '' }}
-          EXPECTED_API_RELEASE: ${{ steps.release-scope.outputs.api == 'true' && env.RELEASE_SHA || '' }}
-          EXPECTED_RUNNER_RELEASE: ${{ steps.release-scope.outputs.runner == 'true' && env.RELEASE_SHA || '' }}
+          EXPECTED_WEB_RELEASE: ${{ env.RELEASE_SHA }}
           SMOKE_WEB: "true"
-          SMOKE_API: "true"
-          SMOKE_RUNNER: "true"
+          SMOKE_API: "false"
+          SMOKE_RUNNER: "false"
+          SMOKE_WEB_VERCEL_DEPLOYMENT: ${{ steps.deploy-web.outputs.url }}
           SMOKE_WEB_ATTEMPTS: "12"
-          SMOKE_API_ATTEMPTS: "12"
-          SMOKE_RUNNER_ATTEMPTS: "12"
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke
 
-      - name: Finalize GitHub deployment
-        if: ${{ always() && steps.github-deployment.outputs.deployment_id != '' }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      - name: Finalize database deployment
+        if: ${{ always() && steps.deployment-database.outputs.deployment_id != '' }}
         env:
-          DEPLOYMENT_ID: ${{ steps.github-deployment.outputs.deployment_id }}
-          DEPLOY_RELEASE_SHOULD_RELEASE: ${{ steps.deploy-release.outputs.should_release }}
-          JOB_STATUS: ${{ job.status }}
-        with:
-          script: |
-            const releaseSha = process.env.RELEASE_SHA;
-            const shortSha = releaseSha.slice(0, 7);
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const succeeded = process.env.JOB_STATUS === "success";
-            const skippedBeforeDeploy =
-              process.env.GITHUB_EVENT_NAME === "push" &&
-              process.env.DEPLOY_RELEASE_SHOULD_RELEASE === "false";
+          DEPLOYMENT_ID: ${{ steps.deployment-database.outputs.deployment_id }}
+          MIGRATION_OUTCOME: ${{ steps.migrate.outcome }}
+        run: |
+          state=inactive
+          if [[ "$MIGRATION_OUTCOME" == "success" ]]; then state=success; fi
+          if [[ "$MIGRATION_OUTCOME" == "failure" ]]; then state=failure; fi
+          node scripts/release-deployment.mjs finalize --surface database --deployment-id "$DEPLOYMENT_ID" --state "$state"
 
-            const state = skippedBeforeDeploy
-              ? "inactive"
-              : succeeded
-                ? "success"
-                : "failure";
-            const description = skippedBeforeDeploy
-              ? `Production release ${shortSha} was superseded before deploy.`
-              : succeeded
-                ? `Production release ${shortSha} completed successfully.`
-                : `Production release ${shortSha} failed.`;
+      - name: Finalize API deployment
+        if: ${{ always() && steps.deployment-api.outputs.deployment_id != '' }}
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment-api.outputs.deployment_id }}
+          SURFACE_RESULT: ${{ steps.deploy-render.outputs.api_result }}
+        run: |
+          state=inactive
+          if [[ "$SURFACE_RESULT" == "success" ]]; then state=success; fi
+          if [[ "$SURFACE_RESULT" == "failure" ]]; then state=failure; fi
+          node scripts/release-deployment.mjs finalize --surface api --deployment-id "$DEPLOYMENT_ID" --state "$state"
 
-            const status = {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              deployment_id: Number(process.env.DEPLOYMENT_ID),
-              state,
-              log_url: runUrl,
-              environment: "production",
-              description,
-            };
+      - name: Finalize runner deployment
+        if: ${{ always() && steps.deployment-runner.outputs.deployment_id != '' }}
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment-runner.outputs.deployment_id }}
+          SURFACE_RESULT: ${{ steps.deploy-render.outputs.runner_result }}
+        run: |
+          state=inactive
+          if [[ "$SURFACE_RESULT" == "success" ]]; then state=success; fi
+          if [[ "$SURFACE_RESULT" == "failure" ]]; then state=failure; fi
+          node scripts/release-deployment.mjs finalize --surface runner --deployment-id "$DEPLOYMENT_ID" --state "$state"
 
-            if (process.env.PRODUCTION_OPENCOMPANY_URL) {
-              status.environment_url = process.env.PRODUCTION_OPENCOMPANY_URL;
-            }
+      - name: Finalize web deployment
+        if: ${{ always() && steps.deployment-web.outputs.deployment_id != '' }}
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment-web.outputs.deployment_id }}
+          DEPLOY_OUTCOME: ${{ steps.deploy-web.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke-web.outcome }}
+          DEPLOYMENT_URL: ${{ steps.deploy-web.outputs.url }}
+        run: |
+          state=inactive
+          if [[ "$DEPLOY_OUTCOME" == "success" ]]; then state=failure; fi
+          if [[ "$SMOKE_OUTCOME" == "success" ]]; then state=success; fi
+          args=(finalize --surface web --deployment-id "$DEPLOYMENT_ID" --state "$state")
+          if [[ -n "$DEPLOYMENT_URL" ]]; then args+=(--environment-url "$DEPLOYMENT_URL"); fi
+          node scripts/release-deployment.mjs "${args[@]}"
 
-            await github.rest.repos.createDeploymentStatus(status);
+      - name: Finalize marketing deployment
+        if: ${{ always() && steps.deployment-marketing.outputs.deployment_id != '' }}
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment-marketing.outputs.deployment_id }}
+          DEPLOY_OUTCOME: ${{ steps.deploy-marketing.outcome }}
+          DEPLOYMENT_URL: ${{ steps.deploy-marketing.outputs.url }}
+        run: |
+          state=inactive
+          if [[ "$DEPLOY_OUTCOME" == "success" ]]; then state=success; fi
+          if [[ "$DEPLOY_OUTCOME" == "failure" ]]; then state=failure; fi
+          args=(finalize --surface marketing --deployment-id "$DEPLOYMENT_ID" --state "$state")
+          if [[ -n "$DEPLOYMENT_URL" ]]; then args+=(--environment-url "$DEPLOYMENT_URL"); fi
+          node scripts/release-deployment.mjs "${args[@]}"
+
+      - name: Require every selected surface to succeed
+        if: ${{ always() && !cancelled() && steps.current-before-migration.outputs.should_release == 'true' }}
+        env:
+          DATABASE_SELECTED: ${{ needs.plan.outputs.database }}
+          DATABASE_DEPLOYMENT_ID: ${{ steps.deployment-database.outputs.deployment_id }}
+          DATABASE_RESULT: ${{ steps.migrate.outcome }}
+          API_SELECTED: ${{ needs.plan.outputs.api }}
+          API_DEPLOYMENT_ID: ${{ steps.deployment-api.outputs.deployment_id }}
+          API_RESULT: ${{ steps.deploy-render.outputs.api_result }}
+          RUNNER_SELECTED: ${{ needs.plan.outputs.runner }}
+          RUNNER_DEPLOYMENT_ID: ${{ steps.deployment-runner.outputs.deployment_id }}
+          RUNNER_RESULT: ${{ steps.deploy-render.outputs.runner_result }}
+          WEB_SELECTED: ${{ needs.plan.outputs.web }}
+          WEB_DEPLOYMENT_ID: ${{ steps.deployment-web.outputs.deployment_id }}
+          WEB_RESULT: ${{ steps.smoke-web.outcome }}
+          MARKETING_SELECTED: ${{ needs.plan.outputs.marketing }}
+          MARKETING_DEPLOYMENT_ID: ${{ steps.deployment-marketing.outputs.deployment_id }}
+          MARKETING_RESULT: ${{ steps.deploy-marketing.outcome }}
+        run: node scripts/check-release-results.mjs
