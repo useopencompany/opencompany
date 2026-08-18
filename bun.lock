@@ -19,7 +19,7 @@
         "drizzle-kit": "^0.31.10",
         "jsdom": "^29.1.1",
         "neonctl": "^2.22.0",
-        "postcss": "8.5.15",
+        "postcss": "8.5.23",
         "turbo": "^2.9.15",
         "typescript": "^6.0.3",
         "vitest": "^4.1.7",
@@ -74,7 +74,7 @@
         "@types/react-dom": "19.2.3",
         "eslint": "9.39.4",
         "eslint-config-next": "16.2.6",
-        "postcss": "8.5.15",
+        "postcss": "8.5.23",
         "tailwindcss": "^4.3.0",
         "typescript": "^6.0.3",
       },
@@ -101,7 +101,7 @@
         "@types/react-dom": "19.2.3",
         "eslint": "9.39.4",
         "eslint-config-next": "16.2.10",
-        "postcss": "8.5.15",
+        "postcss": "8.5.23",
         "tailwindcss": "^4.3.0",
         "typescript": "^6.0.3",
       },
@@ -128,7 +128,7 @@
         "@types/react-dom": "19.2.3",
         "eslint": "9.39.4",
         "eslint-config-next": "16.2.6",
-        "postcss": "8.5.15",
+        "postcss": "8.5.23",
         "tailwindcss": "^4.3.0",
         "typescript": "^6.0.3",
       },
@@ -239,7 +239,7 @@
         "@types/react-dom": "19.2.3",
         "eslint": "9.39.4",
         "eslint-config-next": "16.2.10",
-        "postcss": "8.5.15",
+        "postcss": "8.5.23",
         "tailwindcss": "^4.3.0",
         "typescript": "^6.0.3",
         "vitest": "^4.1.7",
@@ -490,7 +490,7 @@
         "@types/react-dom": "19.2.3",
         "eslint": "9.39.4",
         "eslint-config-next": "16.2.6",
-        "postcss": "8.5.15",
+        "postcss": "8.5.23",
         "tailwindcss": "^4.3.0",
         "typescript": "^6.0.3",
       },
@@ -513,7 +513,7 @@
     },
   },
   "overrides": {
-    "postcss": "8.5.15",
+    "postcss": "8.5.23",
   },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.4.4", "", {}, "sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg=="],
@@ -3062,7 +3062,7 @@
 
     "mustache": ["mustache@4.2.0", "", { "bin": { "mustache": "bin/mustache" } }, "sha512-71ippSywq5Yb7/tVYyGbkBggbU8H3u5Rz56fH60jGFgr8uHwxs+aSKeqmluIVzM0m0kB7xQjKS6qPfd0b2ZoqQ=="],
 
-    "nanoid": ["nanoid@3.3.12", "", { "bin": { "nanoid": "bin/nanoid.cjs" } }, "sha512-ZB9RH/39qpq5Vu6Y+NmUaFhQR6pp+M2Xt76XBnEwDaGcVAqhlvxrl3B2bKS5D3NH3QR76v3aSrKaF/Kiy7lEtQ=="],
+    "nanoid": ["nanoid@3.3.18", "", { "bin": { "nanoid": "bin/nanoid.cjs" } }, "sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w=="],
 
     "napi-postinstall": ["napi-postinstall@0.3.4", "", { "bin": { "napi-postinstall": "lib/cli.js" } }, "sha512-PHI5f1O0EP5xJ9gQmFGMS6IZcrVvTjpXjz7Na41gTE7eE2hK11lg04CECCYEEjdc17EV4DO+fkGEtt7TpTaTiQ=="],
 
@@ -3246,7 +3246,7 @@
 
     "postal-mime": ["postal-mime@2.7.4", "", {}, "sha512-0WdnFQYUrPGGTFu1uOqD2s7omwua8xaeYGdO6rb88oD5yJ/4pPHDA4sdWqfD8wQVfCny563n/HQS7zTFft+f/g=="],
 
-    "postcss": ["postcss@8.5.15", "", { "dependencies": { "nanoid": "^3.3.12", "picocolors": "^1.1.1", "source-map-js": "^1.2.1" } }, "sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A=="],
+    "postcss": ["postcss@8.5.23", "", { "dependencies": { "nanoid": "^3.3.16", "picocolors": "^1.1.1", "source-map-js": "^1.2.1" } }, "sha512-g50586zr4bZmwFiTlflMu8E0bDTb5I5gertgwAKmsdUlTQIhZtunzUlD1WSzwcVWPoAVpsrA6vlfCD7oXvRwgg=="],
 
     "postgres-array": ["postgres-array@2.0.0", "", {}, "sha512-VpZrUqU5A69eQyW2c5CA1jtLecCsN2U/bD6VilrFDWq5+5UIEVO7nazS3TEcHf1zuPYO/sqGvUvW62g86RXZuA=="],
 
