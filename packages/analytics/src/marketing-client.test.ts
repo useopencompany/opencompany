@@ -47,8 +47,24 @@ describe("marketing analytics", () => {
         save_referrer: true,
       }),
     );
-    expect(posthog.capture).toHaveBeenNthCalledWith(1, "marketing_clicked_signup", {});
-    expect(posthog.capture).toHaveBeenNthCalledWith(2, "marketing_clicked_demo", {});
+    expect(posthog.capture).toHaveBeenNthCalledWith(
+      1,
+      "marketing_clicked_signup",
+      {},
+      {
+        send_instantly: true,
+        transport: "sendBeacon",
+      },
+    );
+    expect(posthog.capture).toHaveBeenNthCalledWith(
+      2,
+      "marketing_clicked_demo",
+      {},
+      {
+        send_instantly: true,
+        transport: "sendBeacon",
+      },
+    );
   });
 
   it("is a no-op without PostHog configuration", async () => {
