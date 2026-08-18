@@ -6,6 +6,7 @@
 import { execFileSync } from "node:child_process";
 
 import { expectedReleaseFor } from "./lib/release-smoke.mjs";
+import { vercelCurlArgs } from "./lib/release-vercel.mjs";
 
 const webUrl = normalizeBaseUrl(
   process.env.OPENCOMPANY_URL || process.env.PRODUCTION_OPENCOMPANY_URL,
@@ -102,8 +103,10 @@ async function checkUntilReady(name, url, maxAttempts, waitMs) {
 
 async function readHealthBody(name, url) {
   if (name === "web" && webVercelDeployment) {
-    const args = ["vercel", "curl", "/api/healthz", "--deployment", url];
-    if (process.env.VERCEL_TOKEN?.trim()) args.push("--token", process.env.VERCEL_TOKEN.trim());
+    const args = vercelCurlArgs("/api/healthz", url, {
+      token: process.env.VERCEL_TOKEN,
+      teamId: process.env.VERCEL_ORG_ID,
+    });
     return execFileSync("bunx", args, {
       encoding: "utf8",
       env: process.env,

@@ -96,6 +96,13 @@ export function restorePreparedVercelDirectory(source, destination = ".vercel") 
   copyDirectoryContents(source, destination);
 }
 
+export function vercelCurlArgs(path, deploymentUrl, { token = "", teamId = "" } = {}) {
+  const args = ["vercel", "curl", path, "--deployment", deploymentUrl];
+  if (token.trim()) args.push("--token", token.trim());
+  if (teamId.trim()) args.push("--scope", teamId.trim());
+  return args;
+}
+
 function copyDirectoryContents(source, destination) {
   for (const entry of readdirSync(source)) {
     cpSync(`${source}/${entry}`, `${destination}/${entry}`, {

@@ -3,7 +3,11 @@
 import { spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
-import { cleanVercelWorkDirectory, restorePreparedVercelDirectory } from "./lib/release-vercel.mjs";
+import {
+  cleanVercelWorkDirectory,
+  restorePreparedVercelDirectory,
+  vercelCurlArgs,
+} from "./lib/release-vercel.mjs";
 
 const TERMINAL_FAILURE_STATES = new Set(["ERROR", "CANCELED"]);
 
@@ -96,13 +100,7 @@ async function deployPreparedOutput(options, { token, teamId, projectId }) {
     await runCommand(
       "bunx",
       [
-        "vercel",
-        "curl",
-        options.smokePath,
-        "--deployment",
-        `https://${deployment.url}`,
-        "--token",
-        token,
+        ...vercelCurlArgs(options.smokePath, `https://${deployment.url}`, { token, teamId }),
         "--",
         "--fail-with-body",
         "--silent",

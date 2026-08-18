@@ -18,6 +18,7 @@ import {
   restorePreparedVercelDirectory,
   savePreparedVercelDirectory,
   validateProject,
+  vercelCurlArgs,
 } from "./release-vercel.mjs";
 
 test("validates the web project root and skew protection", () => {
@@ -100,4 +101,24 @@ test("preserves relative function symlinks through prepare and restore", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("scopes Vercel smoke requests to the deployment team", () => {
+  assert.deepEqual(
+    vercelCurlArgs("/api/healthz", "https://web.example.vercel.app", {
+      token: " token ",
+      teamId: " team ",
+    }),
+    [
+      "vercel",
+      "curl",
+      "/api/healthz",
+      "--deployment",
+      "https://web.example.vercel.app",
+      "--token",
+      "token",
+      "--scope",
+      "team",
+    ],
+  );
 });
