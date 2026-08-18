@@ -18,6 +18,7 @@ import {
   restorePreparedVercelDirectory,
   savePreparedVercelDirectory,
   validateProject,
+  vercelCurlArgs,
 } from "./release-vercel.mjs";
 
 test("validates the web project root and skew protection", () => {
@@ -100,4 +101,12 @@ test("preserves relative function symlinks through prepare and restore", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+test("targets an immutable Vercel URL without forwarding global flags to curl", () => {
+  assert.deepEqual(vercelCurlArgs("/api/healthz", "https://web.example.vercel.app"), [
+    "vercel",
+    "curl",
+    "https://web.example.vercel.app/api/healthz",
+    "--yes",
+  ]);
 });
