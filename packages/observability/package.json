@@ -18,12 +18,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "braintrust": "^3.13.0",
+    "braintrust": "^3.27.0",
     "zod": "^4.1.11"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }

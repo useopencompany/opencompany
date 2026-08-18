@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.26.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",
@@ -23,22 +23,22 @@
     "@opencompany/brain": "workspace:*",
     "@opencompany/telemetry": "workspace:*",
     "@opencompany/observability": "workspace:*",
-    "@sentry/bun": "^10.53.1",
+    "@sentry/bun": "^10.70.0",
     "@vercel/blob": "^2.4.0",
-    "ai": "^6.0.189",
+    "ai": "^7.0.66",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "e2b": "^2.21.0",
-    "fastify": "^5.6.2",
-    "unpdf": "^1.4.0",
-    "ws": "^8.18.3"
+    "e2b": "^2.39.0",
+    "fastify": "^5.12.0",
+    "unpdf": "^1.8.1",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.3.11",
-    "@types/node": "^25.9.1",
+    "@electric-sql/pglite": "^0.5.5",
+    "@types/node": "^26.2.0",
     "@types/ws": "^8.18.1",
-    "tsx": "^4.21.0",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }
