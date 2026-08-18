@@ -4,74 +4,68 @@ import test from "node:test";
 
 const workflowUrl = new URL("../../.github/workflows/release-production.yml", import.meta.url);
 
-test("pulls current Vercel production env before every prebuilt build", async () => {
+test("verifies the exact main commit before release planning and production", async () => {
+  const workflow = await readFile(workflowUrl, "utf8");
+
+  assertStepOrder(workflow, ["context:", "verify:", "plan:", "release:"]);
+  assert.match(workflow, /uses: \.\/\.github\/workflows\/verify\.yml/u);
+  assert.match(workflow, /head_sha: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /^ {2}plan:\n[\s\S]*?needs: verify/mu);
+  assert.match(workflow, /^ {2}release:\n[\s\S]*?needs: plan/mu);
+  assert.doesNotMatch(workflow, /workflow_run:/u);
+});
+
+test("builds Vercel outputs before migrations and rechecks main before deploys", async () => {
   const workflow = await readFile(workflowUrl, "utf8");
 
   assertStepOrder(workflow, [
-    "Check Vercel web env",
-    "Pull Vercel web production env",
-    "Build web",
+    "Prepare web deployment",
+    "Prepare marketing deployment",
+    "Confirm release is current before production changes",
+    "Run production migrations",
+    "Confirm release is current before provider deploys",
+    "Deploy and smoke marketing",
+    "Deploy and smoke Render services",
     "Deploy web",
+    "Smoke web release",
   ]);
-  assertStepOrder(workflow, [
-    "Check Vercel marketing project config",
-    "Pull Vercel marketing production env",
-    "Build marketing",
-    "Deploy marketing",
-  ]);
-
-  assert.match(
-    workflow,
-    /VERCEL_PROJECT_ID="\$OPENCOMPANY_VERCEL_PROJECT_ID" bunx vercel pull --yes --environment=production/,
-  );
-  assert.match(
-    workflow,
-    /VERCEL_PROJECT_ID="\$MARKETING_VERCEL_PROJECT_ID" bunx vercel pull --yes --environment=production/,
-  );
+  assert.doesNotMatch(workflow, /node <<['"]?NODE/u);
+  assert.match(workflow, /timeout-minutes: 45/u);
+  assert.match(workflow, /RENDER_DEPLOY_TIMEOUT_MS: "1200000"/u);
+  assert.match(workflow, /VERCEL_DEPLOY_TIMEOUT_MS: "600000"/u);
 });
 
-test("checks only web-owned production environment keys", async () => {
+test("tracks and finalizes every production surface independently", async () => {
   const workflow = await readFile(workflowUrl, "utf8");
-  const stepStart = workflow.indexOf("- name: Check Vercel web env");
-  const stepEnd = workflow.indexOf("- name: Pull Vercel web production env", stepStart);
-  const step = workflow.slice(stepStart, stepEnd);
-  const requiredKeysBlock = step.match(/const required = \[(?<keys>[\s\S]*?)\n\s*\];/u)?.groups
-    ?.keys;
 
-  assert.ok(requiredKeysBlock, "web required keys must remain explicit in the release workflow");
-  assert.match(requiredKeysBlock, /"BLOB_READ_WRITE_TOKEN"/u);
-  assert.match(requiredKeysBlock, /"DATABASE_URL"/u);
-  for (const retiredKey of [
-    "OPENCOMPANY_AUTHKIT_DOMAIN",
-    "OPENCOMPANY_STRIPE_API_KEY",
-    "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
-    "OPENCOMPANY_STRIPE_WEBHOOK_SECRET",
-    "ELECTRIC_URL",
-    "VERCEL_AI_GATEWAY_API_KEY",
-  ]) {
-    assert.doesNotMatch(requiredKeysBlock, new RegExp(`"${retiredKey}"`, "u"));
+  for (const surface of ["database", "api", "runner", "web", "marketing"]) {
+    assert.match(workflow, new RegExp(`create --surface ${surface}`, "u"));
+    assert.match(workflow, new RegExp(`finalize --surface ${surface}`, "u"));
   }
-  assert.doesNotMatch(workflow, /Check web billing env before production changes/u);
-  assert.doesNotMatch(workflow, /check-goat-billing-production-env\.mjs/u);
+  assert.match(workflow, /steps\.deploy-render\.outputs\.api_result == 'success'/u);
+  assert.match(workflow, /steps\.deploy-render\.outputs\.runner_result == 'success'/u);
+  assert.match(workflow, /state=inactive/u);
 });
 
-test("requires PostHog configuration in the marketing Vercel project", async () => {
+test("production credentials are scoped to the release job", async () => {
   const workflow = await readFile(workflowUrl, "utf8");
-  const stepStart = workflow.indexOf("- name: Check Vercel marketing project config");
-  const stepEnd = workflow.indexOf("- name: Pull Vercel marketing production env", stepStart);
-  const step = workflow.slice(stepStart, stepEnd);
+  const releaseStart = workflow.indexOf("  release:\n");
+  const beforeRelease = workflow.slice(0, releaseStart);
+  const release = workflow.slice(releaseStart);
 
-  assert.match(step, /"NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN"/u);
-  assert.match(step, /"NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST"/u);
-  assert.match(step, /Missing marketing Vercel production env keys/u);
+  assert.doesNotMatch(beforeRelease, /id-token: write/u);
+  assert.doesNotMatch(beforeRelease, /environment: Production/u);
+  assert.match(release, /environment: Production/u);
+  assert.match(release, /id-token: write/u);
+  assert.match(release, /deployments: write/u);
 });
 
-function assertStepOrder(workflow, stepNames) {
+function assertStepOrder(workflow, markers) {
   let previousIndex = -1;
-
-  for (const stepName of stepNames) {
-    const index = workflow.indexOf(`- name: ${stepName}`);
-    assert.ok(index > previousIndex, `${stepName} must follow the preceding release step`);
+  for (const marker of markers) {
+    const needle = marker.endsWith(":") ? `  ${marker}` : `- name: ${marker}`;
+    const index = workflow.indexOf(needle);
+    assert.ok(index > previousIndex, `${marker} must follow the preceding workflow marker`);
     previousIndex = index;
   }
 }

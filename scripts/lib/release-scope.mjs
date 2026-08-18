@@ -1,10 +1,12 @@
 export const RELEASE_SURFACES = ["web", "marketing", "api", "runner"];
+export const RELEASE_STATE_SURFACES = ["database", ...RELEASE_SURFACES];
 
 const PACKAGE_SURFACES = new Map([
   ["@opencompany/web", ["web"]],
   ["@opencompany/marketing", ["marketing"]],
   ["@opencompany/api", ["api"]],
   ["@opencompany/runner", ["runner"]],
+  ["@opencompany/db", ["web", "api", "runner"]],
   ["@opencompany/chat-presentation", ["api", "runner"]],
 ]);
 
@@ -14,11 +16,25 @@ const VERCEL_SURFACES = ["web", "marketing"];
 const FORCE_RULES = [
   { files: [".github/workflows/release-production.yml"], surfaces: ALL_SURFACES },
   {
-    files: ["package.json", "turbo.json", "tsconfig.base.json", "bunfig.toml"],
+    files: [
+      ".nvmrc",
+      "bun.lock",
+      "package.json",
+      "turbo.json",
+      "tsconfig.base.json",
+      "bunfig.toml",
+    ],
     surfaces: ALL_SURFACES,
   },
   {
     files: [
+      "scripts/release-plan.mjs",
+      "scripts/release-deployment.mjs",
+      "scripts/lib/release-deployments.mjs",
+      "scripts/check-release-current.mjs",
+      "scripts/check-release-results.mjs",
+      "scripts/release-render-services.mjs",
+      "scripts/lib/release-orchestration.mjs",
       "scripts/release-scope.mjs",
       "scripts/lib/release-scope.mjs",
       "scripts/release-smoke.mjs",
@@ -27,7 +43,14 @@ const FORCE_RULES = [
     ],
     surfaces: ALL_SURFACES,
   },
-  { files: ["scripts/release-vercel-deploy.mjs"], surfaces: VERCEL_SURFACES },
+  {
+    files: [
+      "scripts/release-vercel-deploy.mjs",
+      "scripts/release-vercel-prepare.mjs",
+      "scripts/lib/release-vercel.mjs",
+    ],
+    surfaces: VERCEL_SURFACES,
+  },
   { files: ["scripts/next-web.mjs"], surfaces: ["web"] },
   { files: ["scripts/load-env.mjs"], surfaces: ["web"] },
   { files: ["Dockerfile.api"], surfaces: ["api"] },
@@ -77,4 +100,34 @@ export function planReleaseSurfaces({
   }
 
   return Object.fromEntries(RELEASE_SURFACES.map((surface) => [surface, selected.has(surface)]));
+}
+
+export function databaseChanged({ affectedPackages = [], changedFiles = [] } = {}) {
+  return (
+    affectedPackages.includes("@opencompany/db") ||
+    changedFiles.some(
+      (file) =>
+        file.startsWith("drizzle/") ||
+        file.startsWith("packages/db/") ||
+        file === "scripts/check-schema-migration.mjs" ||
+        file === "scripts/check-migration-journal.mjs",
+    )
+  );
+}
+
+export function finalizeReleasePlan({
+  requestedSurfaces,
+  databaseHasChanges = false,
+  deployAll = false,
+  deployApi = true,
+  deployRunner = true,
+}) {
+  const plan = { ...requestedSurfaces };
+  if (!deployApi) plan.api = false;
+  if (!deployRunner) plan.runner = false;
+
+  return {
+    database: deployAll || databaseHasChanges,
+    ...plan,
+  };
 }
