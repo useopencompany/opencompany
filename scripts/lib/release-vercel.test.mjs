@@ -1,9 +1,22 @@
 import assert from "node:assert/strict";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   missingProductionKeys,
   productionEnvironmentEntries,
+  restorePreparedVercelDirectory,
+  savePreparedVercelDirectory,
   validateProject,
 } from "./release-vercel.mjs";
 
@@ -54,4 +67,37 @@ test("checks only unscoped production environment entries", () => {
     ]),
     ["NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST"],
   );
+});
+
+test("preserves relative function symlinks through prepare and restore", () => {
+  const root = mkdtempSync(join(tmpdir(), "opencompany-vercel-copy-"));
+  const source = join(root, "source");
+  const prepared = join(root, "prepared");
+  const restored = join(root, "restored");
+
+  try {
+    const functions = join(source, "output", "functions");
+    mkdirSync(join(functions, "canonical.func"), { recursive: true });
+    writeFileSync(join(functions, "canonical.func", "index.js"), "export default true;\n");
+    symlinkSync("canonical.func", join(functions, "alias.func"));
+
+    savePreparedVercelDirectory(prepared, source);
+    rmSync(source, { recursive: true, force: true });
+    restorePreparedVercelDirectory(prepared, restored);
+
+    assert.equal(
+      readlinkSync(join(prepared, "output", "functions", "alias.func")),
+      "canonical.func",
+    );
+    assert.equal(
+      readlinkSync(join(restored, "output", "functions", "alias.func")),
+      "canonical.func",
+    );
+    assert.equal(
+      readFileSync(join(restored, "output", "functions", "alias.func", "index.js"), "utf8"),
+      "export default true;\n",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

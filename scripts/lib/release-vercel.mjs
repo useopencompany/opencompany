@@ -98,6 +98,10 @@ export function restorePreparedVercelDirectory(source, destination = ".vercel") 
 
 function copyDirectoryContents(source, destination) {
   for (const entry of readdirSync(source)) {
-    cpSync(`${source}/${entry}`, `${destination}/${entry}`, { recursive: true, force: true });
+    cpSync(`${source}/${entry}`, `${destination}/${entry}`, {
+      recursive: true,
+      force: true,
+      verbatimSymlinks: true,
+    });
   }
 }
