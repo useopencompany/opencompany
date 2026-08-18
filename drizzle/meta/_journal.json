@@ -1499,6 +1499,13 @@
       "when": 1786636760995,
       "tag": "0213_billing_command_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 214,
+      "version": "7",
+      "when": 1787068800000,
+      "tag": "0214_goat_chat_attachment_texts_invariant",
+      "breakpoints": true
     }
   ]
 }

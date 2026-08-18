@@ -265,6 +265,7 @@ describe("Electric read models", () => {
             headers: { operation: "insert" },
             key: '"runtime_1"',
             value: {
+              id: "runtime_1",
               chat_session_id: "conversation_1",
               engine: "codex",
               status: "running",
@@ -292,6 +293,7 @@ describe("Electric read models", () => {
     expect(requestedUrl.searchParams.get("where")).toContain('"workspace_id" = $2');
     expect(requestedUrl.searchParams.get("params[1]")).toBe("user_1");
     expect(requestedUrl.searchParams.get("params[2]")).toBe("workspace_1");
+    expect(requestedUrl.searchParams.get("columns")?.split(",")).toContain("id");
     expect(requestedUrl.searchParams.get("columns")).not.toContain("sandbox_id");
     await expect(response.json()).resolves.toEqual([
       {

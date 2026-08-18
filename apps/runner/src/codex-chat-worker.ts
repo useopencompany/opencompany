@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
 import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
 import {
+  type CodexChatSession,
   type CodexChatTurn,
   type CodexChatTurnSettings,
   codexChatSessions,
@@ -17,12 +18,14 @@ import {
   CodexChatLeaseLostError,
   CodexChatRetryableInfrastructureError,
 } from "./codex-chat-errors";
+import { createCodexChatProjector, loadCodexChatAssistantMessageParts } from "./codex-chat-events";
 import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { runProductChatTurn } from "./opencompany-chat";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
+import { buildTaskTerminalProjection, type TaskTurnContext } from "./task-turn";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -31,6 +34,11 @@ const logger = createLogger({
 const CODEX_CHAT_SANDBOX_SWEEP_INTERVAL_MS = 60_000;
 const CODEX_CHAT_RETRY_BASE_DELAY_MS = 5_000;
 const CODEX_CHAT_RETRY_MAX_DELAY_MS = 60_000;
+export const CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS = 5;
+const CODEX_CHAT_UNEXPECTED_FAILURE_MESSAGE =
+  "This chat run failed before the coding engine could finish. Send your message again to retry.";
+const CODEX_CHAT_INFRASTRUCTURE_RETRY_EXHAUSTED_MESSAGE =
+  "This chat run could not start after several infrastructure retries. Send your message again to retry.";
 
 let registeredWakeup: (() => void) | null = null;
 
@@ -369,11 +377,52 @@ export async function runClaimedTurn(
     } else {
       handedOff = outcome === "handed_off";
     }
+  } catch (error) {
+    if (error instanceof CodexChatLeaseLostError) throw error;
+    captureException(error, {
+      event: "opencompany.goat_codex_chat_turn_terminal_failure",
+      turn_id: turn.id,
+      codex_chat_session_id: session.id,
+    });
+    logger.error("Terminal opencompany chat turn failure", {
+      event: "opencompany.goat_codex_chat_turn_terminal_failure",
+      turn_id: turn.id,
+      codex_chat_session_id: session.id,
+      engine: session.engine,
+      attempt: turn.attempts,
+      error,
+    });
+    await failClaimedTurn({
+      turn,
+      session,
+      canonicalAttemptId,
+      taskContext,
+      message: CODEX_CHAT_UNEXPECTED_FAILURE_MESSAGE,
+    });
+    return;
   } finally {
     clearInterval(heartbeat);
     if (heartbeatAbort) void runPromise?.catch(() => undefined);
   }
   if (retryableError) {
+    if (turn.attempts >= CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS) {
+      logger.error("opencompany chat infrastructure retry budget exhausted", {
+        event: "opencompany.goat_codex_chat_turn_retry_exhausted",
+        turn_id: turn.id,
+        codex_chat_session_id: session.id,
+        engine: session.engine,
+        attempt: turn.attempts,
+        error: retryableError.cause ?? retryableError,
+      });
+      await failClaimedTurn({
+        turn,
+        session,
+        canonicalAttemptId,
+        taskContext,
+        message: CODEX_CHAT_INFRASTRUCTURE_RETRY_EXHAUSTED_MESSAGE,
+      });
+      return;
+    }
     const failedAttempt = await execution.finishAttempt({
       worker: { workerId: leaseOwner },
       runId: turn.id,
@@ -423,6 +472,47 @@ export async function runClaimedTurn(
     if (!abandonedAttempt) throw new CodexChatLeaseLostError();
     await releaseCodexChatTurnForHandoff({ turnId: turn.id, leaseId, leaseOwner });
   }
+}
+
+async function failClaimedTurn(input: {
+  turn: CodexChatTurn;
+  session: CodexChatSession;
+  canonicalAttemptId: string;
+  taskContext: TaskTurnContext | null;
+  message: string;
+}) {
+  const { turn, session } = input;
+  const leaseId = turn.leaseId;
+  const leaseOwner = turn.leaseOwner;
+  if (!leaseId || !leaseOwner) throw new CodexChatLeaseLostError();
+  const initialParts = await loadCodexChatAssistantMessageParts(turn.assistantMessageId);
+  const projector = createCodexChatProjector({
+    target: {
+      userWorkosId: turn.userWorkosId,
+      workspaceId: session.workspaceId,
+      codexChatSessionId: session.id,
+      chatSessionId: session.chatSessionId,
+      turnId: turn.id,
+      userMessageId: turn.userMessageId,
+      assistantMessageId: turn.assistantMessageId,
+      model: session.model,
+      engine: session.engine,
+      leaseId,
+      leaseOwner,
+      canonicalAttemptId: input.canonicalAttemptId,
+      planMode: turn.settings.planModeReasoningEffort != null,
+      turnCreatedAt:
+        turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt,
+    },
+    redact: (value) => value,
+    initialParts,
+  });
+  await projector.fail(input.message, {
+    sessionStatus: "failed",
+    ...(input.taskContext
+      ? { taskCompletion: buildTaskTerminalProjection(input.taskContext) }
+      : {}),
+  });
 }
 
 export async function deferCodexChatTurnForRetry(input: {

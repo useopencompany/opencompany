@@ -84,6 +84,8 @@ describe("coding chat history", () => {
     expect(query.sql).toContain("history_turn.status IN ('completed', 'failed', 'interrupted')");
     expect(query.sql).toContain("ORDER BY history_turn.created_at DESC, history_turn.id DESC");
     expect(query.sql).toContain("ORDER BY recent_history.created_at ASC, recent_history.id ASC");
+    expect(query.sql.match(/jsonb_typeof\([^)]*attachment_texts\) = 'object'/gu)).toHaveLength(2);
+    expect(query.sql.match(/ELSE '\{\}'::jsonb/gu)).toHaveLength(2);
     expect(query.params).toContain(CODING_CHAT_HISTORY_MAX_TURNS);
     expect(query.params).toContain(CODING_CHAT_HISTORY_MAX_MESSAGE_BYTES + 1);
     expect(query.params).toContain(CODING_CHAT_HISTORY_MAX_ATTACHMENT_TEXT_BYTES + 1);

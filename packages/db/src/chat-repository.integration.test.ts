@@ -26,6 +26,7 @@ const migrationPaths = [
   "0199_goat_chat_attachment_uploads.sql",
   "0200_goat_chat_run_pausing.sql",
   "0201_goat_chat_read_models_v1.sql",
+  "0214_goat_chat_attachment_texts_invariant.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -114,6 +115,31 @@ describe("Postgres Chat repositories", () => {
     expect(legacySurvivedMigration).toBe(true);
   });
 
+  it("normalizes JSON null attachment text and rejects non-object JSON at the database boundary", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "attachment-text-invariant",
+      content: "Check the invariant",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+
+    await database.query(
+      `UPDATE goat.chat_messages SET attachment_texts = 'null'::jsonb WHERE id = $1`,
+      [created.messageId],
+    );
+    await expect(
+      database.query<{ is_sql_null: boolean }>(
+        `SELECT attachment_texts IS NULL AS is_sql_null FROM goat.chat_messages WHERE id = $1`,
+        [created.messageId],
+      ),
+    ).resolves.toMatchObject({ rows: [{ is_sql_null: true }] });
+    await expect(
+      database.query(`UPDATE goat.chat_messages SET attachment_texts = '[]'::jsonb WHERE id = $1`, [
+        created.messageId,
+      ]),
+    ).rejects.toThrow(/chat_messages_attachment_texts_object_check/u);
+  });
+
   it("atomically creates and idempotently replays the first durable Message and Run", async () => {
     const command = {
       idempotencyKey: "send-1",
@@ -148,6 +174,14 @@ describe("Postgres Chat repositories", () => {
     ).toMatchObject({
       rows: [{ host_tool_contract_version: CHAT_HOST_TOOL_CONTRACT_VERSION }],
     });
+    expect(
+      await database.query<{ attachment_texts_is_sql_null: boolean }>(
+        `SELECT attachment_texts IS NULL AS attachment_texts_is_sql_null
+         FROM goat.chat_messages
+         WHERE id = $1`,
+        [first.messageId],
+      ),
+    ).toMatchObject({ rows: [{ attachment_texts_is_sql_null: true }] });
     expect(
       (
         await database.query<{

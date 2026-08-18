@@ -591,7 +591,7 @@ export class PostgresChatRepository implements ChatRepository {
     const attachmentIds = input.command.attachmentIds ?? [];
     const resolvedAttachments = await this.resolveAttachments(input.actor, attachmentIds);
     const attachmentsJson = JSON.stringify(resolvedAttachments.attachments);
-    const attachmentTextsJson = JSON.stringify(resolvedAttachments.attachmentTexts);
+    const attachmentTextsJson = serializeAttachmentTexts(resolvedAttachments.attachmentTexts);
     const settingsJson = JSON.stringify({
       ...(input.command.settings ?? {}),
       ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
@@ -2246,6 +2246,14 @@ function mapRunEventPayload(
     conversationId: payload.conversationId,
     triggerMessageId: payload.triggerMessageId,
   };
+}
+
+function serializeAttachmentTexts(
+  attachmentTexts: ResolvedChatAttachments["attachmentTexts"],
+): string | null {
+  return attachmentTexts && Object.keys(attachmentTexts).length > 0
+    ? JSON.stringify(attachmentTexts)
+    : null;
 }
 
 function mapRunAttempt(row: RunAttemptRow): RunAttempt {

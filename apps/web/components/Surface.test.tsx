@@ -479,6 +479,24 @@ describe("Surface chat streaming UI", () => {
     expect(await screen.findAllByText("Hello opencompany")).toHaveLength(2);
   });
 
+  it("shows transcript loading instead of an unexplained empty persisted chat", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "chat_loading_1",
+          title: "Loading chat",
+          model: DEFAULT_MODEL,
+          engine: "opencompany",
+          messages: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Loading conversation…")).toBeInTheDocument();
+  });
+
   it("resolves action approvals as durable Run commands before resuming the stream", async () => {
     const user = userEvent.setup();
     const resolveApproval = vi

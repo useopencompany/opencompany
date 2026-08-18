@@ -3658,6 +3658,10 @@ export const chatMessages = productSchema.table(
     ),
     taskIdx: index("goat_chat_messages_task_idx").on(table.taskId),
     roleCheck: check("goat_chat_messages_role_check", sql`${table.role} IN ('user', 'assistant')`),
+    attachmentTextsObjectCheck: check(
+      "chat_messages_attachment_texts_object_check",
+      sql`${table.attachmentTexts} IS NULL OR jsonb_typeof(${table.attachmentTexts}) = 'object'`,
+    ),
   }),
 );
 
