@@ -20,6 +20,7 @@ import {
   finalizeCodexUiMessageParts,
   offerCodexPlanImplementation,
   parseCodexUiMessageParts,
+  resolveCodexUiApproval,
   resolveCodexUiInteraction,
 } from "./codex-ui-message-parts";
 
@@ -51,6 +52,51 @@ function reduce(parts: CodexUiMessagePart[], raw: Record<string, unknown>[]) {
 }
 
 describe("applyCodexEventToUiMessageParts", () => {
+  it("coalesces streamed assistant deltas by item id", () => {
+    const first = applyCodexEventToUiMessageParts(
+      [],
+      normalizedEvent("assistant.delta", { itemId: "message_1", delta: "Hello" }),
+    );
+    const second = applyCodexEventToUiMessageParts(
+      first.parts,
+      normalizedEvent("assistant.delta", { itemId: "message_1", delta: " world" }),
+    );
+
+    expect(second.parts).toEqual([{ type: "text", itemId: "message_1", text: "Hello world" }]);
+    expect(codexUiMessagePartsContent(second.parts)).toBe("Hello world");
+  });
+
+  it("projects and resolves an ACP permission approval", () => {
+    const waiting = applyCodexEventToUiMessageParts(
+      [],
+      normalizedEvent("approval.requested", {
+        itemId: "acp-approval-command_1",
+        interactionId: "opencompany_acp_permission_1",
+        title: "Run tests",
+        action: "bun test",
+        options: [{ optionId: "allow_once", name: "Allow once", kind: "allow_once" }],
+      }),
+    ).parts;
+
+    expect(waiting[0]).toMatchObject({
+      type: "dynamic-tool",
+      toolName: CODEX_APPROVAL_TOOL_NAME,
+      toolCallId: "acp-approval-command_1",
+      state: "approval-requested",
+      approval: { id: "opencompany_acp_permission_1" },
+    });
+
+    expect(
+      resolveCodexUiApproval(waiting, {
+        approvalId: "opencompany_acp_permission_1",
+        status: "approved",
+      }).parts[0],
+    ).toMatchObject({
+      state: "output-available",
+      output: { status: "approved" },
+    });
+  });
+
   it("inserts a published file at tool completion without a transient tool row", () => {
     const started = applyCodexEventToUiMessageParts(
       [{ type: "text", text: "I created the plan." }],
@@ -278,9 +324,8 @@ describe("applyCodexEventToUiMessageParts", () => {
     expect(parts).toHaveLength(1);
   });
 
-  it("treats deltas, turn events, and usage as no-ops", () => {
+  it("treats turn events and usage as no-ops", () => {
     for (const raw of [
-      { method: "item/agentMessage/delta", params: { delta: "hel" } },
       { method: "turn/started", params: { turn: { id: "t1" } } },
       { method: "turn/completed", params: { turn: { id: "t1", status: "completed" } } },
       { method: "thread/tokenUsage/updated", params: { tokenUsage: { total: 5 } } },
@@ -783,6 +828,30 @@ describe("finalizeCodexUiMessageParts", () => {
 });
 
 describe("parseCodexUiMessageParts", () => {
+  it("restores a resolved ACP approval after a runner reclaim", () => {
+    expect(
+      parseCodexUiMessageParts([
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_APPROVAL_TOOL_NAME,
+          toolCallId: "acp-approval-command_1",
+          state: "approval-responded",
+          input: { title: "Run tests", action: "bun test" },
+          approval: { id: "approval_1", approved: true },
+        },
+      ]),
+    ).toEqual([
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_APPROVAL_TOOL_NAME,
+        toolCallId: "acp-approval-command_1",
+        state: "output-available",
+        input: { title: "Run tests", action: "bun test" },
+        output: { status: "approved" },
+      },
+    ]);
+  });
+
   it("round-trips persisted parts and drops malformed entries", () => {
     const parts: CodexUiMessagePart[] = [
       { type: "reasoning", text: "thinking", state: "done" },

@@ -29,6 +29,16 @@ vi.mock("./db", () => ({
 
 vi.mock("./sandbox", () => ({
   killSandbox: mocks.killSandbox,
+  managedSandboxMetadata: (input: {
+    ownerKind: string;
+    ownerId: string;
+    metadata?: Record<string, string>;
+  }) => ({
+    ...input.metadata,
+    opencompany_managed: "true",
+    opencompany_owner_kind: input.ownerKind,
+    opencompany_owner_id: input.ownerId,
+  }),
 }));
 
 describe("parseDeviceLoginDetails", () => {
@@ -127,7 +137,12 @@ describe("startCodexDeviceAuthFlow", () => {
     expect(mocks.order.indexOf("kill:sbx_old")).toBeLessThan(mocks.order.indexOf("create"));
     expect(mocks.sandboxCreate).toHaveBeenCalledWith("codex", {
       envs: {},
-      metadata: { user_id: "user_1" },
+      metadata: {
+        user_id: "user_1",
+        opencompany_managed: "true",
+        opencompany_owner_kind: "codex_device_auth_flow",
+        opencompany_owner_id: expect.any(String),
+      },
       timeoutMs: 20 * 60 * 1000,
       lifecycle: { onTimeout: "kill" },
     });
@@ -214,6 +229,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
     codexChatIdleTimeoutMs: 1_800_000,
+    claudeCodeAcpEnabled: false,
     jobLeaseTtlMs: 300_000,
     taskWorkerEnabled: false,
     workerConcurrency: 2,

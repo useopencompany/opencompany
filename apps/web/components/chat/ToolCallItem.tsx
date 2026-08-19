@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
   BRAIN_TOOL_NAME,
+  CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
@@ -81,6 +82,15 @@ export function ToolCallItem({
   }
   if (tool.name === CODEX_QUESTION_TOOL_NAME && codexQuestionInput(tool.input)) {
     return <CodexQuestionRow tool={tool} onAction={onCodexAction} />;
+  }
+  if (
+    tool.name === CODEX_APPROVAL_TOOL_NAME &&
+    tool.state === "approval-requested" &&
+    tool.approvalId &&
+    allowActionApproval &&
+    onActionApproval
+  ) {
+    return <ActionApprovalCard tool={tool} onDecision={onActionApproval} allowAlways={false} />;
   }
   if (tool.name === USE_ACTION_TOOL_NAME && capabilityApprovalFromTool(tool)) {
     return <LegacyCapabilityApprovalRow tool={tool} />;
@@ -292,9 +302,11 @@ function CapabilityApprovalCard({
 function ActionApprovalCard({
   tool,
   onDecision,
+  allowAlways = true,
 }: {
   tool: ToolCallView;
   onDecision: (request: ActionApprovalRequest) => Promise<void>;
+  allowAlways?: boolean;
 }) {
   const [submitting, setSubmitting] = useState<ActionApprovalDecision | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -343,14 +355,16 @@ function ActionApprovalCard({
         >
           {submitting === "accept" ? "Running..." : "Accept"}
         </button>
-        <button
-          type="button"
-          disabled={submitting !== null}
-          onClick={() => decide("accept_always")}
-          className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
-        >
-          {submitting === "accept_always" ? "Saving..." : "Always allow"}
-        </button>
+        {allowAlways ? (
+          <button
+            type="button"
+            disabled={submitting !== null}
+            onClick={() => decide("accept_always")}
+            className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
+          >
+            {submitting === "accept_always" ? "Saving..." : "Always allow"}
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={submitting !== null}

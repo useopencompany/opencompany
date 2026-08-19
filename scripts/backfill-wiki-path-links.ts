@@ -1,4 +1,4 @@
-// Canonicalize legacy basename wiki links after 0217_goat_wiki_folders.
+// Canonicalize legacy basename wiki links after 0220_goat_wiki_folders.
 // Safe to re-run: canonical paths are unchanged, ambiguous basenames are left
 // alone, and unchanged page writes do not create another version.
 //

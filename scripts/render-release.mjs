@@ -6,6 +6,7 @@
 import { appendFileSync } from "node:fs";
 
 import {
+  assertRenderServiceShutdownDelay,
   deployCommitMatches,
   isFailedDeployStatus,
   selectNewDeployForRelease,
@@ -46,6 +47,13 @@ async function main() {
   if (args.mode === "wait") {
     await waitForDeploy(args.deployId, releaseSha);
     return;
+  }
+
+  if (args.expectedShutdownDelaySeconds !== undefined) {
+    assertRenderServiceShutdownDelay(
+      await renderRequest(`/services/${serviceId}`),
+      args.expectedShutdownDelaySeconds,
+    );
   }
 
   await cancelStaleInFlightDeploys();
@@ -214,26 +222,43 @@ async function renderRequest(path, init = {}, options = {}) {
 }
 
 function parseArgs(argv) {
-  if (argv.length === 0) return { mode: "deploy" };
+  let expectedShutdownDelaySeconds;
+  const positional = [];
+  for (const arg of argv) {
+    if (arg.startsWith("--expected-shutdown-delay=")) {
+      if (expectedShutdownDelaySeconds !== undefined) {
+        usage("--expected-shutdown-delay may only be provided once.");
+      }
+      const value = Number(arg.slice("--expected-shutdown-delay=".length));
+      if (!Number.isInteger(value) || value <= 0) {
+        usage("--expected-shutdown-delay must be a positive integer.");
+      }
+      expectedShutdownDelaySeconds = value;
+      continue;
+    }
+    positional.push(arg);
+  }
 
-  const [command, deployId, ...rest] = argv;
+  if (positional.length === 0) return { mode: "deploy", expectedShutdownDelaySeconds };
+
+  const [command, deployId, ...rest] = positional;
   if (rest.length > 0) {
     usage(`Unexpected argument: ${rest[0]}`);
   }
 
   if (command === "--trigger-only") {
     if (deployId) usage("--trigger-only does not accept a deploy ID.");
-    return { mode: "trigger-only" };
+    return { mode: "trigger-only", expectedShutdownDelaySeconds };
   }
 
   if (command === "--wait") {
     if (!deployId) usage("--wait requires a deploy ID.");
-    return { mode: "wait", deployId };
+    return { mode: "wait", deployId, expectedShutdownDelaySeconds };
   }
 
   if (command === "--cancel") {
     if (!deployId) usage("--cancel requires a deploy ID.");
-    return { mode: "cancel", deployId };
+    return { mode: "cancel", deployId, expectedShutdownDelaySeconds };
   }
 
   usage(`Unknown argument: ${command}`);
@@ -242,7 +267,7 @@ function parseArgs(argv) {
 function usage(message) {
   console.error(message);
   console.error(
-    "Usage: render-release.mjs [--trigger-only | --wait <deploy_id> | --cancel <deploy_id>]",
+    "Usage: render-release.mjs [--trigger-only | --wait <deploy_id> | --cancel <deploy_id>] [--expected-shutdown-delay=<seconds>]",
   );
   process.exit(1);
 }

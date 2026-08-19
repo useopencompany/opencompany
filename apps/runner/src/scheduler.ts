@@ -10,6 +10,7 @@ import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { captureException } from "@opencompany/observability";
 import { type SQL, sql } from "drizzle-orm";
 import { getDb } from "./db";
+import { createPollingWorker } from "./polling-worker";
 
 const SCHEDULE_POLL_INTERVAL_MS = 30_000;
 
@@ -75,59 +76,22 @@ export async function sweepDueTaskSchedules(
 }
 
 export function startTaskScheduleWorker(input: { onTaskCreated?: () => void } = {}) {
-  let stopped = false;
-  let pendingWake = false;
-  let wake: (() => void) | null = null;
-
-  const notify = () => {
-    if (wake) {
-      wake();
-    } else {
-      pendingWake = true;
-    }
-  };
-
-  const waitForPollOrWake = () => {
-    if (pendingWake) {
-      pendingWake = false;
-      return Promise.resolve();
-    }
-    return new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        wake = null;
-        resolve();
-      }, SCHEDULE_POLL_INTERVAL_MS);
-      wake = () => {
-        clearTimeout(timer);
-        wake = null;
-        resolve();
-      };
-    });
-  };
-
-  const loop = (async () => {
-    while (!stopped) {
+  return createPollingWorker({
+    pollIntervalMs: SCHEDULE_POLL_INTERVAL_MS,
+    poll: async ({ signal }) => {
+      signal.throwIfAborted();
       await sweepDueTaskSchedules({
         ...(input.onTaskCreated ? { onTaskCreated: input.onTaskCreated } : {}),
-      }).catch((error) => {
-        captureException(error, { event: "opencompany.goat_task_schedule_sweep_failed" });
-        console.error("opencompany task schedule sweep failed.", {
-          event: "opencompany.goat_task_schedule_sweep_failed",
-          error,
-        });
       });
-      if (!stopped) await waitForPollOrWake();
-    }
-  })();
-
-  return {
-    notify,
-    stop: async () => {
-      stopped = true;
-      notify();
-      await loop;
     },
-  } satisfies TaskScheduleWorker;
+    onError: (error) => {
+      captureException(error, { event: "opencompany.goat_task_schedule_sweep_failed" });
+      console.error("opencompany task schedule sweep failed.", {
+        event: "opencompany.goat_task_schedule_sweep_failed",
+        error,
+      });
+    },
+  }) satisfies TaskScheduleWorker;
 }
 
 async function claimAndCreateOneDueScheduleRun(now: Date) {

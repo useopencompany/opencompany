@@ -23,6 +23,7 @@ import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { runProductChatTurn } from "./opencompany-chat";
+import { recoveryReasonForDeployVersions, runnerDeployVersion } from "./runner-deploy-version";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
 import { buildTaskTerminalProjection, type TaskTurnContext } from "./task-turn";
@@ -233,9 +234,10 @@ export async function runClaimedTurn(
   const { session, task } = claimedSession;
   const taskContext = task ? { task, harnessSpec: task.harnessSpec } : null;
   const execution = new PostgresRunExecutionRepository((query) => getDb().execute(query));
+  const deployVersion = runnerDeployVersion();
   const requestedAttemptId = `run_attempt_${randomUUID()}`;
   const attempt = await execution.startAttempt({
-    worker: { workerId: leaseOwner },
+    worker: { workerId: leaseOwner, deployVersion },
     runId: turn.id,
     attemptId: requestedAttemptId,
     leaseId,
@@ -276,6 +278,10 @@ export async function runClaimedTurn(
     session.engine !== "opencompany" &&
     turn.attempts > 1 &&
     (turn.engineRecoveryRequired || turn.codexTurnId !== null);
+  const recoveryReason = recoveryReasonForDeployVersions({
+    current: deployVersion,
+    previous: attempt.previousDeployVersion ?? null,
+  });
   if (recoveryRequired) {
     logger.info("Reattaching reclaimed opencompany Codex chat turn", {
       event: "opencompany.goat_codex_chat_turn_reattach_started",
@@ -286,6 +292,9 @@ export async function runClaimedTurn(
       has_codex_turn: Boolean(turn.codexTurnId),
       lease_claim: turn.attempts,
       recovery_attempts: turn.recoveryAttempts,
+      recovery_reason: recoveryReason,
+      deploy_version: deployVersion,
+      previous_deploy_version: attempt.previousDeployVersion ?? null,
     });
   }
   if (turn.attempts > 1) {
@@ -298,6 +307,9 @@ export async function runClaimedTurn(
       attempt: turn.attempts,
       interrupt_requested: Boolean(turn.interruptRequestedAt),
       lease_expires_at: turn.leaseExpiresAt?.toISOString(),
+      recovery_reason: recoveryReason,
+      deploy_version: deployVersion,
+      previous_deploy_version: attempt.previousDeployVersion ?? null,
     });
   }
 
@@ -351,7 +363,7 @@ export async function runClaimedTurn(
           ? { presentationPublisher: options.presentationPublisher }
           : {}),
         ...(taskContext ? { taskContext } : {}),
-        ...(recoveryRequired ? { recovery: { reason: "lease_reclaimed" as const } } : {}),
+        ...(recoveryRequired ? { recovery: { reason: recoveryReason } } : {}),
         shouldAbort: () =>
           options.handoffSignal?.aborted ? new CodexChatHandoffError() : heartbeatAbort,
       };
@@ -791,6 +803,7 @@ export function startCodexChatWorker(
     notify,
     activeCount: () => active.size,
     stop: async (options?: {
+      signal?: AbortSignal;
       handoffAfterMs?: number;
       onHandoff?: (activeCount: number) => Promise<void> | void;
       postHandoffWaitMs?: number;
@@ -799,22 +812,30 @@ export function startCodexChatWorker(
       notify();
       await loop;
       if (active.size === 0) return;
-      if (options?.handoffAfterMs === undefined) {
+      if (!options?.signal && options?.handoffAfterMs === undefined) {
         await Promise.allSettled(Array.from(active.keys()));
         return;
       }
-      const drained = await Promise.race([
-        Promise.allSettled(Array.from(active.keys())).then(() => true),
-        sleep(options.handoffAfterMs).then(() => false),
-      ]);
+      const activeDrain = Promise.allSettled(Array.from(active.keys())).then(() => true);
+      const drained = options.signal
+        ? await Promise.race([
+            activeDrain,
+            options.signal.aborted
+              ? Promise.resolve(false)
+              : new Promise<false>((resolve) => {
+                  options.signal?.addEventListener("abort", () => resolve(false), { once: true });
+                }),
+          ])
+        : await Promise.race([activeDrain, sleep(options.handoffAfterMs ?? 0).then(() => false)]);
       if (drained) return;
 
       await options.onHandoff?.(active.size);
       for (const run of active.values()) run.controller.abort();
-      if (options.postHandoffWaitMs !== undefined) {
+      const postHandoffWaitMs = options.postHandoffWaitMs ?? (options.signal ? 25_000 : undefined);
+      if (postHandoffWaitMs !== undefined) {
         await Promise.race([
           Promise.allSettled(Array.from(active.keys())),
-          sleep(options.postHandoffWaitMs),
+          sleep(postHandoffWaitMs),
         ]);
       }
       // Setup work may be blocked before it reaches the abort check. Fence any such process after

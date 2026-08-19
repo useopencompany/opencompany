@@ -1,6 +1,10 @@
 "use client";
 
-import type { PublishedChatArtifact } from "@opencompany/agent-runtime";
+import {
+  CLOUD_CODING_ENGINE_CONFIG,
+  isCloudCodingEngine,
+  type PublishedChatArtifact,
+} from "@opencompany/agent-runtime";
 import { Link2 } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
@@ -68,7 +72,7 @@ export function SharedChatView({ chat }: { chat: PublicChatView }) {
 
 function sharedChatSubject(chat: { kind: string; engine?: string | null | undefined }) {
   if (chat.kind === "task") return "task run";
-  if (chat.engine === "codex") return "Codex chat";
-  if (chat.engine === "claude_code") return "Claude Code chat";
+  if (isCloudCodingEngine(chat.engine))
+    return `${CLOUD_CODING_ENGINE_CONFIG[chat.engine].label} chat`;
   return "chat";
 }

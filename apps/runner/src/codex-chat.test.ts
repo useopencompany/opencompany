@@ -103,6 +103,16 @@ vi.mock("./codex-chat-events", () => ({
 }));
 
 vi.mock("./sandbox", () => ({
+  managedSandboxMetadata: (input: {
+    ownerKind: string;
+    ownerId: string;
+    metadata?: Record<string, string>;
+  }) => ({
+    ...input.metadata,
+    opencompany_managed: "true",
+    opencompany_owner_kind: input.ownerKind,
+    opencompany_owner_id: input.ownerId,
+  }),
   armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
@@ -1472,6 +1482,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
     codexChatIdleTimeoutMs: 300_000,
+    claudeCodeAcpEnabled: false,
     jobLeaseTtlMs: 300_000,
     taskWorkerEnabled: false,
     workerConcurrency: 2,

@@ -20,7 +20,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { PostgresWikiCommandRepository } from "./wiki-command-repository";
 
 const WS = "ws-wiki-command";
-const MIGRATIONS = ["0195_goat_wiki.sql", "0217_goat_wiki_folders.sql"];
+const MIGRATIONS = ["0195_goat_wiki.sql", "0220_goat_wiki_folders.sql"];
 
 const actor: Actor = {
   userId: "user_1",

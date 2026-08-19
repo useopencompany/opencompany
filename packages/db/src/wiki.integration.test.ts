@@ -26,7 +26,7 @@ import {
 } from "./wiki";
 
 const WS = "ws-test";
-const MIGRATIONS = ["0195_goat_wiki.sql", "0217_goat_wiki_folders.sql"];
+const MIGRATIONS = ["0195_goat_wiki.sql", "0220_goat_wiki_folders.sql"];
 
 let pglite: PGlite;
 let db: ReturnType<typeof drizzle>;

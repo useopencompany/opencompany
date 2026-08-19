@@ -52,6 +52,12 @@ export const METRICS = {
   capabilityApprovalsTotal: "goat.capability.approvals_total",
   capabilityWalletBalanceUsdMicros: "goat.capability.wallet_balance_usd_micros",
   codexChatQueueWaitMs: "goat.codex_chat.queue_wait_ms",
+  runnerShutdownActiveWorkTotal: "goat.runner.shutdown.active_work_total",
+  runnerShutdownInterruptedWorkTotal: "goat.runner.shutdown.interrupted_work_total",
+  postgresNotifyQueueUsage: "goat.postgres.notify_queue_usage",
+  postgresQueueDeadTupleRatio: "goat.postgres.queue.dead_tuple_ratio",
+  postgresQueueDeadTuples: "goat.postgres.queue.dead_tuples",
+  postgresQueueRowsPruned: "goat.postgres.queue.rows_pruned",
   taskDispatchesTotal: "goat.task_dispatches_total",
   taskDispatchDurationMs: "goat.task_dispatch_duration_ms",
   taskRunsTotal: "goat.task_runs_total",
@@ -132,6 +138,7 @@ export type SpanHandle = {
 const meter = metrics.getMeter("opencompany-goat-observability");
 const tracer = trace.getTracer("opencompany-goat-observability");
 const counters = new Map<string, ReturnType<typeof meter.createCounter>>();
+const gauges = new Map<string, ReturnType<typeof meter.createGauge>>();
 const histograms = new Map<string, ReturnType<typeof meter.createHistogram>>();
 
 const SENSITIVE_ATTRIBUTE_PARTS = [
@@ -180,6 +187,7 @@ const LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS = new Set([
   "goat.capability_source",
   "goat.capability_action",
   "goat.approval_decision",
+  "goat.table",
   "goat.token_direction",
   "goat.signup_source",
 ]);
@@ -403,6 +411,18 @@ export function recordCounter(name: string, value = 1, attributes?: TelemetryAtt
   const counter = counters.get(name) ?? meter.createCounter(name);
   counters.set(name, counter);
   counter.add(value, sanitizeMetricAttributes(attributes));
+}
+
+export function recordGauge(
+  name: string,
+  value: number,
+  attributes?: TelemetryAttributes,
+  unit = "1",
+) {
+  if (!isObservabilityEnabled()) return;
+  const gauge = gauges.get(name) ?? meter.createGauge(name, { unit });
+  gauges.set(name, gauge);
+  gauge.record(value, sanitizeMetricAttributes(attributes));
 }
 
 export function recordHistogram(name: string, value: number, attributes?: TelemetryAttributes) {

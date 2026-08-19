@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { persistLastChatSelection } from "@/lib/chat-composer-selection";
 import {
   CHAT_COMPOSER_FOCUS_EVENT,
   HOME_NAVIGATION_EVENT,
@@ -22,7 +23,7 @@ import {
   WEB_FETCH_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
-import { CLAUDE_CHAT_DEFAULT_MODEL_ID } from "@/lib/claude-chat-constants";
+import { CLAUDE_CHAT_DEFAULT_MODEL_ID } from "@/lib/engine-registry";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
 import { HeadlessChatTransport } from "@/lib/headless-chat-transport";
 import { DEFAULT_MODEL } from "@/lib/model-options";
@@ -688,6 +689,57 @@ describe("Surface chat streaming UI", () => {
     await waitFor(() => expect(screen.getByTestId("local-chat-states")).toHaveTextContent("none"));
     expect(textarea).toHaveValue("");
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+  });
+
+  it("starts a bare ampersand message from Home defaults instead of the active Codex runtime", async () => {
+    const user = userEvent.setup();
+    persistLastChatSelection("user_1", DEFAULT_MODEL);
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_codex_active",
+          title: "Codex active",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          messages: [],
+          runtime: {
+            status: "running",
+            activeRunId: "run_codex_active",
+            hasError: false,
+            updatedAt: new Date().toISOString(),
+          },
+        }}
+        codexConnected
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
+
+    await user.type(textarea, "& summarize the release notes");
+
+    expect(screen.getByTestId("background-chat-hint")).toHaveTextContent(
+      "Sending starts this as a new chat in the background.",
+    );
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
+    expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledTimes(1));
+    const body = headlessChatMocks.startBackground.mock.calls[0]![0];
+    expect(body).toMatchObject({
+      content: "summarize the release notes",
+      model: DEFAULT_MODEL,
+    });
+    expect(body.engine).toBeUndefined();
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(chatMock.stop).not.toHaveBeenCalled();
   });
 
   it("starts a raw ampersand Codex directive from a running Codex chat as a new background Codex session", async () => {
@@ -4372,6 +4424,48 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("Streaming answer")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "opencompany is working" })).toBeInTheDocument();
     expect(screen.getByText(/^\d+\.\ds$/)).toBeInTheDocument();
+  });
+
+  it("does not show a live timer for a finalized turn when stream and runtime state are stale", () => {
+    chatMock.status = "streaming";
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "chat_completed_1",
+          title: "Completed chat",
+          model: DEFAULT_MODEL,
+          engine: "opencompany",
+          runtime: {
+            status: "running",
+            activeRunId: "run_completed_1",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [
+            {
+              id: "assistant_completed_1",
+              role: "assistant",
+              metadata: {
+                sessionId: "chat_completed_1",
+                runId: "run_completed_1",
+                timing: { durationMs: 40_795 },
+              },
+              parts: [{ type: "text", text: "Finished answer" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Turn completed in 40.8s")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "opencompany is working" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders assistant text from UI message parts", () => {

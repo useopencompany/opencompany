@@ -162,10 +162,21 @@ const immutableChanges = gitLines([
   "docs/adr",
   "docs/future-concepts/oss-readiness.md",
 ]);
+const retiredUnjournaledMigrations = new Set(["drizzle/0102_goat_brain_folder_defaults.sql"]);
+const relocatedUnjournaledMigration = [
+  "drizzle/0102_goat_brain_folder_defaults.sql",
+  "drizzle/0217_goat_brain_folder_defaults.sql",
+];
 for (const change of immutableChanges) {
   const [status, ...paths] = change.split("\t");
   const changedPath = paths.at(-1);
   if (status === "A" || (status === "M" && changedPath === "drizzle/meta/_journal.json")) {
+    continue;
+  }
+  // This file never entered the journal, so it is not applied migration
+  // history. Its idempotent contents now live in journaled migration 0217.
+  if (status === "D" && retiredUnjournaledMigrations.has(changedPath)) continue;
+  if (status.startsWith("R") && paths.join("\t") === relocatedUnjournaledMigration.join("\t")) {
     continue;
   }
   failures.push(`${changedPath}: immutable migration or ADR history changed`);
@@ -183,8 +194,11 @@ const baseEnvKeys = envKeys(
 // variables are declared here so the check accepts them.
 const addedEnvKeys = ["API_INTERNAL_TOKEN"];
 const expectedEnvKeys = [
-  ...baseEnvKeys.map((key) => migratedEnvironmentName(key) ?? key),
-  ...addedEnvKeys,
+  ...new Set([
+    ...baseEnvKeys.map((key) => migratedEnvironmentName(key) ?? key),
+    "RUNNER_CLAUDE_CODE_ACP_ENABLED",
+    ...addedEnvKeys,
+  ]),
 ].sort();
 if (currentEnvKeys.join("\n") !== expectedEnvKeys.join("\n")) {
   failures.push(".env.example: environment keys do not match the accepted hard-cut mapping");

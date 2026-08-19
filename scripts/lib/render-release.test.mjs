@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assertRenderServiceShutdownDelay,
   deployCommitMatches,
   isFailedDeployStatus,
   selectNewDeployForRelease,
@@ -50,4 +51,22 @@ test("accepts Render's abbreviated commit identifiers", () => {
 test("treats a superseded deploy as terminal", () => {
   assert.equal(isFailedDeployStatus("deactivated"), true);
   assert.equal(isFailedDeployStatus("update_in_progress"), false);
+});
+
+test("rejects a Render service whose live shutdown delay drifted", () => {
+  const service = {
+    name: "opencompany-runner-frankfurt",
+    serviceDetails: { maxShutdownDelaySeconds: 120 },
+  };
+
+  assert.throws(
+    () => assertRenderServiceShutdownDelay(service, 300),
+    /maxShutdownDelaySeconds=120, expected 300/u,
+  );
+  assert.doesNotThrow(() =>
+    assertRenderServiceShutdownDelay(
+      { ...service, serviceDetails: { maxShutdownDelaySeconds: 300 } },
+      300,
+    ),
+  );
 });

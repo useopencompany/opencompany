@@ -62,6 +62,7 @@
     "db:generate": "bun --filter @opencompany/db db:generate",
     "db:migrate": "bun --filter @opencompany/db db:migrate",
     "db:migrations:check": "node scripts/check-migration-journal.mjs",
+    "db:queue:maintenance": "bun --filter @opencompany/runner postgres:queue:maintenance",
     "db:seed": "node scripts/seed.mjs",
     "db:cloud-base:refresh": "node scripts/neon-cloud-base.mjs",
     "db:branch:create": "node scripts/neon-branch.mjs create",

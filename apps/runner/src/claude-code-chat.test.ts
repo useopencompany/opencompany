@@ -37,10 +37,15 @@ const chatMocks = vi.hoisted(() => ({
 }));
 
 const cliMocks = vi.hoisted(() => ({
+  ensureClaudeAcpAdapterInstalled: vi.fn(),
   buildClaudeTurnCommand: vi.fn(),
   ensureClaudeInstalled: vi.fn(),
   killLeftoverClaudeTurnProcesses: vi.fn(),
   runClaudeCodeCliProcess: vi.fn(),
+}));
+
+const acpMocks = vi.hoisted(() => ({
+  runTurn: vi.fn(),
 }));
 
 const eventMocks = vi.hoisted(() => ({
@@ -96,11 +101,21 @@ vi.mock("@opencompany/db/harness", () => ({
 }));
 
 vi.mock("./claude-code-cli", () => ({
+  buildClaudeAcpCommandEnv: () => ({ CLAUDE_CODE_OAUTH_TOKEN: "claude_token" }),
   buildClaudeCommandEnv: () => ({ CLAUDE_CODE_OAUTH_TOKEN: "claude_token" }),
   buildClaudeTurnCommand: cliMocks.buildClaudeTurnCommand,
+  ensureClaudeAcpAdapterInstalled: cliMocks.ensureClaudeAcpAdapterInstalled,
   ensureClaudeInstalled: cliMocks.ensureClaudeInstalled,
   killLeftoverClaudeTurnProcesses: cliMocks.killLeftoverClaudeTurnProcesses,
   runClaudeCodeCliProcess: cliMocks.runClaudeCodeCliProcess,
+}));
+
+vi.mock("./acp-harness", () => ({
+  AcpHarness: class AcpHarness {
+    runTurn(input: unknown) {
+      return acpMocks.runTurn(input);
+    }
+  },
 }));
 
 vi.mock("./coding-agent-shared", () => ({
@@ -178,6 +193,16 @@ vi.mock("./repo-bootstrap", () => ({
 }));
 
 vi.mock("./sandbox", () => ({
+  managedSandboxMetadata: (input: {
+    ownerKind: string;
+    ownerId: string;
+    metadata?: Record<string, string>;
+  }) => ({
+    ...input.metadata,
+    opencompany_managed: "true",
+    opencompany_owner_kind: input.ownerKind,
+    opencompany_owner_id: input.ownerId,
+  }),
   armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
@@ -308,6 +333,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       omittedAttachmentCount: 0,
     });
     cliMocks.ensureClaudeInstalled.mockResolvedValue(undefined);
+    cliMocks.ensureClaudeAcpAdapterInstalled.mockResolvedValue(undefined);
     cliMocks.killLeftoverClaudeTurnProcesses.mockResolvedValue(undefined);
     cliMocks.buildClaudeTurnCommand.mockReturnValue("claude -p prompt");
     cliMocks.runClaudeCodeCliProcess.mockResolvedValue({
@@ -322,6 +348,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       finalize: vi.fn(async () => undefined),
       fail: vi.fn(async () => undefined),
       interrupted: vi.fn(async () => undefined),
+      cancelPendingInteractions: vi.fn(async () => false),
     });
     repoMocks.loadRepositoryBootstrap.mockResolvedValue({
       configs: [],
@@ -376,6 +403,86 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       attemptId: "attempt_1",
       leaseId: "lease_1",
     });
+  });
+
+  it("runs the flag-gated ACP harness while leaving the legacy CLI path untouched", async () => {
+    const projector = {
+      push: vi.fn(async () => undefined),
+      finalize: vi.fn(async () => undefined),
+      fail: vi.fn(async () => undefined),
+      interrupted: vi.fn(async () => undefined),
+    };
+    eventMocks.createCodexChatProjector.mockImplementationOnce(
+      (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
+        ...projector,
+        push: vi.fn(async (events: Record<string, unknown>[]) => {
+          for (const event of events) input.normalizeEvent?.(event);
+        }),
+      }),
+    );
+    acpMocks.runTurn.mockImplementationOnce(
+      async (input: {
+        onEngineSessionId: (sessionId: string) => Promise<void>;
+        onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
+      }) => {
+        await input.onEngineSessionId("acp_session_1");
+        await input.onRuntimeEvents([
+          { method: "session/started", params: { sessionId: "acp_session_1" } },
+          {
+            method: "session/update",
+            params: {
+              sessionId: "acp_session_1",
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                messageId: "message_1",
+                content: { type: "text", text: "Completed over ACP." },
+              },
+            },
+          },
+          {
+            method: "session/prompt_result",
+            params: {
+              sessionId: "acp_session_1",
+              stopReason: "end_turn",
+              usage: { inputTokens: 8, outputTokens: 4 },
+            },
+          },
+        ]);
+        return {
+          sessionId: "acp_session_1",
+          loadedSession: true,
+          promptResponse: { stopReason: "end_turn" },
+          stderrTail: "",
+        };
+      },
+    );
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env({ claudeCodeAcpEnabled: true }),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(cliMocks.ensureClaudeAcpAdapterInstalled).toHaveBeenCalledOnce();
+    expect(cliMocks.ensureClaudeInstalled).not.toHaveBeenCalled();
+    expect(cliMocks.runClaudeCodeCliProcess).not.toHaveBeenCalled();
+    expect(acpMocks.runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingSessionId: "claude_thread_1",
+        model: "claude-sonnet-5",
+        permissionMode: "default",
+      }),
+    );
+    expect(projector.finalize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "acp_session_1",
+        status: "success",
+        result: "Completed over ACP.",
+        usage: { input_tokens: 8, output_tokens: 4 },
+      }),
+    );
   });
 
   it("caps finished durable task sandbox parking at 5 minutes", async () => {
@@ -875,6 +982,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
     codexChatIdleTimeoutMs: 300_000,
+    claudeCodeAcpEnabled: false,
     jobLeaseTtlMs: 300_000,
     taskWorkerEnabled: false,
     workerConcurrency: 2,

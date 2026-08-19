@@ -16,7 +16,7 @@ import { Sandbox } from "e2b";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { INFISICAL_CLI_LINUX_AMD64_SHA256, INFISICAL_CLI_VERSION } from "./infisical-version";
-import { killSandbox, type SandboxHandle } from "./sandbox";
+import { killSandbox, managedSandboxMetadata, type SandboxHandle } from "./sandbox";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "infisical-auth" });
 
@@ -65,17 +65,22 @@ export async function startInfisicalAuthFlow(input: {
   }
   let failureStage: InfisicalAuthStartStage = "supersede_active_flows";
   let sandbox: SandboxHandle | null = null;
+  const id = newInfisicalAuthFlowId();
   try {
     await supersedeActiveFlows(input.workspaceId);
 
     failureStage = "create_sandbox";
     const createdSandbox = await Sandbox.create(input.env.codexE2bTemplate ?? "codex", {
       envs: {},
-      metadata: {
-        user_id: input.requestedByWorkosId,
-        workspace_id: input.workspaceId,
-        purpose: "infisical-auth",
-      },
+      metadata: managedSandboxMetadata({
+        ownerKind: "infisical_auth_flow",
+        ownerId: id,
+        metadata: {
+          user_id: input.requestedByWorkosId,
+          workspace_id: input.workspaceId,
+          purpose: "infisical-auth",
+        },
+      }),
       timeoutMs: INFISICAL_AUTH_SANDBOX_TIMEOUT_MS,
       lifecycle: { onTimeout: "kill" },
     });
@@ -99,7 +104,6 @@ export async function startInfisicalAuthFlow(input: {
       throw new Error("Infisical did not provide a browser login link.");
     }
 
-    const id = newInfisicalAuthFlowId();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + INFISICAL_AUTH_FLOW_TTL_MS);
     failureStage = "persist_flow";

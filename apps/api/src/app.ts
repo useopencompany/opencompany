@@ -216,6 +216,7 @@ export type CreateApiAppInput = {
   billingReconcile?: BillingReconcileService;
   notifier?: RunEventNotifier;
   presentation?: ChatPresentationReader;
+  shutdownSignal?: AbortSignal;
   rateLimiter?: ApiRateLimiter;
   defaultModel?: string;
   now?: () => Date;
@@ -1544,12 +1545,15 @@ export function createApiApp(input: CreateApiAppInput) {
       c.header("Content-Type", "text/event-stream; charset=utf-8");
       c.header("Cache-Control", "private, no-store, no-transform");
       return streamResponse(c, async (stream) => {
+        const streamSignal = input.shutdownSignal
+          ? AbortSignal.any([c.req.raw.signal, input.shutdownSignal])
+          : c.req.raw.signal;
         let lastHeartbeatAt = now().getTime();
         let nextDurablePollAt = 0;
         let durableWake = true;
         let currentAttemptNumber = initialRun.attemptCount;
         try {
-          while (!stream.aborted) {
+          while (!stream.aborted && !streamSignal.aborted) {
             const currentTime = now().getTime();
             if (durableWake || currentTime >= nextDurablePollAt) {
               const page = await input.chat.listRunEvents(actor, {
@@ -1611,7 +1615,7 @@ export function createApiApp(input: CreateApiAppInput) {
             }
             durableWake = await notifier.wait({
               runId,
-              signal: c.req.raw.signal,
+              signal: streamSignal,
               timeoutMs: input.presentation ? PRESENTATION_POLL_MS : EVENT_POLL_MS,
             });
           }

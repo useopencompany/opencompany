@@ -13,7 +13,7 @@ async function applyMigration(db: PGlite, name: string) {
   }
 }
 
-describe("0217_goat_wiki_folders", () => {
+describe("0220_goat_wiki_folders", () => {
   it("converts stub parents and splits parent pages with bodies", async () => {
     const db = new PGlite({ extensions: { pg_trgm } });
     await db.exec("CREATE EXTENSION IF NOT EXISTS pg_trgm;");
@@ -34,7 +34,7 @@ describe("0217_goat_wiki_folders", () => {
       VALUES ('timeline', 'ws', 'parent-page', now(), 'Parent event');
     `);
 
-    await applyMigration(db, "0217_goat_wiki_folders.sql");
+    await applyMigration(db, "0220_goat_wiki_folders.sql");
 
     const result = await db.query<{
       id: string;

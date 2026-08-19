@@ -1,3 +1,4 @@
+export * from "./acp-events";
 export * from "./actions";
 export * from "./attachments";
 export * from "./chat-artifacts";
@@ -10,6 +11,7 @@ export * from "./codex-brain-capture";
 export * from "./codex-ui-message-parts";
 export * from "./exa-search";
 export * from "./github-cli";
+export * from "./harness-events";
 export * from "./models";
 export * from "./paths";
 export * from "./schedules";
