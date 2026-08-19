@@ -8,6 +8,11 @@ import {
   HOME_NAVIGATION_EVENT,
 } from "@/lib/chat-navigation";
 import { clearAllLocalChatStates, setLocalChatState } from "@/lib/chat-session-state";
+import {
+  addOptimisticChatSummary,
+  clearAllOptimisticChatSummaries,
+  removeOptimisticChatSummary,
+} from "@/lib/optimistic-chat-summaries";
 import { Sidebar } from "./Sidebar";
 
 const pathnameMock = vi.hoisted(() => ({ value: "/" }));
@@ -145,6 +150,7 @@ describe("Sidebar", () => {
     recentChatsMock.value = [];
     tasksMock.value = [];
     clearAllLocalChatStates();
+    clearAllOptimisticChatSummaries();
     consumePendingChatComposerFocus("goat_chat_focus");
   });
 
@@ -508,6 +514,51 @@ describe("Sidebar", () => {
     expect(focusRequest).toHaveBeenCalledTimes(1);
     expect(consumePendingChatComposerFocus("goat_chat_focus")).toBe(true);
     window.removeEventListener(CHAT_COMPOSER_FOCUS_EVENT, focusRequest);
+  });
+
+  it("keeps an optimistic chat local until persistence is confirmed", async () => {
+    const user = userEvent.setup();
+    const pendingChatId = "chat_pending";
+    recentChatsMock.value = [
+      {
+        id: pendingChatId,
+        title: "Pending chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Starting",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+        state: "working",
+      },
+    ];
+    addOptimisticChatSummary({
+      workspaceId: workspacesMock.value[0]!.id,
+      sessionId: pendingChatId,
+      prompt: "Pending chat",
+      model: "claude-sonnet-5",
+      engine: "opencompany",
+    });
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const pendingChat = screen.getByRole("button", { name: "Pending chat" });
+    expect(screen.queryByRole("link", { name: "Pending chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pin Pending chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive Pending chat" })).not.toBeInTheDocument();
+
+    await user.hover(pendingChat);
+    await user.click(pendingChat);
+
+    expect(routerMock.prefetch).not.toHaveBeenCalledWith(`/chat/${pendingChatId}`);
+    expect(consumePendingChatComposerFocus(pendingChatId)).toBe(true);
+
+    act(() => removeOptimisticChatSummary(pendingChatId));
+
+    const persistedChat = await screen.findByRole("link", { name: "Pending chat" });
+    expect(persistedChat).toHaveAttribute("href", `/chat/${pendingChatId}`);
+    await user.hover(persistedChat);
+    expect(routerMock.prefetch).toHaveBeenCalledWith(`/chat/${pendingChatId}`);
   });
 
   it("warms the transcript collection when a recent chat is hovered", async () => {
