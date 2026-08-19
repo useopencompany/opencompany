@@ -4374,6 +4374,48 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText(/^\d+\.\ds$/)).toBeInTheDocument();
   });
 
+  it("does not show a live timer for a finalized turn when stream and runtime state are stale", () => {
+    chatMock.status = "streaming";
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "chat_completed_1",
+          title: "Completed chat",
+          model: DEFAULT_MODEL,
+          engine: "opencompany",
+          runtime: {
+            status: "running",
+            activeRunId: "run_completed_1",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [
+            {
+              id: "assistant_completed_1",
+              role: "assistant",
+              metadata: {
+                sessionId: "chat_completed_1",
+                runId: "run_completed_1",
+                timing: { durationMs: 40_795 },
+              },
+              parts: [{ type: "text", text: "Finished answer" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Turn completed in 40.8s")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "opencompany is working" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders assistant text from UI message parts", () => {
     render(
       <Surface

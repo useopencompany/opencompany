@@ -130,6 +130,12 @@ import {
 } from "@/lib/chat-session-state";
 import { composeChatTranscript } from "@/lib/chat-transcript";
 import {
+  type ActiveChatTurn,
+  deriveChatTurnPhase,
+  isChatTurnTerminal,
+  isChatTurnWorking,
+} from "@/lib/chat-turn-lifecycle";
+import {
   type ChatMention,
   type ChatMessageMetadata,
   type ChatSessionView,
@@ -383,9 +389,7 @@ export function Surface({
   const backgroundTaskFocusOriginRef = useRef<Element | null>(null);
   const onboardingKickoffReadRef = useRef(false);
   const onboardingKickoffPromptRef = useRef<string | null>(null);
-  const activeTurnStartedAtRef = useRef<number | null>(null);
-  const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
-  const activeTurnChatSessionIdRef = useRef<string | null>(initialChat?.id ?? null);
+  const activeTurnRef = useRef<ActiveChatTurn | null>(null);
   const lastSeenMarkRef = useRef<string | null>(null);
   const wasAgentWorkingRef = useRef(false);
   const optimisticAttachmentPreviewUrlsRef = useRef<ReadonlyMap<string, string[]>>(new Map());
@@ -501,11 +505,8 @@ export function Surface({
     ReadonlySet<string>
   >(() => new Set());
   const [liveChatTasks, setLiveChatTasks] = useState<readonly TaskView[] | null>(null);
-  const [activeTurnStartedAtMs, setActiveTurnStartedAtMs] = useState<number | null>(() => {
-    if (!isChatRuntimeActive(initialChat?.runtime)) return null;
-    const runtimeUpdatedAtMs = Date.parse(initialChat?.runtime?.updatedAt ?? "");
-    return Number.isFinite(runtimeUpdatedAtMs) ? runtimeUpdatedAtMs : Date.now();
-  });
+  const [activeTurn, setActiveTurn] = useState<ActiveChatTurn | null>(null);
+  const [surfaceMountedAtMs] = useState(() => Date.now());
   const [optimisticTurnDurations, setOptimisticTurnDurations] = useState<
     ReadonlyMap<string, number>
   >(() => new Map());
@@ -576,29 +577,36 @@ export function Surface({
     setStoppingTaskId(null);
   }
 
-  const beginActiveTurn = useCallback((assistantMessageId: string | null = null) => {
-    const startedAtMs = Date.now();
-    const sessionId = routedChatSessionIdRef.current;
-    activeTurnStartedAtRef.current = startedAtMs;
-    activeTurnAssistantMessageIdRef.current = assistantMessageId;
-    activeTurnChatSessionIdRef.current = sessionId;
-    if (sessionId) setLocalChatState(sessionId, "working");
-    setActiveTurnStartedAtMs(startedAtMs);
+  const replaceActiveTurn = useCallback((turn: ActiveChatTurn | null) => {
+    activeTurnRef.current = turn;
+    setActiveTurn(turn);
   }, []);
+
+  const beginActiveTurn = useCallback(
+    (assistantMessageId: string | null = null) => {
+      const conversationId = routedChatSessionIdRef.current;
+      if (!conversationId) return;
+      const turn: ActiveChatTurn = {
+        conversationId,
+        runId: null,
+        assistantMessageId,
+        startedAtMs: Date.now(),
+      };
+      replaceActiveTurn(turn);
+      setLocalChatState(conversationId, "working");
+    },
+    [replaceActiveTurn],
+  );
 
   const clearLocalActiveTurnState = useCallback((sessionId: string | null | undefined) => {
-    clearLocalChatState(sessionId ?? activeTurnChatSessionIdRef.current, "working");
+    clearLocalChatState(sessionId ?? activeTurnRef.current?.conversationId ?? null, "working");
   }, []);
 
-  const clearActiveTurn = useCallback(() => {
-    activeTurnStartedAtRef.current = null;
-    activeTurnAssistantMessageIdRef.current = null;
-    setActiveTurnStartedAtMs(null);
-  }, []);
+  const clearActiveTurn = useCallback(() => replaceActiveTurn(null), [replaceActiveTurn]);
 
   const recordOptimisticTurnDuration = useCallback(
     (assistantMessageId: string | null | undefined) => {
-      const startedAtMs = activeTurnStartedAtRef.current;
+      const startedAtMs = activeTurnRef.current?.startedAtMs ?? null;
       if (!assistantMessageId || startedAtMs === null) return;
       const durationMs = Math.max(0, Date.now() - startedAtMs);
       setOptimisticTurnDurations((current) => {
@@ -643,9 +651,16 @@ export function Surface({
   );
 
   const handleHeadlessAccepted = useCallback(
-    ({ conversationId, assistantMessageId }: HeadlessMessageAccepted) => {
-      activeTurnAssistantMessageIdRef.current = assistantMessageId;
+    ({ conversationId, runId, assistantMessageId }: HeadlessMessageAccepted) => {
       if (routedChatSessionIdRef.current === conversationId) {
+        const currentTurn = activeTurnRef.current;
+        replaceActiveTurn({
+          conversationId,
+          runId,
+          assistantMessageId,
+          startedAtMs:
+            currentTurn?.conversationId === conversationId ? currentTurn.startedAtMs : Date.now(),
+        });
         const acceptedPendingConversation = pendingNewSessionIdRef.current === conversationId;
         setPersistedChatSessionId(conversationId);
         if (acceptedPendingConversation) {
@@ -655,7 +670,7 @@ export function Surface({
       }
       setEngineSubmitting(false);
     },
-    [router],
+    [replaceActiveTurn, router],
   );
   const handleHeadlessReconciled = useCallback(
     ({ conversationId }: Pick<HeadlessMessageAccepted, "conversationId">) =>
@@ -709,6 +724,8 @@ export function Surface({
     },
     onError: (error) => {
       clearLocalActiveTurnState(null);
+      recordOptimisticTurnDuration(activeTurnRef.current?.assistantMessageId);
+      clearActiveTurn();
       if (error.message?.includes(CHAT_OUT_OF_CREDITS_MESSAGE)) {
         void refetchCreditBalance();
         toast.error(CHAT_OUT_OF_CREDITS_MESSAGE, {
@@ -896,25 +913,95 @@ export function Surface({
     return null;
   }, [chatMessages]);
   const hasMessages = chatMessages.length > 0;
-  const isConversationWorking = !activeTaskConversation && conversationRunning;
+  const latestActiveTurnStartedAtMs = useMemo(
+    () => latestChatTurnStartedAtMs(chatMessages),
+    [chatMessages],
+  );
+  const transportTurn = useMemo<ActiveChatTurn | null>(() => {
+    if (activeTurn || !isGenerating || !chatSessionId) return null;
+    const assistantMessage = chatMessages.findLast(
+      (message) => message.role === "assistant" && Boolean(message.metadata?.runId),
+    );
+    const runId = assistantMessage?.metadata?.runId;
+    if (!assistantMessage || !runId) return null;
+    const startedAtMs = chatMessageStartedAtMs(assistantMessage) ?? latestActiveTurnStartedAtMs;
+    if (startedAtMs === null) return null;
+    return {
+      conversationId: assistantMessage.metadata?.sessionId ?? chatSessionId,
+      runId,
+      assistantMessageId: assistantMessage.id,
+      startedAtMs,
+    };
+  }, [activeTurn, chatMessages, chatSessionId, isGenerating, latestActiveTurnStartedAtMs]);
+  const runtimeTurn = useMemo<ActiveChatTurn | null>(() => {
+    const activeRunId = conversationRuntime?.activeRunId;
+    if (
+      activeTurn ||
+      transportTurn ||
+      !chatSessionId ||
+      !activeRunId ||
+      !isChatRuntimeActive(conversationRuntime)
+    ) {
+      return null;
+    }
+    const run = liveChat.runsById.get(activeRunId);
+    const assistantMessage = chatMessages.findLast(
+      (message) => message.role === "assistant" && message.metadata?.runId === activeRunId,
+    );
+    const runtimeUpdatedAtMs = Date.parse(conversationRuntime.updatedAt);
+    const startedAtMs =
+      (assistantMessage ? chatMessageStartedAtMs(assistantMessage) : null) ??
+      latestActiveTurnStartedAtMs ??
+      (Number.isFinite(runtimeUpdatedAtMs) ? runtimeUpdatedAtMs : null);
+    if (startedAtMs === null) return null;
+    return {
+      conversationId: chatSessionId,
+      runId: activeRunId,
+      assistantMessageId: run?.assistantMessageId ?? assistantMessage?.id ?? null,
+      startedAtMs,
+    };
+  }, [
+    activeTurn,
+    chatMessages,
+    chatSessionId,
+    conversationRuntime,
+    latestActiveTurnStartedAtMs,
+    liveChat.runsById,
+    transportTurn,
+  ]);
+  const foregroundTurn = activeTurn ?? transportTurn ?? runtimeTurn;
+  const foregroundRun = foregroundTurn?.runId
+    ? (liveChat.runsById.get(foregroundTurn.runId) ?? null)
+    : null;
+  const foregroundAssistantMessageId =
+    foregroundTurn?.assistantMessageId ?? foregroundRun?.assistantMessageId ?? null;
+  const finalizedAssistantMessage = foregroundAssistantMessageId
+    ? (persistedMessages.find((message) => message.id === foregroundAssistantMessageId) ?? null)
+    : null;
+  const chatTurnPhase = deriveChatTurnPhase({
+    runStatus: foregroundRun?.status ?? null,
+    finalizedAssistantOutcome: finalizedChatAssistantOutcome(finalizedAssistantMessage),
+    runtimeStatus: conversationRuntime?.status ?? null,
+    runtimeMatchesTurn: Boolean(
+      foregroundTurn?.runId && conversationRuntime?.activeRunId === foregroundTurn.runId,
+    ),
+    transportStatus: status,
+    submitting: engineSubmitting,
+  });
+  const isForegroundTurnWorking = isChatTurnWorking(chatTurnPhase);
   const isTaskConversationWorking = Boolean(
     activeTaskConversation?.sessionBacked &&
       !isTaskConversationStopping &&
       (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
   );
-  const isAgentWorking =
-    isGenerating || isConversationWorking || engineSubmitting || isTaskConversationWorking;
+  const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
   const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
-  const latestActiveTurnStartedAtMs = useMemo(
-    () => latestChatTurnStartedAtMs(chatMessages),
-    [chatMessages],
-  );
   const activeTurnTimerStartedAtMs =
-    activeTurnStartedAtMs ??
+    foregroundTurn?.startedAtMs ??
     latestActiveTurnStartedAtMs ??
     activeTaskConversation?.startedAtMs ??
-    null;
+    (isForegroundTurnWorking ? surfaceMountedAtMs : null);
   const paletteRecentChats = useMemo(
     () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
     [optimisticallyArchivedChatIds, recentChats],
@@ -942,24 +1029,25 @@ export function Surface({
   useEffect(() => {
     if (isAgentWorking) {
       wasAgentWorkingRef.current = true;
-      setActiveTurnStartedAtMs((current) => {
-        if (current !== null) {
-          activeTurnStartedAtRef.current = current;
-          return current;
-        }
-        const startedAtMs = latestActiveTurnStartedAtMs ?? Date.now();
-        activeTurnStartedAtRef.current = startedAtMs;
-        return startedAtMs;
-      });
       return;
     }
 
-    if (wasAgentWorkingRef.current) {
-      recordOptimisticTurnDuration(activeTurnAssistantMessageIdRef.current);
+    const turnFinished = isChatTurnTerminal(chatTurnPhase);
+    if (wasAgentWorkingRef.current && turnFinished) {
+      recordOptimisticTurnDuration(foregroundAssistantMessageId);
     }
     wasAgentWorkingRef.current = false;
-    clearActiveTurn();
-  }, [clearActiveTurn, isAgentWorking, latestActiveTurnStartedAtMs, recordOptimisticTurnDuration]);
+    if (turnFinished && activeTurnRef.current === foregroundTurn) {
+      clearActiveTurn();
+    }
+  }, [
+    chatTurnPhase,
+    clearActiveTurn,
+    foregroundAssistantMessageId,
+    foregroundTurn,
+    isAgentWorking,
+    recordOptimisticTurnDuration,
+  ]);
 
   const chatTaskLookup = useMemo(
     () =>
@@ -1966,7 +2054,7 @@ export function Surface({
 
   const handleCodexToolAction = async (action: CodexToolAction) => {
     if (action.type === "answer-question") {
-      const runId = conversationRuntime?.activeRunId;
+      const runId = foregroundTurn?.runId ?? conversationRuntime?.activeRunId;
       if (!runId) throw new Error("The active coding Run is no longer available.");
       await resolveEngineQuestions(runId, action.interactionId, action.answers);
       return;
@@ -1978,7 +2066,7 @@ export function Surface({
       return;
     }
 
-    if (engineSubmitting || conversationRunning) {
+    if (isForegroundTurnWorking) {
       throw new Error("Wait for the current Codex turn to finish.");
     }
     const engine = activeEngineChat?.engine;
@@ -2022,7 +2110,7 @@ export function Surface({
   };
 
   const closeChat = useCallback(() => {
-    if (isGenerating) {
+    if (isForegroundTurnWorking) {
       clearLocalActiveTurnState(chatSessionId);
       void headlessTransport.cancel(chatInstanceKey).catch(() => {});
       void stop();
@@ -2035,7 +2123,7 @@ export function Surface({
     chatSessionId,
     clearLocalActiveTurnState,
     headlessTransport,
-    isGenerating,
+    isForegroundTurnWorking,
     openChat,
     router,
     stop,
@@ -2063,7 +2151,7 @@ export function Surface({
     }
 
     if (chatSessionId) {
-      const activeRunId = conversationRuntime?.activeRunId ?? null;
+      const activeRunId = foregroundTurn?.runId ?? conversationRuntime?.activeRunId ?? null;
       clearLocalActiveTurnState(chatSessionId);
       const cancel = activeRunId
         ? cancelHeadlessChatRun(activeRunId)
@@ -2095,6 +2183,7 @@ export function Surface({
     chatSessionId,
     clearLocalActiveTurnState,
     conversationRuntime?.activeRunId,
+    foregroundTurn?.runId,
     isTaskConversationStopping,
     headlessTransport,
     messages,
@@ -2840,7 +2929,7 @@ export function Surface({
                     />
                   </div>
                   {activeEngine &&
-                  conversationRunning &&
+                  isForegroundTurnWorking &&
                   !activeTaskConversation &&
                   !backgroundChatDirective ? (
                     <EngineStopButton
@@ -2863,8 +2952,7 @@ export function Surface({
                           (attachment) => attachment.status === "ready",
                         )) ||
                       composerAttachments.isUploading ||
-                      (!isBackgroundSubmit && engineSubmitting) ||
-                      (!isBackgroundSubmit && conversationRunning) ||
+                      (!isBackgroundSubmit && isForegroundTurnWorking) ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
                       legacyTaskReadOnly ||
@@ -2873,9 +2961,7 @@ export function Surface({
                     isGenerating={
                       isBackgroundSubmit
                         ? false
-                        : isGenerating ||
-                          (!isEngineChat && isConversationWorking) ||
-                          isTaskConversationWorking
+                        : (!isEngineChat && isForegroundTurnWorking) || isTaskConversationWorking
                     }
                     isStopping={!isBackgroundSubmit && isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
@@ -2901,10 +2987,7 @@ export function Surface({
                         type="button"
                         aria-label="Attach files"
                         disabled={
-                          isGenerating ||
-                          engineSubmitting ||
-                          legacyTaskReadOnly ||
-                          voiceDictation.isActive
+                          isForegroundTurnWorking || legacyTaskReadOnly || voiceDictation.isActive
                         }
                         onClick={() => attachmentFileInputRef.current?.click()}
                         className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
@@ -2917,9 +3000,7 @@ export function Surface({
                     type="button"
                     aria-label="Start voice dictation"
                     disabled={
-                      isGenerating ||
-                      engineSubmitting ||
-                      conversationRunning ||
+                      isForegroundTurnWorking ||
                       backgroundTaskSubmitting ||
                       legacyTaskReadOnly ||
                       voiceDictation.isActive ||
@@ -2954,7 +3035,7 @@ export function Surface({
                       }
                     }}
                     disabled={
-                      isGenerating ||
+                      isForegroundTurnWorking ||
                       Boolean(chatSessionId) ||
                       voiceDictation.isActive ||
                       legacyTaskReadOnly
@@ -2988,9 +3069,11 @@ export function Surface({
                       goalModeEnabled={codexGoalModeEnabled}
                       goalObjective={codexGoalObjective}
                       goalTokenBudget={codexGoalTokenBudget}
-                      disabled={engineSubmitting || legacyTaskReadOnly || voiceDictation.isActive}
+                      disabled={
+                        isForegroundTurnWorking || legacyTaskReadOnly || voiceDictation.isActive
+                      }
                       modelDisabled={
-                        engineSubmitting ||
+                        isForegroundTurnWorking ||
                         Boolean(activeEngineChat) ||
                         legacyTaskReadOnly ||
                         voiceDictation.isActive
@@ -4379,12 +4462,24 @@ function chatMessageDurationMs(
   return optimisticTurnDurations.get(message.id) ?? null;
 }
 
+function chatMessageStartedAtMs(message: ChatUiMessage) {
+  const createdAt = message.metadata?.timing?.createdAt;
+  if (!createdAt) return null;
+  const startedAtMs = Date.parse(createdAt);
+  return Number.isFinite(startedAtMs) ? startedAtMs : null;
+}
+
+function finalizedChatAssistantOutcome(message: ChatUiMessage | null) {
+  if (!message || typeof message.metadata?.timing?.durationMs !== "number") return null;
+  if (message.metadata.aborted) return "canceled" as const;
+  if (message.metadata.error) return "failed" as const;
+  return "completed" as const;
+}
+
 function latestChatTurnStartedAtMs(messages: readonly ChatUiMessage[]) {
   for (const message of messages.toReversed()) {
-    const createdAt = message.metadata?.timing?.createdAt;
-    if (!createdAt) continue;
-    const startedAtMs = Date.parse(createdAt);
-    if (Number.isFinite(startedAtMs)) return startedAtMs;
+    const startedAtMs = chatMessageStartedAtMs(message);
+    if (startedAtMs !== null) return startedAtMs;
   }
   return null;
 }
