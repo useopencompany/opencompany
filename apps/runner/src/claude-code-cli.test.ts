@@ -3,7 +3,6 @@ import {
   buildClaudeAcpCommand,
   buildClaudeAcpCommandEnv,
   buildClaudeCommandEnv,
-  buildClaudeTurnCommand,
   KILL_LEFTOVER_CLAUDE_TURN_COMMAND,
 } from "./claude-code-cli";
 
@@ -29,7 +28,7 @@ describe("buildClaudeCommandEnv", () => {
     expect(env.CLAUDE_CODE_RATE_LIMIT_TIER).toBe("default_claude_max_20x");
   });
 
-  // In -p mode an API key silently outranks the subscription token and flips the
+  // An API key silently outranks the subscription token and flips the
   // session to metered API billing — it must never reach the command env.
   it("strips API-key credentials even if a caller leaks them through githubEnv", () => {
     const env = buildClaudeCommandEnv({
@@ -73,70 +72,13 @@ describe("buildClaudeAcpCommand", () => {
   });
 });
 
-describe("buildClaudeTurnCommand", () => {
-  it("builds a stream-json headless invocation that unsets API keys", () => {
-    const command = buildClaudeTurnCommand({
-      workdir: "/home/user/opencompany-goat/claude-chat",
-      promptPath: "/home/user/.opencompany-goat/claude-chat-prompts/prompt-t1.txt",
-      model: "claude-sonnet-5",
-      reasoningEffort: "xhigh",
-      resumeSessionId: "sess-1",
-      mcpConfigPath: null,
-    });
-    expect(command).toContain("unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN");
-    expect(command).toContain("--output-format stream-json");
-    expect(command).toContain("--verbose");
-    expect(command).toContain("--permission-mode bypassPermissions");
-    expect(command).toContain("--model 'claude-sonnet-5'");
-    expect(command).toContain("--effort 'xhigh'");
-    expect(command).toContain("--resume 'sess-1'");
-    expect(command).not.toContain("--bare");
-    expect(command).not.toContain("--mcp-config");
-    expect(command).not.toContain("--strict-mcp-config");
-  });
-
-  it("omits resume and model when not provided", () => {
-    const command = buildClaudeTurnCommand({
-      workdir: "/w",
-      promptPath: "/p",
-      model: null,
-      reasoningEffort: null,
-      resumeSessionId: null,
-      mcpConfigPath: null,
-    });
-    expect(command).not.toContain("--resume");
-    expect(command).not.toContain("--model");
-    expect(command).not.toContain("--effort");
-  });
-
-  it("adds a strict mcp config flag when an mcp config path is provided", () => {
-    const command = buildClaudeTurnCommand({
-      workdir: "/w",
-      promptPath: "/p",
-      model: null,
-      reasoningEffort: null,
-      resumeSessionId: null,
-      mcpConfigPath: "/home/user/.claude-mcp/turn-t1.json",
-    });
-    expect(command).toContain("--mcp-config '/home/user/.claude-mcp/turn-t1.json'");
-    expect(command).toContain("--strict-mcp-config");
-  });
-});
-
 describe("KILL_LEFTOVER_CLAUDE_TURN_COMMAND", () => {
-  it("matches a real turn invocation but not its own command line", () => {
+  it("matches the ACP adapter invocation but not its own command line", () => {
     const pattern = /'(.+)'/.exec(KILL_LEFTOVER_CLAUDE_TURN_COMMAND)?.[1];
     expect(pattern).toBeTruthy();
     const regex = new RegExp(pattern as string);
-    const turnCommand = buildClaudeTurnCommand({
-      workdir: "/home/user/opencompany-goat/claude-chat",
-      promptPath: "/home/user/.opencompany-goat/claude-chat-prompts/prompt-t1.txt",
-      model: "claude-sonnet-5",
-      reasoningEffort: null,
-      resumeSessionId: "sess-1",
-      mcpConfigPath: null,
-    });
-    // pkill -f matches the leftover wrapper shell and claude process by this signature...
+    const turnCommand = buildClaudeAcpCommand("/home/user/opencompany-goat/claude-chat");
+    // pkill -f matches the leftover wrapper shell and ACP adapter by this signature...
     expect(regex.test(turnCommand)).toBe(true);
     // ...but must not match the shell running the cleanup itself, or pkill kills its own parent.
     expect(regex.test(KILL_LEFTOVER_CLAUDE_TURN_COMMAND)).toBe(false);
@@ -144,9 +86,5 @@ describe("KILL_LEFTOVER_CLAUDE_TURN_COMMAND", () => {
 
   it("tolerates no matching process", () => {
     expect(KILL_LEFTOVER_CLAUDE_TURN_COMMAND).toMatch(/\|\| true$/);
-  });
-
-  it("also fences a leftover ACP adapter", () => {
-    expect(KILL_LEFTOVER_CLAUDE_TURN_COMMAND).toContain("pkill -9 -f '[c]laude-agent-acp'");
   });
 });

@@ -62,12 +62,6 @@ enables the canonical Chat transient presentation lane; without it both services
 Postgres streaming and reconnect behavior. The value is server-only and must never be copied to a
 `NEXT_PUBLIC_*` variable.
 
-`RUNNER_CLAUDE_CODE_ACP_ENABLED` is an optional runner-only pilot gate. Its default is `false`,
-which keeps Claude Code on the established stream-JSON path. Set it in `prod` `/runner` only for
-the ACP pilot; disabling it is the rollback. The persisted sandbox remains available, and the
-existing stale-session recovery creates a fresh Claude session if the legacy engine cannot load an
-ACP-created session id.
-
 The Stripe endpoint secret is `OPENCOMPANY_STRIPE_WEBHOOK_SECRET` in `prod` `/api`; it is not a web secret.
 Stripe still calls the unchanged web URL, which streams the signed raw body to the API-owned
 handler. Other provider URLs follow the same rule: a web relay may preserve a stable public URL,
