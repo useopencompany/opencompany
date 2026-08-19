@@ -32,7 +32,7 @@
     "start:web": "bun --filter @opencompany/web start",
     "lint": "bun run boundary:check && turbo lint",
     "lint:fix": "turbo lint:fix",
-    "boundary:check": "node scripts/check-web-domain-boundary.mjs && node scripts/check-naming-boundary.mjs",
+    "boundary:check": "node scripts/check-web-domain-boundary.mjs && node scripts/check-wiki-db-boundary.mjs && node scripts/check-naming-boundary.mjs",
     "naming:check": "node scripts/check-naming-boundary.mjs",
     "format": "biome check --write .",
     "format:check": "biome check .",
@@ -72,7 +72,10 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
+    "@opencompany/db": "workspace:*",
+    "@opencompany/wiki": "workspace:*",
     "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
     "pg": "^8.13.1",
     "vercel": "^54.5.0"
   },

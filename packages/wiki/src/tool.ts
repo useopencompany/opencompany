@@ -14,6 +14,7 @@ export const WIKI_TOOL_COMMANDS = [
   "search",
   "recent",
   "timeline",
+  "mkdir",
   "write",
   "move",
   "delete",
@@ -33,15 +34,15 @@ export const WIKI_READ_COMMANDS: readonly WikiToolCommand[] = [
 
 export type WikiToolInput = {
   command: WikiToolCommand;
-  /** read: page slugs or paths (one or many). timeline/move/delete/timeline-add: one slug. */
+  /** read: page paths or basenames (one or many). timeline/move/delete/timeline-add: one path. */
   pages?: string | string[] | undefined;
-  /** write: full tree path of the page ("projects/website-redesign"). */
+  /** mkdir/write: full path of the folder or page ("projects/website-redesign"). */
   path?: string | undefined;
   /** write: markdown body (frontmatter is managed for you — do not include it). */
   body?: string | undefined;
   /** write: page kind. */
   kind?: string | undefined;
-  /** write: display name for the page (defaults to the body's first H1). */
+  /** write/mkdir: display name (write defaults to the body's first H1, mkdir to the folder slug). */
   title?: string | undefined;
   /** search: query text. grep: regex pattern. */
   query?: string | undefined;
@@ -49,7 +50,7 @@ export type WikiToolInput = {
   since?: string | undefined;
   /** move: new parent path, or "/" for the root. */
   to?: string | undefined;
-  /** delete: also delete all subpages. */
+  /** delete: required to delete a non-empty folder. */
   recursive?: boolean | undefined;
   /** grep: case-insensitive matching (default true). */
   ignoreCase?: boolean | undefined;
@@ -64,9 +65,9 @@ export type WikiToolInput = {
 export type WikiToolOutput = { ok: true; result: unknown } | { ok: false; error: string };
 
 export const WIKI_TOOL_DESCRIPTION = [
-  "Workspace wiki: markdown pages in a tree (Notion-like pages with subpages). Every page has a stable `slug` used by [[wiki-links]] and a tree `path` of slugs like projects/website-redesign. Retrieval is filesystem-first: start with `tree`, `read` the promising pages, `grep` when hunting for a phrase.",
-  'Commands: tree (list the page tree) · read {pages: slug|path|[...]} (page bodies + subpages + backlinks) · grep {query: regex} (matching lines across pages) · search {query} (keyword search when grep/tree are not enough) · recent {since: "2d"} (pages changed, with +added/-removed lines) · timeline {pages: slug, since?} (a page\'s dated history) · write {path, body, kind?, title?} (create or overwrite; missing parent pages are auto-created) · move {pages: slug, to: parent-path|"/"} · delete {pages: slug, recursive?} · timeline-add {pages: slug, text, at?}.',
-  "Pages link to each other inline with [[slug]] or [[slug|Label]], and to artifacts in other tools with [[source:provider:id]] (e.g. [[source:linear:issue:ENG-123]]) — keep those links when rewriting. `kind` is one of project, person, company, research, meeting, other. Writes overwrite the whole page body: read before you rewrite.",
+  "Workspace wiki: folders and markdown pages in a tree, like a filesystem. Folders are containers and pages are leaf documents. A node's full `path` is its identity; start with `tree`, `read` promising pages, and use `grep` when hunting for a phrase.",
+  'Commands: tree (folders end in `/`) · read {pages: path|basename|[...]} (page bodies + backlinks; a folder returns its children) · grep {query: regex} · search {query} · recent {since: "2d"} · timeline {pages: path, since?} · mkdir {path, title?} (create a folder and missing ancestor folders) · write {path, body, kind?, title?} (create or overwrite a page; missing ancestor folders are auto-created) · move {pages: path, to: folder-path|"/"} (move a page or folder subtree and update links) · delete {pages: path, recursive?} (recursive is required for a non-empty folder) · timeline-add {pages: path, text, at?}.',
+  "Pages link inline with [[path/to/page]] or [[path/to/page|Label]], and to artifacts in other tools with [[source:provider:id]] (e.g. [[source:linear:issue:ENG-123]]) — keep those links when rewriting. Bare basenames resolve only when unique. `kind` is one of project, person, company, research, meeting, other. Writes overwrite the whole page body: read before you rewrite.",
 ].join(" ");
 
 // JSON schema for AI-SDK / MCP registration. Descriptions repeat the contract
@@ -83,12 +84,12 @@ export const WIKI_TOOL_INPUT_JSON_SCHEMA = {
     pages: {
       anyOf: [{ type: "string" }, { type: "array", items: { type: "string" }, maxItems: 20 }],
       description:
-        "Page slug(s) or path(s). Used by read (one or many), timeline, move, delete, timeline-add (one).",
+        "Page path(s) or unique basename(s). Used by read (one or many), timeline, move, delete, timeline-add (one).",
     },
     path: {
       type: "string",
       description:
-        'write: the page\'s full tree path, lowercase slugs joined by "/" (e.g. "projects/website-redesign").',
+        'mkdir/write: the folder or page full path, lowercase slugs joined by "/" (e.g. "projects/website-redesign").',
     },
     body: {
       type: "string",
@@ -102,11 +103,12 @@ export const WIKI_TOOL_INPUT_JSON_SCHEMA = {
     title: {
       type: "string",
       description:
-        "write: display name for the page. Optional — defaults to the body's first H1, and an existing name is kept when omitted.",
+        "write/mkdir: display name for the page or folder. Optional — a page defaults to the body's first H1, a folder to its slug; an existing name is kept when omitted.",
     },
     query: {
       type: "string",
-      description: "search: query text. grep: a regular expression matched line by line.",
+      description:
+        "search: query text. grep: a regular expression matched against page titles and each body line.",
     },
     since: {
       type: "string",
@@ -114,11 +116,11 @@ export const WIKI_TOOL_INPUT_JSON_SCHEMA = {
     },
     to: {
       type: "string",
-      description: 'move: destination parent path, or "/" to move the page to the root.',
+      description: 'move: destination folder path, or "/" to move the node to the root.',
     },
     recursive: {
       type: "boolean",
-      description: "delete: also delete every subpage.",
+      description: "delete: required to delete a non-empty folder and all its contents.",
     },
     ignoreCase: {
       type: "boolean",

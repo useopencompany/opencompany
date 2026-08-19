@@ -28,6 +28,8 @@ export type ChatHostToolCommand = {
   sessionId: string;
   runId: string;
   input?: Record<string, unknown>;
+  /** Stable AI-SDK tool-call id, when the operation has one (see gateway request). */
+  toolCallId?: string;
 };
 
 type BrowserProfile = {
@@ -182,6 +184,8 @@ export type ChatHostToolServiceDependencies = {
     workspaceId: string;
     actorId: string;
     toolInput: Record<string, unknown>;
+    /** Stable per-tool-call key, e.g. `agent-wiki:<turnId>:<toolCallId>`. */
+    idempotencyKey: string;
   }) => Promise<unknown>;
   onRejected?: (command: ChatHostToolCommand) => void;
   onCompleted?: (command: ChatHostToolCommand, durationMs: number) => void;
@@ -391,6 +395,9 @@ async function executeOperation(
         workspaceId: context.workspaceId,
         actorId: context.actorId,
         toolInput,
+        // Stable execution identity: same (turn, tool call) → same key on retry;
+        // two intentional wiki calls in one turn get different keys.
+        idempotencyKey: `agent-wiki:${command.runId}:${command.toolCallId ?? command.sessionId}`,
       });
   }
 }

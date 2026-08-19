@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarkdownBrainEditor } from "./MarkdownBrainEditor";
 
 // jsdom has no layout; ProseMirror's post-dispatch scrollIntoView asks ranges
@@ -34,6 +34,10 @@ vi.mock("@tiptap/react", async (importOriginal) => {
   };
 });
 
+beforeEach(() => {
+  capturedEditor = null;
+});
+
 describe("wiki slash command inside MarkdownBrainEditor", () => {
   it("selects the /page entry with Enter and with a click", async () => {
     const createPage = vi
@@ -56,7 +60,7 @@ describe("wiki slash command inside MarkdownBrainEditor", () => {
     act(() => {
       editor.chain().focus().insertContent("/page").run();
     });
-    await screen.findByText("Create a sub-page and link it here");
+    await screen.findByText("Create a sibling page and link it here");
 
     fireEvent.keyDown(editor.view.dom, { key: "Enter" });
     await waitFor(() => expect(createPage).toHaveBeenCalledTimes(1));
@@ -66,8 +70,47 @@ describe("wiki slash command inside MarkdownBrainEditor", () => {
     act(() => {
       editor.chain().focus().insertContent("/page").run();
     });
-    await screen.findByText("Create a sub-page and link it here");
-    fireEvent.click(screen.getByText("Create a sub-page and link it here"));
+    await screen.findByText("Create a sibling page and link it here");
+    fireEvent.click(screen.getByText("Create a sibling page and link it here"));
     await waitFor(() => expect(createPage).toHaveBeenCalledTimes(2));
+  });
+
+  it("opens the existing-page picker and inserts the selected wiki link", async () => {
+    const view = render(
+      <MarkdownBrainEditor
+        content=""
+        onChange={vi.fn()}
+        brainLinks={{ "company/roadmap": "/wiki/company/roadmap" }}
+        pageTitles={{ "company/roadmap": "Company Roadmap" }}
+        readOnly
+        wikiSlashCommands={{ createPage: vi.fn().mockReturnValue(null) }}
+        placeholder="Write, or type / for commands…"
+      />,
+    );
+
+    await waitFor(() => expect(capturedEditor).not.toBeNull());
+    const editor = capturedEditor as Editor;
+    view.rerender(
+      <MarkdownBrainEditor
+        content=""
+        onChange={vi.fn()}
+        brainLinks={{ "company/roadmap": "/wiki/company/roadmap" }}
+        pageTitles={{ "company/roadmap": "Company Roadmap" }}
+        wikiSlashCommands={{ createPage: vi.fn().mockReturnValue(null) }}
+        placeholder="Write, or type / for commands…"
+      />,
+    );
+    await waitFor(() => expect(editor.isEditable).toBe(true));
+    act(() => {
+      editor.chain().focus().insertContent("/existing").run();
+    });
+    await screen.findByText("Link to an existing wiki page");
+
+    fireEvent.keyDown(editor.view.dom, { key: "Enter" });
+    await screen.findByText("Company Roadmap");
+    fireEvent.keyDown(editor.view.dom, { key: "Enter" });
+
+    await waitFor(() => expect(editor.getMarkdown()).toContain("[[company/roadmap]]"));
+    expect(editor.getMarkdown()).not.toContain("/existing");
   });
 });

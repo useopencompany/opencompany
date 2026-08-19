@@ -27,36 +27,36 @@ export async function createWikiPageRequest(
 }
 
 export async function updateWikiPageRequest(
-  slug: string,
+  id: string,
   command: UpdateWikiPageBody,
   options: KnowledgeClientOptions = {},
 ) {
-  const response = await knowledgeClient(options).v1.wiki.pages[":slug"].$patch({
-    param: { slug },
+  const response = await knowledgeClient(options).v1.wiki.pages[":id"].$patch({
+    param: { id },
     json: command,
   });
   return responseData(response, "Wiki page update failed");
 }
 
 export async function deleteWikiPageRequest(
-  slug: string,
+  id: string,
   command: DeleteWikiPageBody,
   options: KnowledgeClientOptions = {},
 ) {
-  const response = await knowledgeClient(options).v1.wiki.pages[":slug"].delete.$post({
-    param: { slug },
+  const response = await knowledgeClient(options).v1.wiki.pages[":id"].delete.$post({
+    param: { id },
     json: command,
   });
   return responseData(response, "Wiki page deletion failed");
 }
 
 export async function addWikiTimelineEntryRequest(
-  slug: string,
+  id: string,
   command: AddWikiTimelineEntryBody,
   options: KnowledgeClientOptions = {},
 ) {
-  const response = await knowledgeClient(options).v1.wiki.pages[":slug"].timeline.$post({
-    param: { slug },
+  const response = await knowledgeClient(options).v1.wiki.pages[":id"].timeline.$post({
+    param: { id },
     header: { "idempotency-key": `web-wiki-timeline:${crypto.randomUUID()}` },
     json: command,
   });

@@ -63,9 +63,11 @@ import {
 } from "./product-schema";
 import {
   addWikiTimelineEntry,
+  createWikiFolder,
   deleteWikiPage,
   listWikiPagesWithBodies,
-  resolveWikiPages,
+  renameWikiNode,
+  updateWikiNodeTitle,
   WikiError,
   writeWikiPage,
 } from "./wiki";
@@ -394,6 +396,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     actor: Actor;
     idempotencyKey: string;
     clientPageId?: string;
+    nodeType: WikiPage["nodeType"];
     parentPath: string | null;
     title: string;
     slug?: string;
@@ -404,6 +407,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         "wiki_page.create",
         {
           clientPageId: input.clientPageId ?? null,
+          nodeType: input.nodeType,
           parentPath: input.parentPath,
           title: input.title,
           slug: input.slug ?? null,
@@ -424,8 +428,18 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         const baseSlug = wikiSlugFromTitle(input.title.trim()) ?? "untitled";
         slug = baseSlug;
         for (let suffix = 2; ; suffix += 1) {
-          const taken = await resolveWikiPages(input.actor.workspaceId, [slug], this.db);
-          if (taken.pages.length === 0) break;
+          const candidatePath = input.parentPath ? `${input.parentPath}/${slug}` : slug;
+          const [taken] = await this.db
+            .select({ id: wikiPages.id })
+            .from(wikiPages)
+            .where(
+              and(
+                eq(wikiPages.workspaceId, input.actor.workspaceId),
+                eq(wikiPages.path, candidatePath),
+              ),
+            )
+            .limit(1);
+          if (!taken) break;
           slug = `${baseSlug.slice(0, 76)}-${suffix}`;
           if (!isValidWikiSlug(slug)) {
             throw new WikiError(`Cannot derive a slug from "${input.title}".`);
@@ -433,6 +447,27 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         }
       }
       const path = input.parentPath ? `${input.parentPath}/${slug}` : slug;
+      const [existingPath] = await this.db
+        .select({ id: wikiPages.id })
+        .from(wikiPages)
+        .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.path, path)))
+        .limit(1);
+      if (existingPath) {
+        throw new WikiError(`A Wiki node already exists at "${path}".`);
+      }
+      if (input.nodeType === "folder") {
+        const result = await createWikiFolder(
+          {
+            id,
+            workspaceId: input.actor.workspaceId,
+            path,
+            title: input.title.trim() || slug,
+            actorWorkosId: input.actor.userId,
+          },
+          this.db,
+        );
+        return { page: wikiPage(result.folder), transactionIds: result.txids };
+      }
       const result = await writeWikiPage(
         {
           id,
@@ -463,40 +498,106 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
 
   async updateWikiPage(input: {
     actor: Actor;
-    slug: string;
-    body: string;
+    id: string;
+    body?: string;
     kind?: WikiPage["kind"];
+    slug?: string;
     title?: string;
   }) {
     try {
-      const resolved = await resolveWikiPages(input.actor.workspaceId, [input.slug], this.db);
-      const page = resolved.pages[0];
-      if (!page || page.slug !== input.slug) {
+      const [page] = await this.db
+        .select()
+        .from(wikiPages)
+        .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.id, input.id)))
+        .limit(1);
+      if (!page) {
         throw new CoreError("not_found", "Wiki page not found.");
+      }
+      if (input.slug !== undefined && !isValidWikiSlug(input.slug)) {
+        throw new CoreError("invalid_argument", `Invalid Wiki slug "${input.slug}".`);
+      }
+      if (page.nodeType === "folder") {
+        if (input.body !== undefined || input.kind !== undefined) {
+          throw new CoreError("invalid_argument", "Folders only support title and slug updates.");
+        }
+        if (input.title === undefined && input.slug === undefined) {
+          throw new CoreError("invalid_argument", "A folder title or slug is required.");
+        }
+      }
+      const renamed =
+        input.slug !== undefined
+          ? await renameWikiNode(
+              {
+                workspaceId: input.actor.workspaceId,
+                id: page.id,
+                title: input.title ?? page.title,
+                slug: input.slug,
+                actorWorkosId: input.actor.userId,
+              },
+              this.db,
+            )
+          : null;
+      const currentPage = renamed?.node ?? page;
+      if (page.nodeType === "folder") {
+        if (input.title === undefined) {
+          if (renamed) {
+            return { page: wikiPage(renamed.node), transactionIds: renamed.txids };
+          }
+          throw new CoreError("invalid_argument", "A folder title is required.");
+        }
+        if (renamed) return { page: wikiPage(renamed.node), transactionIds: renamed.txids };
+        const result = await updateWikiNodeTitle(
+          {
+            workspaceId: input.actor.workspaceId,
+            id: page.id,
+            title: input.title,
+            actorWorkosId: input.actor.userId,
+          },
+          this.db,
+        );
+        return {
+          page: wikiPage(result.node),
+          transactionIds: result.txid === null ? [] : [result.txid],
+        };
+      }
+      if (renamed && input.body === undefined && input.kind === undefined) {
+        return { page: wikiPage(renamed.node), transactionIds: renamed.txids };
       }
       const result = await writeWikiPage(
         {
           workspaceId: input.actor.workspaceId,
-          path: page.path,
-          body: input.body,
+          path: currentPage.path,
+          body: input.body ?? currentPage.content,
           ...(isValidWikiKind(input.kind) ? { kind: input.kind } : {}),
           ...(input.title !== undefined ? { title: input.title } : {}),
           actorWorkosId: input.actor.userId,
         },
         this.db,
       );
-      return { page: wikiPage(result.page), transactionIds: result.txids };
+      return {
+        page: wikiPage(result.page),
+        transactionIds: [...(renamed?.txids ?? []), ...result.txids],
+      };
     } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new CoreError("conflict", "A Wiki node with that path already exists.");
+      }
       throw knowledgeError(error);
     }
   }
 
-  async deleteWikiPage(input: { actor: Actor; slug: string; recursive: boolean }) {
+  async deleteWikiPage(input: { actor: Actor; id: string; recursive: boolean }) {
     try {
+      const [node] = await this.db
+        .select({ path: wikiPages.path })
+        .from(wikiPages)
+        .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.id, input.id)))
+        .limit(1);
+      if (!node) throw new CoreError("not_found", "Wiki page not found.");
       const result = await deleteWikiPage(
         {
           workspaceId: input.actor.workspaceId,
-          slug: input.slug,
+          path: node.path,
           recursive: input.recursive,
           actorWorkosId: input.actor.userId,
         },
@@ -512,7 +613,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     actor: Actor;
     idempotencyKey: string;
     clientEntryId?: string;
-    slug: string;
+    id: string;
     text: string;
     at?: Date;
   }) {
@@ -522,7 +623,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         "wiki_timeline.create",
         {
           clientEntryId: input.clientEntryId ?? null,
-          slug: input.slug,
+          id: input.id,
           text: input.text,
           at: input.at?.toISOString() ?? null,
         },
@@ -539,11 +640,19 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
         )
         .limit(1);
       if (replay) return { entry: wikiTimelineEntry(replay), transactionId: 0 };
+      const [page] = await this.db
+        .select({ path: wikiPages.path, nodeType: wikiPages.nodeType })
+        .from(wikiPages)
+        .where(and(eq(wikiPages.workspaceId, input.actor.workspaceId), eq(wikiPages.id, input.id)))
+        .limit(1);
+      if (!page || page.nodeType !== "page") {
+        throw new CoreError("not_found", "Wiki page not found.");
+      }
       const result = await addWikiTimelineEntry(
         {
           id,
           workspaceId: input.actor.workspaceId,
-          slug: input.slug,
+          path: page.path,
           text: input.text,
           at: input.at ?? new Date(),
           actorWorkosId: input.actor.userId,
@@ -1021,6 +1130,7 @@ function wikiPage(row: WikiPageRow): WikiPage {
     slug: row.slug,
     path: row.path,
     title: row.title,
+    nodeType: row.nodeType,
     kind: row.kind,
     body: row.content,
     contentHash: row.contentHash,

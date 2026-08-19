@@ -36,6 +36,8 @@ vi.mock("./infisical-auth", () => ({
 const env = {
   internalToken: "internal-secret",
   streamTokenSecret: "stream-secret",
+  apiOrigin: "http://localhost:3001",
+  apiInternalToken: "api-internal-secret",
   vercelAiGatewayApiKey: "gateway",
   openaiCodexApiKey: undefined,
   openaiApiKey: "openai",

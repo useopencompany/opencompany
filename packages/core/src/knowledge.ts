@@ -95,6 +95,7 @@ export type WikiPage = {
   slug: string;
   path: string;
   title: string;
+  nodeType: "page" | "folder";
   kind: "person" | "company" | "project" | "research" | "meeting" | "other";
   body: string;
   contentHash: string;
@@ -181,27 +182,29 @@ export interface KnowledgeRepository {
     actor: Actor;
     idempotencyKey: string;
     clientPageId?: string;
+    nodeType: WikiPage["nodeType"];
     parentPath: string | null;
     title: string;
     slug?: string;
   }): Promise<{ page: WikiPage; transactionIds: number[] }>;
   updateWikiPage(input: {
     actor: Actor;
-    slug: string;
-    body: string;
+    id: string;
+    body?: string;
     kind?: WikiPage["kind"];
+    slug?: string;
     title?: string;
   }): Promise<{ page: WikiPage; transactionIds: number[] }>;
   deleteWikiPage(input: {
     actor: Actor;
-    slug: string;
+    id: string;
     recursive: boolean;
   }): Promise<{ deletedPaths: string[]; transactionIds: number[] }>;
   addWikiTimelineEntry(input: {
     actor: Actor;
     idempotencyKey: string;
     clientEntryId?: string;
-    slug: string;
+    id: string;
     text: string;
     at?: Date;
   }): Promise<{ entry: WikiTimelineEntry; transactionId: number }>;
@@ -373,6 +376,7 @@ export class KnowledgeApplicationService {
     input: {
       idempotencyKey: string;
       clientPageId?: string;
+      nodeType: WikiPage["nodeType"];
       parentPath: string | null;
       title: string;
       slug?: string;
@@ -385,6 +389,7 @@ export class KnowledgeApplicationService {
       ...(input.clientPageId
         ? { clientPageId: resourceId(input.clientPageId, "clientPageId") }
         : {}),
+      nodeType: input.nodeType,
       parentPath: input.parentPath ? bounded(input.parentPath, 512, "parentPath") : null,
       title: boundedRaw(input.title, 160, "title"),
       ...(input.slug ? { slug: bounded(input.slug, 80, "slug") } : {}),
@@ -393,28 +398,30 @@ export class KnowledgeApplicationService {
 
   updateWikiPage(
     actor: Actor,
-    slug: string,
+    id: string,
     input: {
-      body: string;
+      body?: string;
       kind?: WikiPage["kind"];
+      slug?: string;
       title?: string;
     },
   ) {
     requirePermission(actor, WIKI_WRITE_PERMISSION, "Wiki");
     return this.repository.updateWikiPage({
       actor,
-      slug: resourceId(slug, "slug"),
-      body: boundedRaw(input.body, 1_000_000, "body"),
+      id: resourceId(id, "id"),
+      ...(input.body !== undefined ? { body: boundedRaw(input.body, 1_000_000, "body") } : {}),
       ...(input.kind ? { kind: input.kind } : {}),
+      ...(input.slug !== undefined ? { slug: bounded(input.slug, 80, "slug") } : {}),
       ...(input.title !== undefined ? { title: boundedRaw(input.title, 160, "title") } : {}),
     });
   }
 
-  deleteWikiPage(actor: Actor, input: { slug: string; recursive?: boolean }) {
+  deleteWikiPage(actor: Actor, input: { id: string; recursive?: boolean }) {
     requirePermission(actor, WIKI_WRITE_PERMISSION, "Wiki");
     return this.repository.deleteWikiPage({
       actor,
-      slug: resourceId(input.slug, "slug"),
+      id: resourceId(input.id, "id"),
       recursive: input.recursive ?? false,
     });
   }
@@ -424,7 +431,7 @@ export class KnowledgeApplicationService {
     input: {
       idempotencyKey: string;
       clientEntryId?: string;
-      slug: string;
+      id: string;
       text: string;
       at?: string;
     },
@@ -440,7 +447,7 @@ export class KnowledgeApplicationService {
       ...(input.clientEntryId
         ? { clientEntryId: resourceId(input.clientEntryId, "clientEntryId") }
         : {}),
-      slug: resourceId(input.slug, "slug"),
+      id: resourceId(input.id, "id"),
       text: bounded(input.text, 20_000, "text"),
       ...(at ? { at } : {}),
     });

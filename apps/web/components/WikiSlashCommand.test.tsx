@@ -5,6 +5,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect } from "react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { WikiLink } from "./WikiLinkNode";
 import {
   createWikiSlashCommandPlugin,
   filterWikiSlashItems,
@@ -28,9 +29,14 @@ beforeAll(() => {
 });
 
 describe("filterWikiSlashItems", () => {
-  it("matches the page command by id and label", () => {
-    expect(filterWikiSlashItems("")).toHaveLength(1);
-    expect(filterWikiSlashItems("pag")).toHaveLength(1);
+  it("matches commands by id, label, and keywords", () => {
+    // Text, Heading 1-3, Bulleted list, Numbered list, Link to page, Page.
+    expect(filterWikiSlashItems("")).toHaveLength(8);
+    expect(filterWikiSlashItems("pag")).toHaveLength(2);
+    expect(filterWikiSlashItems("link").map((item) => item.id)).toEqual(["linkToPage"]);
+    expect(filterWikiSlashItems("existing").map((item) => item.id)).toEqual(["linkToPage"]);
+    expect(filterWikiSlashItems("head")).toHaveLength(3);
+    expect(filterWikiSlashItems("list")).toHaveLength(2);
     expect(filterWikiSlashItems("nope")).toHaveLength(0);
   });
 });
@@ -49,6 +55,7 @@ function Harness({
     extensions: [
       StarterKit.configure({ link: { openOnClick: false } }),
       Markdown.configure({ markedOptions: { gfm: true, breaks: false } }),
+      WikiLink,
       Extension.create({
         name: "wikiSlashCommand",
         addProseMirrorPlugins() {
@@ -79,7 +86,7 @@ async function mountWithSlashMenuOpen(handlers: WikiSlashCommandHandlers) {
   act(() => {
     editor?.chain().focus().insertContent("/page").run();
   });
-  await screen.findByText("Create a sub-page and link it here");
+  await screen.findByText("Create a sibling page and link it here");
   if (!editor) throw new Error("editor missing");
   return editor as NonNullable<ReturnType<typeof useEditor>>;
 }
@@ -87,7 +94,7 @@ async function mountWithSlashMenuOpen(handlers: WikiSlashCommandHandlers) {
 const CREATED_PAGE = { id: "page-1", slug: "untitled", path: "parent/untitled", title: "" };
 
 describe("wiki slash command menu", () => {
-  it("creates the page, inserts a bare [[slug]] link, and opens it on Enter", async () => {
+  it("creates the page, inserts its full [[path]], and opens it on Enter", async () => {
     const createPage = vi.fn().mockReturnValue(CREATED_PAGE);
     const onPageCreated = vi.fn();
     const editor = await mountWithSlashMenuOpen({ createPage, onPageCreated });
@@ -95,7 +102,7 @@ describe("wiki slash command menu", () => {
     fireEvent.keyDown(editor.view.dom, { key: "Enter" });
 
     await waitFor(() => expect(createPage).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(editor.getMarkdown()).toContain("[[untitled]]"));
+    await waitFor(() => expect(editor.getMarkdown()).toContain("[[parent/untitled]]"));
     expect(editor.getMarkdown()).not.toContain("/page");
     expect(onPageCreated).toHaveBeenCalledWith(CREATED_PAGE);
   });
@@ -117,10 +124,10 @@ describe("wiki slash command menu", () => {
     const onPageCreated = vi.fn();
     const editor = await mountWithSlashMenuOpen({ createPage, onPageCreated });
 
-    fireEvent.click(screen.getByText("Create a sub-page and link it here"));
+    fireEvent.click(screen.getByText("Create a sibling page and link it here"));
 
     await waitFor(() => expect(createPage).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(editor.getMarkdown()).toContain("[[untitled]]"));
+    await waitFor(() => expect(editor.getMarkdown()).toContain("[[parent/untitled]]"));
     expect(onPageCreated).toHaveBeenCalledWith(CREATED_PAGE);
   });
 

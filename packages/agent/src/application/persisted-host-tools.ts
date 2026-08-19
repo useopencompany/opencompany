@@ -34,7 +34,6 @@ import {
   listTaskSchedulesForUser,
   updateTaskScheduleForUser,
 } from "../task-schedules";
-import { runWikiToolForUser } from "../wiki-tool";
 import { createTaskFromWorkflow } from "../workflow-tasks";
 import { listWorkflowCatalog } from "../workflows";
 import {
@@ -51,6 +50,16 @@ export type PersistedHostRuntime = {
   wakeTaskWorker: () => Promise<unknown> | unknown;
   defer: (work: Promise<unknown>) => void;
   planHarness: (input: { actorId: string; prompt: string }) => Promise<HarnessSpec>;
+  /**
+   * Executes a `wiki` tool command through the API-owned boundary. The runner
+   * injects an HTTP client that reaches apps/api; there is no direct-DB path.
+   */
+  executeWikiCommand?: (input: {
+    workspaceId: string;
+    actorId: string;
+    toolInput: Record<string, unknown>;
+    idempotencyKey: string;
+  }) => Promise<unknown>;
 };
 
 export function executePersistedChatHostTool(input: {
@@ -139,8 +148,12 @@ export function executePersistedChatHostTool(input: {
             sessionId: session.sessionId,
           }),
       }).execute({ name, args }),
-    runWikiTool: ({ workspaceId, actorId, toolInput }) =>
-      runWikiToolForUser({ workspaceId, userWorkosId: actorId, toolInput: toolInput as never }),
+    runWikiTool: ({ workspaceId, actorId, toolInput, idempotencyKey }) => {
+      if (!input.runtime.executeWikiCommand) {
+        throw new Error("The wiki command client is not configured for this runtime.");
+      }
+      return input.runtime.executeWikiCommand({ workspaceId, actorId, toolInput, idempotencyKey });
+    },
     onRejected: (command) => {
       logger.warn("Headless Chat host tool rejected", {
         event: "opencompany.headless_chat_host_tool_rejected",
@@ -243,6 +256,6 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
 }
 
 function hostToolCommand(request: ChatHostToolGatewayRequest): ChatHostToolCommand {
-  const { turnId, ...command } = request;
-  return { ...command, runId: turnId };
+  const { turnId, toolCallId, ...command } = request;
+  return { ...command, runId: turnId, ...(toolCallId ? { toolCallId } : {}) };
 }

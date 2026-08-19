@@ -914,9 +914,9 @@ describe("Electric read models", () => {
 
     await proxy.stream({
       actor,
-      readModel: "wiki-pages-v1",
+      readModel: "wiki-pages-v2",
       requestUrl: new URL(
-        "https://api.example.test/v1/read-models/wiki-pages-v1?table=goat.users&where=true&params[1]=workspace_other",
+        "https://api.example.test/v1/read-models/wiki-pages-v2?table=goat.users&where=true&params[1]=workspace_other",
       ),
     });
 

@@ -112,6 +112,48 @@ describe("opencompany Chat Task host tools", () => {
       prompt: "Prepare the briefing.",
     });
   });
+
+  it("runs a wiki command with a turn+toolCall idempotency key", async () => {
+    const runWikiTool = vi.fn(async () => ({ ok: true, result: {} }));
+    const dependencies = testDependencies({ runWikiTool });
+    await executeChatHostToolService({
+      command: {
+        operation: "wiki",
+        sessionId: "runtime_1",
+        runId: "turn_7",
+        toolCallId: "call_42",
+        input: { command: "write", path: "projects/plan", body: "# Plan" },
+      },
+      dependencies,
+    });
+    expect(runWikiTool).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      actorId: "user_1",
+      toolInput: { command: "write", path: "projects/plan", body: "# Plan" },
+      idempotencyKey: "agent-wiki:turn_7:call_42",
+    });
+  });
+
+  it("gives two wiki calls in one turn different idempotency keys", async () => {
+    const runWikiTool = vi.fn(async () => ({ ok: true, result: {} }));
+    const dependencies = testDependencies({ runWikiTool });
+    for (const toolCallId of ["call_a", "call_b"]) {
+      await executeChatHostToolService({
+        command: {
+          operation: "wiki",
+          sessionId: "runtime_1",
+          runId: "turn_7",
+          toolCallId,
+          input: { command: "tree" },
+        },
+        dependencies,
+      });
+    }
+    const keys = (runWikiTool.mock.calls as unknown as Array<[{ idempotencyKey: string }]>).map(
+      ([call]) => call.idempotencyKey,
+    );
+    expect(keys).toEqual(["agent-wiki:turn_7:call_a", "agent-wiki:turn_7:call_b"]);
+  });
 });
 
 const taskResult = {

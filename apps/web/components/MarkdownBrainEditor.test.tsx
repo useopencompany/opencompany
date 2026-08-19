@@ -13,7 +13,7 @@ describe("MarkdownBrainEditor", () => {
     );
 
     const sourceLink = await screen.findByRole("link", { name: "About" });
-    expect(sourceLink.getAttribute("data-brain-href")).toBe("https://www.opencompany.cloud/about");
+    expect(sourceLink.getAttribute("href")).toBe("https://www.opencompany.cloud/about");
     expect(sourceLink.tagName).toBe("A");
     expect(sourceLink.getAttribute("target")).toBe("_blank");
     expect(sourceLink.getAttribute("rel")).toBe("noopener noreferrer");

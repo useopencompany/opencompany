@@ -86,7 +86,12 @@ function context() {
   return {
     sessionId: "session_1",
     turnId: "turn_1",
-    env: { vercelAiGatewayApiKey: "gateway-key", browserEnabled: true },
+    env: {
+      vercelAiGatewayApiKey: "gateway-key",
+      browserEnabled: true,
+      apiOrigin: "http://localhost:3001",
+      apiInternalToken: "api-internal-secret",
+    },
     signal: new AbortController().signal,
     mentionedSkillIds: ["sales"],
     approvalContinuation: false,

@@ -23,11 +23,18 @@
     "./workflows": {
       "types": "./src/workflows.ts",
       "default": "./src/workflows.ts"
+    },
+    "./wiki-commands": {
+      "types": "./src/wiki-commands.ts",
+      "default": "./src/wiki-commands.ts"
     }
   },
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@opencompany/wiki": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

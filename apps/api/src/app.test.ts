@@ -21,6 +21,8 @@ import {
   type TaskSchedule,
   TaskScheduleApplicationService,
   type TaskScheduleRepository,
+  WikiCommandApplicationService,
+  type WikiCommandRepository,
   type Workflow,
   WorkflowApplicationService,
   type WorkflowRepository,
@@ -101,6 +103,8 @@ describe("canonical Hono API", () => {
       tasks: new TaskApplicationService(fakeTaskRepository()),
       ...fakeAutomationServices(),
       knowledge: fakeKnowledgeService(),
+      wikiCommands: fakeWikiCommandsService(),
+      resolveWikiServiceActor: async () => actor,
       brainSources: fakeBrainSources(),
       brainImports: fakeBrainImports(),
       browserProfiles: fakeBrowserProfiles(),
@@ -310,8 +314,8 @@ describe("canonical Hono API", () => {
 
   it("serves Brain, Wiki, and Skill resources through the typed Knowledge boundary", async () => {
     const assertBrainAccess = vi.fn(async () => undefined);
-    const updateWikiPage = vi.fn(async ({ slug }: { slug: string }) => ({
-      page: fakeWikiPage({ slug, path: `projects/${slug}` }),
+    const updateWikiPage = vi.fn(async ({ id }: { id: string }) => ({
+      page: fakeWikiPage({ id }),
       transactionIds: [71],
     }));
     const createSkill = vi.fn(async () => fakeSkill());
@@ -403,14 +407,24 @@ describe("canonical Hono API", () => {
     const wiki = await app.request("/v1/wiki/pages/project-alpha", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: "# Updated", kind: "project", title: "Alpha" }),
+      body: JSON.stringify({
+        body: "# Updated",
+        kind: "project",
+        slug: "alpha",
+        title: "Alpha",
+      }),
     });
     expect(wiki.status).toBe(200);
     await expect(wiki.json()).resolves.toMatchObject({
       data: { page: { slug: "project-alpha", body: "" }, transactionIds: [71] },
     });
     expect(updateWikiPage).toHaveBeenCalledWith(
-      expect.objectContaining({ actor, slug: "project-alpha", body: "# Updated" }),
+      expect.objectContaining({
+        actor,
+        id: "project-alpha",
+        body: "# Updated",
+        slug: "alpha",
+      }),
     );
 
     const skill = await app.request("/v1/skills", {
@@ -3335,6 +3349,127 @@ describe("canonical Hono API", () => {
   });
 });
 
+describe("POST /internal/wiki/commands", () => {
+  const secret = "internal-wiki-secret-value";
+  const body = (command: unknown) =>
+    JSON.stringify({ userWorkosId: "user_1", workspaceId: "workspace_1", command });
+  const headers = (overrides: Record<string, string> = {}) => ({
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${secret}`,
+    "Idempotency-Key": "agent-wiki:turn_1:call_1",
+    ...overrides,
+  });
+
+  it("returns 503 when the internal secret is not configured", async () => {
+    const app = testApp(fakeRepository());
+    const response = await app.request("/internal/wiki/commands", {
+      method: "POST",
+      headers: headers(),
+      body: body({ command: "tree" }),
+    });
+    expect(response.status).toBe(503);
+  });
+
+  it("returns 401 for a wrong bearer token", async () => {
+    const app = testApp(fakeRepository(), { wikiCommandsInternalSecret: secret });
+    const response = await app.request("/internal/wiki/commands", {
+      method: "POST",
+      headers: headers({ Authorization: "Bearer nope" }),
+      body: body({ command: "tree" }),
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it("returns 400 when the Idempotency-Key header is missing", async () => {
+    const app = testApp(fakeRepository(), { wikiCommandsInternalSecret: secret });
+    const response = await app.request("/internal/wiki/commands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+      body: body({ command: "tree" }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("returns 400 for a malformed command", async () => {
+    const app = testApp(fakeRepository(), { wikiCommandsInternalSecret: secret });
+    const response = await app.request("/internal/wiki/commands", {
+      method: "POST",
+      headers: headers(),
+      body: body({ command: "bogus" }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("returns 403 when the actor cannot be reconstructed", async () => {
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: secret,
+      resolveWikiServiceActor: async () => {
+        throw new ApiError(403, "forbidden", "The user cannot access the wiki in this workspace.");
+      },
+    });
+    const response = await app.request("/internal/wiki/commands", {
+      method: "POST",
+      headers: headers(),
+      body: body({ command: "tree" }),
+    });
+    expect(response.status).toBe(403);
+  });
+
+  it("reconstructs the actor server-side and returns the tool output", async () => {
+    const resolveWikiServiceActor = vi.fn(async () => actor);
+    const writePage = vi.fn(async (input: { path: string }) => ({
+      action: "created" as const,
+      path: input.path,
+      slug: "plan",
+      title: "Plan",
+      createdAncestors: [] as string[],
+    }));
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: secret,
+      resolveWikiServiceActor,
+      wikiCommands: fakeWikiCommandsService({ writePage }),
+    });
+    const response = await app.request("/internal/wiki/commands", {
+      method: "POST",
+      headers: headers(),
+      body: body({ command: "write", path: "projects/plan", body: "# Plan" }),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { ok: true, result: { action: "created", path: "projects/plan", slug: "plan" } },
+    });
+    // Tenancy comes from the request but the actor is reloaded, never trusted.
+    expect(resolveWikiServiceActor).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(writePage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace_1",
+        actorWorkosId: "user_1",
+        idempotencyKey: "agent-wiki:turn_1:call_1",
+        path: "projects/plan",
+        body: "# Plan",
+      }),
+    );
+  });
+
+  it("applies a command-aware write rate limit", async () => {
+    const consume = vi.fn(async () => ({ allowed: false, retryAfterSeconds: 42 }));
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: secret,
+      rateLimiter: { consume } as unknown as ApiRateLimiter,
+    });
+    const response = await app.request("/internal/wiki/commands", {
+      method: "POST",
+      headers: headers(),
+      body: body({ command: "write", path: "projects/plan", body: "# Plan" }),
+    });
+    expect(response.status).toBe(429);
+    expect(consume).toHaveBeenCalledWith(expect.objectContaining({ bucket: "wiki_write" }));
+  });
+});
+
 function testApp(
   repository: FakeRepository,
   overrides: Partial<Parameters<typeof createApiApp>[0]> = {},
@@ -3344,6 +3479,8 @@ function testApp(
     tasks: new TaskApplicationService(fakeTaskRepository()),
     ...fakeAutomationServices(),
     knowledge: fakeKnowledgeService(),
+    wikiCommands: fakeWikiCommandsService(),
+    resolveWikiServiceActor: async () => actor,
     brainSources: fakeBrainSources(),
     brainImports: fakeBrainImports(),
     browserProfiles: fakeBrowserProfiles(),
@@ -3973,6 +4110,33 @@ function fakeKnowledgeService() {
   return knowledgeService({});
 }
 
+function fakeWikiCommandRepository(
+  overrides: Partial<WikiCommandRepository> = {},
+): WikiCommandRepository {
+  const reject = async () => {
+    throw new Error("Unexpected wiki command repository call.");
+  };
+  return {
+    getTree: async () => [],
+    resolvePages: async () => ({ pages: [], missing: [] }),
+    getBacklinks: async () => [],
+    grep: async () => [],
+    search: async () => [],
+    recentChanges: async () => [],
+    listTimeline: async () => [],
+    createFolder: reject,
+    writePage: reject,
+    moveNode: reject,
+    deletePage: reject,
+    addTimelineEntry: reject,
+    ...overrides,
+  };
+}
+
+function fakeWikiCommandsService(overrides: Partial<WikiCommandRepository> = {}) {
+  return new WikiCommandApplicationService(fakeWikiCommandRepository(overrides));
+}
+
 function fakeSkillImportService(
   repositoryOverrides: Partial<SkillImportRepository> = {},
   resolverOverrides: Partial<SkillImportResolver> = {},
@@ -4011,6 +4175,7 @@ function fakeBrainDocument() {
     folderPath: "projects",
     path: "projects/project-alpha.md",
     title: "Alpha",
+    nodeType: "page" as const,
     content: "---\nid: project-alpha\n---\n# Alpha",
     body: "# Alpha",
     timeline: [],
@@ -4039,6 +4204,7 @@ function fakeWikiPage(overrides: Partial<ReturnType<typeof baseWikiPage>> = {}) 
 function baseWikiPage() {
   return {
     id: "wiki_page_1",
+    nodeType: "page" as const,
     slug: "project-alpha",
     path: "projects/project-alpha",
     title: "Alpha",

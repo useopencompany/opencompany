@@ -231,7 +231,10 @@ type BrainCliRunner = (
   executionContext?: unknown,
 ) => Promise<BrainToolOutput>;
 type SaveToBrainRunner = (input: SaveToBrainToolInput) => Promise<SaveToBrainToolOutput>;
-type WikiToolRunner = (input: WikiToolInput) => Promise<WikiToolOutput>;
+type WikiToolRunner = (
+  input: WikiToolInput,
+  context: { toolCallId: string },
+) => Promise<WikiToolOutput>;
 type WebFetchRunner = (input: WebFetchToolInput) => Promise<WebFetchToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
 export type BrowserToolRunner = (input: {
@@ -526,6 +529,7 @@ export function createProductChatToolContext(input: {
   let webSearchCallCount = 0;
   let browserCallCount = 0;
   let internalActionInvocationSequence = 0;
+  let internalWikiInvocationSequence = 0;
   const actionTurnGovernance = createInMemoryActionTurnGovernance({
     ...(input.actions?.prelistedSourceIds
       ? { prelistedSourceIds: input.actions.prelistedSourceIds }
@@ -678,9 +682,16 @@ export function createProductChatToolContext(input: {
       inputSchema: jsonSchema<WikiToolInput>(
         WIKI_TOOL_INPUT_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0],
       ),
-      execute: async (args) => {
+      execute: async (args, executionContext) => {
         visibleToolActivity = true;
-        return runWiki(args);
+        const toolCallId =
+          executionContext &&
+          typeof executionContext === "object" &&
+          "toolCallId" in executionContext &&
+          typeof executionContext.toolCallId === "string"
+            ? executionContext.toolCallId
+            : `ai-sdk:${++internalWikiInvocationSequence}`;
+        return runWiki(args, { toolCallId });
       },
     });
   }

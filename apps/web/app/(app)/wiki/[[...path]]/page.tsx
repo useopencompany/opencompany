@@ -27,6 +27,7 @@ export default async function WikiPage({ params }: PageProps) {
         slug: page.slug,
         path: page.path,
         title: page.title,
+        nodeType: page.nodeType,
         kind: page.kind,
         body: page.body,
       }))}

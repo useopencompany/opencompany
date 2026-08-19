@@ -99,9 +99,9 @@ function createWikiCollections(scopeKey: string) {
   const scope = encodeURIComponent(scopeKey);
   const pages = createCollection(
     electricCollectionOptions({
-      id: `headless-wiki-pages:v1:${scope}`,
+      id: `headless-wiki-pages:v2:${scope}`,
       schema: WikiPageReadModelSchema,
-      shapeOptions: shapeOptions("wiki-pages-v1"),
+      shapeOptions: shapeOptions("wiki-pages-v2"),
       getKey: (row) => row.id,
       onInsert: async ({ transaction }) => {
         const transactionIds: number[] = [];
@@ -109,6 +109,7 @@ function createWikiCollections(scopeKey: string) {
           const row = mutation.modified;
           const result = await createWikiPageRequest({
             clientPageId: row.id,
+            nodeType: row.nodeType,
             slug: row.slug,
             parentPath: parentWikiPath(row.path),
             title: row.title,
@@ -126,7 +127,7 @@ function createWikiCollections(scopeKey: string) {
       onDelete: async ({ transaction }) => {
         const transactionIds: number[] = [];
         for (const root of wikiDeleteRoots(transaction.mutations)) {
-          const result = await deleteWikiPageRequest(root.slug, { recursive: true });
+          const result = await deleteWikiPageRequest(root.id, { recursive: true });
           transactionIds.push(...result.transactionIds);
         }
         await awaitHeadlessWikiTransactions(transactionIds, { scopeKey });
@@ -143,9 +144,11 @@ function createWikiCollections(scopeKey: string) {
         const transactionIds: number[] = [];
         for (const mutation of transaction.mutations) {
           const row = mutation.modified;
-          const slug = pages.get(row.pageId)?.slug;
-          if (!slug) throw new Error("Cannot add a timeline entry to an unknown page.");
-          const result = await addWikiTimelineEntryRequest(slug, {
+          const page = pages.get(row.pageId);
+          if (!page || page.nodeType !== "page") {
+            throw new Error("Cannot add a timeline entry to an unknown page.");
+          }
+          const result = await addWikiTimelineEntryRequest(page.id, {
             clientEntryId: row.id,
             text: row.text,
             at: row.at,
@@ -190,11 +193,24 @@ export async function persistHeadlessWikiPageWrites(
   const transactionIds: number[] = [];
   for (const mutation of mutations) {
     const result = await chainWikiPageWrite(mutation.original.id, () =>
-      updateWikiPageRequest(mutation.original.slug, {
-        body: mutation.modified.body,
-        kind: mutation.modified.kind,
-        title: mutation.modified.title,
-      }),
+      updateWikiPageRequest(
+        mutation.original.id,
+        mutation.original.nodeType === "folder"
+          ? {
+              ...(mutation.modified.slug !== mutation.original.slug
+                ? { slug: mutation.modified.slug }
+                : {}),
+              title: mutation.modified.title,
+            }
+          : {
+              body: mutation.modified.body,
+              kind: mutation.modified.kind,
+              ...(mutation.modified.slug !== mutation.original.slug
+                ? { slug: mutation.modified.slug }
+                : {}),
+              title: mutation.modified.title,
+            },
+      ),
     );
     transactionIds.push(...result.transactionIds);
   }

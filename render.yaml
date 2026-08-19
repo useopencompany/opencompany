@@ -168,6 +168,10 @@ services:
         sync: false
       - key: RUNNER_INTERNAL_TOKEN
         sync: false
+      # Runner→API internal wiki command bearer. The API validates it; the runner
+      # sends it. Keep both services' values in sync.
+      - key: API_INTERNAL_TOKEN
+        sync: false
       # Browser profiles moved behind /v1 in the #1203 3e cutover. The feature is
       # flag-gated; the Browserbase credentials are only exercised when
       # OPENCOMPANY_BROWSER_PROFILES_ENABLED is "true".
@@ -273,6 +277,13 @@ services:
       - key: RUNNER_JOB_LEASE_TTL_MS
         sync: false
       - key: RUNNER_INTERNAL_TOKEN
+        sync: false
+      # Runner→API wiki command boundary: the canonical API origin the runner
+      # posts commands to, and the bearer the API validates. Agent wiki writes
+      # fail closed without both; keep API_INTERNAL_TOKEN in sync with the API.
+      - key: OPENCOMPANY_API_ORIGIN
+        sync: false
+      - key: API_INTERNAL_TOKEN
         sync: false
       # This service is the production execution composition root. The release
       # preflight requires the worker gate to be explicitly enabled.

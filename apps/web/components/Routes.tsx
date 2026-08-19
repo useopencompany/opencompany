@@ -271,7 +271,7 @@ export function PreferencesSettingsRoute() {
         <BetaFeatureSwitch
           icon={BookOpen}
           label="Wiki (preview)"
-          description="The next version of Brain: one workspace wiki of markdown pages with subpages, built for you and your agents."
+          description="The next version of Brain: one workspace wiki of folders and markdown pages, built for you and your agents."
           checked={featureFlags.wiki}
           update={updateWikiEnabledAction}
         />

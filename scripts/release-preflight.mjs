@@ -110,6 +110,9 @@ const groups = {
       // public URL is the guaranteed fallback; the internal URL is optional.
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
+      // Validates the runner→API internal wiki command bearer. Must match the
+      // runner's API_INTERNAL_TOKEN or agent wiki writes 401.
+      "API_INTERNAL_TOKEN",
       // Billing/usage and Stripe ingress.
       "OPENCOMPANY_STRIPE_WEBHOOK_SECRET",
       "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
@@ -192,6 +195,10 @@ const groups = {
     required: [
       "DATABASE_URL",
       "RUNNER_INTERNAL_TOKEN",
+      // Runner→API canonical origin and bearer for the internal wiki command
+      // endpoint. Agent wiki writes fail closed if either is missing.
+      "OPENCOMPANY_API_ORIGIN",
+      "API_INTERNAL_TOKEN",
       "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
       "RUNNER_STREAM_TOKEN_SECRET",
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
