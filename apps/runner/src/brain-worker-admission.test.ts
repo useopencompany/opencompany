@@ -4,6 +4,13 @@ import { BRAIN_WORKER_ADMISSION_CHANNEL } from "@opencompany/db/worker-admission
 import { describe, expect, it, vi } from "vitest";
 import { startBrainWorkerAdmissionListener } from "./brain-worker-admission";
 
+const telemetry = vi.hoisted(() => ({ recordGauge: vi.fn() }));
+
+vi.mock("@opencompany/telemetry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencompany/telemetry")>()),
+  recordGauge: telemetry.recordGauge,
+}));
+
 type Pool = PooledDbHandle["pool"];
 type Notification = {
   processId: number;
@@ -63,6 +70,30 @@ describe("startBrainWorkerAdmissionListener", () => {
 
     await vi.waitFor(() => expect(pool.connect).toHaveBeenCalledOnce());
     await expect(listener.stop()).resolves.toBeUndefined();
+  });
+
+  it("reports global notification queue usage from the listener connection", async () => {
+    const client = fakeClient();
+    client.query.mockImplementation(async (query: string) =>
+      query.includes("pg_notification_queue_usage")
+        ? { rows: [{ usage: 0.125 }], rowCount: 1 }
+        : { rows: [], rowCount: 0 },
+    );
+    const listener = startBrainWorkerAdmissionListener({
+      pool: { connect: vi.fn(async () => client as unknown as PooledDbClient) } as unknown as Pool,
+      callbacks: {
+        brain_import: vi.fn(),
+        brain_ingest: vi.fn(),
+        google_drive_sync: vi.fn(),
+      },
+      notificationQueuePollIntervalMs: 10,
+    });
+
+    await vi.waitFor(() =>
+      expect(telemetry.recordGauge).toHaveBeenCalledWith("goat.postgres.notify_queue_usage", 0.125),
+    );
+
+    await listener.stop();
   });
 
   it("reconnects after a dedicated listener connection fails", async () => {
