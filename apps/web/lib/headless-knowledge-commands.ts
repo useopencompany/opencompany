@@ -32,8 +32,8 @@ import {
 type ClientOptions = {
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;
-  scopeKey?: string;
 };
+type ScopedClientOptions = ClientOptions & { scopeKey: string };
 
 export async function createHeadlessBrainDocument(
   brainId: string,
@@ -135,7 +135,7 @@ export async function deleteHeadlessBrainFolder(
 
 export async function createHeadlessWikiPage(
   command: CreateWikiPageBody,
-  options: ClientOptions = {},
+  options: ScopedClientOptions,
 ) {
   const data = await createWikiPageRequest(command, options);
   await awaitHeadlessWikiTransactions(data.transactionIds, collectionOptions(options));
@@ -145,7 +145,7 @@ export async function createHeadlessWikiPage(
 export async function updateHeadlessWikiPage(
   slug: string,
   command: UpdateWikiPageBody,
-  options: ClientOptions = {},
+  options: ScopedClientOptions,
 ) {
   const data = await updateWikiPageRequest(slug, command, options);
   await awaitHeadlessWikiTransactions(data.transactionIds, collectionOptions(options));
@@ -155,7 +155,7 @@ export async function updateHeadlessWikiPage(
 export async function deleteHeadlessWikiPage(
   slug: string,
   command: DeleteWikiPageBody,
-  options: ClientOptions = {},
+  options: ScopedClientOptions,
 ) {
   const data = await deleteWikiPageRequest(slug, command, options);
   await awaitHeadlessWikiTransactions(data.transactionIds, collectionOptions(options));
@@ -165,7 +165,7 @@ export async function deleteHeadlessWikiPage(
 export async function addHeadlessWikiTimelineEntry(
   slug: string,
   command: AddWikiTimelineEntryBody,
-  options: ClientOptions = {},
+  options: ScopedClientOptions,
 ) {
   const data = await addWikiTimelineEntryRequest(slug, command, options);
   await awaitHeadlessWikiTransactions([data.transactionId], {
@@ -235,8 +235,8 @@ function knowledgeClient(options: ClientOptions) {
   });
 }
 
-function collectionOptions(options: ClientOptions) {
-  return options.scopeKey ? { scopeKey: options.scopeKey } : {};
+function collectionOptions(options: ScopedClientOptions) {
+  return { scopeKey: options.scopeKey };
 }
 
 async function responseData<T>(

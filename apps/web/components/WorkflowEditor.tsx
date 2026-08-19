@@ -74,10 +74,12 @@ const DEFAULT_MODEL_LABEL =
 
 export function WorkflowEditor({
   workflow,
+  workspaceId,
   canEdit,
   skillCatalog,
 }: {
   workflow: WorkflowDetail;
+  workspaceId: string;
   canEdit: boolean;
   skillCatalog: SkillCatalogItem[];
 }) {
@@ -133,10 +135,7 @@ export function WorkflowEditor({
             status: snapshot.status,
             trigger: snapshot.trigger,
           },
-          {
-            waitForWorkflowSchedule:
-              triggerTypeRef.current === "schedule" || snapshot.trigger.type === "schedule",
-          },
+          { scopeKey: workspaceId },
         );
         versionRef.current = saved.version;
         triggerTypeRef.current = snapshot.trigger.type;
@@ -172,7 +171,7 @@ export function WorkflowEditor({
         setSaveError(null);
       }
     },
-    [router, workflow.id],
+    [router, workflow.id, workspaceId],
   );
 
   useEffect(() => {
@@ -240,7 +239,7 @@ export function WorkflowEditor({
         await archiveHeadlessWorkflow(
           workflow.id,
           { expectedVersion: versionRef.current },
-          { waitForWorkflowSchedule: triggerTypeRef.current === "schedule" },
+          { scopeKey: workspaceId },
         );
         router.push("/workflows");
       } catch (error) {

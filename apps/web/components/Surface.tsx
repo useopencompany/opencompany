@@ -101,6 +101,7 @@ import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/T
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
 import { useCreditBalance } from "@/components/chat/useCreditBalance";
+import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useHydrated } from "@/components/useHydrated";
 import {
   AD_HOC_TASK_ID,
@@ -137,11 +138,8 @@ import {
   type ChatUiMessage,
   type CodexRuntimeView,
   chatSummaryState,
-  compareChatMessageOrder,
   isChatRuntimeActive,
-  type StoredChatMessage,
   textFromChatUiMessage,
-  toChatUiMessage,
 } from "@/lib/chat-ui";
 import { CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
 import {
@@ -171,11 +169,7 @@ import {
 import type { TaskScheduleView, WorkflowCatalogItem } from "@/lib/headless-automation-types";
 import { uploadHeadlessChatAttachment } from "@/lib/headless-chat-attachment-upload";
 import {
-  getHeadlessChatMessages,
-  getHeadlessChatRuns,
   getHeadlessEngineSessions,
-  type HeadlessChatMessageReadModel,
-  type HeadlessChatRunReadModel,
   type HeadlessEngineSessionReadModel,
 } from "@/lib/headless-chat-collections";
 import {
@@ -443,11 +437,6 @@ export function Surface({
   // NOT when a new session gets its server id mid-turn (that would discard the
   // in-flight stream state).
   const [chatInstanceKey, setChatInstanceKey] = useState(() => initialChat?.id ?? "goat-chat-main");
-  // Persisted messages for the active session, synced live from Electric.
-  const [liveChat, setLiveChat] = useState<{
-    sessionId: string;
-    messages: ChatUiMessage[];
-  } | null>(null);
   const rememberedChatModel = useSyncExternalStore(
     subscribeLastChatSelection,
     () =>
@@ -877,19 +866,28 @@ export function Surface({
   }, [skillMentionMenuOpen, workflowMentionsEnabled]);
 
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
+  const liveTranscriptSessionId =
+    mode === "chat" &&
+    (!activeTaskConversation || activeTaskConversation.sessionBacked) &&
+    chatSessionId &&
+    persistedChatSessionId === chatSessionId
+      ? chatSessionId
+      : null;
+  const liveChat = useHeadlessChatTranscript(liveTranscriptSessionId);
   // Render list: Electric-synced rows are the source of truth for persisted
   // messages; the useChat overlay contributes only entries Electric has not
   // delivered yet (the in-flight turn and optimistic sends).
   const persistedMessages = useMemo(() => {
     if (!chatSessionId) return [];
-    if (liveChat && liveChat.sessionId === chatSessionId) return liveChat.messages;
+    if (liveChat.sessionId === chatSessionId && !liveChat.isLoading) return liveChat.messages;
     if (initialChat && initialChat.id === chatSessionId) return initialChat.messages;
     return [];
   }, [chatSessionId, initialChat, liveChat]);
   const persistedTranscriptLoading = Boolean(
     chatSessionId &&
       persistedChatSessionId === chatSessionId &&
-      liveChat?.sessionId !== chatSessionId &&
+      liveChat.sessionId === chatSessionId &&
+      liveChat.isLoading &&
       !(initialChat?.id === chatSessionId && initialChat.messages.length > 0),
   );
   useEffect(() => {
@@ -1593,6 +1591,7 @@ export function Surface({
         prepareMainComposerFocusRestoreAfterBackgroundTask();
         setBackgroundTaskSubmitting(true);
         void startWorkflowTask({
+          workspaceId,
           workflow: workflowMention,
           description: messagePrompt,
           ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
@@ -1794,6 +1793,7 @@ export function Surface({
       prepareMainComposerFocusRestoreAfterBackgroundTask();
       setBackgroundTaskSubmitting(true);
       void startWorkflowTask({
+        workspaceId,
         workflow: workflowMention,
         description: prompt,
         ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
@@ -2637,12 +2637,6 @@ export function Surface({
           )}
 
           {mode === "chat" &&
-          (!activeTaskConversation || activeTaskConversation.sessionBacked) &&
-          chatSessionId &&
-          persistedChatSessionId === chatSessionId ? (
-            <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
-          ) : null}
-          {mode === "chat" &&
           (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
             <LiveCodexChatSessionStatus
               chatSessionId={activeEngineChat.chatSessionId}
@@ -2652,7 +2646,7 @@ export function Surface({
             />
           ) : null}
           {mode === "chat" && taskSpawningEnabled ? (
-            <LiveChatTasks setTasks={setLiveChatTasks} />
+            <LiveChatTasks workspaceId={workspaceId} setTasks={setLiveChatTasks} />
           ) : null}
 
           <form
@@ -3551,6 +3545,7 @@ function QuickChatComposer({
       composerAttachments.clearAttachments();
       onSubmitted();
       void startWorkflowTask({
+        workspaceId,
         workflow: workflowMention,
         description: prompt,
         ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
@@ -4901,18 +4896,23 @@ async function startAdHocTask(input: {
 }
 
 async function startWorkflowTask(input: {
+  workspaceId: string;
   workflow: Extract<ChatMention, { kind: "workflow" }>;
   description: string;
   mentions?: Extract<ChatMention, { kind: "skill" }>[];
   attachments?: ChatUiAttachment[];
 }) {
-  const payload = await invokeHeadlessWorkflow(input.workflow.id, {
-    description: input.description,
-    ...(input.mentions?.length ? { skillIds: input.mentions.map((mention) => mention.id) } : {}),
-    ...(input.attachments?.length
-      ? { attachmentIds: input.attachments.map((attachment) => attachment.id) }
-      : {}),
-  });
+  const payload = await invokeHeadlessWorkflow(
+    input.workflow.id,
+    {
+      description: input.description,
+      ...(input.mentions?.length ? { skillIds: input.mentions.map((mention) => mention.id) } : {}),
+      ...(input.attachments?.length
+        ? { attachmentIds: input.attachments.map((attachment) => attachment.id) }
+        : {}),
+    },
+    { scopeKey: input.workspaceId },
+  );
   return {
     task: {
       id: payload.task.id,
@@ -5487,58 +5487,6 @@ function CodexSessionStatusIndicator({
   );
 }
 
-type LiveChatMessagesChange = Dispatch<
-  SetStateAction<{ sessionId: string; messages: ChatUiMessage[] } | null>
->;
-
-function LiveChatMessages({
-  sessionId,
-  onChange,
-}: {
-  sessionId: string;
-  onChange: LiveChatMessagesChange;
-}) {
-  const hydrated = useHydrated();
-  if (!hydrated) return null;
-  return <HeadlessLiveChatMessageSubscriber sessionId={sessionId} onChange={onChange} />;
-}
-
-function HeadlessLiveChatMessageSubscriber({
-  sessionId,
-  onChange,
-}: {
-  sessionId: string;
-  onChange: LiveChatMessagesChange;
-}) {
-  const messagesCollection = useMemo(() => getHeadlessChatMessages(sessionId), [sessionId]);
-  const runsCollection = useMemo(() => getHeadlessChatRuns(sessionId), [sessionId]);
-  const { data: rows, isLoading: messagesLoading } = useLiveQuery(
-    (q) => q.from({ message: messagesCollection }),
-    [messagesCollection],
-  );
-  const { data: runRows } = useLiveQuery((q) => q.from({ run: runsCollection }), [runsCollection]);
-  const liveMessages = useMemo(() => {
-    const runsByAssistantMessage = new Map(
-      ((runRows ?? []) as HeadlessChatRunReadModel[]).map((run) => [run.assistantMessageId, run]),
-    );
-    return ((rows ?? []) as HeadlessChatMessageReadModel[])
-      .toSorted((a, b) =>
-        compareChatMessageOrder(
-          { id: a.id, role: a.role, createdAt: a.createdAt },
-          { id: b.id, role: b.role, createdAt: b.createdAt },
-        ),
-      )
-      .map((row) => headlessChatMessageRowToUiMessage(row, runsByAssistantMessage.get(row.id)));
-  }, [rows, runRows]);
-
-  useEffect(() => {
-    if (messagesLoading) return;
-    onChange({ sessionId, messages: liveMessages });
-  }, [liveMessages, messagesLoading, onChange, sessionId]);
-
-  return null;
-}
-
 function LiveCodexChatSessionStatus({
   chatSessionId,
   setRunning,
@@ -5638,21 +5586,25 @@ function LiveCodexChatSessionStatusSubscriber({
 }
 
 function LiveChatTasks({
+  workspaceId,
   setTasks,
 }: {
+  workspaceId: string;
   setTasks: Dispatch<SetStateAction<readonly TaskView[] | null>>;
 }) {
   const hydrated = useHydrated();
   if (!hydrated) return null;
-  return <LiveChatTaskSubscriber setTasks={setTasks} />;
+  return <LiveChatTaskSubscriber workspaceId={workspaceId} setTasks={setTasks} />;
 }
 
 function LiveChatTaskSubscriber({
+  workspaceId,
   setTasks,
 }: {
+  workspaceId: string;
   setTasks: Dispatch<SetStateAction<readonly TaskView[] | null>>;
 }) {
-  const tasks = useMemo(() => getHeadlessTasks(), []);
+  const tasks = useMemo(() => getHeadlessTasks(workspaceId), [workspaceId]);
   const { data: rows } = useLiveQuery((q) => q.from({ task: tasks }));
   const liveTasks = useMemo(() => (rows ?? []).map(taskReadModelToRow).map(taskRowToView), [rows]);
 
@@ -6009,39 +5961,6 @@ function taskRowToView(row: TaskRow): TaskView {
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  };
-}
-
-function headlessChatMessageRowToUiMessage(
-  row: HeadlessChatMessageReadModel,
-  run?: HeadlessChatRunReadModel,
-): ChatUiMessage {
-  const message = toChatUiMessage({
-    id: row.id,
-    sessionId: row.conversationId,
-    role: row.role,
-    content: row.content,
-    taskId: row.taskId,
-    debugTrace: row.presentation as StoredChatMessage["debugTrace"],
-    attachments: row.attachments as StoredChatMessage["attachments"],
-    attachmentTexts: null,
-    createdAt: new Date(row.createdAt),
-    updatedAt: new Date(row.updatedAt),
-    taskDisplayId: null,
-    taskName: null,
-    taskPrompt: null,
-    taskStatus: null,
-  });
-  if (row.role !== "assistant" || !run) return message;
-  return {
-    ...message,
-    metadata: {
-      ...message.metadata,
-      runId: run.id,
-      model: message.metadata?.model ?? run.model,
-      ...(run.status === "failed" && run.error ? { error: run.error } : {}),
-      ...(run.status === "canceled" ? { aborted: true } : {}),
-    },
   };
 }
 

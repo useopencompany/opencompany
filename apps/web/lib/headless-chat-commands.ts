@@ -8,6 +8,7 @@ import {
 } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import { awaitHeadlessConversationTransaction } from "./headless-chat-collections";
+import { reconcileCommittedProjection } from "./headless-collection-reconciliation";
 
 export async function updateHeadlessChatConversation(
   conversationId: string,
@@ -27,7 +28,7 @@ export async function updateHeadlessChatConversation(
   });
   if (!response.ok) throw await responseError(response);
   const data = (await response.json()).data;
-  await awaitHeadlessConversationTransaction(data.transactionId);
+  await reconcileCommittedProjection(awaitHeadlessConversationTransaction(data.transactionId));
   return data;
 }
 

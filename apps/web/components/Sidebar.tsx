@@ -37,6 +37,7 @@ import { SidebarFeedback } from "@/components/SidebarFeedback";
 import { HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navigation";
 import { clearLocalChatState, useLocalChatStates } from "@/lib/chat-session-state";
 import { type ChatSummaryView, chatSummaryState } from "@/lib/chat-ui";
+import { preloadHeadlessChatMessages } from "@/lib/headless-chat-collections";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
 import { useOptimisticChatSummaries } from "@/lib/optimistic-chat-summaries";
 import { createWorkspaceAction, switchWorkspaceAction } from "@/lib/workspace-actions";
@@ -432,6 +433,15 @@ function SidebarRecentChats() {
     const href = chatHref(chat.id);
     const pinned = isPinned(chat);
     const optimistic = optimisticChatIds.has(chat.id);
+    const prefetchChat = () => {
+      router.prefetch(href);
+      void preloadHeadlessChatMessages(chat.id).catch((error: unknown) => {
+        console.warn("Could not preload a sidebar chat transcript.", {
+          conversationId: chat.id,
+          error,
+        });
+      });
+    };
     return (
       <SidebarChatRow
         key={chat.id}
@@ -443,7 +453,7 @@ function SidebarRecentChats() {
         pinned={pinned}
         archiving={archivingIds.has(chat.id)}
         pinning={pinningIds.has(chat.id)}
-        onPrefetch={() => router.prefetch(href)}
+        onPrefetch={prefetchChat}
         onRequestComposerFocus={() => requestChatComposerFocus(chat.id)}
         onTogglePin={() => togglePin(chat.id, chat.title, pinned)}
         onArchive={() => archiveChat(chat.id, chat.title, href)}
@@ -548,6 +558,7 @@ function SidebarChatRow({
           prefetch
           onMouseEnter={onPrefetch}
           onFocus={onPrefetch}
+          onTouchStart={onPrefetch}
           onClick={(event) => {
             if (
               event.button !== 0 ||
