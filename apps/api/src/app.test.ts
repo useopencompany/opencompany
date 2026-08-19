@@ -1624,6 +1624,70 @@ describe("canonical Hono API", () => {
     expect(invalid.status).toBe(400);
   });
 
+  it("returns the same runtime summary from Conversation list and detail REST routes", async () => {
+    const app = testApp(fakeRepository());
+
+    const list = await app.request("/v1/conversations");
+    const detail = await app.request("/v1/conversations/conversation_1");
+
+    expect(list.status).toBe(200);
+    expect(detail.status).toBe(200);
+    await expect(list.json()).resolves.toMatchObject({
+      data: [
+        {
+          runtime: {
+            status: "running",
+            activeRunId: "run_1",
+            hasError: false,
+            updatedAt: createdAt.toISOString(),
+          },
+        },
+      ],
+    });
+    await expect(detail.json()).resolves.toMatchObject({
+      data: {
+        runtime: {
+          status: "running",
+          activeRunId: "run_1",
+          hasError: false,
+          updatedAt: createdAt.toISOString(),
+        },
+      },
+    });
+  });
+
+  it("authorizes a conversation-scoped v2 summary before contacting Electric", async () => {
+    const repository = fakeRepository();
+    const getConversation = vi.fn(repository.getConversation);
+    repository.getConversation = getConversation;
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(repository, { readModels: { stream } });
+
+    const response = await app.request(
+      "/v1/read-models/chat-conversations-v2?conversationId=conversation_1",
+    );
+
+    expect(response.status).toBe(200);
+    expect(getConversation).toHaveBeenCalledWith({
+      actor,
+      conversationId: "conversation_1",
+    });
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor,
+        readModel: "chat-conversations-v2",
+        conversationId: "conversation_1",
+      }),
+    );
+
+    getConversation.mockResolvedValueOnce(null);
+    const denied = await app.request(
+      "/v1/read-models/chat-conversations-v2?conversationId=conversation_other",
+    );
+    expect(denied.status).toBe(404);
+    expect(stream).toHaveBeenCalledTimes(1);
+  });
+
   it("authorizes a child read model, including archived Conversations, before contacting Electric", async () => {
     const repository = fakeRepository();
     const getConversation = vi.fn(async () => null);
@@ -4254,7 +4318,13 @@ function fakeRepository(): FakeRepository {
           title: "Chat",
           engine: "opencompany",
           model: "provider/default",
-          activityState: "idle",
+          runtime: {
+            status: "running",
+            activeRunId: "run_1",
+            hasError: false,
+            updatedAt: createdAt,
+          },
+          activityState: "working",
           hasUnseen: false,
           createdAt,
           updatedAt: createdAt,
@@ -4267,7 +4337,13 @@ function fakeRepository(): FakeRepository {
       title: "Chat",
       engine: "opencompany",
       model: "provider/default",
-      activityState: "idle",
+      runtime: {
+        status: "running",
+        activeRunId: "run_1",
+        hasError: false,
+        updatedAt: createdAt,
+      },
+      activityState: "working",
       hasUnseen: false,
       createdAt,
       updatedAt: createdAt,
