@@ -1,7 +1,11 @@
 import type { AgentModelId } from "@opencompany/agent-runtime";
 import { AUTO_MODEL_SELECTION, type AutoModelSelection } from "@/lib/chat-auto-model";
-import { CLAUDE_PICKER_VALUE, type ClaudePickerValue } from "@/lib/claude-chat-constants";
-import { CODEX_PICKER_VALUE, type CodexPickerValue } from "@/lib/codex-chat-constants";
+import {
+  CLAUDE_PICKER_VALUE,
+  type ClaudePickerValue,
+  CODEX_PICKER_VALUE,
+  type CodexPickerValue,
+} from "@/lib/engine-registry";
 import { DEFAULT_MODEL, normalizeModel } from "@/lib/model-options";
 
 export type ChatModelSelection =

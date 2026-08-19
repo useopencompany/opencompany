@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AUTO_MODEL_SELECTION } from "@/lib/chat-auto-model";
 import { normalizeStoredChatSelection } from "@/lib/chat-composer-selection";
-import { CODEX_PICKER_VALUE } from "@/lib/codex-chat-constants";
+import { CODEX_PICKER_VALUE } from "@/lib/engine-registry";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 
 describe("normalizeStoredChatSelection", () => {

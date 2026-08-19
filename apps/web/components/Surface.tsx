@@ -8,7 +8,6 @@ import type {
   TaskStatus,
 } from "@opencompany/agent/task-runtime-types";
 import {
-  CLOUD_CODING_ENGINE_CONFIG,
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
 } from "@opencompany/agent-runtime";
@@ -144,22 +143,24 @@ import {
 } from "@/lib/chat-ui";
 import { CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
 import {
-  CLAUDE_CHAT_DEFAULT_MODEL_ID,
-  CLAUDE_PICKER_VALUE,
-  type ClaudeChatModelId,
-  normalizeClaudeChatModelId,
-} from "@/lib/claude-chat-constants";
-import {
-  CODEX_CHAT_DEFAULT_MODEL_ID,
-  CODEX_PICKER_VALUE,
-  type CodexChatModelId,
-  normalizeCodexChatModelId,
-} from "@/lib/codex-chat-constants";
-import {
   type CodexComposerSettingsView,
   DEFAULT_CLAUDE_CHAT_REASONING_EFFORT,
   DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 } from "@/lib/codex-chat-settings";
+import {
+  CLAUDE_CHAT_DEFAULT_MODEL_ID,
+  CLAUDE_PICKER_VALUE,
+  type ClaudeChatModelId,
+  CODEX_CHAT_DEFAULT_MODEL_ID,
+  CODEX_PICKER_VALUE,
+  type CodexChatModelId,
+  ENGINE_REGISTRY,
+  type EngineChatKind,
+  isCloudCodingEngine,
+  normalizeClaudeChatModelId,
+  normalizeCodexChatModelId,
+  statusPresenter,
+} from "@/lib/engine-registry";
 import {
   archiveHeadlessTaskSchedule,
   invokeHeadlessWorkflow,
@@ -251,7 +252,6 @@ type MentionOption =
       mention: ChatMention;
     };
 
-type EngineChatKind = "codex" | "claude_code";
 type CodexComposerSettings = CodexComposerSettingsView;
 type EngineComposerSettings = {
   reasoningEffort: CodexReasoningEffort;
@@ -277,22 +277,10 @@ function chatThreadBottomPaddingForComposerHeight(composerHeightPx: number) {
   );
 }
 
-const ENGINE_CHAT_CONFIG: Record<EngineChatKind, { label: string }> = {
-  codex: {
-    label: CLOUD_CODING_ENGINE_CONFIG.codex.label,
-  },
-  claude_code: {
-    label: CLOUD_CODING_ENGINE_CONFIG.claude_code.label,
-  },
-};
-
 function engineChatKindFromChat(
   chat: { engine?: ChatEngine } | null | undefined,
 ): EngineChatKind | null {
-  if (!chat) return null;
-  if (chat.engine === "codex") return "codex";
-  if (chat.engine === "claude_code") return "claude_code";
-  return null;
+  return isCloudCodingEngine(chat?.engine) ? chat.engine : null;
 }
 
 function chatModelSelectionFromEngineMention(
@@ -304,23 +292,10 @@ function chatModelSelectionFromEngineMention(
   return null;
 }
 
-function shareSubjectForActiveChat(input: {
-  isTask: boolean;
-  engine?: ChatEngine | null;
-}): "chat" | "task run" | "Codex chat" | "Claude Code chat" {
+function shareSubjectForActiveChat(input: { isTask: boolean; engine?: ChatEngine | null }): string {
   if (input.isTask) return "task run";
-  if (input.engine === "codex") return "Codex chat";
-  if (input.engine === "claude_code") return "Claude Code chat";
+  if (isCloudCodingEngine(input.engine)) return `${ENGINE_REGISTRY[input.engine].label} chat`;
   return "chat";
-}
-
-// Cloud coding-CLI chats (Codex + Claude Code) share the same home card and status
-// indicator; only the display label differs by engine. Defaults to "Codex" so the
-// shared surface stays labeled for any non-Claude engine that reaches it.
-function codexEngineLabel(engine: ChatEngine | null | undefined): string {
-  return engine === "claude_code"
-    ? ENGINE_CHAT_CONFIG.claude_code.label
-    : ENGINE_CHAT_CONFIG.codex.label;
 }
 
 export type TaskView = {
@@ -445,8 +420,7 @@ export function Surface({
   const [chatModelOverride, setChatModelOverride] = useState<ChatModelSelection | null>(() => {
     if (!initialChat) return null;
     const engine = engineChatKindFromChat(initialChat);
-    if (engine === "codex") return CODEX_PICKER_VALUE;
-    if (engine === "claude_code") return CLAUDE_PICKER_VALUE;
+    if (engine) return ENGINE_REGISTRY[engine].pickerValue;
     return normalizeModel(initialChat.model);
   });
   // The remembered selection is a Home default. Opening or reserving a session sets the override
@@ -465,6 +439,12 @@ export function Surface({
   const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
     normalizeClaudeChatModelId(initialChat?.model),
   );
+  // The selected model for each engine, keyed so a send reads the active engine's model
+  // without a per-engine branch (a third engine reads its own model, not Claude's).
+  const engineChatModel: Record<EngineChatKind, CodexChatModelId | ClaudeChatModelId> = {
+    codex: codexModel,
+    claude_code: claudeModel,
+  };
   const [engineChatSession, setEngineChatSession] = useState<{
     engine: EngineChatKind;
     chatSessionId: string;
@@ -1646,7 +1626,7 @@ export function Surface({
         toast("Started a new chat in the background.");
 
         const engine = backgroundEngine;
-        const config = ENGINE_CHAT_CONFIG[engine];
+        const config = ENGINE_REGISTRY[engine];
         const newSessionId = newOptimisticChatSessionId();
         addOptimisticChatSummary({
           workspaceId,
@@ -1659,7 +1639,7 @@ export function Surface({
         void runBackgroundChatTurn({
           prompt: messagePrompt,
           newSessionId,
-          model: engine === "codex" ? codexModel : claudeModel,
+          model: engineChatModel[engine],
           engine: canonicalMessageEngine(engine, settings.settings),
           ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         })
@@ -1848,7 +1828,7 @@ export function Surface({
       }
       engineSettings = settings.settings;
       messageEngine = canonicalMessageEngine(activeEngine, settings.settings);
-      model = activeEngine === "codex" ? codexModel : claudeModel;
+      model = engineChatModel[activeEngine];
     }
     const metadata: ChatMessageMetadata = {
       ...(mentions.length > 0 ? { mentions } : {}),
@@ -2026,7 +2006,7 @@ export function Surface({
         {
           body: {
             engine: canonicalMessageEngine(engine, settings),
-            model: engine === "codex" ? codexModel : claudeModel,
+            model: engineChatModel[engine],
             sessionId,
           },
         },
@@ -2090,7 +2070,7 @@ export function Surface({
         : headlessTransport.cancel(chatInstanceKey);
       void cancel.catch(() => {
         const label = activeEngineChat
-          ? `interrupt ${ENGINE_CHAT_CONFIG[activeEngineChat.engine].label}`
+          ? `interrupt ${ENGINE_REGISTRY[activeEngineChat.engine].label}`
           : "stop that response";
         toast.error(`Could not ${label}.`);
       });
@@ -2536,8 +2516,7 @@ export function Surface({
                         })}
                       />
                     ) : null}
-                    {activeEngineChat?.engine === "codex" ||
-                    activeEngineChat?.engine === "claude_code" ? (
+                    {activeEngineChat ? (
                       <>
                         <CodingSessionStatusIndicator
                           engine={activeEngineChat.engine}
@@ -2620,8 +2599,8 @@ export function Surface({
                       label={
                         isEngineChat && activeEngine
                           ? conversationRuntime?.status === "queued"
-                            ? `${ENGINE_CHAT_CONFIG[activeEngine].label} is queued`
-                            : `${ENGINE_CHAT_CONFIG[activeEngine].label} is working`
+                            ? `${ENGINE_REGISTRY[activeEngine].label} is queued`
+                            : `${ENGINE_REGISTRY[activeEngine].label} is working`
                           : "opencompany is working"
                       }
                     />
@@ -2860,12 +2839,12 @@ export function Surface({
                       maxLength={10_000}
                     />
                   </div>
-                  {isEngineChat &&
+                  {activeEngine &&
                   conversationRunning &&
                   !activeTaskConversation &&
                   !backgroundChatDirective ? (
                     <EngineStopButton
-                      label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
+                      label={ENGINE_REGISTRY[activeEngine].label}
                       onStop={stopGeneration}
                     />
                   ) : null}
@@ -3028,14 +3007,13 @@ export function Surface({
             </div>
           </form>
         </div>
-        {mode === "chat" &&
-        (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
+        {mode === "chat" && activeEngineChat ? (
           <CodingWorkspacePanel
             key={activeEngineChat.chatSessionId}
             ref={workspacePanelRef}
             chatSessionId={activeEngineChat.chatSessionId}
             sandboxStatus={codingSandboxStatus}
-            engineLabel={CLOUD_CODING_ENGINE_CONFIG[activeEngineChat.engine].label}
+            engineLabel={ENGINE_REGISTRY[activeEngineChat.engine].label}
             onExpandedChange={setWorkspacePanelExpanded}
             onRequestFocusReturn={() => workspaceToggleButtonRef.current?.focus()}
           />
@@ -3113,6 +3091,10 @@ function QuickChatComposer({
   const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
     normalizeClaudeChatModelId(undefined),
   );
+  const engineChatModel: Record<EngineChatKind, CodexChatModelId | ClaudeChatModelId> = {
+    codex: codexModel,
+    claude_code: claudeModel,
+  };
   const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
     DEFAULT_CODEX_CHAT_REASONING_EFFORT,
   );
@@ -3600,7 +3582,7 @@ function QuickChatComposer({
       toast("Started a new chat in the background.");
 
       const engine = targetEngine;
-      const config = ENGINE_CHAT_CONFIG[engine];
+      const config = ENGINE_REGISTRY[engine];
       const newSessionId = newOptimisticChatSessionId();
       addOptimisticChatSummary({
         workspaceId,
@@ -3613,7 +3595,7 @@ function QuickChatComposer({
       void runBackgroundChatTurn({
         prompt,
         newSessionId,
-        model: engine === "codex" ? codexModel : claudeModel,
+        model: engineChatModel[engine],
         engine: canonicalMessageEngine(engine, settings.settings),
         metadata: {
           ...(attachmentsMetadata.length ? { attachments: attachmentsMetadata } : {}),
@@ -4436,7 +4418,9 @@ function codexComposerUiStateForChat(
   }
   return codexComposerUiStateFromSettings(
     chat?.codexComposerSettings ?? null,
-    chat?.engine === "claude_code" ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT : undefined,
+    isCloudCodingEngine(chat?.engine)
+      ? ENGINE_REGISTRY[chat.engine].defaultReasoningEffort
+      : undefined,
   );
 }
 
@@ -4504,26 +4488,31 @@ function buildCodexComposerSettings(input: {
   };
 }
 
+// Each engine carries a distinct on-the-wire settings shape (Codex has plan/goal mode; Claude
+// Code does not), so this stays a per-engine constructor rather than a registry lookup. The
+// switch is exhaustive over EngineChatKind, so a new engine surfaces here as a type error.
 function canonicalMessageEngine(
   engine: EngineChatKind,
   settings: EngineComposerSettings,
 ): MessageEngine {
-  if (engine === "claude_code") {
-    return {
-      type: "claude_code",
-      schemaVersion: 1,
-      settings: { reasoningEffort: settings.reasoningEffort },
-    };
+  switch (engine) {
+    case "claude_code":
+      return {
+        type: "claude_code",
+        schemaVersion: 1,
+        settings: { reasoningEffort: settings.reasoningEffort },
+      };
+    case "codex":
+      return {
+        type: "codex",
+        schemaVersion: 1,
+        settings: {
+          reasoningEffort: settings.reasoningEffort,
+          ...(settings.planModeEnabled ? { planModeEnabled: true } : {}),
+          ...(settings.goalMode ? { goalMode: settings.goalMode } : {}),
+        },
+      };
   }
-  return {
-    type: "codex",
-    schemaVersion: 1,
-    settings: {
-      reasoningEffort: settings.reasoningEffort,
-      ...(settings.planModeEnabled ? { planModeEnabled: true } : {}),
-      ...(settings.goalMode ? { goalMode: settings.goalMode } : {}),
-    },
-  };
 }
 
 function isWorkflowMention(
@@ -5060,7 +5049,7 @@ function CodingEngineModelPicker({
 }
 
 function BackgroundChatDirectiveHint({ engine }: { engine: EngineChatKind | null }) {
-  const label = engine ? ENGINE_CHAT_CONFIG[engine].label : null;
+  const label = engine ? ENGINE_REGISTRY[engine].label : null;
   return (
     <div
       role="status"
@@ -5071,6 +5060,28 @@ function BackgroundChatDirectiveHint({ engine }: { engine: EngineChatKind | null
       <span>Sending starts this as a new {label ? `${label} ` : ""}chat in the background.</span>
     </div>
   );
+}
+
+// The composer's per-engine model picker. Each engine's picker takes a distinct model-id type,
+// so this is a discriminated union narrowed by a switch rather than a registry lookup.
+type EngineModelPickerModel =
+  | { engine: "codex"; value: CodexChatModelId; onChange: (model: CodexChatModelId) => void }
+  | {
+      engine: "claude_code";
+      value: ClaudeChatModelId;
+      onChange: (model: ClaudeChatModelId) => void;
+    };
+
+function renderEngineModelPicker(model: EngineModelPickerModel | null, disabled: boolean) {
+  if (!model) return null;
+  switch (model.engine) {
+    case "codex":
+      return <CodexModelPicker value={model.value} disabled={disabled} onChange={model.onChange} />;
+    case "claude_code":
+      return (
+        <ClaudeModelPicker value={model.value} disabled={disabled} onChange={model.onChange} />
+      );
+  }
 }
 
 function EngineComposerControls({
@@ -5092,14 +5103,7 @@ function EngineComposerControls({
   onGoalObjectiveChange,
   onGoalTokenBudgetChange,
 }: {
-  model:
-    | { engine: "codex"; value: CodexChatModelId; onChange: (model: CodexChatModelId) => void }
-    | {
-        engine: "claude_code";
-        value: ClaudeChatModelId;
-        onChange: (model: ClaudeChatModelId) => void;
-      }
-    | null;
+  model: EngineModelPickerModel | null;
   engineLabel: "Claude" | "Codex";
   reasoningEffortAvailable: boolean;
   reasoningEffort: CodexReasoningEffort;
@@ -5120,11 +5124,7 @@ function EngineComposerControls({
   const reasoningLabel = codexReasoningLabel(reasoningEffort);
   return (
     <div className="mb-px flex shrink-0 items-center gap-1 border-l border-border pl-2">
-      {model?.engine === "codex" ? (
-        <CodexModelPicker value={model.value} disabled={modelDisabled} onChange={model.onChange} />
-      ) : model?.engine === "claude_code" ? (
-        <ClaudeModelPicker value={model.value} disabled={modelDisabled} onChange={model.onChange} />
-      ) : null}
+      {renderEngineModelPicker(model, modelDisabled)}
       {reasoningEffortAvailable ? (
         <button
           type="button"
@@ -5266,12 +5266,11 @@ function ChatTitleHeader({
   engine: ChatEngine;
   isTask?: boolean;
 }) {
+  const EngineIcon = isCloudCodingEngine(engine) ? ENGINE_REGISTRY[engine].Icon : null;
   return (
     <div className="flex min-w-0 items-center gap-2 text-ink">
-      {engine === "codex" ? (
-        <OpenAIIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
-      ) : engine === "claude_code" ? (
-        <AnthropicIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+      {EngineIcon ? (
+        <EngineIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
       ) : (
         <ModelProviderIcon
           modelId={model}
@@ -5349,98 +5348,19 @@ function formatCompactTokens(value: number): string {
   return `${value}`;
 }
 
-type ConversationRuntimeMeta = {
-  kind:
-    | "connecting"
-    | "queued"
-    | "starting"
-    | "working"
-    | "ready"
-    | "asleep"
-    | "needs-attention"
-    | "stopped";
-  label: string;
-  dotClass: string;
-  textClass: string;
-};
-
-function conversationRuntimeMeta(runtime: ConversationRuntimeView | null): ConversationRuntimeMeta {
-  if (!runtime) {
-    return {
-      kind: "connecting",
-      label: "Connecting",
-      dotClass: "bg-ink/25",
-      textClass: "text-ink-subtle",
-    };
-  }
-  if (runtime.status === "queued") {
-    return {
-      kind: "queued",
-      label: "Queued",
-      dotClass: "animate-pulse bg-warning",
-      textClass: "text-warning",
-    };
-  }
-  if (runtime.status === "starting") {
-    return {
-      kind: "starting",
-      label: "Starting",
-      dotClass: "animate-pulse bg-warning",
-      textClass: "text-warning",
-    };
-  }
-  if (runtime.status === "running") {
-    return {
-      kind: "working",
-      label: "Working",
-      dotClass: "animate-pulse bg-warning",
-      textClass: "text-warning",
-    };
-  }
-  if (runtime.status === "failed" || runtime.hasError) {
-    return {
-      kind: "needs-attention",
-      label: "Needs attention",
-      dotClass: "bg-danger",
-      textClass: "text-danger",
-    };
-  }
-  if (runtime.status === "idle") {
-    return {
-      kind: "ready",
-      label: "Ready",
-      dotClass: "bg-success",
-      textClass: "text-success",
-    };
-  }
-  if (runtime.status === "interrupted" || runtime.status === "closed") {
-    return {
-      kind: "stopped",
-      label: "Stopped",
-      dotClass: "bg-ink/30",
-      textClass: "text-ink-subtle",
-    };
-  }
-  return {
-    kind: "connecting",
-    label: "Connecting",
-    dotClass: "bg-ink/25",
-    textClass: "text-ink-subtle",
-  };
-}
-
 function CodingSessionStatusIndicator({
   engine,
   runtime,
   optimisticStatus,
   sandboxStatus,
 }: {
-  engine: ChatEngine;
+  engine: EngineChatKind;
   runtime: ConversationRuntimeView | null;
   optimisticStatus: "starting" | "running" | null;
   sandboxStatus: EngineRuntimeStatus | null;
 }) {
-  let meta = conversationRuntimeMeta(
+  let meta = statusPresenter(
+    engine,
     optimisticStatus
       ? {
           status: optimisticStatus,
@@ -5455,6 +5375,7 @@ function CodingSessionStatusIndicator({
   // anymore and a fresh one starts on the next message.
   if (meta.kind === "ready" && sandboxStatus === "sleeping") {
     meta = {
+      ...meta,
       kind: "asleep",
       label: "Asleep",
       dotClass: "bg-ink/30",
@@ -5467,14 +5388,13 @@ function CodingSessionStatusIndicator({
       : sandboxStatus === "deleted"
         ? " The previous sandbox expired; a new one will start on the next message."
         : "";
-  const engineLabel = codexEngineLabel(engine);
-  const title = `${engineLabel} is ${meta.label.toLowerCase()}.${sandboxDetail}`;
+  const title = `${meta.engineLabel} is ${meta.label.toLowerCase()}.${sandboxDetail}`;
 
   return (
     <div
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-[12px] font-medium leading-4 text-ink-muted shadow-[0_1px_3px_rgba(15,15,15,0.04)]"
       title={title}
-      aria-label={`${engineLabel} status: ${meta.label}`}
+      aria-label={`${meta.engineLabel} status: ${meta.label}`}
     >
       <span className={cn("size-2 rounded-full", meta.dotClass)} aria-hidden="true" />
       <span>{meta.label}</span>
