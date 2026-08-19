@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "postgres:queue:maintenance": "bun src/postgres-queue-maintenance-cli.ts",
     "start": "bun src/index.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run"
