@@ -424,8 +424,25 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       async (input: {
         onEngineSessionId: (sessionId: string) => Promise<void>;
         onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
+        onPermissionRequest: (request: {
+          id: number;
+          method: "session/request_permission";
+          params: Record<string, unknown>;
+        }) => Promise<unknown>;
       }) => {
         await input.onEngineSessionId("acp_session_1");
+        await expect(
+          input.onPermissionRequest({
+            id: 7,
+            method: "session/request_permission",
+            params: {
+              options: [
+                { optionId: "reject", kind: "reject_once" },
+                { optionId: "allow", kind: "allow_once" },
+              ],
+            },
+          }),
+        ).resolves.toEqual({ outcome: { outcome: "selected", optionId: "allow" } });
         await input.onRuntimeEvents([
           { method: "session/started", params: { sessionId: "acp_session_1" } },
           {
@@ -472,7 +489,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       expect.objectContaining({
         existingSessionId: "claude_thread_1",
         model: "claude-sonnet-5",
-        permissionMode: "default",
+        permissionMode: "bypassPermissions",
       }),
     );
     expect(projector.finalize).toHaveBeenCalledWith(

@@ -17,14 +17,9 @@ import {
   markClaudeCodeCredentialValidated,
 } from "@opencompany/db/claude-code-auth";
 import { getWorkflowHarnessSkillSnapshots } from "@opencompany/db/harness";
-import {
-  type CodexChatSession,
-  type CodexChatTurn,
-  codexChatTurns,
-  runApprovals,
-} from "@opencompany/db/product-schema";
+import { type CodexChatSession, type CodexChatTurn } from "@opencompany/db/product-schema";
 import { captureException, createLogger } from "@opencompany/observability";
-import { and, eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   AcpHarness,
   type AcpMcpServer,
@@ -111,7 +106,6 @@ const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
 const CLAUDE_TASK_ABORT_POLL_INTERVAL_MS = 500;
-const CLAUDE_ACP_PERMISSION_POLL_INTERVAL_MS = 500;
 
 // Claude Code recovery re-runs `claude --resume` against the persisted sandbox. Fence off any CLI
 // process left over from the prior attempt before touching the checkout so recovery runs are
@@ -639,7 +633,7 @@ export async function runClaudeCodeChatTurn(input: {
         existingSessionId: resume,
         model: session.model || null,
         reasoningEffort,
-        permissionMode: taskContext ? "bypassPermissions" : "default",
+        permissionMode: "bypassPermissions",
         timeoutMs: env.codexTimeoutMs,
         redact,
         checkAbort,
@@ -672,18 +666,10 @@ export async function runClaudeCodeChatTurn(input: {
           }
           await projector.push(events);
         },
-        onPermissionRequest: async (request) => {
-          if (taskContext) return acpPermissionResponse(request, "approved");
-          const { approvalId } = await projector.requestApproval(request);
-          const resolution = await waitForAcpPermission({
-            approvalId,
-            leaseId,
-            timeoutMs: env.codexTimeoutMs,
-            checkAbort,
-          });
-          await projector.resolveApproval(approvalId, resolution);
-          return acpPermissionResponse(request, resolution);
-        },
+        // bypassPermissions should prevent permission RPCs. Auto-approve any request that still
+        // arrives (for example from a permissions.ask rule) to preserve the legacy CLI's
+        // --permission-mode bypassPermissions behavior without surfacing an approval prompt.
+        onPermissionRequest: async (request) => approveAcpPermission(request),
       });
     };
 
@@ -1092,81 +1078,9 @@ function scheduleWakeupFromToolInput(
   };
 }
 
-async function waitForAcpPermission(input: {
-  approvalId: string;
-  leaseId: string;
-  timeoutMs: number;
-  checkAbort: () => Promise<void>;
-}): Promise<"approved" | "denied" | "canceled"> {
-  const deadline = Date.now() + input.timeoutMs;
-  while (true) {
-    await input.checkAbort();
-    const [approval] = await getDb()
-      .select({ status: runApprovals.status, resolution: runApprovals.resolution })
-      .from(runApprovals)
-      .innerJoin(codexChatTurns, eq(codexChatTurns.id, runApprovals.runId))
-      .where(
-        and(
-          eq(runApprovals.id, input.approvalId),
-          eq(codexChatTurns.leaseId, input.leaseId),
-          eq(codexChatTurns.status, "running"),
-        ),
-      )
-      .limit(1);
-    if (!approval || approval.status === "canceled") return "canceled";
-    if (approval.status === "resolved") {
-      return approval.resolution === "approved"
-        ? "approved"
-        : approval.resolution === "denied"
-          ? "denied"
-          : "canceled";
-    }
-    if (Date.now() >= deadline) {
-      const now = new Date();
-      const [canceled] = await getDb()
-        .update(runApprovals)
-        .set({
-          status: "canceled",
-          resolution: "canceled",
-          response: { resolution: "canceled" },
-          resolvedAt: now,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(runApprovals.id, input.approvalId),
-            eq(runApprovals.status, "pending"),
-            sql`EXISTS (
-              SELECT 1
-              FROM ${codexChatTurns} AS turn
-              WHERE turn.id = ${runApprovals.runId}
-                AND turn.status = 'running'
-                AND turn.lease_id = ${input.leaseId}
-            )`,
-          ),
-        )
-        .returning({ id: runApprovals.id });
-      if (canceled) return "canceled";
-      continue;
-    }
-    await new Promise((resolve) =>
-      setTimeout(
-        resolve,
-        Math.min(CLAUDE_ACP_PERMISSION_POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())),
-      ),
-    );
-  }
-}
-
-function acpPermissionResponse(
-  request: AcpPermissionRequest,
-  resolution: "approved" | "denied" | "canceled",
-): AcpPermissionResponse {
-  if (resolution === "canceled") return { outcome: { outcome: "cancelled" } };
-  const preferredKinds =
-    resolution === "approved" ? ["allow_once", "allow_always"] : ["reject_once", "reject_always"];
+function approveAcpPermission(request: AcpPermissionRequest): AcpPermissionResponse {
   const options = Array.isArray(request.params.options) ? request.params.options : [];
-  for (const kind of preferredKinds) {
+  for (const kind of ["allow_once", "allow_always"]) {
     for (const value of options) {
       const option = recordFromUnknown(value);
       if (option?.kind !== kind || typeof option.optionId !== "string") continue;
