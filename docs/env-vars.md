@@ -39,12 +39,15 @@ release variables. Important contracts include:
 - API: direct database, WorkOS session/OAuth and shared cookie domain, the credentialed browser
   origin allowlist, billing/Stripe, managed capabilities and cron reconciliation, Vercel AI Gateway
   for canonical Auto routing, Blob, Electric, Redis, the cron secret for the internal email
-  persistence relays and the runner token/URL for the engine-auth control calls. The retained
+  persistence relays, the runner token/URL for the engine-auth control calls, and
+  `API_INTERNAL_TOKEN` to validate the runner→API internal wiki command endpoint. The retained
   generic PostHog compatibility sink remains optional.
-- Runner: database, internal/stream tokens, opencompany origin, allowed origins, integration encryption,
-  an explicitly enabled task-worker gate, E2B, Blob, model providers, GitHub/Google/X integration
-  credentials, opencompany PostHog, and Redis values; capability controls and provider-specific tuning
-  remain optional.
+- Runner: database, internal/stream tokens, `OPENCOMPANY_API_ORIGIN` and `API_INTERNAL_TOKEN` for
+  the internal wiki command endpoint (agent wiki writes cross the canonical API, never the wiki
+  database directly), opencompany origin, allowed origins, integration encryption, an explicitly
+  enabled task-worker gate, E2B, Blob, model providers, GitHub/Google/X integration credentials,
+  opencompany PostHog, and Redis values; capability controls and provider-specific tuning remain
+  optional.
 - Release: production DB URL, Vercel/Render credentials and project/service IDs, opencompany/API/runner
   URLs.
 

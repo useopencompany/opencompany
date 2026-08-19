@@ -53,23 +53,25 @@ describe("planWikiMigration", () => {
     expect(plan.skippedMerged).toEqual(["dupe"]);
   });
 
-  it("suffixes slug collisions across brains, first brain wins", () => {
+  it("suffixes collisions within a folder but allows the same basename elsewhere", () => {
     const plan = planWikiMigration([
       doc({ brainSlug: "general", brainId: "roadmap" }),
-      doc({ brainSlug: "second", brainId: "roadmap", folderPath: "thoughts" }),
+      doc({ brainSlug: "second", brainId: "roadmap", folderPath: "projects" }),
       doc({ brainSlug: "third", brainId: "roadmap", folderPath: "inbox" }),
     ]);
     expect(plan.pages.map((page) => page.path)).toEqual([
       "projects/roadmap",
-      "thoughts/roadmap-2",
-      "inbox/roadmap-3",
+      "projects/roadmap-2",
+      "inbox/roadmap",
     ]);
-    expect(plan.collisions).toHaveLength(2);
+    expect(plan.collisions).toHaveLength(1);
   });
 
   it("carries evidence citations into timeline text and flags asset pages", () => {
     const plan = planWikiMigration([
+      doc({ brainId: "ev-gmail-1", folderPath: "evidence/gmail", kind: "evidence" }),
       doc({
+        brainId: "project",
         timeline: [
           { evidenceId: "ev-gmail-1", at: "2026-08-01T00:00:00Z", body: "Budget approved" },
           { evidenceId: "", at: "2026-08-02T00:00:00Z", body: "Plain entry" },
@@ -82,11 +84,14 @@ describe("planWikiMigration", () => {
         assetStorageKey: "key-1",
       }),
     ]);
-    expect(plan.pages[0]?.timeline).toEqual([
-      { at: "2026-08-01T00:00:00Z", text: "Budget approved [[ev-gmail-1]]" },
+    expect(plan.pages[1]?.timeline).toEqual([
+      {
+        at: "2026-08-01T00:00:00Z",
+        text: "Budget approved [[archive/evidence/gmail/ev-gmail-1]]",
+      },
       { at: "2026-08-02T00:00:00Z", text: "Plain entry" },
     ]);
-    expect(plan.pages[1]?.asset).toMatchObject({ assetStorageKey: "key-1" });
-    expect(plan.pages[0]?.asset).toBeNull();
+    expect(plan.pages[2]?.asset).toMatchObject({ assetStorageKey: "key-1" });
+    expect(plan.pages[1]?.asset).toBeNull();
   });
 });

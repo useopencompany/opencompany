@@ -1,15 +1,15 @@
 "use client";
 
-// Wiki links (`[[slug]]`, `[[page:slug|Title]]`, `[[source:...]]`, legacy
+// Wiki links (`[[path/to/page]]`, `[[path/to/page|Title]]`, `[[source:...]]`, legacy
 // `[^ev:...]`) are stored in the markdown body verbatim, but in the editor they
 // are a single atomic inline node — not editable raw text. You can select and
 // delete a link as one unit, but you can't put the caret inside and corrupt the
-// `[[...]]` syntax. This is the foundation for treating a sub-page reference as
+// `[[...]]` syntax. This is the foundation for treating a page reference as
 // a solid pointer at a real page in the tree.
 //
 // The node stores the exact `raw` token as its only attribute and serializes it
 // back verbatim, so the markdown round-trip is lossless and agents keep reading
-// and writing `[[slug]]` exactly as before. Live page titles, hrefs, and click
+// and writing `[[path]]` exactly as before. Live page titles, hrefs, and click
 // navigation are resolved at render time from plugin state (kept in sync by the
 // host editor), fed to the node views through node decorations so a rename
 // updates every chip instantly.
@@ -23,9 +23,9 @@ import { isExternalHref, sourceChipDisplay, sourceHrefForRef } from "@/lib/brain
 // Live data the chips resolve against. The host editor keeps this current by
 // dispatching a WIKI_LINK_STATE_KEY meta transaction whenever its props change.
 export type WikiLinkState = {
-  // Page slug / "kind:target" -> href. Also drives whether a link is resolved.
+  // Page path / "kind:target" -> href. Also drives whether a link is resolved.
   brainLinks: Record<string, string>;
-  // Live page titles keyed by slug, so a rename re-labels every `[[slug]]` chip.
+  // Live page titles keyed by path, so a rename re-labels every chip.
   pageTitles: Record<string, string>;
   editingEnabled: boolean;
   onNavigateInternal: ((href: string) => boolean) | undefined;
@@ -59,15 +59,32 @@ type ResolvedWikiLink = {
   title: string;
 };
 
+function targetForPageLink(target: string, state: WikiLinkState): string | null {
+  if (state.brainLinks[target] || state.pageTitles[target]) return target;
+  if (target.includes("/")) return null;
+  const matches = Object.keys(state.pageTitles).filter(
+    (path) => path.slice(path.lastIndexOf("/") + 1) === target,
+  );
+  return matches.length === 1 ? (matches[0] ?? null) : null;
+}
+
 function hrefForLink(
   link: ReturnType<typeof parseBrainInlineLinks>[number],
-  links: Record<string, string>,
-): string {
-  const mapped = links[`${link.kind}:${link.target}`];
-  if (mapped) return mapped;
-  if (link.kind === "page") return links[link.target] ?? "";
-  if (link.kind === "source") return sourceHrefForRef(link.target) ?? "";
-  return "";
+  state: WikiLinkState,
+): { href: string; resolvedTarget: string } {
+  const mapped = state.brainLinks[`${link.kind}:${link.target}`];
+  if (mapped) return { href: mapped, resolvedTarget: link.target };
+  if (link.kind === "page") {
+    const resolvedTarget = targetForPageLink(link.target, state);
+    return {
+      href: resolvedTarget ? (state.brainLinks[resolvedTarget] ?? "") : "",
+      resolvedTarget: resolvedTarget ?? link.target,
+    };
+  }
+  if (link.kind === "source") {
+    return { href: sourceHrefForRef(link.target) ?? "", resolvedTarget: link.target };
+  }
+  return { href: "", resolvedTarget: link.target };
 }
 
 export function resolveWikiLink(raw: string, state: WikiLinkState): ResolvedWikiLink {
@@ -75,7 +92,7 @@ export function resolveWikiLink(raw: string, state: WikiLinkState): ResolvedWiki
   if (!link) {
     return { href: "", label: raw, icon: "link", external: false, title: raw };
   }
-  const href = hrefForLink(link, state.brainLinks);
+  const { href, resolvedTarget } = hrefForLink(link, state);
   if (link.kind === "source") {
     const chip = sourceChipDisplay(link.target, link.label);
     return {
@@ -88,7 +105,7 @@ export function resolveWikiLink(raw: string, state: WikiLinkState): ResolvedWiki
   }
   // A page link prefers the target's live title over the authored label, so a
   // rename propagates to every reference (Notion-style).
-  const liveTitle = link.kind === "page" ? state.pageTitles[link.target] : undefined;
+  const liveTitle = link.kind === "page" ? state.pageTitles[resolvedTarget] : undefined;
   const label = liveTitle || link.label;
   return {
     href,

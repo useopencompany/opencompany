@@ -1,24 +1,24 @@
-// Workspace wiki access (brain v2). One wiki per workspace; pages form a tree
-// keyed by `path` (ancestor slug chain + own slug) with `slug` as the stable,
-// workspace-unique identity that [[wiki-links]] target. Every mutation writes
-// an append-only version row (with line deltas, so the recent-changes feed is
-// a pure aggregation) and rebuilds the derived wiki_links index from the body.
+// Workspace wiki access (brain v2). Folders and leaf pages form a filesystem-
+// style tree keyed by workspace-unique paths. Page links target those paths.
+// Every mutation writes append-only versions and page writes rebuild the
+// derived wiki_links index from the body.
 
 import { createHash, randomUUID } from "node:crypto";
 import {
   DEFAULT_WIKI_KIND,
   deriveWikiTitle,
   isValidWikiPath,
-  isValidWikiSlug,
   isWikiDescendantPath,
   movedWikiPath,
   parentWikiPath,
+  rewriteWikiPageLinks,
   type WikiKind,
+  type WikiNodeType,
   wikiPageLinkTargets,
   wikiSlugFromPath,
   wikiSourceRefTargets,
 } from "@opencompany/wiki";
-import { and, asc, desc, eq, getTableColumns, gte, inArray, like, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, inArray, like, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   users,
@@ -107,6 +107,7 @@ export type WikiTreeEntry = {
   path: string;
   title: string;
   kind: WikiKind;
+  nodeType: WikiNodeType;
   sizeBytes: number;
   updatedAt: Date;
   childCount: number;
@@ -131,6 +132,7 @@ export async function getWikiTree(
     path: row.path,
     title: row.title,
     kind: row.kind,
+    nodeType: row.nodeType,
     sizeBytes: row.sizeBytes,
     updatedAt: row.updatedAt,
     childCount: childCounts.get(row.path) ?? 0,
@@ -139,7 +141,7 @@ export async function getWikiTree(
 
 /**
  * Every page in the workspace wiki, bodies included — the payload behind the
- * instant client-side navigation in the UI. Wikis are lightweight-Notion
+ * instant client-side navigation in the UI. Wikis are lightweight
  * scale, so shipping all bodies at once is deliberate.
  */
 export async function listWikiPagesWithBodies(
@@ -154,9 +156,9 @@ export async function listWikiPagesWithBodies(
 }
 
 /**
- * Resolves page references that may be slugs or paths ("website-redesign" or
- * "projects/website-redesign"). Unknown refs are reported, not thrown, so a
- * multi-ref read can partially succeed.
+ * Resolves an exact page path first, then falls back to a basename only when it
+ * identifies exactly one page in the workspace. Folders never resolve here.
+ * Unknown and ambiguous refs are reported, not thrown.
  */
 export async function resolveWikiPages(
   workspaceId: string,
@@ -171,22 +173,30 @@ export async function resolveWikiPages(
     .where(
       and(
         eq(wikiPages.workspaceId, workspaceId),
+        eq(wikiPages.nodeType, "page"),
         sql`(${inArray(wikiPages.slug, cleaned)} OR ${inArray(wikiPages.path, cleaned)})`,
       ),
     );
-  const found = new Set(rows.flatMap((row) => [row.slug, row.path]));
-  const bySlug = new Map(rows.map((row) => [row.slug, row]));
-  // Preserve request order; a ref matching by path resolves to the same page.
+  const byPath = new Map(rows.map((row) => [row.path, row]));
+  const bySlug = new Map<string, WikiPage[]>();
+  for (const row of rows) {
+    const matches = bySlug.get(row.slug);
+    if (matches) matches.push(row);
+    else bySlug.set(row.slug, [row]);
+  }
   const ordered: WikiPage[] = [];
+  const missing: string[] = [];
   const seen = new Set<string>();
   for (const ref of cleaned) {
-    const page = bySlug.get(ref) ?? rows.find((row) => row.path === ref);
+    const basenameMatches = bySlug.get(ref) ?? [];
+    const page = byPath.get(ref) ?? (basenameMatches.length === 1 ? basenameMatches[0] : undefined);
     if (page && !seen.has(page.id)) {
       seen.add(page.id);
       ordered.push(page);
     }
+    if (!page) missing.push(ref);
   }
-  return { pages: ordered, missing: cleaned.filter((ref) => !found.has(ref)) };
+  return { pages: ordered, missing };
 }
 
 export type WikiBacklink = {
@@ -198,7 +208,7 @@ export type WikiBacklink = {
 
 export async function getWikiBacklinks(
   workspaceId: string,
-  slug: string,
+  path: string,
   db: DbClient = getDb(),
 ): Promise<WikiBacklink[]> {
   const rows: Array<{ slug: string; path: string; title: string; kind: WikiKind }> = await db
@@ -214,7 +224,8 @@ export async function getWikiBacklinks(
       and(
         eq(wikiLinks.workspaceId, workspaceId),
         eq(wikiLinks.kind, "page"),
-        eq(wikiLinks.target, slug),
+        eq(wikiLinks.target, path),
+        eq(wikiPages.nodeType, "page"),
       ),
     )
     .orderBy(asc(wikiPages.path));
@@ -250,7 +261,7 @@ export type WikiWriteInput = {
 export type WikiWriteResult = {
   page: WikiPage;
   action: "created" | "updated" | "unchanged";
-  /** Stub ancestor pages auto-created so a deep write never dangles. */
+  /** Ancestor folders auto-created so a deep write never dangles. */
   createdAncestors: string[];
   /** Txids of the wiki_pages statements, for Electric optimistic-state matching. */
   txids: number[];
@@ -271,14 +282,10 @@ export async function writeWikiPage(
   }
   const slug = wikiSlugFromPath(path);
 
-  const existing = await pageByPathOrSlug(db, input.workspaceId, path, slug);
-  if (existing && existing.path !== path) {
-    throw new WikiError(
-      `Slug "${slug}" already exists at "${existing.path}". Slugs are unique per workspace; use \`move\` to relocate the page or pick a different name.`,
-    );
-  }
+  const existing = await pageByPath(db, input.workspaceId, path);
+  if (existing?.nodeType === "folder") throw new WikiError(`"${path}" is a folder.`);
 
-  const ancestors = await ensureAncestorPages(
+  const ancestors = await ensureAncestorFolders(
     db,
     input.workspaceId,
     path,
@@ -332,42 +339,148 @@ export async function writeWikiPage(
   return { page, action: "created", createdAncestors, txids: [...ancestors.txids, txid] };
 }
 
+export type WikiFolderCreateResult = {
+  folder: WikiPage;
+  action: "created" | "unchanged";
+  createdAncestors: string[];
+  txids: number[];
+};
+
+export async function createWikiFolder(
+  input: {
+    workspaceId: string;
+    path: string;
+    id?: string;
+    title?: string;
+    actorWorkosId?: string | null;
+  },
+  db: DbClient = getDb(),
+): Promise<WikiFolderCreateResult> {
+  const path = input.path.trim().replace(/^\/+|\/+$/g, "");
+  if (!isValidWikiPath(path)) throw new WikiError(`Invalid folder path "${input.path}".`);
+
+  const existing = await pageByPath(db, input.workspaceId, path);
+  if (existing) {
+    if (existing.nodeType === "page") throw new WikiError(`"${path}" is a page.`);
+    return { folder: existing, action: "unchanged", createdAncestors: [], txids: [] };
+  }
+
+  const ancestors = await ensureAncestorFolders(
+    db,
+    input.workspaceId,
+    path,
+    input.actorWorkosId ?? null,
+  );
+  const inserted = await insertNode(db, {
+    workspaceId: input.workspaceId,
+    path,
+    nodeType: "folder",
+    body: "",
+    kind: DEFAULT_WIKI_KIND,
+    ...(input.id ? { id: input.id } : {}),
+    title: input.title?.trim() || wikiSlugFromPath(path),
+    actorWorkosId: input.actorWorkosId ?? null,
+  });
+  return {
+    folder: inserted.page,
+    action: "created",
+    createdAncestors: ancestors.created,
+    txids: [...ancestors.txids, inserted.txid],
+  };
+}
+
+export async function updateWikiNodeTitle(
+  input: {
+    workspaceId: string;
+    id: string;
+    title: string;
+    actorWorkosId?: string | null;
+  },
+  db: DbClient = getDb(),
+): Promise<{ node: WikiPage; txid: number | null }> {
+  const node = await nodeById(db, input.workspaceId, input.id);
+  if (!node) throw new WikiError("Wiki node not found.");
+  const title = input.title.trim();
+  if (node.title === title) return { node, txid: null };
+  const rows: Array<WikiPage & { txid: string }> = await db
+    .update(wikiPages)
+    .set({
+      title,
+      updatedByWorkosId: input.actorWorkosId ?? null,
+      updatedAt: new Date(),
+    })
+    .where(eq(wikiPages.id, node.id))
+    .returning({ ...getTableColumns(wikiPages), txid: TXID_COLUMN });
+  const { txid, ...updated } = firstRow(rows, "wiki node title update");
+  await recordVersion(db, updated, "write", { added: 0, removed: 0 }, input.actorWorkosId ?? null);
+  return { node: updated, txid: txidFromRow({ txid }, "wiki node title update") };
+}
+
 export type WikiMoveResult = {
-  page: WikiPage;
+  node: WikiPage;
   fromPath: string;
-  /** Descendant pages whose paths were rewritten along with the move. */
+  /** Descendant nodes whose paths were rewritten along with the move. */
   movedDescendants: number;
+  /** Final paths of pages whose bodies had links rewritten. */
+  rewrittenReferrers: string[];
   /** Txids of the wiki_pages statements, for Electric optimistic-state matching. */
   txids: number[];
 };
 
-export async function moveWikiPage(
+export async function moveWikiNode(
   input: {
     workspaceId: string;
-    slug: string;
-    /** New parent path, or null to move to the root. */
+    path: string;
+    /** New containing folder path, or null to move to the root. */
     newParentPath: string | null;
     actorWorkosId?: string | null;
   },
   db: DbClient = getDb(),
 ): Promise<WikiMoveResult> {
-  const page = await requirePageBySlug(db, input.workspaceId, input.slug);
+  if (!supportsInteractiveTransactions(db)) {
+    throw new WikiError("Moving a wiki node requires a transactional database connection.");
+  }
+  return db.transaction((tx: DbClient) => moveWikiNodeInDb(input, tx));
+}
+
+/** Compatibility alias for older callers while the path-based contract rolls out. */
+export const moveWikiPage = moveWikiNode;
+
+async function moveWikiNodeInDb(
+  input: {
+    workspaceId: string;
+    path: string;
+    newParentPath: string | null;
+    actorWorkosId?: string | null;
+  },
+  db: DbClient,
+): Promise<WikiMoveResult> {
+  const node = await requireWikiNode(db, input.workspaceId, input.path);
   const parent = input.newParentPath?.trim().replace(/^\/+|\/+$/g, "") || null;
   if (parent !== null) {
     if (!isValidWikiPath(parent)) throw new WikiError(`Invalid parent path "${parent}".`);
-    if (parent === page.path || isWikiDescendantPath(parent, page.path)) {
-      throw new WikiError(`Cannot move "${page.slug}" inside its own subtree.`);
+    if (parent === node.path || isWikiDescendantPath(parent, node.path)) {
+      throw new WikiError(`Cannot move "${node.slug}" inside its own subtree.`);
     }
-    const parentPage = await pageByPath(db, input.workspaceId, parent);
-    if (!parentPage) throw new WikiError(`Parent page "${parent}" does not exist.`);
+    const parentNode = await pageByPath(db, input.workspaceId, parent);
+    if (!parentNode) throw new WikiError(`Folder "${parent}" does not exist.`);
+    if (parentNode.nodeType !== "folder") throw new WikiError(`"${parent}" is not a folder.`);
   }
-  const newPath = parent ? `${parent}/${page.slug}` : page.slug;
+  const newPath = parent ? `${parent}/${node.slug}` : node.slug;
   if (!isValidWikiPath(newPath)) throw new WikiError(`Invalid destination path "${newPath}".`);
-  if (newPath === page.path) return { page, fromPath: page.path, movedDescendants: 0, txids: [] };
+  if (newPath === node.path) {
+    return {
+      node,
+      fromPath: node.path,
+      movedDescendants: 0,
+      rewrittenReferrers: [],
+      txids: [],
+    };
+  }
   const collision = await pageByPath(db, input.workspaceId, newPath);
-  if (collision) throw new WikiError(`A page already exists at "${newPath}".`);
+  if (collision) throw new WikiError(`A wiki node already exists at "${newPath}".`);
 
-  const fromPath = page.path;
+  const fromPath = node.path;
   const descendants: WikiPage[] = await db
     .select()
     .from(wikiPages)
@@ -377,53 +490,126 @@ export async function moveWikiPage(
         like(wikiPages.path, `${escapeLike(fromPath)}/%`),
       ),
     );
-  // neon-http has no interactive transactions; order the writes so a crash
-  // mid-move leaves descendants under the old prefix (repairable by re-running
-  // the move), never two pages claiming one path.
+
+  const referrers: WikiPage[] = await db
+    .select({ ...getTableColumns(wikiPages) })
+    .from(wikiLinks)
+    .innerJoin(wikiPages, eq(wikiLinks.fromPageId, wikiPages.id))
+    .where(
+      and(
+        eq(wikiLinks.workspaceId, input.workspaceId),
+        eq(wikiLinks.kind, "page"),
+        eq(wikiPages.nodeType, "page"),
+        or(eq(wikiLinks.target, fromPath), like(wikiLinks.target, `${escapeLike(fromPath)}/%`)),
+      ),
+    );
+  const uniqueReferrers = [...new Map(referrers.map((page) => [page.id, page])).values()];
+  const timelineEntries: WikiTimelineEntry[] = await db
+    .select()
+    .from(wikiTimelineEntries)
+    .where(eq(wikiTimelineEntries.workspaceId, input.workspaceId));
+
   const movedRows: Array<WikiPage & { txid: string }> = await db
     .update(wikiPages)
     .set({ path: newPath, updatedByWorkosId: input.actorWorkosId ?? null, updatedAt: new Date() })
-    .where(eq(wikiPages.id, page.id))
+    .where(eq(wikiPages.id, node.id))
     .returning({ ...getTableColumns(wikiPages), txid: TXID_COLUMN });
-  const { txid, ...moved } = firstRow(movedRows, "wiki page move");
-  const txids = [txidFromRow({ txid }, "wiki page move")];
-  for (const descendant of descendants) {
-    const descendantRows: Array<{ txid: string }> = await db
-      .update(wikiPages)
-      .set({ path: movedWikiPath(descendant.path, fromPath, newPath) })
-      .where(eq(wikiPages.id, descendant.id))
-      .returning({ txid: TXID_COLUMN });
-    txids.push(txidFromRow(descendantRows[0], "wiki descendant move"));
-  }
+  const { txid, ...moved } = firstRow(movedRows, "wiki node move");
+  let movedNode = moved;
+  const txids = [txidFromRow({ txid }, "wiki node move")];
   await recordVersion(db, moved, "move", { added: 0, removed: 0 }, input.actorWorkosId ?? null);
-  return { page: moved, fromPath, movedDescendants: descendants.length, txids };
+
+  for (const descendant of descendants) {
+    const descendantRows: Array<WikiPage & { txid: string }> = await db
+      .update(wikiPages)
+      .set({
+        path: movedWikiPath(descendant.path, fromPath, newPath),
+        updatedByWorkosId: input.actorWorkosId ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(wikiPages.id, descendant.id))
+      .returning({ ...getTableColumns(wikiPages), txid: TXID_COLUMN });
+    const { txid: descendantTxid, ...movedDescendant } = firstRow(
+      descendantRows,
+      "wiki descendant move",
+    );
+    txids.push(txidFromRow({ txid: descendantTxid }, "wiki descendant move"));
+    await recordVersion(
+      db,
+      movedDescendant,
+      "move",
+      { added: 0, removed: 0 },
+      input.actorWorkosId ?? null,
+    );
+  }
+
+  const rewrittenReferrers: string[] = [];
+  for (const referrer of uniqueReferrers) {
+    const content = rewriteMovedTargets(referrer.content, fromPath, newPath);
+    if (content === referrer.content) continue;
+    const delta = lineDelta(referrer.content, content);
+    const rows: Array<WikiPage & { txid: string }> = await db
+      .update(wikiPages)
+      .set({
+        content,
+        contentHash: hashWikiContent(content),
+        sizeBytes: Buffer.byteLength(content, "utf8"),
+        updatedByWorkosId: input.actorWorkosId ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(wikiPages.id, referrer.id))
+      .returning({ ...getTableColumns(wikiPages), txid: TXID_COLUMN });
+    const { txid: referrerTxid, ...updatedReferrer } = firstRow(rows, "wiki link rewrite");
+    txids.push(txidFromRow({ txid: referrerTxid }, "wiki link rewrite"));
+    await recordVersion(db, updatedReferrer, "write", delta, input.actorWorkosId ?? null);
+    await rebuildLinks(db, updatedReferrer);
+    if (updatedReferrer.id === movedNode.id) movedNode = updatedReferrer;
+    rewrittenReferrers.push(updatedReferrer.path);
+  }
+
+  for (const entry of timelineEntries) {
+    const text = rewriteMovedTargets(entry.text, fromPath, newPath);
+    if (text === entry.text) continue;
+    await db.update(wikiTimelineEntries).set({ text }).where(eq(wikiTimelineEntries.id, entry.id));
+  }
+
+  return {
+    node: movedNode,
+    fromPath,
+    movedDescendants: descendants.length,
+    rewrittenReferrers,
+    txids,
+  };
 }
 
 export async function deleteWikiPage(
   input: {
     workspaceId: string;
-    slug: string;
+    path: string;
     recursive?: boolean;
     actorWorkosId?: string | null;
   },
   db: DbClient = getDb(),
 ): Promise<{ deletedPaths: string[]; txids: number[] }> {
-  const page = await requirePageBySlug(db, input.workspaceId, input.slug);
+  const node = await requireWikiNode(db, input.workspaceId, input.path);
   const descendants: WikiPage[] = await db
     .select()
     .from(wikiPages)
     .where(
       and(
         eq(wikiPages.workspaceId, input.workspaceId),
-        like(wikiPages.path, `${escapeLike(page.path)}/%`),
+        like(wikiPages.path, `${escapeLike(node.path)}/%`),
       ),
     );
-  if (descendants.length > 0 && !input.recursive) {
+  if (node.nodeType === "page" && descendants.length > 0) {
+    throw new WikiError(`Page "${node.path}" cannot contain child nodes.`);
+  }
+  if (node.nodeType === "folder" && descendants.length > 0 && !input.recursive) {
     throw new WikiError(
-      `"${page.slug}" has ${descendants.length} subpage(s). Pass recursive to delete the whole subtree.`,
+      `Folder "${node.path}" contains ${descendants.length} node(s). Pass recursive to delete it and its contents.`,
     );
   }
-  const doomed = [...descendants].sort((a, b) => b.path.length - a.path.length).concat(page);
+  const doomed = [...descendants].sort((a, b) => b.path.length - a.path.length).concat(node);
   const txids: number[] = [];
   for (const target of doomed) {
     await recordVersion(
@@ -447,10 +633,10 @@ export async function deleteWikiPage(
 // ---------------------------------------------------------------------------
 
 export async function listWikiTimeline(
-  input: { workspaceId: string; slug: string; since?: Date },
+  input: { workspaceId: string; path: string; since?: Date },
   db: DbClient = getDb(),
 ): Promise<WikiTimelineEntry[]> {
-  const page = await requirePageBySlug(db, input.workspaceId, input.slug);
+  const page = await requireWikiPage(db, input.workspaceId, input.path);
   const conditions = [eq(wikiTimelineEntries.pageId, page.id)];
   if (input.since) conditions.push(gte(wikiTimelineEntries.at, input.since));
   return db
@@ -463,7 +649,7 @@ export async function listWikiTimeline(
 export async function addWikiTimelineEntry(
   input: {
     workspaceId: string;
-    slug: string;
+    path: string;
     at: Date;
     text: string;
     /** Explicit entry id for optimistic client inserts (Electric sync-back). */
@@ -474,7 +660,7 @@ export async function addWikiTimelineEntry(
 ): Promise<WikiTimelineEntry & { txid: number }> {
   const text = input.text.trim();
   if (!text) throw new WikiError("Timeline entry text is required.");
-  const page = await requirePageBySlug(db, input.workspaceId, input.slug);
+  const page = await requireWikiPage(db, input.workspaceId, input.path);
   const inserted: Array<WikiTimelineEntry & { txid: string }> = await db
     .insert(wikiTimelineEntries)
     .values({
@@ -528,6 +714,7 @@ export async function searchWiki(
       .where(
         and(
           eq(wikiPages.workspaceId, workspaceId),
+          eq(wikiPages.nodeType, "page"),
           sql`websearch_to_tsquery('english', ${text}) @@ ${wikiPages.searchTsv}`,
         ),
       )
@@ -536,7 +723,13 @@ export async function searchWiki(
     db
       .select({ id: wikiPages.id })
       .from(wikiPages)
-      .where(and(eq(wikiPages.workspaceId, workspaceId), sql`${text} <% ${wikiPages.title}`))
+      .where(
+        and(
+          eq(wikiPages.workspaceId, workspaceId),
+          eq(wikiPages.nodeType, "page"),
+          sql`${text} <% ${wikiPages.title}`,
+        ),
+      )
       .orderBy(desc(titleSimilarity))
       .limit(TITLE_CANDIDATE_LIMIT),
   ]);
@@ -604,6 +797,7 @@ export async function grepWiki(
       .where(
         and(
           eq(wikiPages.workspaceId, workspaceId),
+          eq(wikiPages.nodeType, "page"),
           sql`(${wikiPages.title} ${operator} ${options.pattern} OR ${wikiPages.content} ${operator} ${options.pattern})`,
         ),
       )
@@ -614,7 +808,7 @@ export async function grepWiki(
     pages = await db
       .select()
       .from(wikiPages)
-      .where(eq(wikiPages.workspaceId, workspaceId))
+      .where(and(eq(wikiPages.workspaceId, workspaceId), eq(wikiPages.nodeType, "page")))
       .orderBy(asc(wikiPages.path));
   }
   const matches: WikiGrepMatch[] = [];
@@ -700,37 +894,62 @@ async function insertPage(
     actorWorkosId: string | null;
   },
 ): Promise<{ page: WikiPage; txid: number }> {
+  return insertNode(db, { ...input, nodeType: "page" });
+}
+
+async function insertNode(
+  db: DbClient,
+  input: {
+    workspaceId: string;
+    path: string;
+    nodeType: WikiNodeType;
+    body: string;
+    kind: WikiKind;
+    id?: string;
+    title?: string;
+    actorWorkosId: string | null;
+  },
+): Promise<{ page: WikiPage; txid: number }> {
   const slug = wikiSlugFromPath(input.path);
-  const insertedPages: Array<WikiPage & { txid: string }> = await db
-    .insert(wikiPages)
-    .values({
-      id: input.id ?? randomUUID(),
-      workspaceId: input.workspaceId,
-      slug,
-      path: input.path,
-      title: input.title ?? deriveWikiTitle(input.body, slug),
-      kind: input.kind,
-      content: input.body,
-      contentHash: hashWikiContent(input.body),
-      sizeBytes: Buffer.byteLength(input.body, "utf8"),
-      createdByWorkosId: input.actorWorkosId,
-      updatedByWorkosId: input.actorWorkosId,
-    })
-    .returning({ ...getTableColumns(wikiPages), txid: TXID_COLUMN });
+  let insertedPages: Array<WikiPage & { txid: string }>;
+  try {
+    insertedPages = await db
+      .insert(wikiPages)
+      .values({
+        id: input.id ?? randomUUID(),
+        workspaceId: input.workspaceId,
+        slug,
+        path: input.path,
+        nodeType: input.nodeType,
+        title: input.title ?? deriveWikiTitle(input.body, slug),
+        kind: input.kind,
+        content: input.body,
+        contentHash: hashWikiContent(input.body),
+        sizeBytes: Buffer.byteLength(input.body, "utf8"),
+        createdByWorkosId: input.actorWorkosId,
+        updatedByWorkosId: input.actorWorkosId,
+      })
+      .returning({ ...getTableColumns(wikiPages), txid: TXID_COLUMN });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new WikiError(`A wiki node already exists at "${input.path}".`);
+    }
+    throw error;
+  }
   const { txid, ...page } = firstRow(insertedPages, "wiki page insert");
   await recordVersion(
     db,
     page,
     "write",
-    { added: countLines(input.body), removed: 0 },
+    { added: input.nodeType === "page" ? countLines(input.body) : 0, removed: 0 },
     input.actorWorkosId,
   );
-  await rebuildLinks(db, page);
+  if (input.nodeType === "page") await rebuildLinks(db, page);
   return { page, txid: txidFromRow({ txid }, "wiki page insert") };
 }
 
-/** Creates empty stub pages for any missing ancestors of `path`, top-down. */
-async function ensureAncestorPages(
+/** Creates folders for any missing ancestors of `path`, top-down. */
+async function ensureAncestorFolders(
   db: DbClient,
   workspaceId: string,
   path: string,
@@ -741,27 +960,33 @@ async function ensureAncestorPages(
   const segments = path.split("/");
   for (let depth = 1; depth < segments.length; depth += 1) {
     const ancestorPath = segments.slice(0, depth).join("/");
-    const slug = segments[depth - 1] ?? "";
-    const existing = await pageByPathOrSlug(db, workspaceId, ancestorPath, slug);
+    const existing = await pageByPath(db, workspaceId, ancestorPath);
     if (existing) {
-      if (existing.path !== ancestorPath) {
-        throw new WikiError(
-          `Slug "${slug}" already exists at "${existing.path}", so "${path}" cannot be created. Every path segment is a page slug and slugs are unique per workspace.`,
-        );
-      }
+      if (existing.nodeType !== "folder") throw new WikiError(`"${ancestorPath}" is not a folder.`);
       continue;
     }
-    const inserted = await insertPage(db, {
+    const inserted = await insertNode(db, {
       workspaceId,
       path: ancestorPath,
+      nodeType: "folder",
       body: "",
       kind: "other",
+      title: wikiSlugFromPath(ancestorPath),
       actorWorkosId,
     });
     created.push(ancestorPath);
     txids.push(inserted.txid);
   }
   return { created, txids };
+}
+
+async function nodeById(db: DbClient, workspaceId: string, id: string): Promise<WikiPage | null> {
+  const [row]: WikiPage[] = await db
+    .select()
+    .from(wikiPages)
+    .where(and(eq(wikiPages.workspaceId, workspaceId), eq(wikiPages.id, id)))
+    .limit(1);
+  return row ?? null;
 }
 
 async function pageByPath(
@@ -777,34 +1002,29 @@ async function pageByPath(
   return row ?? null;
 }
 
-async function pageByPathOrSlug(
-  db: DbClient,
-  workspaceId: string,
-  path: string,
-  slug: string,
-): Promise<WikiPage | null> {
-  const [row]: WikiPage[] = await db
-    .select()
-    .from(wikiPages)
-    .where(and(eq(wikiPages.workspaceId, workspaceId), eq(wikiPages.slug, slug)))
-    .limit(1);
-  if (row) return row;
-  return pageByPath(db, workspaceId, path);
-}
-
-async function requirePageBySlug(
-  db: DbClient,
-  workspaceId: string,
-  ref: string,
-): Promise<WikiPage> {
+async function requireWikiPage(db: DbClient, workspaceId: string, ref: string): Promise<WikiPage> {
   const cleaned = ref.trim();
-  if (!isValidWikiSlug(wikiSlugFromPath(cleaned))) {
+  if (!isValidWikiPath(cleaned)) {
     throw new WikiError(`Invalid page reference "${ref}".`);
   }
   const { pages } = await resolveWikiPages(workspaceId, [cleaned], db);
   const page = pages[0];
   if (!page) throw new WikiError(`No wiki page "${ref}".`);
   return page;
+}
+
+async function requireWikiNode(db: DbClient, workspaceId: string, ref: string): Promise<WikiPage> {
+  const cleaned = ref.trim();
+  if (!isValidWikiPath(cleaned)) throw new WikiError(`Invalid wiki path "${ref}".`);
+  const exact = await pageByPath(db, workspaceId, cleaned);
+  if (exact) return exact;
+  const matches: WikiPage[] = await db
+    .select()
+    .from(wikiPages)
+    .where(and(eq(wikiPages.workspaceId, workspaceId), eq(wikiPages.slug, cleaned)));
+  if (matches.length === 1) return matches[0] as WikiPage;
+  if (matches.length > 1) throw new WikiError(`Wiki basename "${ref}" is ambiguous; use its path.`);
+  throw new WikiError(`No wiki node "${ref}".`);
 }
 
 async function recordVersion(
@@ -832,6 +1052,10 @@ async function recordVersion(
 }
 
 async function rebuildLinks(db: DbClient, page: WikiPage): Promise<void> {
+  if (page.nodeType !== "page") {
+    await db.delete(wikiLinks).where(eq(wikiLinks.fromPageId, page.id));
+    return;
+  }
   const entries: Array<{ kind: WikiLinkKind; target: string }> = [
     ...wikiPageLinkTargets(page.content).map((target) => ({ kind: "page" as const, target })),
     ...wikiSourceRefTargets(page.content).map((target) => ({ kind: "source" as const, target })),
@@ -846,6 +1070,33 @@ async function rebuildLinks(db: DbClient, page: WikiPage): Promise<void> {
       target: entry.target,
     })),
   );
+}
+
+/** Rebuilds the derived link index for migrations and repair scripts. */
+export async function rebuildWikiLinksForPage(
+  page: WikiPage,
+  db: DbClient = getDb(),
+): Promise<void> {
+  await rebuildLinks(db, page);
+}
+
+function rewriteMovedTargets(text: string, fromPath: string, toPath: string): string {
+  return rewriteWikiPageLinks(text, (target) => {
+    const moved = movedWikiPath(target, fromPath, toPath);
+    return moved === target ? null : moved;
+  });
+}
+
+function supportsInteractiveTransactions(db: DbClient): boolean {
+  // neon-http exposes only fixed query batches, not the interactive transaction
+  // required to discover and rewrite referrers atomically.
+  return typeof db.transaction === "function" && !("batch" in db);
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: unknown; cause?: unknown };
+  return value.code === "23505" || isUniqueViolation(value.cause);
 }
 
 function reciprocalRankFusion(lists: string[][], k: number = RRF_K): Map<string, number> {

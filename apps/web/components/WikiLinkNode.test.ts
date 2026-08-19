@@ -3,12 +3,39 @@ import { Editor } from "@tiptap/core";
 import { Markdown } from "@tiptap/markdown";
 import StarterKit from "@tiptap/starter-kit";
 import { beforeAll, describe, expect, it } from "vitest";
-import { WikiLink } from "./WikiLinkNode";
+import { resolveWikiLink, WikiLink, type WikiLinkState } from "./WikiLinkNode";
 
 // jsdom has no layout; ProseMirror asks ranges for client rects on dispatch.
 beforeAll(() => {
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
+});
+
+describe("WikiLink path resolution", () => {
+  const state = (paths: string[]): WikiLinkState => ({
+    brainLinks: Object.fromEntries(paths.map((path) => [path, `/wiki/${path}`])),
+    pageTitles: Object.fromEntries(paths.map((path) => [path, `Title for ${path}`])),
+    editingEnabled: true,
+    onNavigateInternal: undefined,
+  });
+
+  it("resolves exact paths", () => {
+    expect(resolveWikiLink("[[company/goals]]", state(["company/goals"]))).toMatchObject({
+      href: "/wiki/company/goals",
+      label: "Title for company/goals",
+    });
+  });
+
+  it("falls back to a unique basename", () => {
+    expect(resolveWikiLink("[[goals]]", state(["company/goals"]))).toMatchObject({
+      href: "/wiki/company/goals",
+    });
+  });
+
+  it("leaves ambiguous and missing basenames unresolved", () => {
+    expect(resolveWikiLink("[[goals]]", state(["company/goals", "personal/goals"])).href).toBe("");
+    expect(resolveWikiLink("[[missing]]", state(["company/goals"])).href).toBe("");
+  });
 });
 
 function makeEditor(markdown: string): Editor {

@@ -7,6 +7,12 @@ const DEFAULT_CODEX_TIMEOUT_MS = 60 * 60 * 1000;
 export type RunnerEnv = {
   internalToken: string;
   streamTokenSecret: string;
+  // Canonical API origin the runner calls for the `wiki` agent tool. The runner
+  // holds no direct wiki database access; every command crosses this boundary.
+  apiOrigin: string;
+  // Bearer secret for the runner→API internal wiki command endpoint. Distinct
+  // from internalToken (API→runner) so the two directions rotate independently.
+  apiInternalToken: string;
   vercelAiGatewayApiKey: string;
   // Platform OpenAI key for codex_coder runs, used only server-side by the LLM broker
   // (llm-broker.ts) as the upstream credential for the "openai" provider. Never enters
@@ -68,6 +74,8 @@ export function loadEnv(): RunnerEnv {
   return {
     internalToken: requiredEnv("RUNNER_INTERNAL_TOKEN"),
     streamTokenSecret: requiredEnv("RUNNER_STREAM_TOKEN_SECRET"),
+    apiOrigin: requiredEnv("OPENCOMPANY_API_ORIGIN"),
+    apiInternalToken: requiredEnv("API_INTERNAL_TOKEN"),
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
     openaiCodexApiKey: optionalEnv("OPENAI_CODEX_API_KEY"),
     openaiApiKey: optionalEnv("OPENAI_API_KEY"),

@@ -143,31 +143,31 @@ export async function createHeadlessWikiPage(
 }
 
 export async function updateHeadlessWikiPage(
-  slug: string,
+  id: string,
   command: UpdateWikiPageBody,
   options: ScopedClientOptions,
 ) {
-  const data = await updateWikiPageRequest(slug, command, options);
+  const data = await updateWikiPageRequest(id, command, options);
   await awaitHeadlessWikiTransactions(data.transactionIds, collectionOptions(options));
   return data.page;
 }
 
 export async function deleteHeadlessWikiPage(
-  slug: string,
+  id: string,
   command: DeleteWikiPageBody,
   options: ScopedClientOptions,
 ) {
-  const data = await deleteWikiPageRequest(slug, command, options);
+  const data = await deleteWikiPageRequest(id, command, options);
   await awaitHeadlessWikiTransactions(data.transactionIds, collectionOptions(options));
   return data;
 }
 
 export async function addHeadlessWikiTimelineEntry(
-  slug: string,
+  id: string,
   command: AddWikiTimelineEntryBody,
   options: ScopedClientOptions,
 ) {
-  const data = await addWikiTimelineEntryRequest(slug, command, options);
+  const data = await addWikiTimelineEntryRequest(id, command, options);
   await awaitHeadlessWikiTransactions([data.transactionId], {
     ...collectionOptions(options),
     target: "timeline",

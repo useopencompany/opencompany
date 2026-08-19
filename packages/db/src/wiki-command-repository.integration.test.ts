@@ -1,23 +1,42 @@
-// Dispatch-level tests for the `wiki` tool executor against embedded Postgres.
-// The storage layer has its own deep suite in @opencompany/db; this covers the
-// command dispatch, result shapes agents see, and WikiError → { ok: false }.
+// Command-dispatch characterization for the wiki agent tool against embedded
+// Postgres (PGlite). This drives the API-owned WikiCommandApplicationService over
+// the Postgres repository — the same stack the runner and MCP use — and asserts
+// the byte-compatible output shapes agents see. It replaces the old
+// apps/web/lib/wiki-tool.test.ts, which tested the deleted direct executor.
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
+import {
+  type Actor,
+  WIKI_READ_PERMISSION,
+  WIKI_WRITE_PERMISSION,
+  WikiCommandApplicationService,
+} from "@opencompany/core";
 import type { WikiToolInput } from "@opencompany/wiki/tool";
 import { drizzle } from "drizzle-orm/pglite";
 import { beforeAll, describe, expect, it } from "vitest";
-import { runWikiToolForUser } from "./wiki-tool";
+import { PostgresWikiCommandRepository } from "./wiki-command-repository";
 
-const WS = "ws-wiki-tool";
-const MIGRATION = path.join(__dirname, "..", "..", "..", "drizzle", "0195_goat_wiki.sql");
+const WS = "ws-wiki-command";
+const MIGRATIONS = ["0195_goat_wiki.sql", "0217_goat_wiki_folders.sql"];
 
-let db: ReturnType<typeof drizzle>;
+const actor: Actor = {
+  userId: "user_1",
+  workspaceId: WS,
+  role: "admin",
+  permissions: [WIKI_READ_PERMISSION, WIKI_WRITE_PERMISSION],
+  authenticationMethod: "service",
+};
 
-const run = (toolInput: WikiToolInput) =>
-  runWikiToolForUser({ workspaceId: WS, userWorkosId: "user_1", toolInput, db });
+let service: WikiCommandApplicationService;
+let sequence = 0;
+
+// Each call gets a distinct idempotency key, mirroring the per-tool-call keys the
+// real callers build (agent-wiki:<turn>:<toolCall>).
+const run = (command: WikiToolInput) =>
+  service.execute({ actor, command, idempotencyKey: `wiki-command-test:${++sequence}` });
 
 beforeAll(async () => {
   const pglite = new PGlite({ extensions: { pg_trgm } });
@@ -25,21 +44,27 @@ beforeAll(async () => {
   await pglite.exec("CREATE SCHEMA goat;");
   await pglite.exec("CREATE TABLE goat.workspaces (id text PRIMARY KEY);");
   await pglite.exec("CREATE TABLE goat.users (workos_user_id text PRIMARY KEY);");
-  for (const statement of (await readFile(MIGRATION, "utf8")).split("--> statement-breakpoint")) {
-    await pglite.exec(statement);
+  for (const migration of MIGRATIONS) {
+    const sql = await readFile(
+      path.join(__dirname, "..", "..", "..", "drizzle", migration),
+      "utf8",
+    );
+    for (const statement of sql.split("--> statement-breakpoint")) {
+      await pglite.exec(statement);
+    }
   }
   await pglite.exec(
     `INSERT INTO goat.workspaces (id) VALUES ('${WS}'); INSERT INTO goat.users (workos_user_id) VALUES ('user_1');`,
   );
-  db = drizzle(pglite);
+  service = new WikiCommandApplicationService(new PostgresWikiCommandRepository(drizzle(pglite)));
 });
 
-describe("wiki tool", () => {
-  it("writes, lists the tree, and reads with subpages and backlinks", async () => {
+describe("wiki command service", () => {
+  it("writes, lists the tree, and reads folders and backlinks", async () => {
     const write = await run({
       command: "write",
       path: "projects/site",
-      body: "# Site\n\nSee [[ada]] for the owner.",
+      body: "# Site\n\nSee [[people/ada]] for the owner.",
       kind: "project",
     });
     expect(write).toMatchObject({
@@ -56,9 +81,10 @@ describe("wiki tool", () => {
       pages: [{ slug: "ada", path: "people/ada", backlinks: ["projects/site"] }],
     });
 
+    await run({ command: "write", path: "other/projects", body: "# A page named Projects" });
     const parent = await run({ command: "read", pages: "projects" });
     expect(parent.ok && parent.result).toMatchObject({
-      pages: [{ subpages: ["projects/site"] }],
+      folders: [{ path: "projects", children: ["projects/site"] }],
     });
   });
 
@@ -93,8 +119,39 @@ describe("wiki tool", () => {
     expect(read.ok && JSON.stringify(read.result)).not.toContain("Kickoff");
   });
 
+  it("replays a repeated timeline-add on the same idempotency key", async () => {
+    const first = await service.execute({
+      actor,
+      command: {
+        command: "timeline-add",
+        pages: "site",
+        text: "Launched",
+        at: "2026-08-02T00:00:00Z",
+      },
+      idempotencyKey: "wiki-command-test:timeline-replay",
+    });
+    const replay = await service.execute({
+      actor,
+      command: {
+        command: "timeline-add",
+        pages: "site",
+        text: "Launched",
+        at: "2026-08-02T00:00:00Z",
+      },
+      idempotencyKey: "wiki-command-test:timeline-replay",
+    });
+    expect(first).toEqual(replay);
+    const timeline = await run({ command: "timeline", pages: "site" });
+    const launched =
+      timeline.ok &&
+      (timeline.result as { entries: Array<{ text: string }> }).entries.filter(
+        (entry) => entry.text === "Launched",
+      );
+    expect(launched && launched.length).toBe(1);
+  });
+
   it("moves and deletes", async () => {
-    await run({ command: "write", path: "archive", body: "" });
+    await run({ command: "mkdir", path: "archive" });
     const move = await run({ command: "move", pages: "site", to: "archive" });
     expect(move.ok && move.result).toMatchObject({ path: "archive/site" });
     const del = await run({ command: "delete", pages: "archive", recursive: true });
@@ -112,5 +169,16 @@ describe("wiki tool", () => {
       ok: false,
       error: expect.stringContaining("Invalid grep pattern"),
     });
+  });
+
+  it("forbids a command when the actor lacks the wiki permission", async () => {
+    const readerOnly: Actor = { ...actor, permissions: [WIKI_READ_PERMISSION] };
+    await expect(
+      service.execute({
+        actor: readerOnly,
+        command: { command: "write", path: "projects/x", body: "# X" },
+        idempotencyKey: "wiki-command-test:forbidden",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
   });
 });

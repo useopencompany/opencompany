@@ -6,7 +6,10 @@
       "name": "cursor-clone",
       "dependencies": {
         "@neondatabase/serverless": "^1.1.0",
+        "@opencompany/db": "workspace:*",
+        "@opencompany/wiki": "workspace:*",
         "dotenv": "^17.4.2",
+        "drizzle-orm": "^0.45.2",
         "pg": "^8.13.1",
         "vercel": "^54.5.0",
       },
@@ -42,6 +45,7 @@
         "@opencompany/observability": "workspace:*",
         "@opencompany/protocol": "workspace:*",
         "@opencompany/telemetry": "workspace:*",
+        "@opencompany/wiki": "workspace:*",
         "@vercel/blob": "^2.4.0",
         "@workos-inc/node": "^9.3.1",
         "drizzle-orm": "^0.45.2",
@@ -373,6 +377,9 @@
     "packages/core": {
       "name": "@opencompany/core",
       "version": "0.1.0",
+      "dependencies": {
+        "@opencompany/wiki": "workspace:*",
+      },
       "devDependencies": {
         "@types/node": "^25.9.1",
         "typescript": "^6.0.3",
@@ -443,6 +450,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@hono/zod-openapi": "^1.5.2",
+        "@opencompany/wiki": "workspace:*",
         "hono": "4.12.28",
         "zod": "^4.4.3",
       },

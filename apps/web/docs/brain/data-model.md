@@ -84,6 +84,18 @@ reserved zone (see Kind above).
 Escaped inline-link syntax and link-shaped text inside inline, fenced, or indented code are treated
 as literal Markdown, not graph edges or citations.
 
+### Workspace Wiki paths and links
+
+The preview Workspace Wiki is separate from the Brain document grammar above. Its single tree has
+two node types in `goat.wiki_pages`: folders are empty containers and pages are leaf Markdown
+documents. A node path is lowercase slug segments joined by `/`, with at most 10 segments. The
+path is workspace-unique; the final `slug` segment only needs to be unique within its folder.
+
+Wiki page links use the full page path: `[[company/strategy/goals]]` or
+`[[company/strategy/goals|Q3 goals]]`. Exact paths win. A bare basename such as `[[goals]]`
+resolves only when one page in the workspace has that basename. Moving a page or folder rewrites
+links to the moved subtree in page bodies and timeline entries.
+
 ### brain_ref vs brain_id
 
 Easy to confuse, deliberately distinct:
@@ -176,6 +188,10 @@ brain-scoped carries a `brain_ref`.
 | `brain_source_items` | `BrainSourceItems` | Normalized external captures awaiting/after ingestion (see [ingestion.md](./ingestion.md)). |
 | `brain_ingest_jobs` | `BrainIngestJobs` | The ingest job queue (lease, attempts, status). |
 | `brain_tool_runs` | `BrainToolRuns` | Audit rows for brain tool invocations. |
+| `wiki_pages` | `wikiPages` | Workspace Wiki folders and leaf pages, keyed by `(workspace_id, path)`. |
+| `wiki_links` | `wikiLinks` | Derived full-path page links and external source refs from Wiki page bodies. |
+| `wiki_page_versions` | `wikiPageVersions` | Append-only Wiki page/folder write, move, and delete history. |
+| `wiki_timeline_entries` | `wikiTimelineEntries` | Dated entries attached to Wiki pages. |
 
 Documents are materialized to a temp filesystem root for CLI access via
 `materializeBrainFilesToRoot` (`packages/db/src/brain-files.ts`) — there is no persistent

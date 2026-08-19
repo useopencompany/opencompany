@@ -178,7 +178,14 @@ const baseEnvKeys = envKeys(
     encoding: "utf8",
   }),
 );
-const expectedEnvKeys = baseEnvKeys.map((key) => migratedEnvironmentName(key) ?? key).sort();
+// Keys added after the GOAT→OPENCOMPANY hard cut. The boundary enforces that
+// `.env.example` still matches origin/main modulo the rename map; genuinely new
+// variables are declared here so the check accepts them.
+const addedEnvKeys = ["API_INTERNAL_TOKEN"];
+const expectedEnvKeys = [
+  ...baseEnvKeys.map((key) => migratedEnvironmentName(key) ?? key),
+  ...addedEnvKeys,
+].sort();
 if (currentEnvKeys.join("\n") !== expectedEnvKeys.join("\n")) {
   failures.push(".env.example: environment keys do not match the accepted hard-cut mapping");
 }

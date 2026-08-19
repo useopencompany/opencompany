@@ -39,6 +39,7 @@ import {
   type TaskApplicationService,
   type TaskSchedule,
   type TaskScheduleApplicationService,
+  type WikiCommandApplicationService,
   type WikiPage,
   type WikiTimelineEntry,
   type Workflow,
@@ -52,6 +53,7 @@ import {
   decodePresentationCursor,
   encodeEventCursor,
   encodePresentationCursor,
+  InternalWikiCommandRequestSchema,
   PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_HEADER,
@@ -60,6 +62,7 @@ import {
   type V1RouteHandlers,
 } from "@opencompany/protocol";
 import { SPANS, withSpan } from "@opencompany/telemetry";
+import { WIKI_READ_COMMANDS } from "@opencompany/wiki/tool";
 import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
@@ -140,6 +143,15 @@ export type CreateApiAppInput = {
   workflows: WorkflowApplicationService;
   schedules: TaskScheduleApplicationService;
   knowledge: KnowledgeApplicationService;
+  // Executes the `wiki` agent tool command contract for internal callers
+  // (the runner over HTTP, the API-hosted MCP tool in-process).
+  wikiCommands: WikiCommandApplicationService;
+  // Reconstructs an Actor for the internal wiki command endpoint from the
+  // caller-named tenancy; never trusts caller-supplied permissions.
+  resolveWikiServiceActor: (input: { userWorkosId: string; workspaceId: string }) => Promise<Actor>;
+  // Bearer secret for POST /internal/wiki/commands (runner→API). Distinct from
+  // the runner's own internal token so the two directions rotate independently.
+  wikiCommandsInternalSecret?: string;
   brainSources: Pick<BrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
   brainImports: Pick<BrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
   browserProfiles: Pick<
@@ -1060,7 +1072,7 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "write", 60);
       const result = await input.knowledge.updateWikiPage(
         actor,
-        c.req.valid("param").slug,
+        c.req.valid("param").id,
         c.req.valid("json"),
       );
       return c.json(
@@ -1075,7 +1087,7 @@ export function createApiApp(input: CreateApiAppInput) {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
       const result = await input.knowledge.deleteWikiPage(actor, {
-        slug: c.req.valid("param").slug,
+        id: c.req.valid("param").id,
         ...c.req.valid("json"),
       });
       return c.json({ data: result, meta }, 200);
@@ -1085,7 +1097,7 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "write", 60);
       const result = await input.knowledge.addWikiTimelineEntry(actor, {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
-        slug: c.req.valid("param").slug,
+        id: c.req.valid("param").id,
         ...c.req.valid("json"),
       });
       return c.json(
@@ -2330,6 +2342,42 @@ export function createApiApp(input: CreateApiAppInput) {
     const skipped = await input.onboardingEmails.unsubscribe(email);
     return c.json({ data: { skipped }, meta }, 200);
   });
+  // Internal runner→API entrypoint for the `wiki` agent tool. The API owns the
+  // whole boundary: bearer auth, body validation, server-side actor
+  // reauthorization, command-aware rate limits, and command execution against
+  // Postgres. The runner never touches the wiki database directly.
+  app.post("/internal/wiki/commands", async (c) => {
+    authorizeInternalBearer(
+      c.req.raw,
+      input.wikiCommandsInternalSecret,
+      "Wiki command execution is unavailable.",
+    );
+    const idempotencyKey = boundedString(c.req.header("idempotency-key"), 200);
+    if (!idempotencyKey) {
+      throw new ApiError(400, "invalid_request", "An Idempotency-Key header is required.");
+    }
+    const parsed = InternalWikiCommandRequestSchema.safeParse(await internalJsonBody(c.req.raw));
+    if (!parsed.success) {
+      throw new ApiError(400, "invalid_request", "A valid wiki command is required.");
+    }
+    const { userWorkosId, workspaceId, command } = parsed.data;
+    // Never trust the caller-supplied tenancy: reload the actor from Postgres.
+    const actor = await input.resolveWikiServiceActor({ userWorkosId, workspaceId });
+    const isRead = WIKI_READ_COMMANDS.includes(command.command);
+    await enforceRateLimit(rateLimiter, actor, isRead ? "wiki_read" : "wiki_write", 120);
+    const startedAt = now();
+    const output = await input.wikiCommands.execute({ actor, command, idempotencyKey });
+    logger.info("Internal wiki command executed", {
+      event: "opencompany.internal_wiki_command",
+      request_id: requestIdFrom(c),
+      command: command.command,
+      user_id: actor.userId,
+      workspace_id: actor.workspaceId,
+      duration_ms: now().getTime() - startedAt.getTime(),
+      outcome: output.ok ? "ok" : "tool_error",
+    });
+    return c.json({ data: output, meta }, 200);
+  });
   if (input.githubIngress) {
     // Purpose-specific provider ingress: registered outside /v1 so the /v1
     // browser middleware (CORS, cookie-mutation Origin checks, actor context)
@@ -2521,10 +2569,17 @@ function isIdentityTierPath(path: string) {
   );
 }
 
-function authorizeEmailLifecycleInternalRequest(request: Request, configuredSecret?: string) {
+// Timing-safe bearer check for internal service-to-service routes. Fails closed:
+// a missing configured secret is 503 (unavailable/retryable), a wrong or absent
+// token is 401.
+function authorizeInternalBearer(
+  request: Request,
+  configuredSecret: string | undefined,
+  unavailableMessage: string,
+) {
   const secret = configuredSecret?.trim();
   if (!secret) {
-    throw new ApiError(503, "unavailable", "Email lifecycle persistence is unavailable.", true);
+    throw new ApiError(503, "unavailable", unavailableMessage, true);
   }
   const authorization = request.headers.get("authorization");
   const supplied = authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
@@ -2536,6 +2591,10 @@ function authorizeEmailLifecycleInternalRequest(request: Request, configuredSecr
   ) {
     throw new ApiError(401, "authentication_required", "Authentication required.");
   }
+}
+
+function authorizeEmailLifecycleInternalRequest(request: Request, configuredSecret?: string) {
+  authorizeInternalBearer(request, configuredSecret, "Email lifecycle persistence is unavailable.");
 }
 
 async function internalJsonBody(request: Request): Promise<Record<string, unknown>> {

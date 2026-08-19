@@ -16,6 +16,7 @@ import {
   KnowledgeApplicationService,
   SkillImportApplicationService,
   TaskApplicationService,
+  WikiCommandApplicationService,
 } from "@opencompany/core";
 import {
   PostgresChatAttachmentRepository,
@@ -24,13 +25,19 @@ import {
 import { PostgresKnowledgeRepository } from "@opencompany/db/knowledge-repository";
 import { createPooledDb } from "@opencompany/db/pool";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
+import { getWikiAccessForUser } from "@opencompany/db/wiki";
+import { PostgresWikiCommandRepository } from "@opencompany/db/wiki-command-repository";
 import { createLogger } from "@opencompany/observability";
 import { registerNodeObservability, shutdownNodeObservability } from "@opencompany/telemetry/node";
 import { WorkOS } from "@workos-inc/node";
 import { createApiApp } from "./app";
 import { createAttachmentUploadService } from "./attachments";
 import { createAttioIngress } from "./attio-ingress";
-import { createWorkOsApiAuthenticator, createWorkOsApiIdentityVerifier } from "./auth";
+import {
+  createWorkOsApiAuthenticator,
+  createWorkOsApiIdentityVerifier,
+  resolveWikiServiceActor,
+} from "./auth";
 import { createAutomationServices } from "./automations";
 import { createBillingReconcileService } from "./billing-reconcile";
 import { createBrainAssetService } from "./brain-assets";
@@ -101,6 +108,9 @@ const automations = createAutomationServices({
 });
 const knowledgeRepository = new PostgresKnowledgeRepository(database.db);
 const knowledge = new KnowledgeApplicationService(knowledgeRepository);
+const wikiCommands = new WikiCommandApplicationService(
+  new PostgresWikiCommandRepository(database.db),
+);
 const brainSources = new BrainSourceApplicationService(database.db);
 const brainImports = new BrainImportApplicationService(database.db, brainSources);
 const browserProfiles = new BrowserProfileApplicationService(database.db);
@@ -122,6 +132,11 @@ const app = createApiApp({
   workflows: automations.workflows,
   schedules: automations.schedules,
   knowledge,
+  wikiCommands,
+  resolveWikiServiceActor: (actorInput) => resolveWikiServiceActor(execute, actorInput),
+  ...(process.env.API_INTERNAL_TOKEN?.trim()
+    ? { wikiCommandsInternalSecret: process.env.API_INTERNAL_TOKEN.trim() }
+    : {}),
   brainSources,
   brainImports,
   browserProfiles,
@@ -166,6 +181,16 @@ const app = createApiApp({
   integrationAccounts: createIntegrationAccountService({ db: database.db, runner: runnerClient }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
   mcp: createMcpService({
+    // The API-hosted MCP tool runs the same command service in-process — no
+    // loopback HTTP. The gateway resolves wiki access and reauthorizes the actor
+    // from Postgres before executing.
+    wiki: {
+      getAccess: (userWorkosId) => getWikiAccessForUser(userWorkosId, database.db),
+      execute: async ({ userWorkosId, workspaceId, command, idempotencyKey }) => {
+        const actor = await resolveWikiServiceActor(execute, { userWorkosId, workspaceId });
+        return wikiCommands.execute({ actor, command, idempotencyKey });
+      },
+    },
     ...(process.env.VERCEL_AI_GATEWAY_API_KEY
       ? { gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY }
       : {}),

@@ -21,6 +21,7 @@ import type {
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { HarnessEngine } from "@opencompany/db/product-schema";
+import { executeApiWikiCommand } from "./api-wiki-client";
 import { wakeCodexChatWorker } from "./codex-chat-worker";
 import type { RunnerEnv } from "./env";
 import { planHarnessForTask } from "./harness";
@@ -29,7 +30,10 @@ import { getHarnessPlannerContextForRunner } from "./harness-planner";
 type Context = {
   sessionId: string;
   turnId: string;
-  env: Pick<RunnerEnv, "vercelAiGatewayApiKey" | "browserEnabled">;
+  env: Pick<
+    RunnerEnv,
+    "vercelAiGatewayApiKey" | "browserEnabled" | "apiOrigin" | "apiInternalToken"
+  >;
   signal: AbortSignal;
   mentionedSkillIds: string[];
   approvalContinuation: boolean;
@@ -49,7 +53,7 @@ export type HostTools = {
   deleteTaskSchedule?: (
     input: DeleteTaskScheduleToolInput,
   ) => Promise<DeleteTaskScheduleToolOutput>;
-  runWiki?: (input: Record<string, unknown>) => Promise<unknown>;
+  runWiki?: (input: Record<string, unknown>, context: { toolCallId: string }) => Promise<unknown>;
   skills?: SkillDispatcher;
   workflows?: WorkflowDispatcher;
   browserTools?: BrowserToolRunner;
@@ -73,8 +77,18 @@ export async function loadHostTools(
       mentionedSkillIds: context.mentionedSkillIds,
     }),
   );
-  const call = (operation: ChatHostToolGatewayRequest["operation"], input?: object) =>
-    callGateway(context, execute, operation, input as Record<string, unknown> | undefined);
+  const call = (
+    operation: ChatHostToolGatewayRequest["operation"],
+    input?: object,
+    toolCallId?: string,
+  ) =>
+    callGateway(
+      context,
+      execute,
+      operation,
+      input as Record<string, unknown> | undefined,
+      toolCallId,
+    );
 
   return {
     bootstrap,
@@ -90,7 +104,10 @@ export async function loadHostTools(
         }
       : {}),
     ...(bootstrap.wikiEnabled
-      ? { runWiki: (input: Record<string, unknown>) => call("wiki", input) }
+      ? {
+          runWiki: (input: Record<string, unknown>, wikiContext: { toolCallId: string }) =>
+            call("wiki", input, wikiContext.toolCallId),
+        }
       : {}),
     ...(bootstrap.browserToolsEnabled
       ? {
@@ -142,7 +159,7 @@ export async function loadHostTools(
         }
       : {}),
     close: async () => {
-      await callGateway(context, execute, "browser_end_profile", undefined, false);
+      await callGateway(context, execute, "browser_end_profile", undefined, undefined, false);
     },
   };
 }
@@ -169,6 +186,7 @@ async function callGateway(
   execute: typeof executePersistedChatHostTool,
   operation: ChatHostToolGatewayRequest["operation"],
   input?: Record<string, unknown>,
+  toolCallId?: string,
   includeTurnSignal = true,
 ): Promise<unknown> {
   const request: ChatHostToolGatewayRequest = {
@@ -176,6 +194,7 @@ async function callGateway(
     sessionId: context.sessionId,
     turnId: context.turnId,
     ...(input ? { input } : {}),
+    ...(toolCallId ? { toolCallId } : {}),
   };
   const response = await execute({
     request,
@@ -185,6 +204,18 @@ async function callGateway(
       defer: (work) => {
         void work;
       },
+      // Wiki commands cross the authenticated HTTP boundary into apps/api; the
+      // runner never touches the wiki database directly.
+      executeWikiCommand: (wikiInput) =>
+        executeApiWikiCommand({
+          origin: context.env.apiOrigin,
+          token: context.env.apiInternalToken,
+          workspaceId: wikiInput.workspaceId,
+          actorId: wikiInput.actorId,
+          toolInput: wikiInput.toolInput,
+          idempotencyKey: wikiInput.idempotencyKey,
+          signal: context.signal,
+        }),
       planHarness: async ({ actorId, prompt }) => {
         const plannerContext = await getHarnessPlannerContextForRunner(actorId, {
           browserEnabled: context.env.browserEnabled,

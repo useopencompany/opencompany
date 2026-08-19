@@ -24,6 +24,7 @@
     "@opencompany/telemetry": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@opencompany/protocol": "workspace:*",
+    "@opencompany/wiki": "workspace:*",
     "@vercel/blob": "^2.4.0",
     "@workos-inc/node": "^9.3.1",
     "drizzle-orm": "^0.45.2",

@@ -488,6 +488,7 @@ export type BrainDocumentVersionOperation = "overwrite" | "delete";
 // its stable identity ([[wiki-links]] target slugs); `path` is its position as
 // the slug chain of its ancestors plus itself. Mirrors @opencompany/wiki.
 export type WikiKind = "project" | "person" | "company" | "research" | "meeting" | "other";
+export type WikiNodeType = "page" | "folder";
 export type WikiPageFormat = BrainDocumentFormat;
 export type WikiPageVersionOperation = "write" | "move" | "delete";
 export type WikiLinkKind = "page" | "source";
@@ -2053,9 +2054,9 @@ export const brainImportCandidates = productSchema.table(
 );
 
 // ---------------------------------------------------------------------------
-// Wiki (brain v2). One wiki per workspace — pages hang directly off the
-// workspace, there is no container table. See packages/wiki for the
-// domain rules these tables store.
+// Wiki (brain v2). One wiki per workspace. Folder and page nodes share this
+// table; paths are their workspace-unique identities. See packages/wiki for
+// the domain rules these tables store.
 // ---------------------------------------------------------------------------
 
 export const wikiPages = productSchema.table(
@@ -2065,12 +2066,12 @@ export const wikiPages = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    // Stable identity, unique per workspace; [[wiki-links]] target slugs so
-    // links survive restructuring.
+    // Basename (the final path segment), unique only among siblings.
     slug: text("slug").notNull(),
-    // Tree position: ancestor slug chain plus own slug ("projects/site").
-    // Invariant (app-enforced): the last path segment equals `slug`.
+    // Workspace-unique identity. Leading segments are folder slugs and the
+    // final segment is this node's slug (app-enforced).
     path: text("path").notNull(),
+    nodeType: text("node_type").$type<WikiNodeType>().notNull().default("page"),
     // Display title derived from the body's first H1 (fallback: slug). Never identity.
     title: text("title").notNull().default(""),
     kind: text("kind").$type<WikiKind>().notNull().default("other"),
@@ -2102,10 +2103,6 @@ export const wikiPages = productSchema.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    workspaceSlugIdx: uniqueIndex("goat_wiki_pages_workspace_slug_idx").on(
-      table.workspaceId,
-      table.slug,
-    ),
     workspacePathIdx: uniqueIndex("goat_wiki_pages_workspace_path_idx").on(
       table.workspaceId,
       table.path,
@@ -2122,6 +2119,10 @@ export const wikiPages = productSchema.table(
     kindCheck: check(
       "goat_wiki_pages_kind_check",
       sql`${table.kind} IN ('project', 'person', 'company', 'research', 'meeting', 'other')`,
+    ),
+    nodeTypeCheck: check(
+      "goat_wiki_pages_node_type_check",
+      sql`${table.nodeType} IN ('page', 'folder')`,
     ),
     formatCheck: check(
       "goat_wiki_pages_format_check",
@@ -2201,7 +2202,7 @@ export const wikiTimelineEntries = productSchema.table(
 );
 
 // Derived link index, rebuilt from a page's body on every write. `target` is a
-// page slug (kind='page' — target page need not exist yet) or a source ref
+// page path (kind='page' — target page need not exist yet) or a source ref
 // (kind='source', e.g. "linear:issue:ENG-123"). Never edited directly; powers
 // backlinks and per-page source listings.
 export const wikiLinks = productSchema.table(

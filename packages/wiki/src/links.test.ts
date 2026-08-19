@@ -3,6 +3,7 @@ import {
   formatWikiPageLink,
   formatWikiSourceLink,
   parseWikiInlineLinks,
+  rewriteWikiPageLinks,
   wikiPageLinkTargets,
   wikiSourceRefTargets,
 } from "./links";
@@ -63,7 +64,7 @@ describe("parseWikiInlineLinks", () => {
 describe("format helpers", () => {
   it("emits bare page links and prefixed source links", () => {
     expect(formatWikiPageLink("some-slug")).toBe("[[some-slug]]");
-    expect(formatWikiPageLink("some-slug", "Label")).toBe("[[some-slug|Label]]");
+    expect(formatWikiPageLink("projects/some-slug", "Label")).toBe("[[projects/some-slug|Label]]");
     expect(formatWikiSourceLink("linear:issue:ENG-1", "ENG-1")).toBe(
       "[[source:linear:issue:ENG-1|ENG-1]]",
     );
@@ -73,5 +74,42 @@ describe("format helpers", () => {
     expect(() => formatWikiPageLink("Not A Slug")).toThrow();
     expect(() => formatWikiSourceLink("nope")).toThrow();
     expect(() => formatWikiPageLink("ok", "bad]label")).toThrow();
+  });
+});
+
+describe("rewriteWikiPageLinks", () => {
+  it("rewrites path targets and preserves labels", () => {
+    expect(
+      rewriteWikiPageLinks("See [[a/b]] and [[a/b/c|Nested label]].", (target) =>
+        target === "a/b" || target.startsWith("a/b/") ? `archive${target.slice(1)}` : null,
+      ),
+    ).toBe("See [[archive/b]] and [[archive/b/c|Nested label]].");
+  });
+
+  it("preserves explicit page prefixes and surrounding whitespace", () => {
+    expect(rewriteWikiPageLinks("[[ page: a/b |Label]]", () => "x/y")).toBe(
+      "[[ page: x/y |Label]]",
+    );
+  });
+
+  it("leaves escaped links, source links, and code ranges untouched", () => {
+    const text = [
+      "\\[[a/b]] [[source:linear:issue:ENG-1]] [[a/b]]",
+      "`[[a/b]]`",
+      "```md",
+      "[[a/b]]",
+      "```",
+    ].join("\n");
+    const expected = text.replace(
+      "\\[[a/b]] [[source:linear:issue:ENG-1]] [[a/b]]",
+      "\\[[a/b]] [[source:linear:issue:ENG-1]] [[x/y]]",
+    );
+    expect(rewriteWikiPageLinks(text, () => "x/y")).toBe(expected);
+  });
+
+  it("preserves the label verbatim", () => {
+    expect(rewriteWikiPageLinks("[[a/b|Label with (c/d)]]", () => "x/y")).toBe(
+      "[[x/y|Label with (c/d)]]",
+    );
   });
 });

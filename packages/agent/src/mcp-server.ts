@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { getWikiAccessForUser } from "@opencompany/db/wiki";
 import type { BrainWithWorkspace } from "@opencompany/db/workspaces";
 import { getBrainAccess, listAccessibleBrainsForUser } from "@opencompany/db/workspaces";
 import {
@@ -8,6 +7,7 @@ import {
   WIKI_TOOL_DESCRIPTION,
   WIKI_TOOL_NAME,
   type WikiToolInput,
+  type WikiToolOutput,
 } from "@opencompany/wiki/tool";
 import * as z from "zod/v4-mini";
 import {
@@ -50,7 +50,6 @@ import {
   searchBrainToToolInput,
 } from "./brain-tools";
 import type { BrainToolInput } from "./chat-ui";
-import { runWikiToolForUser } from "./wiki-tool";
 
 // Tool registration for the user-level opencompany MCP connector: one surface spanning
 // every brain the token's user can access, addressed via an optional `brain`
@@ -61,9 +60,27 @@ import { runWikiToolForUser } from "./wiki-tool";
 // get_document, list_documents, get_timeline) whose parameters match what an agent
 // guesses without a system prompt. They map to the shared read engine via the pure
 // mappers in brain-tools.ts. brain remains as an advanced escape hatch.
+// API-owned wiki gateway injected by apps/api. The agent package never queries
+// the wiki database: it asks the gateway which workspaces the user can reach and
+// hands resolved commands back for in-process execution against the same
+// application service the browser and runner use.
+export type McpWikiGateway = {
+  getAccess(userWorkosId: string): Promise<{
+    enabled: boolean;
+    workspaces: Array<{ id: string; name: string; slug: string | null }>;
+  }>;
+  execute(input: {
+    userWorkosId: string;
+    workspaceId: string;
+    command: WikiToolInput;
+    idempotencyKey: string;
+  }): Promise<WikiToolOutput>;
+};
+
 export type McpToolContext = {
   userWorkosId: string;
   gatewayApiKey: string;
+  wiki?: McpWikiGateway;
   signal?: AbortSignal;
 };
 
@@ -470,9 +487,21 @@ export function registerWikiTool(server: McpServer, ctx: McpToolContext) {
       inputSchema: wikiToolMcpInputSchema,
       annotations: WIKI_TOOL_ANNOTATIONS,
     },
-    async (args: WikiToolInput & { workspace?: string | undefined }) => {
+    async (
+      args: WikiToolInput & { workspace?: string | undefined },
+      extra?: { requestId?: string | number },
+    ) => {
       try {
-        const access = await getWikiAccessForUser(ctx.userWorkosId);
+        const wiki = ctx.wiki;
+        if (!wiki) {
+          return mcpTextToolResult({
+            ok: false,
+            stdout: "",
+            stderr: "",
+            error: "The wiki tool is not configured.",
+          });
+        }
+        const access = await wiki.getAccess(ctx.userWorkosId);
         if (!access.enabled) {
           return mcpTextToolResult({
             ok: false,
@@ -503,11 +532,15 @@ export function registerWikiTool(server: McpServer, ctx: McpToolContext) {
                 : `Pass "workspace" with one of:\n${listing}`,
           });
         }
-        const { workspace: _workspace, ...toolInput } = args;
-        const output = await runWikiToolForUser({
-          workspaceId: workspace.id,
+        const { workspace: _workspace, ...command } = args;
+        // Stable within the authenticated MCP request; distinct requests get
+        // distinct keys so intentional repeat calls are not collapsed.
+        const idempotencyKey = `mcp-wiki:${ctx.userWorkosId}:${workspace.id}:${extra?.requestId ?? "request"}`;
+        const output = await wiki.execute({
           userWorkosId: ctx.userWorkosId,
-          toolInput,
+          workspaceId: workspace.id,
+          command,
+          idempotencyKey,
         });
         return mcpTextToolResult(
           output.ok

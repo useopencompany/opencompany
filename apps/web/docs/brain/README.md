@@ -5,6 +5,11 @@ file-backed documents, provenance, and a lightweight relation/wiki-link graph. P
 durable authority. Filesystem trees are temporary projections for runner ingestion agents, not the
 storage model.
 
+The opt-in Workspace Wiki is a separate, simpler knowledge surface built on `packages/wiki`.
+It uses an Obsidian-style tree: folders are pure containers, pages are leaf Markdown documents,
+and a page's full path is its identity. Wiki links therefore use `[[path/to/page]]` and are
+rewritten when their target moves.
+
 ## Runtime ownership
 
 - `apps/api` owns authenticated Brain commands, assets, sources, fixed read models, MCP delivery,
@@ -16,6 +21,8 @@ storage model.
 - `packages/brain` owns document schemas, parsing, validation, retrieval helpers, CLI behavior,
   and the pointer/copy rule.
 - `packages/db` owns Brain tables, repositories, read queries, projections, and materialization.
+- `packages/wiki` and `packages/db/src/wiki.ts` own the Workspace Wiki path, folder, link, and
+  mutation rules.
 - `apps/web` renders Brain UI and calls typed `/v1` resources or named API read models. It does not
   read or write Brain tables.
 
@@ -43,6 +50,7 @@ not host MCP tools, authorize Brain access, verify provider payloads, or persist
 | API composition | `apps/api/src/server.ts`, `app.ts`, and `brain-assets.ts` |
 | Runner ingestion | `apps/runner/src/brain-ingest-worker.ts` and `brain-agent-ingest.ts` |
 | Tables, materialization, and read plane | `packages/db/src/product-schema.ts`, `brain-files.ts`, and `brain-read.ts` |
+| Workspace Wiki | `packages/wiki/src/*`, `packages/db/src/wiki.ts`, and `apps/web/components/WikiView.tsx` |
 
 ## Invariants
 

@@ -88,14 +88,14 @@ describe("KnowledgeApplicationService", () => {
     ).rejects.toMatchObject({ code: "forbidden" });
   });
 
-  it("uses the route slug for Wiki updates and preserves empty titles", async () => {
+  it("uses the route id for Wiki updates and preserves empty titles", async () => {
     const updateWikiPage = vi.fn(async () => {
       throw new Error("stop after capture");
     });
     const service = new KnowledgeApplicationService(repository({ updateWikiPage }));
 
     await expect(
-      service.updateWikiPage(actor, " page-slug ", {
+      service.updateWikiPage(actor, " page-id ", {
         body: "# Updated",
         kind: "project",
         title: "",
@@ -103,7 +103,7 @@ describe("KnowledgeApplicationService", () => {
     ).rejects.toThrow("stop after capture");
     expect(updateWikiPage).toHaveBeenCalledWith({
       actor,
-      slug: "page-slug",
+      id: "page-id",
       body: "# Updated",
       kind: "project",
       title: "",
@@ -130,7 +130,7 @@ describe("KnowledgeApplicationService", () => {
       service.addWikiTimelineEntry(actor, {
         idempotencyKey: "timeline-1",
         clientEntryId: " entry_1 ",
-        slug: " project-alpha ",
+        id: " page-id ",
         text: " Shipped ",
         at: "2026-08-12T08:00:00.000Z",
       }),
@@ -139,7 +139,7 @@ describe("KnowledgeApplicationService", () => {
       actor,
       idempotencyKey: "timeline-1",
       clientEntryId: "entry_1",
-      slug: "project-alpha",
+      id: "page-id",
       text: "Shipped",
       at: new Date("2026-08-12T08:00:00.000Z"),
     });

@@ -1005,11 +1005,11 @@ export const createWikiPageRoute = createRoute({
 
 export const updateWikiPageRoute = createRoute({
   method: "patch",
-  path: "/v1/wiki/pages/{slug}",
+  path: "/v1/wiki/pages/{id}",
   tags: ["Wiki"],
   security: actorSecurity,
   request: {
-    params: z.object({ slug: ResourceIdSchema }),
+    params: z.object({ id: ResourceIdSchema }),
     body: { required: true, content: { "application/json": { schema: UpdateWikiPageBodySchema } } },
   },
   responses: {
@@ -1023,11 +1023,11 @@ export const updateWikiPageRoute = createRoute({
 
 export const deleteWikiPageRoute = createRoute({
   method: "post",
-  path: "/v1/wiki/pages/{slug}/delete",
+  path: "/v1/wiki/pages/{id}/delete",
   tags: ["Wiki"],
   security: actorSecurity,
   request: {
-    params: z.object({ slug: ResourceIdSchema }),
+    params: z.object({ id: ResourceIdSchema }),
     body: { required: true, content: { "application/json": { schema: DeleteWikiPageBodySchema } } },
   },
   responses: {
@@ -1041,11 +1041,11 @@ export const deleteWikiPageRoute = createRoute({
 
 export const addWikiTimelineEntryRoute = createRoute({
   method: "post",
-  path: "/v1/wiki/pages/{slug}/timeline",
+  path: "/v1/wiki/pages/{id}/timeline",
   tags: ["Wiki"],
   security: actorSecurity,
   request: {
-    params: z.object({ slug: ResourceIdSchema }),
+    params: z.object({ id: ResourceIdSchema }),
     headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
     body: {
       required: true,

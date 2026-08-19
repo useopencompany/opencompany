@@ -5,7 +5,7 @@ import {
   userWorkosIdFromMcpAuth,
   verifyMcpBearerToken,
 } from "./mcp-oauth";
-import { registerBrainTools, registerWikiTool } from "./mcp-server";
+import { type McpWikiGateway, registerBrainTools, registerWikiTool } from "./mcp-server";
 import { MCP_SERVER_NAME } from "./mcp-setup";
 
 const MCP_MAX_DURATION_SECONDS = 120;
@@ -14,7 +14,10 @@ export type McpService = {
   handle(request: Request): Promise<Response>;
 };
 
-export function createMcpService(input: { gatewayApiKey?: string }): McpService {
+export function createMcpService(input: {
+  gatewayApiKey?: string;
+  wiki?: McpWikiGateway;
+}): McpService {
   return {
     async handle(request) {
       const authConfig = resolveAuthKitDomain();
@@ -41,7 +44,11 @@ export function createMcpService(input: { gatewayApiKey?: string }): McpService 
                 gatewayApiKey,
                 signal: authenticatedRequest.signal,
               });
-              registerWikiTool(server, { userWorkosId, gatewayApiKey });
+              registerWikiTool(server, {
+                userWorkosId,
+                gatewayApiKey,
+                ...(input.wiki ? { wiki: input.wiki } : {}),
+              });
             },
             {
               serverInfo: { name: MCP_SERVER_NAME, version: "0.1.0" },

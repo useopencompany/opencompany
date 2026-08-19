@@ -16,6 +16,12 @@ export type ChatHostToolGatewayRequest = {
   sessionId: string;
   turnId: string;
   input?: Record<string, unknown>;
+  /**
+   * Stable AI-SDK tool-call id for the invocation, when the operation has one.
+   * Used to build a per-tool-call idempotency key so a transport retry replays
+   * the same write instead of duplicating it.
+   */
+  toolCallId?: string;
 };
 
 export type ChatHostSkill = {

@@ -1,10 +1,10 @@
 "use client";
 
 // Notion-style "/" menu for the wiki editor. Typing "/" opens a command list of
-// block types (headings, lists, plain text) plus "Page", which creates a
-// sub-page of the current page and inserts a bare [[slug]] link at the cursor
-// (the chip renders the target's live title). Page creation is optimistic
-// (local-first), so the whole interaction is synchronous.
+// block types (headings, lists, plain text), a searchable existing-page link,
+// plus "Page", which creates a sibling of the current page and inserts its
+// full [[path]] at the cursor (the chip renders the target's live title). Page
+// creation is optimistic (local-first), so the whole interaction is synchronous.
 //
 // Rendering, keyboard navigation, and positioning are handled by the shared
 // EditorSuggestionMenu; this file only defines the commands and their rows.
@@ -17,6 +17,7 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  Link2,
   List,
   ListOrdered,
   type LucideIcon,
@@ -34,7 +35,7 @@ export type WikiSlashCreatedPage = {
 
 export type WikiSlashCommandHandlers = {
   /**
-   * Creates the sub-page (optimistically — must return synchronously) and
+   * Creates the sibling page (optimistically — must return synchronously) and
    * returns it, or null when creation is not possible.
    */
   createPage: () => WikiSlashCreatedPage | null;
@@ -116,8 +117,8 @@ const WIKI_SLASH_ITEMS: WikiSlashCommandItem[] = [
   {
     id: "page",
     label: "Page",
-    description: "Create a sub-page and link it here",
-    keywords: ["page", "subpage", "link", "new"],
+    description: "Create a sibling page and link it here",
+    keywords: ["page", "sibling", "new"],
     icon: FilePlus2,
     run: ({ editor, range, handlers }) => {
       const created = handlers.createPage();
@@ -126,9 +127,22 @@ const WIKI_SLASH_ITEMS: WikiSlashCommandItem[] = [
         .chain()
         .focus()
         .deleteRange(range)
-        .insertContent([wikiLinkContent(`[[${created.slug}]]`), { type: "text", text: " " }])
+        .insertContent([wikiLinkContent(`[[${created.path}]]`), { type: "text", text: " " }])
         .run();
       handlers.onPageCreated?.(created);
+    },
+  },
+  {
+    id: "linkToPage",
+    label: "Link to page",
+    description: "Link to an existing wiki page",
+    keywords: ["link", "reference", "existing", "wiki"],
+    icon: Link2,
+    run: ({ editor, range }) => {
+      // Hand off to the wiki-page suggestion plugin. Inserting its `[[`
+      // trigger opens the searchable page picker in the same transaction that
+      // closes this slash menu.
+      editor.chain().focus().deleteRange(range).insertContent("[[").run();
     },
   },
 ];

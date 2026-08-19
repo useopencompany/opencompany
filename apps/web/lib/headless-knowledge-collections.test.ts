@@ -41,6 +41,7 @@ const wikiPage = {
   slug: "launch-plan",
   path: "Launch Plan",
   title: "Launch Plan",
+  nodeType: "page" as const,
   kind: "project" as const,
   body: "Plan",
   contentHash: "a".repeat(64),
@@ -83,8 +84,8 @@ describe("headless knowledge collections", () => {
     const wiki = getHeadlessWikiCollections("workspace_knowledge");
 
     expect((wiki.pages as unknown as TestCollection).options).toMatchObject({
-      id: "headless-wiki-pages:v1:workspace_knowledge",
-      shapeOptions: { url: "https://api.example.test/v1/read-models/wiki-pages-v1" },
+      id: "headless-wiki-pages:v2:workspace_knowledge",
+      shapeOptions: { url: "https://api.example.test/v1/read-models/wiki-pages-v2" },
     });
     expect((wiki.timeline as unknown as TestCollection).options.shapeOptions.url).toBe(
       "https://api.example.test/v1/read-models/wiki-timeline-v1",
@@ -115,7 +116,7 @@ describe("headless knowledge collections", () => {
 
     await expect(first).resolves.toEqual([81]);
     await expect(second).resolves.toEqual([82]);
-    expect(updateWikiPageRequest).toHaveBeenNthCalledWith(2, "launch-plan", {
+    expect(updateWikiPageRequest).toHaveBeenNthCalledWith(2, "wiki_page_1", {
       body: "Second",
       kind: "project",
       title: "Launch Plan",

@@ -1,12 +1,18 @@
-// Core wiki vocabulary: kinds, slugs, and tree paths.
+// Core wiki vocabulary: node types, kinds, slugs, and tree paths.
 //
-// A page has two coordinates:
-//  - `slug`: a stable, workspace-unique identifier. `[[wiki-links]]` target slugs,
-//    so links survive any restructuring.
-//  - `path`: the page's position in the tree, expressed as the slug chain of its
-//    ancestors plus its own slug (`projects/website-redesign`). Moving a page
-//    rewrites paths (its own and its descendants'), never slugs.
-// Invariant: the last path segment is always the page's slug.
+// `path` is the workspace-unique identity of a node. `slug` is its final path
+// segment and is unique only among siblings. Leading path segments are folders;
+// pages are always leaves. `[[wiki-links]]` target full page paths, so moving a
+// node rewrites both subtree paths and links that point into the subtree.
+// Invariant: the last path segment is always the node's slug.
+
+export const WIKI_NODE_TYPES = ["page", "folder"] as const;
+
+export type WikiNodeType = (typeof WIKI_NODE_TYPES)[number];
+
+export function isValidWikiNodeType(value: unknown): value is WikiNodeType {
+  return typeof value === "string" && (WIKI_NODE_TYPES as readonly string[]).includes(value);
+}
 
 export const WIKI_KINDS = ["project", "person", "company", "research", "meeting", "other"] as const;
 
@@ -40,7 +46,7 @@ export function wikiSlugFromPath(path: string): string {
   return segments[segments.length - 1] ?? "";
 }
 
-/** Parent path, or null for a root page. */
+/** Containing folder path, or null for a root node. */
 export function parentWikiPath(path: string): string | null {
   const index = path.lastIndexOf("/");
   return index === -1 ? null : path.slice(0, index);

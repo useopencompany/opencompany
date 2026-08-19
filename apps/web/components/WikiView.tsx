@@ -1,6 +1,6 @@
 "use client";
 
-// The wiki surface: a Notion-lite tree of markdown pages with subpages.
+// The wiki surface: an Obsidian-style tree of folders and leaf markdown pages.
 //
 // Local-first: the tree, page bodies, and timelines are Electric-synced
 // TanStack DB collections (see lib/headless-knowledge-collections.ts). Every mutation is
@@ -13,6 +13,7 @@
 // history.pushState.
 
 import {
+  parentWikiPath,
   WIKI_KINDS,
   type WikiKind,
   wikiPageLinkTargets,
@@ -24,7 +25,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  CornerDownRight,
   History,
   MoreHorizontal,
   Plus,
@@ -55,11 +55,12 @@ export type WikiPageData = {
   slug: string;
   path: string;
   title: string;
+  nodeType: "page" | "folder";
   kind: WikiKind;
   body: string;
 };
 
-type TreeNode = WikiPageData & { children: TreeNode[] };
+export type TreeNode = WikiPageData & { children: TreeNode[] };
 
 const SAVE_DEBOUNCE_MS = 500;
 
@@ -92,7 +93,9 @@ function WikiStaticFrame({
   initialPath: string | null;
 }) {
   const nodes = buildTree(pages);
-  const page = initialPath ? (pages.find((entry) => entry.path === initialPath) ?? null) : null;
+  const page = initialPath
+    ? (pages.find((entry) => entry.nodeType === "page" && entry.path === initialPath) ?? null)
+    : null;
   const noop = () => undefined;
   return (
     <div className="flex h-full min-h-0 w-full">
@@ -100,7 +103,8 @@ function WikiStaticFrame({
         nodes={nodes}
         selectedPath={initialPath}
         onSelect={noop}
-        onCreate={noop}
+        onCreate={() => null}
+        onRename={noop}
         onDelete={noop}
       />
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
@@ -117,7 +121,10 @@ function WikiStaticFrame({
             </div>
           </div>
         ) : (
-          <WikiEmptyState hasPages={pages.length > 0} onCreate={noop} />
+          <WikiEmptyState
+            hasPages={pages.some((entry) => entry.nodeType === "page")}
+            onCreate={noop}
+          />
         )}
       </div>
     </div>
@@ -173,16 +180,27 @@ function WikiLiveView({
 
   const nodes = useMemo(() => buildTree(pages), [pages]);
   const wikiLinks = useMemo(
-    () => Object.fromEntries(pages.map((page) => [page.slug, `/wiki/${page.path}`])),
+    () =>
+      Object.fromEntries(
+        pages
+          .filter((page) => page.nodeType === "page")
+          .map((page) => [page.path, `/wiki/${page.path}`]),
+      ),
     [pages],
   );
   const pageTitles = useMemo(
-    () => Object.fromEntries(pages.map((page) => [page.slug, page.title || "Untitled"])),
+    () =>
+      Object.fromEntries(
+        pages
+          .filter((page) => page.nodeType === "page")
+          .map((page) => [page.path, page.title || "Untitled"]),
+      ),
     [pages],
   );
-  const backlinksBySlug = useMemo(() => {
+  const backlinksByPath = useMemo(() => {
     const index = new Map<string, Array<{ path: string; title: string }>>();
     for (const page of pages) {
+      if (page.nodeType !== "page") continue;
       for (const target of wikiPageLinkTargets(page.body)) {
         const existing = index.get(target);
         const entry = { path: page.path, title: page.title };
@@ -193,7 +211,9 @@ function WikiLiveView({
     return index;
   }, [pages]);
 
-  const page = selectedPath ? (pages.find((entry) => entry.path === selectedPath) ?? null) : null;
+  const page = selectedPath
+    ? (pages.find((entry) => entry.nodeType === "page" && entry.path === selectedPath) ?? null)
+    : null;
 
   const surfaceError = useCallback((message: string | undefined) => {
     setError(message ?? "Something went wrong.");
@@ -213,13 +233,13 @@ function WikiLiveView({
   // page lands ready to name — the Notion flow.
   const focusTitlePageIdRef = useRef<string | null>(null);
 
-  const createPage = useCallback(
-    (parentPath: string | null, title: string) => {
+  const createNode = useCallback(
+    (parentPath: string | null, title: string, nodeType: "page" | "folder") => {
       if (!syncReady) {
         surfaceError("The wiki is still syncing — try again in a moment.");
         return null;
       }
-      const slug = availableWikiSlug(title, pages);
+      const slug = availableWikiSlug(title, pages, parentPath);
       if (!slug) {
         surfaceError(`Cannot derive a page name from "${title}".`);
         return null;
@@ -233,6 +253,7 @@ function WikiLiveView({
           slug,
           path,
           title,
+          nodeType,
           kind: "other",
           body: "",
           contentHash: "0".repeat(64),
@@ -245,7 +266,7 @@ function WikiLiveView({
           updatedAt: now,
         }),
       );
-      return { id, slug, path, title };
+      return { id, slug, path, title, nodeType };
     },
     [collections, pages, surfaceError, syncReady, trackPersistence],
   );
@@ -262,24 +283,45 @@ function WikiLiveView({
 
   const createAndOpenPage = useCallback(
     (parentPath: string | null) => {
-      const created = createPage(parentPath, "");
+      const created = createNode(parentPath, "", "page");
       if (created) openCreatedPage(created);
+      return created;
     },
-    [createPage, openCreatedPage],
+    [createNode, openCreatedPage],
   );
 
-  const deletePage = useCallback(
+  const createFolder = useCallback(
+    (parentPath: string | null) => createNode(parentPath, "", "folder"),
+    [createNode],
+  );
+
+  const renameNode = useCallback(
+    (target: WikiPageData, title: string) => {
+      if (!syncReady || target.title === title) return;
+      trackPersistence(
+        collections.pages.update(target.id, (draft) => {
+          draft.title = title;
+        }),
+      );
+    },
+    [collections, syncReady, trackPersistence],
+  );
+
+  const deleteNode = useCallback(
     (target: WikiPageData) => {
       if (!syncReady) {
         surfaceError("The wiki is still syncing — try again in a moment.");
         return;
       }
-      const doomed = pages.filter(
-        (entry) => entry.path === target.path || entry.path.startsWith(`${target.path}/`),
-      );
+      const doomed =
+        target.nodeType === "folder"
+          ? pages.filter(
+              (entry) => entry.path === target.path || entry.path.startsWith(`${target.path}/`),
+            )
+          : [target];
       const message =
-        doomed.length > 1
-          ? `Delete "${target.title || target.slug}" and all its subpages?`
+        target.nodeType === "folder"
+          ? `Delete folder "${target.title || target.slug}" and all its contents?`
           : `Delete "${target.title || target.slug}"?`;
       if (!window.confirm(message)) return;
       trackPersistence(collections.pages.delete(doomed.map((entry) => entry.id)));
@@ -296,8 +338,11 @@ function WikiLiveView({
         nodes={nodes}
         selectedPath={selectedPath}
         onSelect={navigate}
-        onCreate={(parentPath) => createAndOpenPage(parentPath)}
-        onDelete={(node) => deletePage(node)}
+        onCreate={(parentPath, nodeType) =>
+          nodeType === "folder" ? createFolder(parentPath) : createAndOpenPage(parentPath)
+        }
+        onRename={renameNode}
+        onDelete={(node) => deleteNode(node)}
       />
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         {error ? (
@@ -314,17 +359,20 @@ function WikiLiveView({
             editable={syncReady}
             wikiLinks={wikiLinks}
             pageTitles={pageTitles}
-            backlinks={backlinksBySlug.get(page.slug) ?? []}
+            backlinks={backlinksByPath.get(page.path) ?? []}
             timelineCount={timelineCountByPageId.get(page.id) ?? 0}
             focusTitlePageIdRef={focusTitlePageIdRef}
             onError={surfaceError}
             onNavigate={navigate}
-            onDelete={() => deletePage(page)}
-            onCreateSubpage={() => createPage(page.path, "")}
-            onOpenCreatedSubpage={openCreatedPage}
+            onDelete={() => deleteNode(page)}
+            onCreateSibling={() => createNode(parentWikiPath(page.path), "", "page")}
+            onOpenCreatedPage={openCreatedPage}
           />
         ) : (
-          <WikiEmptyState hasPages={pages.length > 0} onCreate={() => createAndOpenPage(null)} />
+          <WikiEmptyState
+            hasPages={pages.some((entry) => entry.nodeType === "page")}
+            onCreate={() => createAndOpenPage(null)}
+          />
         )}
       </div>
     </div>
@@ -336,8 +384,8 @@ function WikiLiveView({
 type WikiContextMenuState = {
   x: number;
   y: number;
-  /** The right-clicked page, or null for the sidebar background. */
-  node: WikiPageData | null;
+  /** The right-clicked node, or null for the sidebar background. */
+  node: TreeNode | null;
 };
 
 function WikiTreeSidebar({
@@ -345,16 +393,19 @@ function WikiTreeSidebar({
   selectedPath,
   onSelect,
   onCreate,
+  onRename,
   onDelete,
 }: {
   nodes: TreeNode[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
-  onCreate: (parentPath: string | null) => void;
+  onCreate: (parentPath: string | null, nodeType: "page" | "folder") => { id: string } | null;
+  onRename: (node: TreeNode, title: string) => void;
   onDelete: (node: TreeNode) => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<WikiContextMenuState | null>(null);
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
   const toggle = (path: string) => {
@@ -405,7 +456,7 @@ function WikiTreeSidebar({
         <button
           type="button"
           title="New page"
-          onClick={() => onCreate(null)}
+          onClick={() => onCreate(null, "page")}
           className="rounded p-1 text-ink-subtle hover:bg-surface-sunken hover:text-ink"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -418,7 +469,7 @@ function WikiTreeSidebar({
       >
         {nodes.map((node) => (
           <WikiTreeRow
-            key={node.id}
+            key={`${node.id}:${editingNodeId === node.id ? "editing" : "view"}`}
             node={node}
             depth={0}
             selectedPath={selectedPath}
@@ -426,6 +477,12 @@ function WikiTreeSidebar({
             onToggle={toggle}
             onSelect={onSelect}
             onContextMenu={openContextMenu}
+            editingNodeId={editingNodeId}
+            onFinishEditing={(node, title) => {
+              setEditingNodeId(null);
+              onRename(node, title);
+            }}
+            onCancelEditing={() => setEditingNodeId(null)}
           />
         ))}
         {nodes.length === 0 ? (
@@ -436,35 +493,47 @@ function WikiTreeSidebar({
         <div
           ref={contextMenuRef}
           role="menu"
-          aria-label="Wiki page actions"
+          aria-label="Wiki actions"
           className="fixed z-[90] min-w-[180px] overflow-hidden rounded-md border border-border-strong bg-surface-raised py-1 text-[12.5px] text-ink shadow-[0_10px_30px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          {contextMenu.node ? (
+          {contextMenu.node?.nodeType === "folder" ? (
             <>
               <WikiMenuItem
                 autoFocus
-                icon={<CornerDownRight size={14} strokeWidth={1.8} />}
-                label="New sub-page"
+                icon={<Plus size={14} strokeWidth={1.8} />}
+                label="New page"
                 onClick={() => {
                   const parentPath = contextMenu.node?.path ?? null;
                   setContextMenu(null);
-                  onCreate(parentPath);
+                  onCreate(parentPath, "page");
                 }}
               />
               <WikiMenuItem
                 icon={<Plus size={14} strokeWidth={1.8} />}
-                label="New page"
+                label="New folder"
                 onClick={() => {
+                  const parentPath = contextMenu.node?.path ?? null;
                   setContextMenu(null);
-                  onCreate(null);
+                  const created = onCreate(parentPath, "folder");
+                  if (created) setEditingNodeId(created.id);
+                }}
+              />
+              <MenuDivider />
+              <WikiMenuItem
+                icon={<span className="inline-block w-3.5 text-center">T</span>}
+                label="Rename"
+                onClick={() => {
+                  const node = contextMenu.node;
+                  setContextMenu(null);
+                  if (node) setEditingNodeId(node.id);
                 }}
               />
               <MenuDivider />
               <WikiMenuItem
                 icon={<Trash2 size={14} strokeWidth={1.8} />}
-                label="Delete"
+                label="Delete folder…"
                 danger
                 onClick={() => {
                   const node = contextMenu.node;
@@ -473,16 +542,39 @@ function WikiTreeSidebar({
                 }}
               />
             </>
-          ) : (
+          ) : contextMenu.node ? (
             <WikiMenuItem
               autoFocus
-              icon={<Plus size={14} strokeWidth={1.8} />}
-              label="New page"
+              icon={<Trash2 size={14} strokeWidth={1.8} />}
+              label="Delete"
+              danger
               onClick={() => {
+                const node = contextMenu.node;
                 setContextMenu(null);
-                onCreate(null);
+                if (node) onDelete(node);
               }}
             />
+          ) : (
+            <>
+              <WikiMenuItem
+                autoFocus
+                icon={<Plus size={14} strokeWidth={1.8} />}
+                label="New page"
+                onClick={() => {
+                  setContextMenu(null);
+                  onCreate(null, "page");
+                }}
+              />
+              <WikiMenuItem
+                icon={<Plus size={14} strokeWidth={1.8} />}
+                label="New folder"
+                onClick={() => {
+                  setContextMenu(null);
+                  const created = onCreate(null, "folder");
+                  if (created) setEditingNodeId(created.id);
+                }}
+              />
+            </>
           )}
         </div>
       ) : null}
@@ -498,6 +590,9 @@ function WikiTreeRow({
   onToggle,
   onSelect,
   onContextMenu,
+  editingNodeId,
+  onFinishEditing,
+  onCancelEditing,
 }: {
   node: TreeNode;
   depth: number;
@@ -506,26 +601,45 @@ function WikiTreeRow({
   onToggle: (path: string) => void;
   onSelect: (path: string) => void;
   onContextMenu: (event: React.MouseEvent, node: TreeNode) => void;
+  editingNodeId: string | null;
+  onFinishEditing: (node: TreeNode, title: string) => void;
+  onCancelEditing: () => void;
 }) {
   const isCollapsed = collapsed.has(node.path);
-  const isSelected = selectedPath === node.path;
+  const isSelected = node.nodeType === "page" && selectedPath === node.path;
+  const isEditing = editingNodeId === node.id;
+  const [titleDraft, setTitleDraft] = useState(node.title);
 
   return (
     <div>
       {/* biome-ignore lint/a11y/noStaticElementInteractions: right-click affordance on the row container */}
       <div
-        className={`group flex items-center gap-1 rounded-md py-1 pr-1 text-[13px] leading-5 ${
+        className={`group relative flex items-center gap-1 rounded-md py-1 pr-1 text-[13px] leading-5 ${
           isSelected
             ? "bg-surface-sunken font-medium text-ink"
             : "text-ink-muted hover:bg-surface-sunken/60 hover:text-ink"
         }`}
-        style={{ paddingLeft: `${depth * 14 + 4}px` }}
+        style={{ paddingLeft: `${depth * 24 + 4}px` }}
         onContextMenu={(event) => onContextMenu(event, node)}
+        onClick={() => {
+          if (node.nodeType === "folder" && !isEditing) onToggle(node.path);
+        }}
       >
-        {node.children.length > 0 ? (
+        {Array.from({ length: depth }, (_, index) => (
+          <span
+            key={`${node.id}:guide:${index}`}
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 border-l border-edge"
+            style={{ left: `${index * 24 + 13}px` }}
+          />
+        ))}
+        {node.nodeType === "folder" ? (
           <button
             type="button"
-            onClick={() => onToggle(node.path)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggle(node.path);
+            }}
             className="rounded p-0.5 text-ink-subtle hover:text-ink"
             aria-label={isCollapsed ? "Expand" : "Collapse"}
           >
@@ -535,22 +649,51 @@ function WikiTreeRow({
               <ChevronDown className="h-3 w-3" />
             )}
           </button>
+        ) : null}
+        {isEditing ? (
+          <input
+            autoFocus
+            value={titleDraft}
+            onChange={(event) => setTitleDraft(event.target.value)}
+            onBlur={() => onFinishEditing(node, titleDraft)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onFinishEditing(node, titleDraft);
+              if (event.key === "Escape") onCancelEditing();
+            }}
+            onClick={(event) => event.stopPropagation()}
+            className="min-w-0 flex-1 rounded-sm border border-edge bg-surface px-1 text-[13px] leading-5 text-ink outline-none"
+            aria-label="Folder title"
+          />
+        ) : node.nodeType === "folder" ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggle(node.path);
+            }}
+            className="min-w-0 flex-1 truncate text-left"
+            title={node.path}
+          >
+            {node.title || node.slug}
+          </button>
         ) : (
-          <span className="w-4" />
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect(node.path);
+            }}
+            className="min-w-0 flex-1 truncate text-left"
+            title={node.path}
+          >
+            {node.title || "Untitled"}
+          </button>
         )}
-        <button
-          type="button"
-          onClick={() => onSelect(node.path)}
-          className="min-w-0 flex-1 truncate text-left"
-          title={node.path}
-        >
-          {node.title || "Untitled"}
-        </button>
       </div>
       {!isCollapsed
         ? node.children.map((child) => (
             <WikiTreeRow
-              key={child.id}
+              key={`${child.id}:${editingNodeId === child.id ? "editing" : "view"}`}
               node={child}
               depth={depth + 1}
               selectedPath={selectedPath}
@@ -558,6 +701,9 @@ function WikiTreeRow({
               onToggle={onToggle}
               onSelect={onSelect}
               onContextMenu={onContextMenu}
+              editingNodeId={editingNodeId}
+              onFinishEditing={onFinishEditing}
+              onCancelEditing={onCancelEditing}
             />
           ))
         : null}
@@ -580,8 +726,8 @@ function WikiPageEditor({
   onError,
   onNavigate,
   onDelete,
-  onCreateSubpage,
-  onOpenCreatedSubpage,
+  onCreateSibling,
+  onOpenCreatedPage,
 }: {
   page: WikiPageData;
   pages: WikiPageData[];
@@ -595,8 +741,8 @@ function WikiPageEditor({
   onError: (message: string | undefined) => void;
   onNavigate: (path: string | null) => void;
   onDelete: () => void;
-  onCreateSubpage: () => { id: string; slug: string; path: string; title: string } | null;
-  onOpenCreatedSubpage: (created: { id: string; path: string }) => void;
+  onCreateSibling: () => { id: string; slug: string; path: string; title: string } | null;
+  onOpenCreatedPage: (created: { id: string; path: string }) => void;
 }) {
   const [saveState, setSaveState] = useState<"saved" | "dirty">("saved");
   const [showTimeline, setShowTimeline] = useState(false);
@@ -681,16 +827,15 @@ function WikiPageEditor({
 
   // The editor captures its slash-command handlers once at mount; route them
   // through refs so `/page` always sees the current tree.
-  const createSubpageRef = useRef(onCreateSubpage);
-  const openCreatedSubpageRef = useRef(onOpenCreatedSubpage);
+  const createSiblingRef = useRef(onCreateSibling);
+  const openCreatedPageRef = useRef(onOpenCreatedPage);
   useEffect(() => {
-    createSubpageRef.current = onCreateSubpage;
-    openCreatedSubpageRef.current = onOpenCreatedSubpage;
-  }, [onCreateSubpage, onOpenCreatedSubpage]);
+    createSiblingRef.current = onCreateSibling;
+    openCreatedPageRef.current = onOpenCreatedPage;
+  }, [onCreateSibling, onOpenCreatedPage]);
   const [slashHandlers] = useState(() => ({
-    createPage: () => createSubpageRef.current(),
-    onPageCreated: (created: { id: string; path: string }) =>
-      openCreatedSubpageRef.current(created),
+    createPage: () => createSiblingRef.current(),
+    onPageCreated: (created: { id: string; path: string }) => openCreatedPageRef.current(created),
   }));
 
   const segments = page.path.split("/");
@@ -709,17 +854,7 @@ function WikiPageEditor({
             return (
               <span key={ancestorPath} className="flex min-w-0 items-center gap-1">
                 <span className="text-ink-subtle/60">/</span>
-                {isLast ? (
-                  <span className="truncate text-ink-muted">{label}</span>
-                ) : (
-                  <button
-                    type="button"
-                    className="truncate hover:text-ink"
-                    onClick={() => onNavigate(ancestorPath)}
-                  >
-                    {label}
-                  </button>
-                )}
+                <span className={isLast ? "truncate text-ink-muted" : "truncate"}>{label}</span>
               </span>
             );
           })}
@@ -1028,8 +1163,8 @@ function WikiEmptyState({ hasPages, onCreate }: { hasPages: boolean; onCreate: (
         </p>
         <p className="mt-1 max-w-sm text-[13px] leading-5 text-ink-subtle">
           {hasPages
-            ? "Or create a new page — every page can hold subpages, links to other pages, and links to work in your other tools."
-            : "Markdown pages with subpages, for you and your agents. Agents browse it like a filesystem; you get a lightweight Notion."}
+            ? "Or create a new page or folder. Pages can link to other pages and to work in your other tools."
+            : "Folders and markdown pages for you and your agents, organized like a filesystem."}
         </p>
       </div>
       <button
@@ -1051,15 +1186,22 @@ function pageRowToData(row: HeadlessWikiPageReadModel): WikiPageData {
     slug: row.slug,
     path: row.path,
     title: row.title,
+    nodeType: row.nodeType,
     kind: row.kind,
     body: row.body,
   };
 }
 
-/** Workspace-unique slug for a new page title; null when nothing usable remains. */
-function availableWikiSlug(title: string, pages: WikiPageData[]): string | null {
+/** Sibling-unique slug for a new node title; null when suffixes are exhausted. */
+export function availableWikiSlug(
+  title: string,
+  pages: WikiPageData[],
+  parentPath: string | null,
+): string | null {
   const base = wikiSlugFromTitle(title.trim() || "Untitled") ?? "untitled";
-  const taken = new Set(pages.map((page) => page.slug));
+  const taken = new Set(
+    pages.filter((page) => parentWikiPath(page.path) === parentPath).map((page) => page.slug),
+  );
   if (!taken.has(base)) return base;
   for (let suffix = 2; suffix < 1_000; suffix += 1) {
     const candidate = `${base.slice(0, 76)}-${suffix}`;
@@ -1068,10 +1210,12 @@ function availableWikiSlug(title: string, pages: WikiPageData[]): string | null 
   return null;
 }
 
-function buildTree(items: WikiPageData[]): TreeNode[] {
+export function buildTree(items: WikiPageData[]): TreeNode[] {
   const nodesByPath = new Map<string, TreeNode>();
   const roots: TreeNode[] = [];
-  const sorted = [...items].sort((a, b) => a.path.localeCompare(b.path));
+  const sorted = [...items].sort(
+    (a, b) => a.path.split("/").length - b.path.split("/").length || a.path.localeCompare(b.path),
+  );
   for (const item of sorted) {
     const node: TreeNode = { ...item, children: [] };
     nodesByPath.set(item.path, node);
@@ -1080,5 +1224,15 @@ function buildTree(items: WikiPageData[]): TreeNode[] {
     if (parent) parent.children.push(node);
     else roots.push(node);
   }
+  const sortLevel = (nodes: TreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.nodeType !== b.nodeType) return a.nodeType === "folder" ? -1 : 1;
+      const aLabel = a.title || (a.nodeType === "folder" ? a.slug : "Untitled");
+      const bLabel = b.title || (b.nodeType === "folder" ? b.slug : "Untitled");
+      return aLabel.localeCompare(bLabel, undefined, { sensitivity: "base" });
+    });
+    for (const node of nodes) sortLevel(node.children);
+  };
+  sortLevel(roots);
   return roots;
 }

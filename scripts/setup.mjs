@@ -944,6 +944,16 @@ async function ensureStripe(state) {
     ok("CRON_SECRET is set");
   }
 
+  // Shared runner→API bearer for the internal wiki command endpoint. Generated
+  // locally (not printed) and written once to the root .env.local, which both
+  // the API and the runner read.
+  if (isPlaceholder(env.API_INTERNAL_TOKEN)) {
+    updates.API_INTERNAL_TOKEN = randomBytes(32).toString("hex");
+    ok("Will generate API_INTERNAL_TOKEN for the runner→API wiki command boundary");
+  } else {
+    ok("API_INTERNAL_TOKEN is set");
+  }
+
   if (state.stripeWebhookSecret === "set") {
     ok("OPENCOMPANY_STRIPE_WEBHOOK_SECRET is set");
   } else {

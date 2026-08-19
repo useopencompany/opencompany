@@ -449,13 +449,14 @@ function readModelShape(input: {
         "created_at",
         "updated_at",
       ]);
-    case "wiki-pages-v1":
+    case "wiki-pages-v2":
       return {
         table: "goat.wiki_pages",
         columns: [
           "id",
           "slug",
           "path",
+          "node_type",
           "title",
           "kind",
           "content",
@@ -676,7 +677,7 @@ function projectReadModelValue(
       return (
         partial ? BrainImportRunReadModelSchema.partial() : BrainImportRunReadModelSchema
       ).parse(projected);
-    case "wiki-pages-v1":
+    case "wiki-pages-v2":
       return (partial ? WikiPageReadModelSchema.partial() : WikiPageReadModelSchema).parse(
         projected,
       );
@@ -1163,10 +1164,11 @@ const READ_MODEL_COLUMN_NAMES = {
     created_at: "createdAt",
     updated_at: "updatedAt",
   },
-  "wiki-pages-v1": {
+  "wiki-pages-v2": {
     id: "id",
     slug: "slug",
     path: "path",
+    node_type: "nodeType",
     title: "title",
     kind: "kind",
     content: "body",

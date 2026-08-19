@@ -5821,6 +5821,13 @@
             "type": "string",
             "maxLength": 160
           },
+          "nodeType": {
+            "type": "string",
+            "enum": [
+              "page",
+              "folder"
+            ]
+          },
           "kind": {
             "type": "string",
             "enum": [
@@ -5877,6 +5884,7 @@
           "slug",
           "path",
           "title",
+          "nodeType",
           "kind",
           "body",
           "contentHash",
@@ -5932,6 +5940,14 @@
             "maxLength": 256,
             "example": "run_019fed53"
           },
+          "nodeType": {
+            "type": "string",
+            "enum": [
+              "page",
+              "folder"
+            ],
+            "default": "page"
+          },
           "parentPath": {
             "type": "string",
             "nullable": true,
@@ -5977,9 +5993,6 @@
             "maxLength": 160
           }
         },
-        "required": [
-          "body"
-        ],
         "additionalProperties": false
       },
       "WikiPageDeleteEnvelope": {
@@ -15647,7 +15660,7 @@
         }
       }
     },
-    "/v1/wiki/pages/{slug}": {
+    "/v1/wiki/pages/{id}": {
       "patch": {
         "tags": [
           "Wiki"
@@ -15669,7 +15682,7 @@
               "example": "run_019fed53"
             },
             "required": true,
-            "name": "slug",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -15707,7 +15720,7 @@
         }
       }
     },
-    "/v1/wiki/pages/{slug}/delete": {
+    "/v1/wiki/pages/{id}/delete": {
       "post": {
         "tags": [
           "Wiki"
@@ -15729,7 +15742,7 @@
               "example": "run_019fed53"
             },
             "required": true,
-            "name": "slug",
+            "name": "id",
             "in": "path"
           }
         ],
@@ -15767,7 +15780,7 @@
         }
       }
     },
-    "/v1/wiki/pages/{slug}/timeline": {
+    "/v1/wiki/pages/{id}/timeline": {
       "post": {
         "tags": [
           "Wiki"
@@ -15789,7 +15802,7 @@
               "example": "run_019fed53"
             },
             "required": true,
-            "name": "slug",
+            "name": "id",
             "in": "path"
           },
           {
@@ -17655,7 +17668,7 @@
                 "brain-edges-v1",
                 "brain-ingest-jobs-v1",
                 "brain-import-runs-v1",
-                "wiki-pages-v1",
+                "wiki-pages-v2",
                 "wiki-timeline-v1",
                 "integration-accounts-v1"
               ]

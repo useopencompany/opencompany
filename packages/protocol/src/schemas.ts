@@ -1,4 +1,5 @@
 import { z } from "@hono/zod-openapi";
+import { WIKI_TOOL_COMMANDS } from "@opencompany/wiki/tool";
 import { API_VERSION, PROTOCOL_VERSION } from "./version";
 
 export const ResourceIdSchema = z.string().min(1).max(256).openapi({ example: "run_019fed53" });
@@ -357,7 +358,7 @@ export const BrainTimelineReadModelNameSchema = z.literal("brain-timeline-v1");
 export const BrainEdgeReadModelNameSchema = z.literal("brain-edges-v1");
 export const BrainIngestJobReadModelNameSchema = z.literal("brain-ingest-jobs-v1");
 export const BrainImportRunReadModelNameSchema = z.literal("brain-import-runs-v1");
-export const WikiPageReadModelNameSchema = z.literal("wiki-pages-v1");
+export const WikiPageReadModelNameSchema = z.literal("wiki-pages-v2");
 export const WikiTimelineReadModelNameSchema = z.literal("wiki-timeline-v1");
 export const IntegrationAccountReadModelNameSchema = z.literal("integration-accounts-v1");
 export const ReadModelSchema = z.enum([
@@ -1227,6 +1228,7 @@ export const WikiKindSchema = z.enum([
   "meeting",
   "other",
 ]);
+export const WikiNodeTypeSchema = z.enum(["page", "folder"]);
 
 export const WikiPageSchema = z
   .object({
@@ -1234,6 +1236,7 @@ export const WikiPageSchema = z
     slug: z.string().min(1).max(80),
     path: z.string().min(1).max(512),
     title: z.string().max(160),
+    nodeType: WikiNodeTypeSchema,
     kind: WikiKindSchema,
     body: z.string(),
     contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -1259,7 +1262,7 @@ export const WikiTimelineEntrySchema = z
   .strict()
   .openapi("WikiTimelineEntry");
 
-export const WikiPageReadModelSchema = WikiPageSchema.openapi("WikiPageReadModelV1");
+export const WikiPageReadModelSchema = WikiPageSchema.openapi("WikiPageReadModelV2");
 export const WikiTimelineReadModelSchema =
   WikiTimelineEntrySchema.openapi("WikiTimelineReadModelV1");
 
@@ -1471,6 +1474,7 @@ export const WikiTimelineMutationEnvelopeSchema = z
 export const CreateWikiPageBodySchema = z
   .object({
     clientPageId: ResourceIdSchema.optional(),
+    nodeType: WikiNodeTypeSchema.default("page"),
     parentPath: z.string().min(1).max(512).nullable(),
     title: z.string().max(160),
     slug: z.string().min(1).max(80).optional(),
@@ -1479,11 +1483,16 @@ export const CreateWikiPageBodySchema = z
   .openapi("CreateWikiPageBody");
 export const UpdateWikiPageBodySchema = z
   .object({
-    body: z.string().max(1_000_000),
+    body: z.string().max(1_000_000).optional(),
     kind: WikiKindSchema.optional(),
     title: z.string().max(160).optional(),
   })
   .strict()
+  .refine(
+    (body: { body?: string; kind?: z.infer<typeof WikiKindSchema>; title?: string }) =>
+      body.body !== undefined || body.kind !== undefined || body.title !== undefined,
+    { message: "At least one Wiki field is required." },
+  )
   .openapi("UpdateWikiPageBody");
 export const DeleteWikiPageBodySchema = z
   .object({ recursive: z.boolean().optional() })
@@ -1497,6 +1506,55 @@ export const AddWikiTimelineEntryBodySchema = z
   })
   .strict()
   .openapi("AddWikiTimelineEntryBody");
+
+// Runtime validator for the shared `wiki` agent tool command contract. It mirrors
+// WIKI_TOOL_INPUT_JSON_SCHEMA (the AI-SDK/MCP schema) and sources its command enum
+// from the same WIKI_TOOL_COMMANDS constant; the protocol test asserts the field
+// set never drifts from the JSON schema. Deliberately not registered as an OpenAPI
+// component — the runner→API command endpoint is internal, not public.
+export const WikiCommandSchema = z
+  .object({
+    command: z.enum([...WIKI_TOOL_COMMANDS]),
+    pages: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(20)]).optional(),
+    path: z.string().min(1).max(512).optional(),
+    body: z.string().max(1_000_000).optional(),
+    kind: WikiKindSchema.optional(),
+    title: z.string().max(160).optional(),
+    query: z.string().min(1).optional(),
+    since: z.string().min(1).optional(),
+    to: z.string().min(1).optional(),
+    recursive: z.boolean().optional(),
+    ignoreCase: z.boolean().optional(),
+    at: z.string().min(1).optional(),
+    text: z.string().min(1).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().min(0).optional(),
+  })
+  .strict();
+
+// Body of POST /internal/wiki/commands. The API never trusts the caller-supplied
+// tenancy: it reloads the user, onboarding, wiki flag, membership, role, and
+// permissions from Postgres before executing the command.
+export const InternalWikiCommandRequestSchema = z
+  .object({
+    userWorkosId: z.string().min(1).max(256),
+    workspaceId: z.string().min(1).max(256),
+    command: WikiCommandSchema,
+  })
+  .strict();
+
+export type WikiCommandRequest = z.infer<typeof InternalWikiCommandRequestSchema>;
+
+// Response envelope: the tool output ({ ok, result } | { ok, error }) under `data`.
+export const InternalWikiCommandResponseSchema = z
+  .object({
+    data: z.union([
+      z.object({ ok: z.literal(true), result: z.unknown() }).strict(),
+      z.object({ ok: z.literal(false), error: z.string() }).strict(),
+    ]),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict();
 
 export const SkillListEnvelopeSchema = z
   .object({ data: z.array(SkillListItemSchema), meta: ProtocolMetadataSchema })

@@ -256,26 +256,80 @@ async function resolveLocalActor(
     userId: identity.userId,
     workspaceId: row.workspaceId,
     role: row.role,
-    permissions: [
-      CHAT_READ_PERMISSION,
-      CHAT_WRITE_PERMISSION,
-      TASK_READ_PERMISSION,
-      TASK_WRITE_PERMISSION,
-      BRAIN_READ_PERMISSION,
-      SKILL_READ_PERMISSION,
-      ...(row.role === "admin" ? [BRAIN_WRITE_PERMISSION, SKILL_WRITE_PERMISSION] : []),
-      ...(row.wikiEnabled ? [WIKI_READ_PERMISSION, WIKI_WRITE_PERMISSION] : []),
-      ...(row.taskSpawningEnabled
-        ? [
-            WORKFLOW_READ_PERMISSION,
-            WORKFLOW_WRITE_PERMISSION,
-            SCHEDULE_READ_PERMISSION,
-            SCHEDULE_WRITE_PERMISSION,
-          ]
-        : []),
-    ],
+    permissions: actorPermissions(row),
     authenticationMethod: identity.method,
     ...(identity.sessionId ? { sessionId: identity.sessionId } : {}),
+  };
+}
+
+// Role- and flag-derived permission set, the single source of truth shared by
+// the request authenticator and the internal service-actor resolver.
+function actorPermissions(row: {
+  role: string;
+  wikiEnabled: boolean;
+  taskSpawningEnabled: boolean;
+}): string[] {
+  return [
+    CHAT_READ_PERMISSION,
+    CHAT_WRITE_PERMISSION,
+    TASK_READ_PERMISSION,
+    TASK_WRITE_PERMISSION,
+    BRAIN_READ_PERMISSION,
+    SKILL_READ_PERMISSION,
+    ...(row.role === "admin" ? [BRAIN_WRITE_PERMISSION, SKILL_WRITE_PERMISSION] : []),
+    ...(row.wikiEnabled ? [WIKI_READ_PERMISSION, WIKI_WRITE_PERMISSION] : []),
+    ...(row.taskSpawningEnabled
+      ? [
+          WORKFLOW_READ_PERMISSION,
+          WORKFLOW_WRITE_PERMISSION,
+          SCHEDULE_READ_PERMISSION,
+          SCHEDULE_WRITE_PERMISSION,
+        ]
+      : []),
+  ];
+}
+
+// Reconstructs an Actor for an explicit (userWorkosId, workspaceId) pair from
+// Postgres, for internal service calls (e.g. the runner→API wiki command
+// endpoint) that name their tenancy but must never be trusted for permissions.
+// Requires the user to exist, have finished onboarding, have the wiki preview
+// enabled, and hold an accessible membership of the named workspace.
+export async function resolveWikiServiceActor(
+  execute: ChatSqlExecute,
+  input: { userWorkosId: string; workspaceId: string },
+): Promise<Actor> {
+  const result = await execute(sql`
+    SELECT
+      member.workspace_id AS "workspaceId",
+      member.role,
+      actor_user.task_spawning_enabled AS "taskSpawningEnabled",
+      actor_user.wiki_enabled AS "wikiEnabled"
+    FROM goat.users AS actor_user
+    JOIN goat.workspace_members AS member
+      ON member.user_workos_id = actor_user.workos_user_id
+    JOIN goat.workspaces AS workspace
+      ON workspace.id = member.workspace_id
+    WHERE actor_user.workos_user_id = ${input.userWorkosId}
+      AND actor_user.onboarded_at IS NOT NULL
+      AND actor_user.wiki_enabled = true
+      AND workspace.id = ${input.workspaceId}
+    LIMIT 1
+  `);
+  const row = rowsFromExecute<{
+    workspaceId: string;
+    role: string;
+    taskSpawningEnabled: boolean;
+    wikiEnabled: boolean;
+  }>(result)[0];
+  if (!row) {
+    throw new ApiError(403, "forbidden", "The user cannot access the wiki in this workspace.");
+  }
+  return {
+    userId: input.userWorkosId,
+    workspaceId: row.workspaceId,
+    role: row.role,
+    permissions: actorPermissions(row),
+    authenticationMethod: "service",
   };
 }
 

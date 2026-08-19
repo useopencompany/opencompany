@@ -41,6 +41,14 @@ entity type, status, compiled truth, and an append-only evidence timeline.
 The detailed schema reference is in `apps/web/docs/brain/data-model.md`; code-level truth lives in
 `packages/brain/src/schema.ts` and `packages/db/src/product-schema.ts`.
 
+## Workspace Wiki preview
+
+The opt-in Workspace Wiki is a separate filesystem-style surface. Folders are pure containers and
+pages are leaf Markdown documents. Names are unique within a folder, while the full path is the
+node's workspace-unique identity. Page links use full paths such as `[[company/strategy/goals]]`
+or `[[company/strategy/goals|Q3 goals]]`; moving a page or folder rewrites references to that
+subtree. A bare basename resolves only when it identifies exactly one page.
+
 ## Pointer/copy rule
 
 Brain writers prefer canonical pointers over stale copies. Claims cite a provider source ref.

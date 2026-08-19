@@ -10,12 +10,13 @@ import { drizzle } from "drizzle-orm/pglite";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   addWikiTimelineEntry,
+  createWikiFolder,
   deleteWikiPage,
   getWikiBacklinks,
   getWikiTree,
   grepWiki,
   listWikiTimeline,
-  moveWikiPage,
+  moveWikiNode,
   recentWikiChanges,
   resolveWikiPages,
   searchWiki,
@@ -24,7 +25,7 @@ import {
 } from "./wiki";
 
 const WS = "ws-test";
-const MIGRATION = path.join(__dirname, "..", "..", "..", "drizzle", "0195_goat_wiki.sql");
+const MIGRATIONS = ["0195_goat_wiki.sql", "0217_goat_wiki_folders.sql"];
 
 let pglite: PGlite;
 let db: ReturnType<typeof drizzle>;
@@ -35,9 +36,14 @@ beforeAll(async () => {
   await pglite.exec("CREATE SCHEMA goat;");
   await pglite.exec("CREATE TABLE goat.workspaces (id text PRIMARY KEY);");
   await pglite.exec("CREATE TABLE goat.users (workos_user_id text PRIMARY KEY);");
-  const sql = await readFile(MIGRATION, "utf8");
-  for (const statement of sql.split("--> statement-breakpoint")) {
-    await pglite.exec(statement);
+  for (const migration of MIGRATIONS) {
+    const sql = await readFile(
+      path.join(__dirname, "..", "..", "..", "drizzle", migration),
+      "utf8",
+    );
+    for (const statement of sql.split("--> statement-breakpoint")) {
+      await pglite.exec(statement);
+    }
   }
   await pglite.exec(`INSERT INTO goat.workspaces (id) VALUES ('${WS}'), ('ws-other');`);
   db = drizzle(pglite);
@@ -63,7 +69,7 @@ describe("writeWikiPage", () => {
     expect(changes[0]).toMatchObject({ slug: "projects", writes: 1, addedLines: 3 });
   });
 
-  it("auto-creates missing ancestors as stubs", async () => {
+  it("auto-creates missing ancestors as folders", async () => {
     const result = await writeWikiPage(
       { workspaceId: WS, path: "projects/site/notes", body: "# Notes", kind: "research" },
       db,
@@ -75,6 +81,7 @@ describe("writeWikiPage", () => {
       "projects/site",
       "projects/site/notes",
     ]);
+    expect(tree.map((entry) => entry.nodeType)).toEqual(["folder", "folder", "page"]);
     expect(tree[1]?.childCount).toBe(1);
   });
 
@@ -114,11 +121,10 @@ describe("writeWikiPage", () => {
     expect(unchanged.action).toBe("unchanged");
   });
 
-  it("rejects a slug reused under a different parent", async () => {
+  it("allows a slug to be reused under a different folder", async () => {
     await writeWikiPage({ workspaceId: WS, path: "projects/site", body: "" }, db);
-    await expect(
-      writeWikiPage({ workspaceId: WS, path: "archive/site", body: "" }, db),
-    ).rejects.toThrow(/already exists at "projects\/site"/);
+    const result = await writeWikiPage({ workspaceId: WS, path: "archive/site", body: "" }, db);
+    expect(result.action).toBe("created");
   });
 
   it("keeps slugs independent across workspaces", async () => {
@@ -147,40 +153,69 @@ describe("writeWikiPage", () => {
 });
 
 describe("resolveWikiPages", () => {
-  it("resolves by slug or path and reports missing refs", async () => {
+  it("resolves exact paths and unique basenames", async () => {
     await writeWikiPage({ workspaceId: WS, path: "projects/site", body: "# Site" }, db);
     const { pages, missing } = await resolveWikiPages(WS, ["site", "projects/site", "ghost"], db);
     expect(pages).toHaveLength(1);
     expect(pages[0]?.slug).toBe("site");
     expect(missing).toEqual(["ghost"]);
   });
+
+  it("does not resolve ambiguous or missing basenames", async () => {
+    await writeWikiPage({ workspaceId: WS, path: "projects/goals", body: "work" }, db);
+    await writeWikiPage({ workspaceId: WS, path: "personal/goals", body: "life" }, db);
+    const { pages, missing } = await resolveWikiPages(WS, ["goals", "projects/goals", "ghost"], db);
+    expect(pages.map((page) => page.path)).toEqual(["projects/goals"]);
+    expect(missing).toEqual(["goals", "ghost"]);
+  });
 });
 
-describe("moveWikiPage", () => {
-  it("moves a subtree and rewrites descendant paths", async () => {
+describe("moveWikiNode", () => {
+  it("moves a folder subtree and rewrites page and timeline links", async () => {
+    await createWikiFolder({ workspaceId: WS, path: "projects/site" }, db);
     await writeWikiPage({ workspaceId: WS, path: "projects/site/notes", body: "n" }, db);
-    await writeWikiPage({ workspaceId: WS, path: "archive", body: "" }, db);
-    const result = await moveWikiPage(
-      { workspaceId: WS, slug: "site", newParentPath: "archive" },
+    await createWikiFolder({ workspaceId: WS, path: "archive" }, db);
+    await writeWikiPage(
+      { workspaceId: WS, path: "referrer", body: "See [[projects/site/notes|Notes]]." },
+      db,
+    );
+    await addWikiTimelineEntry(
+      {
+        workspaceId: WS,
+        path: "referrer",
+        at: new Date("2026-08-01T10:00:00Z"),
+        text: "Reviewed [[projects/site/notes]]",
+      },
+      db,
+    );
+    const result = await moveWikiNode(
+      { workspaceId: WS, path: "projects/site", newParentPath: "archive" },
       db,
     );
     expect(result.movedDescendants).toBe(1);
+    expect(result.rewrittenReferrers).toEqual(["referrer"]);
+    expect(result.txids).toHaveLength(3);
     const tree = await getWikiTree(WS, db);
     expect(tree.map((entry) => entry.path).sort()).toEqual([
       "archive",
       "archive/site",
       "archive/site/notes",
       "projects",
+      "referrer",
     ]);
+    const referrer = (await resolveWikiPages(WS, ["referrer"], db)).pages[0];
+    expect(referrer?.content).toBe("See [[archive/site/notes|Notes]].");
+    const timeline = await listWikiTimeline({ workspaceId: WS, path: "referrer" }, db);
+    expect(timeline[0]?.text).toBe("Reviewed [[archive/site/notes]]");
   });
 
   it("refuses cycles and missing parents", async () => {
-    await writeWikiPage({ workspaceId: WS, path: "a/b", body: "" }, db);
+    await createWikiFolder({ workspaceId: WS, path: "a/b" }, db);
     await expect(
-      moveWikiPage({ workspaceId: WS, slug: "a", newParentPath: "a/b" }, db),
+      moveWikiNode({ workspaceId: WS, path: "a", newParentPath: "a/b" }, db),
     ).rejects.toThrow(/inside its own subtree/);
     await expect(
-      moveWikiPage({ workspaceId: WS, slug: "b", newParentPath: "ghost" }, db),
+      moveWikiNode({ workspaceId: WS, path: "a/b", newParentPath: "ghost" }, db),
     ).rejects.toThrow(/does not exist/);
   });
 });
@@ -188,10 +223,10 @@ describe("moveWikiPage", () => {
 describe("deleteWikiPage", () => {
   it("requires recursive for subtrees and versions every deletion", async () => {
     await writeWikiPage({ workspaceId: WS, path: "projects/site", body: "x" }, db);
-    await expect(deleteWikiPage({ workspaceId: WS, slug: "projects" }, db)).rejects.toThrow(
+    await expect(deleteWikiPage({ workspaceId: WS, path: "projects" }, db)).rejects.toThrow(
       WikiError,
     );
-    const result = await deleteWikiPage({ workspaceId: WS, slug: "projects", recursive: true }, db);
+    const result = await deleteWikiPage({ workspaceId: WS, path: "projects", recursive: true }, db);
     expect(result.deletedPaths).toEqual(["projects/site", "projects"]);
     const changes = await recentWikiChanges(WS, { since: new Date(Date.now() - 60_000) }, db);
     expect(changes.filter((change) => change.deleted)).toHaveLength(2);
@@ -245,7 +280,7 @@ describe("timeline", () => {
     await addWikiTimelineEntry(
       {
         workspaceId: WS,
-        slug: "site",
+        path: "projects/site",
         at: new Date("2026-08-01T10:00:00Z"),
         text: "Kickoff call [[source:jamie:meeting:xyz]]",
       },
@@ -254,19 +289,19 @@ describe("timeline", () => {
     await addWikiTimelineEntry(
       {
         workspaceId: WS,
-        slug: "site",
+        path: "projects/site",
         at: new Date("2026-08-05T10:00:00Z"),
         text: "Budget approved",
       },
       db,
     );
-    const entries = await listWikiTimeline({ workspaceId: WS, slug: "site" }, db);
+    const entries = await listWikiTimeline({ workspaceId: WS, path: "projects/site" }, db);
     expect(entries.map((entry) => entry.text)).toEqual([
       "Budget approved",
       "Kickoff call [[source:jamie:meeting:xyz]]",
     ]);
     const since = await listWikiTimeline(
-      { workspaceId: WS, slug: "site", since: new Date("2026-08-03T00:00:00Z") },
+      { workspaceId: WS, path: "projects/site", since: new Date("2026-08-03T00:00:00Z") },
       db,
     );
     expect(since).toHaveLength(1);

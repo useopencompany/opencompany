@@ -1,14 +1,14 @@
 // Inline `[[...]]` link parsing for wiki page bodies, code-fence aware.
-// Grammar (the Notion-ish pattern):
-//   [[some-slug]]                — link to another wiki page, by slug
-//   [[some-slug|Label]]          — same, with display label
+// Grammar:
+//   [[path/to/page]]             — link to another wiki page, by path
+//   [[path/to/page|Label]]       — same, with display label
 //   [[source:linear:ENG-123]]    — reference to an artifact in another tool
 // Links inside markdown code fences, indented code, and inline backtick spans
 // are ignored. The code-range scanner is carried over verbatim from the brain
 // implementation (which this package replaces) — it is the part of the grammar
 // that is annoying to get right and is covered by the tests.
 
-import { isValidWikiSlug, isValidWikiSourceRef } from "./schema";
+import { isValidWikiPath, isValidWikiSourceRef } from "./schema";
 
 const BRACKET_LINK_PATTERN = /\[\[([^[\]\n|]+)(?:\|([^[\]\n]+))?\]\]/g;
 
@@ -46,10 +46,10 @@ export function parseWikiInlineLinks(text: string): WikiInlineLink[] {
   return links.sort((a, b) => a.index - b.index || a.raw.localeCompare(b.raw));
 }
 
-/** Canonical page link: bare `[[slug]]`, no kind prefix. */
-export function formatWikiPageLink(slug: string, label?: string): string {
-  const normalizedTarget = slug.trim();
-  if (!isValidWikiSlug(normalizedTarget)) throw new Error("Invalid wiki page link target.");
+/** Canonical page link: bare `[[path/to/page]]`, no kind prefix. */
+export function formatWikiPageLink(path: string, label?: string): string {
+  const normalizedTarget = path.trim();
+  if (!isValidWikiPath(normalizedTarget)) throw new Error("Invalid wiki page link target.");
   return withLabel(`[[${normalizedTarget}`, label);
 }
 
@@ -59,9 +59,39 @@ export function formatWikiSourceLink(ref: string, label?: string): string {
   return withLabel(`[[source:${normalizedTarget}`, label);
 }
 
-/** Distinct, valid page slugs linked from `text`, in order of first appearance. */
+/** Distinct, valid page paths linked from `text`, in order of first appearance. */
 export function wikiPageLinkTargets(text: string): string[] {
   return inlineLinkTargets(text, "page");
+}
+
+/**
+ * Rewrites valid page-link targets while preserving labels and source links.
+ * Escaped links and links in Markdown code ranges are absent from the parser's
+ * output and therefore remain byte-for-byte unchanged.
+ */
+export function rewriteWikiPageLinks(
+  text: string,
+  rewriteTarget: (target: string) => string | null,
+): string {
+  let rewritten = text;
+  const links = parseWikiInlineLinks(text)
+    .filter((link) => link.kind === "page" && link.valid)
+    .toSorted((a, b) => b.index - a.index);
+
+  for (const link of links) {
+    const nextTarget = rewriteTarget(link.target);
+    if (nextTarget === null || nextTarget === link.target) continue;
+    if (!isValidWikiPath(nextTarget)) {
+      throw new Error(`Invalid rewritten wiki page link target "${nextTarget}".`);
+    }
+
+    const nextRaw = rewritePageLinkRaw(link.raw, nextTarget);
+    rewritten = `${rewritten.slice(0, link.index)}${nextRaw}${rewritten.slice(
+      link.index + link.raw.length,
+    )}`;
+  }
+
+  return rewritten;
 }
 
 /** Distinct, valid source refs linked from `text`, in order of first appearance. */
@@ -105,10 +135,19 @@ function inlineLinkTargets(text: string, kind: WikiInlineLinkKind): string[] {
 function isValidInlineLinkTarget(kind: WikiInlineLinkKind, target: string): boolean {
   switch (kind) {
     case "page":
-      return isValidWikiSlug(target);
+      return isValidWikiPath(target);
     case "source":
       return isValidWikiSourceRef(target);
   }
+}
+
+function rewritePageLinkRaw(raw: string, target: string): string {
+  const inner = raw.slice(2, -2);
+  const labelIndex = inner.indexOf("|");
+  const targetField = labelIndex === -1 ? inner : inner.slice(0, labelIndex);
+  const labelField = labelIndex === -1 ? "" : inner.slice(labelIndex);
+  const match = /^(\s*)(page:\s*)?.*?(\s*)$/.exec(targetField);
+  return `[[${match?.[1] ?? ""}${match?.[2] ?? ""}${target}${match?.[3] ?? ""}${labelField}]]`;
 }
 
 function isValidInlineLinkLabel(label: string): boolean {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isValidWikiKind,
+  isValidWikiNodeType,
   isValidWikiPath,
   isValidWikiSlug,
   isValidWikiSourceRef,
@@ -71,6 +72,14 @@ describe("wiki kinds", () => {
     expect(isValidWikiKind("other")).toBe(true);
     expect(isValidWikiKind("evidence")).toBe(false);
     expect(isValidWikiKind(null)).toBe(false);
+  });
+});
+
+describe("wiki node types", () => {
+  it("accepts pages and folders", () => {
+    expect(isValidWikiNodeType("page")).toBe(true);
+    expect(isValidWikiNodeType("folder")).toBe(true);
+    expect(isValidWikiNodeType("document")).toBe(false);
   });
 });
 

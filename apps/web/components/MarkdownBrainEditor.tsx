@@ -16,6 +16,7 @@ import {
   createSkillMentionPlugin,
 } from "@/components/SkillMentionSuggestion";
 import { WIKI_LINK_STATE_KEY, WikiLink, type WikiLinkState } from "@/components/WikiLinkNode";
+import { createWikiPageSuggestionPlugin } from "@/components/WikiPageSuggestion";
 import {
   createWikiSlashCommandPlugin,
   type WikiSlashCommandHandlers,
@@ -56,7 +57,7 @@ export function MarkdownBrainEditor({
   content: string;
   onChange: (content: string) => void;
   brainLinks?: Record<string, string>;
-  // Live titles for `page` links, keyed by slug. When a target resolves here,
+  // Live titles for `page` links, keyed by path. When a target resolves here,
   // its chip renders this title instead of the authored label, so renaming a
   // page updates every link to it instantly (Notion-style).
   pageTitles?: Record<string, string>;
@@ -74,7 +75,7 @@ export function MarkdownBrainEditor({
   // that need this pass a stable, server-fetched catalog.
   skillMentions?: SkillCatalogItem[];
   // Wiki surfaces only: typing "/" opens a Notion-style command menu (e.g.
-  // "page" creates a sub-page). Captured once at mount like skillMentions.
+  // "page" creates a sibling page). Captured once at mount like skillMentions.
   wikiSlashCommands?: WikiSlashCommandHandlers;
   // Full-document surfaces (wiki page body): show a Notion-style drag handle in
   // the left gutter to grab and reorder blocks. Off for compact form fields.
@@ -127,9 +128,25 @@ export function MarkdownBrainEditor({
         ...(wikiSlashCommands
           ? [
               Extension.create({
+                name: "wikiPageSuggestion",
+                addProseMirrorPlugins() {
+                  return [
+                    createWikiPageSuggestionPlugin(
+                      this.editor,
+                      () =>
+                        WIKI_LINK_STATE_KEY.getState(this.editor.state)?.pageTitles ??
+                        EMPTY_PAGE_TITLES,
+                    ),
+                  ];
+                },
+              }),
+            ]
+          : []),
+        ...(wikiSlashCommands
+          ? [
+              Extension.create({
                 name: "wikiSlashCommand",
                 addProseMirrorPlugins() {
-                  if (readOnly) return [];
                   return [createWikiSlashCommandPlugin(this.editor, wikiSlashCommands)];
                 },
               }),

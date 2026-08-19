@@ -836,6 +836,8 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
   return {
     internalToken: "internal",
     streamTokenSecret: "stream",
+    apiOrigin: "http://localhost:3001",
+    apiInternalToken: "api-internal-secret",
     vercelAiGatewayApiKey: "gateway",
     openaiCodexApiKey: "codex",
     exaApiKey: "exa",
