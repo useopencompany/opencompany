@@ -53,6 +53,9 @@ export const METRICS = {
   capabilityWalletBalanceUsdMicros: "goat.capability.wallet_balance_usd_micros",
   codexChatQueueWaitMs: "goat.codex_chat.queue_wait_ms",
   postgresNotifyQueueUsage: "goat.postgres.notify_queue_usage",
+  postgresQueueDeadTupleRatio: "goat.postgres.queue.dead_tuple_ratio",
+  postgresQueueDeadTuples: "goat.postgres.queue.dead_tuples",
+  postgresQueueRowsPruned: "goat.postgres.queue.rows_pruned",
   taskDispatchesTotal: "goat.task_dispatches_total",
   taskDispatchDurationMs: "goat.task_dispatch_duration_ms",
   taskRunsTotal: "goat.task_runs_total",
@@ -182,6 +185,7 @@ const LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS = new Set([
   "goat.capability_source",
   "goat.capability_action",
   "goat.approval_decision",
+  "goat.table",
   "goat.token_direction",
   "goat.signup_source",
 ]);
