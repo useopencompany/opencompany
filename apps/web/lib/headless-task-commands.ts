@@ -9,12 +9,13 @@ import {
   type TaskSummaryDto,
 } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
-import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
+import { reconcileCommittedProjection } from "./headless-collection-reconciliation";
 import { awaitHeadlessTaskTransaction } from "./headless-task-collections";
 
-type ClientOptions = { baseUrl?: string; fetch?: typeof globalThis.fetch; scopeKey?: string };
+type ClientOptions = { baseUrl?: string; fetch?: typeof globalThis.fetch };
+type ScopedClientOptions = ClientOptions & { scopeKey: string };
 
-export async function createHeadlessTask(command: CreateTaskBody, options: ClientOptions = {}) {
+export async function createHeadlessTask(command: CreateTaskBody, options: ScopedClientOptions) {
   const client = taskClient(options);
   const response = await client.v1.tasks.$post({
     header: { "idempotency-key": `web-task:${crypto.randomUUID()}` },
@@ -22,16 +23,9 @@ export async function createHeadlessTask(command: CreateTaskBody, options: Clien
   });
   if (!response.ok) throw await taskResponseError(response, "Task creation failed");
   const data = (await response.json()).data;
-  await Promise.all([
-    awaitHeadlessTaskTransaction(
-      data.transactionId,
-      options.scopeKey ? { scopeKey: options.scopeKey } : {},
-    ),
-    awaitHeadlessChatTransaction({
-      conversationId: data.task.conversationId,
-      transactionId: data.transactionId,
-    }),
-  ]);
+  await reconcileCommittedProjection(
+    awaitHeadlessTaskTransaction(data.transactionId, { scopeKey: options.scopeKey }),
+  );
   return data;
 }
 
@@ -74,16 +68,15 @@ export async function getLegacyTaskCompatibilityHistory(
   return (await response.json()).data;
 }
 
-export async function archiveHeadlessTask(taskId: string, options: ClientOptions = {}) {
+export async function archiveHeadlessTask(taskId: string, options: ScopedClientOptions) {
   const response = await taskClient(options).v1.tasks[":taskId"].$patch({
     param: { taskId },
     json: { archived: true },
   });
   if (!response.ok) throw await taskResponseError(response, "Task archive failed");
   const data = (await response.json()).data;
-  await awaitHeadlessTaskTransaction(
-    data.transactionId,
-    options.scopeKey ? { scopeKey: options.scopeKey } : {},
+  await reconcileCommittedProjection(
+    awaitHeadlessTaskTransaction(data.transactionId, { scopeKey: options.scopeKey }),
   );
   return data.task;
 }

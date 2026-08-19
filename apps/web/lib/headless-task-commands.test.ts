@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
 import { awaitHeadlessTaskTransaction } from "./headless-task-collections";
 import {
   archiveHeadlessTask,
@@ -9,10 +8,6 @@ import {
   getLegacyTaskCompatibilityHistory,
   listLegacyTaskCompatibility,
 } from "./headless-task-commands";
-
-vi.mock("./headless-chat-collections", () => ({
-  awaitHeadlessChatTransaction: vi.fn(async () => undefined),
-}));
 
 vi.mock("./headless-task-collections", () => ({
   awaitHeadlessTaskTransaction: vi.fn(async () => undefined),
@@ -41,7 +36,7 @@ const task = {
 describe("headless Task commands", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("creates through /v1 and reconciles Task, Message, and Run read models", async () => {
+  it("creates through /v1 and reconciles the workspace Task read model", async () => {
     let request: Request | null = null;
     const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       request = input instanceof Request ? input : new Request(input, init);
@@ -80,10 +75,6 @@ describe("headless Task commands", () => {
     });
     expect(awaitHeadlessTaskTransaction).toHaveBeenCalledWith("42", {
       scopeKey: "workspace_1",
-    });
-    expect(awaitHeadlessChatTransaction).toHaveBeenCalledWith({
-      conversationId: "conversation_1",
-      transactionId: "42",
     });
   });
 
