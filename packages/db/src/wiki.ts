@@ -67,6 +67,15 @@ export function hashWikiContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+function normalizedWikiPathInput(value: string): string {
+  const trimmed = value.trim();
+  let start = 0;
+  let end = trimmed.length;
+  while (start < end && trimmed.charCodeAt(start) === 47) start += 1;
+  while (end > start && trimmed.charCodeAt(end - 1) === 47) end -= 1;
+  return trimmed.slice(start, end);
+}
+
 function firstRow<T>(rows: T[], context: string): T {
   const row = rows[0];
   if (row === undefined) throw new WikiError(`Expected a row from ${context}.`);
@@ -277,7 +286,7 @@ export async function writeWikiPage(
   input: WikiWriteInput,
   db: DbClient = getDb(),
 ): Promise<WikiWriteResult> {
-  const path = input.path.trim().replace(/^\/+|\/+$/g, "");
+  const path = normalizedWikiPathInput(input.path);
   if (!isValidWikiPath(path)) {
     throw new WikiError(
       `Invalid wiki path "${input.path}". Paths are lowercase slug segments joined by "/", e.g. projects/website-redesign.`,
@@ -362,7 +371,7 @@ export async function createWikiFolder(
   },
   db: DbClient = getDb(),
 ): Promise<WikiFolderCreateResult> {
-  const path = input.path.trim().replace(/^\/+|\/+$/g, "");
+  const path = normalizedWikiPathInput(input.path);
   if (!isValidWikiPath(path)) throw new WikiError(`Invalid folder path "${input.path}".`);
 
   const existing = await pageByPath(db, input.workspaceId, path);
@@ -481,7 +490,7 @@ async function moveWikiNodeInDb(
   db: DbClient,
 ): Promise<WikiMoveResult> {
   const node = await requireWikiNode(db, input.workspaceId, input.path);
-  const parent = input.newParentPath?.trim().replace(/^\/+|\/+$/g, "") || null;
+  const parent = input.newParentPath ? normalizedWikiPathInput(input.newParentPath) || null : null;
   const slug = input.newSlug?.trim() || node.slug;
   if (!isValidWikiSlug(slug)) throw new WikiError(`Invalid slug "${input.newSlug}".`);
   if (parent !== null) {

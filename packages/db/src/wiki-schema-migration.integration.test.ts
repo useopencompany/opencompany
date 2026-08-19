@@ -32,6 +32,11 @@ describe("0220_goat_wiki_folders", () => {
         ('parent-child', 'ws', 'child', 'section/child', 'Child', 'Child body', '${"3".repeat(64)}', 10);
       INSERT INTO goat.wiki_timeline_entries (id, workspace_id, page_id, at, text)
       VALUES ('timeline', 'ws', 'parent-page', now(), 'Parent event');
+      INSERT INTO goat.wiki_page_versions
+        (id, workspace_id, page_id, slug, path, title, kind, content, content_hash, operation)
+      VALUES
+        ('version', 'ws', 'parent-page', 'section', 'section', 'Section', 'other',
+         'Parent body', '${"2".repeat(64)}', 'write');
     `);
 
     await applyMigration(db, "0220_goat_wiki_folders.sql");
@@ -57,6 +62,22 @@ describe("0220_goat_wiki_folders", () => {
       WHERE timeline.id = 'timeline'
     `);
     expect(timeline.rows[0]?.path).toBe("section/section");
+
+    const version = await db.query<{ page_id: string; path: string }>(`
+      SELECT version.page_id, page.path
+      FROM goat.wiki_page_versions version
+      JOIN goat.wiki_pages page ON page.id = version.page_id
+      WHERE version.id = 'version'
+    `);
+    expect(version.rows[0]?.path).toBe("section/section");
+
+    const migrationVersion = await db.query<{ page_id: string; path: string }>(`
+      SELECT version.page_id, version.path
+      FROM goat.wiki_page_versions version
+      JOIN goat.wiki_pages page ON page.id = version.page_id
+      WHERE page.path = 'section/section' AND version.operation = 'move'
+    `);
+    expect(migrationVersion.rows[0]?.path).toBe("section/section");
 
     await expect(
       db.exec(`

@@ -23,6 +23,7 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
     "Prepare marketing deployment",
     "Confirm release is current before production changes",
     "Run production migrations",
+    "Canonicalize wiki path links",
     "Confirm release is current before provider deploys",
     "Deploy and smoke marketing",
     "Deploy and smoke Render services",
@@ -33,6 +34,11 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
   assert.match(workflow, /timeout-minutes: 45/u);
   assert.match(workflow, /RENDER_DEPLOY_TIMEOUT_MS: "1200000"/u);
   assert.match(workflow, /VERCEL_DEPLOY_TIMEOUT_MS: "600000"/u);
+  assert.match(workflow, /run: bun scripts\/backfill-wiki-path-links\.ts/u);
+  assert.match(
+    workflow,
+    /steps\.migrate\.outcome == 'success' && steps\.backfill-wiki-path-links\.outcome == 'success'/u,
+  );
 });
 
 test("tracks and finalizes every production surface independently", async () => {

@@ -86,6 +86,15 @@ describe("writeWikiPage", () => {
     expect(tree[1]?.childCount).toBe(1);
   });
 
+  it("normalizes whitespace and surrounding slashes without a regular expression", async () => {
+    const result = await writeWikiPage(
+      { workspaceId: WS, path: "  ///projects/site///  ", body: "# Site" },
+      db,
+    );
+    expect(result.page.path).toBe("projects/site");
+    expect(result.createdAncestors).toEqual(["projects"]);
+  });
+
   it("honors an explicit title and preserves it across body rewrites", async () => {
     await writeWikiPage(
       { workspaceId: WS, path: "q3-planning", body: "goals go here", title: "Q3 Planning" },

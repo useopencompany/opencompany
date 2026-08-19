@@ -259,6 +259,11 @@ jobs:
         if: ${{ steps.current-before-migration.outputs.should_release == 'true' && needs.plan.outputs.database == 'true' && steps.deployment-database.outputs.deployment_id != '' }}
         run: bun run db:migrate
 
+      - name: Canonicalize wiki path links
+        id: backfill-wiki-path-links
+        if: ${{ steps.current-before-migration.outputs.should_release == 'true' && needs.plan.outputs.database == 'true' && steps.migrate.outcome == 'success' }}
+        run: bun scripts/backfill-wiki-path-links.ts
+
       - name: Confirm release is current before provider deploys
         id: current-before-deploy
         if: ${{ always() && !cancelled() && steps.current-before-migration.outputs.should_release == 'true' }}
@@ -276,7 +281,7 @@ jobs:
 
       - name: Deploy and smoke Render services
         id: deploy-render
-        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && ((needs.plan.outputs.api == 'true' && steps.deployment-api.outputs.deployment_id != '') || (needs.plan.outputs.runner == 'true' && steps.deployment-runner.outputs.deployment_id != '')) && (needs.plan.outputs.database != 'true' || steps.migrate.outcome == 'success') }}
+        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && ((needs.plan.outputs.api == 'true' && steps.deployment-api.outputs.deployment_id != '') || (needs.plan.outputs.runner == 'true' && steps.deployment-runner.outputs.deployment_id != '')) && (needs.plan.outputs.database != 'true' || (steps.migrate.outcome == 'success' && steps.backfill-wiki-path-links.outcome == 'success')) }}
         run: |
           args=()
           if [[ "${{ needs.plan.outputs.api }}" == "true" && -n "${{ steps.deployment-api.outputs.deployment_id }}" ]]; then args+=(--api); fi
@@ -285,7 +290,7 @@ jobs:
 
       - name: Deploy web
         id: deploy-web
-        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && needs.plan.outputs.web == 'true' && steps.deployment-web.outputs.deployment_id != '' && (needs.plan.outputs.database != 'true' || steps.migrate.outcome == 'success') && (needs.plan.outputs.api != 'true' || steps.deploy-render.outputs.api_result == 'success') && (needs.plan.outputs.runner != 'true' || steps.deploy-render.outputs.runner_result == 'success') }}
+        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && needs.plan.outputs.web == 'true' && steps.deployment-web.outputs.deployment_id != '' && (needs.plan.outputs.database != 'true' || (steps.migrate.outcome == 'success' && steps.backfill-wiki-path-links.outcome == 'success')) && (needs.plan.outputs.api != 'true' || steps.deploy-render.outputs.api_result == 'success') && (needs.plan.outputs.runner != 'true' || steps.deploy-render.outputs.runner_result == 'success') }}
         run: >-
           node scripts/release-vercel-deploy.mjs
           --label web
@@ -310,10 +315,11 @@ jobs:
         env:
           DEPLOYMENT_ID: ${{ steps.deployment-database.outputs.deployment_id }}
           MIGRATION_OUTCOME: ${{ steps.migrate.outcome }}
+          BACKFILL_OUTCOME: ${{ steps.backfill-wiki-path-links.outcome }}
         run: |
           state=inactive
-          if [[ "$MIGRATION_OUTCOME" == "success" ]]; then state=success; fi
-          if [[ "$MIGRATION_OUTCOME" == "failure" ]]; then state=failure; fi
+          if [[ "$MIGRATION_OUTCOME" == "success" && "$BACKFILL_OUTCOME" == "success" ]]; then state=success; fi
+          if [[ "$MIGRATION_OUTCOME" == "failure" || "$BACKFILL_OUTCOME" == "failure" ]]; then state=failure; fi
           node scripts/release-deployment.mjs finalize --surface database --deployment-id "$DEPLOYMENT_ID" --state "$state"
 
       - name: Finalize API deployment

@@ -43,6 +43,21 @@ BEGIN
       UPDATE "goat"."wiki_timeline_entries"
       SET "page_id" = nested_page_id
       WHERE "page_id" = existing_page."id";
+
+      UPDATE "goat"."wiki_page_versions"
+      SET "page_id" = nested_page_id
+      WHERE "page_id" = existing_page."id";
+
+      INSERT INTO "goat"."wiki_page_versions" (
+        "id", "workspace_id", "page_id", "slug", "path", "title", "kind",
+        "content", "content_hash", "operation", "added_lines", "removed_lines",
+        "actor_workos_id"
+      ) VALUES (
+        gen_random_uuid()::text, existing_page."workspace_id", nested_page_id,
+        existing_page."slug", existing_page."path" || '/' || existing_page."slug",
+        existing_page."title", existing_page."kind", existing_page."content",
+        existing_page."content_hash", 'move', 0, 0, existing_page."updated_by_workos_id"
+      );
     END IF;
 
     UPDATE "goat"."wiki_pages"
