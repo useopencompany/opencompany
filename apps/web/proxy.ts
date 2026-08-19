@@ -14,7 +14,7 @@ const UNAUTHENTICATED_PATHS = new Set([
   "/mcp",
   "/changelog",
 ]);
-const UNAUTHENTICATED_PREFIXES = ["/.well-known/oauth-", "/share/"];
+const UNAUTHENTICATED_PREFIXES = ["/.well-known/oauth-", "/share/", "/auth/desktop/"];
 
 export default async function proxy(request: NextRequest) {
   const localHttpsRedirect = localHttpsRedirectUrl(request);

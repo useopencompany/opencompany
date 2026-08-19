@@ -82,6 +82,7 @@
   "overrides": {
     "postcss": "$postcss"
   },
+  "trustedDependencies": ["electron"],
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
     "@testing-library/jest-dom": "^6.9.1",

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://download.todesktop.com/config-schema.json",
+  "id": "REPLACE_WITH_TODESKTOP_APP_ID",
+  "appId": "chat.opencompany.desktop",
+  "productName": "opencompany",
+  "icon": "./assets/icon.png",
+  "mac": {
+    "category": "public.app-category.productivity",
+    "arch": ["arm64"]
+  },
+  "protocols": [
+    {
+      "name": "opencompany",
+      "schemes": ["opencompany"]
+    }
+  ]
+}

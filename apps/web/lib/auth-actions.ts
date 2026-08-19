@@ -13,6 +13,7 @@ import {
   setOAuthStateCookie,
   setOrganizationSelection,
 } from "@/lib/auth-methods";
+import { mintDesktopHandoffToken } from "@/lib/desktop-auth";
 import { getAppUrl, getWorkOSRedirectUri } from "@/lib/workos";
 import { getWorkOSClient } from "@/lib/workos-client";
 
@@ -137,6 +138,18 @@ export async function selectOrganization(input: {
   }
 
   await clearOrganizationSelection();
+
+  // Desktop handoff path: a multi-org user who reached org selection on the
+  // desktop flow. Seal the refresh token and bounce back to the app rather than
+  // completing this (browser) session — same reasoning as the callback route.
+  if (selection.desktopChallenge) {
+    const handoffToken = mintDesktopHandoffToken({
+      refreshToken: authResponse.refreshToken,
+      challenge: selection.desktopChallenge,
+    });
+    redirect(`/auth/desktop/return?token=${encodeURIComponent(handoffToken)}`);
+  }
+
   await completeAuthentication(authResponse, getAppUrl());
   redirect(selection.returnPathname);
 }

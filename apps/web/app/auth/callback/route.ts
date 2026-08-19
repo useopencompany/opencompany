@@ -7,6 +7,7 @@ import {
   safeReturnPathname,
   setOrganizationSelection,
 } from "@/lib/auth-methods";
+import { mintDesktopHandoffToken } from "@/lib/desktop-auth";
 import { getAppUrl } from "@/lib/workos";
 import { getWorkOSClient } from "@/lib/workos-client";
 
@@ -46,6 +47,21 @@ export async function GET(request: NextRequest) {
       ...(ipAddress ? { ipAddress } : {}),
       ...(userAgent ? { userAgent } : {}),
     });
+
+    // Desktop handoff path: seal the refresh token and bounce back to the app
+    // instead of completing the browser session. Completing here would make the
+    // browser cookie and the handoff token share one refresh token, and the
+    // desktop redemption's rotation would silently kill the browser session.
+    if (statePayload.desktopChallenge) {
+      const handoffToken = mintDesktopHandoffToken({
+        refreshToken: authResponse.refreshToken,
+        challenge: statePayload.desktopChallenge,
+      });
+      const url = new URL("/auth/desktop/return", getAppUrl());
+      url.searchParams.set("token", handoffToken);
+      return NextResponse.redirect(url);
+    }
+
     await completeAuthentication(authResponse, request);
     return NextResponse.redirect(
       new URL(safeReturnPathname(statePayload.returnPathname), getAppUrl()),
@@ -56,6 +72,9 @@ export async function GET(request: NextRequest) {
       await setOrganizationSelection({
         ...selection,
         returnPathname: safeReturnPathname(statePayload.returnPathname),
+        ...(statePayload.desktopChallenge
+          ? { desktopChallenge: statePayload.desktopChallenge }
+          : {}),
       });
       return NextResponse.redirect(new URL("/signin", getAppUrl()));
     }
