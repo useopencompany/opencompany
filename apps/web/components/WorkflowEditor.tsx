@@ -88,7 +88,6 @@ export function WorkflowEditor({
   const [isArchiving, startArchiving] = useTransition();
   const draftRef = useRef(draft);
   const versionRef = useRef(workflow.version);
-  const triggerTypeRef = useRef(workflow.trigger.type);
   const mountedRef = useRef(true);
   const autosaveRef = useRef({
     savedValue: serializeWorkflowDraft(draft),
@@ -123,23 +122,15 @@ export function WorkflowEditor({
 
       let result: { ok: true } | { ok: false; message: string };
       try {
-        const saved = await updateHeadlessWorkflow(
-          workflow.id,
-          {
-            expectedVersion: versionRef.current,
-            name: snapshot.name,
-            description: snapshot.description,
-            steps: snapshot.steps,
-            status: snapshot.status,
-            trigger: snapshot.trigger,
-          },
-          {
-            waitForWorkflowSchedule:
-              triggerTypeRef.current === "schedule" || snapshot.trigger.type === "schedule",
-          },
-        );
+        const saved = await updateHeadlessWorkflow(workflow.id, {
+          expectedVersion: versionRef.current,
+          name: snapshot.name,
+          description: snapshot.description,
+          steps: snapshot.steps,
+          status: snapshot.status,
+          trigger: snapshot.trigger,
+        });
         versionRef.current = saved.version;
-        triggerTypeRef.current = snapshot.trigger.type;
         result = { ok: true };
       } catch (error) {
         result = { ok: false, message: workflowCommandError(error, "saved") };
@@ -237,11 +228,7 @@ export function WorkflowEditor({
     setSaveError(null);
     startArchiving(async () => {
       try {
-        await archiveHeadlessWorkflow(
-          workflow.id,
-          { expectedVersion: versionRef.current },
-          { waitForWorkflowSchedule: triggerTypeRef.current === "schedule" },
-        );
+        await archiveHeadlessWorkflow(workflow.id, { expectedVersion: versionRef.current });
         router.push("/workflows");
       } catch (error) {
         setSaveError(workflowCommandError(error, "archived"));

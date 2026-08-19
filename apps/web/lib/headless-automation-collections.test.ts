@@ -2,7 +2,6 @@ import { createCollection } from "@tanstack/react-db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   awaitHeadlessTaskScheduleTransaction,
-  awaitHeadlessWorkflowTransaction,
   getHeadlessTaskSchedules,
   getHeadlessWorkflows,
 } from "./headless-automation-collections";
@@ -46,23 +45,6 @@ describe("headless automation collections", () => {
       id: "headless-task-schedules:v1:workspace_catalog",
       shapeOptions: { url: "https://api.example.test/v1/read-models/task-schedules-v1" },
     });
-  });
-
-  it("waits for both Workflow projections only when a schedule can change", async () => {
-    const workflows = getHeadlessWorkflows("workspace_wait");
-
-    await awaitHeadlessWorkflowTransaction("71", {
-      scopeKey: "workspace_wait",
-      timeoutMs: 5_000,
-      includeSchedule: true,
-    });
-
-    const workflowSchedules = vi
-      .mocked(createCollection)
-      .mock.results.map((result) => result.value as unknown as TestCollection)
-      .find((collection) => collection.options.id.includes("workflow-schedules"));
-    expect(workflows.utils.awaitTxId).toHaveBeenCalledWith(71, 5_000);
-    expect(workflowSchedules?.utils.awaitTxId).toHaveBeenCalledWith(71, 5_000);
   });
 
   it("rejects unsafe API transaction identifiers before waiting", async () => {

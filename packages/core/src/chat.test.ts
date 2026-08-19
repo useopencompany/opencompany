@@ -116,6 +116,9 @@ describe("ChatApplicationService", () => {
       title: "Archived Chat",
       engine: "opencompany",
       model: "openai/gpt-5.5",
+      runtime: null,
+      activityState: "idle",
+      hasUnseen: false,
       createdAt: new Date("2026-08-11T15:00:00.000Z"),
       updatedAt: new Date("2026-08-11T15:10:00.000Z"),
     });

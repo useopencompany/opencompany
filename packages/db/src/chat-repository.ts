@@ -189,22 +189,22 @@ export class PostgresChatRepository implements ChatRepository {
     const cursor = decodeConversationCursor(input.cursor);
     const rows = await this.rows<ConversationRow>(sql`
       SELECT
-        chat.id,
-        chat.title,
-        chat.engine,
-        chat.model,
-        chat.created_at AS "createdAt",
-        chat.updated_at AS "updatedAt"
-      FROM goat.chat_sessions AS chat
-      LEFT JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = chat.id
-      WHERE chat.user_workos_id = ${input.actor.userId}
-        AND chat.kind = 'chat'
-        AND chat.closed_at IS NULL
-        AND (
-          runtime.id IS NULL
-          OR runtime.workspace_id IS NULL
-          OR runtime.workspace_id = ${input.actor.workspaceId}
-        )
+        conversation.id,
+        conversation.title,
+        conversation.engine,
+        conversation.model,
+        conversation.runtime_status AS "runtimeStatus",
+        conversation.active_run_id AS "activeRunId",
+        conversation.runtime_has_error AS "runtimeHasError",
+        conversation.runtime_updated_at AS "runtimeUpdatedAt",
+        conversation.activity_state AS "activityState",
+        conversation.has_unseen AS "hasUnseen",
+        conversation.created_at AS "createdAt",
+        conversation.updated_at AS "updatedAt"
+      FROM goat.conversation_read_model_v1 AS conversation
+      WHERE conversation.actor_id = ${input.actor.userId}
+        AND conversation.archived_at IS NULL
+        AND (conversation.workspace_id IS NULL OR conversation.workspace_id = ${input.actor.workspaceId})
         AND EXISTS (
           SELECT 1 FROM goat.workspace_members AS member
           WHERE member.workspace_id = ${input.actor.workspaceId}
@@ -212,12 +212,12 @@ export class PostgresChatRepository implements ChatRepository {
         )
         AND (
           ${cursor?.updatedAt ?? null}::timestamptz IS NULL
-          OR (chat.updated_at, chat.id) < (
+          OR (conversation.updated_at, conversation.id) < (
             ${cursor?.updatedAt ?? null}::timestamptz,
             ${cursor?.id ?? null}::text
           )
         )
-      ORDER BY chat.updated_at DESC, chat.id DESC
+      ORDER BY conversation.updated_at DESC, conversation.id DESC
       LIMIT ${input.limit + 1}
     `);
     const page = rows.slice(0, input.limit).map(mapConversation);
@@ -238,23 +238,23 @@ export class PostgresChatRepository implements ChatRepository {
   }): Promise<Conversation | null> {
     const [conversation] = await this.rows<ConversationRow>(sql`
       SELECT
-        chat.id,
-        chat.title,
-        chat.engine,
-        chat.model,
-        chat.created_at AS "createdAt",
-        chat.updated_at AS "updatedAt"
-      FROM goat.chat_sessions AS chat
-      LEFT JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = chat.id
-      WHERE chat.id = ${input.conversationId}
-        AND chat.user_workos_id = ${input.actor.userId}
-        AND chat.kind = 'chat'
-        AND (${input.includeArchived ?? false}::boolean OR chat.closed_at IS NULL)
-        AND (
-          runtime.id IS NULL
-          OR runtime.workspace_id IS NULL
-          OR runtime.workspace_id = ${input.actor.workspaceId}
-        )
+        conversation.id,
+        conversation.title,
+        conversation.engine,
+        conversation.model,
+        conversation.runtime_status AS "runtimeStatus",
+        conversation.active_run_id AS "activeRunId",
+        conversation.runtime_has_error AS "runtimeHasError",
+        conversation.runtime_updated_at AS "runtimeUpdatedAt",
+        conversation.activity_state AS "activityState",
+        conversation.has_unseen AS "hasUnseen",
+        conversation.created_at AS "createdAt",
+        conversation.updated_at AS "updatedAt"
+      FROM goat.conversation_read_model_v1 AS conversation
+      WHERE conversation.id = ${input.conversationId}
+        AND conversation.actor_id = ${input.actor.userId}
+        AND (${input.includeArchived ?? false}::boolean OR conversation.archived_at IS NULL)
+        AND (conversation.workspace_id IS NULL OR conversation.workspace_id = ${input.actor.workspaceId})
         AND EXISTS (
           SELECT 1 FROM goat.workspace_members AS member
           WHERE member.workspace_id = ${input.actor.workspaceId}
@@ -325,6 +325,10 @@ export class PostgresChatRepository implements ChatRepository {
               WHEN ${markSeen}::boolean IS TRUE
               THEN GREATEST(COALESCE(chat.last_seen_at, '-infinity'::timestamptz), ${now})
               ELSE chat.last_seen_at
+            END,
+            has_unseen = CASE
+              WHEN ${markSeen}::boolean IS TRUE THEN false
+              ELSE chat.has_unseen
             END,
             updated_at = CASE
               WHEN ${archived}::boolean IS NOT NULL
@@ -1011,7 +1015,7 @@ export class PostgresChatRepository implements ChatRepository {
       ),
       updated_chat AS (
         UPDATE goat.chat_sessions AS chat
-        SET updated_at = ${now}, last_seen_at = ${now}
+        SET updated_at = ${now}, last_seen_at = ${now}, has_unseen = false
         FROM target_chat, inserted_run
         WHERE chat.id = target_chat.id
         RETURNING chat.id
@@ -1894,7 +1898,14 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
         SET status = 'idle', active_turn_id = NULL, updated_at = ${pausedAt}
         FROM paused_run AS run
         WHERE runtime.id = run.codex_chat_session_id
-        RETURNING runtime.id
+        RETURNING runtime.id, runtime.chat_session_id
+      ),
+      updated_chat AS MATERIALIZED (
+        UPDATE goat.chat_sessions AS chat
+        SET has_unseen = true, updated_at = ${pausedAt}
+        FROM idled_runtime AS runtime
+        WHERE chat.id = runtime.chat_session_id
+        RETURNING chat.id
       ),
       notified AS MATERIALIZED (
         SELECT pg_notify(
@@ -1908,6 +1919,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
       FROM inserted_approvals AS approval
       WHERE (SELECT COUNT(*) FROM inserted_events) = ${eventDrafts.length}
         AND EXISTS (SELECT 1 FROM idled_runtime)
+        AND EXISTS (SELECT 1 FROM updated_chat)
         AND EXISTS (SELECT 1 FROM notified)
       ORDER BY approval.created_at ASC, approval.id ASC
     `);
@@ -1945,6 +1957,12 @@ type ConversationRow = {
   title: string;
   engine: Conversation["engine"];
   model: string;
+  runtimeStatus: NonNullable<Conversation["runtime"]>["status"] | null;
+  activeRunId: string | null;
+  runtimeHasError: boolean | null;
+  runtimeUpdatedAt: Date | string | null;
+  activityState: Conversation["activityState"];
+  hasUnseen: boolean;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -2184,6 +2202,17 @@ function mapConversation(row: ConversationRow): Conversation {
     title: row.title,
     engine: row.engine,
     model: row.model,
+    runtime:
+      row.runtimeStatus !== null && row.runtimeHasError !== null && row.runtimeUpdatedAt !== null
+        ? {
+            status: row.runtimeStatus,
+            activeRunId: row.activeRunId,
+            hasError: row.runtimeHasError,
+            updatedAt: asDate(row.runtimeUpdatedAt),
+          }
+        : null,
+    activityState: row.activityState,
+    hasUnseen: row.hasUnseen,
     createdAt: asDate(row.createdAt),
     updatedAt: asDate(row.updatedAt),
   };

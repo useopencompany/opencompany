@@ -9,6 +9,24 @@ import { CHAT_ATTACHMENTS_PER_MESSAGE } from "./attachments";
 export const CHAT_ENGINES = ["opencompany", "codex", "claude_code"] as const;
 export type ChatEngine = (typeof CHAT_ENGINES)[number];
 
+export const CONVERSATION_RUNTIME_STATUSES = [
+  "queued",
+  "starting",
+  "idle",
+  "running",
+  "failed",
+  "interrupted",
+  "closed",
+] as const;
+export type ConversationRuntimeStatus = (typeof CONVERSATION_RUNTIME_STATUSES)[number];
+
+export type ConversationRuntime = {
+  status: ConversationRuntimeStatus;
+  activeRunId: string | null;
+  hasError: boolean;
+  updatedAt: Date;
+};
+
 export const RUN_STATUSES = [
   "queued",
   "running",
@@ -60,6 +78,9 @@ export type Conversation = {
   title: string;
   engine: ChatEngine;
   model: string;
+  runtime: ConversationRuntime | null;
+  activityState: "working" | "idle";
+  hasUnseen: boolean;
   createdAt: Date;
   updatedAt: Date;
 };

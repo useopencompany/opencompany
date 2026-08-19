@@ -15,7 +15,7 @@ import {
   type ChatMessageMetadata,
   type ChatSummaryView,
   type ChatUiMessage,
-  type CodexRuntimeView,
+  type ConversationRuntimeView,
   START_TASK_TOOL_PART_TYPE,
   START_WORKFLOW_TOOL_PART_TYPE,
   USE_ACTION_TOOL_PART_TYPE,
@@ -497,6 +497,75 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("Loading conversation…")).toBeInTheDocument();
   });
 
+  it("reloads an active opencompany Conversation with Stop targeting its authoritative Run", async () => {
+    const user = userEvent.setup();
+    const transportCancel = vi
+      .spyOn(HeadlessChatTransport.prototype, "cancel")
+      .mockResolvedValue(false);
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_opencompany_active",
+          title: "Active research",
+          model: DEFAULT_MODEL,
+          engine: "opencompany",
+          runtime: {
+            status: "running",
+            activeRunId: "run_viewed_conversation",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+      />,
+    );
+
+    const stop = screen.getByRole("button", { name: "Stop response" });
+    expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("status", { name: "opencompany is working" }),
+    ).toBeInTheDocument();
+
+    await user.click(stop);
+
+    expect(headlessChatCommandMocks.cancel).toHaveBeenCalledWith("run_viewed_conversation");
+    expect(transportCancel).not.toHaveBeenCalled();
+    expect(chatMock.stop).toHaveBeenCalledOnce();
+  });
+
+  it("reloads an active Claude Code Conversation with Working and Stop", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "goat_chat_claude_active",
+          title: "Active coding",
+          model: DEFAULT_MODEL,
+          engine: "claude_code",
+          runtime: {
+            status: "running",
+            activeRunId: "run_claude_active",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        claudeCodeConnected
+      />,
+    );
+
+    expect(screen.getByLabelText("Claude Code status: Working")).toHaveTextContent("Working");
+    expect(screen.getByRole("button", { name: "Interrupt Claude Code" })).toBeInTheDocument();
+  });
+
   it("resolves action approvals as durable Run commands before resuming the stream", async () => {
     const user = userEvent.setup();
     const resolveApproval = vi
@@ -634,9 +703,10 @@ describe("Surface chat streaming UI", () => {
           model: DEFAULT_MODEL,
           engine: "codex",
           messages: [],
-          codexRuntime: {
+          runtime: {
             status: "running",
-            error: null,
+            activeRunId: "run_codex_active",
+            hasError: false,
             updatedAt: new Date().toISOString(),
           },
         }}
@@ -718,12 +788,14 @@ describe("Surface chat streaming UI", () => {
           model: DEFAULT_MODEL,
           engine: "codex",
           messages: [],
-          codexRuntime: {
+          runtime: {
             status: "running",
-            error: null,
+            activeRunId: "run_codex_active",
+            hasError: false,
             updatedAt: new Date().toISOString(),
           },
         }}
+        workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
         taskSpawningEnabled
@@ -746,9 +818,13 @@ describe("Surface chat streaming UI", () => {
     await user.click(submit);
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
-    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("ship-feature", {
-      description: "#ship-feature fix the composer send button",
-    });
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "ship-feature",
+      {
+        description: "#ship-feature fix the composer send button",
+      },
+      { scopeKey: "workspace_1" },
+    );
     expect(chatMock.stop).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
@@ -877,7 +953,8 @@ describe("Surface chat streaming UI", () => {
       preview: "Start",
       updatedAt: staleSummaryUpdatedAt,
       lastSeenAt: staleSummaryUpdatedAt,
-      state: "done_seen",
+      activityState: "idle",
+      hasUnseen: true,
       pinnedAt: null,
     };
 
@@ -904,12 +981,16 @@ describe("Surface chat streaming UI", () => {
     expect(updateHeadlessChatConversation).not.toHaveBeenCalled();
 
     chatMock.status = "ready";
+    const completedSummary = {
+      ...staleSummary,
+      updatedAt: "2026-07-04T12:01:00.000Z",
+    };
     rerender(
       <Surface
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
-        recentChats={[staleSummary]}
+        recentChats={[completedSummary]}
       />,
     );
 
@@ -1143,9 +1224,10 @@ describe("Surface chat streaming UI", () => {
               parts: [{ type: "text", text: "Run the morning workflow" }],
             },
           ],
-          codexRuntime: {
+          runtime: {
             status: "running",
-            error: null,
+            activeRunId: "run_task_1",
+            hasError: false,
             updatedAt: new Date().toISOString(),
           },
         }}
@@ -1184,9 +1266,10 @@ describe("Surface chat streaming UI", () => {
               parts: [{ type: "text", text: "Run the morning workflow" }],
             },
           ],
-          codexRuntime: {
+          runtime: {
             status: "interrupted",
-            error: null,
+            activeRunId: null,
+            hasError: false,
             updatedAt: new Date().toISOString(),
           },
         }}
@@ -2125,10 +2208,10 @@ describe("Surface chat streaming UI", () => {
           title: "Codex question",
           model: DEFAULT_MODEL,
           engine: "codex",
-          codexRuntime: {
+          runtime: {
             status: "running",
-            activeTurnId: "goat_codex_chat_turn_1",
-            error: null,
+            activeRunId: "goat_codex_chat_turn_1",
+            hasError: false,
             updatedAt: new Date().toISOString(),
           },
           messages: [
@@ -2238,9 +2321,10 @@ describe("Surface chat streaming UI", () => {
           title: "Codex chat",
           model: DEFAULT_MODEL,
           engine: "codex",
-          codexRuntime: {
+          runtime: {
             status: "idle",
-            error: null,
+            activeRunId: null,
+            hasError: false,
             updatedAt: currentTimestamp(),
           },
           messages: [],
@@ -2293,9 +2377,10 @@ describe("Surface chat streaming UI", () => {
           title: "Codex chat",
           model: DEFAULT_MODEL,
           engine: "codex",
-          codexRuntime: {
+          runtime: {
             status: "queued",
-            error: null,
+            activeRunId: "run_queued_1",
+            hasError: false,
             updatedAt: currentTimestamp(),
           },
           messages: [],
@@ -2603,6 +2688,7 @@ describe("Surface chat streaming UI", () => {
           model: DEFAULT_MODEL,
           messages: [],
         }}
+        workspaceId="workspace_1"
         userWorkosId="user_1"
         taskSpawningEnabled
       />,
@@ -2623,10 +2709,14 @@ describe("Surface chat streaming UI", () => {
     await user.type(textarea, "{Enter}");
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
-    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
-      description: "#morning-test run today's checks with @skill/smooth-shadow-ring",
-      skillIds: ["smooth-shadow-ring"],
-    });
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "morning-test",
+      {
+        description: "#morning-test run today's checks with @skill/smooth-shadow-ring",
+        skillIds: ["smooth-shadow-ring"],
+      },
+      { scopeKey: "workspace_1" },
+    );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
@@ -2676,6 +2766,7 @@ describe("Surface chat streaming UI", () => {
           model: DEFAULT_MODEL,
           messages: [],
         }}
+        workspaceId="workspace_1"
         userWorkosId="user_1"
         taskSpawningEnabled
       />,
@@ -2702,10 +2793,14 @@ describe("Surface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Start task" }));
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
-    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
-      description: "#morning-test summarize this report",
-      attachmentIds: ["attachment_1"],
-    });
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "morning-test",
+      {
+        description: "#morning-test summarize this report",
+        attachmentIds: ["attachment_1"],
+      },
+      { scopeKey: "workspace_1" },
+    );
     expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
@@ -2755,6 +2850,7 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={null}
+        workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
         taskSpawningEnabled
@@ -2774,9 +2870,13 @@ describe("Surface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Start task" }));
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
-    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
-      description: "#morning-test run today's checks",
-    });
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "morning-test",
+      {
+        description: "#morning-test run today's checks",
+      },
+      { scopeKey: "workspace_1" },
+    );
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining("messages"),
       expect.anything(),
@@ -3814,6 +3914,7 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={null}
+        workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
         taskSpawningEnabled
@@ -3837,9 +3938,13 @@ describe("Surface chat streaming UI", () => {
     await user.click(within(dialog).getByRole("button", { name: "Start task" }));
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
-    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
-      description: "#morning-test run today's checks",
-    });
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "morning-test",
+      {
+        description: "#morning-test run today's checks",
+      },
+      { scopeKey: "workspace_1" },
+    );
     expect(headlessChatMocks.startBackground).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
@@ -5032,14 +5137,16 @@ function taskView(overrides: Partial<TaskView> = {}): TaskView {
 }
 
 function codexChatSummary(
-  overrides: Partial<Omit<ChatSummaryView, "codexRuntime">> & {
-    status?: CodexRuntimeView["status"] | null;
-    error?: string | null;
+  overrides: Partial<Omit<ChatSummaryView, "runtime">> & {
+    status?: ConversationRuntimeView["status"] | null;
+    hasError?: boolean;
   } = {},
 ): ChatSummaryView {
   const now = currentTimestamp();
-  const { status = "idle", error = null, ...summaryOverrides } = overrides;
+  const { status = "idle", hasError = false, ...summaryOverrides } = overrides;
   const updatedAt = summaryOverrides.updatedAt ?? now;
+  const activityState =
+    status === "queued" || status === "starting" || status === "running" ? "working" : "idle";
   return {
     id: "goat_chat_codex_1",
     title: "Codex task",
@@ -5048,7 +5155,9 @@ function codexChatSummary(
     preview: "Codex is working on the repository.",
     updatedAt,
     pinnedAt: null,
-    codexRuntime: status ? { status, error, updatedAt } : null,
+    runtime: status ? { status, activeRunId: null, hasError, updatedAt } : null,
+    activityState,
+    hasUnseen: false,
     ...summaryOverrides,
   };
 }

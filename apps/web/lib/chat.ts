@@ -42,7 +42,10 @@ function toChatSessionView(conversation: ConversationDto): ChatSessionView {
     model: normalizeModel(conversation.model),
     engine: conversation.engine,
     codexComposerSettings: null,
-    codexRuntime: null,
+    runtime: conversation.runtime,
+    activityState: conversation.activityState,
+    hasUnseen: conversation.hasUnseen,
+    updatedAt: conversation.updatedAt,
     // The API-owned Electric read model hydrates the transcript in Surface.
     messages: [],
   };
@@ -55,11 +58,12 @@ function toChatSummaryView(conversation: ConversationDto): ChatSummaryView {
     model: normalizeModel(conversation.model),
     engine: conversation.engine,
     codexComposerSettings: null,
-    codexRuntime: null,
-    state: "done_seen",
+    runtime: conversation.runtime,
+    activityState: conversation.activityState,
+    hasUnseen: conversation.hasUnseen,
     preview: "No messages yet.",
     updatedAt: conversation.updatedAt,
-    lastSeenAt: conversation.updatedAt,
+    lastSeenAt: null,
     pinnedAt: null,
   };
 }

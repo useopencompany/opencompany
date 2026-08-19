@@ -90,6 +90,7 @@ import {
   CodingWorkspacePanel,
   type CodingWorkspacePanelHandle,
 } from "@/components/CodingWorkspacePanel";
+import { ConversationRuntimeSync } from "@/components/ConversationRuntimeSync";
 import { buildChatTaskLookup } from "@/components/chat/assistant-items";
 import {
   ComposerAttachments,
@@ -101,6 +102,7 @@ import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/T
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
 import { useCreditBalance } from "@/components/chat/useCreditBalance";
+import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useHydrated } from "@/components/useHydrated";
 import {
   AD_HOC_TASK_ID,
@@ -135,13 +137,10 @@ import {
   type ChatSummaryView,
   type ChatUiAttachment,
   type ChatUiMessage,
-  type CodexRuntimeView,
+  type ConversationRuntimeView,
   chatSummaryState,
-  compareChatMessageOrder,
   isChatRuntimeActive,
-  type StoredChatMessage,
   textFromChatUiMessage,
-  toChatUiMessage,
 } from "@/lib/chat-ui";
 import { CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
 import {
@@ -171,16 +170,7 @@ import {
 import type { TaskScheduleView, WorkflowCatalogItem } from "@/lib/headless-automation-types";
 import { uploadHeadlessChatAttachment } from "@/lib/headless-chat-attachment-upload";
 import {
-  getHeadlessChatMessages,
-  getHeadlessChatRuns,
-  getHeadlessEngineSessions,
-  type HeadlessChatMessageReadModel,
-  type HeadlessChatRunReadModel,
-  type HeadlessEngineSessionReadModel,
-} from "@/lib/headless-chat-collections";
-import {
   cancelHeadlessChatRun,
-  getEngineRuntimeStatus,
   resolveEngineQuestions,
   updateHeadlessChatConversation,
 } from "@/lib/headless-chat-commands";
@@ -224,7 +214,6 @@ const CHAT_THREAD_COMPOSER_GAP_PX = 20;
 const BACKGROUND_CHAT_PROMPT_MAX_LENGTH = 10_000;
 const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
-const CODEX_SANDBOX_STATUS_POLL_INTERVAL_MS = 30_000;
 const CODEX_MENTION: ChatMention = { kind: "engine", id: "codex" };
 const CLAUDE_MENTION: ChatMention = { kind: "engine", id: "claude" };
 const CLOUD_CODEX_ATTACHMENT_CAPABILITIES = { images: true, pdf: true } as const;
@@ -443,11 +432,6 @@ export function Surface({
   // NOT when a new session gets its server id mid-turn (that would discard the
   // in-flight stream state).
   const [chatInstanceKey, setChatInstanceKey] = useState(() => initialChat?.id ?? "goat-chat-main");
-  // Persisted messages for the active session, synced live from Electric.
-  const [liveChat, setLiveChat] = useState<{
-    sessionId: string;
-    messages: ChatUiMessage[];
-  } | null>(null);
   const rememberedChatModel = useSyncExternalStore(
     subscribeLastChatSelection,
     () =>
@@ -515,13 +499,11 @@ export function Surface({
   const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState(
     initialCodexComposerUiState.goalTokenBudget,
   );
-  const [codexSandboxStatus, setCodexSandboxStatus] = useState<EngineRuntimeStatus | null>(null);
-  const [codexRuntime, setCodexRuntime] = useState<CodexRuntimeView | null>(
-    initialChat?.codexRuntime ?? null,
+  const [codingSandboxStatus, setCodingSandboxStatus] = useState<EngineRuntimeStatus | null>(null);
+  const [conversationRuntime, setConversationRuntime] = useState<ConversationRuntimeView | null>(
+    initialChat?.runtime ?? null,
   );
-  const [engineRunning, setEngineRunning] = useState(() =>
-    isCodexRuntimeActive(initialChat?.codexRuntime),
-  );
+  const conversationRunning = isChatRuntimeActive(conversationRuntime);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
@@ -539,7 +521,11 @@ export function Surface({
     ReadonlySet<string>
   >(() => new Set());
   const [liveChatTasks, setLiveChatTasks] = useState<readonly TaskView[] | null>(null);
-  const [activeTurnStartedAtMs, setActiveTurnStartedAtMs] = useState<number | null>(null);
+  const [activeTurnStartedAtMs, setActiveTurnStartedAtMs] = useState<number | null>(() => {
+    if (!isChatRuntimeActive(initialChat?.runtime)) return null;
+    const runtimeUpdatedAtMs = Date.parse(initialChat?.runtime?.updatedAt ?? "");
+    return Number.isFinite(runtimeUpdatedAtMs) ? runtimeUpdatedAtMs : Date.now();
+  });
   const [optimisticTurnDurations, setOptimisticTurnDurations] = useState<
     ReadonlyMap<string, number>
   >(() => new Map());
@@ -877,19 +863,28 @@ export function Surface({
   }, [skillMentionMenuOpen, workflowMentionsEnabled]);
 
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
+  const liveTranscriptSessionId =
+    mode === "chat" &&
+    (!activeTaskConversation || activeTaskConversation.sessionBacked) &&
+    chatSessionId &&
+    persistedChatSessionId === chatSessionId
+      ? chatSessionId
+      : null;
+  const liveChat = useHeadlessChatTranscript(liveTranscriptSessionId);
   // Render list: Electric-synced rows are the source of truth for persisted
   // messages; the useChat overlay contributes only entries Electric has not
   // delivered yet (the in-flight turn and optimistic sends).
   const persistedMessages = useMemo(() => {
     if (!chatSessionId) return [];
-    if (liveChat && liveChat.sessionId === chatSessionId) return liveChat.messages;
+    if (liveChat.sessionId === chatSessionId && !liveChat.isLoading) return liveChat.messages;
     if (initialChat && initialChat.id === chatSessionId) return initialChat.messages;
     return [];
   }, [chatSessionId, initialChat, liveChat]);
   const persistedTranscriptLoading = Boolean(
     chatSessionId &&
       persistedChatSessionId === chatSessionId &&
-      liveChat?.sessionId !== chatSessionId &&
+      liveChat.sessionId === chatSessionId &&
+      liveChat.isLoading &&
       !(initialChat?.id === chatSessionId && initialChat.messages.length > 0),
   );
   useEffect(() => {
@@ -921,13 +916,14 @@ export function Surface({
     return null;
   }, [chatMessages]);
   const hasMessages = chatMessages.length > 0;
-  const isEngineWorking = isEngineChat && (engineRunning || engineSubmitting);
+  const isConversationWorking = !activeTaskConversation && conversationRunning;
   const isTaskConversationWorking = Boolean(
     activeTaskConversation?.sessionBacked &&
       !isTaskConversationStopping &&
       (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
   );
-  const isAgentWorking = isGenerating || isEngineWorking || isTaskConversationWorking;
+  const isAgentWorking =
+    isGenerating || isConversationWorking || engineSubmitting || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
   const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
   const latestActiveTurnStartedAtMs = useMemo(
@@ -999,39 +995,43 @@ export function Surface({
   const activeChatSummary = chatSessionId
     ? (recentChats.find((chat) => chat.id === chatSessionId) ?? null)
     : null;
+  const activeChatVisibility =
+    activeChatSummary ?? (initialChat?.id === chatSessionId ? initialChat : null);
   useEffect(() => {
     if (!chatSessionId || persistedChatSessionId !== chatSessionId) return;
-    const state = isAgentWorking ? "working" : mode === "chat" ? "done_seen" : null;
+    const state = isAgentWorking ? "working" : null;
     setLocalChatState(chatSessionId, state);
     return () => {
       if (state !== "working") setLocalChatState(chatSessionId, null);
     };
-  }, [chatSessionId, isAgentWorking, mode, persistedChatSessionId]);
+  }, [chatSessionId, isAgentWorking, persistedChatSessionId]);
 
   useEffect(() => {
     if (mode !== "chat" || !chatSessionId || persistedChatSessionId !== chatSessionId) {
       return;
     }
-    if (isAgentWorking) {
+    if (activeChatVisibility?.activityState !== "idle" || activeChatVisibility.hasUnseen !== true) {
       lastSeenMarkRef.current = null;
       return;
     }
 
-    const markKey = [
-      chatSessionId,
-      activeChatSummary?.updatedAt ?? "no-summary-update",
-      latestAssistantMessageId ?? "no-assistant-message",
-      chatMessages.length,
-    ].join(":");
-    if (lastSeenMarkRef.current === markKey) return;
-    lastSeenMarkRef.current = markKey;
-    void updateHeadlessChatConversation(chatSessionId, { markSeen: true }).catch(() => undefined);
+    const markKey = `${chatSessionId}:${activeChatVisibility.updatedAt ?? "initial"}`;
+    const markSeenIfVisible = () => {
+      if (document.visibilityState === "hidden" || lastSeenMarkRef.current === markKey) return;
+      lastSeenMarkRef.current = markKey;
+      void updateHeadlessChatConversation(chatSessionId, { markSeen: true }).catch((error) => {
+        if (lastSeenMarkRef.current === markKey) lastSeenMarkRef.current = null;
+        console.warn("Could not mark the active chat as seen.", error);
+      });
+    };
+    markSeenIfVisible();
+    document.addEventListener("visibilitychange", markSeenIfVisible);
+    return () => document.removeEventListener("visibilitychange", markSeenIfVisible);
   }, [
-    activeChatSummary?.updatedAt,
-    chatMessages.length,
+    activeChatVisibility?.activityState,
+    activeChatVisibility?.hasUnseen,
+    activeChatVisibility?.updatedAt,
     chatSessionId,
-    isAgentWorking,
-    latestAssistantMessageId,
     mode,
     persistedChatSessionId,
   ]);
@@ -1110,7 +1110,7 @@ export function Surface({
         model: string;
         engine?: ChatEngine;
         codexComposerSettings?: CodexComposerSettings | null;
-        codexRuntime?: CodexRuntimeView | null;
+        runtime?: ConversationRuntimeView | null;
       } | null,
     ) => {
       if (chatSessionId && isEngineChat) {
@@ -1153,13 +1153,8 @@ export function Surface({
         chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
       );
       applyCodexComposerUiState(nextCodexComposerState);
-      setCodexSandboxStatus(null);
-      setCodexRuntime(
-        engineTarget === "codex" || engineTarget === "claude_code"
-          ? (chat?.codexRuntime ?? null)
-          : null,
-      );
-      setEngineRunning(isCodexRuntimeActive(chat?.codexRuntime));
+      setCodingSandboxStatus(null);
+      setConversationRuntime(chat?.runtime ?? null);
       clearActiveTurn();
       setOptimisticTurnDurations(new Map());
       setMessages([]);
@@ -1593,6 +1588,7 @@ export function Surface({
         prepareMainComposerFocusRestoreAfterBackgroundTask();
         setBackgroundTaskSubmitting(true);
         void startWorkflowTask({
+          workspaceId,
           workflow: workflowMention,
           description: messagePrompt,
           ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
@@ -1794,6 +1790,7 @@ export function Surface({
       prepareMainComposerFocusRestoreAfterBackgroundTask();
       setBackgroundTaskSubmitting(true);
       void startWorkflowTask({
+        workspaceId,
         workflow: workflowMention,
         description: prompt,
         ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
@@ -1989,7 +1986,7 @@ export function Surface({
 
   const handleCodexToolAction = async (action: CodexToolAction) => {
     if (action.type === "answer-question") {
-      const runId = codexRuntime?.activeTurnId;
+      const runId = conversationRuntime?.activeRunId;
       if (!runId) throw new Error("The active coding Run is no longer available.");
       await resolveEngineQuestions(runId, action.interactionId, action.answers);
       return;
@@ -2001,7 +1998,7 @@ export function Surface({
       return;
     }
 
-    if (engineSubmitting || engineRunning) {
+    if (engineSubmitting || conversationRunning) {
       throw new Error("Wait for the current Codex turn to finish.");
     }
     const engine = activeEngineChat?.engine;
@@ -2035,7 +2032,6 @@ export function Surface({
         },
       );
       setChatSessionId(sessionId);
-      setEngineRunning(true);
       router.refresh();
     } catch (error) {
       clearActiveTurn();
@@ -2086,17 +2082,18 @@ export function Surface({
       return;
     }
 
-    if (activeEngineChat) {
-      const config = ENGINE_CHAT_CONFIG[activeEngineChat.engine];
-      const activeRunId = codexRuntime?.activeTurnId ?? null;
-      setEngineRunning(false);
-      clearLocalActiveTurnState(activeEngineChat.chatSessionId);
-      void headlessTransport
-        .cancel(chatInstanceKey)
-        .then((canceled) => {
-          if (!canceled && activeRunId) return cancelHeadlessChatRun(activeRunId);
-        })
-        .catch(() => toast.error(`Could not interrupt ${config.label}.`));
+    if (chatSessionId) {
+      const activeRunId = conversationRuntime?.activeRunId ?? null;
+      clearLocalActiveTurnState(chatSessionId);
+      const cancel = activeRunId
+        ? cancelHeadlessChatRun(activeRunId)
+        : headlessTransport.cancel(chatInstanceKey);
+      void cancel.catch(() => {
+        const label = activeEngineChat
+          ? `interrupt ${ENGINE_CHAT_CONFIG[activeEngineChat.engine].label}`
+          : "stop that response";
+        toast.error(`Could not ${label}.`);
+      });
       void stop();
       return;
     }
@@ -2117,7 +2114,7 @@ export function Surface({
     chatInstanceKey,
     chatSessionId,
     clearLocalActiveTurnState,
-    codexRuntime?.activeTurnId,
+    conversationRuntime?.activeRunId,
     isTaskConversationStopping,
     headlessTransport,
     messages,
@@ -2542,17 +2539,17 @@ export function Surface({
                     {activeEngineChat?.engine === "codex" ||
                     activeEngineChat?.engine === "claude_code" ? (
                       <>
-                        <CodexSessionStatusIndicator
+                        <CodingSessionStatusIndicator
                           engine={activeEngineChat.engine}
-                          runtime={codexRuntime}
+                          runtime={conversationRuntime}
                           optimisticStatus={
                             engineSubmitting
                               ? "starting"
-                              : engineRunning && !isCodexRuntimeActive(codexRuntime)
+                              : conversationRunning && !isChatRuntimeActive(conversationRuntime)
                                 ? "running"
                                 : null
                           }
-                          sandboxStatus={codexSandboxStatus}
+                          sandboxStatus={codingSandboxStatus}
                         />
                         <Tooltip>
                           <TooltipTrigger
@@ -2617,42 +2614,35 @@ export function Surface({
                   ))}
                   {isTaskConversationStopping ? (
                     <PendingActivityIndicator label="Stopping task…" />
-                  ) : chatMessages.length === 0 && persistedTranscriptLoading ? (
-                    <PendingActivityIndicator label="Loading conversation…" />
                   ) : isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
                     <ThinkingIndicator
                       startedAtMs={activeTurnTimerStartedAtMs}
                       label={
                         isEngineChat && activeEngine
-                          ? codexRuntime?.status === "queued"
+                          ? conversationRuntime?.status === "queued"
                             ? `${ENGINE_CHAT_CONFIG[activeEngine].label} is queued`
                             : `${ENGINE_CHAT_CONFIG[activeEngine].label} is working`
                           : "opencompany is working"
                       }
                     />
+                  ) : chatMessages.length === 0 && persistedTranscriptLoading ? (
+                    <PendingActivityIndicator label="Loading conversation…" />
                   ) : null}
                 </div>
               </div>
             </div>
           )}
 
-          {mode === "chat" &&
-          (!activeTaskConversation || activeTaskConversation.sessionBacked) &&
-          chatSessionId &&
-          persistedChatSessionId === chatSessionId ? (
-            <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
-          ) : null}
-          {mode === "chat" &&
-          (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
-            <LiveCodexChatSessionStatus
-              chatSessionId={activeEngineChat.chatSessionId}
-              setRunning={setEngineRunning}
-              setSandboxStatus={setCodexSandboxStatus}
-              setRuntime={setCodexRuntime}
+          {mode === "chat" && chatSessionId && !activeTaskConversation ? (
+            <ConversationRuntimeSync
+              conversationId={chatSessionId}
+              setSandboxStatus={setCodingSandboxStatus}
+              setRuntime={setConversationRuntime}
+              pollSandbox={Boolean(activeEngineChat)}
             />
           ) : null}
           {mode === "chat" && taskSpawningEnabled ? (
-            <LiveChatTasks setTasks={setLiveChatTasks} />
+            <LiveChatTasks workspaceId={workspaceId} setTasks={setLiveChatTasks} />
           ) : null}
 
           <form
@@ -2871,7 +2861,7 @@ export function Surface({
                     />
                   </div>
                   {isEngineChat &&
-                  engineRunning &&
+                  conversationRunning &&
                   !activeTaskConversation &&
                   !backgroundChatDirective ? (
                     <EngineStopButton
@@ -2895,14 +2885,18 @@ export function Surface({
                         )) ||
                       composerAttachments.isUploading ||
                       (!isBackgroundSubmit && engineSubmitting) ||
-                      (!isBackgroundSubmit && engineRunning) ||
+                      (!isBackgroundSubmit && conversationRunning) ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
                       legacyTaskReadOnly ||
                       chatSendBlocked
                     }
                     isGenerating={
-                      isBackgroundSubmit ? false : isGenerating || isTaskConversationWorking
+                      isBackgroundSubmit
+                        ? false
+                        : isGenerating ||
+                          (!isEngineChat && isConversationWorking) ||
+                          isTaskConversationWorking
                     }
                     isStopping={!isBackgroundSubmit && isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
@@ -2946,7 +2940,7 @@ export function Surface({
                     disabled={
                       isGenerating ||
                       engineSubmitting ||
-                      engineRunning ||
+                      conversationRunning ||
                       backgroundTaskSubmitting ||
                       legacyTaskReadOnly ||
                       voiceDictation.isActive ||
@@ -3040,7 +3034,7 @@ export function Surface({
             key={activeEngineChat.chatSessionId}
             ref={workspacePanelRef}
             chatSessionId={activeEngineChat.chatSessionId}
-            sandboxStatus={codexSandboxStatus}
+            sandboxStatus={codingSandboxStatus}
             engineLabel={CLOUD_CODING_ENGINE_CONFIG[activeEngineChat.engine].label}
             onExpandedChange={setWorkspacePanelExpanded}
             onRequestFocusReturn={() => workspaceToggleButtonRef.current?.focus()}
@@ -3551,6 +3545,7 @@ function QuickChatComposer({
       composerAttachments.clearAttachments();
       onSubmitted();
       void startWorkflowTask({
+        workspaceId,
         workflow: workflowMention,
         description: prompt,
         ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
@@ -4901,18 +4896,23 @@ async function startAdHocTask(input: {
 }
 
 async function startWorkflowTask(input: {
+  workspaceId: string;
   workflow: Extract<ChatMention, { kind: "workflow" }>;
   description: string;
   mentions?: Extract<ChatMention, { kind: "skill" }>[];
   attachments?: ChatUiAttachment[];
 }) {
-  const payload = await invokeHeadlessWorkflow(input.workflow.id, {
-    description: input.description,
-    ...(input.mentions?.length ? { skillIds: input.mentions.map((mention) => mention.id) } : {}),
-    ...(input.attachments?.length
-      ? { attachmentIds: input.attachments.map((attachment) => attachment.id) }
-      : {}),
-  });
+  const payload = await invokeHeadlessWorkflow(
+    input.workflow.id,
+    {
+      description: input.description,
+      ...(input.mentions?.length ? { skillIds: input.mentions.map((mention) => mention.id) } : {}),
+      ...(input.attachments?.length
+        ? { attachmentIds: input.attachments.map((attachment) => attachment.id) }
+        : {}),
+    },
+    { scopeKey: input.workspaceId },
+  );
   return {
     task: {
       id: payload.task.id,
@@ -5349,7 +5349,7 @@ function formatCompactTokens(value: number): string {
   return `${value}`;
 }
 
-type CodexRuntimeMeta = {
+type ConversationRuntimeMeta = {
   kind:
     | "connecting"
     | "queued"
@@ -5364,7 +5364,7 @@ type CodexRuntimeMeta = {
   textClass: string;
 };
 
-function codexRuntimeMeta(runtime: CodexRuntimeView | null): CodexRuntimeMeta {
+function conversationRuntimeMeta(runtime: ConversationRuntimeView | null): ConversationRuntimeMeta {
   if (!runtime) {
     return {
       kind: "connecting",
@@ -5397,7 +5397,7 @@ function codexRuntimeMeta(runtime: CodexRuntimeView | null): CodexRuntimeMeta {
       textClass: "text-warning",
     };
   }
-  if (runtime.status === "failed" || runtime.error) {
+  if (runtime.status === "failed" || runtime.hasError) {
     return {
       kind: "needs-attention",
       label: "Needs attention",
@@ -5413,7 +5413,7 @@ function codexRuntimeMeta(runtime: CodexRuntimeView | null): CodexRuntimeMeta {
       textClass: "text-success",
     };
   }
-  if (runtime.status === "interrupted") {
+  if (runtime.status === "interrupted" || runtime.status === "closed") {
     return {
       kind: "stopped",
       label: "Stopped",
@@ -5429,28 +5429,23 @@ function codexRuntimeMeta(runtime: CodexRuntimeView | null): CodexRuntimeMeta {
   };
 }
 
-function isCodexRuntimeActive(
-  runtime: { status?: string | null; activeTurnId?: string | null } | null | undefined,
-) {
-  return isChatRuntimeActive(runtime);
-}
-
-function CodexSessionStatusIndicator({
+function CodingSessionStatusIndicator({
   engine,
   runtime,
   optimisticStatus,
   sandboxStatus,
 }: {
   engine: ChatEngine;
-  runtime: CodexRuntimeView | null;
+  runtime: ConversationRuntimeView | null;
   optimisticStatus: "starting" | "running" | null;
   sandboxStatus: EngineRuntimeStatus | null;
 }) {
-  let meta = codexRuntimeMeta(
+  let meta = conversationRuntimeMeta(
     optimisticStatus
       ? {
           status: optimisticStatus,
-          error: null,
+          activeRunId: runtime?.activeRunId ?? null,
+          hasError: false,
           updatedAt: runtime?.updatedAt ?? "",
         }
       : runtime,
@@ -5487,172 +5482,26 @@ function CodexSessionStatusIndicator({
   );
 }
 
-type LiveChatMessagesChange = Dispatch<
-  SetStateAction<{ sessionId: string; messages: ChatUiMessage[] } | null>
->;
-
-function LiveChatMessages({
-  sessionId,
-  onChange,
-}: {
-  sessionId: string;
-  onChange: LiveChatMessagesChange;
-}) {
-  const hydrated = useHydrated();
-  if (!hydrated) return null;
-  return <HeadlessLiveChatMessageSubscriber sessionId={sessionId} onChange={onChange} />;
-}
-
-function HeadlessLiveChatMessageSubscriber({
-  sessionId,
-  onChange,
-}: {
-  sessionId: string;
-  onChange: LiveChatMessagesChange;
-}) {
-  const messagesCollection = useMemo(() => getHeadlessChatMessages(sessionId), [sessionId]);
-  const runsCollection = useMemo(() => getHeadlessChatRuns(sessionId), [sessionId]);
-  const { data: rows, isLoading: messagesLoading } = useLiveQuery(
-    (q) => q.from({ message: messagesCollection }),
-    [messagesCollection],
-  );
-  const { data: runRows } = useLiveQuery((q) => q.from({ run: runsCollection }), [runsCollection]);
-  const liveMessages = useMemo(() => {
-    const runsByAssistantMessage = new Map(
-      ((runRows ?? []) as HeadlessChatRunReadModel[]).map((run) => [run.assistantMessageId, run]),
-    );
-    return ((rows ?? []) as HeadlessChatMessageReadModel[])
-      .toSorted((a, b) =>
-        compareChatMessageOrder(
-          { id: a.id, role: a.role, createdAt: a.createdAt },
-          { id: b.id, role: b.role, createdAt: b.createdAt },
-        ),
-      )
-      .map((row) => headlessChatMessageRowToUiMessage(row, runsByAssistantMessage.get(row.id)));
-  }, [rows, runRows]);
-
-  useEffect(() => {
-    if (messagesLoading) return;
-    onChange({ sessionId, messages: liveMessages });
-  }, [liveMessages, messagesLoading, onChange, sessionId]);
-
-  return null;
-}
-
-function LiveCodexChatSessionStatus({
-  chatSessionId,
-  setRunning,
-  setSandboxStatus,
-  setRuntime,
-}: {
-  chatSessionId: string;
-  setRunning: Dispatch<SetStateAction<boolean>>;
-  setSandboxStatus: Dispatch<SetStateAction<EngineRuntimeStatus | null>>;
-  setRuntime: Dispatch<SetStateAction<CodexRuntimeView | null>>;
-}) {
-  const hydrated = useHydrated();
-  if (!hydrated) return null;
-  return (
-    <LiveCodexChatSessionStatusSubscriber
-      chatSessionId={chatSessionId}
-      setRunning={setRunning}
-      setSandboxStatus={setSandboxStatus}
-      setRuntime={setRuntime}
-    />
-  );
-}
-
-function LiveCodexChatSessionStatusSubscriber({
-  chatSessionId,
-  setRunning,
-  setSandboxStatus,
-  setRuntime,
-}: {
-  chatSessionId: string;
-  setRunning: Dispatch<SetStateAction<boolean>>;
-  setSandboxStatus: Dispatch<SetStateAction<EngineRuntimeStatus | null>>;
-  setRuntime: Dispatch<SetStateAction<CodexRuntimeView | null>>;
-}) {
-  const engineSessions = useMemo(() => getHeadlessEngineSessions(), []);
-  const { data: rows, isLoading } = useLiveQuery(
-    (q) => q.from({ engineSession: engineSessions }),
-    [engineSessions],
-  );
-  const row =
-    ((rows ?? []) as HeadlessEngineSessionReadModel[]).find(
-      (candidate) => candidate.conversationId === chatSessionId,
-    ) ?? null;
-  const status = row?.status ?? null;
-
-  useEffect(() => {
-    if (isLoading) return;
-    setRuntime(
-      row
-        ? {
-            status: row.status,
-            activeTurnId: row.activeRunId,
-            error: row.error,
-            updatedAt: row.updatedAt,
-          }
-        : null,
-    );
-    setRunning(isCodexRuntimeActive(row));
-  }, [isLoading, row, setRunning, setRuntime, status]);
-
-  useEffect(() => {
-    if (!status) {
-      setSandboxStatus(null);
-      return;
-    }
-
-    const controller = new AbortController();
-    let active = true;
-
-    const loadStatus = async () => {
-      try {
-        const runtimeStatus = await getEngineRuntimeStatus(chatSessionId, {
-          fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
-        });
-        if (!active) return;
-        setSandboxStatus(runtimeStatus);
-      } catch {
-        // The session status still tells us when a turn is actively starting/running.
-        if (active && (status === "starting" || status === "running")) {
-          setSandboxStatus("running");
-        }
-      }
-    };
-
-    void loadStatus();
-    const interval = setInterval(() => {
-      void loadStatus();
-    }, CODEX_SANDBOX_STATUS_POLL_INTERVAL_MS);
-    return () => {
-      active = false;
-      controller.abort();
-      clearInterval(interval);
-    };
-  }, [chatSessionId, setSandboxStatus, status]);
-
-  return null;
-}
-
 function LiveChatTasks({
+  workspaceId,
   setTasks,
 }: {
+  workspaceId: string;
   setTasks: Dispatch<SetStateAction<readonly TaskView[] | null>>;
 }) {
   const hydrated = useHydrated();
   if (!hydrated) return null;
-  return <LiveChatTaskSubscriber setTasks={setTasks} />;
+  return <LiveChatTaskSubscriber workspaceId={workspaceId} setTasks={setTasks} />;
 }
 
 function LiveChatTaskSubscriber({
+  workspaceId,
   setTasks,
 }: {
+  workspaceId: string;
   setTasks: Dispatch<SetStateAction<readonly TaskView[] | null>>;
 }) {
-  const tasks = useMemo(() => getHeadlessTasks(), []);
+  const tasks = useMemo(() => getHeadlessTasks(workspaceId), [workspaceId]);
   const { data: rows } = useLiveQuery((q) => q.from({ task: tasks }));
   const liveTasks = useMemo(() => (rows ?? []).map(taskReadModelToRow).map(taskRowToView), [rows]);
 
@@ -6009,39 +5858,6 @@ function taskRowToView(row: TaskRow): TaskView {
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  };
-}
-
-function headlessChatMessageRowToUiMessage(
-  row: HeadlessChatMessageReadModel,
-  run?: HeadlessChatRunReadModel,
-): ChatUiMessage {
-  const message = toChatUiMessage({
-    id: row.id,
-    sessionId: row.conversationId,
-    role: row.role,
-    content: row.content,
-    taskId: row.taskId,
-    debugTrace: row.presentation as StoredChatMessage["debugTrace"],
-    attachments: row.attachments as StoredChatMessage["attachments"],
-    attachmentTexts: null,
-    createdAt: new Date(row.createdAt),
-    updatedAt: new Date(row.updatedAt),
-    taskDisplayId: null,
-    taskName: null,
-    taskPrompt: null,
-    taskStatus: null,
-  });
-  if (row.role !== "assistant" || !run) return message;
-  return {
-    ...message,
-    metadata: {
-      ...message.metadata,
-      runId: run.id,
-      model: message.metadata?.model ?? run.model,
-      ...(run.status === "failed" && run.error ? { error: run.error } : {}),
-      ...(run.status === "canceled" ? { aborted: true } : {}),
-    },
   };
 }
 

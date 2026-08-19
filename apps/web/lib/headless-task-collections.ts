@@ -22,7 +22,7 @@ function createTasks(scopeKey: string) {
   );
 }
 
-export function getHeadlessTasks(scopeKey = "active") {
+export function getHeadlessTasks(scopeKey: string) {
   const cached = tasksByScope.get(scopeKey);
   if (cached) return cached;
   const collection = createTasks(scopeKey);
@@ -32,7 +32,7 @@ export function getHeadlessTasks(scopeKey = "active") {
 
 export async function awaitHeadlessTaskTransaction(
   transactionIdValue: string,
-  options: { scopeKey?: string; timeoutMs?: number } = {},
+  options: { scopeKey: string; timeoutMs?: number },
 ) {
   const transactionId = Number(transactionIdValue);
   if (!Number.isSafeInteger(transactionId) || transactionId < 1) {

@@ -87,18 +87,14 @@ describe("WorkflowEditor", () => {
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenCalledTimes(1);
-    expect(workflowActionsMock.update).toHaveBeenCalledWith(
-      "workflow_1",
-      {
-        expectedVersion: 1,
-        name: "Investor update",
-        description: "Summarize the week.",
-        steps: workflow.steps,
-        status: "draft",
-        trigger: { type: "manual" },
-      },
-      { waitForWorkflowSchedule: false },
-    );
+    expect(workflowActionsMock.update).toHaveBeenCalledWith("workflow_1", {
+      expectedVersion: 1,
+      name: "Investor update",
+      description: "Summarize the week.",
+      steps: workflow.steps,
+      status: "draft",
+      trigger: { type: "manual" },
+    });
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
@@ -131,7 +127,6 @@ describe("WorkflowEditor", () => {
         steps: [expect.objectContaining({ id: "step-1", title: "Final edit" })],
         trigger: { type: "manual" },
       }),
-      { waitForWorkflowSchedule: false },
     );
   });
 
@@ -211,7 +206,6 @@ describe("WorkflowEditor", () => {
         ],
         trigger: { type: "manual" },
       }),
-      { waitForWorkflowSchedule: false },
     );
   });
 
@@ -241,7 +235,6 @@ describe("WorkflowEditor", () => {
         ],
         trigger: { type: "manual" },
       }),
-      { waitForWorkflowSchedule: false },
     );
   });
 
@@ -269,7 +262,6 @@ describe("WorkflowEditor", () => {
           prompt: "Draft the weekday update.",
         },
       }),
-      { waitForWorkflowSchedule: true },
     );
   });
 
@@ -294,7 +286,6 @@ describe("WorkflowEditor", () => {
           prompt: "Check for updates.",
         },
       }),
-      { waitForWorkflowSchedule: true },
     );
   });
 
@@ -319,7 +310,6 @@ describe("WorkflowEditor", () => {
           prompt: "Run the monthly report.",
         },
       }),
-      { waitForWorkflowSchedule: true },
     );
   });
 
@@ -332,17 +322,13 @@ describe("WorkflowEditor", () => {
       await Promise.resolve();
     });
 
-    expect(workflowActionsMock.archive).toHaveBeenCalledWith(
-      "workflow_1",
-      {
-        expectedVersion: 1,
-      },
-      { waitForWorkflowSchedule: false },
-    );
+    expect(workflowActionsMock.archive).toHaveBeenCalledWith("workflow_1", {
+      expectedVersion: 1,
+    });
     expect(routerMock.push).toHaveBeenCalledWith("/workflows");
   });
 
-  it("does not wait for a deleted schedule projection when archiving after a manual save", async () => {
+  it("archives with the version returned by the latest autosave", async () => {
     render(
       <WorkflowEditor
         workflow={{
@@ -370,11 +356,7 @@ describe("WorkflowEditor", () => {
       await Promise.resolve();
     });
 
-    expect(workflowActionsMock.archive).toHaveBeenCalledWith(
-      "workflow_1",
-      { expectedVersion: 2 },
-      { waitForWorkflowSchedule: false },
-    );
+    expect(workflowActionsMock.archive).toHaveBeenCalledWith("workflow_1", { expectedVersion: 2 });
   });
 
   it("does not race archive against a pending autosave version", () => {

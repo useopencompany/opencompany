@@ -1506,6 +1506,20 @@
       "when": 1787068800000,
       "tag": "0214_goat_chat_attachment_texts_invariant",
       "breakpoints": true
+    },
+    {
+      "idx": 215,
+      "version": "7",
+      "when": 1787126146000,
+      "tag": "0215_goat_chat_sidebar_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 216,
+      "version": "7",
+      "when": 1787130075310,
+      "tag": "0216_goat_conversation_runtime_summary",
+      "breakpoints": true
     }
   ]
 }

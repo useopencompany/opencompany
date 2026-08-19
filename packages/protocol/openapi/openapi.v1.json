@@ -6663,6 +6663,19 @@
           "model": {
             "type": "string"
           },
+          "runtime": {
+            "$ref": "#/components/schemas/ConversationRuntime"
+          },
+          "activityState": {
+            "type": "string",
+            "enum": [
+              "working",
+              "idle"
+            ]
+          },
+          "hasUnseen": {
+            "type": "boolean"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -6677,7 +6690,49 @@
           "title",
           "engine",
           "model",
+          "runtime",
+          "activityState",
+          "hasUnseen",
           "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ConversationRuntime": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "starting",
+              "idle",
+              "running",
+              "failed",
+              "interrupted",
+              "closed"
+            ]
+          },
+          "activeRunId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "hasError": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "status",
+          "activeRunId",
+          "hasError",
           "updatedAt"
         ],
         "additionalProperties": false
@@ -17586,6 +17641,7 @@
               "type": "string",
               "enum": [
                 "chat-conversations-v1",
+                "chat-conversations-v2",
                 "chat-messages-v1",
                 "chat-runs-v1",
                 "engine-sessions-v1",

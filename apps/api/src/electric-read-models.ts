@@ -1,5 +1,6 @@
 import type { Actor } from "@opencompany/core";
 import { normalizeBrainIngestTrace } from "@opencompany/db/brain-ingest-trace";
+import { createLogger } from "@opencompany/observability";
 import {
   BrainDocumentReadModelSchema,
   BrainEdgeReadModelSchema,
@@ -8,6 +9,9 @@ import {
   BrainIngestJobReadModelSchema,
   BrainTimelineReadModelSchema,
   ConversationReadModelSchema,
+  ConversationReadModelV1Schema,
+  ConversationRuntimeSchema,
+  ENGINE_SESSION_ERROR_MAX_LENGTH,
   EngineSessionReadModelSchema,
   IntegrationAccountReadModelSchema,
   MessageReadModelSchema,
@@ -22,6 +26,8 @@ import {
   WorkflowScheduleReadModelSchema,
 } from "@opencompany/protocol";
 import { ApiError } from "./errors";
+
+const logger = createLogger({ service: "opencompany-api", runtime: "electric-read-models" });
 
 // Safe client-managed ShapeStream state from @electric-sql/client. Shape identity (table,
 // columns, where, and bound params) remains server-owned below.
@@ -47,8 +53,8 @@ const ELECTRIC_RESPONSE_HEADERS = [
   "electric-up-to-date",
 ] as const;
 
-// These columns cross the API boundary as decoded JSON values. Omitting their upstream JSONB
-// metadata prevents @electric-sql/client from parsing the already-decoded values a second time.
+// These fields cross the API boundary as decoded values. Omitting their upstream type metadata
+// prevents @electric-sql/client from parsing the already-decoded values a second time.
 const PREDECODED_READ_MODEL_FIELDS = new Set([
   "presentation",
   "attachments",
@@ -61,6 +67,9 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "aliases",
   "scopes",
   "capabilityModes",
+  "hasUnseen",
+  "enabled",
+  "planPaused",
 ]);
 
 export interface ReadModelService {
@@ -185,6 +194,24 @@ function readModelShape(input: {
         where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
         params: [input.actor.userId, input.actor.workspaceId],
       };
+    case "chat-conversations-v2":
+      return conversationReadModelShape(input, [
+        "id",
+        "title",
+        "engine",
+        "model",
+        "archived_at",
+        "pinned_at",
+        "last_seen_at",
+        "activity_state",
+        "has_unseen",
+        "runtime_status",
+        "active_run_id",
+        "runtime_has_error",
+        "runtime_updated_at",
+        "created_at",
+        "updated_at",
+      ]);
     case "chat-messages-v1":
       return conversationShape(input, "goat.message_read_model_v1", [
         "id",
@@ -481,6 +508,27 @@ function conversationShape(
   };
 }
 
+function conversationReadModelShape(
+  input: { actor: Actor; conversationId?: string },
+  columns: string[],
+) {
+  if (input.conversationId) {
+    return {
+      table: "goat.conversation_read_model_v1",
+      columns,
+      where:
+        `"id" = $1 ` + `AND "actor_id" = $2 AND ("workspace_id" = $3 OR "workspace_id" IS NULL)`,
+      params: [input.conversationId, input.actor.userId, input.actor.workspaceId],
+    };
+  }
+  return {
+    table: "goat.conversation_read_model_v1",
+    columns,
+    where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
+    params: [input.actor.userId, input.actor.workspaceId],
+  };
+}
+
 function projectElectricEntry(readModel: ReadModel, entry: unknown) {
   if (!isRecord(entry) || !isRecord(entry.value)) return entry;
   const operation = isRecord(entry.headers) ? entry.headers.operation : undefined;
@@ -506,6 +554,16 @@ function projectReadModelValue(
         : [],
     ),
   );
+  if (readModel === "chat-conversations-v2") {
+    const runtime = conversationRuntimeValue(row);
+    if (runtime !== undefined) projected.runtime = runtime;
+    const schema = partial
+      ? ConversationReadModelSchema.partial().extend({
+          runtime: ConversationRuntimeSchema.partial().nullable().optional(),
+        })
+      : ConversationReadModelSchema;
+    return schema.parse(projected);
+  }
   if (readModel === "brain-documents-v1") {
     if (typeof projected.folderPath === "string" && typeof projected.brainId === "string") {
       projected.path = `${projected.folderPath}/${projected.brainId}.md`;
@@ -556,11 +614,24 @@ function projectReadModelValue(
       projected.focus = boundedNullableString(projected.focus, 2_000);
     }
   }
+  if (readModel === "engine-sessions-v1" && typeof projected.error === "string") {
+    const originalLength = projected.error.length;
+    if (originalLength > ENGINE_SESSION_ERROR_MAX_LENGTH) {
+      projected.error = projected.error.slice(0, ENGINE_SESSION_ERROR_MAX_LENGTH);
+      logger.warn("Normalized overlong engine session error", {
+        event: "opencompany.api_engine_session_error_normalized",
+        read_model: readModel,
+        field: "error",
+        original_length: originalLength,
+        max_length: ENGINE_SESSION_ERROR_MAX_LENGTH,
+      });
+    }
+  }
   switch (readModel) {
     case "chat-conversations-v1":
-      return (partial ? ConversationReadModelSchema.partial() : ConversationReadModelSchema).parse(
-        projected,
-      );
+      return (
+        partial ? ConversationReadModelV1Schema.partial() : ConversationReadModelV1Schema
+      ).parse(projected);
     case "chat-messages-v1":
       return (partial ? MessageReadModelSchema.partial() : MessageReadModelSchema).parse(projected);
     case "chat-runs-v1":
@@ -619,6 +690,9 @@ function projectReadModelValue(
 function readModelFieldValue(readModel: ReadModel, name: string, value: unknown) {
   if (name.endsWith("At") || name === "at" || name === "scheduledFor") {
     return timestampValue(value);
+  }
+  if (name === "hasUnseen" || name === "enabled" || name === "planPaused") {
+    return booleanValue(value);
   }
   if (
     name === "attemptCount" ||
@@ -774,6 +848,13 @@ function numberValue(value: unknown) {
   return Number.isFinite(number) ? number : value;
 }
 
+function booleanValue(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (value === "true" || value === "t") return true;
+  if (value === "false" || value === "f") return false;
+  return value;
+}
+
 function jsonValue(value: unknown) {
   if (typeof value !== "string") return value;
   try {
@@ -871,6 +952,23 @@ const READ_MODEL_COLUMN_NAMES = {
     archived_at: "archivedAt",
     pinned_at: "pinnedAt",
     last_seen_at: "lastSeenAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "chat-conversations-v2": {
+    id: "id",
+    title: "title",
+    engine: "engine",
+    model: "model",
+    archived_at: "archivedAt",
+    pinned_at: "pinnedAt",
+    last_seen_at: "lastSeenAt",
+    activity_state: "activityState",
+    has_unseen: "hasUnseen",
+    runtime_status: "",
+    active_run_id: "",
+    runtime_has_error: "",
+    runtime_updated_at: "",
     created_at: "createdAt",
     updated_at: "updatedAt",
   },
@@ -1095,6 +1193,37 @@ const TASK_OUTCOME_COLUMN_NAMES = {
   error: "error",
   reported_status: "reportedStatus",
   outcome_comment: "comment",
+} as const;
+
+function conversationRuntimeValue(row: Record<string, unknown>) {
+  if (!Object.keys(CONVERSATION_RUNTIME_COLUMN_NAMES).some((name) => Object.hasOwn(row, name))) {
+    return undefined;
+  }
+  if (row.runtime_status === null) return null;
+
+  return Object.fromEntries(
+    Object.entries(CONVERSATION_RUNTIME_COLUMN_NAMES).flatMap(([physicalName, publicName]) =>
+      Object.hasOwn(row, physicalName)
+        ? [
+            [
+              publicName,
+              publicName === "updatedAt"
+                ? timestampValue(row[physicalName])
+                : publicName === "hasError"
+                  ? booleanValue(row[physicalName])
+                  : row[physicalName],
+            ],
+          ]
+        : [],
+    ),
+  );
+}
+
+const CONVERSATION_RUNTIME_COLUMN_NAMES = {
+  runtime_status: "status",
+  active_run_id: "activeRunId",
+  runtime_has_error: "hasError",
+  runtime_updated_at: "updatedAt",
 } as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -2,6 +2,7 @@ import { z } from "@hono/zod-openapi";
 import { API_VERSION, PROTOCOL_VERSION } from "./version";
 
 export const ResourceIdSchema = z.string().min(1).max(256).openapi({ example: "run_019fed53" });
+export const ENGINE_SESSION_ERROR_MAX_LENGTH = 2_000;
 export const CursorSchema = z
   .string()
   .regex(/^v1:[1-9][0-9]*$/u)
@@ -15,6 +16,25 @@ export const PresentationCursorSchema = z
   });
 export const TimestampSchema = z.iso.datetime({ offset: true });
 export const ChatEngineSchema = z.enum(["opencompany", "codex", "claude_code"]);
+export const ConversationActivityStateSchema = z.enum(["working", "idle"]);
+export const ConversationRuntimeStatusSchema = z.enum([
+  "queued",
+  "starting",
+  "idle",
+  "running",
+  "failed",
+  "interrupted",
+  "closed",
+]);
+export const ConversationRuntimeSchema = z
+  .object({
+    status: ConversationRuntimeStatusSchema,
+    activeRunId: ResourceIdSchema.nullable(),
+    hasError: z.boolean(),
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("ConversationRuntime");
 export const EngineReasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
 export const CodexGoalModeSchema = z
   .object({
@@ -103,6 +123,9 @@ export const ConversationSchema = z
     title: z.string(),
     engine: ChatEngineSchema,
     model: z.string(),
+    runtime: ConversationRuntimeSchema.nullable(),
+    activityState: ConversationActivityStateSchema,
+    hasUnseen: z.boolean(),
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
   })
@@ -319,6 +342,7 @@ export const WorkflowScheduleReadModelSchema = z
 // field names through the shared collection adapter.
 export const ChatReadModelSchema = z.enum([
   "chat-conversations-v1",
+  "chat-conversations-v2",
   "chat-messages-v1",
   "chat-runs-v1",
   "engine-sessions-v1",
@@ -401,7 +425,7 @@ export const ChatPresentationAttachmentSchema = z
   .strict()
   .openapi("ChatPresentationAttachment");
 
-export const ConversationReadModelSchema = z
+export const ConversationReadModelV1Schema = z
   .object({
     id: ResourceIdSchema,
     title: z.string(),
@@ -415,6 +439,14 @@ export const ConversationReadModelSchema = z
   })
   .strict()
   .openapi("ConversationReadModelV1");
+
+export const ConversationReadModelSchema = ConversationReadModelV1Schema.extend({
+  runtime: ConversationRuntimeSchema.nullable(),
+  activityState: ConversationActivityStateSchema,
+  hasUnseen: z.boolean(),
+})
+  .strict()
+  .openapi("ConversationReadModelV2");
 
 export const MessageReadModelSchema = z
   .object({
@@ -454,7 +486,7 @@ export const EngineSessionReadModelSchema = z
     engine: z.enum(["opencompany", "codex", "claude_code"]),
     status: z.enum(["queued", "starting", "idle", "running", "failed", "interrupted", "closed"]),
     activeRunId: ResourceIdSchema.nullable(),
-    error: z.string().max(2_000).nullable(),
+    error: z.string().max(ENGINE_SESSION_ERROR_MAX_LENGTH).nullable(),
     updatedAt: TimestampSchema,
   })
   .strict()
@@ -3370,6 +3402,7 @@ export const InfisicalAuthFlowEnvelopeSchema = z
   .openapi("InfisicalAuthFlowEnvelope");
 
 export type ConversationDto = z.infer<typeof ConversationSchema>;
+export type ConversationRuntimeDto = z.infer<typeof ConversationRuntimeSchema>;
 export type ConversationShareDto = z.infer<typeof ConversationShareSchema>;
 export type PublicChatMessageDto = z.infer<typeof PublicChatMessageSchema>;
 export type PublicChatShareDto = z.infer<typeof PublicChatShareSchema>;
@@ -3445,6 +3478,7 @@ export type CreateTaskScheduleBody = z.infer<typeof CreateTaskScheduleBodySchema
 export type UpdateTaskScheduleBody = z.infer<typeof UpdateTaskScheduleBodySchema>;
 export type SetTaskScheduleEnabledBody = z.infer<typeof SetTaskScheduleEnabledBodySchema>;
 export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
+export type ConversationReadModelV1 = z.infer<typeof ConversationReadModelV1Schema>;
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
 export type RunReadModel = z.infer<typeof RunReadModelSchema>;
 export type EngineSessionReadModel = z.infer<typeof EngineSessionReadModelSchema>;

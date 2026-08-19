@@ -1,5 +1,6 @@
 "use client";
 
+import { captureException } from "@opencompany/observability";
 import {
   type CreateMessageBody,
   createApiClient,
@@ -156,12 +157,9 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
       transactionId: envelope.data.transactionId,
     };
     this.onAccepted?.(accepted);
-    void awaitHeadlessChatTransaction({
-      conversationId: state.conversationId,
-      transactionId: envelope.data.transactionId,
-    })
+    void reconcileAcceptedMessage(accepted)
       .then(() => this.onReconciled?.(accepted))
-      .catch(() => undefined);
+      .catch((error) => reportReconciliationFailure(error, accepted));
     return this.uiStream(input.chatId, state, input.abortSignal);
   }
 
@@ -356,10 +354,15 @@ export async function startHeadlessBackgroundChat(
   });
   if (!response.ok) throw await responseError(response);
   const data = (await response.json()).data;
-  await awaitHeadlessChatTransaction({
+  const accepted = {
     conversationId: data.conversationId,
+    runId: data.runId,
+    assistantMessageId: data.assistantMessageId,
     transactionId: data.transactionId,
-  });
+  };
+  void reconcileAcceptedMessage(accepted).catch((error) =>
+    reportReconciliationFailure(error, accepted),
+  );
   // Background Chat has no mounted useChat consumer, so consume semantic events until the Run
   // settles or pauses for user interaction.
   for await (const event of streamRunEvents({
@@ -371,6 +374,23 @@ export async function startHeadlessBackgroundChat(
     void event;
   }
   return data;
+}
+
+function reconcileAcceptedMessage(accepted: HeadlessMessageAccepted) {
+  return awaitHeadlessChatTransaction({
+    conversationId: accepted.conversationId,
+    transactionId: accepted.transactionId,
+  });
+}
+
+function reportReconciliationFailure(error: unknown, accepted: HeadlessMessageAccepted) {
+  captureException(error, {
+    event: "opencompany.chat_read_model_reconciliation_failed",
+    session_id: accepted.conversationId,
+    run_id: accepted.runId,
+    message_id: accepted.assistantMessageId,
+    transaction_id: accepted.transactionId,
+  });
 }
 
 function bindFetchToRuntime(fetchImpl = globalThis.fetch) {

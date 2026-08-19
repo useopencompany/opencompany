@@ -8,6 +8,11 @@ import {
   HOME_NAVIGATION_EVENT,
 } from "@/lib/chat-navigation";
 import { clearAllLocalChatStates, setLocalChatState } from "@/lib/chat-session-state";
+import {
+  addOptimisticChatSummary,
+  clearAllOptimisticChatSummaries,
+  removeOptimisticChatSummary,
+} from "@/lib/optimistic-chat-summaries";
 import { Sidebar } from "./Sidebar";
 
 const pathnameMock = vi.hoisted(() => ({ value: "/" }));
@@ -38,12 +43,14 @@ const recentChatsMock = vi.hoisted(() => ({
     model: string;
     engine: string;
     codexComposerSettings: null;
-    codexRuntime?: {
+    runtime?: {
       status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
-      activeTurnId?: string | null;
-      error: string | null;
+      activeRunId: string | null;
+      hasError: boolean;
       updatedAt: string;
     } | null;
+    activityState?: "working" | "idle";
+    hasUnseen?: boolean;
     state?: "working" | "done_unseen" | "done_seen";
     preview: string;
     updatedAt: string;
@@ -84,7 +91,15 @@ const chatCommandsMock = vi.hoisted(() => ({
   updateHeadlessChatConversation: vi.fn(async () => ({ transactionId: "1" })),
 }));
 
+const chatCollectionMocks = vi.hoisted(() => ({
+  preloadHeadlessChatMessages: vi.fn(async (conversationId: string) => {
+    void conversationId;
+  }),
+}));
+
 vi.mock("@/lib/headless-chat-commands", () => chatCommandsMock);
+
+vi.mock("@/lib/headless-chat-collections", () => chatCollectionMocks);
 
 vi.mock("@/components/AppDataProvider", () => ({
   useAppData: () => ({
@@ -135,6 +150,7 @@ describe("Sidebar", () => {
     recentChatsMock.value = [];
     tasksMock.value = [];
     clearAllLocalChatStates();
+    clearAllOptimisticChatSummaries();
     consumePendingChatComposerFocus("goat_chat_focus");
   });
 
@@ -443,7 +459,8 @@ describe("Sidebar", () => {
         preview: "Working",
         updatedAt: "2026-07-14T09:00:00.000Z",
         pinnedAt: null,
-        state: "working",
+        activityState: "working",
+        hasUnseen: false,
       },
       {
         id: "goat_chat_unseen",
@@ -454,7 +471,8 @@ describe("Sidebar", () => {
         preview: "Ready",
         updatedAt: "2026-07-14T09:01:00.000Z",
         pinnedAt: null,
-        state: "done_unseen",
+        activityState: "idle",
+        hasUnseen: true,
       },
     ];
 
@@ -498,7 +516,75 @@ describe("Sidebar", () => {
     window.removeEventListener(CHAT_COMPOSER_FOCUS_EVENT, focusRequest);
   });
 
-  it("shows working instead of unseen when a chat still has an active model turn", () => {
+  it("keeps an optimistic chat local until persistence is confirmed", async () => {
+    const user = userEvent.setup();
+    const pendingChatId = "chat_pending";
+    recentChatsMock.value = [
+      {
+        id: pendingChatId,
+        title: "Pending chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Starting",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+        state: "working",
+      },
+    ];
+    addOptimisticChatSummary({
+      workspaceId: workspacesMock.value[0]!.id,
+      sessionId: pendingChatId,
+      prompt: "Pending chat",
+      model: "claude-sonnet-5",
+      engine: "opencompany",
+    });
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const pendingChat = screen.getByRole("button", { name: "Pending chat" });
+    expect(screen.queryByRole("link", { name: "Pending chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pin Pending chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive Pending chat" })).not.toBeInTheDocument();
+
+    await user.hover(pendingChat);
+    await user.click(pendingChat);
+
+    expect(routerMock.prefetch).not.toHaveBeenCalledWith(`/chat/${pendingChatId}`);
+    expect(consumePendingChatComposerFocus(pendingChatId)).toBe(true);
+
+    act(() => removeOptimisticChatSummary(pendingChatId));
+
+    const persistedChat = await screen.findByRole("link", { name: "Pending chat" });
+    expect(persistedChat).toHaveAttribute("href", `/chat/${pendingChatId}`);
+    await user.hover(persistedChat);
+    expect(routerMock.prefetch).toHaveBeenCalledWith(`/chat/${pendingChatId}`);
+  });
+
+  it("warms the transcript collection when a recent chat is hovered", async () => {
+    const user = userEvent.setup();
+    recentChatsMock.value = [
+      {
+        id: "chat_warm",
+        title: "Warm chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Ready",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.hover(screen.getByRole("link", { name: "Warm chat" }));
+
+    expect(routerMock.prefetch).toHaveBeenCalledWith("/chat/chat_warm");
+    expect(chatCollectionMocks.preloadHeadlessChatMessages).toHaveBeenCalledWith("chat_warm");
+  });
+
+  it("shows working before unseen when the API reports both", () => {
     pathnameMock.value = "/";
     recentChatsMock.value = [
       {
@@ -507,17 +593,18 @@ describe("Sidebar", () => {
         model: "claude-sonnet-5",
         engine: "opencompany",
         codexComposerSettings: null,
-        codexRuntime: {
+        runtime: {
           status: "idle",
-          activeTurnId: "goat_codex_chat_turn_1",
-          error: null,
+          activeRunId: "goat_codex_chat_turn_1",
+          hasError: false,
           updatedAt: "2026-07-14T09:00:30.000Z",
         },
+        activityState: "working",
+        hasUnseen: true,
         preview: "Ready",
         updatedAt: "2026-07-14T09:01:00.000Z",
         lastSeenAt: "2026-07-14T09:00:00.000Z",
         pinnedAt: null,
-        state: "done_unseen",
       },
     ];
 
@@ -541,7 +628,8 @@ describe("Sidebar", () => {
         updatedAt: "2026-07-14T09:01:00.000Z",
         lastSeenAt: "2026-07-14T09:00:00.000Z",
         pinnedAt: null,
-        state: "done_unseen",
+        activityState: "idle",
+        hasUnseen: true,
       },
     ];
 
@@ -551,7 +639,7 @@ describe("Sidebar", () => {
     expect(screen.queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
   });
 
-  it("drops a retained local working state after durable runtime reports working", async () => {
+  it("drops a retained local working state after the API projection reports working", async () => {
     pathnameMock.value = "/";
     setLocalChatState("goat_chat_runtime", "working");
     recentChatsMock.value = [
@@ -561,17 +649,18 @@ describe("Sidebar", () => {
         model: "claude-sonnet-5",
         engine: "opencompany",
         codexComposerSettings: null,
-        codexRuntime: {
+        runtime: {
           status: "running",
-          activeTurnId: "goat_codex_chat_turn_1",
-          error: null,
+          activeRunId: "goat_codex_chat_turn_1",
+          hasError: false,
           updatedAt: "2026-07-14T09:01:00.000Z",
         },
+        activityState: "working",
+        hasUnseen: false,
         preview: "Partial answer",
         updatedAt: "2026-07-14T09:01:00.000Z",
         lastSeenAt: "2026-07-14T09:00:00.000Z",
         pinnedAt: null,
-        state: "done_unseen",
       },
     ];
 
@@ -582,12 +671,8 @@ describe("Sidebar", () => {
       recentChatsMock.value = [
         {
           ...recentChatsMock.value[0]!,
-          codexRuntime: {
-            status: "idle",
-            activeTurnId: null,
-            error: null,
-            updatedAt: "2026-07-14T09:02:00.000Z",
-          },
+          activityState: "idle",
+          hasUnseen: true,
         },
       ];
       rerender(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
@@ -595,7 +680,7 @@ describe("Sidebar", () => {
     });
   });
 
-  it("hides the unseen marker for the selected completed chat", () => {
+  it("keeps the unseen marker until the selected chat is reset through the API", () => {
     pathnameMock.value = "/chat/goat_chat_unseen";
     recentChatsMock.value = [
       {
@@ -604,10 +689,17 @@ describe("Sidebar", () => {
         model: "claude-sonnet-5",
         engine: "opencompany",
         codexComposerSettings: null,
+        runtime: {
+          status: "idle",
+          activeRunId: "goat_codex_chat_turn_1",
+          hasError: false,
+          updatedAt: "2026-07-14T09:00:30.000Z",
+        },
         preview: "Ready",
         updatedAt: "2026-07-14T09:01:00.000Z",
         pinnedAt: null,
-        state: "done_unseen",
+        activityState: "idle",
+        hasUnseen: true,
       },
     ];
 
@@ -617,7 +709,7 @@ describe("Sidebar", () => {
       "aria-current",
       "page",
     );
-    expect(screen.queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-chat-unseen")).toBeInTheDocument();
   });
 
   it("pins and unpins chats via the row toggle", async () => {

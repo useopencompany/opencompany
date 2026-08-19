@@ -13,8 +13,11 @@ const mocks = vi.hoisted(() => {
     isLoading: true,
   };
   return {
+    liveQueryResult,
     getHeadlessChatConversations: vi.fn(() => ({})),
-    getHeadlessEngineSessions: vi.fn(() => ({})),
+    preloadHeadlessChatMessages: vi.fn(async (conversationId: string) => {
+      void conversationId;
+    }),
     getHeadlessIntegrationAccounts: vi.fn(() => ({})),
     getHeadlessTaskSchedules: vi.fn(() => ({})),
     getHeadlessTasks: vi.fn(() => ({})),
@@ -29,7 +32,7 @@ vi.mock("@tanstack/react-db", () => ({
 
 vi.mock("@/lib/headless-chat-collections", () => ({
   getHeadlessChatConversations: mocks.getHeadlessChatConversations,
-  getHeadlessEngineSessions: mocks.getHeadlessEngineSessions,
+  preloadHeadlessChatMessages: mocks.preloadHeadlessChatMessages,
 }));
 
 vi.mock("@/lib/headless-integration-collections", () => ({
@@ -55,8 +58,10 @@ describe("AppDataProvider", () => {
     mocks.getHeadlessTasks.mockClear();
     mocks.getHeadlessTaskSchedules.mockClear();
     mocks.getHeadlessIntegrationAccounts.mockClear();
+    mocks.preloadHeadlessChatMessages.mockClear();
     mocks.listLegacyTaskCompatibility.mockClear();
-    mocks.useLiveQuery.mockClear();
+    mocks.useLiveQuery.mockReset();
+    mocks.useLiveQuery.mockImplementation(() => mocks.liveQueryResult);
   });
 
   afterEach(() => {
@@ -83,6 +88,78 @@ describe("AppDataProvider", () => {
 
     expect(mocks.useLiveQuery).toHaveBeenCalled();
     expect(mocks.getHeadlessTaskSchedules).not.toHaveBeenCalled();
+  });
+
+  it("preloads only the first eight sidebar transcripts after live conversations are ready", async () => {
+    const now = Date.now();
+    const chatRows = Array.from({ length: 10 }, (_, index) => ({
+      id: `chat_preload_${index}`,
+      title: `Chat ${index}`,
+      model: "anthropic/claude-sonnet-5",
+      engine: "opencompany" as const,
+      archivedAt: null,
+      pinnedAt: null,
+      lastSeenAt: null,
+      activityState: "idle" as const,
+      hasUnseen: false,
+      createdAt: new Date(now - index * 1_000).toISOString(),
+      updatedAt: new Date(now - index * 1_000).toISOString(),
+    }));
+    const perCollection = [
+      { data: [], isLoading: true },
+      { data: [], isLoading: true },
+      { data: chatRows, isLoading: false },
+      { data: [], isLoading: true },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(() => {
+      const result = perCollection[call % perCollection.length]!;
+      call += 1;
+      return result;
+    });
+
+    const data = initialData();
+    data.workspace = {
+      id: "workspace_preload",
+      name: "Preload",
+      role: "admin",
+    };
+    render(
+      <AppDataProvider initialData={data}>
+        <DataProbe />
+      </AppDataProvider>,
+    );
+
+    await waitFor(() => expect(mocks.preloadHeadlessChatMessages).toHaveBeenCalledTimes(8));
+    expect(mocks.preloadHeadlessChatMessages.mock.calls.map(([chatId]) => chatId)).toEqual(
+      chatRows.slice(0, 8).map((chat) => chat.id),
+    );
+  });
+
+  it("does not fan out transcript preloads from the server fallback", () => {
+    const data = initialData();
+    data.recentChats = [
+      {
+        id: "chat_server_fallback",
+        title: "Server fallback",
+        model: "anthropic/claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        runtime: null,
+        preview: "Fallback",
+        updatedAt: new Date().toISOString(),
+        lastSeenAt: null,
+        pinnedAt: null,
+      },
+    ];
+
+    render(
+      <AppDataProvider initialData={data}>
+        <DataProbe />
+      </AppDataProvider>,
+    );
+
+    expect(mocks.preloadHeadlessChatMessages).not.toHaveBeenCalled();
   });
 
   it("resubscribes Task reads when the active workspace changes", async () => {
@@ -138,7 +215,7 @@ describe("AppDataProvider", () => {
     expect(screen.getByTestId("recent").textContent).toBe("Research Q3 launch options");
   });
 
-  it("attaches codex_chat runtime to Claude Code chats so the home card is not stuck 'Connecting'", () => {
+  it("uses the unified Conversation projection for Claude Code sidebar state", () => {
     const now = new Date().toISOString();
     const chatRow = {
       id: "goat_chat_claude_1",
@@ -148,26 +225,25 @@ describe("AppDataProvider", () => {
       archivedAt: null,
       pinnedAt: null,
       lastSeenAt: now,
+      runtime: {
+        status: "idle" as const,
+        activeRunId: null,
+        hasError: false,
+        updatedAt: now,
+      },
+      activityState: "idle" as const,
+      hasUnseen: false,
       createdAt: now,
       updatedAt: now,
     };
-    const runtimeRow = {
-      conversationId: "goat_chat_claude_1",
-      engine: "claude_code" as const,
-      activeRunId: null,
-      status: "idle" as const,
-      error: null,
-      updatedAt: now,
-    };
     // useLiveQuery is called once per collection per render, in a fixed order:
-    // tasks, schedules, conversations, engineSessions, integrations. Only the
-    // Chat collections carry live data here; the rest stay loading so their memos
+    // tasks, schedules, conversations, integrations. Only the Conversation
+    // collection carries live data here; the rest stay loading so their memos
     // fall back to (empty) initial data instead of dereferencing it.
     const perCollection = [
       { data: [], isLoading: true },
       { data: [], isLoading: true },
       { data: [chatRow], isLoading: false },
-      { data: [runtimeRow], isLoading: false },
       { data: [], isLoading: true },
     ];
     let call = 0;
@@ -183,13 +259,12 @@ describe("AppDataProvider", () => {
       </AppDataProvider>,
     );
 
-    // Before the fix this read "claude_code:null" (runtime dropped for non-codex
-    // engines) which rendered as the null-runtime "Connecting" label.
-    expect(screen.getByTestId("recent").textContent).toBe("claude_code:idle");
+    expect(screen.getByTestId("recent").textContent).toBe("claude_code:idle:false");
+    expect(screen.getByTestId("recent").getAttribute("data-chat-id")).toBe("goat_chat_claude_1");
+    expect(screen.getByTestId("recent").getAttribute("data-runtime-status")).toBe("idle");
   });
 
-  it("keeps active-turn runtimes in recent chats as working when status lags", () => {
-    const now = new Date().toISOString();
+  it("keeps multiple API-projected working chats without a second live query", () => {
     const old = "2026-07-01T10:00:00.000Z";
     const chatRow = {
       id: "goat_chat_active_turn",
@@ -199,22 +274,21 @@ describe("AppDataProvider", () => {
       archivedAt: null,
       pinnedAt: null,
       lastSeenAt: "2026-07-01T09:59:00.000Z",
+      activityState: "working" as const,
+      hasUnseen: false,
       createdAt: old,
       updatedAt: old,
     };
-    const runtimeRow = {
-      conversationId: "goat_chat_active_turn",
-      engine: "opencompany" as const,
-      activeRunId: "goat_codex_chat_turn_1",
-      status: "idle" as const,
-      error: null,
-      updatedAt: now,
+    const newerChatRow = {
+      ...chatRow,
+      id: "conversation_other_active_turn",
+      title: "Other active chat",
+      updatedAt: "2026-07-01T10:01:00.000Z",
     };
     const perCollection = [
       { data: [], isLoading: false },
       { data: [], isLoading: false },
-      { data: [chatRow], isLoading: false },
-      { data: [runtimeRow], isLoading: false },
+      { data: [chatRow, newerChatRow], isLoading: false },
       { data: [], isLoading: true },
     ];
     let call = 0;
@@ -230,7 +304,12 @@ describe("AppDataProvider", () => {
       </AppDataProvider>,
     );
 
-    expect(screen.getByTestId("recent").textContent).toBe("Lagging runtime:working");
+    expect(screen.getByTestId("recent").textContent).toBe(
+      "Other active chat:working|Lagging runtime:working",
+    );
+    expect(screen.getByTestId("recent").getAttribute("data-chat-ids")).toBe(
+      "conversation_other_active_turn,goat_chat_active_turn",
+    );
   });
 
   it("keeps same-workspace live data during a server data refresh", () => {
@@ -243,6 +322,8 @@ describe("AppDataProvider", () => {
       archivedAt: null,
       pinnedAt: null,
       lastSeenAt: now,
+      activityState: "idle" as const,
+      hasUnseen: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -250,7 +331,6 @@ describe("AppDataProvider", () => {
       { data: [], isLoading: false },
       { data: [], isLoading: false },
       { data: [chatRow], isLoading: false },
-      { data: [], isLoading: false },
       { data: [], isLoading: true },
     ];
     let call = 0;
@@ -281,7 +361,7 @@ describe("AppDataProvider", () => {
               model: "anthropic/claude-sonnet-5",
               engine: "opencompany",
               codexComposerSettings: null,
-              codexRuntime: null,
+              runtime: null,
               preview: "Stale server snapshot",
               updatedAt: now,
               lastSeenAt: now,
@@ -303,8 +383,8 @@ function RecentChatsProbe() {
   const data = useAppData();
   const chat = data.recentChats[0];
   return (
-    <div data-testid="recent">
-      {chat ? `${chat.engine}:${chat.codexRuntime?.status ?? "null"}` : "empty"}
+    <div data-testid="recent" data-chat-id={chat?.id} data-runtime-status={chat?.runtime?.status}>
+      {chat ? `${chat.engine}:${chat.activityState}:${String(chat.hasUnseen)}` : "empty"}
     </div>
   );
 }
@@ -318,8 +398,13 @@ function RecentChatTitleProbe({ onRender }: { onRender: (value: string) => void 
 
 function RecentChatStateProbe() {
   const data = useAppData();
-  const chat = data.recentChats[0];
-  return <div data-testid="recent">{chat ? `${chat.title}:${chat.state}` : "empty"}</div>;
+  return (
+    <div data-testid="recent" data-chat-ids={data.recentChats.map((chat) => chat.id).join(",")}>
+      {data.recentChats.length > 0
+        ? data.recentChats.map((chat) => `${chat.title}:${chat.activityState}`).join("|")
+        : "empty"}
+    </div>
+  );
 }
 
 function DataProbe() {

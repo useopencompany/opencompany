@@ -18,6 +18,12 @@ const analyticsMocks = vi.hoisted(() => ({
   captureProductModelSpendRecorded: vi.fn(async () => undefined),
   captureProductServerEvent: vi.fn(async () => undefined),
 }));
+const loggerMocks = vi.hoisted(() => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
 
 vi.mock("./db", () => ({
   getDb: () => ({ execute: mocks.execute }),
@@ -29,6 +35,11 @@ vi.mock("@opencompany/analytics/product/server", () => ({
   captureProductServerEvent: analyticsMocks.captureProductServerEvent,
   productAnalyticsUsageSourceForEngine: (engine: "opencompany" | "codex" | "claude_code") =>
     engine === "opencompany" ? "owned_platform" : "external_harness",
+}));
+
+vi.mock("@opencompany/observability", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencompany/observability")>()),
+  createLogger: () => loggerMocks,
 }));
 
 describe("session-backed task turns", () => {
@@ -272,6 +283,7 @@ describe("session-backed task turns", () => {
     expect(query.sql).toContain("finished_canonical_attempt AS");
     expect(query.sql).toContain("inserted_canonical_events AS");
     expect(query.sql).toContain("canonical_settlement_guard AS MATERIALIZED");
+    expect(query.sql).toContain("has_unseen = CASE");
     expect(query.sql).toContain("event_sequence = turn.event_sequence +");
     expect(query.sql).toContain("pg_notify");
     expect(query.params).toContain("attempt_1");
@@ -317,6 +329,50 @@ describe("session-backed task turns", () => {
 
     const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
     expect(canonicalEventTypes(query.params)).toEqual(["message.content_updated", terminalEvent]);
+  });
+
+  it("bounds coding-session and turn errors at durable settlement", async () => {
+    const overlongError = `${"x".repeat(2_000)}private-tail`;
+    const boundedError = overlongError.slice(0, 2_000);
+
+    await settleDurableTurn({
+      target: {
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        codexChatSessionId: "runtime_1",
+        chatSessionId: "conversation_1",
+        turnId: "turn_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+      turnStatus: "failed",
+      sessionStatus: "failed",
+      error: overlongError,
+      completedAt: new Date("2026-07-30T09:30:00.000Z"),
+      canonicalRun: {
+        attemptId: "attempt_1",
+        assistantMessageId: "assistant_message_1",
+        content: "Latest response",
+      },
+    });
+
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
+    expect(query.sql).toContain("UPDATE goat.codex_chat_turns AS turn");
+    expect(query.sql).toContain("UPDATE goat.codex_chat_sessions AS runtime");
+    expect(query.params.filter((value) => value === boundedError).length).toBeGreaterThanOrEqual(3);
+    expect(
+      query.params.every((value) => typeof value !== "string" || !value.includes("private-tail")),
+    ).toBe(true);
+    expect(loggerMocks.warn).toHaveBeenCalledWith(
+      "Normalized overlong coding error before durable settlement",
+      {
+        event: "opencompany.runner_coding_error_normalized",
+        field: "error",
+        original_length: overlongError.length,
+        max_length: 2_000,
+      },
+    );
+    expect(loggerMocks.warn.mock.calls[0]?.[1]).not.toHaveProperty("error");
   });
 
   it("settles the current lease and queues the next workflow Run in the same Conversation", async () => {

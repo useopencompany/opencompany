@@ -7,7 +7,16 @@ import {
   parseRunStreamEvent,
 } from "./client";
 import { createOpenApiDocument } from "./routes";
-import { BrainDocumentSchema, CreateMessageBodySchema, ErrorEnvelopeSchema } from "./schemas";
+import {
+  BrainDocumentSchema,
+  ConversationReadModelSchema,
+  ConversationReadModelV1Schema,
+  ConversationSchema,
+  CreateMessageBodySchema,
+  ENGINE_SESSION_ERROR_MAX_LENGTH,
+  EngineSessionReadModelSchema,
+  ErrorEnvelopeSchema,
+} from "./schemas";
 import { PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "./version";
 
 describe("v1 protocol contract", () => {
@@ -57,6 +66,63 @@ describe("v1 protocol contract", () => {
   it("preserves bounded historical Brain aliases", () => {
     expect(BrainDocumentSchema.shape.aliases.parse(["a".repeat(113)])).toEqual(["a".repeat(113)]);
     expect(() => BrainDocumentSchema.shape.aliases.parse(["a".repeat(513)])).toThrow();
+  });
+
+  it("bounds the public engine-session error contract", () => {
+    const session = {
+      conversationId: "conversation_1",
+      engine: "codex",
+      status: "failed",
+      activeRunId: null,
+      error: "x".repeat(ENGINE_SESSION_ERROR_MAX_LENGTH),
+      updatedAt: "2026-08-13T08:00:00.000Z",
+    };
+
+    expect(EngineSessionReadModelSchema.safeParse(session).success).toBe(true);
+    expect(
+      EngineSessionReadModelSchema.safeParse({
+        ...session,
+        error: "x".repeat(ENGINE_SESSION_ERROR_MAX_LENGTH + 1),
+      }).success,
+    ).toBe(false);
+  });
+
+  it("shares an engine-neutral runtime summary across Conversation REST and v2 read models", () => {
+    const runtime = {
+      status: "running" as const,
+      activeRunId: "run_1",
+      hasError: false,
+      updatedAt: "2026-08-13T08:00:00.000Z",
+    };
+    const conversation = {
+      id: "conversation_1",
+      title: "Ship the runtime contract",
+      engine: "claude_code" as const,
+      model: "anthropic/claude-sonnet-5",
+      runtime,
+      activityState: "working" as const,
+      hasUnseen: false,
+      createdAt: "2026-08-13T07:00:00.000Z",
+      updatedAt: "2026-08-13T08:00:00.000Z",
+    };
+
+    expect(ConversationSchema.parse(conversation).runtime).toEqual(runtime);
+    expect(
+      ConversationReadModelSchema.parse({
+        ...conversation,
+        archivedAt: null,
+        pinnedAt: null,
+        lastSeenAt: null,
+      }).runtime,
+    ).toEqual(runtime);
+    expect(() =>
+      ConversationReadModelV1Schema.parse({
+        ...conversation,
+        archivedAt: null,
+        pinnedAt: null,
+        lastSeenAt: null,
+      }),
+    ).toThrow();
   });
 
   it("parses typed semantic events and rejects provider or lease payload leakage", () => {

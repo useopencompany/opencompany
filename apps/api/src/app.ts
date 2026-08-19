@@ -1719,6 +1719,13 @@ export function createApiApp(input: CreateApiAppInput) {
             "conversationId and brainId are not valid for this read model.",
           );
         }
+      } else if (params.readModel === "chat-conversations-v2") {
+        if (query.brainId) {
+          throw new ApiError(400, "invalid_request", "brainId is not valid for this read model.");
+        }
+        if (query.conversationId) {
+          await input.chat.getConversation(actor, query.conversationId);
+        }
       } else if (
         params.readModel !== "chat-conversations-v1" &&
         params.readModel !== "engine-sessions-v1"
@@ -2680,11 +2687,22 @@ function conversationDto(conversation: {
   title: string;
   engine: "opencompany" | "codex" | "claude_code";
   model: string;
+  runtime: {
+    status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
+    activeRunId: string | null;
+    hasError: boolean;
+    updatedAt: Date;
+  } | null;
+  activityState: "working" | "idle";
+  hasUnseen: boolean;
   createdAt: Date;
   updatedAt: Date;
 }) {
   return {
     ...conversation,
+    runtime: conversation.runtime
+      ? { ...conversation.runtime, updatedAt: conversation.runtime.updatedAt.toISOString() }
+      : null,
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
   };

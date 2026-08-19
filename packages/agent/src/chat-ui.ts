@@ -10,11 +10,11 @@ import {
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { BrowserToolName } from "@opencompany/browser-tools";
+import type { ConversationRuntimeStatus } from "@opencompany/core";
 import type {
   ChatAttachmentKind,
   ChatEngine,
   ChatMessage,
-  CodexChatSessionStatus,
   HarnessEngine,
   TaskStatus,
 } from "@opencompany/db/product-schema";
@@ -620,14 +620,17 @@ export type ChatSessionView = {
   model: AgentModelId;
   engine?: ChatEngine;
   codexComposerSettings?: CodexComposerSettingsView | null;
-  codexRuntime?: CodexRuntimeView | null;
+  runtime?: ConversationRuntimeView | null;
+  activityState?: "working" | "idle";
+  hasUnseen?: boolean;
+  updatedAt?: string;
   messages: ChatUiMessage[];
 };
 
-export type CodexRuntimeView = {
-  status: CodexChatSessionStatus;
-  activeTurnId?: string | null;
-  error: string | null;
+export type ConversationRuntimeView = {
+  status: ConversationRuntimeStatus;
+  activeRunId: string | null;
+  hasError: boolean;
   updatedAt: string;
 };
 
@@ -639,7 +642,11 @@ export type ChatSummaryView = {
   model: AgentModelId;
   engine?: ChatEngine;
   codexComposerSettings?: CodexComposerSettingsView | null;
-  codexRuntime?: CodexRuntimeView | null;
+  runtime?: ConversationRuntimeView | null;
+  activityState?: "working" | "idle";
+  hasUnseen?: boolean;
+  // Compatibility fallback for optimistic and rolling-deploy snapshots. Live API rows own
+  // activityState/hasUnseen and always take precedence.
   state?: ChatState;
   preview: string;
   updatedAt: string;
@@ -650,31 +657,16 @@ export type ChatSummaryView = {
 
 export const PINNED_CHAT_LIMIT = 20;
 
-export function deriveChatState(input: {
-  updatedAt: string;
-  lastSeenAt?: string | null;
-  codexRuntime?: { status?: string | null; activeTurnId?: string | null } | null;
-}): ChatState {
-  if (isChatRuntimeActive(input.codexRuntime)) return "working";
-  if (!input.lastSeenAt) return "done_unseen";
-
-  const lastSeenAt = Date.parse(input.lastSeenAt);
-  const updatedAt = Date.parse(input.updatedAt);
-  if (!Number.isFinite(lastSeenAt) || !Number.isFinite(updatedAt)) return "done_unseen";
-  return lastSeenAt >= updatedAt ? "done_seen" : "done_unseen";
-}
-
 export function chatSummaryState(
-  chat: Pick<ChatSummaryView, "codexRuntime" | "lastSeenAt" | "state" | "updatedAt">,
+  chat: Pick<ChatSummaryView, "activityState" | "hasUnseen" | "state">,
 ): ChatState {
-  if (isChatRuntimeActive(chat.codexRuntime)) return "working";
-  if (chat.state) return chat.state;
-  if (chat.lastSeenAt === undefined) return "done_seen";
-  return deriveChatState(chat);
+  if (chat.activityState === "working") return "working";
+  if (chat.activityState === "idle") return chat.hasUnseen ? "done_unseen" : "done_seen";
+  return chat.state ?? "done_seen";
 }
 
 export function isChatRuntimeActive(
-  runtime: { status?: string | null; activeTurnId?: string | null } | null | undefined,
+  runtime: { status?: string | null; activeRunId?: string | null } | null | undefined,
 ): boolean {
   if (
     runtime?.status === "queued" ||
@@ -683,7 +675,7 @@ export function isChatRuntimeActive(
   ) {
     return true;
   }
-  if (!runtime?.activeTurnId) return false;
+  if (!runtime?.activeRunId) return false;
   return (
     runtime.status !== "failed" && runtime.status !== "interrupted" && runtime.status !== "closed"
   );

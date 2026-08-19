@@ -1,5 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ElectricReadModelProxy } from "./electric-read-models";
+
+const loggerMocks = vi.hoisted(() => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  createLogger: () => loggerMocks,
+}));
 
 const actor = {
   userId: "user_1",
@@ -19,6 +30,185 @@ const actor = {
 };
 
 describe("Electric read models", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("keeps the v1 Conversation shape stable for deployed clients", async () => {
+    let requestedUrl: URL | undefined;
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        requestedUrl = new URL(String(input));
+        return Response.json([]);
+      }) as typeof fetch,
+    });
+
+    await proxy.stream({
+      actor,
+      readModel: "chat-conversations-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/chat-conversations-v1"),
+    });
+
+    expect(requestedUrl?.searchParams.get("columns")).not.toContain("activity_state");
+    expect(requestedUrl?.searchParams.get("columns")).not.toContain("has_unseen");
+  });
+
+  it("projects API-owned activity and unseen state on Conversation rows", async () => {
+    let requestedUrl: URL | undefined;
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        requestedUrl = new URL(String(input));
+        return Response.json(
+          [
+            {
+              headers: { operation: "insert" },
+              key: '"conversation_1"',
+              value: {
+                id: "conversation_1",
+                title: "Review launch",
+                engine: "claude_code",
+                model: "anthropic/claude-sonnet-5",
+                archived_at: null,
+                pinned_at: null,
+                last_seen_at: "2026-08-10 20:00:00+00",
+                activity_state: "working",
+                has_unseen: "true",
+                runtime_status: "running",
+                active_run_id: "run_1",
+                runtime_has_error: "false",
+                runtime_updated_at: "2026-08-10 20:00:30+00",
+                error: "must-not-cross",
+                created_at: "2026-08-10 19:00:00+00",
+                updated_at: "2026-08-10 20:01:00+00",
+                actor_id: "must-not-cross",
+                workspace_id: "must-not-cross",
+              },
+            },
+          ],
+          {
+            headers: {
+              "electric-schema": JSON.stringify({
+                id: { type: "text" },
+                has_unseen: { type: "bool" },
+                runtime_has_error: { type: "bool" },
+              }),
+            },
+          },
+        );
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "chat-conversations-v2",
+      requestUrl: new URL("https://api.example.test/v1/read-models/chat-conversations-v2"),
+    });
+
+    expect(requestedUrl?.searchParams.get("columns")).toContain("activity_state");
+    expect(requestedUrl?.searchParams.get("columns")).toContain("has_unseen");
+    expect(requestedUrl?.searchParams.get("columns")).toContain("runtime_status");
+    expect(requestedUrl?.searchParams.get("columns")?.split(",")).not.toContain("error");
+    expect(response.headers.get("electric-schema")).toBe(JSON.stringify({ id: { type: "text" } }));
+    expect(await response.json()).toEqual([
+      {
+        headers: { operation: "insert" },
+        key: '"conversation_1"',
+        value: {
+          id: "conversation_1",
+          title: "Review launch",
+          engine: "claude_code",
+          model: "anthropic/claude-sonnet-5",
+          archivedAt: null,
+          pinnedAt: null,
+          lastSeenAt: "2026-08-10T20:00:00.000Z",
+          activityState: "working",
+          hasUnseen: true,
+          runtime: {
+            status: "running",
+            activeRunId: "run_1",
+            hasError: false,
+            updatedAt: "2026-08-10T20:00:30.000Z",
+          },
+          createdAt: "2026-08-10T19:00:00.000Z",
+          updatedAt: "2026-08-10T20:01:00.000Z",
+        },
+      },
+    ]);
+  });
+
+  it("scopes v2 Conversation detail shapes to one actor-authorized projection row", async () => {
+    let requestedUrl: URL | undefined;
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        requestedUrl = new URL(String(input));
+        return Response.json([]);
+      }) as typeof fetch,
+    });
+
+    await proxy.stream({
+      actor,
+      readModel: "chat-conversations-v2",
+      conversationId: "conversation_1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/chat-conversations-v2?conversationId=conversation_1",
+      ),
+    });
+
+    expect(requestedUrl?.searchParams.get("where")).toBe(
+      '"id" = $1 AND "actor_id" = $2 AND ("workspace_id" = $3 OR "workspace_id" IS NULL)',
+    );
+    expect(requestedUrl?.searchParams.get("params[1]")).toBe("conversation_1");
+    expect(requestedUrl?.searchParams.get("params[2]")).toBe("user_1");
+    expect(requestedUrl?.searchParams.get("params[3]")).toBe("workspace_1");
+  });
+
+  it("projects nested runtime fields from partial v2 Conversation updates", async () => {
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async () =>
+        Response.json([
+          {
+            headers: { operation: "update" },
+            key: '"conversation_1"',
+            value: {
+              runtime_status: "failed",
+              active_run_id: null,
+              runtime_has_error: "t",
+              runtime_updated_at: "2026-08-10 20:02:00+00",
+            },
+          },
+        ]),
+      ) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "chat-conversations-v2",
+      conversationId: "conversation_1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/chat-conversations-v2?conversationId=conversation_1",
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual([
+      {
+        headers: { operation: "update" },
+        key: '"conversation_1"',
+        value: {
+          runtime: {
+            status: "failed",
+            activeRunId: null,
+            hasError: true,
+            updatedAt: "2026-08-10T20:02:00.000Z",
+          },
+        },
+      },
+    ]);
+  });
+
   it("serves integration accounts as a credential-free actor and workspace read model", async () => {
     let requestedUrl: URL | undefined;
     const proxy = new ElectricReadModelProxy({
@@ -307,6 +497,95 @@ describe("Electric read models", () => {
           error: null,
           updatedAt: "2026-08-13T08:00:00.000Z",
         },
+      },
+    ]);
+  });
+
+  it("bounds a legacy session error without dropping valid active session state", async () => {
+    const historicalError = `${"x".repeat(2_000)}private-tail`;
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async () =>
+        Response.json([
+          {
+            headers: { operation: "insert" },
+            key: '"runtime_legacy"',
+            value: {
+              id: "runtime_legacy",
+              chat_session_id: "conversation_legacy",
+              engine: "claude_code",
+              status: "failed",
+              active_turn_id: null,
+              error: historicalError,
+              updated_at: "2026-08-13 07:00:00+00",
+            },
+          },
+          {
+            headers: { operation: "insert" },
+            key: '"runtime_active"',
+            value: {
+              id: "runtime_active",
+              chat_session_id: "conversation_active",
+              engine: "codex",
+              status: "running",
+              active_turn_id: "run_active",
+              error: null,
+              updated_at: "2026-08-13 08:00:00+00",
+            },
+          },
+        ]),
+      ) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "engine-sessions-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/engine-sessions-v1"),
+    });
+    const payload = (await response.json()) as Array<{ value: Record<string, unknown> }>;
+
+    expect(payload[0]?.value.error).toBe(historicalError.slice(0, 2_000));
+    expect(payload[1]?.value).toMatchObject({
+      conversationId: "conversation_active",
+      status: "running",
+      activeRunId: "run_active",
+    });
+    expect(loggerMocks.warn).toHaveBeenCalledWith("Normalized overlong engine session error", {
+      event: "opencompany.api_engine_session_error_normalized",
+      read_model: "engine-sessions-v1",
+      field: "error",
+      original_length: historicalError.length,
+      max_length: 2_000,
+    });
+    expect(loggerMocks.warn.mock.calls[0]?.[1]).not.toHaveProperty("error");
+  });
+
+  it("bounds overlong errors in partial Electric updates", async () => {
+    const historicalError = "x".repeat(2_001);
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async () =>
+        Response.json([
+          {
+            headers: { operation: "update" },
+            key: '"runtime_legacy"',
+            value: { error: historicalError },
+          },
+        ]),
+      ) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "engine-sessions-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/engine-sessions-v1"),
+    });
+
+    await expect(response.json()).resolves.toEqual([
+      {
+        headers: { operation: "update" },
+        key: '"runtime_legacy"',
+        value: { error: historicalError.slice(0, 2_000) },
       },
     ]);
   });

@@ -5,15 +5,12 @@ import {
   TaskScheduleReadModelSchema,
   type WorkflowReadModel,
   WorkflowReadModelSchema,
-  type WorkflowScheduleReadModel,
-  WorkflowScheduleReadModelSchema,
 } from "@opencompany/protocol";
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 
 const workflowsByScope = new Map<string, ReturnType<typeof createWorkflows>>();
-const workflowSchedulesByScope = new Map<string, ReturnType<typeof createWorkflowSchedules>>();
 const taskSchedulesByScope = new Map<string, ReturnType<typeof createTaskSchedules>>();
 
 function shapeOptions(readModel: string) {
@@ -34,17 +31,6 @@ function createWorkflows(scopeKey: string) {
   );
 }
 
-function createWorkflowSchedules(scopeKey: string) {
-  return createCollection(
-    electricCollectionOptions({
-      id: `headless-workflow-schedules:v1:${encodeURIComponent(scopeKey)}`,
-      schema: WorkflowScheduleReadModelSchema,
-      shapeOptions: shapeOptions("workflow-schedules-v1"),
-      getKey: (row) => row.id,
-    }),
-  );
-}
-
 function createTaskSchedules(scopeKey: string) {
   return createCollection(
     electricCollectionOptions({
@@ -56,7 +42,7 @@ function createTaskSchedules(scopeKey: string) {
   );
 }
 
-export function getHeadlessWorkflows(scopeKey = "active") {
+export function getHeadlessWorkflows(scopeKey: string) {
   const cached = workflowsByScope.get(scopeKey);
   if (cached) return cached;
   const collection = createWorkflows(scopeKey);
@@ -64,15 +50,7 @@ export function getHeadlessWorkflows(scopeKey = "active") {
   return collection;
 }
 
-export function getHeadlessWorkflowSchedules(scopeKey = "active") {
-  const cached = workflowSchedulesByScope.get(scopeKey);
-  if (cached) return cached;
-  const collection = createWorkflowSchedules(scopeKey);
-  workflowSchedulesByScope.set(scopeKey, collection);
-  return collection;
-}
-
-export function getHeadlessTaskSchedules(scopeKey = "active") {
+export function getHeadlessTaskSchedules(scopeKey: string) {
   const cached = taskSchedulesByScope.get(scopeKey);
   if (cached) return cached;
   const collection = createTaskSchedules(scopeKey);
@@ -80,28 +58,9 @@ export function getHeadlessTaskSchedules(scopeKey = "active") {
   return collection;
 }
 
-export async function awaitHeadlessWorkflowTransaction(
-  transactionIdValue: string,
-  options: { scopeKey?: string; timeoutMs?: number; includeSchedule?: boolean } = {},
-) {
-  const transactionId = transactionIdFromApi(transactionIdValue);
-  const waits = [
-    getHeadlessWorkflows(options.scopeKey).utils.awaitTxId(transactionId, options.timeoutMs),
-  ];
-  if (options.includeSchedule) {
-    waits.push(
-      getHeadlessWorkflowSchedules(options.scopeKey).utils.awaitTxId(
-        transactionId,
-        options.timeoutMs,
-      ),
-    );
-  }
-  await Promise.all(waits);
-}
-
 export async function awaitHeadlessTaskScheduleTransaction(
   transactionIdValue: string,
-  options: { scopeKey?: string; timeoutMs?: number } = {},
+  options: { scopeKey: string; timeoutMs?: number },
 ) {
   await getHeadlessTaskSchedules(options.scopeKey).utils.awaitTxId(
     transactionIdFromApi(transactionIdValue),
@@ -118,5 +77,4 @@ function transactionIdFromApi(value: string) {
 }
 
 export type HeadlessWorkflowReadModel = WorkflowReadModel;
-export type HeadlessWorkflowScheduleReadModel = WorkflowScheduleReadModel;
 export type HeadlessTaskScheduleReadModel = TaskScheduleReadModel;

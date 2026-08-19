@@ -27,6 +27,7 @@ import {
   type Task,
   type TaskReportedOutcome,
 } from "@opencompany/db/product-schema";
+import { createLogger } from "@opencompany/observability";
 import {
   createGatewayAttribution,
   gatewayProviderOptions,
@@ -50,6 +51,8 @@ import { normalizeTaskToolNames } from "./task-tool-names";
 
 const TASK_OUTCOME_COMMENT_MAX_LENGTH = 200;
 const TASK_CLOSER_MODEL = "openai/gpt-5.4-mini";
+const CODING_ERROR_MAX_LENGTH = 2_000;
+const logger = createLogger({ service: "opencompany-runner", runtime: "task-turn" });
 
 export type TaskTurnContext = {
   task: Task;
@@ -476,6 +479,15 @@ export async function settleDurableTurn(input: {
   };
 }) {
   const { target } = input;
+  const normalizedError = input.error?.slice(0, CODING_ERROR_MAX_LENGTH) ?? null;
+  if (input.error && input.error.length > CODING_ERROR_MAX_LENGTH) {
+    logger.warn("Normalized overlong coding error before durable settlement", {
+      event: "opencompany.runner_coding_error_normalized",
+      field: "error",
+      original_length: input.error.length,
+      max_length: CODING_ERROR_MAX_LENGTH,
+    });
+  }
   const completion = input.taskCompletion ?? null;
   const next = completion?.nextTurn ?? null;
   const terminalTaskStatus =
@@ -496,7 +508,7 @@ export async function settleDurableTurn(input: {
     ? input.turnStatus === "completed"
       ? taskSucceededNotification(completion.taskDisplayId, completion.result)
       : input.turnStatus === "failed"
-        ? taskFailedNotification(completion.taskDisplayId, input.error ?? "")
+        ? taskFailedNotification(completion.taskDisplayId, normalizedError ?? "")
         : null
     : null;
   const canonicalEvents = input.canonicalRun
@@ -527,7 +539,7 @@ export async function settleDurableTurn(input: {
                 type: "run.failed",
                 payload: {
                   code: "execution_failed",
-                  message: input.error ?? "Chat execution failed.",
+                  message: normalizedError ?? "Chat execution failed.",
                   retryable: false,
                 },
               },
@@ -544,7 +556,7 @@ export async function settleDurableTurn(input: {
     WITH settled_turn AS (
       UPDATE goat.codex_chat_turns AS turn
       SET status = ${input.turnStatus},
-          error = ${input.error},
+          error = ${normalizedError},
           completed_at = ${input.completedAt},
           event_sequence = turn.event_sequence + ${canonicalEvents.length},
           updated_at = ${input.completedAt}
@@ -571,7 +583,7 @@ export async function settleDurableTurn(input: {
       UPDATE goat.run_attempts AS attempt
       SET status = ${canonicalAttemptStatus},
           error_code = ${input.turnStatus === "failed" ? "execution_failed" : null},
-          error_message = ${input.turnStatus === "failed" ? input.error : null},
+          error_message = ${input.turnStatus === "failed" ? normalizedError : null},
           completed_at = ${input.completedAt}
       FROM settled_turn AS run
       WHERE attempt.id = ${input.canonicalRun?.attemptId ?? null}
@@ -642,7 +654,7 @@ export async function settleDurableTurn(input: {
             WHEN ${Boolean(next)} THEN NULL
             WHEN ${input.turnStatus} = 'completed' THEN NULL
             WHEN ${input.turnStatus} = 'interrupted' THEN 'Stopped by user.'
-            ELSE ${input.error}
+            ELSE ${normalizedError}
           END,
           reported_outcome = CASE WHEN ${Boolean(next)}
             THEN NULL
@@ -812,18 +824,22 @@ export async function settleDurableTurn(input: {
             WHEN ${Boolean(next)} THEN ${next?.hostToolContractVersion ?? null}
             ELSE runtime.host_tool_contract_version
           END,
-          error = ${input.error},
+          error = ${normalizedError},
           updated_at = ${input.completedAt}
       WHERE runtime.id = ${target.codexChatSessionId}
         AND runtime.user_workos_id = ${target.userWorkosId}
         AND (runtime.active_turn_id IS NULL OR runtime.active_turn_id = ${target.turnId})
         AND EXISTS (SELECT 1 FROM settled_turn)
-      RETURNING runtime.id, runtime.chat_session_id
+      RETURNING runtime.id, runtime.chat_session_id, runtime.status
     ),
     updated_task_chat AS (
       UPDATE goat.chat_sessions AS chat
       SET engine = COALESCE(${next?.engine ?? null}, chat.engine),
           model = COALESCE(${next?.chatModel ?? null}, chat.model),
+          has_unseen = CASE
+            WHEN runtime.status = 'queued' THEN chat.has_unseen
+            ELSE true
+          END,
           updated_at = ${input.completedAt}
       FROM updated_runtime AS runtime
       WHERE chat.id = runtime.chat_session_id
@@ -877,7 +893,7 @@ export async function settleDurableTurn(input: {
     ),
     touched_origin_chat AS (
       UPDATE goat.chat_sessions AS chat
-      SET updated_at = ${input.completedAt}
+      SET has_unseen = true, updated_at = ${input.completedAt}
       FROM inserted_notification AS notification
       WHERE chat.id = notification.session_id
       RETURNING chat.id

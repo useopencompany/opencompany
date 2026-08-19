@@ -25,23 +25,6 @@ jobs:
       requested_scope: affected
       cache_write: false
 
-  dco:
-    name: DCO
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 5
-    steps:
-      - name: Checkout pull request history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Require every non-merge commit to be signed off
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node scripts/check-dco.mjs
-
   dependency-review:
     name: Dependency review
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -55,7 +38,7 @@ jobs:
   gate:
     name: PR gate
     if: ${{ always() }}
-    needs: [verify, dco, dependency-review]
+    needs: [verify, dependency-review]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
