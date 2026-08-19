@@ -381,9 +381,6 @@ services:
         sync: false
       - key: RUNNER_OPENCOMPANY_CODEX_CHAT_IDLE_TIMEOUT_MS
         sync: false
-      # Flag-gated Claude Code ACP pilot; false preserves the legacy stream-json path.
-      - key: RUNNER_CLAUDE_CODE_ACP_ENABLED
-        sync: false
       - key: RUNNER_OPENCOMPANY_CODEX_CHAT_LEASE_TTL_MS
         sync: false
       # Optional upstream key for the runner's OpenAI provider and voice models.

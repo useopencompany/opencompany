@@ -189,10 +189,12 @@ const baseEnvKeys = envKeys(
     encoding: "utf8",
   }),
 );
+const retiredEnvKeys = new Set([["RUNNER", "CLAUDE", "CODE", "ACP", "ENABLED"].join("_")]);
 const expectedEnvKeys = [
   ...new Set([
-    ...baseEnvKeys.map((key) => migratedEnvironmentName(key) ?? key),
-    "RUNNER_CLAUDE_CODE_ACP_ENABLED",
+    ...baseEnvKeys
+      .map((key) => migratedEnvironmentName(key) ?? key)
+      .filter((key) => !retiredEnvKeys.has(key)),
   ]),
 ].sort();
 if (currentEnvKeys.join("\n") !== expectedEnvKeys.join("\n")) {

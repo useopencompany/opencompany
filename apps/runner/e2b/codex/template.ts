@@ -2,8 +2,6 @@ import { Template } from "e2b";
 import {
   CLAUDE_CODE_ACP_ADAPTER_PACKAGE,
   CLAUDE_CODE_ACP_ADAPTER_VERSION,
-  CLAUDE_CODE_CLI_PACKAGE,
-  CLAUDE_CODE_CLI_VERSION,
 } from "../../src/claude-code-version";
 import { CODEX_CLI_PACKAGE, CODEX_CLI_VERSION } from "../../src/codex-version";
 import {
@@ -14,8 +12,6 @@ import {
 export {
   CLAUDE_CODE_ACP_ADAPTER_PACKAGE,
   CLAUDE_CODE_ACP_ADAPTER_VERSION,
-  CLAUDE_CODE_CLI_PACKAGE,
-  CLAUDE_CODE_CLI_VERSION,
 } from "../../src/claude-code-version";
 export { CODEX_CLI_PACKAGE, CODEX_CLI_VERSION } from "../../src/codex-version";
 export {
@@ -108,7 +104,7 @@ export const template = Template()
     [
       `curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}"`,
       `test "$(bun --version)" = "${BUN_VERSION}"`,
-      `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g --prefix /usr/local ${CODEX_CLI_PACKAGE} ${CLAUDE_CODE_CLI_PACKAGE} ${CLAUDE_CODE_ACP_ADAPTER_PACKAGE} ${PLAYWRIGHT_PACKAGE}`,
+      `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g --prefix /usr/local ${CODEX_CLI_PACKAGE} ${CLAUDE_CODE_ACP_ADAPTER_PACKAGE} ${PLAYWRIGHT_PACKAGE}`,
       "command -v rg",
       "command -v fd",
       "command -v jq",
@@ -122,8 +118,6 @@ export const template = Template()
       "command -v bun",
       "command -v codex",
       `test "$(codex --version)" = "codex-cli ${CODEX_CLI_VERSION}"`,
-      "command -v claude",
-      `claude --version | grep -F "${CLAUDE_CODE_CLI_VERSION}"`,
       "command -v claude-agent-acp",
       `test "$(claude-agent-acp --version)" = "${CLAUDE_CODE_ACP_ADAPTER_VERSION}"`,
       "command -v playwright",

@@ -144,6 +144,51 @@ describe("createAcpEventNormalizer", () => {
     ).toEqual(["command.output", "command.completed"]);
   });
 
+  it("extracts safe file metadata from a completed publish_artifact call", () => {
+    const normalizer = createAcpEventNormalizer();
+    normalizer.beginRun("session_1");
+    normalizer.normalize(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "publish_1",
+        title: "Publish artifact",
+        name: "mcp__opencompany_actions__publish_artifact",
+        rawInput: { path: "plan.md" },
+        status: "in_progress",
+      }),
+    );
+
+    const [event] = normalizer.normalize(
+      update({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "publish_1",
+        status: "completed",
+        rawOutput: {
+          ok: true,
+          artifact: {
+            artifactId: "artifact_1",
+            artifactVersionId: "version_1",
+            version: 1,
+            title: "Plan",
+            filename: "plan.md",
+            mediaType: "text/markdown",
+            sizeBytes: 42,
+            state: "ready",
+          },
+        },
+      }),
+    );
+
+    expect(event).toMatchObject({
+      type: "mcp_tool.completed",
+      payload: {
+        server: "opencompany_actions",
+        tool: "publish_artifact",
+        artifact: { artifactVersionId: "version_1", state: "ready" },
+      },
+    });
+  });
+
   it("maps permission requests to a distinct approval projection", () => {
     const normalizer = createAcpEventNormalizer();
     const [event] = normalizer.normalize({
