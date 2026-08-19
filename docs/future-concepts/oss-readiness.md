@@ -255,8 +255,9 @@ choose FSL/BUSL deliberately and call the launch source-available, not open sour
   rights, so there is no need to hide the marketing application merely to protect the brand.
 
 Before changing `LICENSE`, confirm the company can relicense all historical contributions and add
-any required `NOTICE` or third-party attribution file. Use an inbound-equals-outbound contribution
-policy; do not add a CLA unless a real dual-licensing or ownership need appears.
+any required `NOTICE` or third-party attribution file. Use an inbound-equals-outbound policy plus a
+Developer Certificate of Origin sign-off; do not add a CLA unless a real dual-licensing or ownership
+need appears.
 
 ## Decision 4: Secret and history safety
 
@@ -316,11 +317,14 @@ erase it and rotate regardless.
 The public-repository gate is:
 
 - replace branch protection with or mirror it in a visible `main` ruleset: pull requests required,
-  branch current, four existing CI checks required, conversations resolved, admins enforced, and no
-  force pushes or deletions. Reviews are encouraged but are not a merge requirement. Make
-  critical-path CODEOWNER approval mandatory after a second active maintainer is assigned;
-- keep squash-only merges for linear history. Do not require signed commits at launch; immutable
-  action pins, protected merges, and CI provide more value with less contributor friction;
+  branch current, four existing CI checks required, conversations resolved, stale approvals
+  dismissed, admins enforced, and no force pushes or deletions. External pull requests require one
+  maintainer approval; the owner may use an explicit ruleset bypass for owner-authored changes after
+  all required checks pass. Make critical-path CODEOWNER approval mandatory after a second active
+  maintainer is assigned;
+- keep squash-only merges for linear history. Do not require signed commits at launch; DCO sign-off,
+  immutable action pins, protected merges, and review provide more value with less contributor
+  friction;
 - restrict Actions to required publishers and full commit SHAs. Convert every release workflow
   action from a mutable tag to a full SHA before enabling repository-level pin enforcement;
 - run fork code only on `pull_request` with a read-only token, no secrets, no OIDC, no production
@@ -348,7 +352,7 @@ change.
 The root README, CONTRIBUTING guide, CODEOWNERS, and pull-request template exist and accurately list
 the internal checks. The README explains the architecture but its three-command quick start assumes
 company Infisical/Neon access. CONTRIBUTING does not state the contribution model, support promise,
-license terms, security-reporting path, or a credential-free setup. There is no SECURITY policy,
+license/DCO terms, security-reporting path, or a credential-free setup. There is no SECURITY policy,
 Code of Conduct, issue form, Dependabot configuration, or public example. The generated OpenAPI and
 typed client provide a natural example surface, but none is packaged for a newcomer.
 
@@ -377,7 +381,7 @@ Before launch, add:
 - a README with product screenshot/demo, architecture diagram, community quick start, supported and
   optional providers, project maturity, license, security link, and contribution stance;
 - CONTRIBUTING sections for the community setup, repository map, boundary rules, test selection,
-  contribution terms, review expectations, and areas requiring prior design approval;
+  DCO sign-off, review expectations, and areas requiring prior design approval;
 - SECURITY, Code of Conduct, support/maturity statement, issue forms for reproducible bugs and
   scoped proposals, and a security form that points to private vulnerability reporting rather than
   public issue content;
@@ -422,7 +426,7 @@ Accepted: use the following order. No slice may rely on a future visibility chan
 | 2. Code-only naming | Rename user-facing/code-only Goat vocabulary and the four packages; update imports, generated artifacts, checks, and current docs. Do not touch physical schema, migration history, env names, or Infisical. | Package mapping accepted | 4–7 days |
 | 3. Environment and operations naming | Pre-provision `OPENCOMPANY_*` and `/web`, switch code/setup/hosts/release preflight in one exact release with no fallback reads, verify, then remove every `GOAT_*` hosted value and `/goat`. | Exact production cutover approval | 3–5 engineering days plus a cutover window |
 | 4. Layout, docs, and community setup | Add package/app READMEs and dependency map; extract Fumadocs to `apps/docs`; normalize provider/maintenance tooling; add the credential-free community setup and API example; test clean clones on macOS/Linux. | Development-supported promise accepted | 6–10 days |
-| 5. License and contributor surface | Complete provenance/asset report; switch to Apache-2.0; add notices/trademark/contribution guidance, README/CONTRIBUTING/security/conduct/forms, and maintainer ownership. | Apache-2.0 and maintainer-led model accepted; legal gate remains | 2–4 days plus legal review |
+| 5. License and contributor surface | Complete provenance/asset report; switch to Apache-2.0; add notices/trademark/DCO, README/CONTRIBUTING/security/conduct/forms, and maintainer ownership. | Apache-2.0 and maintainer-led model accepted; legal gate remains | 2–4 days plus legal review |
 | 6. Public CI and repository controls | Harden/pin Actions, isolate fork CI, add dependency/license/docs/example gates, enable Dependabot/security features, configure ruleset/CODEOWNERS and production-environment protection. Prove a fork PR cannot access secrets or deploy. | Startup defaults accepted; review after launch | 2–4 days |
 | 7. Publication | Rerun full mirror scans and clean-clone checks, capture a repository/settings backup, review the exact tracked tree, switch visibility, verify clone/docs/issues/security reporting, and monitor the first public CI/deploy cycle. | Yes; this is the final irreversible call. | 1–2 days |
 
