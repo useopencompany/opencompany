@@ -8,7 +8,6 @@ import type {
   TaskStatus,
 } from "@opencompany/agent/task-runtime-types";
 import {
-  CLOUD_CODING_ENGINE_CONFIG,
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
 } from "@opencompany/agent-runtime";
@@ -131,6 +130,12 @@ import {
 } from "@/lib/chat-session-state";
 import { composeChatTranscript } from "@/lib/chat-transcript";
 import {
+  type ActiveChatTurn,
+  deriveChatTurnPhase,
+  isChatTurnTerminal,
+  isChatTurnWorking,
+} from "@/lib/chat-turn-lifecycle";
+import {
   type ChatMention,
   type ChatMessageMetadata,
   type ChatSessionView,
@@ -144,22 +149,24 @@ import {
 } from "@/lib/chat-ui";
 import { CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
 import {
-  CLAUDE_CHAT_DEFAULT_MODEL_ID,
-  CLAUDE_PICKER_VALUE,
-  type ClaudeChatModelId,
-  normalizeClaudeChatModelId,
-} from "@/lib/claude-chat-constants";
-import {
-  CODEX_CHAT_DEFAULT_MODEL_ID,
-  CODEX_PICKER_VALUE,
-  type CodexChatModelId,
-  normalizeCodexChatModelId,
-} from "@/lib/codex-chat-constants";
-import {
   type CodexComposerSettingsView,
   DEFAULT_CLAUDE_CHAT_REASONING_EFFORT,
   DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 } from "@/lib/codex-chat-settings";
+import {
+  CLAUDE_CHAT_DEFAULT_MODEL_ID,
+  CLAUDE_PICKER_VALUE,
+  type ClaudeChatModelId,
+  CODEX_CHAT_DEFAULT_MODEL_ID,
+  CODEX_PICKER_VALUE,
+  type CodexChatModelId,
+  ENGINE_REGISTRY,
+  type EngineChatKind,
+  isCloudCodingEngine,
+  normalizeClaudeChatModelId,
+  normalizeCodexChatModelId,
+  statusPresenter,
+} from "@/lib/engine-registry";
 import {
   archiveHeadlessTaskSchedule,
   invokeHeadlessWorkflow,
@@ -251,7 +258,6 @@ type MentionOption =
       mention: ChatMention;
     };
 
-type EngineChatKind = "codex" | "claude_code";
 type CodexComposerSettings = CodexComposerSettingsView;
 type EngineComposerSettings = {
   reasoningEffort: CodexReasoningEffort;
@@ -277,22 +283,10 @@ function chatThreadBottomPaddingForComposerHeight(composerHeightPx: number) {
   );
 }
 
-const ENGINE_CHAT_CONFIG: Record<EngineChatKind, { label: string }> = {
-  codex: {
-    label: CLOUD_CODING_ENGINE_CONFIG.codex.label,
-  },
-  claude_code: {
-    label: CLOUD_CODING_ENGINE_CONFIG.claude_code.label,
-  },
-};
-
 function engineChatKindFromChat(
   chat: { engine?: ChatEngine } | null | undefined,
 ): EngineChatKind | null {
-  if (!chat) return null;
-  if (chat.engine === "codex") return "codex";
-  if (chat.engine === "claude_code") return "claude_code";
-  return null;
+  return isCloudCodingEngine(chat?.engine) ? chat.engine : null;
 }
 
 function chatModelSelectionFromEngineMention(
@@ -304,23 +298,10 @@ function chatModelSelectionFromEngineMention(
   return null;
 }
 
-function shareSubjectForActiveChat(input: {
-  isTask: boolean;
-  engine?: ChatEngine | null;
-}): "chat" | "task run" | "Codex chat" | "Claude Code chat" {
+function shareSubjectForActiveChat(input: { isTask: boolean; engine?: ChatEngine | null }): string {
   if (input.isTask) return "task run";
-  if (input.engine === "codex") return "Codex chat";
-  if (input.engine === "claude_code") return "Claude Code chat";
+  if (isCloudCodingEngine(input.engine)) return `${ENGINE_REGISTRY[input.engine].label} chat`;
   return "chat";
-}
-
-// Cloud coding-CLI chats (Codex + Claude Code) share the same home card and status
-// indicator; only the display label differs by engine. Defaults to "Codex" so the
-// shared surface stays labeled for any non-Claude engine that reaches it.
-function codexEngineLabel(engine: ChatEngine | null | undefined): string {
-  return engine === "claude_code"
-    ? ENGINE_CHAT_CONFIG.claude_code.label
-    : ENGINE_CHAT_CONFIG.codex.label;
 }
 
 export type TaskView = {
@@ -408,9 +389,7 @@ export function Surface({
   const backgroundTaskFocusOriginRef = useRef<Element | null>(null);
   const onboardingKickoffReadRef = useRef(false);
   const onboardingKickoffPromptRef = useRef<string | null>(null);
-  const activeTurnStartedAtRef = useRef<number | null>(null);
-  const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
-  const activeTurnChatSessionIdRef = useRef<string | null>(initialChat?.id ?? null);
+  const activeTurnRef = useRef<ActiveChatTurn | null>(null);
   const lastSeenMarkRef = useRef<string | null>(null);
   const wasAgentWorkingRef = useRef(false);
   const optimisticAttachmentPreviewUrlsRef = useRef<ReadonlyMap<string, string[]>>(new Map());
@@ -445,8 +424,7 @@ export function Surface({
   const [chatModelOverride, setChatModelOverride] = useState<ChatModelSelection | null>(() => {
     if (!initialChat) return null;
     const engine = engineChatKindFromChat(initialChat);
-    if (engine === "codex") return CODEX_PICKER_VALUE;
-    if (engine === "claude_code") return CLAUDE_PICKER_VALUE;
+    if (engine) return ENGINE_REGISTRY[engine].pickerValue;
     return normalizeModel(initialChat.model);
   });
   // The remembered selection is a Home default. Opening or reserving a session sets the override
@@ -465,6 +443,12 @@ export function Surface({
   const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
     normalizeClaudeChatModelId(initialChat?.model),
   );
+  // The selected model for each engine, keyed so a send reads the active engine's model
+  // without a per-engine branch (a third engine reads its own model, not Claude's).
+  const engineChatModel: Record<EngineChatKind, CodexChatModelId | ClaudeChatModelId> = {
+    codex: codexModel,
+    claude_code: claudeModel,
+  };
   const [engineChatSession, setEngineChatSession] = useState<{
     engine: EngineChatKind;
     chatSessionId: string;
@@ -521,11 +505,8 @@ export function Surface({
     ReadonlySet<string>
   >(() => new Set());
   const [liveChatTasks, setLiveChatTasks] = useState<readonly TaskView[] | null>(null);
-  const [activeTurnStartedAtMs, setActiveTurnStartedAtMs] = useState<number | null>(() => {
-    if (!isChatRuntimeActive(initialChat?.runtime)) return null;
-    const runtimeUpdatedAtMs = Date.parse(initialChat?.runtime?.updatedAt ?? "");
-    return Number.isFinite(runtimeUpdatedAtMs) ? runtimeUpdatedAtMs : Date.now();
-  });
+  const [activeTurn, setActiveTurn] = useState<ActiveChatTurn | null>(null);
+  const [surfaceMountedAtMs] = useState(() => Date.now());
   const [optimisticTurnDurations, setOptimisticTurnDurations] = useState<
     ReadonlyMap<string, number>
   >(() => new Map());
@@ -596,29 +577,36 @@ export function Surface({
     setStoppingTaskId(null);
   }
 
-  const beginActiveTurn = useCallback((assistantMessageId: string | null = null) => {
-    const startedAtMs = Date.now();
-    const sessionId = routedChatSessionIdRef.current;
-    activeTurnStartedAtRef.current = startedAtMs;
-    activeTurnAssistantMessageIdRef.current = assistantMessageId;
-    activeTurnChatSessionIdRef.current = sessionId;
-    if (sessionId) setLocalChatState(sessionId, "working");
-    setActiveTurnStartedAtMs(startedAtMs);
+  const replaceActiveTurn = useCallback((turn: ActiveChatTurn | null) => {
+    activeTurnRef.current = turn;
+    setActiveTurn(turn);
   }, []);
+
+  const beginActiveTurn = useCallback(
+    (assistantMessageId: string | null = null) => {
+      const conversationId = routedChatSessionIdRef.current;
+      if (!conversationId) return;
+      const turn: ActiveChatTurn = {
+        conversationId,
+        runId: null,
+        assistantMessageId,
+        startedAtMs: Date.now(),
+      };
+      replaceActiveTurn(turn);
+      setLocalChatState(conversationId, "working");
+    },
+    [replaceActiveTurn],
+  );
 
   const clearLocalActiveTurnState = useCallback((sessionId: string | null | undefined) => {
-    clearLocalChatState(sessionId ?? activeTurnChatSessionIdRef.current, "working");
+    clearLocalChatState(sessionId ?? activeTurnRef.current?.conversationId ?? null, "working");
   }, []);
 
-  const clearActiveTurn = useCallback(() => {
-    activeTurnStartedAtRef.current = null;
-    activeTurnAssistantMessageIdRef.current = null;
-    setActiveTurnStartedAtMs(null);
-  }, []);
+  const clearActiveTurn = useCallback(() => replaceActiveTurn(null), [replaceActiveTurn]);
 
   const recordOptimisticTurnDuration = useCallback(
     (assistantMessageId: string | null | undefined) => {
-      const startedAtMs = activeTurnStartedAtRef.current;
+      const startedAtMs = activeTurnRef.current?.startedAtMs ?? null;
       if (!assistantMessageId || startedAtMs === null) return;
       const durationMs = Math.max(0, Date.now() - startedAtMs);
       setOptimisticTurnDurations((current) => {
@@ -663,9 +651,16 @@ export function Surface({
   );
 
   const handleHeadlessAccepted = useCallback(
-    ({ conversationId, assistantMessageId }: HeadlessMessageAccepted) => {
-      activeTurnAssistantMessageIdRef.current = assistantMessageId;
+    ({ conversationId, runId, assistantMessageId }: HeadlessMessageAccepted) => {
       if (routedChatSessionIdRef.current === conversationId) {
+        const currentTurn = activeTurnRef.current;
+        replaceActiveTurn({
+          conversationId,
+          runId,
+          assistantMessageId,
+          startedAtMs:
+            currentTurn?.conversationId === conversationId ? currentTurn.startedAtMs : Date.now(),
+        });
         const acceptedPendingConversation = pendingNewSessionIdRef.current === conversationId;
         setPersistedChatSessionId(conversationId);
         if (acceptedPendingConversation) {
@@ -675,7 +670,7 @@ export function Surface({
       }
       setEngineSubmitting(false);
     },
-    [router],
+    [replaceActiveTurn, router],
   );
   const handleHeadlessReconciled = useCallback(
     ({ conversationId }: Pick<HeadlessMessageAccepted, "conversationId">) =>
@@ -729,6 +724,8 @@ export function Surface({
     },
     onError: (error) => {
       clearLocalActiveTurnState(null);
+      recordOptimisticTurnDuration(activeTurnRef.current?.assistantMessageId);
+      clearActiveTurn();
       if (error.message?.includes(CHAT_OUT_OF_CREDITS_MESSAGE)) {
         void refetchCreditBalance();
         toast.error(CHAT_OUT_OF_CREDITS_MESSAGE, {
@@ -916,25 +913,95 @@ export function Surface({
     return null;
   }, [chatMessages]);
   const hasMessages = chatMessages.length > 0;
-  const isConversationWorking = !activeTaskConversation && conversationRunning;
+  const latestActiveTurnStartedAtMs = useMemo(
+    () => latestChatTurnStartedAtMs(chatMessages),
+    [chatMessages],
+  );
+  const transportTurn = useMemo<ActiveChatTurn | null>(() => {
+    if (activeTurn || !isGenerating || !chatSessionId) return null;
+    const assistantMessage = chatMessages.findLast(
+      (message) => message.role === "assistant" && Boolean(message.metadata?.runId),
+    );
+    const runId = assistantMessage?.metadata?.runId;
+    if (!assistantMessage || !runId) return null;
+    const startedAtMs = chatMessageStartedAtMs(assistantMessage) ?? latestActiveTurnStartedAtMs;
+    if (startedAtMs === null) return null;
+    return {
+      conversationId: assistantMessage.metadata?.sessionId ?? chatSessionId,
+      runId,
+      assistantMessageId: assistantMessage.id,
+      startedAtMs,
+    };
+  }, [activeTurn, chatMessages, chatSessionId, isGenerating, latestActiveTurnStartedAtMs]);
+  const runtimeTurn = useMemo<ActiveChatTurn | null>(() => {
+    const activeRunId = conversationRuntime?.activeRunId;
+    if (
+      activeTurn ||
+      transportTurn ||
+      !chatSessionId ||
+      !activeRunId ||
+      !isChatRuntimeActive(conversationRuntime)
+    ) {
+      return null;
+    }
+    const run = liveChat.runsById.get(activeRunId);
+    const assistantMessage = chatMessages.findLast(
+      (message) => message.role === "assistant" && message.metadata?.runId === activeRunId,
+    );
+    const runtimeUpdatedAtMs = Date.parse(conversationRuntime.updatedAt);
+    const startedAtMs =
+      (assistantMessage ? chatMessageStartedAtMs(assistantMessage) : null) ??
+      latestActiveTurnStartedAtMs ??
+      (Number.isFinite(runtimeUpdatedAtMs) ? runtimeUpdatedAtMs : null);
+    if (startedAtMs === null) return null;
+    return {
+      conversationId: chatSessionId,
+      runId: activeRunId,
+      assistantMessageId: run?.assistantMessageId ?? assistantMessage?.id ?? null,
+      startedAtMs,
+    };
+  }, [
+    activeTurn,
+    chatMessages,
+    chatSessionId,
+    conversationRuntime,
+    latestActiveTurnStartedAtMs,
+    liveChat.runsById,
+    transportTurn,
+  ]);
+  const foregroundTurn = activeTurn ?? transportTurn ?? runtimeTurn;
+  const foregroundRun = foregroundTurn?.runId
+    ? (liveChat.runsById.get(foregroundTurn.runId) ?? null)
+    : null;
+  const foregroundAssistantMessageId =
+    foregroundTurn?.assistantMessageId ?? foregroundRun?.assistantMessageId ?? null;
+  const finalizedAssistantMessage = foregroundAssistantMessageId
+    ? (persistedMessages.find((message) => message.id === foregroundAssistantMessageId) ?? null)
+    : null;
+  const chatTurnPhase = deriveChatTurnPhase({
+    runStatus: foregroundRun?.status ?? null,
+    finalizedAssistantOutcome: finalizedChatAssistantOutcome(finalizedAssistantMessage),
+    runtimeStatus: conversationRuntime?.status ?? null,
+    runtimeMatchesTurn: Boolean(
+      foregroundTurn?.runId && conversationRuntime?.activeRunId === foregroundTurn.runId,
+    ),
+    transportStatus: status,
+    submitting: engineSubmitting,
+  });
+  const isForegroundTurnWorking = isChatTurnWorking(chatTurnPhase);
   const isTaskConversationWorking = Boolean(
     activeTaskConversation?.sessionBacked &&
       !isTaskConversationStopping &&
       (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
   );
-  const isAgentWorking =
-    isGenerating || isConversationWorking || engineSubmitting || isTaskConversationWorking;
+  const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
   const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
-  const latestActiveTurnStartedAtMs = useMemo(
-    () => latestChatTurnStartedAtMs(chatMessages),
-    [chatMessages],
-  );
   const activeTurnTimerStartedAtMs =
-    activeTurnStartedAtMs ??
+    foregroundTurn?.startedAtMs ??
     latestActiveTurnStartedAtMs ??
     activeTaskConversation?.startedAtMs ??
-    null;
+    (isForegroundTurnWorking ? surfaceMountedAtMs : null);
   const paletteRecentChats = useMemo(
     () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
     [optimisticallyArchivedChatIds, recentChats],
@@ -962,24 +1029,25 @@ export function Surface({
   useEffect(() => {
     if (isAgentWorking) {
       wasAgentWorkingRef.current = true;
-      setActiveTurnStartedAtMs((current) => {
-        if (current !== null) {
-          activeTurnStartedAtRef.current = current;
-          return current;
-        }
-        const startedAtMs = latestActiveTurnStartedAtMs ?? Date.now();
-        activeTurnStartedAtRef.current = startedAtMs;
-        return startedAtMs;
-      });
       return;
     }
 
-    if (wasAgentWorkingRef.current) {
-      recordOptimisticTurnDuration(activeTurnAssistantMessageIdRef.current);
+    const turnFinished = isChatTurnTerminal(chatTurnPhase);
+    if (wasAgentWorkingRef.current && turnFinished) {
+      recordOptimisticTurnDuration(foregroundAssistantMessageId);
     }
     wasAgentWorkingRef.current = false;
-    clearActiveTurn();
-  }, [clearActiveTurn, isAgentWorking, latestActiveTurnStartedAtMs, recordOptimisticTurnDuration]);
+    if (turnFinished && activeTurnRef.current === foregroundTurn) {
+      clearActiveTurn();
+    }
+  }, [
+    chatTurnPhase,
+    clearActiveTurn,
+    foregroundAssistantMessageId,
+    foregroundTurn,
+    isAgentWorking,
+    recordOptimisticTurnDuration,
+  ]);
 
   const chatTaskLookup = useMemo(
     () =>
@@ -1646,7 +1714,7 @@ export function Surface({
         toast("Started a new chat in the background.");
 
         const engine = backgroundEngine;
-        const config = ENGINE_CHAT_CONFIG[engine];
+        const config = ENGINE_REGISTRY[engine];
         const newSessionId = newOptimisticChatSessionId();
         addOptimisticChatSummary({
           workspaceId,
@@ -1659,7 +1727,7 @@ export function Surface({
         void runBackgroundChatTurn({
           prompt: messagePrompt,
           newSessionId,
-          model: engine === "codex" ? codexModel : claudeModel,
+          model: engineChatModel[engine],
           engine: canonicalMessageEngine(engine, settings.settings),
           ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         })
@@ -1848,7 +1916,7 @@ export function Surface({
       }
       engineSettings = settings.settings;
       messageEngine = canonicalMessageEngine(activeEngine, settings.settings);
-      model = activeEngine === "codex" ? codexModel : claudeModel;
+      model = engineChatModel[activeEngine];
     }
     const metadata: ChatMessageMetadata = {
       ...(mentions.length > 0 ? { mentions } : {}),
@@ -1986,7 +2054,7 @@ export function Surface({
 
   const handleCodexToolAction = async (action: CodexToolAction) => {
     if (action.type === "answer-question") {
-      const runId = conversationRuntime?.activeRunId;
+      const runId = foregroundTurn?.runId ?? conversationRuntime?.activeRunId;
       if (!runId) throw new Error("The active coding Run is no longer available.");
       await resolveEngineQuestions(runId, action.interactionId, action.answers);
       return;
@@ -1998,7 +2066,7 @@ export function Surface({
       return;
     }
 
-    if (engineSubmitting || conversationRunning) {
+    if (isForegroundTurnWorking) {
       throw new Error("Wait for the current Codex turn to finish.");
     }
     const engine = activeEngineChat?.engine;
@@ -2026,7 +2094,7 @@ export function Surface({
         {
           body: {
             engine: canonicalMessageEngine(engine, settings),
-            model: engine === "codex" ? codexModel : claudeModel,
+            model: engineChatModel[engine],
             sessionId,
           },
         },
@@ -2042,7 +2110,7 @@ export function Surface({
   };
 
   const closeChat = useCallback(() => {
-    if (isGenerating) {
+    if (isForegroundTurnWorking) {
       clearLocalActiveTurnState(chatSessionId);
       void headlessTransport.cancel(chatInstanceKey).catch(() => {});
       void stop();
@@ -2055,7 +2123,7 @@ export function Surface({
     chatSessionId,
     clearLocalActiveTurnState,
     headlessTransport,
-    isGenerating,
+    isForegroundTurnWorking,
     openChat,
     router,
     stop,
@@ -2083,14 +2151,14 @@ export function Surface({
     }
 
     if (chatSessionId) {
-      const activeRunId = conversationRuntime?.activeRunId ?? null;
+      const activeRunId = foregroundTurn?.runId ?? conversationRuntime?.activeRunId ?? null;
       clearLocalActiveTurnState(chatSessionId);
       const cancel = activeRunId
         ? cancelHeadlessChatRun(activeRunId)
         : headlessTransport.cancel(chatInstanceKey);
       void cancel.catch(() => {
         const label = activeEngineChat
-          ? `interrupt ${ENGINE_CHAT_CONFIG[activeEngineChat.engine].label}`
+          ? `interrupt ${ENGINE_REGISTRY[activeEngineChat.engine].label}`
           : "stop that response";
         toast.error(`Could not ${label}.`);
       });
@@ -2115,6 +2183,7 @@ export function Surface({
     chatSessionId,
     clearLocalActiveTurnState,
     conversationRuntime?.activeRunId,
+    foregroundTurn?.runId,
     isTaskConversationStopping,
     headlessTransport,
     messages,
@@ -2536,8 +2605,7 @@ export function Surface({
                         })}
                       />
                     ) : null}
-                    {activeEngineChat?.engine === "codex" ||
-                    activeEngineChat?.engine === "claude_code" ? (
+                    {activeEngineChat ? (
                       <>
                         <CodingSessionStatusIndicator
                           engine={activeEngineChat.engine}
@@ -2620,8 +2688,8 @@ export function Surface({
                       label={
                         isEngineChat && activeEngine
                           ? conversationRuntime?.status === "queued"
-                            ? `${ENGINE_CHAT_CONFIG[activeEngine].label} is queued`
-                            : `${ENGINE_CHAT_CONFIG[activeEngine].label} is working`
+                            ? `${ENGINE_REGISTRY[activeEngine].label} is queued`
+                            : `${ENGINE_REGISTRY[activeEngine].label} is working`
                           : "opencompany is working"
                       }
                     />
@@ -2860,12 +2928,12 @@ export function Surface({
                       maxLength={10_000}
                     />
                   </div>
-                  {isEngineChat &&
-                  conversationRunning &&
+                  {activeEngine &&
+                  isForegroundTurnWorking &&
                   !activeTaskConversation &&
                   !backgroundChatDirective ? (
                     <EngineStopButton
-                      label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
+                      label={ENGINE_REGISTRY[activeEngine].label}
                       onStop={stopGeneration}
                     />
                   ) : null}
@@ -2884,8 +2952,7 @@ export function Surface({
                           (attachment) => attachment.status === "ready",
                         )) ||
                       composerAttachments.isUploading ||
-                      (!isBackgroundSubmit && engineSubmitting) ||
-                      (!isBackgroundSubmit && conversationRunning) ||
+                      (!isBackgroundSubmit && isForegroundTurnWorking) ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
                       legacyTaskReadOnly ||
@@ -2894,9 +2961,7 @@ export function Surface({
                     isGenerating={
                       isBackgroundSubmit
                         ? false
-                        : isGenerating ||
-                          (!isEngineChat && isConversationWorking) ||
-                          isTaskConversationWorking
+                        : (!isEngineChat && isForegroundTurnWorking) || isTaskConversationWorking
                     }
                     isStopping={!isBackgroundSubmit && isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
@@ -2922,10 +2987,7 @@ export function Surface({
                         type="button"
                         aria-label="Attach files"
                         disabled={
-                          isGenerating ||
-                          engineSubmitting ||
-                          legacyTaskReadOnly ||
-                          voiceDictation.isActive
+                          isForegroundTurnWorking || legacyTaskReadOnly || voiceDictation.isActive
                         }
                         onClick={() => attachmentFileInputRef.current?.click()}
                         className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
@@ -2938,9 +3000,7 @@ export function Surface({
                     type="button"
                     aria-label="Start voice dictation"
                     disabled={
-                      isGenerating ||
-                      engineSubmitting ||
-                      conversationRunning ||
+                      isForegroundTurnWorking ||
                       backgroundTaskSubmitting ||
                       legacyTaskReadOnly ||
                       voiceDictation.isActive ||
@@ -2975,7 +3035,7 @@ export function Surface({
                       }
                     }}
                     disabled={
-                      isGenerating ||
+                      isForegroundTurnWorking ||
                       Boolean(chatSessionId) ||
                       voiceDictation.isActive ||
                       legacyTaskReadOnly
@@ -3009,9 +3069,11 @@ export function Surface({
                       goalModeEnabled={codexGoalModeEnabled}
                       goalObjective={codexGoalObjective}
                       goalTokenBudget={codexGoalTokenBudget}
-                      disabled={engineSubmitting || legacyTaskReadOnly || voiceDictation.isActive}
+                      disabled={
+                        isForegroundTurnWorking || legacyTaskReadOnly || voiceDictation.isActive
+                      }
                       modelDisabled={
-                        engineSubmitting ||
+                        isForegroundTurnWorking ||
                         Boolean(activeEngineChat) ||
                         legacyTaskReadOnly ||
                         voiceDictation.isActive
@@ -3028,14 +3090,13 @@ export function Surface({
             </div>
           </form>
         </div>
-        {mode === "chat" &&
-        (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
+        {mode === "chat" && activeEngineChat ? (
           <CodingWorkspacePanel
             key={activeEngineChat.chatSessionId}
             ref={workspacePanelRef}
             chatSessionId={activeEngineChat.chatSessionId}
             sandboxStatus={codingSandboxStatus}
-            engineLabel={CLOUD_CODING_ENGINE_CONFIG[activeEngineChat.engine].label}
+            engineLabel={ENGINE_REGISTRY[activeEngineChat.engine].label}
             onExpandedChange={setWorkspacePanelExpanded}
             onRequestFocusReturn={() => workspaceToggleButtonRef.current?.focus()}
           />
@@ -3113,6 +3174,10 @@ function QuickChatComposer({
   const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
     normalizeClaudeChatModelId(undefined),
   );
+  const engineChatModel: Record<EngineChatKind, CodexChatModelId | ClaudeChatModelId> = {
+    codex: codexModel,
+    claude_code: claudeModel,
+  };
   const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
     DEFAULT_CODEX_CHAT_REASONING_EFFORT,
   );
@@ -3600,7 +3665,7 @@ function QuickChatComposer({
       toast("Started a new chat in the background.");
 
       const engine = targetEngine;
-      const config = ENGINE_CHAT_CONFIG[engine];
+      const config = ENGINE_REGISTRY[engine];
       const newSessionId = newOptimisticChatSessionId();
       addOptimisticChatSummary({
         workspaceId,
@@ -3613,7 +3678,7 @@ function QuickChatComposer({
       void runBackgroundChatTurn({
         prompt,
         newSessionId,
-        model: engine === "codex" ? codexModel : claudeModel,
+        model: engineChatModel[engine],
         engine: canonicalMessageEngine(engine, settings.settings),
         metadata: {
           ...(attachmentsMetadata.length ? { attachments: attachmentsMetadata } : {}),
@@ -4397,12 +4462,24 @@ function chatMessageDurationMs(
   return optimisticTurnDurations.get(message.id) ?? null;
 }
 
+function chatMessageStartedAtMs(message: ChatUiMessage) {
+  const createdAt = message.metadata?.timing?.createdAt;
+  if (!createdAt) return null;
+  const startedAtMs = Date.parse(createdAt);
+  return Number.isFinite(startedAtMs) ? startedAtMs : null;
+}
+
+function finalizedChatAssistantOutcome(message: ChatUiMessage | null) {
+  if (!message || typeof message.metadata?.timing?.durationMs !== "number") return null;
+  if (message.metadata.aborted) return "canceled" as const;
+  if (message.metadata.error) return "failed" as const;
+  return "completed" as const;
+}
+
 function latestChatTurnStartedAtMs(messages: readonly ChatUiMessage[]) {
   for (const message of messages.toReversed()) {
-    const createdAt = message.metadata?.timing?.createdAt;
-    if (!createdAt) continue;
-    const startedAtMs = Date.parse(createdAt);
-    if (Number.isFinite(startedAtMs)) return startedAtMs;
+    const startedAtMs = chatMessageStartedAtMs(message);
+    if (startedAtMs !== null) return startedAtMs;
   }
   return null;
 }
@@ -4436,7 +4513,9 @@ function codexComposerUiStateForChat(
   }
   return codexComposerUiStateFromSettings(
     chat?.codexComposerSettings ?? null,
-    chat?.engine === "claude_code" ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT : undefined,
+    isCloudCodingEngine(chat?.engine)
+      ? ENGINE_REGISTRY[chat.engine].defaultReasoningEffort
+      : undefined,
   );
 }
 
@@ -4504,26 +4583,31 @@ function buildCodexComposerSettings(input: {
   };
 }
 
+// Each engine carries a distinct on-the-wire settings shape (Codex has plan/goal mode; Claude
+// Code does not), so this stays a per-engine constructor rather than a registry lookup. The
+// switch is exhaustive over EngineChatKind, so a new engine surfaces here as a type error.
 function canonicalMessageEngine(
   engine: EngineChatKind,
   settings: EngineComposerSettings,
 ): MessageEngine {
-  if (engine === "claude_code") {
-    return {
-      type: "claude_code",
-      schemaVersion: 1,
-      settings: { reasoningEffort: settings.reasoningEffort },
-    };
+  switch (engine) {
+    case "claude_code":
+      return {
+        type: "claude_code",
+        schemaVersion: 1,
+        settings: { reasoningEffort: settings.reasoningEffort },
+      };
+    case "codex":
+      return {
+        type: "codex",
+        schemaVersion: 1,
+        settings: {
+          reasoningEffort: settings.reasoningEffort,
+          ...(settings.planModeEnabled ? { planModeEnabled: true } : {}),
+          ...(settings.goalMode ? { goalMode: settings.goalMode } : {}),
+        },
+      };
   }
-  return {
-    type: "codex",
-    schemaVersion: 1,
-    settings: {
-      reasoningEffort: settings.reasoningEffort,
-      ...(settings.planModeEnabled ? { planModeEnabled: true } : {}),
-      ...(settings.goalMode ? { goalMode: settings.goalMode } : {}),
-    },
-  };
 }
 
 function isWorkflowMention(
@@ -5060,7 +5144,7 @@ function CodingEngineModelPicker({
 }
 
 function BackgroundChatDirectiveHint({ engine }: { engine: EngineChatKind | null }) {
-  const label = engine ? ENGINE_CHAT_CONFIG[engine].label : null;
+  const label = engine ? ENGINE_REGISTRY[engine].label : null;
   return (
     <div
       role="status"
@@ -5071,6 +5155,28 @@ function BackgroundChatDirectiveHint({ engine }: { engine: EngineChatKind | null
       <span>Sending starts this as a new {label ? `${label} ` : ""}chat in the background.</span>
     </div>
   );
+}
+
+// The composer's per-engine model picker. Each engine's picker takes a distinct model-id type,
+// so this is a discriminated union narrowed by a switch rather than a registry lookup.
+type EngineModelPickerModel =
+  | { engine: "codex"; value: CodexChatModelId; onChange: (model: CodexChatModelId) => void }
+  | {
+      engine: "claude_code";
+      value: ClaudeChatModelId;
+      onChange: (model: ClaudeChatModelId) => void;
+    };
+
+function renderEngineModelPicker(model: EngineModelPickerModel | null, disabled: boolean) {
+  if (!model) return null;
+  switch (model.engine) {
+    case "codex":
+      return <CodexModelPicker value={model.value} disabled={disabled} onChange={model.onChange} />;
+    case "claude_code":
+      return (
+        <ClaudeModelPicker value={model.value} disabled={disabled} onChange={model.onChange} />
+      );
+  }
 }
 
 function EngineComposerControls({
@@ -5092,14 +5198,7 @@ function EngineComposerControls({
   onGoalObjectiveChange,
   onGoalTokenBudgetChange,
 }: {
-  model:
-    | { engine: "codex"; value: CodexChatModelId; onChange: (model: CodexChatModelId) => void }
-    | {
-        engine: "claude_code";
-        value: ClaudeChatModelId;
-        onChange: (model: ClaudeChatModelId) => void;
-      }
-    | null;
+  model: EngineModelPickerModel | null;
   engineLabel: "Claude" | "Codex";
   reasoningEffortAvailable: boolean;
   reasoningEffort: CodexReasoningEffort;
@@ -5120,11 +5219,7 @@ function EngineComposerControls({
   const reasoningLabel = codexReasoningLabel(reasoningEffort);
   return (
     <div className="mb-px flex shrink-0 items-center gap-1 border-l border-border pl-2">
-      {model?.engine === "codex" ? (
-        <CodexModelPicker value={model.value} disabled={modelDisabled} onChange={model.onChange} />
-      ) : model?.engine === "claude_code" ? (
-        <ClaudeModelPicker value={model.value} disabled={modelDisabled} onChange={model.onChange} />
-      ) : null}
+      {renderEngineModelPicker(model, modelDisabled)}
       {reasoningEffortAvailable ? (
         <button
           type="button"
@@ -5266,12 +5361,11 @@ function ChatTitleHeader({
   engine: ChatEngine;
   isTask?: boolean;
 }) {
+  const EngineIcon = isCloudCodingEngine(engine) ? ENGINE_REGISTRY[engine].Icon : null;
   return (
     <div className="flex min-w-0 items-center gap-2 text-ink">
-      {engine === "codex" ? (
-        <OpenAIIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
-      ) : engine === "claude_code" ? (
-        <AnthropicIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+      {EngineIcon ? (
+        <EngineIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
       ) : (
         <ModelProviderIcon
           modelId={model}
@@ -5349,98 +5443,19 @@ function formatCompactTokens(value: number): string {
   return `${value}`;
 }
 
-type ConversationRuntimeMeta = {
-  kind:
-    | "connecting"
-    | "queued"
-    | "starting"
-    | "working"
-    | "ready"
-    | "asleep"
-    | "needs-attention"
-    | "stopped";
-  label: string;
-  dotClass: string;
-  textClass: string;
-};
-
-function conversationRuntimeMeta(runtime: ConversationRuntimeView | null): ConversationRuntimeMeta {
-  if (!runtime) {
-    return {
-      kind: "connecting",
-      label: "Connecting",
-      dotClass: "bg-ink/25",
-      textClass: "text-ink-subtle",
-    };
-  }
-  if (runtime.status === "queued") {
-    return {
-      kind: "queued",
-      label: "Queued",
-      dotClass: "animate-pulse bg-warning",
-      textClass: "text-warning",
-    };
-  }
-  if (runtime.status === "starting") {
-    return {
-      kind: "starting",
-      label: "Starting",
-      dotClass: "animate-pulse bg-warning",
-      textClass: "text-warning",
-    };
-  }
-  if (runtime.status === "running") {
-    return {
-      kind: "working",
-      label: "Working",
-      dotClass: "animate-pulse bg-warning",
-      textClass: "text-warning",
-    };
-  }
-  if (runtime.status === "failed" || runtime.hasError) {
-    return {
-      kind: "needs-attention",
-      label: "Needs attention",
-      dotClass: "bg-danger",
-      textClass: "text-danger",
-    };
-  }
-  if (runtime.status === "idle") {
-    return {
-      kind: "ready",
-      label: "Ready",
-      dotClass: "bg-success",
-      textClass: "text-success",
-    };
-  }
-  if (runtime.status === "interrupted" || runtime.status === "closed") {
-    return {
-      kind: "stopped",
-      label: "Stopped",
-      dotClass: "bg-ink/30",
-      textClass: "text-ink-subtle",
-    };
-  }
-  return {
-    kind: "connecting",
-    label: "Connecting",
-    dotClass: "bg-ink/25",
-    textClass: "text-ink-subtle",
-  };
-}
-
 function CodingSessionStatusIndicator({
   engine,
   runtime,
   optimisticStatus,
   sandboxStatus,
 }: {
-  engine: ChatEngine;
+  engine: EngineChatKind;
   runtime: ConversationRuntimeView | null;
   optimisticStatus: "starting" | "running" | null;
   sandboxStatus: EngineRuntimeStatus | null;
 }) {
-  let meta = conversationRuntimeMeta(
+  let meta = statusPresenter(
+    engine,
     optimisticStatus
       ? {
           status: optimisticStatus,
@@ -5455,6 +5470,7 @@ function CodingSessionStatusIndicator({
   // anymore and a fresh one starts on the next message.
   if (meta.kind === "ready" && sandboxStatus === "sleeping") {
     meta = {
+      ...meta,
       kind: "asleep",
       label: "Asleep",
       dotClass: "bg-ink/30",
@@ -5467,14 +5483,13 @@ function CodingSessionStatusIndicator({
       : sandboxStatus === "deleted"
         ? " The previous sandbox expired; a new one will start on the next message."
         : "";
-  const engineLabel = codexEngineLabel(engine);
-  const title = `${engineLabel} is ${meta.label.toLowerCase()}.${sandboxDetail}`;
+  const title = `${meta.engineLabel} is ${meta.label.toLowerCase()}.${sandboxDetail}`;
 
   return (
     <div
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-[12px] font-medium leading-4 text-ink-muted shadow-[0_1px_3px_rgba(15,15,15,0.04)]"
       title={title}
-      aria-label={`${engineLabel} status: ${meta.label}`}
+      aria-label={`${meta.engineLabel} status: ${meta.label}`}
     >
       <span className={cn("size-2 rounded-full", meta.dotClass)} aria-hidden="true" />
       <span>{meta.label}</span>

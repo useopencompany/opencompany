@@ -26,3 +26,12 @@ export function isFailedDeployStatus(status) {
     status === "pre_deploy_failed"
   );
 }
+
+export function assertRenderServiceShutdownDelay(service, expectedSeconds) {
+  const actual = service?.serviceDetails?.maxShutdownDelaySeconds;
+  if (actual === expectedSeconds) return;
+  const name = typeof service?.name === "string" ? service.name : "(unknown service)";
+  throw new Error(
+    `Render service ${name} has maxShutdownDelaySeconds=${String(actual)}, expected ${expectedSeconds}. Align the live service configuration before deploying.`,
+  );
+}

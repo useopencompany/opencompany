@@ -9,7 +9,7 @@ import type {
   TaskStatus,
   TaskToolName,
 } from "@opencompany/agent/task-runtime-types";
-import { getAgentModelDefinition } from "@opencompany/agent-runtime";
+import { getAgentModelDefinition, isCloudCodingEngine } from "@opencompany/agent-runtime";
 import type { ChatSessionView } from "@/lib/chat-ui";
 
 export type TaskRunTaskInput =
@@ -786,8 +786,8 @@ function normalizeTask(task: TaskRunTaskInput): HarnessRunViewModel["task"] {
 }
 
 function readHarnessEngine(value: unknown): HarnessEngine {
-  const spec = readRecord(value);
-  return spec?.engine === "codex" || spec?.engine === "claude_code" ? spec.engine : "opencompany";
+  const engine = readRecord(value)?.engine;
+  return isCloudCodingEngine(engine) ? engine : "opencompany";
 }
 
 function normalizeMessage(message: TaskRunMessageInput): RunMessage {

@@ -115,6 +115,10 @@ describe("useHeadlessChatTranscript", () => {
       runId: "run_1",
       model: "anthropic/claude-sonnet-5",
     });
+    expect(result.current.runsById.get("run_1")).toMatchObject({
+      status: "completed",
+      assistantMessageId: "message_2",
+    });
   });
 
   it("does not create Electric collections before hydration", () => {

@@ -32,9 +32,10 @@ export class WorkspaceProvisioningError extends Error {
 }
 
 // WorkOS and Postgres cannot share a transaction. Provision WorkOS first, then
-// persist the complete local workspace in one Neon batch. If local persistence
-// fails, compensate by deleting the new organization; once Postgres succeeds,
-// the workspace is durable and activation can be retried without duplication.
+// persist the complete local workspace in one atomic database operation. If
+// local persistence fails, compensate by deleting the new organization; once
+// Postgres succeeds, the workspace is durable and activation can be retried
+// without duplication.
 export async function provisionWorkspace(
   input: {
     authUserId: string;

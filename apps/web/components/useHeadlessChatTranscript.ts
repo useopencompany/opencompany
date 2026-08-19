@@ -19,6 +19,7 @@ import {
 export type HeadlessChatTranscript = {
   sessionId: string | null;
   messages: ChatUiMessage[];
+  runsById: ReadonlyMap<string, HeadlessChatRunReadModel>;
   isLoading: boolean;
 };
 
@@ -51,6 +52,11 @@ export function useHeadlessChatTranscript(sessionId: string | null): HeadlessCha
   // which TanStack's useLiveQuery intentionally does not.
   const { rows, isLoading: messagesLoading } = useCollectionRows(messagesCollection);
   const { rows: runRows } = useCollectionRows(runsCollection);
+  const runsById = useMemo(
+    () =>
+      new Map(((runRows ?? []) as HeadlessChatRunReadModel[]).map((run) => [run.id, run] as const)),
+    [runRows],
+  );
   const messages = useMemo(() => {
     const runsByAssistantMessage = new Map(
       ((runRows ?? []) as HeadlessChatRunReadModel[]).map((run) => [run.assistantMessageId, run]),
@@ -68,6 +74,7 @@ export function useHeadlessChatTranscript(sessionId: string | null): HeadlessCha
   return {
     sessionId,
     messages,
+    runsById,
     isLoading: Boolean(sessionId) && (!hydrated || messagesLoading),
   };
 }

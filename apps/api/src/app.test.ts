@@ -1421,6 +1421,51 @@ describe("canonical Hono API", () => {
     expect(conflict.status).toBe(400);
   });
 
+  it("ends active Run streams during shutdown without polling Postgres again", async () => {
+    const shutdown = new AbortController();
+    const repository = fakeRepository();
+    repository.getRun = vi.fn(async () => ({
+      id: "run_1",
+      conversationId: "conversation_1",
+      triggerMessageId: "message_user_1",
+      status: "running" as const,
+      engine: "opencompany" as const,
+      model: "provider/default",
+      attemptCount: 1,
+      createdAt,
+      updatedAt: createdAt,
+    }));
+    repository.listRunEvents = vi.fn(async ({ afterSequence }) => ({
+      events: [],
+      nextSequence: afterSequence,
+    }));
+    let notifyWaitStarted: (() => void) | undefined;
+    const waitStarted = new Promise<void>((resolve) => {
+      notifyWaitStarted = resolve;
+    });
+    const wait = vi.fn(async ({ signal }: { signal: AbortSignal }) => {
+      notifyWaitStarted?.();
+      if (signal.aborted) return false;
+      return new Promise<boolean>((resolve) => {
+        signal.addEventListener("abort", () => resolve(false), { once: true });
+      });
+    });
+    const app = testApp(repository, {
+      shutdownSignal: shutdown.signal,
+      notifier: { wait },
+    });
+
+    const response = await app.request("/v1/runs/run_1/events");
+    const body = response.text();
+    await waitStarted;
+    shutdown.abort();
+
+    await expect(body).resolves.toBe("");
+    expect(repository.getRun).toHaveBeenCalledTimes(2);
+    expect(repository.listRunEvents).toHaveBeenCalledTimes(1);
+    expect(wait).toHaveBeenCalledTimes(1);
+  });
+
   it("leaves hop-by-hop SSE framing to the Node server adapter", async () => {
     const app = testApp(fakeRepository());
     const directResponse = await app.request("/v1/runs/run_1/events");

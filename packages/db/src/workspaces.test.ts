@@ -30,7 +30,7 @@ describe("opencompany brain ids", () => {
 });
 
 describe("opencompany workspace creation", () => {
-  it("batches the workspace, membership, default brain, and folder rows together", async () => {
+  it("uses one batch for the neon-http client", async () => {
     const insert = vi.fn((table: unknown) => ({
       values: vi.fn((values: Record<string, unknown>) => {
         const query = {
@@ -83,6 +83,54 @@ describe("opencompany workspace creation", () => {
     expect(batchedQueries).toHaveLength(3 + defaultBrainFolderManifestEntries().length);
     expect(batchedQueries.some((query) => query.table === workspaceMembers)).toBe(true);
     expect(batchedQueries.filter((query) => query.table === brainFolders)).toHaveLength(
+      defaultBrainFolderManifestEntries().length,
+    );
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses one transaction for the pooled API client", async () => {
+    const insertedRows: Array<{ table: unknown; values: Record<string, unknown> }> = [];
+    const insert = vi.fn((table: unknown) => ({
+      values: vi.fn((values: Record<string, unknown>) => {
+        insertedRows.push({ table, values });
+        if (table === workspaces || table === brains) {
+          return { returning: vi.fn(async () => [values]) };
+        }
+        return Promise.resolve();
+      }),
+    }));
+    const transaction = vi.fn(async (callback: (tx: { insert: typeof insert }) => unknown) =>
+      callback({ insert }),
+    );
+    const execute = vi.fn(async () => []);
+
+    const result = await createWorkspaceForUser(
+      {
+        workspaceId: "workspace_new",
+        workosOrganizationId: "org_new",
+        userWorkosId: "user_123",
+        name: "Analytical Co",
+        slug: "analytical-co",
+      },
+      { db: { transaction, execute } },
+    );
+
+    expect(result.workspace).toEqual(
+      expect.objectContaining({
+        id: "workspace_new",
+        workosOrganizationId: "org_new",
+      }),
+    );
+    expect(result.brain).toEqual(
+      expect.objectContaining({
+        workspaceId: "workspace_new",
+        name: "General",
+        slug: "general",
+      }),
+    );
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(insertedRows.some((row) => row.table === workspaceMembers)).toBe(true);
+    expect(insertedRows.filter((row) => row.table === brainFolders)).toHaveLength(
       defaultBrainFolderManifestEntries().length,
     );
     expect(execute).toHaveBeenCalledTimes(2);
