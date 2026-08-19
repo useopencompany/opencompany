@@ -24,8 +24,9 @@ the current Git branch, runs migrations, and writes local app env files. `bun ru
 `bun run dev:web` both start the opencompany web app, canonical API, runner, Stripe CLI webhook
 forwarding, Electric, and the local HTTPS/tunnel support needed by integrations.
 
-Live Infisical and Vercel project bindings are local, gitignored state. The tracked example files
-document their shape without tying a clone to opencompany's provider accounts.
+The tracked `.infisical.json` selects opencompany's Infisical project; it contains no credentials,
+so an authenticated CLI session with project access is still required. The Vercel project binding
+remains local, gitignored state, with a tracked example documenting its shape.
 
 See [Getting started](./docs/getting-started.md) for prerequisites and troubleshooting.
 

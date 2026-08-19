@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolveElectricDevConfig } from "./electric-dev.mjs";
+import { dockerRunArgs, resolveElectricDevConfig } from "./electric-dev.mjs";
 
 test("Electric keeps its conventional identity outside Conductor", () => {
   assert.deepEqual(resolveElectricDevConfig({}), {
@@ -32,4 +32,12 @@ test("Electric rejects a Conductor range that exceeds the TCP port limit", () =>
     () => resolveElectricDevConfig({ CONDUCTOR_PORT: "65533" }),
     /no available Electric port/,
   );
+});
+
+test("Electric containers carry the cleanup ownership label", () => {
+  const args = dockerRunArgs("postgresql://database", { env: {} });
+  const labelIndex = args.indexOf("--label");
+
+  assert.notEqual(labelIndex, -1);
+  assert.equal(args[labelIndex + 1], "dev.opencompany.service=electric");
 });

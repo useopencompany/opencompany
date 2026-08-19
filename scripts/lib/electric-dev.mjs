@@ -3,6 +3,11 @@
 // (scripts/setup.mjs), which starts Electric detached so `bun run setup`
 // leaves a working dev environment in one go.
 
+import {
+  ELECTRIC_CONTAINER_LABEL,
+  ELECTRIC_CONTAINER_LABEL_VALUE,
+} from "./electric-container-cleanup.mjs";
+
 export const ELECTRIC_IMAGE = "electricsql/electric:latest";
 const electricDevConfig = resolveElectricDevConfig();
 export const ELECTRIC_CONTAINER = electricDevConfig.container;
@@ -79,6 +84,8 @@ export function dockerRunArgs(databaseUrl, { detached = false, env = process.env
     ...(detached ? ["-d", "--restart", "unless-stopped"] : ["--rm", "-it"]),
     "--name",
     ELECTRIC_CONTAINER,
+    "--label",
+    `${ELECTRIC_CONTAINER_LABEL}=${ELECTRIC_CONTAINER_LABEL_VALUE}`,
     "-e",
     `DATABASE_URL=${databaseUrl}`,
     ...(secret ? ["-e", `ELECTRIC_SECRET=${secret}`] : ["-e", "ELECTRIC_INSECURE=true"]),

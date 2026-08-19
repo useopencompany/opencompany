@@ -221,6 +221,7 @@ const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   API_BROWSER_ORIGINS: LOCAL_WEB_APP_URL,
   OPENCOMPANY_API_ORIGIN: LOCAL_API_ORIGIN,
   NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN: "",
+  WORKOS_COOKIE_NAME: "wos-session",
   OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "developer@example.com",
   OPENCOMPANY_PORT: "3002",
   OPENCOMPANY_HTTPS_PORT: webHttpsPort(process.env),
@@ -241,8 +242,6 @@ const WEB_LOCAL_ENV_KEYS = [
   "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN",
   "CRON_SECRET",
   "BLOB_READ_WRITE_TOKEN",
-  "WORKOS_COOKIE_NAME",
-  "WORKOS_COOKIE_DOMAIN",
   "RESEND_API_KEY",
   "RESEND_WELCOME_FROM",
   "RESEND_REPLY_TO",
@@ -617,6 +616,9 @@ async function ensureLocalDevDefaults() {
 }
 
 function shouldReplaceLocalDefault(key, current, next) {
+  if (key === "WORKOS_COOKIE_NAME") {
+    return current.trim() === "";
+  }
   if (
     key === "API_BROWSER_ORIGINS" ||
     key === "OPENCOMPANY_API_ORIGIN" ||
@@ -647,6 +649,8 @@ async function ensureWebEnvFile() {
     NEXT_PUBLIC_APP_URL: webAppUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: webRedirectUri,
     WORKOS_REDIRECT_URI: webRedirectUri,
+    WORKOS_COOKIE_NAME: env.WORKOS_COOKIE_NAME?.trim() || "wos-session",
+    WORKOS_COOKIE_DOMAIN: env.WORKOS_COOKIE_DOMAIN?.trim() || "",
   };
 
   for (const key of WEB_LOCAL_ENV_KEYS) {

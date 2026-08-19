@@ -13,7 +13,6 @@ test-results
 !.env.example
 .vercel/*
 !.vercel/project.json.example
-.infisical.json
 .context/
 .env*.local
 *.local.*
