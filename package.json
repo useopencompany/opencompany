@@ -11,12 +11,10 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "node scripts/dev.mjs --ui=stream --filter=@opencompany/web --filter=@opencompany/api --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
+    "dev": "node scripts/dev.mjs --ui=tui --filter=@opencompany/web --filter=@opencompany/api --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
     "dev:stream": "node scripts/dev.mjs --ui=stream --filter=@opencompany/web --filter=@opencompany/api --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
     "dev:logs": "node scripts/dev-logs.mjs",
-    "dev:web": "node scripts/dev.mjs --ui=stream --filter=@opencompany/web --filter=@opencompany/api --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
-    "dev:web:tui": "node scripts/dev.mjs --ui=tui --filter=@opencompany/web --filter=@opencompany/api --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
-    "dev:tui": "node scripts/dev.mjs --ui=tui --filter=@opencompany/web --filter=@opencompany/api --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
+    "dev:web": "node scripts/dev.mjs --ui=tui --filter=@opencompany/web --filter=@opencompany/api --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
     "web:capabilities:contract": "bun --cwd apps/web capabilities:contract",
     "dev:ds": "turbo dev --ui=tui --filter=@opencompany/design-system",
     "dev:docs": "turbo dev --ui=tui --filter=@opencompany/docs",
@@ -55,7 +53,7 @@
     "release:render:services": "node scripts/release-render-services.mjs",
     "release:smoke": "node scripts/release-smoke.mjs",
     "release:vercel:prepare": "node scripts/release-vercel-prepare.mjs",
-    "setup": "node scripts/setup.mjs",
+    "setup": "node scripts/cleanup-local-electric.mjs && node scripts/setup.mjs",
     "setup:dev": "node scripts/setup.mjs --dev",
     "setup:stripe": "node scripts/setup.mjs --stripe",
     "mcp:configure": "node scripts/configure-agent-mcp.mjs",

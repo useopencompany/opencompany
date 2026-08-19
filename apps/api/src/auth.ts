@@ -65,7 +65,8 @@ type AuthenticatorOptions = {
 export function createWorkOsApiIdentityVerifier(
   options: AuthenticatorOptions = {},
 ): ApiIdentityVerifier {
-  const cookieName = options.cookieName ?? process.env.WORKOS_COOKIE_NAME ?? DEFAULT_SESSION_COOKIE;
+  const cookieName =
+    options.cookieName?.trim() || process.env.WORKOS_COOKIE_NAME?.trim() || DEFAULT_SESSION_COOKIE;
   const audience = options.audience ?? process.env.OPENCOMPANY_API_OAUTH_AUDIENCE?.trim();
   const authKitDomain = normalizeOrigin(
     options.authKitDomain ?? process.env.OPENCOMPANY_AUTHKIT_DOMAIN?.trim(),
@@ -106,7 +107,8 @@ export function createWorkOsApiIdentityVerifier(
         }
         workos = new WorkOS(apiKey, { clientId });
       }
-      const cookieDomain = options.cookieDomain ?? process.env.WORKOS_COOKIE_DOMAIN;
+      const cookieDomain =
+        options.cookieDomain?.trim() || process.env.WORKOS_COOKIE_DOMAIN?.trim() || undefined;
       identity = await identityFromSession({
         workos,
         sessionData,
