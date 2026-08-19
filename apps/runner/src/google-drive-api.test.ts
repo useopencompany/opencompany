@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   googleApiFetch: vi.fn(),
-  extractDocxText: vi.fn(async () => "docx text"),
-  extractXlsxText: vi.fn(async () => "sheet one\nsheet two"),
-  getDocumentProxy: vi.fn(async () => ({})),
-  extractPdfText: vi.fn(async () => ({ text: "pdf text" })),
+  extractDocumentMarkdown: vi.fn(
+    async (input: { mediaType?: string }) =>
+      ({ markdown: `extracted:${input.mediaType}`, truncated: false, format: "text" }) as const,
+  ),
 }));
 
 vi.mock("./google-api-auth", () => ({
@@ -22,36 +22,37 @@ vi.mock("./google-api-auth", () => ({
 }));
 
 vi.mock("@opencompany/file-extract", () => ({
-  extractDocxText: mocks.extractDocxText,
-  extractXlsxText: mocks.extractXlsxText,
+  extractDocumentMarkdown: mocks.extractDocumentMarkdown,
+  DocumentExtractionError: class DocumentExtractionError extends Error {
+    constructor(
+      readonly kind: string,
+      message: string,
+    ) {
+      super(message);
+      this.name = "DocumentExtractionError";
+    }
+  },
 }));
 
-vi.mock("unpdf", () => ({
-  getDocumentProxy: mocks.getDocumentProxy,
-  extractText: mocks.extractPdfText,
-}));
-
+import { DocumentExtractionError } from "@opencompany/file-extract";
 import { type GoogleDriveFileMetadata, readGoogleDriveDocument } from "./google-drive-api";
 
 describe("Google Drive document extraction", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it.each([
-    ["application/vnd.google-apps.document", "text/markdown", "markdown text"],
-    ["application/vnd.google-apps.presentation", "text/plain", "slide text"],
+    ["application/vnd.google-apps.document", "text/markdown"],
+    ["application/vnd.google-apps.presentation", "text/plain"],
     [
       "application/vnd.google-apps.spreadsheet",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "sheet one\nsheet two",
     ],
-  ])("exports Google-native %s files", async (mimeType, exportMimeType, expectedText) => {
-    mocks.googleApiFetch.mockResolvedValue(
-      new Response(mimeType.includes("spreadsheet") ? "xlsx bytes" : expectedText),
-    );
+  ])("exports Google-native %s files as %s", async (mimeType, exportMimeType) => {
+    mocks.googleApiFetch.mockResolvedValue(new Response("exported bytes"));
 
     const result = await readGoogleDriveDocument(context(), file({ mimeType }));
 
-    expect(result).toMatchObject({ ok: true, extractedText: expectedText });
+    expect(result).toMatchObject({ ok: true, extractedText: `extracted:${exportMimeType}` });
     const request = mocks.googleApiFetch.mock.calls[0]?.[0] as { url: string };
     const url = new URL(request.url);
     expect(url.pathname.endsWith("/export")).toBe(true);
@@ -59,21 +60,37 @@ describe("Google Drive document extraction", () => {
   });
 
   it.each([
-    ["application/pdf", "pdf text"],
-    ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx text"],
-    ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "sheet one\nsheet two"],
-    ["text/markdown", "plain text"],
-    ["text/csv", "plain text"],
-    ["text/plain", "plain text"],
-  ])("downloads and extracts %s files", async (mimeType, expectedText) => {
-    mocks.googleApiFetch.mockResolvedValue(new Response("plain text"));
+    ["application/pdf"],
+    ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    ["text/markdown"],
+    ["text/csv"],
+    ["text/plain"],
+  ])("downloads and extracts %s files", async (mimeType) => {
+    mocks.googleApiFetch.mockResolvedValue(new Response("bytes"));
 
     const result = await readGoogleDriveDocument(context(), file({ mimeType }));
 
-    expect(result).toMatchObject({ ok: true, extractedText: expectedText });
+    expect(result).toMatchObject({ ok: true, extractedText: `extracted:${mimeType}` });
     const request = mocks.googleApiFetch.mock.calls[0]?.[0] as { url: string };
     const url = new URL(request.url);
     expect(url.searchParams.get("alt")).toBe("media");
+    // The downloaded bytes are parsed with the file's own media type as the hint.
+    expect(mocks.extractDocumentMarkdown.mock.calls[0]?.[0]).toMatchObject({ mediaType: mimeType });
+  });
+
+  it("maps document extraction failures to a visible terminal reason", async () => {
+    mocks.googleApiFetch.mockResolvedValue(new Response("bytes"));
+    mocks.extractDocumentMarkdown.mockRejectedValueOnce(
+      new DocumentExtractionError(
+        "image_only_pdf",
+        "This PDF is scanned or image-only; OCR is not supported.",
+      ),
+    );
+
+    await expect(
+      readGoogleDriveDocument(context(), file({ mimeType: "application/pdf" })),
+    ).resolves.toMatchObject({ ok: false, reason: expect.stringContaining("image-only") });
   });
 
   it("returns visible terminal reasons for unsupported, non-downloadable, and oversized files", async () => {

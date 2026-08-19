@@ -2253,31 +2253,27 @@ async function downloadBrainAssetBytes(
   return Buffer.concat(chunks);
 }
 
+// Filename extension used to hint the shared parser for signature-less text formats. Binary formats
+// (pdf/docx/xlsx) are detected from the bytes, so their extension here is only a fallback.
+const ASSET_FORMAT_EXTENSIONS: Record<string, string> = {
+  pdf: "pdf",
+  docx: "docx",
+  xlsx: "xlsx",
+  csv: "csv",
+  tsv: "tsv",
+  json: "json",
+  text: "txt",
+  srt: "srt",
+};
+
 async function extractAssetText(format: string, bytes: Buffer): Promise<string> {
+  const extension = ASSET_FORMAT_EXTENSIONS[format];
+  // Images (and any future format without a text plane) extract nothing.
+  if (!extension) return "";
   try {
-    switch (format) {
-      case "pdf":
-        return await extractPdfText(bytes);
-      case "docx": {
-        const { extractDocxText } = await import("@opencompany/file-extract");
-        return await extractDocxText(bytes);
-      }
-      case "xlsx": {
-        const { extractXlsxText } = await import("@opencompany/file-extract");
-        return await extractXlsxText(bytes);
-      }
-      case "csv":
-      case "tsv":
-      case "json":
-      case "text":
-      case "srt": {
-        const { extractUtf8Text } = await import("@opencompany/file-extract");
-        return extractUtf8Text(bytes);
-      }
-      default:
-        // Images (and any future format without a text plane) extract nothing.
-        return "";
-    }
+    const { extractDocumentMarkdown } = await import("@opencompany/file-extract");
+    const { markdown } = await extractDocumentMarkdown({ bytes, filename: `asset.${extension}` });
+    return markdown;
   } catch (error) {
     logger.warn("opencompany Brain asset text extraction failed", {
       event: "opencompany.goat_brain_asset_extraction_failed",
@@ -2286,13 +2282,6 @@ async function extractAssetText(format: string, bytes: Buffer): Promise<string> 
     });
     return "";
   }
-}
-
-async function extractPdfText(bytes: Buffer): Promise<string> {
-  const { extractText, getDocumentProxy } = await import("unpdf");
-  const pdf = await getDocumentProxy(new Uint8Array(bytes));
-  const { text } = await extractText(pdf, { mergePages: true });
-  return typeof text === "string" ? text.trim() : "";
 }
 
 // Anthropic prompt-cache breakpoint, forwarded through the AI Gateway as a

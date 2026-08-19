@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { extractDocxText, extractXlsxText } from "@opencompany/file-extract";
+import { DocumentExtractionError, extractDocumentMarkdown } from "@opencompany/file-extract";
 import type { RunnerEnv } from "./env";
 import {
   type GoogleApiAccount,
@@ -231,7 +231,20 @@ export async function readGoogleDriveDocument(
   if (bytes.byteLength > MAX_DOWNLOAD_BYTES) {
     return { ok: false as const, reason: "Google Drive file exceeds the 20 MB ingestion limit." };
   }
-  const extractedText = capUtf8(await mode.extract(bytes), MAX_EXTRACTED_BYTES);
+  let extractedText: string;
+  try {
+    ({ markdown: extractedText } = await extractDocumentMarkdown({
+      bytes,
+      filename: file.name,
+      mediaType: mode.contentType,
+      maxOutputBytes: MAX_EXTRACTED_BYTES,
+    }));
+  } catch (error) {
+    if (error instanceof DocumentExtractionError) {
+      return { ok: false as const, reason: error.message };
+    }
+    throw error;
+  }
   return {
     ok: true as const,
     extractedText,
@@ -239,42 +252,28 @@ export async function readGoogleDriveDocument(
   };
 }
 
-function readMode(
-  mimeType: string,
-): { exportMimeType: string | null; extract(bytes: Buffer): Promise<string> } | null {
-  if (mimeType === GOOGLE_DOC_MIME_TYPE) return textMode("text/markdown");
+// Resolves how to fetch a Drive file and the media type its downloaded bytes will carry. Google-native
+// files are exported into an AnyDoc-supported format; ordinary files download as-is. `null` means the
+// type is not readable.
+function readMode(mimeType: string): { exportMimeType: string | null; contentType: string } | null {
+  if (mimeType === GOOGLE_DOC_MIME_TYPE)
+    return { exportMimeType: "text/markdown", contentType: "text/markdown" };
   if (mimeType === GOOGLE_SHEET_MIME_TYPE) {
-    return { exportMimeType: XLSX_MIME_TYPE, extract: (bytes) => extractXlsxText(bytes) };
+    return { exportMimeType: XLSX_MIME_TYPE, contentType: XLSX_MIME_TYPE };
   }
-  if (mimeType === GOOGLE_SLIDES_MIME_TYPE) return textMode("text/plain");
-  if (mimeType === PDF_MIME_TYPE) {
-    return { exportMimeType: null, extract: extractPdfText };
-  }
-  if (mimeType === DOCX_MIME_TYPE) {
-    return { exportMimeType: null, extract: (bytes) => extractDocxText(bytes) };
-  }
-  if (mimeType === XLSX_MIME_TYPE) {
-    return { exportMimeType: null, extract: (bytes) => extractXlsxText(bytes) };
-  }
+  if (mimeType === GOOGLE_SLIDES_MIME_TYPE)
+    return { exportMimeType: "text/plain", contentType: "text/plain" };
+  if (mimeType === PDF_MIME_TYPE) return { exportMimeType: null, contentType: PDF_MIME_TYPE };
+  if (mimeType === DOCX_MIME_TYPE) return { exportMimeType: null, contentType: DOCX_MIME_TYPE };
+  if (mimeType === XLSX_MIME_TYPE) return { exportMimeType: null, contentType: XLSX_MIME_TYPE };
   if (
     mimeType.startsWith("text/") ||
     mimeType === "application/csv" ||
     mimeType === "application/json"
   ) {
-    return textMode(null);
+    return { exportMimeType: null, contentType: mimeType };
   }
   return null;
-}
-
-function textMode(exportMimeType: string | null) {
-  return { exportMimeType, extract: async (bytes: Buffer) => bytes.toString("utf8").trim() };
-}
-
-async function extractPdfText(bytes: Buffer) {
-  const { extractText, getDocumentProxy } = await import("unpdf");
-  const pdf = await getDocumentProxy(new Uint8Array(bytes));
-  const { text } = await extractText(pdf, { mergePages: true });
-  return typeof text === "string" ? text.trim() : "";
 }
 
 async function callJson(context: GoogleDriveApiContext, method: string, url: URL) {
@@ -317,11 +316,6 @@ function readPerson(value: Record<string, unknown>) {
   const email = readString(value.emailAddress);
   if (name && email) return `${name} <${email}>`;
   return name ?? email;
-}
-
-function capUtf8(value: string, maxBytes: number) {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
-  return `${Buffer.from(value, "utf8").subarray(0, maxBytes).toString("utf8").replace(/�+$/, "")}\n… truncated`;
 }
 
 function driveQueryLiteral(value: string) {
