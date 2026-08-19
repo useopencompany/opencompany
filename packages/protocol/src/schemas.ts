@@ -2,6 +2,7 @@ import { z } from "@hono/zod-openapi";
 import { API_VERSION, PROTOCOL_VERSION } from "./version";
 
 export const ResourceIdSchema = z.string().min(1).max(256).openapi({ example: "run_019fed53" });
+export const ENGINE_SESSION_ERROR_MAX_LENGTH = 2_000;
 export const CursorSchema = z
   .string()
   .regex(/^v1:[1-9][0-9]*$/u)
@@ -465,7 +466,7 @@ export const EngineSessionReadModelSchema = z
     engine: z.enum(["opencompany", "codex", "claude_code"]),
     status: z.enum(["queued", "starting", "idle", "running", "failed", "interrupted", "closed"]),
     activeRunId: ResourceIdSchema.nullable(),
-    error: z.string().max(2_000).nullable(),
+    error: z.string().max(ENGINE_SESSION_ERROR_MAX_LENGTH).nullable(),
     updatedAt: TimestampSchema,
   })
   .strict()

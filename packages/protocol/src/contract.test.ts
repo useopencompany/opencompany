@@ -7,7 +7,13 @@ import {
   parseRunStreamEvent,
 } from "./client";
 import { createOpenApiDocument } from "./routes";
-import { BrainDocumentSchema, CreateMessageBodySchema, ErrorEnvelopeSchema } from "./schemas";
+import {
+  BrainDocumentSchema,
+  CreateMessageBodySchema,
+  ENGINE_SESSION_ERROR_MAX_LENGTH,
+  EngineSessionReadModelSchema,
+  ErrorEnvelopeSchema,
+} from "./schemas";
 import { PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "./version";
 
 describe("v1 protocol contract", () => {
@@ -57,6 +63,25 @@ describe("v1 protocol contract", () => {
   it("preserves bounded historical Brain aliases", () => {
     expect(BrainDocumentSchema.shape.aliases.parse(["a".repeat(113)])).toEqual(["a".repeat(113)]);
     expect(() => BrainDocumentSchema.shape.aliases.parse(["a".repeat(513)])).toThrow();
+  });
+
+  it("bounds the public engine-session error contract", () => {
+    const session = {
+      conversationId: "conversation_1",
+      engine: "codex",
+      status: "failed",
+      activeRunId: null,
+      error: "x".repeat(ENGINE_SESSION_ERROR_MAX_LENGTH),
+      updatedAt: "2026-08-13T08:00:00.000Z",
+    };
+
+    expect(EngineSessionReadModelSchema.safeParse(session).success).toBe(true);
+    expect(
+      EngineSessionReadModelSchema.safeParse({
+        ...session,
+        error: "x".repeat(ENGINE_SESSION_ERROR_MAX_LENGTH + 1),
+      }).success,
+    ).toBe(false);
   });
 
   it("parses typed semantic events and rejects provider or lease payload leakage", () => {
