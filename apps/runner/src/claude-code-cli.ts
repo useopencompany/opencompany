@@ -1,6 +1,11 @@
 import { shellQuote } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
-import { CLAUDE_CODE_CLI_PACKAGE, CLAUDE_CODE_CLI_VERSION } from "./claude-code-version";
+import {
+  CLAUDE_CODE_ACP_ADAPTER_PACKAGE,
+  CLAUDE_CODE_ACP_ADAPTER_VERSION,
+  CLAUDE_CODE_CLI_PACKAGE,
+  CLAUDE_CODE_CLI_VERSION,
+} from "./claude-code-version";
 import {
   commandExitResult,
   guardCommandStreamCallbacks,
@@ -44,6 +49,22 @@ export async function ensureClaudeInstalled(sandbox: SandboxHandle) {
   );
 }
 
+export async function ensureClaudeAcpAdapterInstalled(sandbox: SandboxHandle) {
+  const check = await sandbox.commands.run(
+    `export PATH=${CLAUDE_BIN_PATH}:"$PATH" && claude-agent-acp --version 2>/dev/null || true`,
+    { timeoutMs: 30_000 },
+  );
+  if (String(check.stdout ?? "").trim() === CLAUDE_CODE_ACP_ADAPTER_VERSION) return;
+  await sandbox.commands.run(
+    [
+      `npm install -g --prefix ${CLAUDE_CLI_PREFIX} ${shellQuote(CLAUDE_CODE_ACP_ADAPTER_PACKAGE)}`,
+      `export PATH=${CLAUDE_BIN_PATH}:"$PATH"`,
+      `test "$(claude-agent-acp --version)" = ${shellQuote(CLAUDE_CODE_ACP_ADAPTER_VERSION)}`,
+    ].join(" && "),
+    { timeoutMs: 180_000 },
+  );
+}
+
 export function buildClaudeCommandEnv(input: {
   auth: ClaudeCodeCliAuth;
   githubEnv?: Record<string, string>;
@@ -60,12 +81,24 @@ export function buildClaudeCommandEnv(input: {
   return env;
 }
 
-// Matches the wrapper shell and the claude process of a turn run (both carry
-// "--output-format stream-json" on their command line) without matching the shell
-// executing this cleanup: its own command line contains "[-]-output-format", which the
-// pattern does not match. pkill exits 1 when nothing matched, hence the trailing true.
-export const KILL_LEFTOVER_CLAUDE_TURN_COMMAND =
-  "pkill -9 -f '[-]-output-format stream-json' || true";
+export function buildClaudeAcpCommandEnv(input: {
+  auth: ClaudeCodeCliAuth;
+  githubEnv?: Record<string, string>;
+  model?: string | null;
+}) {
+  return {
+    ...buildClaudeCommandEnv(input),
+    ...(input.model ? { ANTHROPIC_MODEL: input.model } : {}),
+  };
+}
+
+// Matches either legacy stream-json processes or the ACP adapter without matching the cleanup
+// shell itself (the bracketed patterns do not occur literally in their own command line). pkill
+// exits 1 when nothing matched, hence each command has its own trailing true.
+export const KILL_LEFTOVER_CLAUDE_TURN_COMMAND = [
+  "pkill -9 -f '[-]-output-format stream-json' || true",
+  "pkill -9 -f '[c]laude-agent-acp' || true",
+].join("\n");
 
 // A hard runner death (crash, OOM kill, SIGKILL at the end of a deploy grace period)
 // never reaches handle.kill(), so the background `claude` process survives in the
@@ -106,6 +139,15 @@ export function buildClaudeTurnCommand(input: {
     `unset ${FORBIDDEN_ANTHROPIC_ENV_KEYS.join(" ")}`,
     `export PATH=${CLAUDE_BIN_PATH}:"$PATH"`,
     args.join(" "),
+  ].join(" && ");
+}
+
+export function buildClaudeAcpCommand(workdir: string) {
+  return [
+    `cd ${shellQuote(workdir)}`,
+    `unset ${FORBIDDEN_ANTHROPIC_ENV_KEYS.join(" ")}`,
+    `export PATH=${CLAUDE_BIN_PATH}:"$PATH"`,
+    "exec claude-agent-acp",
   ].join(" && ");
 }
 
