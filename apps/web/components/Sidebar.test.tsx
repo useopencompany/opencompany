@@ -49,6 +49,8 @@ const recentChatsMock = vi.hoisted(() => ({
       error: string | null;
       updatedAt: string;
     } | null;
+    activityState?: "working" | "idle";
+    hasUnseen?: boolean;
     state?: "working" | "done_unseen" | "done_seen";
     preview: string;
     updatedAt: string;
@@ -457,7 +459,8 @@ describe("Sidebar", () => {
         preview: "Working",
         updatedAt: "2026-07-14T09:00:00.000Z",
         pinnedAt: null,
-        state: "working",
+        activityState: "working",
+        hasUnseen: false,
       },
       {
         id: "goat_chat_unseen",
@@ -468,7 +471,8 @@ describe("Sidebar", () => {
         preview: "Ready",
         updatedAt: "2026-07-14T09:01:00.000Z",
         pinnedAt: null,
-        state: "done_unseen",
+        activityState: "idle",
+        hasUnseen: true,
       },
     ];
 
@@ -580,7 +584,7 @@ describe("Sidebar", () => {
     expect(chatCollectionMocks.preloadHeadlessChatMessages).toHaveBeenCalledWith("chat_warm");
   });
 
-  it("shows working instead of unseen when a chat still has an active model turn", () => {
+  it("shows working before unseen when the API reports both", () => {
     pathnameMock.value = "/";
     recentChatsMock.value = [
       {
@@ -595,11 +599,12 @@ describe("Sidebar", () => {
           error: null,
           updatedAt: "2026-07-14T09:00:30.000Z",
         },
+        activityState: "working",
+        hasUnseen: true,
         preview: "Ready",
         updatedAt: "2026-07-14T09:01:00.000Z",
         lastSeenAt: "2026-07-14T09:00:00.000Z",
         pinnedAt: null,
-        state: "done_unseen",
       },
     ];
 
@@ -623,7 +628,8 @@ describe("Sidebar", () => {
         updatedAt: "2026-07-14T09:01:00.000Z",
         lastSeenAt: "2026-07-14T09:00:00.000Z",
         pinnedAt: null,
-        state: "done_unseen",
+        activityState: "idle",
+        hasUnseen: true,
       },
     ];
 
@@ -633,7 +639,7 @@ describe("Sidebar", () => {
     expect(screen.queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
   });
 
-  it("drops a retained local working state after durable runtime reports working", async () => {
+  it("drops a retained local working state after the API projection reports working", async () => {
     pathnameMock.value = "/";
     setLocalChatState("goat_chat_runtime", "working");
     recentChatsMock.value = [
@@ -649,11 +655,12 @@ describe("Sidebar", () => {
           error: null,
           updatedAt: "2026-07-14T09:01:00.000Z",
         },
+        activityState: "working",
+        hasUnseen: false,
         preview: "Partial answer",
         updatedAt: "2026-07-14T09:01:00.000Z",
         lastSeenAt: "2026-07-14T09:00:00.000Z",
         pinnedAt: null,
-        state: "done_unseen",
       },
     ];
 
@@ -664,12 +671,8 @@ describe("Sidebar", () => {
       recentChatsMock.value = [
         {
           ...recentChatsMock.value[0]!,
-          codexRuntime: {
-            status: "idle",
-            activeTurnId: null,
-            error: null,
-            updatedAt: "2026-07-14T09:02:00.000Z",
-          },
+          activityState: "idle",
+          hasUnseen: true,
         },
       ];
       rerender(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
@@ -677,7 +680,7 @@ describe("Sidebar", () => {
     });
   });
 
-  it("hides the unseen marker for the selected completed chat", () => {
+  it("keeps the unseen marker until the selected chat is reset through the API", () => {
     pathnameMock.value = "/chat/goat_chat_unseen";
     recentChatsMock.value = [
       {
@@ -686,10 +689,17 @@ describe("Sidebar", () => {
         model: "claude-sonnet-5",
         engine: "opencompany",
         codexComposerSettings: null,
+        codexRuntime: {
+          status: "idle",
+          activeTurnId: "goat_codex_chat_turn_1",
+          error: null,
+          updatedAt: "2026-07-14T09:00:30.000Z",
+        },
         preview: "Ready",
         updatedAt: "2026-07-14T09:01:00.000Z",
         pinnedAt: null,
-        state: "done_unseen",
+        activityState: "idle",
+        hasUnseen: true,
       },
     ];
 
@@ -699,7 +709,7 @@ describe("Sidebar", () => {
       "aria-current",
       "page",
     );
-    expect(screen.queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-chat-unseen")).toBeInTheDocument();
   });
 
   it("pins and unpins chats via the row toggle", async () => {

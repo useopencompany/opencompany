@@ -882,7 +882,8 @@ describe("Surface chat streaming UI", () => {
       preview: "Start",
       updatedAt: staleSummaryUpdatedAt,
       lastSeenAt: staleSummaryUpdatedAt,
-      state: "done_seen",
+      activityState: "idle",
+      hasUnseen: true,
       pinnedAt: null,
     };
 
@@ -909,12 +910,16 @@ describe("Surface chat streaming UI", () => {
     expect(updateHeadlessChatConversation).not.toHaveBeenCalled();
 
     chatMock.status = "ready";
+    const completedSummary = {
+      ...staleSummary,
+      updatedAt: "2026-07-04T12:01:00.000Z",
+    };
     rerender(
       <Surface
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
-        recentChats={[staleSummary]}
+        recentChats={[completedSummary]}
       />,
     );
 
@@ -5065,6 +5070,8 @@ function codexChatSummary(
   const now = currentTimestamp();
   const { status = "idle", error = null, ...summaryOverrides } = overrides;
   const updatedAt = summaryOverrides.updatedAt ?? now;
+  const activityState =
+    status === "queued" || status === "starting" || status === "running" ? "working" : "idle";
   return {
     id: "goat_chat_codex_1",
     title: "Codex task",
@@ -5074,6 +5081,8 @@ function codexChatSummary(
     updatedAt,
     pinnedAt: null,
     codexRuntime: status ? { status, error, updatedAt } : null,
+    activityState,
+    hasUnseen: false,
     ...summaryOverrides,
   };
 }

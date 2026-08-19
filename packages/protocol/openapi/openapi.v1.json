@@ -6663,6 +6663,16 @@
           "model": {
             "type": "string"
           },
+          "activityState": {
+            "type": "string",
+            "enum": [
+              "working",
+              "idle"
+            ]
+          },
+          "hasUnseen": {
+            "type": "boolean"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -6677,6 +6687,8 @@
           "title",
           "engine",
           "model",
+          "activityState",
+          "hasUnseen",
           "createdAt",
           "updatedAt"
         ],
@@ -17586,6 +17598,7 @@
               "type": "string",
               "enum": [
                 "chat-conversations-v1",
+                "chat-conversations-v2",
                 "chat-messages-v1",
                 "chat-runs-v1",
                 "engine-sessions-v1",

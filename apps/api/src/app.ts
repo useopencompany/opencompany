@@ -1721,6 +1721,7 @@ export function createApiApp(input: CreateApiAppInput) {
         }
       } else if (
         params.readModel !== "chat-conversations-v1" &&
+        params.readModel !== "chat-conversations-v2" &&
         params.readModel !== "engine-sessions-v1"
       ) {
         if (!query.conversationId || query.brainId) {
@@ -2680,6 +2681,8 @@ function conversationDto(conversation: {
   title: string;
   engine: "opencompany" | "codex" | "claude_code";
   model: string;
+  activityState: "working" | "idle";
+  hasUnseen: boolean;
   createdAt: Date;
   updatedAt: Date;
 }) {

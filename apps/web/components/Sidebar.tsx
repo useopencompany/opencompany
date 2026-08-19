@@ -531,7 +531,7 @@ function SidebarChatRow({
   onTogglePin: () => void;
   onArchive: () => void;
 }) {
-  const state = resolveSidebarChatState({ chat, active, localState });
+  const state = resolveSidebarChatState({ chat, localState });
   const content = (
     <>
       <SidebarChatStateIndicator state={state} />
@@ -624,17 +624,10 @@ function SidebarChatRow({
 
 function resolveSidebarChatState(input: {
   chat: ChatSummaryView;
-  active: boolean;
   localState: ReturnType<typeof chatSummaryState> | null;
 }) {
   if (input.localState === "working") return "working";
-  if (input.active) return activeSidebarChatState(input.chat);
   return input.localState ?? chatSummaryState(input.chat);
-}
-
-function activeSidebarChatState(chat: ChatSummaryView) {
-  const state = chatSummaryState(chat);
-  return state === "working" ? "working" : "done_seen";
 }
 
 function SidebarChatStateIndicator({ state }: { state: ReturnType<typeof chatSummaryState> }) {

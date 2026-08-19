@@ -272,6 +272,7 @@ describe("session-backed task turns", () => {
     expect(query.sql).toContain("finished_canonical_attempt AS");
     expect(query.sql).toContain("inserted_canonical_events AS");
     expect(query.sql).toContain("canonical_settlement_guard AS MATERIALIZED");
+    expect(query.sql).toContain("has_unseen = CASE");
     expect(query.sql).toContain("event_sequence = turn.event_sequence +");
     expect(query.sql).toContain("pg_notify");
     expect(query.params).toContain("attempt_1");

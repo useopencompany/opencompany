@@ -14,12 +14,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { TaskView } from "@/components/Surface";
-import {
-  type ChatSummaryView,
-  deriveChatState,
-  isChatRuntimeActive,
-  PINNED_CHAT_LIMIT,
-} from "@/lib/chat-ui";
+import { type ChatSummaryView, PINNED_CHAT_LIMIT } from "@/lib/chat-ui";
 import type { FeatureFlags } from "@/lib/feature-flags";
 import {
   getHeadlessTaskSchedules,
@@ -28,9 +23,7 @@ import {
 import type { TaskScheduleView } from "@/lib/headless-automation-types";
 import {
   getHeadlessChatConversations,
-  getHeadlessEngineSessions,
   type HeadlessChatConversationReadModel,
-  type HeadlessEngineSessionReadModel,
   preloadHeadlessChatMessages,
 } from "@/lib/headless-chat-collections";
 import {
@@ -54,11 +47,6 @@ import {
 } from "@/lib/optimistic-chat-summaries";
 import type { TaskRow } from "@/lib/task-collections";
 import { deriveTaskWorkflowSteps } from "@/lib/task-workflow-activity";
-
-// Every engine exposes the same durable engine-session read model.
-function hasDurableChatRuntime(engine: HeadlessChatConversationReadModel["engine"]): boolean {
-  return engine === "opencompany" || engine === "codex" || engine === "claude_code";
-}
 
 const SIDEBAR_CHAT_TRANSCRIPT_PRELOAD_LIMIT = 8;
 
@@ -256,7 +244,6 @@ function AppLiveDataSubscriptions({
     [initialData.featureFlags.taskSpawning, taskSchedulesCollection],
   );
   const conversationsCollection = useMemo(() => getHeadlessChatConversations(), []);
-  const engineSessionsCollection = useMemo(() => getHeadlessEngineSessions(), []);
   const integrationAccountsCollection = useMemo(
     () => getHeadlessIntegrationAccounts(initialData.workspace.id),
     [initialData.workspace.id],
@@ -264,10 +251,6 @@ function AppLiveDataSubscriptions({
   const { data: chatRows, isLoading: chatsLoading } = useLiveQuery(
     (q) => q.from({ conversation: conversationsCollection }),
     [conversationsCollection],
-  );
-  const { data: engineSessionRows } = useLiveQuery(
-    (q) => q.from({ engineSession: engineSessionsCollection }),
-    [engineSessionsCollection],
   );
   const { data: integrationRows, isLoading: integrationsLoading } = useLiveQuery(
     (q) => q.from({ integration: integrationAccountsCollection }),
@@ -304,35 +287,17 @@ function AppLiveDataSubscriptions({
   const recentChats = useMemo(() => {
     if (chatsLoading && !chatRows?.length) return initialData.recentChats;
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
-    const codexRuntimeByChatId = new Map(
-      ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[]).map((row) => [
-        row.conversationId,
-        {
-          status: row.status,
-          activeTurnId: row.activeRunId,
-          error: row.error,
-          updatedAt: row.updatedAt,
-        },
-      ]),
-    );
     const toSummary = (row: HeadlessChatConversationReadModel): ChatSummaryView => {
       const initial = initialById.get(row.id);
-      const durableRuntime = codexRuntimeByChatId.get(row.id);
-      const codexRuntime = hasDurableChatRuntime(row.engine)
-        ? (durableRuntime ?? initial?.codexRuntime ?? null)
-        : null;
       return {
         id: row.id,
         title: row.title,
         model: row.model as AgentModelId,
         engine: row.engine,
         codexComposerSettings: initial?.codexComposerSettings ?? null,
-        codexRuntime,
-        state: deriveChatState({
-          updatedAt: row.updatedAt,
-          lastSeenAt: row.lastSeenAt,
-          codexRuntime,
-        }),
+        codexRuntime: initial?.codexRuntime ?? null,
+        activityState: row.activityState,
+        hasUnseen: row.hasUnseen,
         preview: initial?.preview ?? "No messages yet.",
         updatedAt: row.updatedAt,
         lastSeenAt: row.lastSeenAt,
@@ -343,9 +308,7 @@ function AppLiveDataSubscriptions({
       (row) => !row.archivedAt,
     );
     const activeRuntimeChatIds = new Set(
-      ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[])
-        .filter((row) => isChatRuntimeActive({ status: row.status, activeTurnId: row.activeRunId }))
-        .map((row) => row.conversationId),
+      openRows.filter((row) => row.activityState === "working").map((row) => row.id),
     );
     const pinned = openRows
       .filter((row) => row.pinnedAt)
@@ -365,7 +328,7 @@ function AppLiveDataSubscriptions({
       .slice(0, 8)
       .map(toSummary);
     return [...pinned, ...activeRuntime, ...recent];
-  }, [chatRows, chatsLoading, engineSessionRows, initialData.recentChats]);
+  }, [chatRows, chatsLoading, initialData.recentChats]);
 
   useEffect(() => {
     // Wait for the authoritative conversation shape so the larger server
@@ -382,17 +345,6 @@ function AppLiveDataSubscriptions({
   }, [chatRows?.length, chatsLoading, recentChats]);
 
   const archivedChats = useMemo<ChatSummaryView[]>(() => {
-    const codexRuntimeByChatId = new Map(
-      ((engineSessionRows ?? []) as HeadlessEngineSessionReadModel[]).map((row) => [
-        row.conversationId,
-        {
-          status: row.status,
-          activeTurnId: row.activeRunId,
-          error: row.error,
-          updatedAt: row.updatedAt,
-        },
-      ]),
-    );
     return ((chatRows ?? []) as HeadlessChatConversationReadModel[])
       .filter((row) => row.archivedAt)
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
@@ -403,17 +355,16 @@ function AppLiveDataSubscriptions({
         model: row.model as AgentModelId,
         engine: row.engine,
         codexComposerSettings: null,
-        codexRuntime: hasDurableChatRuntime(row.engine)
-          ? (codexRuntimeByChatId.get(row.id) ?? null)
-          : null,
-        state: "done_seen",
+        codexRuntime: null,
+        activityState: row.activityState,
+        hasUnseen: row.hasUnseen,
         preview: "Archived",
         updatedAt: row.updatedAt,
         lastSeenAt: row.lastSeenAt,
         pinnedAt: null,
         archived: true,
       }));
-  }, [chatRows, engineSessionRows]);
+  }, [chatRows]);
 
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;
