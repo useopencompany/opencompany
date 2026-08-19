@@ -1102,10 +1102,10 @@ export async function claimCodexChatRecovery(input: {
   leaseId: string;
   leaseOwner: string;
   // Codex caps recovery at a single attempt and rearms the guard only after durably adopting a
-  // replacement engine turn (see persistCodexChatEngineTurnId). Engines whose recovery is an
-  // idempotent re-run — Claude Code reruns `claude --resume` against the persisted sandbox — pass
-  // a higher ceiling so several handoffs (e.g. back-to-back deploys during one long turn) do not
-  // strand the turn, while still breaking a genuine poison loop.
+  // replacement engine turn (see persistCodexChatEngineTurnId). Engines whose recovery reruns the
+  // prompt against a persisted session, such as Claude Code over ACP, pass a higher ceiling so
+  // several handoffs (e.g. back-to-back deploys during one long turn) do not strand the turn,
+  // while still breaking a genuine poison loop.
   maxRecoveryAttempts?: number;
   exhaustedMessage?: string;
 }) {

@@ -4,7 +4,6 @@ export * from "./attachments";
 export * from "./chat-artifacts";
 export * from "./chat-host-tools";
 export * from "./claude-action-gateway-auth";
-export * from "./claude-code-events";
 export * from "./cloud-coding-engines";
 export * from "./codex-app-server-events";
 export * from "./codex-brain-capture";

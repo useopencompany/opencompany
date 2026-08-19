@@ -51,8 +51,6 @@ export type RunnerEnv = {
   // each run), a chat sandbox stays alive across turns so files and the app-server daemon survive;
   // on idle timeout E2B pauses it and Sandbox.connect auto-resumes on the next message.
   codexChatIdleTimeoutMs: number;
-  // Flag-gated Claude Code pilot using ACP instead of the legacy stream-json parser.
-  claudeCodeAcpEnabled: boolean;
   // Delivery-lease TTL for runner jobs. The lease heartbeats every 5s while a job runs, so this only
   // matters when the heartbeat stops (deploy, instance recycle, GC, or network blip).
   jobLeaseTtlMs: number;
@@ -100,7 +98,6 @@ export function loadEnv(): RunnerEnv {
       "RUNNER_OPENCOMPANY_CODEX_CHAT_IDLE_TIMEOUT_MS",
       5 * 60_000,
     ),
-    claudeCodeAcpEnabled: optionalBooleanEnv("RUNNER_CLAUDE_CODE_ACP_ENABLED", false),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
     codexChatLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_CODEX_CHAT_LEASE_TTL_MS", 90_000),
     taskWorkerEnabled: optionalBooleanEnv("RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED", false),

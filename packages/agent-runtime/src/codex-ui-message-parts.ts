@@ -132,8 +132,8 @@ export function applyCodexEventToUiMessageParts(
   ) {
     return applyPublishedArtifactEvent(parts, event);
   }
-  // Subagent steps carry the parent Task's tool call id; fold them into that part's children
-  // rather than the top-level turn (see createClaudeCodeEventNormalizer's stampParent).
+  // Subagent steps carry the parent Agent tool call id; fold them into that part's children
+  // rather than the top-level turn.
   const parentToolCallId = readString(event.payload.parentToolCallId);
   if (parentToolCallId) {
     return applyEventToSubagentChild(parts, parentToolCallId, event, options);

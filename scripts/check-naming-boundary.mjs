@@ -193,10 +193,12 @@ const baseEnvKeys = envKeys(
 // `.env.example` still matches origin/main modulo the rename map; genuinely new
 // variables are declared here so the check accepts them.
 const addedEnvKeys = ["API_INTERNAL_TOKEN"];
+const retiredEnvKeys = new Set([["RUNNER", "CLAUDE", "CODE", "ACP", "ENABLED"].join("_")]);
 const expectedEnvKeys = [
   ...new Set([
-    ...baseEnvKeys.map((key) => migratedEnvironmentName(key) ?? key),
-    "RUNNER_CLAUDE_CODE_ACP_ENABLED",
+    ...baseEnvKeys
+      .map((key) => migratedEnvironmentName(key) ?? key)
+      .filter((key) => !retiredEnvKeys.has(key)),
     ...addedEnvKeys,
   ]),
 ].sort();
