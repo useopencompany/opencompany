@@ -558,6 +558,18 @@ export function Surface({
     : isClaudeMode
       ? "claude_code"
       : null;
+  // `&` is a shortcut from the global composer, even when it is typed inside an
+  // existing Conversation. Base it on Home's remembered selection and let only
+  // an explicit engine mention override that clean starting point.
+  const backgroundHomeModel = chatSessionId ? rememberedChatModel : baseChatModel;
+  const backgroundLaunchSelection = backgroundInputDirective
+    ? resolveBackgroundChatLaunchSelection({
+        directive: backgroundInputDirective,
+        mentions: activeSelectedMentions,
+        homeModel: backgroundHomeModel,
+      })
+    : null;
+  const composerChatModel = backgroundLaunchSelection?.model ?? chatModel;
   const legacyTaskReadOnly = Boolean(
     activeTaskConversation && !activeTaskConversation.sessionBacked,
   );
@@ -764,10 +776,8 @@ export function Surface({
     creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
   );
   const backgroundChatDirective = backgroundInputDirective;
-  const backgroundDirectiveTargetEngine = backgroundChatDirective
-    ? (backgroundChatDirective.engine ?? activeEngine)
-    : null;
-  const composerEngine = backgroundDirectiveTargetEngine ?? activeEngine;
+  const backgroundDirectiveTargetEngine = backgroundLaunchSelection?.engine ?? null;
+  const composerEngine = backgroundChatDirective ? backgroundDirectiveTargetEngine : activeEngine;
   const chatSendBlocked = outOfCredits && !composerEngine;
   const lowCreditBalance = Boolean(
     creditBalance &&
@@ -803,7 +813,7 @@ export function Surface({
     : null;
   const attachmentsEnabled = Boolean(userWorkosId) && !activeTaskConversation;
   const composerAttachments = useChatAttachments({
-    modelName: String(chatModel),
+    modelName: String(composerChatModel),
     // The Cmd+K compose view mounts a second composer with its own window-level drop
     // listener. Keep the main composer visible behind the modal, but let only the quick
     // composer consume dropped files while that view is showing.
@@ -813,7 +823,7 @@ export function Surface({
       !(newChatCommandOpen && commandPaletteView === "compose"),
     ...(composerEngine === "codex" || composerEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
-      : isAutoChatModel
+      : composerChatModel === AUTO_MODEL_SELECTION
         ? { capabilities: AUTO_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
     upload: uploadCanonicalAttachment,
@@ -1537,9 +1547,17 @@ export function Surface({
     const prompt = (pendingProgrammaticPromptRef.current ?? input).trim();
     pendingProgrammaticPromptRef.current = null;
     const backgroundChat = parseBackgroundChatDirective(prompt);
-    const backgroundEngine = backgroundChat ? (backgroundChat.engine ?? activeEngine) : null;
+    const backgroundLaunch = backgroundChat
+      ? resolveBackgroundChatLaunchSelection({
+          directive: backgroundChat,
+          mentions: activeSelectedMentions,
+          homeModel: backgroundHomeModel,
+        })
+      : null;
+    const backgroundEngine = backgroundLaunch?.engine ?? null;
+    const backgroundModel = backgroundLaunch?.model ?? chatModel;
     if ((isInteractionPending && !isBackgroundSubmit) || backgroundTaskSubmitting) return;
-    if (outOfCredits && !(backgroundEngine ?? activeEngine)) {
+    if (outOfCredits && !(backgroundChat ? backgroundEngine : activeEngine)) {
       toast.error(CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
           label: "Add credits",
@@ -1619,7 +1637,7 @@ export function Surface({
         setBackgroundTaskSubmitting(true);
         void startAdHocTask({
           description: messagePrompt,
-          model: String(chatModel),
+          model: String(backgroundModel),
           workspaceId,
           ...(backgroundEngine === "codex" ||
           mentions.some((mention) => mention.kind === "engine" && mention.id === "codex")
@@ -1720,14 +1738,14 @@ export function Surface({
           workspaceId,
           sessionId: newSessionId,
           prompt: messagePrompt,
-          model: String(chatModel),
+          model: String(backgroundModel),
           engine,
         });
         setLocalChatState(newSessionId, "working");
         void runBackgroundChatTurn({
           prompt: messagePrompt,
           newSessionId,
-          model: engineChatModel[engine],
+          model: chatSessionId ? ENGINE_REGISTRY[engine].defaultModelId : engineChatModel[engine],
           engine: canonicalMessageEngine(engine, settings.settings),
           ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         })
@@ -1769,13 +1787,13 @@ export function Surface({
         workspaceId,
         sessionId: newSessionId,
         prompt: messagePrompt,
-        model: String(chatModel),
+        model: String(backgroundModel),
         engine: "opencompany",
       });
       setLocalChatState(newSessionId, "working");
       void runBackgroundChatTurn({
         prompt: messagePrompt,
-        model: String(chatModel),
+        model: String(backgroundModel),
         newSessionId,
         ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       })
@@ -3012,16 +3030,16 @@ export function Surface({
                     <Mic size={15} strokeWidth={1.9} />
                   </button>
                   <ModelPicker
-                    value={chatModel}
+                    value={composerChatModel}
                     onChange={(model) => {
                       setSelectedMentions((current) =>
                         current.filter((mention) => mention.kind !== "engine"),
                       );
                       setChatModelOverride(model);
                       persistLastChatSelection(userWorkosId, model);
-                      if (model === CODEX_PICKER_VALUE && model !== chatModel) {
+                      if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
                         setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
-                      } else if (model === CLAUDE_PICKER_VALUE && model !== chatModel) {
+                      } else if (model === CLAUDE_PICKER_VALUE && model !== composerChatModel) {
                         setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
                         setCodexPlanModeEnabled(false);
                         setCodexGoalModeEnabled(false);
@@ -3208,8 +3226,16 @@ function QuickChatComposer({
       : null;
   const backgroundChatDirective = hasBackgroundChatDirective(input);
   const parsedBackgroundChatDirective = parseBackgroundChatDirective(input);
+  const backgroundLaunchSelection = parsedBackgroundChatDirective
+    ? resolveBackgroundChatLaunchSelection({
+        directive: parsedBackgroundChatDirective,
+        mentions: activeSelectedMentions,
+        homeModel: baseChatModel,
+      })
+    : null;
+  const composerChatModel = backgroundLaunchSelection?.model ?? chatModel;
   const composerEngine = parsedBackgroundChatDirective
-    ? (parsedBackgroundChatDirective.engine ?? selectedEngine)
+    ? (backgroundLaunchSelection?.engine ?? null)
     : selectedEngine;
   const isEngineChat = composerEngine !== null;
   const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
@@ -3247,11 +3273,11 @@ function QuickChatComposer({
 
   const attachmentsEnabled = Boolean(userWorkosId);
   const composerAttachments = useChatAttachments({
-    modelName: String(chatModel),
+    modelName: String(composerChatModel),
     enabled: attachmentsEnabled && !isSubmitting,
     ...(composerEngine === "codex" || composerEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
-      : chatModel === AUTO_MODEL_SELECTION
+      : composerChatModel === AUTO_MODEL_SELECTION
         ? { capabilities: AUTO_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
     upload: uploadCanonicalAttachment,
@@ -3521,7 +3547,15 @@ function QuickChatComposer({
     const backgroundChat = parseBackgroundChatDirective(rawPrompt);
     const prompt = backgroundChat?.prompt ?? rawPrompt;
     const isBackgroundChatDirective = backgroundChat !== null;
-    const backgroundEngine = backgroundChat ? (backgroundChat.engine ?? selectedEngine) : null;
+    const backgroundLaunch = backgroundChat
+      ? resolveBackgroundChatLaunchSelection({
+          directive: backgroundChat,
+          mentions: activeSelectedMentions,
+          homeModel: baseChatModel,
+        })
+      : null;
+    const backgroundEngine = backgroundLaunch?.engine ?? null;
+    const backgroundModel = backgroundLaunch?.model ?? chatModel;
     const pendingAttachments = composerAttachments.attachments;
     const readyAttachments = pendingAttachments.filter(
       (attachment) => attachment.status === "ready",
@@ -3577,7 +3611,7 @@ function QuickChatComposer({
       onSubmitted();
       void startAdHocTask({
         description: prompt,
-        model: String(chatModel),
+        model: String(backgroundModel),
         workspaceId,
         ...(backgroundEngine === "codex" ||
         mentions.some((mention) => mention.kind === "engine" && mention.id === "codex")
@@ -3637,7 +3671,7 @@ function QuickChatComposer({
     setMentionToken(null);
     setSelectedMentions([]);
 
-    const targetEngine = backgroundEngine ?? selectedEngine;
+    const targetEngine = isBackgroundChatDirective ? backgroundEngine : selectedEngine;
     if (targetEngine) {
       // Validate before clearing attachments / closing the dialog: once onSubmitted()
       // unmounts this component, there's no visible composer left to restore a draft into.
@@ -3671,7 +3705,7 @@ function QuickChatComposer({
         workspaceId,
         sessionId: newSessionId,
         prompt,
-        model: String(chatModel),
+        model: String(backgroundModel),
         engine,
       });
       setLocalChatState(newSessionId, "working");
@@ -3713,7 +3747,7 @@ function QuickChatComposer({
       workspaceId,
       sessionId: newSessionId,
       prompt,
-      model: String(chatModel),
+      model: String(backgroundModel),
       engine: "opencompany",
     });
     setLocalChatState(newSessionId, "working");
@@ -3726,7 +3760,7 @@ function QuickChatComposer({
     };
     void runBackgroundChatTurn({
       prompt,
-      model: String(chatModel),
+      model: String(backgroundModel),
       newSessionId,
       ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     })
@@ -3926,7 +3960,7 @@ function QuickChatComposer({
               </>
             ) : null}
             <ModelPicker
-              value={chatModel}
+              value={composerChatModel}
               onChange={(model) => {
                 // Deliberately not persisted via persistLastChatSelection: this picker
                 // only applies to this one quick-compose chat, not the app-wide "last used
@@ -3935,9 +3969,9 @@ function QuickChatComposer({
                   current.filter((mention) => mention.kind !== "engine"),
                 );
                 setChatModelOverride(model);
-                if (model === CODEX_PICKER_VALUE && model !== chatModel) {
+                if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
                   setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
-                } else if (model === CLAUDE_PICKER_VALUE && model !== chatModel) {
+                } else if (model === CLAUDE_PICKER_VALUE && model !== composerChatModel) {
                   setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
                   setCodexPlanModeEnabled(false);
                   setCodexGoalModeEnabled(false);
@@ -4657,10 +4691,12 @@ function hasBackgroundChatDirective(value: string) {
   return value.trimStart().startsWith("&");
 }
 
-function parseBackgroundChatDirective(value: string): {
+type BackgroundChatDirective = {
   prompt: string;
   engine: EngineChatKind | null;
-} | null {
+};
+
+function parseBackgroundChatDirective(value: string): BackgroundChatDirective | null {
   const trimmedStart = value.trimStart();
   if (!trimmedStart.startsWith("&")) return null;
   const directive = trimmedStart.slice(1).trimStart();
@@ -4668,6 +4704,22 @@ function parseBackgroundChatDirective(value: string): {
   if (!engineMatch) return { prompt: directive, engine: null };
   const engine = engineMatch[1]?.toLowerCase() === "claude" ? "claude_code" : "codex";
   return { prompt: directive.slice(engineMatch[0].length).trimStart(), engine };
+}
+
+function resolveBackgroundChatLaunchSelection(input: {
+  directive: BackgroundChatDirective;
+  mentions: readonly ChatMention[];
+  homeModel: ChatModelSelection;
+}): { model: ChatModelSelection; engine: EngineChatKind | null } {
+  const mentionedModel = chatModelSelectionFromEngineMention(
+    input.mentions.find((mention) => mention.kind === "engine"),
+  );
+  const model = input.directive.engine
+    ? ENGINE_REGISTRY[input.directive.engine].pickerValue
+    : (mentionedModel ?? input.homeModel);
+  const engine =
+    model === CODEX_PICKER_VALUE ? "codex" : model === CLAUDE_PICKER_VALUE ? "claude_code" : null;
+  return { model, engine };
 }
 
 type ComposerMentionHighlight = Extract<ChatMention, { kind: "engine" | "skill" | "workflow" }>;
