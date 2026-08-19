@@ -3238,6 +3238,7 @@ export const taskEvents = productSchema.table(
       table.id,
     ),
     taskIdIdx: index("goat_task_events_task_id_idx").on(table.taskId, table.id),
+    retentionIdx: index("opencompany_task_events_retention_idx").on(table.createdAt, table.id),
   }),
 );
 
@@ -4014,6 +4015,11 @@ export const codexChatTurns = productSchema.table(
     assistantMessageIdx: uniqueIndex("goat_codex_chat_turns_assistant_message_idx").on(
       table.assistantMessageId,
     ),
+    retentionIdx: index("opencompany_codex_chat_turns_retention_idx")
+      .on(table.completedAt, table.id)
+      .where(
+        sql`${table.status} IN ('completed', 'failed', 'interrupted') AND ${table.completedAt} IS NOT NULL`,
+      ),
     statusCheck: check(
       "goat_codex_chat_turns_status_v2_check",
       sql`${table.status} IN ('queued', 'running', 'paused', 'completed', 'failed', 'interrupted')`,
@@ -4344,6 +4350,7 @@ export const runEvents = productSchema.table(
   (table) => ({
     runSequenceIdx: uniqueIndex("goat_run_events_run_sequence_idx").on(table.runId, table.sequence),
     attemptIdx: index("goat_run_events_attempt_idx").on(table.attemptId),
+    retentionIdx: index("opencompany_run_events_retention_idx").on(table.createdAt, table.id),
     typeCheck: check(
       "goat_run_events_type_check",
       sql`${table.type} IN (${sql.join(
@@ -4815,6 +4822,10 @@ export const codexChatEvents = productSchema.table(
     turnCreatedIdx: index("goat_codex_chat_events_turn_created_idx").on(
       table.codexChatTurnId,
       table.createdAt,
+    ),
+    retentionIdx: index("opencompany_codex_chat_events_retention_idx").on(
+      table.createdAt,
+      table.id,
     ),
     turnEventKeyIdx: uniqueIndex("goat_codex_chat_events_turn_event_key_idx")
       .on(table.codexChatTurnId, table.eventKey)
