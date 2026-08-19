@@ -7,6 +7,7 @@ import {
   hashUserId,
   isObservabilityEnabled,
   recordCounter,
+  recordGauge,
   recordModelCost,
   recordRunOutcome,
   recordSignup,
@@ -160,6 +161,7 @@ describe("@opencompany/telemetry", () => {
     vi.stubEnv("OPENCOMPANY_OBSERVABILITY_ENABLED", "false");
     expect(isObservabilityEnabled()).toBe(false);
     expect(() => recordCounter("goat.test", 1, { "goat.task_id": "task" })).not.toThrow();
+    expect(() => recordGauge("goat.test.gauge", 0.5)).not.toThrow();
     expect(() =>
       recordModelCost({
         costUsdMicros: 42,
