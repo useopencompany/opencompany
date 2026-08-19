@@ -31,7 +31,7 @@ export function addOptimisticChatSummary(input: {
       model: input.model as ChatSummaryView["model"],
       engine: input.engine,
       codexComposerSettings: null,
-      codexRuntime: null,
+      runtime: null,
       activityState: "working",
       hasUnseen: false,
       preview: normalizedPrompt || "Starting chat…",

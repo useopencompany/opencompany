@@ -145,7 +145,7 @@ describe("AppDataProvider", () => {
         model: "anthropic/claude-sonnet-5",
         engine: "opencompany",
         codexComposerSettings: null,
-        codexRuntime: null,
+        runtime: null,
         preview: "Fallback",
         updatedAt: new Date().toISOString(),
         lastSeenAt: null,
@@ -225,6 +225,12 @@ describe("AppDataProvider", () => {
       archivedAt: null,
       pinnedAt: null,
       lastSeenAt: now,
+      runtime: {
+        status: "idle" as const,
+        activeRunId: null,
+        hasError: false,
+        updatedAt: now,
+      },
       activityState: "idle" as const,
       hasUnseen: false,
       createdAt: now,
@@ -255,9 +261,10 @@ describe("AppDataProvider", () => {
 
     expect(screen.getByTestId("recent").textContent).toBe("claude_code:idle:false");
     expect(screen.getByTestId("recent").getAttribute("data-chat-id")).toBe("goat_chat_claude_1");
+    expect(screen.getByTestId("recent").getAttribute("data-runtime-status")).toBe("idle");
   });
 
-  it("keeps API-projected working chats in the recent list without a second live query", () => {
+  it("keeps multiple API-projected working chats without a second live query", () => {
     const old = "2026-07-01T10:00:00.000Z";
     const chatRow = {
       id: "goat_chat_active_turn",
@@ -272,10 +279,16 @@ describe("AppDataProvider", () => {
       createdAt: old,
       updatedAt: old,
     };
+    const newerChatRow = {
+      ...chatRow,
+      id: "conversation_other_active_turn",
+      title: "Other active chat",
+      updatedAt: "2026-07-01T10:01:00.000Z",
+    };
     const perCollection = [
       { data: [], isLoading: false },
       { data: [], isLoading: false },
-      { data: [chatRow], isLoading: false },
+      { data: [chatRow, newerChatRow], isLoading: false },
       { data: [], isLoading: true },
     ];
     let call = 0;
@@ -291,8 +304,12 @@ describe("AppDataProvider", () => {
       </AppDataProvider>,
     );
 
-    expect(screen.getByTestId("recent").textContent).toBe("Lagging runtime:working");
-    expect(screen.getByTestId("recent").getAttribute("data-chat-id")).toBe("goat_chat_active_turn");
+    expect(screen.getByTestId("recent").textContent).toBe(
+      "Other active chat:working|Lagging runtime:working",
+    );
+    expect(screen.getByTestId("recent").getAttribute("data-chat-ids")).toBe(
+      "conversation_other_active_turn,goat_chat_active_turn",
+    );
   });
 
   it("keeps same-workspace live data during a server data refresh", () => {
@@ -344,7 +361,7 @@ describe("AppDataProvider", () => {
               model: "anthropic/claude-sonnet-5",
               engine: "opencompany",
               codexComposerSettings: null,
-              codexRuntime: null,
+              runtime: null,
               preview: "Stale server snapshot",
               updatedAt: now,
               lastSeenAt: now,
@@ -366,7 +383,7 @@ function RecentChatsProbe() {
   const data = useAppData();
   const chat = data.recentChats[0];
   return (
-    <div data-testid="recent" data-chat-id={chat?.id}>
+    <div data-testid="recent" data-chat-id={chat?.id} data-runtime-status={chat?.runtime?.status}>
       {chat ? `${chat.engine}:${chat.activityState}:${String(chat.hasUnseen)}` : "empty"}
     </div>
   );
@@ -381,10 +398,11 @@ function RecentChatTitleProbe({ onRender }: { onRender: (value: string) => void 
 
 function RecentChatStateProbe() {
   const data = useAppData();
-  const chat = data.recentChats[0];
   return (
-    <div data-testid="recent" data-chat-id={chat?.id}>
-      {chat ? `${chat.title}:${chat.activityState}` : "empty"}
+    <div data-testid="recent" data-chat-ids={data.recentChats.map((chat) => chat.id).join(",")}>
+      {data.recentChats.length > 0
+        ? data.recentChats.map((chat) => `${chat.title}:${chat.activityState}`).join("|")
+        : "empty"}
     </div>
   );
 }

@@ -105,7 +105,9 @@ export function HomeRoute({
       model: summary.model,
       engine: summary.engine,
       codexComposerSettings: summary.codexComposerSettings ?? null,
-      codexRuntime: summary.codexRuntime ?? null,
+      // Sidebar summaries can bridge navigation metadata, but detail controls wait for the
+      // conversation-scoped REST/Electric record instead of trusting a list row.
+      runtime: null,
       ...(summary.activityState ? { activityState: summary.activityState } : {}),
       ...(summary.hasUnseen !== undefined ? { hasUnseen: summary.hasUnseen } : {}),
       updatedAt: summary.updatedAt,

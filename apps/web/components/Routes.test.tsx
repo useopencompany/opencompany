@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BrainView } from "@/components/BrainView";
 import {
   BrainRoute,
+  HomeRoute,
   McpSettingsRoute,
   PreferencesSettingsRoute,
   SkillEditorRoute,
@@ -50,6 +51,7 @@ const workflowLiveQueryMock = vi.hoisted(() => ({
   hydrated: true,
   isLoading: true,
 }));
+const surfaceMock = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
 
 const skillActionsMock = vi.hoisted(() => ({
   updateHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
@@ -103,7 +105,10 @@ vi.mock("@/components/BrainSettings", () => ({
 }));
 
 vi.mock("@/components/Surface", () => ({
-  Surface: () => null,
+  Surface: (props: Record<string, unknown>) => {
+    surfaceMock.props = props;
+    return null;
+  },
 }));
 
 vi.mock("@/components/JamieIntegrationSetup", () => ({
@@ -168,6 +173,44 @@ vi.mock("@/components/ThemeProvider", () => ({
     setTheme: themeMock.setTheme,
   }),
 }));
+
+describe("HomeRoute", () => {
+  it("does not let a sidebar runtime row control the active Conversation", () => {
+    Object.assign(appDataMock.value, {
+      activeBrain: null,
+      tasks: [],
+      schedules: [],
+      recentChats: [
+        {
+          id: "conversation_1",
+          title: "Sidebar snapshot",
+          model: "anthropic/claude-sonnet-5",
+          engine: "opencompany",
+          runtime: {
+            status: "running",
+            activeRunId: "stale_sidebar_run",
+            hasError: false,
+            updatedAt: "2026-08-19T10:00:00.000Z",
+          },
+          activityState: "working",
+          hasUnseen: false,
+          preview: "Working",
+          updatedAt: "2026-08-19T10:00:00.000Z",
+        },
+      ],
+      archivedChats: [],
+      codexConnected: false,
+      claudeCodeConnected: false,
+    });
+
+    render(<HomeRoute chatId="conversation_1" />);
+
+    expect(surfaceMock.props?.initialChat).toMatchObject({
+      id: "conversation_1",
+      runtime: null,
+    });
+  });
+});
 
 describe("WorkflowsRoute", () => {
   beforeEach(() => {
