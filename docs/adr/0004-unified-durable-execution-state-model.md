@@ -70,6 +70,7 @@ target than the physical schema suggests.
 | Task identity | `goat.tasks` | Current Tasks have a unique `session_id` and execute through their Task Conversation. | Keep the metadata record and Conversation link. Remove its execution responsibilities. |
 | Task Messages and Events | `goat.task_messages`, `goat.task_events` | Production code only reads these for sessionless compatibility history. New Task work uses `chat_messages` and `run_events`. | Keep read-only behind the ADR 0002 retention gate, then archive or drop together. Never dual-write. |
 | Task usage | `goat.task_*_usage` | Current Task summaries use canonical Chat ledger/Message data when `session_id` exists and legacy usage only for sessionless rows. | Keep legacy rows read-only. Attribute new usage to Run/Attempt through the canonical billing/runtime path. |
+| Conversation tenancy | `goat.codex_chat_sessions.workspace_id`, with Task fallback | `chat_sessions` has no `workspace_id`, so authorization and read-model projection depend on a temporary Harness runtime row. | Add authoritative Conversation workspace ownership before removing or replacing the runtime adapter. |
 | Run work row | `goat.codex_chat_turns` | This is the physical Run, queue row, live lease owner, retry counter, cancellation row, and event-sequence allocator for all engines. | Keep it behind a neutral Run repository during migration. Do not make convergence depend on a cosmetic table rename. |
 | Attempts | `goat.run_attempts` | The worker first claims the Run lease, then inserts an Attempt in a second operation. The Attempt copies `lease_id` but owns no expiry. | Create the Attempt atomically during claim and move lease expiry/heartbeat authority to it. |
 | Engine interactions | `goat.codex_chat_interactions` plus `goat.run_approvals` | An interaction copies the Run lease as a fencing token. Its canonical Approval already has `attempt_id`. | Use Attempt identity for fencing and converge structured questions/permissions on neutral Approvals or elicitations after #1300. |
@@ -85,6 +86,13 @@ A follow-up guard may pin the existing duplicate numeric prefixes (`0102`, `0183
 `0206` as historical exceptions while rejecting new prefix collisions; that is independent of this
 state-model migration.
 
+The other hygiene findings do not all belong in this migration series. Runtime schemas for JSONB
+write/read boundaries are required because canonical Events, Harness config, presentation, and
+generic command results depend on them. Conversation `workspace_id` is also required because
+tenancy cannot remain owned by a removable runtime adapter. Foreign keys for `action_turns` and
+`tasks.workflow_id`, and any normalization of `closed_at` / `archived_at` / `deleted_at`, stay in
+separate changes: those columns have different retention semantics and need their own data audits.
+
 ## Target ownership and invariants
 
 ### Conversation and Message
@@ -92,6 +100,12 @@ state-model migration.
 A Conversation owns its ordered Messages. Task and ordinary Chat Conversations use the same
 Message store and command path. A Conversation may optionally have one Task metadata owner, enforced
 by the existing partial unique Task Conversation index.
+
+The Conversation also owns `workspace_id`. Add it nullable, backfill from the matching Harness
+runtime or Task, make every canonical creator write it, and switch authorization plus read-model
+projection to it before enforcing the canonical not-null invariant. Historical rows that cannot be
+attributed safely remain quarantined for an explicit owner decision; a migration must not guess
+tenancy.
 
 Conversation runtime health is a projection of the Harness session and active Run. It is not a
 second Run lifecycle. Fields such as `active_turn_id` may remain as rebuildable read optimization,
@@ -163,8 +177,8 @@ versions; they do not treat arbitrary JSON as a valid Event.
 
 The Harness adapter introduced by #1300 converts engine output into neutral semantic updates. The
 model accommodates the Agent Client Protocol's `session/update` categories—message/thought content,
-tool call/update, plan/update, and usage update—without persisting ACP JSON-RPC or any provider's raw
-event as the product contract. See the ACP
+tool call/update, and plan/update—without persisting ACP JSON-RPC or any provider's raw event as the
+product contract. See the ACP
 [protocol overview](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/protocol/v2/overview.mdx)
 and [versioned schema](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/schema/v1/schema.json).
 The canonical set should include neutral message, reasoning, tool, plan, usage, approval, artifact,
@@ -284,6 +298,8 @@ exact release SHA; no phase assumes that a passing local migration proves old wr
 - Introduce neutral Harness adapter, session, event, and settings names in application code.
 - Make every Run snapshot its Harness engine, model, and validated config.
 - Normalize Codex, Claude Code, OpenCompany, and future ACP events before persistence.
+- Add Conversation `workspace_id`, backfill only unambiguous ownership, make canonical creators
+  write it, and move authorization/read-model tenancy off the Harness runtime.
 - Add characterization coverage for claim/reclaim, heartbeat loss, graceful handoff,
   infrastructure retry, cancellation, approval/question resolution, Task continuation, and
   terminal settlement.
