@@ -16,15 +16,14 @@ import {
 } from "./headless-automation-collections";
 import { workflowDtoToCatalogItem } from "./headless-automation-types";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
-import { awaitHeadlessChatTransaction } from "./headless-chat-collections";
+import { reconcileCommittedProjection } from "./headless-collection-reconciliation";
 import { awaitHeadlessTaskTransaction } from "./headless-task-collections";
 
 type ClientOptions = {
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;
-  scopeKey?: string;
-  waitForWorkflowSchedule?: boolean;
 };
+type ScopedClientOptions = ClientOptions & { scopeKey: string };
 
 export async function listHeadlessWorkflowCatalog(options: ClientOptions = {}) {
   const workflows = await listAllWorkflows(options);
@@ -36,7 +35,7 @@ export async function listHeadlessWorkflowCatalog(options: ClientOptions = {}) {
 
 export async function createHeadlessWorkflow(
   command: CreateWorkflowBody,
-  options: ClientOptions = {},
+  options: ScopedClientOptions,
 ) {
   const response = await automationClient(options).v1.workflows.$post({
     header: { "idempotency-key": `web-workflow:${crypto.randomUUID()}` },
@@ -44,14 +43,16 @@ export async function createHeadlessWorkflow(
   });
   if (!response.ok) throw await automationResponseError(response, "Workflow creation failed");
   const data = (await response.json()).data;
-  await awaitHeadlessWorkflowTransaction(data.transactionId, workflowCollectionOptions(options));
+  await reconcileCommittedProjection(
+    awaitHeadlessWorkflowTransaction(data.transactionId, collectionOptions(options)),
+  );
   return data.workflow;
 }
 
 export async function updateHeadlessWorkflow(
   workflowId: string,
   command: UpdateWorkflowBody,
-  options: ClientOptions = {},
+  options: ScopedClientOptions,
 ) {
   const response = await automationClient(options).v1.workflows[":workflowId"].$patch({
     param: { workflowId },
@@ -59,14 +60,16 @@ export async function updateHeadlessWorkflow(
   });
   if (!response.ok) throw await automationResponseError(response, "Workflow update failed");
   const data = (await response.json()).data;
-  await awaitHeadlessWorkflowTransaction(data.transactionId, workflowCollectionOptions(options));
+  await reconcileCommittedProjection(
+    awaitHeadlessWorkflowTransaction(data.transactionId, collectionOptions(options)),
+  );
   return data.workflow;
 }
 
 export async function archiveHeadlessWorkflow(
   workflowId: string,
   command: ArchiveVersionBody,
-  options: ClientOptions = {},
+  options: ScopedClientOptions,
 ) {
   const response = await automationClient(options).v1.workflows[":workflowId"].archive.$post({
     param: { workflowId },
@@ -74,14 +77,16 @@ export async function archiveHeadlessWorkflow(
   });
   if (!response.ok) throw await automationResponseError(response, "Workflow archive failed");
   const data = (await response.json()).data;
-  await awaitHeadlessWorkflowTransaction(data.transactionId, workflowCollectionOptions(options));
+  await reconcileCommittedProjection(
+    awaitHeadlessWorkflowTransaction(data.transactionId, collectionOptions(options)),
+  );
   return data;
 }
 
 export async function invokeHeadlessWorkflow(
   workflowId: string,
   command: InvokeWorkflowBody,
-  options: ClientOptions = {},
+  options: ScopedClientOptions,
 ) {
   const response = await automationClient(options).v1.workflows[":workflowId"].invoke.$post({
     param: { workflowId },
@@ -92,7 +97,7 @@ export async function invokeHeadlessWorkflow(
   return reconcileCreatedTask((await response.json()).data, options);
 }
 
-export async function runHeadlessWorkflowNow(workflowId: string, options: ClientOptions = {}) {
+export async function runHeadlessWorkflowNow(workflowId: string, options: ScopedClientOptions) {
   const response = await automationClient(options).v1.workflows[":workflowId"]["run-now"].$post({
     param: { workflowId },
     header: { "idempotency-key": `web-workflow-run:${crypto.randomUUID()}` },
@@ -103,7 +108,7 @@ export async function runHeadlessWorkflowNow(workflowId: string, options: Client
 
 export async function createHeadlessTaskSchedule(
   command: CreateTaskScheduleBody,
-  options: ClientOptions = {},
+  options: ScopedClientOptions,
 ) {
   const response = await automationClient(options).v1.schedules.$post({
     header: { "idempotency-key": `web-task-schedule:${crypto.randomUUID()}` },
@@ -113,14 +118,16 @@ export async function createHeadlessTaskSchedule(
     throw await automationResponseError(response, "Recurring Task creation failed");
   }
   const data = (await response.json()).data;
-  await awaitHeadlessTaskScheduleTransaction(data.transactionId, collectionOptions(options));
+  await reconcileCommittedProjection(
+    awaitHeadlessTaskScheduleTransaction(data.transactionId, collectionOptions(options)),
+  );
   return data.schedule;
 }
 
 export async function updateHeadlessTaskSchedule(
   scheduleId: string,
   command: UpdateTaskScheduleBody | SetTaskScheduleEnabledBody,
-  options: ClientOptions = {},
+  options: ScopedClientOptions,
 ) {
   const response = await automationClient(options).v1.schedules[":scheduleId"].$patch({
     param: { scheduleId },
@@ -130,14 +137,16 @@ export async function updateHeadlessTaskSchedule(
     throw await automationResponseError(response, "Recurring Task update failed");
   }
   const data = (await response.json()).data;
-  await awaitHeadlessTaskScheduleTransaction(data.transactionId, collectionOptions(options));
+  await reconcileCommittedProjection(
+    awaitHeadlessTaskScheduleTransaction(data.transactionId, collectionOptions(options)),
+  );
   return data.schedule;
 }
 
 export async function archiveHeadlessTaskSchedule(
   scheduleId: string,
   command: ArchiveVersionBody,
-  options: ClientOptions = {},
+  options: ScopedClientOptions,
 ) {
   const response = await automationClient(options).v1.schedules[":scheduleId"].archive.$post({
     param: { scheduleId },
@@ -147,11 +156,13 @@ export async function archiveHeadlessTaskSchedule(
     throw await automationResponseError(response, "Recurring Task archive failed");
   }
   const data = (await response.json()).data;
-  await awaitHeadlessTaskScheduleTransaction(data.transactionId, collectionOptions(options));
+  await reconcileCommittedProjection(
+    awaitHeadlessTaskScheduleTransaction(data.transactionId, collectionOptions(options)),
+  );
   return data;
 }
 
-export async function runHeadlessTaskScheduleNow(scheduleId: string, options: ClientOptions = {}) {
+export async function runHeadlessTaskScheduleNow(scheduleId: string, options: ScopedClientOptions) {
   const response = await automationClient(options).v1.schedules[":scheduleId"]["run-now"].$post({
     param: { scheduleId },
     header: { "idempotency-key": `web-task-schedule-run:${crypto.randomUUID()}` },
@@ -182,15 +193,11 @@ async function reconcileCreatedTask(
     runId: string;
     transactionId: string;
   },
-  options: ClientOptions,
+  options: ScopedClientOptions,
 ) {
-  await Promise.all([
+  await reconcileCommittedProjection(
     awaitHeadlessTaskTransaction(data.transactionId, collectionOptions(options)),
-    awaitHeadlessChatTransaction({
-      conversationId: data.task.conversationId,
-      transactionId: data.transactionId,
-    }),
-  ]);
+  );
   return data;
 }
 
@@ -204,15 +211,8 @@ function automationClient(options: ClientOptions) {
   });
 }
 
-function collectionOptions(options: ClientOptions) {
-  return options.scopeKey ? { scopeKey: options.scopeKey } : {};
-}
-
-function workflowCollectionOptions(options: ClientOptions) {
-  return {
-    ...collectionOptions(options),
-    ...(options.waitForWorkflowSchedule ? { includeSchedule: true } : {}),
-  };
+function collectionOptions(options: ScopedClientOptions) {
+  return { scopeKey: options.scopeKey };
 }
 
 async function automationResponseError(response: Response, fallback: string) {

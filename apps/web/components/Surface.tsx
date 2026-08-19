@@ -1593,6 +1593,7 @@ export function Surface({
         prepareMainComposerFocusRestoreAfterBackgroundTask();
         setBackgroundTaskSubmitting(true);
         void startWorkflowTask({
+          workspaceId,
           workflow: workflowMention,
           description: messagePrompt,
           ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
@@ -1794,6 +1795,7 @@ export function Surface({
       prepareMainComposerFocusRestoreAfterBackgroundTask();
       setBackgroundTaskSubmitting(true);
       void startWorkflowTask({
+        workspaceId,
         workflow: workflowMention,
         description: prompt,
         ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
@@ -2652,7 +2654,7 @@ export function Surface({
             />
           ) : null}
           {mode === "chat" && taskSpawningEnabled ? (
-            <LiveChatTasks setTasks={setLiveChatTasks} />
+            <LiveChatTasks workspaceId={workspaceId} setTasks={setLiveChatTasks} />
           ) : null}
 
           <form
@@ -3551,6 +3553,7 @@ function QuickChatComposer({
       composerAttachments.clearAttachments();
       onSubmitted();
       void startWorkflowTask({
+        workspaceId,
         workflow: workflowMention,
         description: prompt,
         ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
@@ -4901,18 +4904,23 @@ async function startAdHocTask(input: {
 }
 
 async function startWorkflowTask(input: {
+  workspaceId: string;
   workflow: Extract<ChatMention, { kind: "workflow" }>;
   description: string;
   mentions?: Extract<ChatMention, { kind: "skill" }>[];
   attachments?: ChatUiAttachment[];
 }) {
-  const payload = await invokeHeadlessWorkflow(input.workflow.id, {
-    description: input.description,
-    ...(input.mentions?.length ? { skillIds: input.mentions.map((mention) => mention.id) } : {}),
-    ...(input.attachments?.length
-      ? { attachmentIds: input.attachments.map((attachment) => attachment.id) }
-      : {}),
-  });
+  const payload = await invokeHeadlessWorkflow(
+    input.workflow.id,
+    {
+      description: input.description,
+      ...(input.mentions?.length ? { skillIds: input.mentions.map((mention) => mention.id) } : {}),
+      ...(input.attachments?.length
+        ? { attachmentIds: input.attachments.map((attachment) => attachment.id) }
+        : {}),
+    },
+    { scopeKey: input.workspaceId },
+  );
   return {
     task: {
       id: payload.task.id,
@@ -5638,21 +5646,25 @@ function LiveCodexChatSessionStatusSubscriber({
 }
 
 function LiveChatTasks({
+  workspaceId,
   setTasks,
 }: {
+  workspaceId: string;
   setTasks: Dispatch<SetStateAction<readonly TaskView[] | null>>;
 }) {
   const hydrated = useHydrated();
   if (!hydrated) return null;
-  return <LiveChatTaskSubscriber setTasks={setTasks} />;
+  return <LiveChatTaskSubscriber workspaceId={workspaceId} setTasks={setTasks} />;
 }
 
 function LiveChatTaskSubscriber({
+  workspaceId,
   setTasks,
 }: {
+  workspaceId: string;
   setTasks: Dispatch<SetStateAction<readonly TaskView[] | null>>;
 }) {
-  const tasks = useMemo(() => getHeadlessTasks(), []);
+  const tasks = useMemo(() => getHeadlessTasks(workspaceId), [workspaceId]);
   const { data: rows } = useLiveQuery((q) => q.from({ task: tasks }));
   const liveTasks = useMemo(() => (rows ?? []).map(taskReadModelToRow).map(taskRowToView), [rows]);
 
