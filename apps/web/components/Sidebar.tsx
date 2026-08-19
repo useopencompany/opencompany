@@ -22,7 +22,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { type FormEvent, type MouseEventHandler, useEffect, useState, useTransition } from "react";
+import {
+  type FormEvent,
+  type MouseEventHandler,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { BrainSwitcher } from "@/components/BrainSwitcher";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
@@ -31,6 +38,7 @@ import { HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navi
 import { clearLocalChatState, useLocalChatStates } from "@/lib/chat-session-state";
 import { type ChatSummaryView, chatSummaryState } from "@/lib/chat-ui";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
+import { useOptimisticChatSummaries } from "@/lib/optimistic-chat-summaries";
 import { createWorkspaceAction, switchWorkspaceAction } from "@/lib/workspace-actions";
 
 function Icon({ className }: { className?: string }) {
@@ -329,11 +337,21 @@ function SidebarAccountMenu() {
 }
 
 function SidebarRecentChats() {
-  const { recentChats } = useAppData();
+  const { recentChats, workspace } = useAppData();
   const pathname = usePathname();
   const router = useRouter();
   const [, startTransition] = useTransition();
   const localChatStates = useLocalChatStates();
+  const optimisticChats = useOptimisticChatSummaries();
+  const optimisticChatIds = useMemo(
+    () =>
+      new Set(
+        optimisticChats
+          .filter((entry) => entry.workspaceId === workspace.id)
+          .map((entry) => entry.chat.id),
+      ),
+    [optimisticChats, workspace.id],
+  );
   const [archivingIds, setArchivingIds] = useState<Set<string>>(() => new Set());
   const [pinningIds, setPinningIds] = useState<Set<string>>(() => new Set());
   const [pinOverrides, setPinOverrides] = useState<Map<string, boolean>>(() => new Map());
@@ -413,12 +431,14 @@ function SidebarRecentChats() {
   const renderRow = (chat: ChatSummaryView) => {
     const href = chatHref(chat.id);
     const pinned = isPinned(chat);
+    const optimistic = optimisticChatIds.has(chat.id);
     return (
       <SidebarChatRow
         key={chat.id}
         chat={chat}
         href={href}
         active={pathname === href}
+        optimistic={optimistic}
         localState={localChatStates.get(chat.id) ?? null}
         pinned={pinned}
         archiving={archivingIds.has(chat.id)}
@@ -478,6 +498,7 @@ function SidebarChatRow({
   chat,
   href,
   active,
+  optimistic,
   localState,
   pinned,
   archiving,
@@ -490,6 +511,7 @@ function SidebarChatRow({
   chat: ChatSummaryView;
   href: string;
   active: boolean;
+  optimistic: boolean;
   localState: ReturnType<typeof chatSummaryState> | null;
   pinned: boolean;
   archiving: boolean;
@@ -500,72 +522,91 @@ function SidebarChatRow({
   onArchive: () => void;
 }) {
   const state = resolveSidebarChatState({ chat, active, localState });
+  const content = (
+    <>
+      <SidebarChatStateIndicator state={state} />
+      <span className="truncate tracking-[-0.005em]">{chat.title}</span>
+    </>
+  );
   return (
     <div
       className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
-      <Link
-        href={href}
-        prefetch
-        onMouseEnter={onPrefetch}
-        onFocus={onPrefetch}
-        onClick={(event) => {
-          if (
-            event.button !== 0 ||
-            event.metaKey ||
-            event.ctrlKey ||
-            event.shiftKey ||
-            event.altKey
-          ) {
-            return;
-          }
-          onRequestComposerFocus();
-        }}
-        aria-current={active ? "page" : undefined}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        <SidebarChatStateIndicator state={state} />
-        <span className="truncate tracking-[-0.005em]">{chat.title}</span>
-      </Link>
-      <button
-        type="button"
-        title={pinned ? "Unpin chat" : "Pin chat"}
-        aria-label={pinned ? `Unpin ${chat.title}` : `Pin ${chat.title}`}
-        aria-pressed={pinned}
-        disabled={pinning}
-        onClick={onTogglePin}
-        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
-          pinned || pinning
-            ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-        }`}
-      >
-        {pinning ? (
-          <Loader2 size={12} strokeWidth={1.75} className="animate-spin" />
-        ) : (
-          <Pin size={11.5} strokeWidth={1.8} fill={pinned ? "currentColor" : "none"} />
-        )}
-      </button>
-      <button
-        type="button"
-        title="Archive chat"
-        aria-label={`Archive ${chat.title}`}
-        disabled={archiving}
-        onClick={onArchive}
-        className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
-          archiving
-            ? "opacity-100"
-            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-        }`}
-      >
-        {archiving ? (
-          <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
-        ) : (
-          <Archive size={13} strokeWidth={1.75} />
-        )}
-      </button>
+      {optimistic ? (
+        <button
+          type="button"
+          onClick={onRequestComposerFocus}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pl-2 pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          {content}
+        </button>
+      ) : (
+        <Link
+          href={href}
+          prefetch
+          onMouseEnter={onPrefetch}
+          onFocus={onPrefetch}
+          onClick={(event) => {
+            if (
+              event.button !== 0 ||
+              event.metaKey ||
+              event.ctrlKey ||
+              event.shiftKey ||
+              event.altKey
+            ) {
+              return;
+            }
+            onRequestComposerFocus();
+          }}
+          aria-current={active ? "page" : undefined}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          {content}
+        </Link>
+      )}
+      {optimistic ? null : (
+        <>
+          <button
+            type="button"
+            title={pinned ? "Unpin chat" : "Pin chat"}
+            aria-label={pinned ? `Unpin ${chat.title}` : `Pin ${chat.title}`}
+            aria-pressed={pinned}
+            disabled={pinning}
+            onClick={onTogglePin}
+            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+              pinned || pinning
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+            }`}
+          >
+            {pinning ? (
+              <Loader2 size={12} strokeWidth={1.75} className="animate-spin" />
+            ) : (
+              <Pin size={11.5} strokeWidth={1.8} fill={pinned ? "currentColor" : "none"} />
+            )}
+          </button>
+          <button
+            type="button"
+            title="Archive chat"
+            aria-label={`Archive ${chat.title}`}
+            disabled={archiving}
+            onClick={onArchive}
+            className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+              archiving
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+            }`}
+          >
+            {archiving ? (
+              <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
+            ) : (
+              <Archive size={13} strokeWidth={1.75} />
+            )}
+          </button>
+        </>
+      )}
     </div>
   );
 }
