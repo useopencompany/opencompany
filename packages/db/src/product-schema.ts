@@ -572,7 +572,7 @@ export type CodexChatTurnStatus =
   | "completed"
   | "failed"
   | "interrupted";
-export const CODEX_APP_SERVER_EVENT_TYPES = [
+export const CODING_HARNESS_EVENT_TYPES = [
   "assistant.delta",
   "assistant.completed",
   "reasoning.completed",
@@ -600,13 +600,13 @@ export const CODEX_APP_SERVER_EVENT_TYPES = [
   "error",
   "unknown",
 ] as const;
-export type CodexAppServerEventType = (typeof CODEX_APP_SERVER_EVENT_TYPES)[number];
+export type CodingHarnessEventType = (typeof CODING_HARNESS_EVENT_TYPES)[number];
 export type CodexChatEventType = Exclude<
-  CodexAppServerEventType,
+  CodingHarnessEventType,
   "assistant.delta" | "command.output"
 >;
 export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
-  CODEX_APP_SERVER_EVENT_TYPES.filter(
+  CODING_HARNESS_EVENT_TYPES.filter(
     (eventType): eventType is CodexChatEventType =>
       eventType !== "assistant.delta" && eventType !== "command.output",
   );
@@ -4792,7 +4792,7 @@ export const codexChatInteractions = productSchema.table(
     ),
     methodCheck: check(
       "goat_codex_chat_interactions_method_check",
-      sql`${table.method} = 'item/tool/requestUserInput'`,
+      sql`${table.method} = 'elicitation/create'`,
     ),
   }),
 );

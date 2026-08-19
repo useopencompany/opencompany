@@ -2,10 +2,10 @@ import { parseSlackBotEventCommand } from "@opencompany/agent/integrations/slack
 import { INFISICAL_US_HOST, isInfisicalHost } from "@opencompany/db/infisical-auth";
 import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
+import { registerAcpToolsMcpRoute } from "./acp-tools-mcp";
 import { alwaysAllowAction } from "./action-permissions";
 import { wakeBrainImportWorker } from "./brain-import-worker";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
-import { registerClaudeActionsMcpRoute } from "./claude-actions-mcp";
 import { pollCodexDeviceAuthFlow, startCodexDeviceAuthFlow } from "./codex-auth";
 import { wakeCodexChatWorker } from "./codex-chat-worker";
 import { CodingWorkspaceAccessError, mintCodingWorkspaceAccess } from "./coding-workspace-runtime";
@@ -62,12 +62,12 @@ export function createServer(
     }
   });
 
-  registerClaudeActionsMcpRoute(app, env);
+  registerAcpToolsMcpRoute(app, env);
 
   app.get("/healthz", async () => ({
     ok: true,
     service: "opencompany-runner",
-    capabilities: { claudeActionsMcp: "v2", brainWorkerAdmission: "postgres-v1" },
+    capabilities: { acpToolsMcp: "v3", brainWorkerAdmission: "postgres-v1" },
     environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
     release:
       process.env.RENDER_GIT_COMMIT ??

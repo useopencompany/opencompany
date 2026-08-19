@@ -6,6 +6,8 @@ import {
   CODEX_DYNAMIC_TOOL_NAME,
   CODEX_SUBAGENT_TOOL_PART_TYPE,
   type CodexUiMessagePart,
+  createAcpEventNormalizer,
+  createExternalEngineGatewayTicket,
   isActionHostToolContractVersion,
   isCodexReasoningEffort,
   shellQuote,
@@ -27,26 +29,39 @@ import {
   codexChatTurns,
   type HarnessSpec,
   integrations,
+  runApprovals,
 } from "@opencompany/db/product-schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, desc, eq, lt, lte, or, type SQL, sql } from "drizzle-orm";
+import { ACP_ENGINE_ADAPTERS } from "./acp-engine-adapters";
+import {
+  type AcpElicitationRequest,
+  type AcpElicitationResponse,
+  AcpHarness,
+  type AcpPermissionRequest,
+  type AcpPermissionResponse,
+  type AcpPromptBlock,
+} from "./acp-harness";
+import { buildAcpToolsMcpServers } from "./acp-tools-client";
 import { downloadBlobBytes } from "./attachment-hydration";
-import { createPublishArtifactDynamicTool } from "./chat-artifacts";
 import { loadCodexCliAuth, persistRefreshedCodexAuth } from "./codex";
-import { createCodexActionDynamicTools } from "./codex-action-tools";
-import { runCodexAppServerTurn } from "./codex-app-server";
-import { createCodexBrainCaptureDynamicTool } from "./codex-brain-capture-tool";
-import { createCodexBrainDynamicTool } from "./codex-brain-tool";
 import {
   CodexChatHandoffError,
   CodexChatLeaseLostError,
   CodexChatRetryableInfrastructureError,
   TaskTurnTerminalError,
 } from "./codex-chat-errors";
-import { createCodexChatProjector, loadCodexChatAssistantMessageParts } from "./codex-chat-events";
-import { ensureCodexInstalled } from "./codex-cli";
+import {
+  createExternalEngineProjector,
+  loadCodexChatAssistantMessageParts,
+} from "./codex-chat-events";
+import { buildCodexAcpCommandEnv, ensureCodexAcpAdapterInstalled } from "./codex-cli";
 import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
-import { createKnownSecretRedactor, gitAuthHeader } from "./coding-agent-shared";
+import {
+  buildGitHubCommandEnv,
+  createKnownSecretRedactor,
+  gitAuthHeader,
+} from "./coding-agent-shared";
 import {
   type CodingChatHistory,
   type CodingChatHistoryAttachmentMaterialization,
@@ -121,7 +136,7 @@ export async function runCodexChatTurn(input: {
 
   const initialParts = await loadCodexChatAssistantMessageParts(turn.assistantMessageId);
   const bareProjector = async () =>
-    createCodexChatProjector({
+    createExternalEngineProjector({
       target: {
         userWorkosId: turn.userWorkosId,
         workspaceId: session.workspaceId,
@@ -281,16 +296,42 @@ export async function runCodexChatTurn(input: {
   });
   const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
   const github = await loadGitHubAuthForUser(turn.userWorkosId);
+  const canonicalAttemptId = input.canonicalAttemptId;
+  const actionHostEnabled = isActionHostToolContractVersion(session.hostToolContractVersion);
+  const brainReadHostEnabled =
+    actionHostEnabled || session.hostToolContractVersion === CODEX_BRAIN_TOOL_CONTRACT_VERSION;
+  const hostGatewayEnabled =
+    brainReadHostEnabled &&
+    Boolean(session.workspaceId) &&
+    Boolean(env.runnerPublicUrl) &&
+    Boolean(canonicalAttemptId);
+  const brainToolEnabled = hostGatewayEnabled && brainReadHostEnabled && Boolean(session.brainRef);
+  const brainCaptureEnabled = hostGatewayEnabled && actionHostEnabled && Boolean(session.brainRef);
+  const actionToolsEnabled = hostGatewayEnabled && actionHostEnabled;
+  const artifactToolsEnabled = hostGatewayEnabled && actionHostEnabled;
+  const toolGatewayTicket =
+    hostGatewayEnabled && canonicalAttemptId
+      ? createExternalEngineGatewayTicket({
+          codexChatSessionId: session.id,
+          codexChatTurnId: turn.id,
+          attemptId: canonicalAttemptId,
+          leaseId,
+          secret: env.internalToken,
+          ttlMs: env.codexTimeoutMs + 10 * 60_000,
+        }).ticket
+      : null;
   const redact = createKnownSecretRedactor([
     serializedAuthJson,
     auth.kind === "api" ? auth.apiKeyValue : null,
     github?.githubToken ?? null,
     github?.githubAuthHeader ?? null,
     env.internalToken,
+    toolGatewayTicket,
     ...repositoryBootstrap.secretValues,
     ...infisicalAuth.redactionValues,
   ]);
-  const projector = createCodexChatProjector({
+  const acpNormalizer = createAcpEventNormalizer({ engineName: "Codex" });
+  const projector = createExternalEngineProjector({
     target: {
       userWorkosId: turn.userWorkosId,
       workspaceId: session.workspaceId,
@@ -312,6 +353,7 @@ export async function runCodexChatTurn(input: {
     // Resumes the parts already persisted for this message (normally empty; non-empty only if a
     // previous write landed before a transient failure of the same turn).
     initialParts,
+    normalizeEvent: acpNormalizer.normalize,
   });
 
   const checkExternalAbort = () => {
@@ -319,20 +361,10 @@ export async function runCodexChatTurn(input: {
     if (abort) throw abort;
   };
 
-  let recoveryHadPendingInteraction = false;
-  const recoveryHadPendingDynamicTool = Boolean(
-    input.recovery &&
-      initialParts.some(
-        (part) =>
-          part.type === "dynamic-tool" &&
-          part.toolName === CODEX_DYNAMIC_TOOL_NAME &&
-          part.state === "input-available",
-      ),
-  );
   if (input.recovery) {
-    // A server request belongs to the dead proxy connection and cannot be resumed. Settle it
+    // A client request belongs to the dead ACP connection and cannot be resumed. Settle it
     // before starting the recovery turn so a stale card cannot accept an unusable answer.
-    recoveryHadPendingInteraction = await projector.cancelPendingInteractions();
+    await projector.cancelPendingInteractions();
   }
 
   let outcome: "settled" | "handed_off" = "settled";
@@ -358,8 +390,8 @@ export async function runCodexChatTurn(input: {
       authCacheStaged = true;
       checkExternalAbort();
     }
-    executionStage = "ensure_codex";
-    await ensureCodexInstalled(sandbox);
+    executionStage = "ensure_codex_acp";
+    await ensureCodexAcpAdapterInstalled(sandbox);
     checkExternalAbort();
     executionStage = "load_skills";
     const sessionSkills = await loadCodexChatSessionSkills(turn);
@@ -370,7 +402,7 @@ export async function runCodexChatTurn(input: {
     });
     checkExternalAbort();
     executionStage = "materialize_skills";
-    const codexSkills = await materializeCodexSkillSnapshotsForSession({
+    await materializeCodexSkillSnapshotsForSession({
       sandbox,
       codexWorkRoot: CODEX_CHAT_WORKDIR,
       skills: turnSkills.snapshots.map((skill) => ({
@@ -384,10 +416,6 @@ export async function runCodexChatTurn(input: {
       })),
     });
     checkExternalAbort();
-    const invokedSkills = turnSkills.invokedSkillIds.map((skillId) => ({
-      name: skillId,
-      path: `${CODEX_CHAT_WORKDIR}/.agents/skills/${skillId}/SKILL.md`,
-    }));
     executionStage = "materialize_attachments";
     const materializedAttachments = await materializeCodexChatAttachments({
       sandbox,
@@ -403,65 +431,6 @@ export async function runCodexChatTurn(input: {
       leaseOwner,
       ...(shouldAbort ? { shouldAbort } : {}),
     });
-    const actionHostToolsEnabled = isActionHostToolContractVersion(session.hostToolContractVersion);
-    const brainToolEnabled =
-      Boolean(session.brainRef) &&
-      (actionHostToolsEnabled ||
-        session.hostToolContractVersion === CODEX_BRAIN_TOOL_CONTRACT_VERSION);
-    const brainCaptureEnabled =
-      Boolean(session.brainRef) &&
-      Boolean(session.workspaceId) &&
-      session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION;
-    const actionToolsEnabled = actionHostToolsEnabled && Boolean(session.workspaceId);
-    const artifactToolsEnabled = actionHostToolsEnabled && Boolean(session.workspaceId);
-    const dynamicTools = [
-      ...(artifactToolsEnabled && session.workspaceId
-        ? [
-            createPublishArtifactDynamicTool({
-              sandbox,
-              workDirectory: CODEX_CHAT_WORKDIR,
-              workspaceId: session.workspaceId,
-              userWorkosId: turn.userWorkosId,
-              chatSessionId: session.chatSessionId,
-              codexChatSessionId: session.id,
-              turnId: turn.id,
-              assistantMessageId: turn.assistantMessageId,
-              engine: "codex",
-              env,
-              checkAbort,
-            }),
-          ]
-        : []),
-      ...(brainToolEnabled && session.brainRef
-        ? [
-            createCodexBrainDynamicTool({
-              brainRef: session.brainRef,
-              userWorkosId: turn.userWorkosId,
-              chatSessionId: session.chatSessionId,
-              userMessageId: turn.userMessageId,
-              assistantMessageId: turn.assistantMessageId,
-              env,
-              checkAbort,
-            }),
-          ]
-        : []),
-      ...(brainCaptureEnabled
-        ? [
-            createCodexBrainCaptureDynamicTool({
-              codexChatSessionId: session.id,
-              codexChatTurnId: turn.id,
-              checkAbort,
-            }),
-          ]
-        : []),
-      ...(actionToolsEnabled
-        ? createCodexActionDynamicTools({
-            codexChatSessionId: session.id,
-            codexChatTurnId: turn.id,
-            checkAbort,
-          })
-        : []),
-    ];
     executionStage = "run_turn";
     const buildTask = (
       history: CodingChatHistory,
@@ -501,14 +470,10 @@ export async function runCodexChatTurn(input: {
             ...(historyAttachmentMaterialization ? { historyAttachmentMaterialization } : {}),
             taskContext,
           });
-    const summary = await runCodexAppServerTurn({
-      sandbox,
-      codexWorkRoot: CODEX_CHAT_WORKDIR,
-      codexHome: CODEX_CHAT_HOME,
-      skillFingerprint: codexSkills.fingerprint,
-      skills: invokedSkills,
-      task: buildTask(emptyCodingChatHistory()),
-      prepareBootstrapTurn: async () => {
+    const existingSessionId = sandboxReplaced ? null : session.codexThreadId;
+    let bootstrapPromise: Promise<{ task: string; prompt: AcpPromptBlock[] }> | null = null;
+    const prepareBootstrap = () => {
+      bootstrapPromise ??= (async () => {
         const historyAttachments = await materializeCodingChatHistory({
           sandbox,
           turnId: turn.id,
@@ -516,75 +481,132 @@ export async function runCodexChatTurn(input: {
           blobToken: env.blobReadWriteToken,
         });
         await checkAbort();
+        const freshTask = buildTask(conversationHistory, historyAttachments.materialization);
         return {
-          task: buildTask(conversationHistory, historyAttachments.materialization),
-          localImages: historyAttachments.localImages,
+          task: freshTask,
+          prompt: [
+            { type: "text" as const, text: freshTask },
+            ...materializedAttachments.imagePromptBlocks,
+            ...historyAttachments.imagePromptBlocks,
+          ],
         };
-      },
-      localImages: materializedAttachments.localImages,
-      dynamicTools,
+      })();
+      return bootstrapPromise;
+    };
+    const resumedTask = buildTask(emptyCodingChatHistory());
+    const bootstrap = existingSessionId ? null : await prepareBootstrap();
+    const task = bootstrap?.task ?? resumedTask;
+    const prompt: AcpPromptBlock[] = bootstrap?.prompt ?? [
+      { type: "text", text: task },
+      ...materializedAttachments.imagePromptBlocks,
+    ];
+    const mcpServers = toolGatewayTicket
+      ? buildAcpToolsMcpServers({
+          runnerPublicUrl: env.runnerPublicUrl,
+          ticket: toolGatewayTicket,
+        })
+      : [];
+    if (input.recovery) {
+      await claimCodexChatRecovery({
+        turn,
+        leaseId,
+        leaseOwner,
+        maxRecoveryAttempts: 10,
+        exhaustedMessage:
+          "This turn was interrupted by too many runner restarts to resume safely. Send your message again to continue.",
+      });
+    }
+    const reasoningEffort =
+      taskContext?.harnessSpec.codex?.reasoningEffort ??
+      settings.planModeReasoningEffort ??
+      settings.reasoningEffort;
+    const harnessResult = await new AcpHarness().runTurn({
+      adapter: ACP_ENGINE_ADAPTERS.codex,
+      sandbox,
+      workdir: CODEX_CHAT_WORKDIR,
+      task,
+      prepareFreshTask: async () => (await prepareBootstrap()).task,
+      prompt,
+      prepareFreshPrompt: async () => (await prepareBootstrap()).prompt,
+      existingSessionId,
+      mcpServers,
+      envs: buildCodexAcpCommandEnv({
+        auth,
+        codexHome: CODEX_CHAT_HOME,
+        ...(github
+          ? {
+              githubEnv: buildGitHubCommandEnv({
+                githubAuthHeader: github.githubAuthHeader,
+                githubToken: github.githubToken,
+                toolCallId: turn.id,
+              }),
+            }
+          : {}),
+      }),
       model: session.model || env.codexModel,
-      reasoningEffort: taskContext?.harnessSpec.codex?.reasoningEffort ?? settings.reasoningEffort,
-      planModeReasoningEffort: taskContext ? null : settings.planModeReasoningEffort,
-      goalMode: taskContext?.harnessSpec.codex?.goalMode ?? settings.goalMode,
-      existingEngineSessionId: sandboxReplaced ? null : session.codexThreadId,
-      existingEngineTurnId: input.recovery ? turn.codexTurnId : null,
-      existingEngineTurnBaselineIds: input.recovery ? turn.engineTurnBaselineIds : null,
-      reattachExistingTurn: Boolean(input.recovery),
-      forceRestartForRecovery: recoveryHadPendingInteraction || recoveryHadPendingDynamicTool,
-      auth,
-      githubAuth: {
-        githubToken: github?.githubToken ?? null,
-        githubAuthHeader: github?.githubAuthHeader ?? null,
-      },
+      reasoningEffort,
+      permissionMode: "bypassPermissions",
+      collaborationMode: planMode ? "plan" : "default",
+      goal: taskContext?.harnessSpec.codex?.goalMode ?? settings.goalMode,
       timeoutMs: env.codexTimeoutMs,
+      redact,
       checkAbort,
-      detachOnAbort: (error) => error instanceof CodexChatHandoffError,
       onRuntimeEvents: (events) => projector.push(events),
-      onEngineSessionId: (codexThreadId) =>
-        updateCodexChatSessionIfLeaseHeld({
+      onEngineSessionId: async (codexThreadId) => {
+        acpNormalizer.beginRun(codexThreadId);
+        if (codexThreadId === session.codexThreadId) return;
+        await updateCodexChatSessionIfLeaseHeld({
           turn,
           leaseId,
           leaseOwner,
           setSql: sql`codex_thread_id = ${codexThreadId}, updated_at = ${new Date()}`,
-        }),
-      onEngineTurnId: (codexTurnId) =>
-        persistCodexChatEngineTurnId({ turn, leaseId, leaseOwner, codexTurnId }),
-      onBeforeEngineTurnStart: (baselineTurnIds) =>
-        persistCodexChatEngineTurnBaseline({
+        });
+      },
+      onExistingSessionInvalidated: () =>
+        updateCodexChatSessionIfLeaseHeld({
           turn,
           leaseId,
           leaseOwner,
-          baselineTurnIds,
+          setSql: sql`codex_thread_id = NULL, updated_at = ${new Date()}`,
         }),
-      onRecoveryStart: () => claimCodexChatRecovery({ turn, leaseId, leaseOwner }),
-      onServerRequest: async (request) => {
-        if (request.method === "item/commandExecution/requestApproval") {
-          return { decision: "decline" };
-        }
-        if (request.method === "item/fileChange/requestApproval") {
-          return { decision: "decline" };
-        }
-        if (request.method === "item/permissions/requestApproval") {
-          return { permissions: [] };
-        }
-        if (request.method !== "item/tool/requestUserInput") {
-          throw new Error(`Unsupported Codex app-server request: ${request.method}`);
-        }
-
-        const { interactionId } = await projector.requestUserInput(request);
-        const resolution = await waitForCodexChatInteraction({
-          interactionId,
-          request: request.params,
+      onPermissionRequest: (request) =>
+        handleAcpPermissionRequest({
+          request,
+          projector,
+          turnId: turn.id,
           leaseId,
           timeoutMs: env.codexTimeoutMs,
           checkAbort,
-        });
-        await projector.resolveInteraction(interactionId, resolution?.status ?? "canceled");
-        return resolution?.response ?? { answers: {} };
-      },
-      onActivity: async () => undefined,
+        }),
+      onElicitationRequest: (request) =>
+        handleAcpElicitationRequest({
+          request,
+          projector,
+          engineSessionId: acpNormalizer.sessionId(),
+          turnId: turn.id,
+          leaseId,
+          timeoutMs: env.codexTimeoutMs,
+          checkAbort,
+        }),
     });
+    const acpSummary = acpNormalizer.summary();
+    const summary = acpSummary
+      ? {
+          sessionId: acpSummary.sessionId,
+          status: acpSummary.status === "success" ? ("success" as const) : ("error" as const),
+          result: acpSummary.result ?? "",
+          error: acpSummary.error,
+          usage: acpSummary.usage,
+          goal: acpSummary.goal,
+        }
+      : {
+          sessionId: harnessResult.sessionId,
+          status: "error" as const,
+          result: "",
+          error: "Codex ended without a result.",
+          usage: null,
+          goal: null,
+        };
 
     executionStage = "finalize";
     if (summary.sessionId && summary.sessionId !== session.codexThreadId) {
@@ -773,6 +795,210 @@ export async function codexChatTurnLeaseIsHeld(input: {
     LIMIT 1
   `);
   return rowsFromExecute(result).length > 0;
+}
+
+async function handleAcpPermissionRequest(input: {
+  request: AcpPermissionRequest;
+  projector: ReturnType<typeof createExternalEngineProjector>;
+  turnId: string;
+  leaseId: string;
+  timeoutMs: number;
+  checkAbort: () => Promise<void>;
+}): Promise<AcpPermissionResponse> {
+  const { approvalId } = await input.projector.requestApproval(input.request);
+  const deadline = Date.now() + input.timeoutMs;
+  while (Date.now() < deadline) {
+    await input.checkAbort();
+    const [approval] = await getDb()
+      .select({ status: runApprovals.status, resolution: runApprovals.resolution })
+      .from(runApprovals)
+      .where(and(eq(runApprovals.id, approvalId), eq(runApprovals.runId, input.turnId)))
+      .limit(1);
+    if (!approval || approval.status === "canceled") {
+      await input.projector.resolveApproval(approvalId, "canceled");
+      return { outcome: { outcome: "cancelled" } };
+    }
+    if (approval.status === "resolved") {
+      const approved = approval.resolution === "approved";
+      await input.projector.resolveApproval(approvalId, approved ? "approved" : "denied");
+      const optionId = selectPermissionOption(input.request, approved);
+      return optionId
+        ? { outcome: { outcome: "selected", optionId } }
+        : { outcome: { outcome: "cancelled" } };
+    }
+    await new Promise((resolve) => setTimeout(resolve, INTERACTION_POLL_INTERVAL_MS));
+  }
+  await input.projector.resolveApproval(approvalId, "canceled");
+  return { outcome: { outcome: "cancelled" } };
+}
+
+function selectPermissionOption(request: AcpPermissionRequest, approved: boolean) {
+  const options = Array.isArray(request.params.options) ? request.params.options : [];
+  const preferredKinds = approved
+    ? ["allow_once", "allow_always"]
+    : ["reject_once", "reject_always"];
+  for (const kind of preferredKinds) {
+    for (const value of options) {
+      const option = isRecord(value) ? value : null;
+      if (option?.kind === kind && typeof option.optionId === "string") return option.optionId;
+    }
+  }
+  return null;
+}
+
+async function handleAcpElicitationRequest(input: {
+  request: AcpElicitationRequest;
+  projector: ReturnType<typeof createExternalEngineProjector>;
+  engineSessionId: string | null;
+  turnId: string;
+  leaseId: string;
+  timeoutMs: number;
+  checkAbort: () => Promise<void>;
+}): Promise<AcpElicitationResponse> {
+  const userInputParams = elicitationUserInputParams({
+    params: input.request.params,
+    engineSessionId: input.engineSessionId,
+    turnId: input.turnId,
+  });
+  if (!userInputParams) return { action: "cancel" };
+  const { interactionId } = await input.projector.requestUserInput({
+    id: input.request.id,
+    method: "elicitation/create",
+    params: userInputParams,
+  });
+  const resolution = await waitForCodexChatInteraction({
+    interactionId,
+    request: userInputParams,
+    leaseId: input.leaseId,
+    timeoutMs: input.timeoutMs,
+    checkAbort: input.checkAbort,
+  });
+  await input.projector.resolveInteraction(interactionId, resolution?.status ?? "canceled");
+  if (!resolution) return { action: "cancel" };
+  const content = elicitationContent(input.request.params, resolution.response);
+  if (input.request.params.mode === "url") {
+    const decision = typeof content.confirm === "string" ? content.confirm : "";
+    return { action: decision === "Accept" ? "accept" : "decline", content: null };
+  }
+  return { action: "accept", content };
+}
+
+function elicitationUserInputParams(input: {
+  params: Record<string, unknown>;
+  engineSessionId: string | null;
+  turnId: string;
+}): Record<string, unknown> | null {
+  const message = typeof input.params.message === "string" ? input.params.message.trim() : "";
+  const itemId =
+    typeof input.params.toolCallId === "string" && input.params.toolCallId
+      ? input.params.toolCallId
+      : `acp-elicitation-${input.turnId}`;
+  if (input.params.mode === "url") {
+    const url = typeof input.params.url === "string" ? input.params.url : "";
+    return {
+      threadId: input.engineSessionId ?? "acp-session",
+      turnId: input.turnId,
+      itemId,
+      questions: [
+        {
+          id: "confirm",
+          header: "Continue",
+          question: [message, url].filter(Boolean).join("\n"),
+          options: [
+            { label: "Accept", description: "Continue with this URL flow." },
+            { label: "Decline", description: "Do not continue." },
+          ],
+        },
+      ],
+    };
+  }
+  if (input.params.mode !== "form") return null;
+  const schema = isRecord(input.params.requestedSchema) ? input.params.requestedSchema : null;
+  const properties = schema && isRecord(schema.properties) ? schema.properties : null;
+  if (!properties) return null;
+  const questions = Object.entries(properties)
+    .slice(0, 3)
+    .flatMap(([id, value]) => {
+      const property = isRecord(value) ? value : null;
+      if (!property) return [];
+      const choices = Array.isArray(property.oneOf)
+        ? property.oneOf.flatMap((choice) => {
+            const record = isRecord(choice) ? choice : null;
+            const label = typeof record?.title === "string" ? record.title : record?.const;
+            return typeof label === "string"
+              ? [
+                  {
+                    label,
+                    description: typeof record?.description === "string" ? record.description : "",
+                  },
+                ]
+              : [];
+          })
+        : [];
+      return [
+        {
+          id,
+          header: typeof property.title === "string" ? property.title : id,
+          question:
+            typeof property.description === "string" && property.description.trim()
+              ? property.description
+              : message || `Provide ${id}.`,
+          ...(choices.length ? { options: choices, isOther: true } : {}),
+          isSecret:
+            isRecord(property._meta) && readNestedBoolean(property._meta, ["codex", "isSecret"]),
+        },
+      ];
+    });
+  if (questions.length === 0) return null;
+  const autoResolutionMs = readNestedNumber(input.params, ["_meta", "codex", "autoResolutionMs"]);
+  return {
+    threadId: input.engineSessionId ?? "acp-session",
+    turnId: input.turnId,
+    itemId,
+    questions,
+    ...(autoResolutionMs != null ? { autoResolutionMs } : {}),
+  };
+}
+
+function elicitationContent(
+  params: Record<string, unknown>,
+  response: Record<string, unknown>,
+): Record<string, unknown> {
+  const answers = isRecord(response.answers) ? response.answers : {};
+  const schema = isRecord(params.requestedSchema) ? params.requestedSchema : {};
+  const properties = isRecord(schema.properties) ? schema.properties : {};
+  const content: Record<string, unknown> = {};
+  for (const [id, answer] of Object.entries(answers)) {
+    const values = isRecord(answer) && Array.isArray(answer.answers) ? answer.answers : [];
+    const strings = values.filter((value): value is string => typeof value === "string");
+    if (strings.length === 0) continue;
+    const property = isRecord(properties[id]) ? properties[id] : {};
+    const selected = elicitationConstForLabel(property, strings[0] as string);
+    content[id] = property.type === "array" ? strings : selected;
+  }
+  return content;
+}
+
+function elicitationConstForLabel(property: Record<string, unknown>, label: string) {
+  for (const choice of Array.isArray(property.oneOf) ? property.oneOf : []) {
+    const record = isRecord(choice) ? choice : null;
+    if (record?.title === label && record.const !== undefined) return record.const;
+  }
+  return label;
+}
+
+function readNestedNumber(value: unknown, path: string[]): number | null {
+  let current: unknown = value;
+  for (const key of path) current = isRecord(current) ? current[key] : null;
+  return typeof current === "number" && Number.isSafeInteger(current) && current >= 0
+    ? current
+    : null;
+}
+
+function readNestedBoolean(value: unknown, path: string[]) {
+  let current: unknown = value;
+  for (const key of path) current = isRecord(current) ? current[key] : null;
+  return current === true;
 }
 
 async function waitForCodexChatInteraction(input: {
@@ -1239,7 +1465,7 @@ function buildCodexChatRecoveryTask(input: {
 }) {
   return [
     "You are Codex running in a persistent cloud sandbox for an ongoing chat with a user.",
-    "The previous runner process died while handling this same user message. Continue from the durable sandbox, filesystem, git state, app-server thread, and persisted progress below instead of starting over.",
+    "The previous runner process died while handling this same user message. Continue from the durable sandbox, filesystem, git state, ACP session, and persisted progress below instead of starting over.",
     "First inspect the current filesystem, git state, and any relevant external state. Do not repeat completed work or rerun side-effecting commands until inspection proves that it is necessary.",
     input.githubAvailable
       ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Before pushing, opening a PR, or mutating GitHub, inspect the current remote/PR state so recovery is idempotent."
@@ -1322,6 +1548,7 @@ export async function materializeCodexChatAttachments(input: {
     return {
       paths: [],
       localImages: [],
+      imagePromptBlocks: [],
       materializedAttachments: [],
       unavailableAttachmentIds: [],
     };
@@ -1374,6 +1601,13 @@ export async function materializeCodexChatAttachments(input: {
     localImages: materializedFiles
       .filter((file) => file.attachment.kind === "image")
       .map((file) => ({ path: file.absolutePath, detail: "original" as const })),
+    imagePromptBlocks: materializedFiles
+      .filter((file) => file.attachment.kind === "image")
+      .map((file) => ({
+        type: "image" as const,
+        data: Buffer.from(file.content).toString("base64"),
+        mimeType: file.attachment.mediaType,
+      })),
     materializedAttachments: materializedFiles.map((file) => ({
       attachmentId: file.attachment.id,
       path: file.absolutePath,
@@ -1392,6 +1626,7 @@ export async function materializeCodingChatHistory(input: {
 }): Promise<{
   materialization: CodingChatHistoryAttachmentMaterialization;
   localImages: Array<{ path: string; detail: "original" }>;
+  imagePromptBlocks: AcpPromptBlock[];
 }> {
   const materialized = await materializeCodexChatAttachments({
     sandbox: input.sandbox,
@@ -1411,6 +1646,7 @@ export async function materializeCodingChatHistory(input: {
       unavailableAttachmentIds: new Set(materialized.unavailableAttachmentIds),
     },
     localImages: materialized.localImages,
+    imagePromptBlocks: materialized.imagePromptBlocks,
   };
 }
 

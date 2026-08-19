@@ -61,7 +61,212 @@ describe("createAcpEventNormalizer", () => {
         cache_creation_input_tokens: 2,
       },
       sessionId: "session_1",
+      goal: null,
     });
+  });
+
+  it("normalizes Codex goals, plans, nested subagents, terminal output, and MCP identity", () => {
+    const normalizer = createAcpEventNormalizer({ engineName: "Codex" });
+    normalizer.beginRun("session_1");
+
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "session_info_update",
+          _meta: {
+            goal: {
+              objective: "Finish the migration",
+              status: "active",
+              tokenBudget: 10_000,
+              tokensUsed: 250,
+              timeUsedSeconds: 30,
+            },
+          },
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "goal.updated",
+        payload: {
+          objective: "Finish the migration",
+          status: "active",
+          tokenBudget: 10_000,
+        },
+      },
+    ]);
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "plan_update",
+          planId: "plan_1",
+          plan: { content: "1. Inspect\n2. Implement" },
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "plan.updated",
+        payload: { itemId: "plan_1", text: "1. Inspect\n2. Implement" },
+      },
+    ]);
+
+    const [subagent] = normalizer.normalize(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "agent_1",
+        title: "Inspect the repository",
+        rawInput: { prompt: "Find the event adapter." },
+        _meta: { codex: { subagent: { threadId: "thread_child" } } },
+      }),
+    );
+    expect(subagent).toMatchObject({
+      type: "subagent.started",
+      payload: { itemId: "agent_1", prompt: "Find the event adapter." },
+    });
+
+    const [collaborator] = normalizer.normalize(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "agent_2",
+        title: "Review the adapter",
+        rawInput: { prompt: "Check the provider contract." },
+        _meta: { codex: { collaboration: { senderThreadId: "agent_1" } } },
+      }),
+    );
+    expect(collaborator).toMatchObject({
+      type: "subagent.started",
+      payload: { itemId: "agent_2", parentToolCallId: "agent_1" },
+    });
+
+    const [command] = normalizer.normalize(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "command_1",
+        title: "Run tests",
+        kind: "execute",
+        rawInput: { command: "bun test" },
+        _meta: { codex: { subagent: { parentToolCallId: "agent_1" } } },
+      }),
+    );
+    expect(command).toMatchObject({
+      type: "command.started",
+      payload: { parentToolCallId: "agent_1", command: "bun test" },
+    });
+    expect(
+      normalizer
+        .normalize(
+          update({
+            sessionUpdate: "tool_call_update",
+            toolCallId: "command_1",
+            status: "completed",
+            rawOutput: { exit_code: 0 },
+            _meta: { terminal_output: { data: "12 tests passed" } },
+          }),
+        )
+        .map((event) => event.type),
+    ).toEqual(["command.output", "command.completed"]);
+
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "mcp_1",
+          title: "List actions",
+          rawInput: { server: "opencompany", tool: "list_actions" },
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "mcp_tool.started",
+        payload: { server: "opencompany", tool: "list_actions" },
+      },
+    ]);
+
+    normalizer.normalize({
+      method: "session/prompt_result",
+      params: { sessionId: "session_1", stopReason: "end_turn" },
+    });
+    expect(normalizer.summary()?.goal).toEqual({
+      objective: "Finish the migration",
+      status: "active",
+      tokenBudget: 10_000,
+      tokensUsed: 250,
+      timeUsedSeconds: 30,
+    });
+  });
+
+  it("normalizes ACP reasoning, file edits, web searches, and provider usage updates", () => {
+    const normalizer = createAcpEventNormalizer({ engineName: "Codex" });
+    normalizer.beginRun("session_1");
+
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "agent_thought_chunk",
+          messageId: "thought_1",
+          content: { type: "text", text: "Inspecting the affected boundary." },
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "reasoning.completed",
+        payload: { itemId: "thought_1", text: "Inspecting the affected boundary." },
+      },
+    ]);
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "edit_1",
+          title: "Edit the adapter",
+          kind: "edit",
+          locations: [{ path: "apps/runner/src/acp-engine-adapters.ts" }],
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "file_change.started",
+        payload: {
+          itemId: "edit_1",
+          changes: [{ path: "apps/runner/src/acp-engine-adapters.ts", kind: "edit" }],
+        },
+      },
+    ]);
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "search_1",
+          title: "Search the web",
+          kind: "search",
+          rawInput: { query: "ACP steering extension" },
+          status: "completed",
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "web_search.started",
+        payload: { itemId: "search_1", query: "ACP steering extension" },
+      },
+      {
+        type: "web_search.completed",
+        payload: { itemId: "search_1", query: "ACP steering extension", status: "completed" },
+      },
+    ]);
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "usage_update",
+          used: 512,
+          size: 16_384,
+          cost: { amount: 0.01, currency: "USD" },
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "usage.updated",
+        payload: { contextUsage: { used: 512, size: 16_384 } },
+      },
+    ]);
   });
 
   it("nests subagent transcript events without adding child text to the root result", () => {

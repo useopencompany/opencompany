@@ -1,11 +1,13 @@
-import { CODEX_COMMAND_TOOL_PART_TYPE, type CodexUiMessagePart } from "@opencompany/agent-runtime";
-import type { WorkflowHarnessSpec } from "@opencompany/db/harness";
-import type { Task } from "@opencompany/db/product-schema";
-import { PgDialect } from "drizzle-orm/pg-core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CodexAppServerRequest } from "./codex-app-server";
 import {
-  CODEX_CHAT_HOME,
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
+  CODEX_COMMAND_TOOL_PART_TYPE,
+  type CodexUiMessagePart,
+  verifyExternalEngineGatewayTicket,
+} from "@opencompany/agent-runtime";
+import type { CodexChatSession, CodexChatTurn } from "@opencompany/db/product-schema";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AcpHarnessTurnInput } from "./acp-harness";
+import {
   CodexChatInterruptedError,
   claimCodexChatRecovery,
   createTurnAbortCheck,
@@ -13,93 +15,105 @@ import {
   runCodexChatTurn,
   summarizeCodexChatRecoveryProgress,
 } from "./codex-chat";
-import { CodexChatHandoffError, CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
+import { CodexChatHandoffError } from "./codex-chat-errors";
 import type { RunnerEnv } from "./env";
 
-const appServerMocks = vi.hoisted(() => ({
-  runCodexAppServerTurn: vi.fn(),
-}));
-
-const attachmentMocks = vi.hoisted(() => ({
-  downloadBlobBytes: vi.fn(),
-}));
-
-const codexAuthMocks = vi.hoisted(() => ({
+const acpMocks = vi.hoisted(() => ({ runTurn: vi.fn() }));
+const attachmentMocks = vi.hoisted(() => ({ downloadBlobBytes: vi.fn() }));
+const authMocks = vi.hoisted(() => ({
   loadCodexCliAuth: vi.fn(),
   persistRefreshedCodexAuth: vi.fn(),
 }));
-
-const codexToolMocks = vi.hoisted(() => ({
-  ensureCodexInstalled: vi.fn(),
+const cliMocks = vi.hoisted(() => ({
+  buildCodexAcpCommandEnv: vi.fn(),
+  ensureCodexAcpAdapterInstalled: vi.fn(),
 }));
-
-const historyMocks = vi.hoisted(() => ({
-  loadCodingChatHistory: vi.fn(),
-}));
-
 const dbMocks = vi.hoisted(() => ({
   selectRows: [] as unknown[][],
   execute: vi.fn(),
 }));
-
 const eventMocks = vi.hoisted(() => ({
-  createCodexChatProjector: vi.fn(),
+  createExternalEngineProjector: vi.fn(),
   loadCodexChatAssistantMessageParts: vi.fn(),
 }));
-
+const historyMocks = vi.hoisted(() => ({ loadCodingChatHistory: vi.fn() }));
+const repoMocks = vi.hoisted(() => ({
+  loadRepositoryBootstrap: vi.fn(),
+  stageRepositoryBootstrap: vi.fn(),
+}));
 const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
   isRetryableSandboxAcquisitionError: vi.fn(),
+  writeSandboxTextFiles: vi.fn(),
 }));
+const skillMocks = vi.hoisted(() => ({ materializeCodexSkillSnapshotsForSession: vi.fn() }));
 
-const repoBootstrapMocks = vi.hoisted(() => ({
-  loadRepositoryBootstrap: vi.fn(),
-  stageRepositoryBootstrap: vi.fn(),
-}));
-
-vi.mock("./codex-app-server", () => ({
-  runCodexAppServerTurn: appServerMocks.runCodexAppServerTurn,
+vi.mock("./acp-harness", () => ({
+  AcpHarness: class AcpHarness {
+    runTurn(input: AcpHarnessTurnInput) {
+      return acpMocks.runTurn(input);
+    }
+  },
 }));
 
 vi.mock("./attachment-hydration", () => ({
   downloadBlobBytes: attachmentMocks.downloadBlobBytes,
 }));
 
+vi.mock("./codex", () => ({
+  loadCodexCliAuth: authMocks.loadCodexCliAuth,
+  persistRefreshedCodexAuth: authMocks.persistRefreshedCodexAuth,
+}));
+
 vi.mock("./codex-cli", () => ({
-  ensureCodexInstalled: codexToolMocks.ensureCodexInstalled,
+  buildCodexAcpCommand: () => "exec codex-acp",
+  buildCodexAcpCommandEnv: cliMocks.buildCodexAcpCommandEnv,
+  ensureCodexAcpAdapterInstalled: cliMocks.ensureCodexAcpAdapterInstalled,
 }));
 
 vi.mock("./coding-agent-shared", () => ({
+  buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
   gitAuthHeader: (token: string) => `Authorization: Basic ${token}`,
 }));
 
 vi.mock("./coding-chat-history", async (importOriginal) => {
   const original = await importOriginal<typeof import("./coding-chat-history")>();
-  return {
-    ...original,
-    loadCodingChatHistory: historyMocks.loadCodingChatHistory,
-  };
+  return { ...original, loadCodingChatHistory: historyMocks.loadCodingChatHistory };
 });
+
+vi.mock("./codex-chat-events", () => ({
+  createExternalEngineProjector: eventMocks.createExternalEngineProjector,
+  loadCodexChatAssistantMessageParts: eventMocks.loadCodexChatAssistantMessageParts,
+}));
+
+vi.mock("./codex-managed-skills", () => ({
+  materializeCodexSkillSnapshotsForSession: skillMocks.materializeCodexSkillSnapshotsForSession,
+}));
 
 vi.mock("./db", () => ({
   getDb: () => queryBuilder(dbMocks.selectRows, dbMocks.execute),
 }));
 
-vi.mock("./github", () => ({
-  getGitHubWorkInstallationToken: vi.fn(),
-}));
+vi.mock("./github", () => ({ getGitHubWorkInstallationToken: vi.fn() }));
 
-vi.mock("./codex", () => ({
-  loadCodexCliAuth: codexAuthMocks.loadCodexCliAuth,
-  persistRefreshedCodexAuth: codexAuthMocks.persistRefreshedCodexAuth,
-}));
+vi.mock("./infisical-sandbox-auth", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./infisical-sandbox-auth")>();
+  return {
+    ...original,
+    reconcileInfisicalSandboxAuth: vi.fn(async () => ({
+      available: false,
+      promptFragment: "",
+      redactionValues: [],
+    })),
+  };
+});
 
-vi.mock("./codex-chat-events", () => ({
-  createCodexChatProjector: eventMocks.createCodexChatProjector,
-  loadCodexChatAssistantMessageParts: eventMocks.loadCodexChatAssistantMessageParts,
+vi.mock("./repo-bootstrap", () => ({
+  loadRepositoryBootstrap: repoMocks.loadRepositoryBootstrap,
+  stageRepositoryBootstrap: repoMocks.stageRepositoryBootstrap,
 }));
 
 vi.mock("./sandbox", () => ({
@@ -117,20 +131,7 @@ vi.mock("./sandbox", () => ({
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
   isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
-  writeSandboxTextFiles: vi.fn(
-    async (input: {
-      sandbox: { files: { write: (files: unknown) => Promise<void> } };
-      files: Array<{ path: string; content: unknown }>;
-    }) =>
-      input.sandbox.files.write(
-        input.files.map((file) => ({ path: file.path, data: file.content })),
-      ),
-  ),
-}));
-
-vi.mock("./repo-bootstrap", () => ({
-  loadRepositoryBootstrap: repoBootstrapMocks.loadRepositoryBootstrap,
-  stageRepositoryBootstrap: repoBootstrapMocks.stageRepositoryBootstrap,
+  writeSandboxTextFiles: sandboxMocks.writeSandboxTextFiles,
 }));
 
 describe("createTurnAbortCheck", () => {
@@ -158,11 +159,7 @@ describe("createTurnAbortCheck", () => {
 
   it("still hands off when the durable turn has no interrupt request", async () => {
     dbMocks.selectRows.push([
-      {
-        interruptRequestedAt: null,
-        leaseId: "lease_1",
-        leaseOwner: "runner_1",
-      },
+      { interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" },
     ]);
     const checkAbort = createTurnAbortCheck({
       turnId: "turn_1",
@@ -178,22 +175,12 @@ describe("createTurnAbortCheck", () => {
 describe("materializeCodingChatHistory", () => {
   it("keeps recovery usable when an old attachment blob is unavailable", async () => {
     attachmentMocks.downloadBlobBytes.mockRejectedValueOnce(new Error("Blob not found"));
-    const attachment = {
-      id: "attachment_missing",
-      kind: "image" as const,
-      mediaType: "image/png",
-      filename: "missing.png",
-      sizeBytes: 128,
-      blobPathname: "goat-chat/user_1/missing.png",
-      blobUrl: "https://blob.test/goat-chat/user_1/missing.png",
-    };
-
     const result = await materializeCodingChatHistory({
       sandbox: fakeSandbox("sbx_existing") as never,
       turnId: "turn_2",
       history: {
         messages: [],
-        materializableAttachments: [attachment],
+        materializableAttachments: [imageAttachment("attachment_missing")],
         omittedTurnCount: 0,
         omittedAttachmentCount: 0,
       },
@@ -204,980 +191,217 @@ describe("materializeCodingChatHistory", () => {
     expect(result.materialization.unavailableAttachmentIds).toEqual(
       new Set(["attachment_missing"]),
     );
+    expect(result.imagePromptBlocks).toEqual([]);
   });
 });
 
-describe("runCodexChatTurn", () => {
+describe("runCodexChatTurn over ACP", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbMocks.selectRows.length = 0;
     dbMocks.execute.mockReset().mockResolvedValue({ rows: [{ id: "updated" }] });
-    codexAuthMocks.loadCodexCliAuth.mockResolvedValue({
+    authMocks.loadCodexCliAuth.mockResolvedValue({
       kind: "api",
       baseUrl: "https://api.openai.test/v1",
       apiKeyEnvVar: "CODEX_API_KEY",
       apiKeyValue: "codex_secret",
       brokered: false,
     });
-    codexAuthMocks.persistRefreshedCodexAuth.mockResolvedValue(undefined);
-    codexToolMocks.ensureCodexInstalled.mockResolvedValue(undefined);
-    historyMocks.loadCodingChatHistory.mockResolvedValue({
-      messages: [],
-      materializableAttachments: [],
-      omittedTurnCount: 0,
-      omittedAttachmentCount: 0,
+    authMocks.persistRefreshedCodexAuth.mockResolvedValue(undefined);
+    cliMocks.buildCodexAcpCommandEnv.mockReturnValue({
+      CODEX_HOME: "/home/user/.opencompany-goat/codex-chat-home",
+      CODEX_CONFIG: "{}",
+      CODEX_API_KEY: "codex_secret",
     });
+    cliMocks.ensureCodexAcpAdapterInstalled.mockResolvedValue(undefined);
+    historyMocks.loadCodingChatHistory.mockResolvedValue(emptyHistory());
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
-    eventMocks.createCodexChatProjector.mockReturnValue({
-      push: vi.fn(async () => undefined),
-      finalize: vi.fn(async () => undefined),
-      fail: vi.fn(async () => undefined),
-      interrupted: vi.fn(async () => undefined),
-      cancelPendingInteractions: vi.fn(async () => false),
-    });
-    sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
-    sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
-    sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
-    sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
-    repoBootstrapMocks.loadRepositoryBootstrap.mockResolvedValue({
+    eventMocks.createExternalEngineProjector.mockImplementation(
+      (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
+        push: vi.fn(async (events: Record<string, unknown>[]) => {
+          for (const event of events) input.normalizeEvent?.(event);
+        }),
+        finalize: vi.fn(async () => undefined),
+        fail: vi.fn(async () => undefined),
+        interrupted: vi.fn(async () => undefined),
+        requestApproval: vi.fn(),
+        requestUserInput: vi.fn(),
+        resolveApproval: vi.fn(),
+        resolveInteraction: vi.fn(),
+        cancelPendingInteractions: vi.fn(async () => false),
+      }),
+    );
+    repoMocks.loadRepositoryBootstrap.mockResolvedValue({
       configs: [],
       promptFragment: "",
       secretValues: [],
     });
-    repoBootstrapMocks.stageRepositoryBootstrap.mockResolvedValue(undefined);
-    appServerMocks.runCodexAppServerTurn.mockImplementation(
-      async (input: { onBeforeEngineTurnStart?: (turnIds: string[]) => Promise<void> }) => {
-        await input.onBeforeEngineTurnStart?.(["turn_before"]);
-        return {
-          sessionId: "thread_existing",
-          status: "success",
-          result: "Done.",
-          error: null,
-          usage: null,
-          goal: null,
-        };
-      },
-    );
+    repoMocks.stageRepositoryBootstrap.mockResolvedValue(undefined);
+    sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
+    sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
+    sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
+    sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
+    sandboxMocks.writeSandboxTextFiles.mockResolvedValue(undefined);
+    skillMocks.materializeCodexSkillSnapshotsForSession.mockResolvedValue(undefined);
     attachmentMocks.downloadBlobBytes.mockResolvedValue(Buffer.from("image bytes"));
+    acpMocks.runTurn.mockImplementation(completeAcpTurn);
   });
 
-  it("fails closed for native Codex approval and permission requests", async () => {
-    appServerMocks.runCodexAppServerTurn.mockImplementationOnce(
-      async (input: {
-        onBeforeEngineTurnStart?: (turnIds: string[]) => Promise<void>;
-        onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
-      }) => {
-        await input.onBeforeEngineTurnStart?.(["turn_before"]);
-        expect(input.onServerRequest).toBeTypeOf("function");
-        const onServerRequest = input.onServerRequest!;
-        await expect(
-          onServerRequest({
-            id: "approval_1",
-            method: "item/commandExecution/requestApproval",
-            params: { threadId: "thread_1", turnId: "turn_1", itemId: "cmd_1" },
-          }),
-        ).resolves.toEqual({ decision: "decline" });
-        await expect(
-          onServerRequest({
-            id: "approval_2",
-            method: "item/fileChange/requestApproval",
-            params: { threadId: "thread_1", turnId: "turn_1", itemId: "patch_1" },
-          }),
-        ).resolves.toEqual({ decision: "decline" });
-        await expect(
-          onServerRequest({
-            id: "approval_3",
-            method: "item/permissions/requestApproval",
-            params: {
-              threadId: "thread_1",
-              turnId: "turn_1",
-              itemId: "permissions_1",
-              permissions: [{ type: "network" }],
-            },
-          }),
-        ).resolves.toEqual({ permissions: [] });
-        return {
-          sessionId: "thread_existing",
-          status: "success" as const,
-          result: "Done.",
-          error: null,
-          usage: null,
-          goal: null,
-        };
-      },
+  it("uses the Codex adapter with model, reasoning, plan, goal, and the shared MCP", async () => {
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn({
+          settings: {
+            reasoningEffort: "high",
+            planModeReasoningEffort: "xhigh",
+            goalMode: { objective: "Finish issue 1324", tokenBudget: 50_000 },
+          },
+        }),
+        session: codexSession({
+          workspaceId: "workspace_1",
+          brainRef: "brain_1",
+          hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
+        }),
+        canonicalAttemptId: "attempt_1",
+        env: env({ runnerPublicUrl: "https://runner.example.com" }),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(cliMocks.ensureCodexAcpAdapterInstalled).toHaveBeenCalledOnce();
+    expect(acpMocks.runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapter: expect.objectContaining({ id: "codex" }),
+        existingSessionId: "thread_existing",
+        model: "gpt-5.5",
+        reasoningEffort: "xhigh",
+        permissionMode: "bypassPermissions",
+        collaborationMode: "plan",
+        goal: { objective: "Finish issue 1324", tokenBudget: 50_000 },
+      }),
     );
+    const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
+    expect(harnessInput.task).toContain("list_actions and use_action");
+    expect(harnessInput.task).toContain("save_to_brain");
+    const [mcpServer] = harnessInput.mcpServers;
+    expect(mcpServer).toMatchObject({
+      name: "opencompany",
+      url: "https://runner.example.com/internal/goat/acp-tools",
+    });
+    if (!mcpServer || !("headers" in mcpServer)) throw new Error("Expected HTTP MCP server.");
+    const ticket = mcpServer?.headers.find(
+      (header) => header.name === "x-opencompany-tool-ticket",
+    )?.value;
+    expect(
+      verifyExternalEngineGatewayTicket({ ticket: ticket ?? "", secret: "internal" }),
+    ).toMatchObject({
+      codexChatSessionId: "goat_codex_chat_1",
+      codexChatTurnId: "goat_codex_turn_1",
+      attemptId: "attempt_1",
+      leaseId: "lease_1",
+    });
+  });
+
+  it("sends current-turn images as standard ACP prompt blocks", async () => {
+    dbMocks.selectRows.push([], [{ attachments: [imageAttachment("image_1")] }], []);
 
     await runCodexChatTurn({
       turn: codexTurn(),
       session: codexSession(),
       env: env(),
     });
+
+    const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
+    expect(harnessInput.prompt).toContainEqual({
+      type: "image",
+      data: Buffer.from("image bytes").toString("base64"),
+      mimeType: "image/png",
+    });
+    expect(harnessInput.task).toContain("image_1-screenshot.png");
   });
 
-  it("supplies durable history only when Codex must bootstrap a native thread", async () => {
-    const priorAttachment = {
-      id: "attachment_prior",
-      kind: "image" as const,
-      mediaType: "image/png",
-      filename: "architecture.png",
-      sizeBytes: 128,
-      blobPathname: "goat-chat/user_1/architecture.png",
-      blobUrl: "https://blob.test/goat-chat/user_1/architecture.png",
-    };
+  it("bootstraps durable history after ACP invalidates a stored session", async () => {
+    dbMocks.selectRows.push(
+      [],
+      [],
+      [],
+      [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
+    );
     historyMocks.loadCodingChatHistory.mockResolvedValueOnce({
       messages: [
-        {
-          role: "user",
-          content: "Inspect the repository.",
-          attachments: [
-            {
-              id: priorAttachment.id,
-              kind: priorAttachment.kind,
-              mediaType: priorAttachment.mediaType,
-              filename: priorAttachment.filename,
-            },
-          ],
-        },
+        { role: "user", content: "Inspect the repository.", attachments: [] },
         { role: "assistant", content: "It uses Next.js.", attachments: [] },
       ],
-      materializableAttachments: [priorAttachment],
+      materializableAttachments: [],
       omittedTurnCount: 0,
       omittedAttachmentCount: 0,
     });
+    let resumedTask = "";
+    let freshTask = "";
+    acpMocks.runTurn.mockImplementationOnce(async (input: AcpHarnessTurnInput) => {
+      resumedTask = input.task;
+      await input.onExistingSessionInvalidated();
+      freshTask = await input.prepareFreshTask();
+      await input.onEngineSessionId("thread_fresh");
+      await input.onRuntimeEvents(successfulAcpEvents("Recovered."));
+      return harnessResult("thread_fresh", false);
+    });
 
     await runCodexChatTurn({
-      turn: { ...codexTurn(), prompt: "What did we establish?" },
-      session: { ...codexSession(), codexThreadId: null },
+      turn: codexTurn({ prompt: "What did we establish?" }),
+      session: codexSession({ codexThreadId: "thread_missing" }),
       env: env(),
     });
 
-    const appServerInput = appServerMocks.runCodexAppServerTurn.mock.calls[0]?.[0];
-    expect(appServerInput).toEqual(
-      expect.objectContaining({
-        existingEngineSessionId: null,
-        task: expect.not.stringContaining("Inspect the repository."),
-        prepareBootstrapTurn: expect.any(Function),
-      }),
-    );
-    dbMocks.selectRows.push([
-      { interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" },
-    ]);
-    const prepared = await appServerInput?.prepareBootstrapTurn();
-    expect(prepared).toEqual(
-      expect.objectContaining({
-        task: expect.stringMatching(
-          /conversation_history_json[\s\S]*Inspect the repository\.[\s\S]*What did we establish\?/u,
-        ),
-        localImages: [
-          expect.objectContaining({
-            path: expect.stringContaining("attachment_prior-architecture.png"),
-            detail: "original",
-          }),
-        ],
-      }),
-    );
-    expect(prepared?.task).toContain("sandboxPath");
-  });
-
-  it("invalidates a Codex checkpoint when its sandbox is replaced", async () => {
-    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(fakeSandbox("sbx_replacement"));
-
-    await runCodexChatTurn({
-      turn: codexTurn(),
-      session: {
-        ...codexSession(),
-        sandboxId: "sbx_missing",
-        codexThreadId: "thread_missing",
-      },
-      env: env(),
-    });
-
-    const statements = dbMocks.execute.mock.calls.map(
-      ([query]) => new PgDialect().sqlToQuery(query).sql,
+    expect(resumedTask).not.toContain("Inspect the repository.");
+    expect(freshTask).toMatch(
+      /conversation_history_json[\s\S]*Inspect the repository\.[\s\S]*What did we establish\?/u,
     );
     expect(
-      statements.some((statement) => /sandbox_id = \$\d+, codex_thread_id = NULL/u.test(statement)),
+      dbMocks.execute.mock.calls.some(([query]) => sqlText(query).includes("codex_thread_id =")),
     ).toBe(true);
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ existingEngineSessionId: null }),
-    );
   });
 
-  it("materializes uploaded files and passes screenshots to Codex as local images", async () => {
-    dbMocks.selectRows.push(
-      [],
-      [
-        {
-          attachments: [
-            {
-              id: "goat_chat_att_1",
-              kind: "image",
-              mediaType: "image/png",
-              filename: "../screenshot one.png",
-              sizeBytes: 11,
-              blobPathname: "goat-chat/user_1/screenshot.png",
-              blobUrl: "https://blob.test/goat-chat/user_1/screenshot.png",
-            },
-          ],
-        },
-      ],
-    );
-    const sandbox = fakeSandbox("sbx_existing");
-    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-
+  it("cancels stale durable interactions before a reclaimed ACP turn", async () => {
     await runCodexChatTurn({
       turn: codexTurn(),
       session: codexSession(),
-      env: env({ blobReadWriteToken: "blob-token" }),
-    });
-
-    expect(attachmentMocks.downloadBlobBytes).toHaveBeenCalledWith(
-      "https://blob.test/goat-chat/user_1/screenshot.png",
-      "blob-token",
-    );
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: expect.stringContaining(
-            "/.opencompany-goat/codex-chat-attachments/goat_codex_turn_1/goat_chat_att_1-screenshot_one.png",
-          ),
-          data: Buffer.from("image bytes"),
-        }),
-      ]),
-    );
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.stringContaining(
-          ".opencompany-goat/codex-chat-attachments/goat_codex_turn_1/goat_chat_att_1-screenshot_one.png",
-        ),
-        localImages: [
-          {
-            path: expect.stringContaining(
-              "/.opencompany-goat/codex-chat-attachments/goat_codex_turn_1/goat_chat_att_1-screenshot_one.png",
-            ),
-            detail: "original",
-          },
-        ],
-      }),
-    );
-  });
-
-  it("persists a staged ChatGPT auth cache after an ordinary turn failure", async () => {
-    const auth = {
-      kind: "chatgpt" as const,
-      authJson: { tokens: { refresh_token: "refresh" } },
-      credentialLastRotatedAt: new Date("2026-08-01T12:00:00.000Z"),
-      brokered: false as const,
-    };
-    codexAuthMocks.loadCodexCliAuth.mockResolvedValueOnce(auth);
-    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(
-      new Error("Codex failed after rotating its auth cache."),
-    );
-
-    await expect(
-      runCodexChatTurn({
-        turn: codexTurn(),
-        session: codexSession(),
-        env: env(),
-      }),
-    ).resolves.toBe("settled");
-
-    expect(codexAuthMocks.persistRefreshedCodexAuth).toHaveBeenCalledOnce();
-    expect(codexAuthMocks.persistRefreshedCodexAuth).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userWorkosId: "user_1",
-        auth,
-        codexHome: CODEX_CHAT_HOME,
-      }),
-    );
-  });
-
-  it("stages workspace repository config and includes only its prompt fragment", async () => {
-    let resolveBootstrap:
-      | ((bootstrap: { configs: []; promptFragment: string; secretValues: string[] }) => void)
-      | undefined;
-    repoBootstrapMocks.loadRepositoryBootstrap.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveBootstrap = resolve;
-        }),
-    );
-    dbMocks.selectRows.push([]);
-    const sandbox = fakeSandbox("sbx_existing");
-    sandboxMocks.createOrConnectSandbox.mockImplementationOnce(async () => {
-      expect(resolveBootstrap).toBeTypeOf("function");
-      resolveBootstrap?.({
-        configs: [],
-        promptFragment:
-          '<repository_bootstrap>\nWhen working on "opencompany/app": its environment file is staged at "/opt/oc/repos/123/.env".\nAfter cloning a repository, read and follow its root AGENTS.md and CLAUDE.md files when present, before running setup or development commands.\n</repository_bootstrap>',
-        secretValues: ["never-project-this-secret"],
-      });
-      return sandbox;
-    });
-
-    await runCodexChatTurn({
-      turn: codexTurn(),
-      session: { ...codexSession(), workspaceId: "goat_ws_1" },
+      recovery: { reason: "lease_reclaimed" },
       env: env(),
     });
 
-    expect(repoBootstrapMocks.loadRepositoryBootstrap).toHaveBeenCalledWith("goat_ws_1", "user_1");
-    expect(repoBootstrapMocks.stageRepositoryBootstrap).toHaveBeenCalledWith({
-      sandbox,
-      bootstrap: expect.objectContaining({
-        secretValues: ["never-project-this-secret"],
-      }),
-    });
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.stringContaining("/opt/oc/repos/123/.env"),
-      }),
-    );
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.stringContaining("read and follow its root AGENTS.md and CLAUDE.md files"),
-      }),
-    );
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.cancelPendingInteractions).toHaveBeenCalledOnce();
+    expect(sqlText(dbMocks.execute.mock.calls[0]?.[0])).toContain("recovery_attempts");
   });
 
-  it("propagates repository bootstrap load failures so the worker can retry the turn", async () => {
-    const loadError = new Error("database unavailable");
-    repoBootstrapMocks.loadRepositoryBootstrap.mockRejectedValueOnce(loadError);
-    dbMocks.selectRows.push([]);
+  it("hands a turn off without finalizing when ACP is interrupted by shutdown", async () => {
+    acpMocks.runTurn.mockRejectedValueOnce(new CodexChatHandoffError());
 
     await expect(
-      runCodexChatTurn({
-        turn: codexTurn(),
-        session: { ...codexSession(), workspaceId: "goat_ws_1" },
-        env: env(),
-      }),
-    ).rejects.toBe(loadError);
-
-    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalled();
-    expect(appServerMocks.runCodexAppServerTurn).not.toHaveBeenCalled();
-  });
-
-  it("materializes every active session skill and only invokes skills activated by this message", async () => {
-    dbMocks.selectRows.push(
-      [],
-      [],
-      [
-        {
-          skillId: "review-work",
-          activatedMessageId: "goat_msg_user_previous",
-          name: "Review work",
-          description: "How reviews should happen.",
-          instructions: "Review the existing implementation.",
-          activatedAt: new Date("2026-07-10T11:00:00Z"),
-        },
-        {
-          skillId: "coding-work",
-          activatedMessageId: "goat_msg_user_1",
-          name: "Coding work",
-          description: "How coding work should happen.",
-          instructions: "Inspect, implement, and verify.",
-          activatedAt: new Date("2026-07-10T12:00:00Z"),
-        },
-      ],
-    );
-    const sandbox = fakeSandbox("sbx_existing");
-    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-
-    await runCodexChatTurn({
-      turn: codexTurn(),
-      session: codexSession(),
-      env: env(),
-    });
-
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        {
-          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/review-work/SKILL.md",
-          data: expect.stringContaining('name: "review-work"'),
-        },
-        {
-          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
-          data: expect.stringContaining('name: "coding-work"'),
-        },
-      ]),
-    );
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        skillFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
-        skills: [
-          {
-            name: "coding-work",
-            path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
-          },
-        ],
-      }),
-    );
-  });
-
-  it("materializes and invokes only the current workflow step skills for durable tasks", async () => {
-    dbMocks.execute.mockResolvedValue({ rows: [{ id: "updated", outcome: "updated" }] });
-    dbMocks.selectRows.push(
-      [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
-      [],
-      [],
-      [
-        {
-          skillId: "coding-work",
-          activatedMessageId: "goat_msg_user_previous",
-          name: "Coding work",
-          description: "An older interactive snapshot.",
-          instructions: "Use the older interactive instructions.",
-          activatedAt: new Date("2026-07-10T11:00:00Z"),
-        },
-        {
-          skillId: "chat-skill",
-          activatedMessageId: "goat_msg_user_1",
-          name: "Chat skill",
-          description: "A skill activated on this message.",
-          instructions: "Apply the current chat instructions.",
-          activatedAt: new Date("2026-07-10T12:00:00Z"),
-        },
-      ],
-    );
-    appServerMocks.runCodexAppServerTurn.mockResolvedValueOnce({
-      sessionId: "thread_existing",
-      status: "failed",
-      result: "",
-      error: "Expected test stop.",
-      usage: null,
-      goal: null,
-    });
-    const sandbox = fakeSandbox("sbx_existing");
-    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    const harnessSpec = workflowTaskHarnessSpec();
-
-    await runCodexChatTurn({
-      turn: codexTurn(),
-      session: codexSession(),
-      taskContext: {
-        task: workflowTask(harnessSpec),
-        harnessSpec,
-      },
-      env: env(),
-    });
-
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        {
-          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
-          data: expect.stringContaining("Use the immutable workflow instructions."),
-        },
-        {
-          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/chat-skill/SKILL.md",
-          data: expect.stringContaining("Apply the current chat instructions."),
-        },
-      ]),
-    );
-    expect(sandbox.files.write).not.toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/research-work/SKILL.md",
-        }),
-      ]),
-    );
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        skills: [
-          {
-            name: "chat-skill",
-            path: "/home/user/opencompany-goat/codex-chat/.agents/skills/chat-skill/SKILL.md",
-          },
-          {
-            name: "coding-work",
-            path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
-          },
-        ],
-      }),
-    );
-  });
-
-  it("reuses a stored sandbox id and rearms the 5 minute idle pause window after the turn", async () => {
-    dbMocks.selectRows.push([]);
-    const sandbox = fakeSandbox("sbx_existing");
-    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-
-    await runCodexChatTurn({
-      turn: codexTurn(),
-      session: codexSession(),
-      env: env(),
-    });
-
-    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sandboxId: "sbx_existing",
-        template: "codex",
-        idleTimeoutMs: 300_000,
-      }),
-    );
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        existingEngineSessionId: "thread_existing",
-        codexWorkRoot: "/home/user/opencompany-goat/codex-chat",
-        reasoningEffort: "xhigh",
-      }),
-    );
-    const statements = dbMocks.execute.mock.calls.map(([query]) => sqlText(query));
-    expect(statements).toContainEqual(
-      expect.stringContaining("SET engine_recovery_required = true"),
-    );
-    expect(statements).toContainEqual(expect.stringContaining("SET sandbox_timeout_armed_at"));
-    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
-  });
-
-  it("caps finished durable task sandbox parking at 5 minutes", async () => {
-    dbMocks.execute.mockResolvedValue({ rows: [{ id: "updated", outcome: "updated" }] });
-    dbMocks.selectRows.push(
-      [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
-      [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
-      [],
-      [],
-    );
-    appServerMocks.runCodexAppServerTurn.mockResolvedValueOnce({
-      sessionId: "thread_existing",
-      status: "failed",
-      result: "",
-      error: "Expected test stop.",
-      usage: null,
-      goal: null,
-    });
-    const sandbox = fakeSandbox("sbx_existing");
-    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    const harnessSpec = workflowTaskHarnessSpec();
-
-    await runCodexChatTurn({
-      turn: codexTurn(),
-      session: codexSession(),
-      taskContext: {
-        task: workflowTask(harnessSpec),
-        harnessSpec,
-      },
-      env: env({ codexChatIdleTimeoutMs: 30 * 60 * 1000 }),
-    });
-
-    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
-      expect.objectContaining({ idleTimeoutMs: 30 * 60 * 1000 }),
-    );
-    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
-  });
-
-  it("preserves the turn when sandbox acquisition fails transiently", async () => {
-    dbMocks.selectRows.push([]);
-    const capacity = new Error("500: Failed to place sandbox");
-    capacity.name = "SandboxError";
-    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(capacity);
-    sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValueOnce(true);
-
-    await expect(
-      runCodexChatTurn({
-        turn: codexTurn(),
-        session: codexSession(),
-        env: env(),
-      }),
-    ).rejects.toBeInstanceOf(CodexChatRetryableInfrastructureError);
-
-    expect(eventMocks.createCodexChatProjector).not.toHaveBeenCalled();
-    expect(appServerMocks.runCodexAppServerTurn).not.toHaveBeenCalled();
-  });
-
-  it("keeps permanent sandbox acquisition failures terminal", async () => {
-    dbMocks.selectRows.push([]);
-    const authentication = new Error("Unauthorized");
-    authentication.name = "AuthenticationError";
-    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(authentication);
-
-    await expect(
-      runCodexChatTurn({
-        turn: codexTurn(),
-        session: codexSession(),
-        env: env(),
-      }),
-    ).resolves.toBe("settled");
-
-    const projector = eventMocks.createCodexChatProjector.mock.results[0]?.value;
-    expect(projector.fail).toHaveBeenCalledWith(
-      "Codex sandbox could not be started: Unauthorized. Send your message again to retry.",
-    );
-  });
-
-  it("persists the engine turn baseline at the start boundary", async () => {
-    dbMocks.selectRows.push([]);
-
-    await runCodexChatTurn({
-      turn: codexTurn(),
-      session: codexSession(),
-      env: env(),
-    });
-
-    const recoveryBoundaryIndex = dbMocks.execute.mock.calls.findIndex(([query]) =>
-      sqlText(query).includes("engine_recovery_required = true"),
-    );
-    expect(recoveryBoundaryIndex).toBeGreaterThanOrEqual(0);
-    expect(sqlText(dbMocks.execute.mock.calls[recoveryBoundaryIndex]?.[0])).toContain(
-      "engine_turn_baseline_ids",
-    );
-  });
-
-  it("settles a deferred turn interrupted before sandbox acquisition", async () => {
-    dbMocks.selectRows.push([]);
-
-    await expect(
-      runCodexChatTurn({
-        turn: { ...codexTurn(), interruptRequestedAt: new Date("2026-07-10T09:01:00.000Z") },
-        session: codexSession(),
-        env: env(),
-        recovery: { reason: "lease_reclaimed" },
-      }),
-    ).resolves.toBe("settled");
-
-    const projector = eventMocks.createCodexChatProjector.mock.results[0]?.value;
-    expect(projector.interrupted).toHaveBeenCalledOnce();
-    expect(codexAuthMocks.loadCodexCliAuth).not.toHaveBeenCalled();
-    expect(sandboxMocks.createOrConnectSandbox).not.toHaveBeenCalled();
-  });
-
-  it("registers the Brain host tool only for a session pinned to its contract", async () => {
-    dbMocks.selectRows.push([]);
-
-    await runCodexChatTurn({
-      turn: codexTurn(),
-      session: {
-        ...codexSession(),
-        brainRef: "brain_1",
-        hostToolContractVersion: "goat-codex-brain.v1",
-      },
-      env: env(),
-    });
-
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.stringContaining(
-          "A read-only goat_brain tool is available for the Brain pinned to this chat.",
-        ),
-        dynamicTools: [
-          expect.objectContaining({
-            spec: expect.objectContaining({
-              type: "function",
-              name: "goat_brain",
-            }),
-          }),
-        ],
-      }),
-    );
-  });
-
-  it("detaches without settling the turn and keeps the sandbox alive for handoff", async () => {
-    dbMocks.selectRows.push([]);
-    const sandbox = fakeSandbox("sbx_existing");
-    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new CodexChatHandoffError());
-
-    await expect(
-      runCodexChatTurn({
-        turn: codexTurn(),
-        session: codexSession(),
-        env: env(),
-      }),
+      runCodexChatTurn({ turn: codexTurn(), session: codexSession(), env: env() }),
     ).resolves.toBe("handed_off");
 
-    const projector = eventMocks.createCodexChatProjector.mock.results[0]?.value;
-    expect(projector.cancelPendingInteractions).toHaveBeenCalledOnce();
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
     expect(projector.finalize).not.toHaveBeenCalled();
     expect(projector.fail).not.toHaveBeenCalled();
-    expect(projector.interrupted).not.toHaveBeenCalled();
-    expect(sandboxMocks.armSandboxActiveTimeoutById).toHaveBeenCalledWith("sbx_existing");
-    expect(sandboxMocks.armSandboxIdleTimeout).not.toHaveBeenCalled();
   });
 
-  it("treats a setup timeout after shutdown starts as a handoff", async () => {
-    dbMocks.selectRows.push([]);
-    const sandbox = fakeSandbox("sbx_existing");
-    let handoffRequested = false;
-    const timeout = new Error("the operation timed out");
-    timeout.name = "TimeoutError";
-    sandbox.commands.run.mockImplementationOnce(async () => {
-      handoffRequested = true;
-      throw timeout;
+  it("stages ChatGPT authentication for the ACP adapter", async () => {
+    authMocks.loadCodexCliAuth.mockResolvedValueOnce({
+      kind: "chatgpt",
+      authJson: { tokens: { access_token: "chatgpt-secret" } },
     });
-    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-
-    await expect(
-      runCodexChatTurn({
-        turn: codexTurn(),
-        session: codexSession(),
-        env: env(),
-        shouldAbort: () => (handoffRequested ? new CodexChatHandoffError() : null),
-      }),
-    ).resolves.toBe("handed_off");
-
-    const projector = eventMocks.createCodexChatProjector.mock.results[0]?.value;
-    expect(projector.cancelPendingInteractions).toHaveBeenCalledOnce();
-    expect(projector.fail).not.toHaveBeenCalled();
-    expect(appServerMocks.runCodexAppServerTurn).not.toHaveBeenCalled();
-    expect(sandboxMocks.armSandboxActiveTimeoutById).toHaveBeenCalledWith("sbx_existing");
-    expect(sandboxMocks.armSandboxIdleTimeout).not.toHaveBeenCalled();
-  });
-
-  it("does not park a sandbox after shutdown already released the lease", async () => {
-    dbMocks.selectRows.push([]);
-    dbMocks.execute.mockImplementation(async (query) => ({
-      rows: sqlText(query).includes("SELECT 1") ? [] : [{ id: "updated" }],
-    }));
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new CodexChatHandoffError());
 
-    await expect(
-      runCodexChatTurn({
-        turn: codexTurn(),
-        session: codexSession(),
-        env: env(),
-      }),
-    ).resolves.toBe("handed_off");
+    await runCodexChatTurn({ turn: codexTurn(), session: codexSession(), env: env() });
 
-    expect(sandboxMocks.armSandboxActiveTimeoutById).not.toHaveBeenCalled();
-    expect(sandboxMocks.armSandboxIdleTimeout).not.toHaveBeenCalled();
-  });
-
-  it("does not shorten the active timeout while a handed-off turn still owns its lease", async () => {
-    dbMocks.selectRows.push([]);
-    dbMocks.execute.mockImplementation(async () => ({ rows: [{ id: "owned" }] }));
-    const sandbox = fakeSandbox("sbx_existing");
-    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new CodexChatHandoffError());
-
-    await expect(
-      runCodexChatTurn({
-        turn: codexTurn(),
-        session: codexSession(),
-        env: env(),
-      }),
-    ).resolves.toBe("handed_off");
-
-    expect(sandboxMocks.armSandboxActiveTimeoutById).toHaveBeenCalledWith("sbx_existing");
-    expect(sandboxMocks.armSandboxIdleTimeout).not.toHaveBeenCalled();
-  });
-
-  it("persists first-turn engine ids before a handoff can detach the proxy", async () => {
-    dbMocks.selectRows.push([]);
-    appServerMocks.runCodexAppServerTurn.mockImplementationOnce(
-      async (input: {
-        onEngineSessionId?: (threadId: string) => Promise<void>;
-        onEngineTurnId?: (turnId: string) => Promise<void>;
-      }) => {
-        await input.onEngineSessionId?.("thread_new");
-        await input.onEngineTurnId?.("turn_new");
-        throw new CodexChatHandoffError();
-      },
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/.opencompany-goat/codex-chat-home/auth.json",
+      JSON.stringify({ tokens: { access_token: "chatgpt-secret" } }),
     );
-
-    await expect(
-      runCodexChatTurn({
-        turn: codexTurn(),
-        session: { ...codexSession(), codexThreadId: null },
-        env: env(),
-      }),
-    ).resolves.toBe("handed_off");
-
-    const statements = dbMocks.execute.mock.calls.map(([query]) => sqlText(query));
-    expect(statements).toContainEqual(expect.stringContaining("codex_thread_id"));
-    expect(statements).toContainEqual(expect.stringContaining("codex_turn_id"));
-  });
-
-  it("rearms recovery only after persisting a replacement engine turn", async () => {
-    dbMocks.selectRows.push([]);
-    appServerMocks.runCodexAppServerTurn.mockImplementationOnce(
-      async (input: {
-        onRecoveryStart?: () => Promise<void>;
-        onEngineTurnId?: (turnId: string) => Promise<void>;
-      }) => {
-        await input.onRecoveryStart?.();
-        await input.onEngineTurnId?.("turn_recovered");
-        return {
-          sessionId: "thread_existing",
-          status: "success",
-          result: "Done.",
-          error: null,
-          usage: null,
-          goal: null,
-        };
-      },
-    );
-
-    await runCodexChatTurn({
-      turn: {
-        ...codexTurn(),
-        attempts: 2,
-        codexTurnId: "turn_missing",
-        recoveryAttempts: 0,
-      },
-      session: codexSession(),
-      env: env(),
-      recovery: { reason: "lease_reclaimed" },
-    });
-
-    const statements = dbMocks.execute.mock.calls.map(([query]) => sqlText(query));
-    const recoveryClaimIndex = statements.findIndex((statement) =>
-      statement.includes("recovery_attempts = turn.recovery_attempts + 1"),
-    );
-    const replacementPersistIndex = statements.findIndex(
-      (statement) =>
-        statement.includes("codex_turn_id") &&
-        statement.includes("turn.codex_turn_id IS DISTINCT FROM") &&
-        statement.includes("THEN 0"),
-    );
-
-    expect(recoveryClaimIndex).toBeGreaterThanOrEqual(0);
-    expect(replacementPersistIndex).toBeGreaterThan(recoveryClaimIndex);
-  });
-
-  it("keeps recovery consumed when no replacement engine turn is persisted", async () => {
-    dbMocks.selectRows.push([]);
-    appServerMocks.runCodexAppServerTurn.mockImplementationOnce(
-      async (input: { onRecoveryStart?: () => Promise<void> }) => {
-        await input.onRecoveryStart?.();
-        throw new Error("turn/start failed");
-      },
-    );
-
-    await runCodexChatTurn({
-      turn: {
-        ...codexTurn(),
-        attempts: 2,
-        codexTurnId: "turn_missing",
-        recoveryAttempts: 0,
-      },
-      session: codexSession(),
-      env: env(),
-      recovery: { reason: "lease_reclaimed" },
-    });
-
-    const statements = dbMocks.execute.mock.calls.map(([query]) => sqlText(query));
-    expect(
-      statements.filter((statement) =>
-        statement.includes("recovery_attempts = turn.recovery_attempts + 1"),
-      ),
-    ).toHaveLength(1);
-    expect(
-      statements.some(
-        (statement) =>
-          statement.includes("codex_turn_id") &&
-          statement.includes("turn.codex_turn_id IS DISTINCT FROM"),
-      ),
-    ).toBe(false);
-  });
-
-  it("restarts the daemon before recovery when a dead proxy owned a user question", async () => {
-    dbMocks.selectRows.push([]);
-    const projector = {
-      push: vi.fn(async () => undefined),
-      finalize: vi.fn(async () => undefined),
-      fail: vi.fn(async () => undefined),
-      interrupted: vi.fn(async () => undefined),
-      cancelPendingInteractions: vi.fn(async () => true),
-    };
-    eventMocks.createCodexChatProjector.mockReturnValueOnce(projector);
-
-    await runCodexChatTurn({
-      turn: { ...codexTurn(), attempts: 2, codexTurnId: "turn_existing" },
-      session: codexSession(),
-      env: env(),
-      recovery: { reason: "lease_reclaimed" },
-    });
-
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        existingEngineTurnId: "turn_existing",
-        reattachExistingTurn: true,
-        forceRestartForRecovery: true,
-      }),
-    );
-  });
-
-  it("restarts the daemon before recovering a pending host tool call", async () => {
-    dbMocks.selectRows.push([]);
-    eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValueOnce([
-      {
-        type: "dynamic-tool",
-        toolName: "codex_dynamic_tool",
-        toolCallId: "dynamic_1",
-        state: "input-available",
-        input: { label: "Brain", tool: "goat_brain" },
-      },
-    ]);
-
-    await runCodexChatTurn({
-      turn: { ...codexTurn(), attempts: 2, codexTurnId: "turn_existing" },
-      session: {
-        ...codexSession(),
-        brainRef: "brain_1",
-        hostToolContractVersion: "goat-codex-brain.v1",
-      },
-      env: env(),
-      recovery: { reason: "lease_reclaimed" },
-    });
-
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        existingEngineTurnId: "turn_existing",
-        reattachExistingTurn: true,
-        forceRestartForRecovery: true,
-      }),
-    );
-  });
-
-  it("registers read-only action tools for v2 workspace-pinned sessions", async () => {
-    await runCodexChatTurn({
-      turn: codexTurn(),
-      session: {
-        ...codexSession(),
-        workspaceId: "workspace_1",
-        hostToolContractVersion: "goat-codex-host-tools.v2",
-      },
-      env: env(),
-    });
-
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        dynamicTools: [
-          expect.objectContaining({ spec: expect.objectContaining({ name: "publish_artifact" }) }),
-          expect.objectContaining({ spec: expect.objectContaining({ name: "list_actions" }) }),
-          expect.objectContaining({ spec: expect.objectContaining({ name: "use_action" }) }),
-        ],
-        task: expect.stringContaining("Read-only actions are available"),
-      }),
-    );
-  });
-
-  it("registers Brain capture for v3 Brain-pinned sessions", async () => {
-    await runCodexChatTurn({
-      turn: codexTurn(),
-      session: {
-        ...codexSession(),
-        brainRef: "brain_1",
-        workspaceId: "workspace_1",
-        hostToolContractVersion: "goat-codex-host-tools.v3",
-      },
-      env: env(),
-    });
-
-    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        dynamicTools: [
-          expect.objectContaining({ spec: expect.objectContaining({ name: "publish_artifact" }) }),
-          expect.objectContaining({ spec: expect.objectContaining({ name: "goat_brain" }) }),
-          expect.objectContaining({ spec: expect.objectContaining({ name: "save_to_brain" }) }),
-          expect.objectContaining({ spec: expect.objectContaining({ name: "list_actions" }) }),
-          expect.objectContaining({ spec: expect.objectContaining({ name: "use_action" }) }),
-        ],
-        task: expect.stringContaining(
-          "A save_to_brain tool is available for the Brain pinned to this chat.",
-        ),
-      }),
+    expect(cliMocks.buildCodexAcpCommandEnv).toHaveBeenCalledWith(
+      expect.objectContaining({ auth: expect.objectContaining({ kind: "chatgpt" }) }),
     );
   });
 });
@@ -1188,37 +412,18 @@ describe("claimCodexChatRecovery", () => {
     dbMocks.execute.mockReset().mockResolvedValue({ rows: [{ id: "goat_codex_turn_1" }] });
   });
 
-  it("caps recovery at a single attempt by default", async () => {
-    await claimCodexChatRecovery({
-      turn: codexTurn(),
-      leaseId: "lease_1",
-      leaseOwner: "runner_1",
-    });
-    const query = dbMocks.execute.mock.calls[0]?.[0];
-    expect(sqlText(query)).toContain("recovery_attempts <");
-    expect(sqlNumbers(query)).toContain(1);
-  });
-
-  it("allows a higher ceiling for idempotent engines (Claude Code)", async () => {
+  it("uses the configured recovery ceiling", async () => {
     await claimCodexChatRecovery({
       turn: codexTurn(),
       leaseId: "lease_1",
       leaseOwner: "runner_1",
       maxRecoveryAttempts: 10,
     });
-    const query = dbMocks.execute.mock.calls[0]?.[0];
-    expect(sqlText(query)).toContain("recovery_attempts <");
-    expect(sqlNumbers(query)).toContain(10);
+    expect(sqlText(dbMocks.execute.mock.calls[0]?.[0])).toContain("recovery_attempts <");
+    expect(sqlNumbers(dbMocks.execute.mock.calls[0]?.[0])).toContain(10);
   });
 
-  it("throws the default Codex message once the ceiling is reached", async () => {
-    dbMocks.execute.mockResolvedValue({ rows: [] });
-    await expect(
-      claimCodexChatRecovery({ turn: codexTurn(), leaseId: "lease_1", leaseOwner: "runner_1" }),
-    ).rejects.toThrow("could not safely resume this turn");
-  });
-
-  it("throws the provided message once a higher ceiling is exhausted", async () => {
+  it("throws the provided message once the ceiling is exhausted", async () => {
     dbMocks.execute.mockResolvedValue({ rows: [] });
     await expect(
       claimCodexChatRecovery({
@@ -1233,7 +438,7 @@ describe("claimCodexChatRecovery", () => {
 });
 
 describe("summarizeCodexChatRecoveryProgress", () => {
-  it("summarizes persisted assistant progress for a recovery prompt", () => {
+  it("summarizes durable partial output and in-flight commands", () => {
     const parts: CodexUiMessagePart[] = [
       { type: "text", text: "I inspected the repo." },
       {
@@ -1249,26 +454,74 @@ describe("summarizeCodexChatRecoveryProgress", () => {
         state: "input-available",
         input: { command: "git push origin branch" },
       },
-      {
-        type: "dynamic-tool",
-        toolName: "codex_goal",
-        toolCallId: "goal_1",
-        state: "output-available",
-        input: { objective: "Open a PR" },
-        output: { status: "active", objective: "Open a PR" },
-      },
     ];
 
-    expect(summarizeCodexChatRecoveryProgress(parts)).toContain("Assistant: I inspected the repo.");
-    expect(summarizeCodexChatRecoveryProgress(parts)).toContain(
-      "Command completed, exit 0: bun test",
-    );
-    expect(summarizeCodexChatRecoveryProgress(parts)).toContain(
-      "Command started without a persisted result: git push origin branch",
-    );
-    expect(summarizeCodexChatRecoveryProgress(parts)).toContain("codex_goal active: Open a PR");
+    const summary = summarizeCodexChatRecoveryProgress(parts);
+    expect(summary).toContain("Assistant: I inspected the repo.");
+    expect(summary).toContain("Command completed, exit 0: bun test");
+    expect(summary).toContain("Command started without a persisted result: git push origin branch");
   });
 });
+
+async function completeAcpTurn(input: AcpHarnessTurnInput) {
+  await input.onEngineSessionId(input.existingSessionId ?? "thread_new");
+  await input.onRuntimeEvents(successfulAcpEvents("Done over ACP."));
+  return harnessResult(input.existingSessionId ?? "thread_new", Boolean(input.existingSessionId));
+}
+
+function successfulAcpEvents(result: string): Record<string, unknown>[] {
+  return [
+    {
+      method: "session/update",
+      params: {
+        sessionId: "thread_existing",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "message_1",
+          content: { type: "text", text: result },
+        },
+      },
+    },
+    {
+      method: "session/prompt_result",
+      params: {
+        sessionId: "thread_existing",
+        stopReason: "end_turn",
+        usage: { inputTokens: 12, outputTokens: 4 },
+      },
+    },
+  ];
+}
+
+function harnessResult(sessionId: string, loadedSession: boolean) {
+  return {
+    sessionId,
+    loadedSession,
+    promptResponse: { stopReason: "end_turn" },
+    stderrTail: "",
+  };
+}
+
+function emptyHistory() {
+  return {
+    messages: [],
+    materializableAttachments: [],
+    omittedTurnCount: 0,
+    omittedAttachmentCount: 0,
+  };
+}
+
+function imageAttachment(id: string) {
+  return {
+    id,
+    kind: "image" as const,
+    mediaType: "image/png",
+    filename: "screenshot.png",
+    sizeBytes: 128,
+    blobPathname: `goat-chat/user_1/${id}.png`,
+    blobUrl: `https://blob.test/goat-chat/user_1/${id}.png`,
+  };
+}
 
 function queryBuilder(rows: unknown[][], execute: ReturnType<typeof vi.fn>) {
   const builder = {
@@ -1303,8 +556,6 @@ function sqlText(query: unknown): string {
     .join("");
 }
 
-// Embedded numeric `${value}` interpolations land in queryChunks as raw Number chunks that
-// sqlText intentionally skips; expose them so tests can assert on bound integer values.
 function sqlNumbers(query: unknown): number[] {
   const chunks = (query as { queryChunks?: unknown[] }).queryChunks ?? [];
   return chunks.filter((chunk): chunk is number => typeof chunk === "number");
@@ -1313,9 +564,7 @@ function sqlNumbers(query: unknown): number[] {
 function fakeSandbox(sandboxId: string) {
   return {
     sandboxId,
-    commands: {
-      run: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
-    },
+    commands: { run: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })) },
     files: {
       write: vi.fn(async () => undefined),
       read: vi.fn(async () => "{}"),
@@ -1323,7 +572,7 @@ function fakeSandbox(sandboxId: string) {
   };
 }
 
-function codexSession() {
+function codexSession(overrides: Partial<CodexChatSession> = {}): CodexChatSession {
   const now = new Date("2026-07-10T12:00:00Z");
   return {
     id: "goat_codex_chat_1",
@@ -1342,10 +591,11 @@ function codexSession() {
     sandboxTimeoutArmedAt: null,
     createdAt: now,
     updatedAt: now,
-  } as const;
+    ...overrides,
+  };
 }
 
-function codexTurn() {
+function codexTurn(overrides: Partial<CodexChatTurn> = {}): CodexChatTurn {
   const now = new Date("2026-07-10T12:00:00Z");
   return {
     id: "goat_codex_turn_1",
@@ -1372,99 +622,7 @@ function codexTurn() {
     completedAt: null,
     createdAt: now,
     updatedAt: now,
-  } as const;
-}
-
-function workflowTaskHarnessSpec(): WorkflowHarnessSpec {
-  return {
-    schemaVersion: "goat.harness.v1",
-    engine: "codex",
-    model: "openai/gpt-5.5",
-    systemPrompt: "Implement and verify the change.",
-    systemBlocks: ["Implement and verify the change."],
-    initialUserMessage: "Ship the requested change.",
-    tools: [],
-    skills: [],
-    maxModelSteps: 16,
-    resultMode: "assistant_final",
-    workflow: {
-      id: "workflow_1",
-      workspaceId: "workspace_1",
-      skillIds: ["research-work", "coding-work"],
-      currentStepIndex: 1,
-      completedStepCount: 1,
-      steps: [
-        {
-          index: 0,
-          title: "Research",
-          engine: "opencompany",
-          model: "moonshotai/kimi-k2.6",
-          systemPrompt: "Research the change.",
-          systemBlocks: ["Research the change."],
-          skillIds: ["research-work"],
-        },
-        {
-          index: 1,
-          title: "Implement",
-          engine: "codex",
-          model: "openai/gpt-5.5",
-          systemPrompt: "Implement and verify the change.",
-          systemBlocks: ["Implement and verify the change."],
-          skillIds: ["coding-work"],
-        },
-      ],
-      skillSnapshots: [
-        {
-          id: "research-work",
-          name: "Research work",
-          description: "How to research.",
-          instructions: "Use the research instructions.",
-        },
-        {
-          id: "coding-work",
-          name: "Coding work",
-          description: "How to implement.",
-          instructions: "Use the immutable workflow instructions.",
-        },
-      ],
-    },
-  };
-}
-
-function workflowTask(harnessSpec: WorkflowHarnessSpec): Task {
-  const now = new Date("2026-07-10T12:00:00Z");
-  return {
-    id: "goat_task_1",
-    displayId: "TASK-1",
-    name: "Ship workflow",
-    userWorkosId: "user_1",
-    workspaceId: "workspace_1",
-    prompt: "Ship the requested change.",
-    source: "workflow",
-    model: harnessSpec.model,
-    sessionId: "goat_chat_1",
-    scheduleId: null,
-    scheduledFor: null,
-    status: "running",
-    stage: "running",
-    result: null,
-    error: null,
-    workflowId: "workflow_1",
-    workflowBrainRef: null,
-    reportedOutcome: null,
-    outcomeComment: null,
-    harnessSpec,
-    debugTrace: {},
-    codexEngineSessionId: null,
-    sandboxId: null,
-    attempts: 1,
-    nextRunAt: now,
-    leaseId: null,
-    leaseOwner: null,
-    leaseExpiresAt: null,
-    archivedAt: null,
-    createdAt: now,
-    updatedAt: now,
+    ...overrides,
   };
 }
 

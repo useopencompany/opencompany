@@ -1,23 +1,22 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-// Claude Code's `claude` process runs inside the sandbox and can only call custom
-// tools over MCP, which it initiates itself — unlike Codex, where dynamic tool calls
-// round-trip through the trusted runner host process and the raw RUNNER_INTERNAL_TOKEN
-// never enters the sandbox. Handing the sandboxed agent that broad, multi-route token
+// External engines run inside the sandbox and initiate MCP calls themselves. The raw
+// RUNNER_INTERNAL_TOKEN must never enter that sandbox: handing an engine the broad,
+// multi-route token
 // would let a leaked ticket reach the brain-capture and task-runner routes too. This
 // ticket is a narrow, short-lived capability bound to one persisted session, Run,
 // Attempt, and lease. It carries no Actor or workspace identity and grants no access
 // to other runner routes, the same way createCodingWorkspaceTicket scopes preview access.
 const TICKET_VERSION = 2;
 
-export type ClaudeActionGatewayLegacyTicketPayload = {
+export type ExternalEngineGatewayLegacyTicketPayload = {
   v: 1;
   codexChatSessionId: string;
   codexChatTurnId: string;
   expiresAt: number;
 };
 
-export type ClaudeActionGatewayTicketPayload = {
+export type ExternalEngineGatewayTicketPayload = {
   v: 2;
   codexChatSessionId: string;
   codexChatTurnId: string;
@@ -26,11 +25,11 @@ export type ClaudeActionGatewayTicketPayload = {
   expiresAt: number;
 };
 
-export type VerifiedClaudeActionGatewayTicket =
-  | ClaudeActionGatewayLegacyTicketPayload
-  | ClaudeActionGatewayTicketPayload;
+export type VerifiedExternalEngineGatewayTicket =
+  | ExternalEngineGatewayLegacyTicketPayload
+  | ExternalEngineGatewayTicketPayload;
 
-export function createClaudeActionGatewayTicket(input: {
+export function createExternalEngineGatewayTicket(input: {
   codexChatSessionId: string;
   codexChatTurnId: string;
   attemptId: string;
@@ -48,18 +47,18 @@ export function createClaudeActionGatewayTicket(input: {
       attemptId: input.attemptId,
       leaseId: input.leaseId,
       expiresAt,
-    } satisfies ClaudeActionGatewayTicketPayload),
+    } satisfies ExternalEngineGatewayTicketPayload),
   ).toString("base64url");
   const signature = sign(encodedPayload, input.secret);
 
   return { ticket: `${encodedPayload}.${signature}`, expiresAt };
 }
 
-export function verifyClaudeActionGatewayTicket(input: {
+export function verifyExternalEngineGatewayTicket(input: {
   ticket: string;
   secret: string;
   now?: number;
-}): VerifiedClaudeActionGatewayTicket | null {
+}): VerifiedExternalEngineGatewayTicket | null {
   if (!input.ticket || input.ticket.length > 4_096) return null;
   const separator = input.ticket.lastIndexOf(".");
   if (separator <= 0) return null;
@@ -71,7 +70,7 @@ export function verifyClaudeActionGatewayTicket(input: {
   try {
     const value = JSON.parse(
       Buffer.from(encodedPayload, "base64url").toString("utf8"),
-    ) as Partial<VerifiedClaudeActionGatewayTicket>;
+    ) as Partial<VerifiedExternalEngineGatewayTicket>;
     if (
       (value.v !== 1 && value.v !== TICKET_VERSION) ||
       typeof value.codexChatSessionId !== "string" ||
@@ -93,13 +92,15 @@ export function verifyClaudeActionGatewayTicket(input: {
     ) {
       return null;
     }
-    return value as VerifiedClaudeActionGatewayTicket;
+    return value as VerifiedExternalEngineGatewayTicket;
   } catch {
     return null;
   }
 }
 
 function sign(value: string, secret: string) {
+  // Keep the original HMAC domain separator so already-minted v1/v2 capabilities
+  // remain valid through a rolling deployment.
   return createHmac("sha256", secret)
     .update("goat-claude-action-gateway-ticket")
     .update("\0")
