@@ -53,8 +53,8 @@ const ELECTRIC_RESPONSE_HEADERS = [
   "electric-up-to-date",
 ] as const;
 
-// These columns cross the API boundary as decoded JSON values. Omitting their upstream JSONB
-// metadata prevents @electric-sql/client from parsing the already-decoded values a second time.
+// These fields cross the API boundary as decoded values. Omitting their upstream type metadata
+// prevents @electric-sql/client from parsing the already-decoded values a second time.
 const PREDECODED_READ_MODEL_FIELDS = new Set([
   "presentation",
   "attachments",
@@ -67,6 +67,9 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "aliases",
   "scopes",
   "capabilityModes",
+  "hasUnseen",
+  "enabled",
+  "planPaused",
 ]);
 
 export interface ReadModelService {
@@ -688,6 +691,9 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
   if (name.endsWith("At") || name === "at" || name === "scheduledFor") {
     return timestampValue(value);
   }
+  if (name === "hasUnseen" || name === "enabled" || name === "planPaused") {
+    return booleanValue(value);
+  }
   if (
     name === "attemptCount" ||
     name === "version" ||
@@ -840,6 +846,13 @@ function boundedNullableString(value: unknown, limit: number) {
 function numberValue(value: unknown) {
   const number = typeof value === "number" ? value : Number(value);
   return Number.isFinite(number) ? number : value;
+}
+
+function booleanValue(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (value === "true" || value === "t") return true;
+  if (value === "false" || value === "f") return false;
+  return value;
 }
 
 function jsonValue(value: unknown) {
@@ -1194,7 +1207,11 @@ function conversationRuntimeValue(row: Record<string, unknown>) {
         ? [
             [
               publicName,
-              publicName === "updatedAt" ? timestampValue(row[physicalName]) : row[physicalName],
+              publicName === "updatedAt"
+                ? timestampValue(row[physicalName])
+                : publicName === "hasError"
+                  ? booleanValue(row[physicalName])
+                  : row[physicalName],
             ],
           ]
         : [],
