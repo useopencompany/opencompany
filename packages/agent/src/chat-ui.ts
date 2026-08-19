@@ -621,6 +621,9 @@ export type ChatSessionView = {
   engine?: ChatEngine;
   codexComposerSettings?: CodexComposerSettingsView | null;
   codexRuntime?: CodexRuntimeView | null;
+  activityState?: "working" | "idle";
+  hasUnseen?: boolean;
+  updatedAt?: string;
   messages: ChatUiMessage[];
 };
 
@@ -640,6 +643,10 @@ export type ChatSummaryView = {
   engine?: ChatEngine;
   codexComposerSettings?: CodexComposerSettingsView | null;
   codexRuntime?: CodexRuntimeView | null;
+  activityState?: "working" | "idle";
+  hasUnseen?: boolean;
+  // Compatibility fallback for optimistic and rolling-deploy snapshots. Live API rows own
+  // activityState/hasUnseen and always take precedence.
   state?: ChatState;
   preview: string;
   updatedAt: string;
@@ -650,27 +657,12 @@ export type ChatSummaryView = {
 
 export const PINNED_CHAT_LIMIT = 20;
 
-export function deriveChatState(input: {
-  updatedAt: string;
-  lastSeenAt?: string | null;
-  codexRuntime?: { status?: string | null; activeTurnId?: string | null } | null;
-}): ChatState {
-  if (isChatRuntimeActive(input.codexRuntime)) return "working";
-  if (!input.lastSeenAt) return "done_unseen";
-
-  const lastSeenAt = Date.parse(input.lastSeenAt);
-  const updatedAt = Date.parse(input.updatedAt);
-  if (!Number.isFinite(lastSeenAt) || !Number.isFinite(updatedAt)) return "done_unseen";
-  return lastSeenAt >= updatedAt ? "done_seen" : "done_unseen";
-}
-
 export function chatSummaryState(
-  chat: Pick<ChatSummaryView, "codexRuntime" | "lastSeenAt" | "state" | "updatedAt">,
+  chat: Pick<ChatSummaryView, "activityState" | "hasUnseen" | "state">,
 ): ChatState {
-  if (isChatRuntimeActive(chat.codexRuntime)) return "working";
-  if (chat.state) return chat.state;
-  if (chat.lastSeenAt === undefined) return "done_seen";
-  return deriveChatState(chat);
+  if (chat.activityState === "working") return "working";
+  if (chat.activityState === "idle") return chat.hasUnseen ? "done_unseen" : "done_seen";
+  return chat.state ?? "done_seen";
 }
 
 export function isChatRuntimeActive(

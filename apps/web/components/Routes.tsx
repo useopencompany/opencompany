@@ -106,6 +106,9 @@ export function HomeRoute({
       engine: summary.engine,
       codexComposerSettings: summary.codexComposerSettings ?? null,
       codexRuntime: summary.codexRuntime ?? null,
+      ...(summary.activityState ? { activityState: summary.activityState } : {}),
+      ...(summary.hasUnseen !== undefined ? { hasUnseen: summary.hasUnseen } : {}),
+      updatedAt: summary.updatedAt,
       messages: [],
     };
   }, [chatId, data.recentChats, routeInitialChat]);

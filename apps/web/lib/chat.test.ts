@@ -11,6 +11,8 @@ const conversation = {
   title: "Launch plan",
   engine: "opencompany",
   model: "anthropic/claude-sonnet-5",
+  activityState: "idle",
+  hasUnseen: true,
   createdAt: "2026-08-13T09:00:00.000Z",
   updatedAt: "2026-08-13T10:00:00.000Z",
 };
@@ -64,6 +66,9 @@ describe("canonical Chat server reads", () => {
       model: conversation.model,
       codexComposerSettings: null,
       codexRuntime: null,
+      activityState: conversation.activityState,
+      hasUnseen: conversation.hasUnseen,
+      updatedAt: conversation.updatedAt,
       messages: [],
     });
   });

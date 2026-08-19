@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => {
   return {
     liveQueryResult,
     getHeadlessChatConversations: vi.fn(() => ({})),
-    getHeadlessEngineSessions: vi.fn(() => ({})),
     preloadHeadlessChatMessages: vi.fn(async (conversationId: string) => {
       void conversationId;
     }),
@@ -33,7 +32,6 @@ vi.mock("@tanstack/react-db", () => ({
 
 vi.mock("@/lib/headless-chat-collections", () => ({
   getHeadlessChatConversations: mocks.getHeadlessChatConversations,
-  getHeadlessEngineSessions: mocks.getHeadlessEngineSessions,
   preloadHeadlessChatMessages: mocks.preloadHeadlessChatMessages,
 }));
 
@@ -102,6 +100,8 @@ describe("AppDataProvider", () => {
       archivedAt: null,
       pinnedAt: null,
       lastSeenAt: null,
+      activityState: "idle" as const,
+      hasUnseen: false,
       createdAt: new Date(now - index * 1_000).toISOString(),
       updatedAt: new Date(now - index * 1_000).toISOString(),
     }));
@@ -109,7 +109,6 @@ describe("AppDataProvider", () => {
       { data: [], isLoading: true },
       { data: [], isLoading: true },
       { data: chatRows, isLoading: false },
-      { data: [], isLoading: false },
       { data: [], isLoading: true },
     ];
     let call = 0;
@@ -216,7 +215,7 @@ describe("AppDataProvider", () => {
     expect(screen.getByTestId("recent").textContent).toBe("Research Q3 launch options");
   });
 
-  it("attaches codex_chat runtime to Claude Code chats so the home card is not stuck 'Connecting'", () => {
+  it("uses the unified Conversation projection for Claude Code sidebar state", () => {
     const now = new Date().toISOString();
     const chatRow = {
       id: "goat_chat_claude_1",
@@ -226,26 +225,19 @@ describe("AppDataProvider", () => {
       archivedAt: null,
       pinnedAt: null,
       lastSeenAt: now,
+      activityState: "idle" as const,
+      hasUnseen: false,
       createdAt: now,
       updatedAt: now,
     };
-    const runtimeRow = {
-      conversationId: "goat_chat_claude_1",
-      engine: "claude_code" as const,
-      activeRunId: null,
-      status: "idle" as const,
-      error: null,
-      updatedAt: now,
-    };
     // useLiveQuery is called once per collection per render, in a fixed order:
-    // tasks, schedules, conversations, engineSessions, integrations. Only the
-    // Chat collections carry live data here; the rest stay loading so their memos
+    // tasks, schedules, conversations, integrations. Only the Conversation
+    // collection carries live data here; the rest stay loading so their memos
     // fall back to (empty) initial data instead of dereferencing it.
     const perCollection = [
       { data: [], isLoading: true },
       { data: [], isLoading: true },
       { data: [chatRow], isLoading: false },
-      { data: [runtimeRow], isLoading: false },
       { data: [], isLoading: true },
     ];
     let call = 0;
@@ -261,13 +253,11 @@ describe("AppDataProvider", () => {
       </AppDataProvider>,
     );
 
-    // Before the fix this read "claude_code:null" (runtime dropped for non-codex
-    // engines) which rendered as the null-runtime "Connecting" label.
-    expect(screen.getByTestId("recent").textContent).toBe("claude_code:idle");
+    expect(screen.getByTestId("recent").textContent).toBe("claude_code:idle:false");
+    expect(screen.getByTestId("recent").getAttribute("data-chat-id")).toBe("goat_chat_claude_1");
   });
 
-  it("keeps active-turn runtimes in recent chats as working when status lags", () => {
-    const now = new Date().toISOString();
+  it("keeps API-projected working chats in the recent list without a second live query", () => {
     const old = "2026-07-01T10:00:00.000Z";
     const chatRow = {
       id: "goat_chat_active_turn",
@@ -277,22 +267,15 @@ describe("AppDataProvider", () => {
       archivedAt: null,
       pinnedAt: null,
       lastSeenAt: "2026-07-01T09:59:00.000Z",
+      activityState: "working" as const,
+      hasUnseen: false,
       createdAt: old,
       updatedAt: old,
-    };
-    const runtimeRow = {
-      conversationId: "goat_chat_active_turn",
-      engine: "opencompany" as const,
-      activeRunId: "goat_codex_chat_turn_1",
-      status: "idle" as const,
-      error: null,
-      updatedAt: now,
     };
     const perCollection = [
       { data: [], isLoading: false },
       { data: [], isLoading: false },
       { data: [chatRow], isLoading: false },
-      { data: [runtimeRow], isLoading: false },
       { data: [], isLoading: true },
     ];
     let call = 0;
@@ -309,6 +292,7 @@ describe("AppDataProvider", () => {
     );
 
     expect(screen.getByTestId("recent").textContent).toBe("Lagging runtime:working");
+    expect(screen.getByTestId("recent").getAttribute("data-chat-id")).toBe("goat_chat_active_turn");
   });
 
   it("keeps same-workspace live data during a server data refresh", () => {
@@ -321,6 +305,8 @@ describe("AppDataProvider", () => {
       archivedAt: null,
       pinnedAt: null,
       lastSeenAt: now,
+      activityState: "idle" as const,
+      hasUnseen: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -328,7 +314,6 @@ describe("AppDataProvider", () => {
       { data: [], isLoading: false },
       { data: [], isLoading: false },
       { data: [chatRow], isLoading: false },
-      { data: [], isLoading: false },
       { data: [], isLoading: true },
     ];
     let call = 0;
@@ -381,8 +366,8 @@ function RecentChatsProbe() {
   const data = useAppData();
   const chat = data.recentChats[0];
   return (
-    <div data-testid="recent">
-      {chat ? `${chat.engine}:${chat.codexRuntime?.status ?? "null"}` : "empty"}
+    <div data-testid="recent" data-chat-id={chat?.id}>
+      {chat ? `${chat.engine}:${chat.activityState}:${String(chat.hasUnseen)}` : "empty"}
     </div>
   );
 }
@@ -397,7 +382,11 @@ function RecentChatTitleProbe({ onRender }: { onRender: (value: string) => void 
 function RecentChatStateProbe() {
   const data = useAppData();
   const chat = data.recentChats[0];
-  return <div data-testid="recent">{chat ? `${chat.title}:${chat.state}` : "empty"}</div>;
+  return (
+    <div data-testid="recent" data-chat-id={chat?.id}>
+      {chat ? `${chat.title}:${chat.activityState}` : "empty"}
+    </div>
+  );
 }
 
 function DataProbe() {

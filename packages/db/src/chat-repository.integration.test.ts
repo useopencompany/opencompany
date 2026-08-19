@@ -27,6 +27,7 @@ const migrationPaths = [
   "0200_goat_chat_run_pausing.sql",
   "0201_goat_chat_read_models_v1.sql",
   "0214_goat_chat_attachment_texts_invariant.sql",
+  "0215_goat_chat_sidebar_state.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -160,6 +161,10 @@ describe("Postgres Chat repositories", () => {
       idempotentReplay: false,
     });
     expect(replay).toEqual({ ...first, idempotentReplay: true });
+    await expect(service.getConversation(actor(), first.conversationId)).resolves.toMatchObject({
+      activityState: "working",
+      hasUnseen: false,
+    });
     expect(
       (
         await database.query<{ count: number }>(`
@@ -432,6 +437,9 @@ describe("Postgres Chat repositories", () => {
        )`,
       [created.conversationId],
     );
+    await database.query("UPDATE goat.chat_sessions SET has_unseen = true WHERE id = $1", [
+      created.conversationId,
+    ]);
 
     const presented = await service.updateConversation(actor(), created.conversationId, {
       pinned: true,
@@ -446,9 +454,10 @@ describe("Postgres Chat repositories", () => {
         await database.query<{
           pinned_at: Date | null;
           last_seen_at: Date | null;
+          has_unseen: boolean;
           archived_at: Date | null;
         }>(
-          `SELECT pinned_at, last_seen_at, archived_at
+          `SELECT pinned_at, last_seen_at, has_unseen, archived_at
            FROM goat.conversation_read_model_v1
            WHERE id = $1`,
           [created.conversationId],
@@ -458,6 +467,7 @@ describe("Postgres Chat repositories", () => {
       {
         pinned_at: new Date("2026-08-10T20:00:00.000Z"),
         last_seen_at: new Date("2026-08-10T20:00:00.000Z"),
+        has_unseen: false,
         archived_at: null,
       },
     ]);
@@ -642,6 +652,10 @@ describe("Postgres Chat repositories", () => {
         ],
       }),
     ).resolves.toMatchObject([{ id: "approval_1", status: "pending" }]);
+    await expect(service.getConversation(actor(), created.conversationId)).resolves.toMatchObject({
+      activityState: "idle",
+      hasUnseen: true,
+    });
     await database.query(
       `INSERT INTO goat.capability_runs (
          id, workspace_id, user_workos_id, chat_session_id, tool_call_id, status,

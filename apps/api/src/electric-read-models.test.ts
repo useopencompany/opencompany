@@ -19,6 +19,85 @@ const actor = {
 };
 
 describe("Electric read models", () => {
+  it("keeps the v1 Conversation shape stable for deployed clients", async () => {
+    let requestedUrl: URL | undefined;
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        requestedUrl = new URL(String(input));
+        return Response.json([]);
+      }) as typeof fetch,
+    });
+
+    await proxy.stream({
+      actor,
+      readModel: "chat-conversations-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/chat-conversations-v1"),
+    });
+
+    expect(requestedUrl?.searchParams.get("columns")).not.toContain("activity_state");
+    expect(requestedUrl?.searchParams.get("columns")).not.toContain("has_unseen");
+  });
+
+  it("projects API-owned activity and unseen state on Conversation rows", async () => {
+    let requestedUrl: URL | undefined;
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        requestedUrl = new URL(String(input));
+        return Response.json([
+          {
+            headers: { operation: "insert" },
+            key: '"conversation_1"',
+            value: {
+              id: "conversation_1",
+              title: "Review launch",
+              engine: "claude_code",
+              model: "anthropic/claude-sonnet-5",
+              archived_at: null,
+              pinned_at: null,
+              last_seen_at: "2026-08-10 20:00:00+00",
+              activity_state: "working",
+              has_unseen: true,
+              created_at: "2026-08-10 19:00:00+00",
+              updated_at: "2026-08-10 20:01:00+00",
+              actor_id: "must-not-cross",
+              workspace_id: "must-not-cross",
+            },
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "chat-conversations-v2",
+      requestUrl: new URL("https://api.example.test/v1/read-models/chat-conversations-v2"),
+    });
+
+    expect(requestedUrl?.searchParams.get("columns")).toContain("activity_state");
+    expect(requestedUrl?.searchParams.get("columns")).toContain("has_unseen");
+    expect(await response.json()).toEqual([
+      {
+        headers: { operation: "insert" },
+        key: '"conversation_1"',
+        value: {
+          id: "conversation_1",
+          title: "Review launch",
+          engine: "claude_code",
+          model: "anthropic/claude-sonnet-5",
+          archivedAt: null,
+          pinnedAt: null,
+          lastSeenAt: "2026-08-10T20:00:00.000Z",
+          activityState: "working",
+          hasUnseen: true,
+          createdAt: "2026-08-10T19:00:00.000Z",
+          updatedAt: "2026-08-10T20:01:00.000Z",
+        },
+      },
+    ]);
+  });
+
   it("serves integration accounts as a credential-free actor and workspace read model", async () => {
     let requestedUrl: URL | undefined;
     const proxy = new ElectricReadModelProxy({

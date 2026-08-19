@@ -997,39 +997,43 @@ export function Surface({
   const activeChatSummary = chatSessionId
     ? (recentChats.find((chat) => chat.id === chatSessionId) ?? null)
     : null;
+  const activeChatVisibility =
+    activeChatSummary ?? (initialChat?.id === chatSessionId ? initialChat : null);
   useEffect(() => {
     if (!chatSessionId || persistedChatSessionId !== chatSessionId) return;
-    const state = isAgentWorking ? "working" : mode === "chat" ? "done_seen" : null;
+    const state = isAgentWorking ? "working" : null;
     setLocalChatState(chatSessionId, state);
     return () => {
       if (state !== "working") setLocalChatState(chatSessionId, null);
     };
-  }, [chatSessionId, isAgentWorking, mode, persistedChatSessionId]);
+  }, [chatSessionId, isAgentWorking, persistedChatSessionId]);
 
   useEffect(() => {
     if (mode !== "chat" || !chatSessionId || persistedChatSessionId !== chatSessionId) {
       return;
     }
-    if (isAgentWorking) {
+    if (activeChatVisibility?.activityState !== "idle" || activeChatVisibility.hasUnseen !== true) {
       lastSeenMarkRef.current = null;
       return;
     }
 
-    const markKey = [
-      chatSessionId,
-      activeChatSummary?.updatedAt ?? "no-summary-update",
-      latestAssistantMessageId ?? "no-assistant-message",
-      chatMessages.length,
-    ].join(":");
-    if (lastSeenMarkRef.current === markKey) return;
-    lastSeenMarkRef.current = markKey;
-    void updateHeadlessChatConversation(chatSessionId, { markSeen: true }).catch(() => undefined);
+    const markKey = `${chatSessionId}:${activeChatVisibility.updatedAt ?? "initial"}`;
+    const markSeenIfVisible = () => {
+      if (document.visibilityState === "hidden" || lastSeenMarkRef.current === markKey) return;
+      lastSeenMarkRef.current = markKey;
+      void updateHeadlessChatConversation(chatSessionId, { markSeen: true }).catch((error) => {
+        if (lastSeenMarkRef.current === markKey) lastSeenMarkRef.current = null;
+        console.warn("Could not mark the active chat as seen.", error);
+      });
+    };
+    markSeenIfVisible();
+    document.addEventListener("visibilitychange", markSeenIfVisible);
+    return () => document.removeEventListener("visibilitychange", markSeenIfVisible);
   }, [
-    activeChatSummary?.updatedAt,
-    chatMessages.length,
+    activeChatVisibility?.activityState,
+    activeChatVisibility?.hasUnseen,
+    activeChatVisibility?.updatedAt,
     chatSessionId,
-    isAgentWorking,
-    latestAssistantMessageId,
     mode,
     persistedChatSessionId,
   ]);
