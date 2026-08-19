@@ -1,5 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ElectricReadModelProxy } from "./electric-read-models";
+
+const loggerMocks = vi.hoisted(() => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  createLogger: () => loggerMocks,
+}));
 
 const actor = {
   userId: "user_1",
@@ -19,6 +30,10 @@ const actor = {
 };
 
 describe("Electric read models", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("keeps the v1 Conversation shape stable for deployed clients", async () => {
     let requestedUrl: URL | undefined;
     const proxy = new ElectricReadModelProxy({
@@ -386,6 +401,95 @@ describe("Electric read models", () => {
           error: null,
           updatedAt: "2026-08-13T08:00:00.000Z",
         },
+      },
+    ]);
+  });
+
+  it("bounds a legacy session error without dropping valid active session state", async () => {
+    const historicalError = `${"x".repeat(2_000)}private-tail`;
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async () =>
+        Response.json([
+          {
+            headers: { operation: "insert" },
+            key: '"runtime_legacy"',
+            value: {
+              id: "runtime_legacy",
+              chat_session_id: "conversation_legacy",
+              engine: "claude_code",
+              status: "failed",
+              active_turn_id: null,
+              error: historicalError,
+              updated_at: "2026-08-13 07:00:00+00",
+            },
+          },
+          {
+            headers: { operation: "insert" },
+            key: '"runtime_active"',
+            value: {
+              id: "runtime_active",
+              chat_session_id: "conversation_active",
+              engine: "codex",
+              status: "running",
+              active_turn_id: "run_active",
+              error: null,
+              updated_at: "2026-08-13 08:00:00+00",
+            },
+          },
+        ]),
+      ) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "engine-sessions-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/engine-sessions-v1"),
+    });
+    const payload = (await response.json()) as Array<{ value: Record<string, unknown> }>;
+
+    expect(payload[0]?.value.error).toBe(historicalError.slice(0, 2_000));
+    expect(payload[1]?.value).toMatchObject({
+      conversationId: "conversation_active",
+      status: "running",
+      activeRunId: "run_active",
+    });
+    expect(loggerMocks.warn).toHaveBeenCalledWith("Normalized overlong engine session error", {
+      event: "opencompany.api_engine_session_error_normalized",
+      read_model: "engine-sessions-v1",
+      field: "error",
+      original_length: historicalError.length,
+      max_length: 2_000,
+    });
+    expect(loggerMocks.warn.mock.calls[0]?.[1]).not.toHaveProperty("error");
+  });
+
+  it("bounds overlong errors in partial Electric updates", async () => {
+    const historicalError = "x".repeat(2_001);
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async () =>
+        Response.json([
+          {
+            headers: { operation: "update" },
+            key: '"runtime_legacy"',
+            value: { error: historicalError },
+          },
+        ]),
+      ) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "engine-sessions-v1",
+      requestUrl: new URL("https://api.example.test/v1/read-models/engine-sessions-v1"),
+    });
+
+    await expect(response.json()).resolves.toEqual([
+      {
+        headers: { operation: "update" },
+        key: '"runtime_legacy"',
+        value: { error: historicalError.slice(0, 2_000) },
       },
     ]);
   });

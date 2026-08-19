@@ -1,5 +1,6 @@
 import type { Actor } from "@opencompany/core";
 import { normalizeBrainIngestTrace } from "@opencompany/db/brain-ingest-trace";
+import { createLogger } from "@opencompany/observability";
 import {
   BrainDocumentReadModelSchema,
   BrainEdgeReadModelSchema,
@@ -9,6 +10,7 @@ import {
   BrainTimelineReadModelSchema,
   ConversationReadModelSchema,
   ConversationReadModelV1Schema,
+  ENGINE_SESSION_ERROR_MAX_LENGTH,
   EngineSessionReadModelSchema,
   IntegrationAccountReadModelSchema,
   MessageReadModelSchema,
@@ -23,6 +25,8 @@ import {
   WorkflowScheduleReadModelSchema,
 } from "@opencompany/protocol";
 import { ApiError } from "./errors";
+
+const logger = createLogger({ service: "opencompany-api", runtime: "electric-read-models" });
 
 // Safe client-managed ShapeStream state from @electric-sql/client. Shape identity (table,
 // columns, where, and bound params) remains server-owned below.
@@ -574,6 +578,19 @@ function projectReadModelValue(
     }
     if (Object.hasOwn(projected, "focus")) {
       projected.focus = boundedNullableString(projected.focus, 2_000);
+    }
+  }
+  if (readModel === "engine-sessions-v1" && typeof projected.error === "string") {
+    const originalLength = projected.error.length;
+    if (originalLength > ENGINE_SESSION_ERROR_MAX_LENGTH) {
+      projected.error = projected.error.slice(0, ENGINE_SESSION_ERROR_MAX_LENGTH);
+      logger.warn("Normalized overlong engine session error", {
+        event: "opencompany.api_engine_session_error_normalized",
+        read_model: readModel,
+        field: "error",
+        original_length: originalLength,
+        max_length: ENGINE_SESSION_ERROR_MAX_LENGTH,
+      });
     }
   }
   switch (readModel) {
