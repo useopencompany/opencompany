@@ -301,7 +301,7 @@ export async function getDefaultBrainForUser(
 
 // Creates the local resources for a user-created WorkOS organization. The
 // workspace, admin membership, default brain, and required folder rows are one
-// Neon batch so a failed provision never leaves a partially usable workspace.
+// atomic write so a failed provision never leaves a partially usable workspace.
 export async function createWorkspaceForUser(
   input: {
     workspaceId: string;
@@ -317,51 +317,64 @@ export async function createWorkspaceForUser(
   if (!name) throw new Error("Workspace name cannot be empty.");
 
   const brainId = newBrainId(DEFAULT_BRAIN_SLUG);
-  const workspaceInsert = db
-    .insert(workspaces)
-    .values({
-      id: input.workspaceId,
-      workosOrganizationId: input.workosOrganizationId,
-      name,
-      slug: input.slug ?? null,
-      createdByWorkosId: input.userWorkosId,
-    })
-    .returning();
-  const membershipInsert = db.insert(workspaceMembers).values({
+  const workspaceValues = {
+    id: input.workspaceId,
+    workosOrganizationId: input.workosOrganizationId,
+    name,
+    slug: input.slug ?? null,
+    createdByWorkosId: input.userWorkosId,
+  };
+  const membershipValues = {
     id: `goat_wsm_${randomUUID()}`,
     workspaceId: input.workspaceId,
     userWorkosId: input.userWorkosId,
-    role: "admin",
-  });
-  const brainInsert = db
-    .insert(brains)
-    .values({
-      id: brainId,
-      workspaceId: input.workspaceId,
-      name: DEFAULT_BRAIN_NAME,
-      slug: DEFAULT_BRAIN_SLUG,
-      visibility: "workspace",
-      createdByWorkosId: input.userWorkosId,
-    })
-    .returning();
-  const folderInserts = defaultBrainFolderManifestEntries().map((folder) =>
-    db.insert(brainFolders).values({
-      id: `goat_brain_folder_${hashBrainContent(`${brainId}:${folder.path}`).slice(0, 24)}`,
-      userWorkosId: input.userWorkosId,
-      brainRef: brainId,
-      path: folder.path,
-      source: folder.source,
-    }),
-  );
+    role: "admin" as const,
+  };
+  const brainValues = {
+    id: brainId,
+    workspaceId: input.workspaceId,
+    name: DEFAULT_BRAIN_NAME,
+    slug: DEFAULT_BRAIN_SLUG,
+    visibility: "workspace" as const,
+    createdByWorkosId: input.userWorkosId,
+  };
+  const folderValues = defaultBrainFolderManifestEntries().map((folder) => ({
+    id: `goat_brain_folder_${hashBrainContent(`${brainId}:${folder.path}`).slice(0, 24)}`,
+    userWorkosId: input.userWorkosId,
+    brainRef: brainId,
+    path: folder.path,
+    source: folder.source,
+  }));
 
-  const [workspaceRows, , brainRows] = await db.batch([
-    workspaceInsert,
-    membershipInsert,
-    brainInsert,
-    ...folderInserts,
-  ]);
-  const workspace = workspaceRows[0];
-  const brain = brainRows[0];
+  let workspace: Workspace | undefined;
+  let brain: Brain | undefined;
+
+  // neon-http exposes transactional batches but no interactive transactions;
+  // the canonical API's node-postgres client exposes the inverse surface.
+  if ("batch" in db) {
+    const [workspaceRows, , brainRows] = await db.batch([
+      db.insert(workspaces).values(workspaceValues).returning(),
+      db.insert(workspaceMembers).values(membershipValues),
+      db.insert(brains).values(brainValues).returning(),
+      ...folderValues.map((folder) => db.insert(brainFolders).values(folder)),
+    ]);
+    workspace = workspaceRows[0];
+    brain = brainRows[0];
+  } else {
+    ({ workspace, brain } = await db.transaction(async (tx: DbClient) => {
+      const [workspace] = await tx.insert(workspaces).values(workspaceValues).returning();
+      await tx.insert(workspaceMembers).values(membershipValues);
+      const [brain] = await tx.insert(brains).values(brainValues).returning();
+      for (const folder of folderValues) {
+        await tx.insert(brainFolders).values(folder);
+      }
+      if (!workspace || !brain) {
+        throw new Error("Could not persist the opencompany workspace.");
+      }
+      return { workspace, brain };
+    }));
+  }
+
   if (!workspace || !brain) throw new Error("Could not persist the opencompany workspace.");
 
   // Monthly-allowance writes are idempotent and deliberately non-blocking: a
