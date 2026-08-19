@@ -28,6 +28,7 @@ const migrationPaths = [
   "0201_goat_chat_read_models_v1.sql",
   "0214_goat_chat_attachment_texts_invariant.sql",
   "0215_goat_chat_sidebar_state.sql",
+  "0216_goat_conversation_runtime_summary.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -37,6 +38,7 @@ describe("Postgres Chat repositories", () => {
   let service: ChatApplicationService;
   let execute: (query: SQL) => Promise<unknown>;
   let legacySurvivedMigration: boolean;
+  let legacyRuntimeSurvivedMigration: boolean;
 
   beforeEach(async () => {
     database = new PGlite();
@@ -76,10 +78,23 @@ describe("Postgres Chat repositories", () => {
     const migratedProjection = await database.query<{ id: string; content: string }>(`
       SELECT id, content FROM goat.message_read_model_v1 WHERE id = 'migration_message'
     `);
+    const migratedConversationProjection = await database.query<{
+      runtime_status: string | null;
+      active_run_id: string | null;
+      runtime_has_error: boolean | null;
+    }>(`
+      SELECT runtime_status, active_run_id, runtime_has_error
+      FROM goat.conversation_read_model_v1
+      WHERE id = 'migration_conversation'
+    `);
     legacySurvivedMigration =
       migrated.rows[0]?.id === "migration_run" &&
       migrated.rows[0].event_sequence === 0 &&
       migratedProjection.rows[0]?.content === "Preserve me";
+    legacyRuntimeSurvivedMigration =
+      migratedConversationProjection.rows[0]?.runtime_status === "queued" &&
+      migratedConversationProjection.rows[0]?.active_run_id === null &&
+      migratedConversationProjection.rows[0]?.runtime_has_error === false;
     await database.exec(`
       DELETE FROM goat.codex_chat_turns;
       DELETE FROM goat.codex_chat_sessions;
@@ -114,6 +129,65 @@ describe("Postgres Chat repositories", () => {
 
   it("keeps pre-existing durable rows while adding the canonical event cursor", () => {
     expect(legacySurvivedMigration).toBe(true);
+    expect(legacyRuntimeSurvivedMigration).toBe(true);
+  });
+
+  it.each([
+    "opencompany",
+    "codex",
+    "claude_code",
+  ] as const)("returns and atomically refreshes the %s runtime summary without exposing raw errors", async (engine) => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: `runtime-${engine}`,
+      content: `Exercise the ${engine} runtime.`,
+      engine,
+      model: "provider/model",
+    });
+
+    const initial = await service.getConversation(actor(), created.conversationId);
+    expect(initial.runtime).toMatchObject({
+      status: "queued",
+      activeRunId: created.runId,
+      hasError: false,
+    });
+    await expect(service.listConversations(actor())).resolves.toMatchObject({
+      conversations: [{ runtime: initial.runtime }],
+    });
+
+    await database.query(
+      `UPDATE goat.codex_chat_sessions
+         SET status = 'running', active_turn_id = $2, updated_at = $3
+         WHERE chat_session_id = $1`,
+      [created.conversationId, created.runId, "2026-08-10T20:01:00.000Z"],
+    );
+    await expect(service.getConversation(actor(), created.conversationId)).resolves.toMatchObject({
+      activityState: "working",
+      runtime: {
+        status: "running",
+        activeRunId: created.runId,
+        hasError: false,
+        updatedAt: new Date("2026-08-10T20:01:00.000Z"),
+      },
+    });
+
+    const rawError = "provider-private failure detail";
+    await database.query(
+      `UPDATE goat.codex_chat_sessions
+         SET status = 'failed', active_turn_id = NULL, error = $2, updated_at = $3
+         WHERE chat_session_id = $1`,
+      [created.conversationId, rawError, "2026-08-10T20:02:00.000Z"],
+    );
+    const failed = await service.getConversation(actor(), created.conversationId);
+    expect(failed).toMatchObject({
+      activityState: "idle",
+      runtime: {
+        status: "failed",
+        activeRunId: null,
+        hasError: true,
+        updatedAt: new Date("2026-08-10T20:02:00.000Z"),
+      },
+    });
+    expect(JSON.stringify(failed)).not.toContain(rawError);
   });
 
   it("normalizes JSON null attachment text and rejects non-object JSON at the database boundary", async () => {

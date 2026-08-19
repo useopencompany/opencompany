@@ -6663,6 +6663,9 @@
           "model": {
             "type": "string"
           },
+          "runtime": {
+            "$ref": "#/components/schemas/ConversationRuntime"
+          },
           "activityState": {
             "type": "string",
             "enum": [
@@ -6687,9 +6690,49 @@
           "title",
           "engine",
           "model",
+          "runtime",
           "activityState",
           "hasUnseen",
           "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ConversationRuntime": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "starting",
+              "idle",
+              "running",
+              "failed",
+              "interrupted",
+              "closed"
+            ]
+          },
+          "activeRunId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "hasError": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "status",
+          "activeRunId",
+          "hasError",
           "updatedAt"
         ],
         "additionalProperties": false

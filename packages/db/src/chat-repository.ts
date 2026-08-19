@@ -193,6 +193,10 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.title,
         conversation.engine,
         conversation.model,
+        conversation.runtime_status AS "runtimeStatus",
+        conversation.active_run_id AS "activeRunId",
+        conversation.runtime_has_error AS "runtimeHasError",
+        conversation.runtime_updated_at AS "runtimeUpdatedAt",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
         conversation.created_at AS "createdAt",
@@ -238,6 +242,10 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.title,
         conversation.engine,
         conversation.model,
+        conversation.runtime_status AS "runtimeStatus",
+        conversation.active_run_id AS "activeRunId",
+        conversation.runtime_has_error AS "runtimeHasError",
+        conversation.runtime_updated_at AS "runtimeUpdatedAt",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
         conversation.created_at AS "createdAt",
@@ -1949,6 +1957,10 @@ type ConversationRow = {
   title: string;
   engine: Conversation["engine"];
   model: string;
+  runtimeStatus: NonNullable<Conversation["runtime"]>["status"] | null;
+  activeRunId: string | null;
+  runtimeHasError: boolean | null;
+  runtimeUpdatedAt: Date | string | null;
   activityState: Conversation["activityState"];
   hasUnseen: boolean;
   createdAt: Date | string;
@@ -2190,6 +2202,15 @@ function mapConversation(row: ConversationRow): Conversation {
     title: row.title,
     engine: row.engine,
     model: row.model,
+    runtime:
+      row.runtimeStatus !== null && row.runtimeHasError !== null && row.runtimeUpdatedAt !== null
+        ? {
+            status: row.runtimeStatus,
+            activeRunId: row.activeRunId,
+            hasError: row.runtimeHasError,
+            updatedAt: asDate(row.runtimeUpdatedAt),
+          }
+        : null,
     activityState: row.activityState,
     hasUnseen: row.hasUnseen,
     createdAt: asDate(row.createdAt),

@@ -10,6 +10,7 @@ import {
   BrainTimelineReadModelSchema,
   ConversationReadModelSchema,
   ConversationReadModelV1Schema,
+  ConversationRuntimeSchema,
   ENGINE_SESSION_ERROR_MAX_LENGTH,
   EngineSessionReadModelSchema,
   IntegrationAccountReadModelSchema,
@@ -191,24 +192,23 @@ function readModelShape(input: {
         params: [input.actor.userId, input.actor.workspaceId],
       };
     case "chat-conversations-v2":
-      return {
-        table: "goat.conversation_read_model_v1",
-        columns: [
-          "id",
-          "title",
-          "engine",
-          "model",
-          "archived_at",
-          "pinned_at",
-          "last_seen_at",
-          "activity_state",
-          "has_unseen",
-          "created_at",
-          "updated_at",
-        ],
-        where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
-        params: [input.actor.userId, input.actor.workspaceId],
-      };
+      return conversationReadModelShape(input, [
+        "id",
+        "title",
+        "engine",
+        "model",
+        "archived_at",
+        "pinned_at",
+        "last_seen_at",
+        "activity_state",
+        "has_unseen",
+        "runtime_status",
+        "active_run_id",
+        "runtime_has_error",
+        "runtime_updated_at",
+        "created_at",
+        "updated_at",
+      ]);
     case "chat-messages-v1":
       return conversationShape(input, "goat.message_read_model_v1", [
         "id",
@@ -505,6 +505,27 @@ function conversationShape(
   };
 }
 
+function conversationReadModelShape(
+  input: { actor: Actor; conversationId?: string },
+  columns: string[],
+) {
+  if (input.conversationId) {
+    return {
+      table: "goat.conversation_read_model_v1",
+      columns,
+      where:
+        `"id" = $1 ` + `AND "actor_id" = $2 AND ("workspace_id" = $3 OR "workspace_id" IS NULL)`,
+      params: [input.conversationId, input.actor.userId, input.actor.workspaceId],
+    };
+  }
+  return {
+    table: "goat.conversation_read_model_v1",
+    columns,
+    where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
+    params: [input.actor.userId, input.actor.workspaceId],
+  };
+}
+
 function projectElectricEntry(readModel: ReadModel, entry: unknown) {
   if (!isRecord(entry) || !isRecord(entry.value)) return entry;
   const operation = isRecord(entry.headers) ? entry.headers.operation : undefined;
@@ -530,6 +551,16 @@ function projectReadModelValue(
         : [],
     ),
   );
+  if (readModel === "chat-conversations-v2") {
+    const runtime = conversationRuntimeValue(row);
+    if (runtime !== undefined) projected.runtime = runtime;
+    const schema = partial
+      ? ConversationReadModelSchema.partial().extend({
+          runtime: ConversationRuntimeSchema.partial().nullable().optional(),
+        })
+      : ConversationReadModelSchema;
+    return schema.parse(projected);
+  }
   if (readModel === "brain-documents-v1") {
     if (typeof projected.folderPath === "string" && typeof projected.brainId === "string") {
       projected.path = `${projected.folderPath}/${projected.brainId}.md`;
@@ -598,10 +629,6 @@ function projectReadModelValue(
       return (
         partial ? ConversationReadModelV1Schema.partial() : ConversationReadModelV1Schema
       ).parse(projected);
-    case "chat-conversations-v2":
-      return (partial ? ConversationReadModelSchema.partial() : ConversationReadModelSchema).parse(
-        projected,
-      );
     case "chat-messages-v1":
       return (partial ? MessageReadModelSchema.partial() : MessageReadModelSchema).parse(projected);
     case "chat-runs-v1":
@@ -925,6 +952,10 @@ const READ_MODEL_COLUMN_NAMES = {
     last_seen_at: "lastSeenAt",
     activity_state: "activityState",
     has_unseen: "hasUnseen",
+    runtime_status: "",
+    active_run_id: "",
+    runtime_has_error: "",
+    runtime_updated_at: "",
     created_at: "createdAt",
     updated_at: "updatedAt",
   },
@@ -1149,6 +1180,33 @@ const TASK_OUTCOME_COLUMN_NAMES = {
   error: "error",
   reported_status: "reportedStatus",
   outcome_comment: "comment",
+} as const;
+
+function conversationRuntimeValue(row: Record<string, unknown>) {
+  if (!Object.keys(CONVERSATION_RUNTIME_COLUMN_NAMES).some((name) => Object.hasOwn(row, name))) {
+    return undefined;
+  }
+  if (row.runtime_status === null) return null;
+
+  return Object.fromEntries(
+    Object.entries(CONVERSATION_RUNTIME_COLUMN_NAMES).flatMap(([physicalName, publicName]) =>
+      Object.hasOwn(row, physicalName)
+        ? [
+            [
+              publicName,
+              publicName === "updatedAt" ? timestampValue(row[physicalName]) : row[physicalName],
+            ],
+          ]
+        : [],
+    ),
+  );
+}
+
+const CONVERSATION_RUNTIME_COLUMN_NAMES = {
+  runtime_status: "status",
+  active_run_id: "activeRunId",
+  runtime_has_error: "hasError",
+  runtime_updated_at: "updatedAt",
 } as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {

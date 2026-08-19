@@ -4,6 +4,7 @@ import {
   type ApprovalResolution,
   CHAT_ATTACHMENT_FORMATS,
   type ChatAttachmentFormat,
+  type ConversationRuntimeStatus,
   RUN_APPROVAL_STATUSES,
   RUN_ATTEMPT_STATUSES,
   RUN_EVENT_TYPES,
@@ -562,14 +563,7 @@ export type ChatMessageAttachment = {
   blobUrl: string;
 };
 
-export type CodexChatSessionStatus =
-  | "queued"
-  | "starting"
-  | "idle"
-  | "running"
-  | "failed"
-  | "interrupted"
-  | "closed";
+export type CodexChatSessionStatus = ConversationRuntimeStatus;
 export type CodexChatTurnStatus =
   | "queued"
   | "running"
@@ -4380,6 +4374,10 @@ export const conversationReadModelV1 = productSchema.table(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     activityState: text("activity_state").$type<ChatActivityState>().notNull().default("idle"),
     hasUnseen: boolean("has_unseen").notNull().default(false),
+    runtimeStatus: text("runtime_status").$type<ConversationRuntimeStatus>(),
+    activeRunId: text("active_run_id"),
+    runtimeHasError: boolean("runtime_has_error"),
+    runtimeUpdatedAt: timestamp("runtime_updated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
@@ -4390,6 +4388,23 @@ export const conversationReadModelV1 = productSchema.table(
     activityStateCheck: check(
       "goat_conversation_read_model_v1_activity_state_check",
       sql`${table.activityState} IN ('working', 'idle')`,
+    ),
+    runtimeStatusCheck: check(
+      "conversation_read_model_v1_runtime_status_check",
+      sql`${table.runtimeStatus} IS NULL OR ${table.runtimeStatus} IN ('queued', 'starting', 'idle', 'running', 'failed', 'interrupted', 'closed')`,
+    ),
+    runtimeSummaryCheck: check(
+      "conversation_read_model_v1_runtime_summary_check",
+      sql`(
+        ${table.runtimeStatus} IS NULL
+        AND ${table.activeRunId} IS NULL
+        AND ${table.runtimeHasError} IS NULL
+        AND ${table.runtimeUpdatedAt} IS NULL
+      ) OR (
+        ${table.runtimeStatus} IS NOT NULL
+        AND ${table.runtimeHasError} IS NOT NULL
+        AND ${table.runtimeUpdatedAt} IS NOT NULL
+      )`,
     ),
   }),
 );

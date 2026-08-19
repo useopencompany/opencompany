@@ -17,6 +17,24 @@ export const PresentationCursorSchema = z
 export const TimestampSchema = z.iso.datetime({ offset: true });
 export const ChatEngineSchema = z.enum(["opencompany", "codex", "claude_code"]);
 export const ConversationActivityStateSchema = z.enum(["working", "idle"]);
+export const ConversationRuntimeStatusSchema = z.enum([
+  "queued",
+  "starting",
+  "idle",
+  "running",
+  "failed",
+  "interrupted",
+  "closed",
+]);
+export const ConversationRuntimeSchema = z
+  .object({
+    status: ConversationRuntimeStatusSchema,
+    activeRunId: ResourceIdSchema.nullable(),
+    hasError: z.boolean(),
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("ConversationRuntime");
 export const EngineReasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
 export const CodexGoalModeSchema = z
   .object({
@@ -105,6 +123,7 @@ export const ConversationSchema = z
     title: z.string(),
     engine: ChatEngineSchema,
     model: z.string(),
+    runtime: ConversationRuntimeSchema.nullable(),
     activityState: ConversationActivityStateSchema,
     hasUnseen: z.boolean(),
     createdAt: TimestampSchema,
@@ -422,6 +441,7 @@ export const ConversationReadModelV1Schema = z
   .openapi("ConversationReadModelV1");
 
 export const ConversationReadModelSchema = ConversationReadModelV1Schema.extend({
+  runtime: ConversationRuntimeSchema.nullable(),
   activityState: ConversationActivityStateSchema,
   hasUnseen: z.boolean(),
 })
@@ -3382,6 +3402,7 @@ export const InfisicalAuthFlowEnvelopeSchema = z
   .openapi("InfisicalAuthFlowEnvelope");
 
 export type ConversationDto = z.infer<typeof ConversationSchema>;
+export type ConversationRuntimeDto = z.infer<typeof ConversationRuntimeSchema>;
 export type ConversationShareDto = z.infer<typeof ConversationShareSchema>;
 export type PublicChatMessageDto = z.infer<typeof PublicChatMessageSchema>;
 export type PublicChatShareDto = z.infer<typeof PublicChatShareSchema>;
