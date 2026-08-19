@@ -77,9 +77,7 @@ describe("WorkflowEditor", () => {
   });
 
   it("debounces edits and saves the step plan", async () => {
-    render(
-      <WorkflowEditor workspaceId="workspace_1" workflow={workflow} canEdit skillCatalog={[]} />,
-    );
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Weekly update" }));
     const title = screen.getByPlaceholderText("Untitled workflow");
@@ -89,18 +87,14 @@ describe("WorkflowEditor", () => {
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenCalledTimes(1);
-    expect(workflowActionsMock.update).toHaveBeenCalledWith(
-      "workflow_1",
-      {
-        expectedVersion: 1,
-        name: "Investor update",
-        description: "Summarize the week.",
-        steps: workflow.steps,
-        status: "draft",
-        trigger: { type: "manual" },
-      },
-      { scopeKey: "workspace_1" },
-    );
+    expect(workflowActionsMock.update).toHaveBeenCalledWith("workflow_1", {
+      expectedVersion: 1,
+      name: "Investor update",
+      description: "Summarize the week.",
+      steps: workflow.steps,
+      status: "draft",
+      trigger: { type: "manual" },
+    });
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
@@ -109,9 +103,7 @@ describe("WorkflowEditor", () => {
     workflowActionsMock.update
       .mockImplementationOnce(() => firstSave.promise)
       .mockResolvedValue({ version: 3 });
-    render(
-      <WorkflowEditor workspaceId="workspace_1" workflow={workflow} canEdit skillCatalog={[]} />,
-    );
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "First edit" } });
     await advanceAutosave();
@@ -135,7 +127,6 @@ describe("WorkflowEditor", () => {
         steps: [expect.objectContaining({ id: "step-1", title: "Final edit" })],
         trigger: { type: "manual" },
       }),
-      { scopeKey: "workspace_1" },
     );
   });
 
@@ -143,9 +134,7 @@ describe("WorkflowEditor", () => {
     workflowActionsMock.update
       .mockRejectedValueOnce(new Error("Temporary save failure."))
       .mockResolvedValueOnce({ version: 2 });
-    render(
-      <WorkflowEditor workspaceId="workspace_1" workflow={workflow} canEdit skillCatalog={[]} />,
-    );
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Retry me" } });
     await advanceAutosave();
@@ -162,9 +151,7 @@ describe("WorkflowEditor", () => {
   });
 
   it("adds and removes steps without allowing the final step to be removed", () => {
-    render(
-      <WorkflowEditor workspaceId="workspace_1" workflow={workflow} canEdit skillCatalog={[]} />,
-    );
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     expect(screen.queryByLabelText("Step 2 name")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add step" }));
@@ -178,7 +165,6 @@ describe("WorkflowEditor", () => {
   it("renders markdown lists in read-only workflow steps", () => {
     render(
       <WorkflowEditor
-        workspaceId="workspace_1"
         workflow={{
           ...workflow,
           steps: [
@@ -201,9 +187,7 @@ describe("WorkflowEditor", () => {
   });
 
   it("offers Claude Code as a workflow step model option", async () => {
-    render(
-      <WorkflowEditor workspaceId="workspace_1" workflow={workflow} canEdit skillCatalog={[]} />,
-    );
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.click(screen.getByRole("button", { name: /^Runtime:/ }));
     fireEvent.click(screen.getByRole("button", { name: /Claude Code/ }));
@@ -222,14 +206,11 @@ describe("WorkflowEditor", () => {
         ],
         trigger: { type: "manual" },
       }),
-      { scopeKey: "workspace_1" },
     );
   });
 
   it("saves the concrete Codex model and effort for coding steps", async () => {
-    render(
-      <WorkflowEditor workspaceId="workspace_1" workflow={workflow} canEdit skillCatalog={[]} />,
-    );
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.click(screen.getByRole("button", { name: /^Runtime:/ }));
     fireEvent.click(screen.getByRole("button", { name: /Codex/ }));
@@ -254,14 +235,11 @@ describe("WorkflowEditor", () => {
         ],
         trigger: { type: "manual" },
       }),
-      { scopeKey: "workspace_1" },
     );
   });
 
   it("saves an on-a-schedule trigger using the friendly schedule builder", async () => {
-    render(
-      <WorkflowEditor workspaceId="workspace_1" workflow={workflow} canEdit skillCatalog={[]} />,
-    );
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
     expect(screen.getByLabelText("Frequency")).toHaveValue("weekdays");
@@ -284,14 +262,11 @@ describe("WorkflowEditor", () => {
           prompt: "Draft the weekday update.",
         },
       }),
-      { scopeKey: "workspace_1" },
     );
   });
 
   it("switches the frequency preset and updates the cron accordingly", async () => {
-    render(
-      <WorkflowEditor workspaceId="workspace_1" workflow={workflow} canEdit skillCatalog={[]} />,
-    );
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
     fireEvent.change(screen.getByLabelText("Frequency"), { target: { value: "hours" } });
@@ -311,14 +286,11 @@ describe("WorkflowEditor", () => {
           prompt: "Check for updates.",
         },
       }),
-      { scopeKey: "workspace_1" },
     );
   });
 
   it("saves a custom cron expression via the advanced option", async () => {
-    render(
-      <WorkflowEditor workspaceId="workspace_1" workflow={workflow} canEdit skillCatalog={[]} />,
-    );
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
     fireEvent.change(screen.getByLabelText("Frequency"), { target: { value: "custom" } });
@@ -338,14 +310,11 @@ describe("WorkflowEditor", () => {
           prompt: "Run the monthly report.",
         },
       }),
-      { scopeKey: "workspace_1" },
     );
   });
 
   it("archives from the editor menu", async () => {
-    render(
-      <WorkflowEditor workspaceId="workspace_1" workflow={workflow} canEdit skillCatalog={[]} />,
-    );
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.click(screen.getByRole("button", { name: "More" }));
     fireEvent.click(screen.getByRole("button", { name: "Archive workflow" }));
@@ -353,20 +322,15 @@ describe("WorkflowEditor", () => {
       await Promise.resolve();
     });
 
-    expect(workflowActionsMock.archive).toHaveBeenCalledWith(
-      "workflow_1",
-      {
-        expectedVersion: 1,
-      },
-      { scopeKey: "workspace_1" },
-    );
+    expect(workflowActionsMock.archive).toHaveBeenCalledWith("workflow_1", {
+      expectedVersion: 1,
+    });
     expect(routerMock.push).toHaveBeenCalledWith("/workflows");
   });
 
-  it("does not wait for a deleted schedule projection when archiving after a manual save", async () => {
+  it("archives with the version returned by the latest autosave", async () => {
     render(
       <WorkflowEditor
-        workspaceId="workspace_1"
         workflow={{
           ...workflow,
           trigger: {
@@ -392,17 +356,11 @@ describe("WorkflowEditor", () => {
       await Promise.resolve();
     });
 
-    expect(workflowActionsMock.archive).toHaveBeenCalledWith(
-      "workflow_1",
-      { expectedVersion: 2 },
-      { scopeKey: "workspace_1" },
-    );
+    expect(workflowActionsMock.archive).toHaveBeenCalledWith("workflow_1", { expectedVersion: 2 });
   });
 
   it("does not race archive against a pending autosave version", () => {
-    render(
-      <WorkflowEditor workspaceId="workspace_1" workflow={workflow} canEdit skillCatalog={[]} />,
-    );
+    render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Unsaved edit" } });
     fireEvent.click(screen.getByRole("button", { name: "More" }));
