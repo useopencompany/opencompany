@@ -29,6 +29,7 @@ import type { TaskScheduleView } from "@/lib/headless-automation-types";
 import {
   getHeadlessChatConversations,
   getHeadlessEngineSessions,
+  preloadHeadlessChatMessages,
   type HeadlessChatConversationReadModel,
   type HeadlessEngineSessionReadModel,
 } from "@/lib/headless-chat-collections";
@@ -58,6 +59,8 @@ import { deriveTaskWorkflowSteps } from "@/lib/task-workflow-activity";
 function hasDurableChatRuntime(engine: HeadlessChatConversationReadModel["engine"]): boolean {
   return engine === "opencompany" || engine === "codex" || engine === "claude_code";
 }
+
+const SIDEBAR_CHAT_TRANSCRIPT_PRELOAD_LIMIT = 8;
 
 type UserView = {
   // Scopes client-side chat attachment uploads (blob prefix goat-chat/{id}/).
@@ -363,6 +366,20 @@ function AppLiveDataSubscriptions({
       .map(toSummary);
     return [...pinned, ...activeRuntime, ...recent];
   }, [chatRows, chatsLoading, engineSessionRows, initialData.recentChats]);
+
+  useEffect(() => {
+    // Wait for the authoritative conversation shape so the larger server
+    // fallback cannot accidentally fan out into one Electric shape per chat.
+    if (chatsLoading && !chatRows?.length) return;
+    for (const chat of recentChats.slice(0, SIDEBAR_CHAT_TRANSCRIPT_PRELOAD_LIMIT)) {
+      void preloadHeadlessChatMessages(chat.id).catch((error: unknown) => {
+        console.warn("Could not preload a sidebar chat transcript.", {
+          conversationId: chat.id,
+          error,
+        });
+      });
+    }
+  }, [chatRows?.length, chatsLoading, recentChats]);
 
   const archivedChats = useMemo<ChatSummaryView[]>(() => {
     const codexRuntimeByChatId = new Map(

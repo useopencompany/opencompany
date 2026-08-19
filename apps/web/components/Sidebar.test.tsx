@@ -84,7 +84,15 @@ const chatCommandsMock = vi.hoisted(() => ({
   updateHeadlessChatConversation: vi.fn(async () => ({ transactionId: "1" })),
 }));
 
+const chatCollectionMocks = vi.hoisted(() => ({
+  preloadHeadlessChatMessages: vi.fn(async (conversationId: string) => {
+    void conversationId;
+  }),
+}));
+
 vi.mock("@/lib/headless-chat-commands", () => chatCommandsMock);
+
+vi.mock("@/lib/headless-chat-collections", () => chatCollectionMocks);
 
 vi.mock("@/components/AppDataProvider", () => ({
   useAppData: () => ({
@@ -496,6 +504,29 @@ describe("Sidebar", () => {
     expect(focusRequest).toHaveBeenCalledTimes(1);
     expect(consumePendingChatComposerFocus("goat_chat_focus")).toBe(true);
     window.removeEventListener(CHAT_COMPOSER_FOCUS_EVENT, focusRequest);
+  });
+
+  it("warms the transcript collection when a recent chat is hovered", async () => {
+    const user = userEvent.setup();
+    recentChatsMock.value = [
+      {
+        id: "chat_warm",
+        title: "Warm chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Ready",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.hover(screen.getByRole("link", { name: "Warm chat" }));
+
+    expect(routerMock.prefetch).toHaveBeenCalledWith("/chat/chat_warm");
+    expect(chatCollectionMocks.preloadHeadlessChatMessages).toHaveBeenCalledWith("chat_warm");
   });
 
   it("shows working instead of unseen when a chat still has an active model turn", () => {
