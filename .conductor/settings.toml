@@ -1,6 +1,6 @@
 "$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
 
 [scripts]
-setup = "bun install && bun run mcp:configure"
-run = "OPENCOMPANY_NGROK_DISABLED=1 bun run dev:stream"
+setup = "node scripts/cleanup-local-electric.mjs && bun install && bun run mcp:configure"
+run = "OPENCOMPANY_NGROK_DISABLED=1 bun run dev"
 run_mode = "nonconcurrent"

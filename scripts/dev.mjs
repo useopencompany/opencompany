@@ -1,4 +1,4 @@
-// Called by: root `bun run dev`, `bun run dev:web`, and `bun run dev:tui`.
+// Called by: root `bun run dev`, `bun run dev:web`, and `bun run dev:stream`.
 // Purpose: starts the web dev proxy, local HTTPS, and ngrok when available, then runs
 // the local Turbo dev stack (web app + runner + Stripe listener).
 

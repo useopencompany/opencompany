@@ -1,8 +1,47 @@
 import type { SQL } from "drizzle-orm";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorkOsApiAuthenticator, createWorkOsApiIdentityVerifier } from "./auth";
 
 describe("API authentication", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    "",
+    "   ",
+  ])("uses the default WorkOS session cookie when WORKOS_COOKIE_NAME is %j", async (cookieName) => {
+    vi.stubEnv("WORKOS_COOKIE_NAME", cookieName);
+    const loadSealedSession = vi.fn(async () => ({
+      authenticate: async () => ({
+        authenticated: true,
+        user: { id: "user_1" },
+        organizationId: "org_1",
+        sessionId: "session_1",
+      }),
+    }));
+    const identify = createWorkOsApiIdentityVerifier({
+      cookiePassword: "a-secure-cookie-password-with-32-chars",
+      workos: { userManagement: { loadSealedSession } } as never,
+    });
+
+    await expect(
+      identify(
+        new Request("https://api.example.test/v1/identity", {
+          headers: { Cookie: "wos-session=sealed-session" },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      userId: "user_1",
+      organizationId: "org_1",
+      method: "session",
+    });
+    expect(loadSealedSession).toHaveBeenCalledWith({
+      sessionData: "sealed-session",
+      cookiePassword: "a-secure-cookie-password-with-32-chars",
+    });
+  });
+
   it("accepts a verified pre-organization bearer identity for onboarding and identity sync", async () => {
     const identify = createWorkOsApiIdentityVerifier({
       audience: "api_resource",
@@ -146,6 +185,7 @@ describe("API authentication", () => {
   });
 
   it("refreshes an expired sealed browser session and returns the rotated cookie", async () => {
+    vi.stubEnv("WORKOS_COOKIE_DOMAIN", "   ");
     const execute = vi.fn(async () => ({
       rows: [
         {
@@ -159,6 +199,7 @@ describe("API authentication", () => {
     const authenticate = createWorkOsApiAuthenticator(execute, {
       cookieName: "wos-session",
       cookiePassword: "a-secure-cookie-password-with-32-chars",
+      cookieDomain: "   ",
       workos: {
         userManagement: {
           loadSealedSession: async () => ({
@@ -188,5 +229,6 @@ describe("API authentication", () => {
     });
     expect(result.refreshedSessionCookie).toContain("wos-session=rotated-session");
     expect(result.refreshedSessionCookie).toContain("HttpOnly");
+    expect(result.refreshedSessionCookie).not.toContain("Domain=");
   });
 });
