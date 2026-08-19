@@ -724,6 +724,7 @@ describe("Surface chat streaming UI", () => {
             updatedAt: new Date().toISOString(),
           },
         }}
+        workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
         taskSpawningEnabled
@@ -746,9 +747,13 @@ describe("Surface chat streaming UI", () => {
     await user.click(submit);
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
-    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("ship-feature", {
-      description: "#ship-feature fix the composer send button",
-    });
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "ship-feature",
+      {
+        description: "#ship-feature fix the composer send button",
+      },
+      { scopeKey: "workspace_1" },
+    );
     expect(chatMock.stop).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
@@ -2603,6 +2608,7 @@ describe("Surface chat streaming UI", () => {
           model: DEFAULT_MODEL,
           messages: [],
         }}
+        workspaceId="workspace_1"
         userWorkosId="user_1"
         taskSpawningEnabled
       />,
@@ -2623,10 +2629,14 @@ describe("Surface chat streaming UI", () => {
     await user.type(textarea, "{Enter}");
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
-    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
-      description: "#morning-test run today's checks with @skill/smooth-shadow-ring",
-      skillIds: ["smooth-shadow-ring"],
-    });
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "morning-test",
+      {
+        description: "#morning-test run today's checks with @skill/smooth-shadow-ring",
+        skillIds: ["smooth-shadow-ring"],
+      },
+      { scopeKey: "workspace_1" },
+    );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
@@ -2676,6 +2686,7 @@ describe("Surface chat streaming UI", () => {
           model: DEFAULT_MODEL,
           messages: [],
         }}
+        workspaceId="workspace_1"
         userWorkosId="user_1"
         taskSpawningEnabled
       />,
@@ -2702,10 +2713,14 @@ describe("Surface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Start task" }));
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
-    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
-      description: "#morning-test summarize this report",
-      attachmentIds: ["attachment_1"],
-    });
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "morning-test",
+      {
+        description: "#morning-test summarize this report",
+        attachmentIds: ["attachment_1"],
+      },
+      { scopeKey: "workspace_1" },
+    );
     expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
@@ -2755,6 +2770,7 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={null}
+        workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
         taskSpawningEnabled
@@ -2774,9 +2790,13 @@ describe("Surface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Start task" }));
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
-    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
-      description: "#morning-test run today's checks",
-    });
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "morning-test",
+      {
+        description: "#morning-test run today's checks",
+      },
+      { scopeKey: "workspace_1" },
+    );
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining("messages"),
       expect.anything(),
@@ -3814,6 +3834,7 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={null}
+        workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
         taskSpawningEnabled
@@ -3837,9 +3858,13 @@ describe("Surface chat streaming UI", () => {
     await user.click(within(dialog).getByRole("button", { name: "Start task" }));
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
-    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith("morning-test", {
-      description: "#morning-test run today's checks",
-    });
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "morning-test",
+      {
+        description: "#morning-test run today's checks",
+      },
+      { scopeKey: "workspace_1" },
+    );
     expect(headlessChatMocks.startBackground).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());

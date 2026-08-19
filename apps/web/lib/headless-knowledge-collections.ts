@@ -22,6 +22,7 @@ import { parentWikiPath } from "@opencompany/wiki";
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
+import { reconcileCommittedProjection } from "./headless-collection-reconciliation";
 import {
   addWikiTimelineEntryRequest,
   createWikiPageRequest,
@@ -114,20 +115,21 @@ function createWikiCollections(scopeKey: string) {
           });
           transactionIds.push(...result.transactionIds);
         }
-        return { txid: transactionIds };
+        await awaitHeadlessWikiTransactions(transactionIds, { scopeKey });
       },
-      onUpdate: async ({ transaction }) => ({
-        txid: await persistHeadlessWikiPageWrites(
+      onUpdate: async ({ transaction }) => {
+        const transactionIds = await persistHeadlessWikiPageWrites(
           asHeadlessWikiPageWriteMutations(transaction.mutations),
-        ),
-      }),
+        );
+        await awaitHeadlessWikiTransactions(transactionIds, { scopeKey });
+      },
       onDelete: async ({ transaction }) => {
         const transactionIds: number[] = [];
         for (const root of wikiDeleteRoots(transaction.mutations)) {
           const result = await deleteWikiPageRequest(root.slug, { recursive: true });
           transactionIds.push(...result.transactionIds);
         }
-        return { txid: transactionIds };
+        await awaitHeadlessWikiTransactions(transactionIds, { scopeKey });
       },
     }),
   );
@@ -150,7 +152,7 @@ function createWikiCollections(scopeKey: string) {
           });
           transactionIds.push(result.transactionId);
         }
-        return { txid: transactionIds };
+        await awaitHeadlessWikiTransactions(transactionIds, { scopeKey, target: "timeline" });
       },
     }),
   );
@@ -219,7 +221,7 @@ export function getHeadlessBrainCollections(brainId: string) {
   return collections;
 }
 
-export function getHeadlessWikiCollections(scopeKey = "active") {
+export function getHeadlessWikiCollections(scopeKey: string) {
   const cached = wikisByScope.get(scopeKey);
   if (cached) return cached;
   const collections = createWikiCollections(scopeKey);
@@ -230,7 +232,7 @@ export function getHeadlessWikiCollections(scopeKey = "active") {
 export type HeadlessWikiCollections = ReturnType<typeof createWikiCollections>;
 export async function awaitHeadlessWikiTransactions(
   transactionIds: number[],
-  options: { scopeKey?: string; target?: "pages" | "timeline"; timeoutMs?: number } = {},
+  options: { scopeKey: string; target?: "pages" | "timeline"; timeoutMs?: number },
 ) {
   const pendingIds = transactionIds.filter(
     (transactionId) => Number.isSafeInteger(transactionId) && transactionId > 0,
@@ -238,7 +240,9 @@ export async function awaitHeadlessWikiTransactions(
   if (pendingIds.length === 0) return;
   const collection = getHeadlessWikiCollections(options.scopeKey)[options.target ?? "pages"];
   await Promise.all(
-    pendingIds.map((transactionId) => collection.utils.awaitTxId(transactionId, options.timeoutMs)),
+    pendingIds.map((transactionId) =>
+      reconcileCommittedProjection(collection.utils.awaitTxId(transactionId, options.timeoutMs)),
+    ),
   );
 }
 

@@ -917,7 +917,7 @@ export function WorkflowsRoute({
           descriptionPlaceholder="What this workflow does"
           submitLabel="Create workflow"
           create={async (input) => {
-            const workflow = await createHeadlessWorkflow(input);
+            const workflow = await createHeadlessWorkflow(input, { scopeKey: workspaceId });
             return { ok: true, slug: workflow.slug };
           }}
           onClose={() => setCreating(false)}
