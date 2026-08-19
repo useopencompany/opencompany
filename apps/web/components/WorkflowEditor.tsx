@@ -2,6 +2,7 @@
 
 import {
   type AgentSchedulePreset,
+  CLOUD_CODING_ENGINE_CONFIG,
   cronForSchedulePreset,
   SUPPORTED_HOUR_INTERVALS,
   schedulePresetFromCron,
@@ -1016,7 +1017,7 @@ function StepCloudModelPicker({
   const options = workflowCloudModelOptions(engine);
   const selectedOption = options.find((option) => option.id === value);
   const selectedLabel = selectedOption?.label ?? value;
-  const runtimeLabel = engine === "codex" ? "Codex" : "Claude Code";
+  const runtimeLabel = CLOUD_CODING_ENGINE_CONFIG[engine].label;
 
   return (
     <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>

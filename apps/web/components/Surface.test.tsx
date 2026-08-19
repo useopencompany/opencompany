@@ -22,7 +22,7 @@ import {
   WEB_FETCH_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
-import { CLAUDE_CHAT_DEFAULT_MODEL_ID } from "@/lib/claude-chat-constants";
+import { CLAUDE_CHAT_DEFAULT_MODEL_ID } from "@/lib/engine-registry";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
 import { HeadlessChatTransport } from "@/lib/headless-chat-transport";
 import { DEFAULT_MODEL } from "@/lib/model-options";
