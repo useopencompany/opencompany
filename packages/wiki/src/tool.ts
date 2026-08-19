@@ -42,7 +42,7 @@ export type WikiToolInput = {
   body?: string | undefined;
   /** write: page kind. */
   kind?: string | undefined;
-  /** write: display name for the page (defaults to the body's first H1). */
+  /** write/mkdir: display name (write defaults to the body's first H1, mkdir to the folder slug). */
   title?: string | undefined;
   /** search: query text. grep: regex pattern. */
   query?: string | undefined;
@@ -66,7 +66,7 @@ export type WikiToolOutput = { ok: true; result: unknown } | { ok: false; error:
 
 export const WIKI_TOOL_DESCRIPTION = [
   "Workspace wiki: folders and markdown pages in a tree, like a filesystem. Folders are containers and pages are leaf documents. A node's full `path` is its identity; start with `tree`, `read` promising pages, and use `grep` when hunting for a phrase.",
-  'Commands: tree (folders end in `/`) · read {pages: path|basename|[...]} (page bodies + backlinks; a folder returns its children) · grep {query: regex} · search {query} · recent {since: "2d"} · timeline {pages: path, since?} · mkdir {path} (create a folder and missing ancestor folders) · write {path, body, kind?, title?} (create or overwrite a page; missing ancestor folders are auto-created) · move {pages: path, to: folder-path|"/"} (move a page or folder subtree and update links) · delete {pages: path, recursive?} (recursive is required for a non-empty folder) · timeline-add {pages: path, text, at?}.',
+  'Commands: tree (folders end in `/`) · read {pages: path|basename|[...]} (page bodies + backlinks; a folder returns its children) · grep {query: regex} · search {query} · recent {since: "2d"} · timeline {pages: path, since?} · mkdir {path, title?} (create a folder and missing ancestor folders) · write {path, body, kind?, title?} (create or overwrite a page; missing ancestor folders are auto-created) · move {pages: path, to: folder-path|"/"} (move a page or folder subtree and update links) · delete {pages: path, recursive?} (recursive is required for a non-empty folder) · timeline-add {pages: path, text, at?}.',
   "Pages link inline with [[path/to/page]] or [[path/to/page|Label]], and to artifacts in other tools with [[source:provider:id]] (e.g. [[source:linear:issue:ENG-123]]) — keep those links when rewriting. Bare basenames resolve only when unique. `kind` is one of project, person, company, research, meeting, other. Writes overwrite the whole page body: read before you rewrite.",
 ].join(" ");
 
@@ -103,11 +103,12 @@ export const WIKI_TOOL_INPUT_JSON_SCHEMA = {
     title: {
       type: "string",
       description:
-        "write: display name for the page. Optional — defaults to the body's first H1, and an existing name is kept when omitted.",
+        "write/mkdir: display name for the page or folder. Optional — a page defaults to the body's first H1, a folder to its slug; an existing name is kept when omitted.",
     },
     query: {
       type: "string",
-      description: "search: query text. grep: a regular expression matched line by line.",
+      description:
+        "search: query text. grep: a regular expression matched against page titles and each body line.",
     },
     since: {
       type: "string",

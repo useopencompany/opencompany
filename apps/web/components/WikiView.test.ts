@@ -24,6 +24,11 @@ describe("Wiki tree helpers", () => {
     expect(availableWikiSlug("Goals", pages, "personal")).toBe("goals");
   });
 
+  it("does not treat the renamed node's existing slug as a collision", () => {
+    const pages = [node({ id: "page-a", path: "company/goals", slug: "goals" })];
+    expect(availableWikiSlug("Goals", pages, "company", "page-a")).toBe("goals");
+  });
+
   it("sorts folders first and then pages by display title", () => {
     const tree = buildTree([
       node({ id: "page-a", path: "a", slug: "a", title: "Alpha" }),

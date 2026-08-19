@@ -192,6 +192,7 @@ export interface KnowledgeRepository {
     id: string;
     body?: string;
     kind?: WikiPage["kind"];
+    slug?: string;
     title?: string;
   }): Promise<{ page: WikiPage; transactionIds: number[] }>;
   deleteWikiPage(input: {
@@ -401,6 +402,7 @@ export class KnowledgeApplicationService {
     input: {
       body?: string;
       kind?: WikiPage["kind"];
+      slug?: string;
       title?: string;
     },
   ) {
@@ -410,6 +412,7 @@ export class KnowledgeApplicationService {
       id: resourceId(id, "id"),
       ...(input.body !== undefined ? { body: boundedRaw(input.body, 1_000_000, "body") } : {}),
       ...(input.kind ? { kind: input.kind } : {}),
+      ...(input.slug !== undefined ? { slug: bounded(input.slug, 80, "slug") } : {}),
       ...(input.title !== undefined ? { title: boundedRaw(input.title, 160, "title") } : {}),
     });
   }

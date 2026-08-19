@@ -123,6 +123,29 @@ describe("headless knowledge collections", () => {
     });
   });
 
+  it("persists a changed Wiki slug with the page update", async () => {
+    vi.mocked(updateWikiPageRequest).mockResolvedValue({
+      page: { ...wikiPage, slug: "renamed", path: "renamed" },
+      transactionIds: [83],
+    });
+
+    await expect(
+      persistHeadlessWikiPageWrites([
+        {
+          original: wikiPage,
+          modified: { ...wikiPage, slug: "renamed", path: "renamed", title: "Renamed" },
+        },
+      ]),
+    ).resolves.toEqual([83]);
+
+    expect(updateWikiPageRequest).toHaveBeenCalledWith("wiki_page_1", {
+      body: "Plan",
+      kind: "project",
+      slug: "renamed",
+      title: "Renamed",
+    });
+  });
+
   it("waits only for positive safe Wiki transaction ids", async () => {
     const wiki = getHeadlessWikiCollections("workspace_wait");
 

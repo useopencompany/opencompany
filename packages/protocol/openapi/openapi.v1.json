@@ -5988,6 +5988,11 @@
               "other"
             ]
           },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
           "title": {
             "type": "string",
             "maxLength": 160

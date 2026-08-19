@@ -18,6 +18,7 @@ import {
   listWikiTimeline,
   moveWikiNode,
   recentWikiChanges,
+  renameWikiNode,
   resolveWikiPages,
   searchWiki,
   WikiError,
@@ -121,6 +122,31 @@ describe("writeWikiPage", () => {
     expect(unchanged.action).toBe("unchanged");
   });
 
+  it("absorbs concurrent creation of a shared ancestor folder", async () => {
+    // Parallel agent tool calls race check-then-insert on the same missing
+    // parent; every write must converge instead of failing with "already exists".
+    const results = await Promise.all([
+      writeWikiPage({ workspaceId: WS, path: "company/pitch", body: "# Pitch" }, db),
+      writeWikiPage({ workspaceId: WS, path: "company/team", body: "# Team" }, db),
+      writeWikiPage({ workspaceId: WS, path: "company/history", body: "# History" }, db),
+      createWikiFolder({ workspaceId: WS, path: "company" }, db),
+      createWikiFolder({ workspaceId: WS, path: "company" }, db),
+    ]);
+    expect(results.slice(0, 3).map((result) => result.action)).toEqual([
+      "created",
+      "created",
+      "created",
+    ]);
+    const tree = await getWikiTree(WS, db);
+    expect(tree.filter((entry) => entry.path === "company")).toHaveLength(1);
+    expect(tree.map((entry) => entry.path).sort()).toEqual([
+      "company",
+      "company/history",
+      "company/pitch",
+      "company/team",
+    ]);
+  });
+
   it("allows a slug to be reused under a different folder", async () => {
     await writeWikiPage({ workspaceId: WS, path: "projects/site", body: "" }, db);
     const result = await writeWikiPage({ workspaceId: WS, path: "archive/site", body: "" }, db);
@@ -220,6 +246,61 @@ describe("moveWikiNode", () => {
   });
 });
 
+describe("renameWikiNode", () => {
+  it("renames the slug and rewrites backlinks in the same transaction", async () => {
+    const created = await writeWikiPage(
+      { workspaceId: WS, path: "untitled", body: "Self: [[untitled]]", title: "" },
+      db,
+    );
+    await writeWikiPage({ workspaceId: WS, path: "referrer", body: "See [[untitled]]." }, db);
+
+    const result = await renameWikiNode(
+      {
+        workspaceId: WS,
+        id: created.page.id,
+        title: "Launch Plan",
+        slug: "launch-plan",
+      },
+      db,
+    );
+
+    expect(result.node).toMatchObject({
+      slug: "launch-plan",
+      path: "launch-plan",
+      title: "Launch Plan",
+      content: "Self: [[launch-plan]]",
+    });
+    expect(result.txids).toHaveLength(4);
+    const referrer = (await resolveWikiPages(WS, ["referrer"], db)).pages[0];
+    expect(referrer?.content).toBe("See [[launch-plan]].");
+    await expect(resolveWikiPages(WS, ["untitled"], db)).resolves.toMatchObject({
+      missing: ["untitled"],
+    });
+  });
+
+  it("rejects a sibling slug collision without changing the title", async () => {
+    const created = await writeWikiPage(
+      { workspaceId: WS, path: "untitled", body: "", title: "" },
+      db,
+    );
+    await writeWikiPage({ workspaceId: WS, path: "launch-plan", body: "" }, db);
+
+    await expect(
+      renameWikiNode(
+        {
+          workspaceId: WS,
+          id: created.page.id,
+          title: "Launch Plan",
+          slug: "launch-plan",
+        },
+        db,
+      ),
+    ).rejects.toThrow(/already exists/);
+    const original = (await resolveWikiPages(WS, ["untitled"], db)).pages[0];
+    expect(original?.title).toBe("");
+  });
+});
+
 describe("deleteWikiPage", () => {
   it("requires recursive for subtrees and versions every deletion", async () => {
     await writeWikiPage({ workspaceId: WS, path: "projects/site", body: "x" }, db);
@@ -266,6 +347,18 @@ describe("retrieval", () => {
   it("greps with line numbers", async () => {
     const matches = await grepWiki(WS, { pattern: "founding engineer", ignoreCase: true }, db);
     expect(matches).toMatchObject([{ slug: "ada-lovelace", lineNumber: 3 }]);
+  });
+
+  it("greps titles that never appear in the body as pseudo-line 0", async () => {
+    await writeWikiPage(
+      { workspaceId: WS, path: "q3-okrs", body: "Ship the relaunch.", title: "Q3 OKRs" },
+      db,
+    );
+    const matches = await grepWiki(WS, { pattern: "okr", ignoreCase: true }, db);
+    expect(matches).toMatchObject([{ slug: "q3-okrs", lineNumber: 0, line: "Q3 OKRs" }]);
+    // A title derived from the body's H1 matches once, via the body line.
+    const h1 = await grepWiki(WS, { pattern: "ada lovelace", ignoreCase: true }, db);
+    expect(h1).toMatchObject([{ slug: "ada-lovelace", lineNumber: 1 }]);
   });
 
   it("scopes retrieval to the workspace", async () => {

@@ -1485,12 +1485,21 @@ export const UpdateWikiPageBodySchema = z
   .object({
     body: z.string().max(1_000_000).optional(),
     kind: WikiKindSchema.optional(),
+    slug: z.string().min(1).max(80).optional(),
     title: z.string().max(160).optional(),
   })
   .strict()
   .refine(
-    (body: { body?: string; kind?: z.infer<typeof WikiKindSchema>; title?: string }) =>
-      body.body !== undefined || body.kind !== undefined || body.title !== undefined,
+    (body: {
+      body?: string;
+      kind?: z.infer<typeof WikiKindSchema>;
+      slug?: string;
+      title?: string;
+    }) =>
+      body.body !== undefined ||
+      body.kind !== undefined ||
+      body.slug !== undefined ||
+      body.title !== undefined,
     { message: "At least one Wiki field is required." },
   )
   .openapi("UpdateWikiPageBody");

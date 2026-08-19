@@ -8,6 +8,7 @@ import {
   DEFAULT_WIKI_KIND,
   deriveWikiTitle,
   isValidWikiPath,
+  isValidWikiSlug,
   isWikiDescendantPath,
   movedWikiPath,
   parentWikiPath,
@@ -56,6 +57,11 @@ const MAX_GREP_MATCHES_PER_PAGE = 10;
 const RRF_K = 60;
 
 export class WikiError extends Error {}
+
+// Insert lost a unique-violation race on (workspace_id, path): another writer
+// created the node between our existence check and the insert. Folder creation
+// absorbs this and converges on the winner's row; page writes surface it.
+class WikiNodeExistsError extends WikiError {}
 
 export function hashWikiContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
@@ -371,16 +377,32 @@ export async function createWikiFolder(
     path,
     input.actorWorkosId ?? null,
   );
-  const inserted = await insertNode(db, {
-    workspaceId: input.workspaceId,
-    path,
-    nodeType: "folder",
-    body: "",
-    kind: DEFAULT_WIKI_KIND,
-    ...(input.id ? { id: input.id } : {}),
-    title: input.title?.trim() || wikiSlugFromPath(path),
-    actorWorkosId: input.actorWorkosId ?? null,
-  });
+  let inserted: { page: WikiPage; txid: number };
+  try {
+    inserted = await insertNode(db, {
+      workspaceId: input.workspaceId,
+      path,
+      nodeType: "folder",
+      body: "",
+      kind: DEFAULT_WIKI_KIND,
+      ...(input.id ? { id: input.id } : {}),
+      title: input.title?.trim() || wikiSlugFromPath(path),
+      actorWorkosId: input.actorWorkosId ?? null,
+    });
+  } catch (error) {
+    if (!(error instanceof WikiNodeExistsError)) throw error;
+    // A concurrent writer created this path between the existence check and the
+    // insert; converge on their node instead of failing an idempotent mkdir.
+    const winner = await pageByPath(db, input.workspaceId, path);
+    if (!winner) throw error;
+    if (winner.nodeType === "page") throw new WikiError(`"${path}" is a page.`);
+    return {
+      folder: winner,
+      action: "unchanged",
+      createdAncestors: ancestors.created,
+      txids: ancestors.txids,
+    };
+  }
   return {
     folder: inserted.page,
     action: "created",
@@ -433,6 +455,8 @@ export async function moveWikiNode(
     path: string;
     /** New containing folder path, or null to move to the root. */
     newParentPath: string | null;
+    /** New final path segment, or the existing slug when omitted. */
+    newSlug?: string;
     actorWorkosId?: string | null;
   },
   db: DbClient = getDb(),
@@ -451,12 +475,15 @@ async function moveWikiNodeInDb(
     workspaceId: string;
     path: string;
     newParentPath: string | null;
+    newSlug?: string;
     actorWorkosId?: string | null;
   },
   db: DbClient,
 ): Promise<WikiMoveResult> {
   const node = await requireWikiNode(db, input.workspaceId, input.path);
   const parent = input.newParentPath?.trim().replace(/^\/+|\/+$/g, "") || null;
+  const slug = input.newSlug?.trim() || node.slug;
+  if (!isValidWikiSlug(slug)) throw new WikiError(`Invalid slug "${input.newSlug}".`);
   if (parent !== null) {
     if (!isValidWikiPath(parent)) throw new WikiError(`Invalid parent path "${parent}".`);
     if (parent === node.path || isWikiDescendantPath(parent, node.path)) {
@@ -466,7 +493,7 @@ async function moveWikiNodeInDb(
     if (!parentNode) throw new WikiError(`Folder "${parent}" does not exist.`);
     if (parentNode.nodeType !== "folder") throw new WikiError(`"${parent}" is not a folder.`);
   }
-  const newPath = parent ? `${parent}/${node.slug}` : node.slug;
+  const newPath = parent ? `${parent}/${slug}` : slug;
   if (!isValidWikiPath(newPath)) throw new WikiError(`Invalid destination path "${newPath}".`);
   if (newPath === node.path) {
     return {
@@ -511,7 +538,12 @@ async function moveWikiNodeInDb(
 
   const movedRows: Array<WikiPage & { txid: string }> = await db
     .update(wikiPages)
-    .set({ path: newPath, updatedByWorkosId: input.actorWorkosId ?? null, updatedAt: new Date() })
+    .set({
+      slug,
+      path: newPath,
+      updatedByWorkosId: input.actorWorkosId ?? null,
+      updatedAt: new Date(),
+    })
     .where(eq(wikiPages.id, node.id))
     .returning({ ...getTableColumns(wikiPages), txid: TXID_COLUMN });
   const { txid, ...moved } = firstRow(movedRows, "wiki node move");
@@ -580,6 +612,49 @@ async function moveWikiNodeInDb(
     rewrittenReferrers,
     txids,
   };
+}
+
+/** Renames a node's display title and final path segment in one transaction. */
+export async function renameWikiNode(
+  input: {
+    workspaceId: string;
+    id: string;
+    title: string;
+    slug: string;
+    actorWorkosId?: string | null;
+  },
+  db: DbClient = getDb(),
+): Promise<{ node: WikiPage; txids: number[] }> {
+  if (!supportsInteractiveTransactions(db)) {
+    throw new WikiError("Renaming a wiki node requires a transactional database connection.");
+  }
+  return db.transaction(async (tx: DbClient) => {
+    const node = await nodeById(tx, input.workspaceId, input.id);
+    if (!node) throw new WikiError("Wiki node not found.");
+    const moved = await moveWikiNodeInDb(
+      {
+        workspaceId: input.workspaceId,
+        path: node.path,
+        newParentPath: parentWikiPath(node.path),
+        newSlug: input.slug,
+        actorWorkosId: input.actorWorkosId ?? null,
+      },
+      tx,
+    );
+    const titled = await updateWikiNodeTitle(
+      {
+        workspaceId: input.workspaceId,
+        id: input.id,
+        title: input.title,
+        actorWorkosId: input.actorWorkosId ?? null,
+      },
+      tx,
+    );
+    return {
+      node: titled.node,
+      txids: titled.txid === null ? moved.txids : [...moved.txids, titled.txid],
+    };
+  });
 }
 
 export async function deleteWikiPage(
@@ -772,8 +847,8 @@ export type WikiGrepMatch = {
 };
 
 /**
- * Regex grep over page bodies for surfaces without a real filesystem (chat,
- * MCP). Postgres pre-filters with the same pattern; matching lines are
+ * Regex grep over page titles and bodies for surfaces without a real filesystem
+ * (chat, MCP). Postgres pre-filters with the same pattern; matching lines are
  * extracted in JS. Sandboxed agents should just ripgrep the materialized tree.
  */
 export async function grepWiki(
@@ -820,6 +895,12 @@ export async function grepWiki(
       matches.push({ slug: page.slug, path: page.path, lineNumber: i + 1, line: lines[i] ?? "" });
       perPage += 1;
       if (matches.length >= limit || perPage >= MAX_GREP_MATCHES_PER_PAGE) break;
+    }
+    // A display title can match without appearing in the body (the SQL
+    // prefilter includes titles); emit it as pseudo-line 0 so title-only
+    // matches are not silently dropped.
+    if (perPage === 0 && matches.length < limit && regex.test(page.title)) {
+      matches.push({ slug: page.slug, path: page.path, lineNumber: 0, line: page.title });
     }
     if (matches.length >= limit) break;
   }
@@ -932,7 +1013,7 @@ async function insertNode(
       .returning({ ...getTableColumns(wikiPages), txid: TXID_COLUMN });
   } catch (error) {
     if (isUniqueViolation(error)) {
-      throw new WikiError(`A wiki node already exists at "${input.path}".`);
+      throw new WikiNodeExistsError(`A wiki node already exists at "${input.path}".`);
     }
     throw error;
   }
@@ -965,15 +1046,24 @@ async function ensureAncestorFolders(
       if (existing.nodeType !== "folder") throw new WikiError(`"${ancestorPath}" is not a folder.`);
       continue;
     }
-    const inserted = await insertNode(db, {
-      workspaceId,
-      path: ancestorPath,
-      nodeType: "folder",
-      body: "",
-      kind: "other",
-      title: wikiSlugFromPath(ancestorPath),
-      actorWorkosId,
-    });
+    let inserted: { page: WikiPage; txid: number };
+    try {
+      inserted = await insertNode(db, {
+        workspaceId,
+        path: ancestorPath,
+        nodeType: "folder",
+        body: "",
+        kind: "other",
+        title: wikiSlugFromPath(ancestorPath),
+        actorWorkosId,
+      });
+    } catch (error) {
+      if (!(error instanceof WikiNodeExistsError)) throw error;
+      // A concurrent writer created this ancestor first; treat it as existing.
+      const winner = await pageByPath(db, workspaceId, ancestorPath);
+      if (winner?.nodeType === "folder") continue;
+      throw winner ? new WikiError(`"${ancestorPath}" is not a folder.`) : error;
+    }
     created.push(ancestorPath);
     txids.push(inserted.txid);
   }

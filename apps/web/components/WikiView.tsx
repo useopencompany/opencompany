@@ -13,6 +13,7 @@
 // history.pushState.
 
 import {
+  movedWikiPath,
   parentWikiPath,
   WIKI_KINDS,
   type WikiKind,
@@ -297,14 +298,37 @@ function WikiLiveView({
 
   const renameNode = useCallback(
     (target: WikiPageData, title: string) => {
-      if (!syncReady || target.title === title) return;
-      trackPersistence(
-        collections.pages.update(target.id, (draft) => {
-          draft.title = title;
-        }),
-      );
+      if (!syncReady) return;
+      const parentPath = parentWikiPath(target.path);
+      const slug = availableWikiSlug(title, pages, parentPath, target.id);
+      if (!slug) {
+        surfaceError(`Cannot derive a page name from "${title}".`);
+        return;
+      }
+      if (target.title === title && target.slug === slug) return;
+      const path = parentPath ? `${parentPath}/${slug}` : slug;
+      // The server owns subtree and backlink rewrites. Updating descendants in
+      // this client transaction would persist their pre-rewrite bodies again.
+      const transaction = collections.pages.update(target.id, (draft) => {
+        draft.path = path;
+        draft.slug = slug;
+        draft.title = title;
+      });
+      trackPersistence(transaction);
+      if (selectedPath === target.path || selectedPath?.startsWith(`${target.path}/`)) {
+        const destination = movedWikiPath(selectedPath, target.path, path);
+        if (target.nodeType === "folder") {
+          transaction.isPersisted.promise.then(
+            () => navigate(destination),
+            () => undefined,
+          );
+        } else {
+          navigate(destination);
+          transaction.isPersisted.promise.catch(() => navigate(selectedPath));
+        }
+      }
     },
-    [collections, syncReady, trackPersistence],
+    [collections, navigate, pages, selectedPath, surfaceError, syncReady, trackPersistence],
   );
 
   const deleteNode = useCallback(
@@ -838,6 +862,24 @@ function WikiPageEditor({
     onPageCreated: (created: { id: string; path: string }) => openCreatedPageRef.current(created),
   }));
 
+  const commitTitlePath = useCallback(() => {
+    if (!editable) return;
+    const parentPath = parentWikiPath(page.path);
+    const slug = availableWikiSlug(titleDraft, pages, parentPath, page.id);
+    if (!slug || slug === page.slug) return;
+    const path = parentPath ? `${parentPath}/${slug}` : slug;
+    const transaction = collections.pages.update(page.id, (draft) => {
+      draft.slug = slug;
+      draft.path = path;
+      draft.title = titleDraft;
+    });
+    onNavigate(path);
+    transaction.isPersisted.promise.catch((cause: unknown) => {
+      onNavigate(page.path);
+      onError(cause instanceof Error ? cause.message : undefined);
+    });
+  }, [collections, editable, onError, onNavigate, page, pages, titleDraft]);
+
   const segments = page.path.split("/");
 
   return (
@@ -880,7 +922,10 @@ function WikiPageEditor({
         value={titleDraft}
         readOnly={!editable}
         onFocus={() => setTitleFocused(true)}
-        onBlur={() => setTitleFocused(false)}
+        onBlur={() => {
+          setTitleFocused(false);
+          commitTitlePath();
+        }}
         onChange={(event) => {
           setTitleDraft(event.target.value);
           queueSave({ title: event.target.value });
@@ -1197,10 +1242,13 @@ export function availableWikiSlug(
   title: string,
   pages: WikiPageData[],
   parentPath: string | null,
+  excludedNodeId?: string,
 ): string | null {
   const base = wikiSlugFromTitle(title.trim() || "Untitled") ?? "untitled";
   const taken = new Set(
-    pages.filter((page) => parentWikiPath(page.path) === parentPath).map((page) => page.slug),
+    pages
+      .filter((page) => page.id !== excludedNodeId && parentWikiPath(page.path) === parentPath)
+      .map((page) => page.slug),
   );
   if (!taken.has(base)) return base;
   for (let suffix = 2; suffix < 1_000; suffix += 1) {

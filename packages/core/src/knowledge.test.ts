@@ -98,6 +98,7 @@ describe("KnowledgeApplicationService", () => {
       service.updateWikiPage(actor, " page-id ", {
         body: "# Updated",
         kind: "project",
+        slug: "updated-page",
         title: "",
       }),
     ).rejects.toThrow("stop after capture");
@@ -106,6 +107,7 @@ describe("KnowledgeApplicationService", () => {
       id: "page-id",
       body: "# Updated",
       kind: "project",
+      slug: "updated-page",
       title: "",
     });
   });

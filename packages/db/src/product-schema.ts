@@ -2072,7 +2072,8 @@ export const wikiPages = productSchema.table(
     // final segment is this node's slug (app-enforced).
     path: text("path").notNull(),
     nodeType: text("node_type").$type<WikiNodeType>().notNull().default("page"),
-    // Display title derived from the body's first H1 (fallback: slug). Never identity.
+    // Display title derived from the body's first H1 (fallback: slug). The path
+    // remains canonical identity even when the UI renames its slug from this title.
     title: text("title").notNull().default(""),
     kind: text("kind").$type<WikiKind>().notNull().default("other"),
     // Markdown body WITHOUT frontmatter. The `kind:` frontmatter block is a

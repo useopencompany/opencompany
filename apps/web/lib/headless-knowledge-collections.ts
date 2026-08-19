@@ -196,10 +196,18 @@ export async function persistHeadlessWikiPageWrites(
       updateWikiPageRequest(
         mutation.original.id,
         mutation.original.nodeType === "folder"
-          ? { title: mutation.modified.title }
+          ? {
+              ...(mutation.modified.slug !== mutation.original.slug
+                ? { slug: mutation.modified.slug }
+                : {}),
+              title: mutation.modified.title,
+            }
           : {
               body: mutation.modified.body,
               kind: mutation.modified.kind,
+              ...(mutation.modified.slug !== mutation.original.slug
+                ? { slug: mutation.modified.slug }
+                : {}),
               title: mutation.modified.title,
             },
       ),

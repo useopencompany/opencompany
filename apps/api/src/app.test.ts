@@ -407,14 +407,24 @@ describe("canonical Hono API", () => {
     const wiki = await app.request("/v1/wiki/pages/project-alpha", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: "# Updated", kind: "project", title: "Alpha" }),
+      body: JSON.stringify({
+        body: "# Updated",
+        kind: "project",
+        slug: "alpha",
+        title: "Alpha",
+      }),
     });
     expect(wiki.status).toBe(200);
     await expect(wiki.json()).resolves.toMatchObject({
       data: { page: { slug: "project-alpha", body: "" }, transactionIds: [71] },
     });
     expect(updateWikiPage).toHaveBeenCalledWith(
-      expect.objectContaining({ actor, id: "project-alpha", body: "# Updated" }),
+      expect.objectContaining({
+        actor,
+        id: "project-alpha",
+        body: "# Updated",
+        slug: "alpha",
+      }),
     );
 
     const skill = await app.request("/v1/skills", {

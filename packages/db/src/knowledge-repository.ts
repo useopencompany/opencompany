@@ -66,6 +66,7 @@ import {
   createWikiFolder,
   deleteWikiPage,
   listWikiPagesWithBodies,
+  renameWikiNode,
   updateWikiNodeTitle,
   WikiError,
   writeWikiPage,
@@ -500,6 +501,7 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     id: string;
     body?: string;
     kind?: WikiPage["kind"];
+    slug?: string;
     title?: string;
   }) {
     try {
@@ -511,13 +513,39 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
       if (!page) {
         throw new CoreError("not_found", "Wiki page not found.");
       }
+      if (input.slug !== undefined && !isValidWikiSlug(input.slug)) {
+        throw new CoreError("invalid_argument", `Invalid Wiki slug "${input.slug}".`);
+      }
       if (page.nodeType === "folder") {
         if (input.body !== undefined || input.kind !== undefined) {
-          throw new CoreError("invalid_argument", "Folders only support title updates.");
+          throw new CoreError("invalid_argument", "Folders only support title and slug updates.");
         }
+        if (input.title === undefined && input.slug === undefined) {
+          throw new CoreError("invalid_argument", "A folder title or slug is required.");
+        }
+      }
+      const renamed =
+        input.slug !== undefined
+          ? await renameWikiNode(
+              {
+                workspaceId: input.actor.workspaceId,
+                id: page.id,
+                title: input.title ?? page.title,
+                slug: input.slug,
+                actorWorkosId: input.actor.userId,
+              },
+              this.db,
+            )
+          : null;
+      const currentPage = renamed?.node ?? page;
+      if (page.nodeType === "folder") {
         if (input.title === undefined) {
+          if (renamed) {
+            return { page: wikiPage(renamed.node), transactionIds: renamed.txids };
+          }
           throw new CoreError("invalid_argument", "A folder title is required.");
         }
+        if (renamed) return { page: wikiPage(renamed.node), transactionIds: renamed.txids };
         const result = await updateWikiNodeTitle(
           {
             workspaceId: input.actor.workspaceId,
@@ -532,19 +560,28 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
           transactionIds: result.txid === null ? [] : [result.txid],
         };
       }
+      if (renamed && input.body === undefined && input.kind === undefined) {
+        return { page: wikiPage(renamed.node), transactionIds: renamed.txids };
+      }
       const result = await writeWikiPage(
         {
           workspaceId: input.actor.workspaceId,
-          path: page.path,
-          body: input.body ?? page.content,
+          path: currentPage.path,
+          body: input.body ?? currentPage.content,
           ...(isValidWikiKind(input.kind) ? { kind: input.kind } : {}),
           ...(input.title !== undefined ? { title: input.title } : {}),
           actorWorkosId: input.actor.userId,
         },
         this.db,
       );
-      return { page: wikiPage(result.page), transactionIds: result.txids };
+      return {
+        page: wikiPage(result.page),
+        transactionIds: [...(renamed?.txids ?? []), ...result.txids],
+      };
     } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new CoreError("conflict", "A Wiki node with that path already exists.");
+      }
       throw knowledgeError(error);
     }
   }
