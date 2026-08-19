@@ -31,6 +31,7 @@ import { sql } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import { fetchLinearIssueSnapshot, type LinearIssueSnapshot } from "./linear-api";
+import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-linear-flush" });
@@ -289,76 +290,49 @@ export function buildLinearIssueWindowItem(input: {
 
 export function startLinearFlushWorker(options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? LINEAR_FLUSH_POLL_INTERVAL_MS);
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let wake: (() => void) | null = null;
-
-  const sleep = () =>
-    new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        wake = null;
-        resolve();
-      }, pollIntervalMs);
-      timer.unref?.();
-      wake = () => {
-        if (timer) clearTimeout(timer);
-        wake = null;
-        resolve();
-      };
-    });
-
-  const loop = (async () => {
-    while (!stopped) {
-      try {
-        const due = await listDueLinearIssueWindows({});
-        for (const window of due) {
-          if (stopped) break;
-          const flushed = await flushLinearIssueWindow(window).catch((error) => {
-            captureException(error, {
-              event: "opencompany.goat_linear_flush_failed",
-              integration_id: window.integrationId,
-              issue_id: window.issueId,
-            });
-            logger.error("opencompany Linear window flush failed", {
-              event: "opencompany.goat_linear_flush_failed",
-              integration_id: window.integrationId,
-              issue_id: window.issueId,
-              error,
-            });
-            return null;
+  return createPollingWorker({
+    pollIntervalMs,
+    poll: async ({ signal, stopping }) => {
+      signal.throwIfAborted();
+      const due = await listDueLinearIssueWindows({});
+      for (const window of due) {
+        if (stopping()) break;
+        const flushed = await flushLinearIssueWindow(window).catch((error) => {
+          if (signal.aborted) throw error;
+          captureException(error, {
+            event: "opencompany.goat_linear_flush_failed",
+            integration_id: window.integrationId,
+            issue_id: window.issueId,
           });
-          if (flushed) {
-            logger.info("opencompany Linear window flushed", {
-              event: "opencompany.goat_linear_window_flushed",
-              integration_id: window.integrationId,
-              issue_id: window.issueId,
-              source_item_id: flushed.sourceItemId,
-              event_count: flushed.eventCount,
-              enqueued: flushed.enqueued,
-              skipped: flushed.skipped,
-            });
-          }
-        }
-      } catch (error) {
-        captureException(error, { event: "opencompany.goat_linear_flush_worker_failed" });
-        logger.error("opencompany Linear flush worker failed", {
-          event: "opencompany.goat_linear_flush_worker_failed",
-          error,
+          logger.error("opencompany Linear window flush failed", {
+            event: "opencompany.goat_linear_flush_failed",
+            integration_id: window.integrationId,
+            issue_id: window.issueId,
+            error,
+          });
+          return null;
         });
+        if (flushed) {
+          logger.info("opencompany Linear window flushed", {
+            event: "opencompany.goat_linear_window_flushed",
+            integration_id: window.integrationId,
+            issue_id: window.issueId,
+            source_item_id: flushed.sourceItemId,
+            event_count: flushed.eventCount,
+            enqueued: flushed.enqueued,
+            skipped: flushed.skipped,
+          });
+        }
       }
-      if (stopped) break;
-      await sleep();
-    }
-  })();
-
-  return {
-    notify: () => wake?.(),
-    stop: async () => {
-      stopped = true;
-      wake?.();
-      await loop;
     },
-  };
+    onError: (error) => {
+      captureException(error, { event: "opencompany.goat_linear_flush_worker_failed" });
+      logger.error("opencompany Linear flush worker failed", {
+        event: "opencompany.goat_linear_flush_worker_failed",
+        error,
+      });
+    },
+  });
 }
 
 async function previewBufferedLinearEvents(window: LinearDueWindow) {

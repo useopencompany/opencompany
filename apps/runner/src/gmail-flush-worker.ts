@@ -23,6 +23,7 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { fetchGmailThreadSnapshot, type GmailThreadSnapshot } from "./gmail-api";
 import { googleApiCall } from "./google-api-auth";
+import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-gmail-flush" });
@@ -306,77 +307,48 @@ export function buildGmailThreadWindowItem(input: {
 
 export function startGmailFlushWorker(env: RunnerEnv, options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GMAIL_FLUSH_POLL_INTERVAL_MS);
-  const abort = new AbortController();
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let wake: (() => void) | null = null;
-
-  const sleep = () =>
-    new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        wake = null;
-        resolve();
-      }, pollIntervalMs);
-      timer.unref?.();
-      wake = () => {
-        if (timer) clearTimeout(timer);
-        wake = null;
-        resolve();
-      };
-    });
-
-  const loop = (async () => {
-    while (!stopped) {
-      try {
-        const due = await listDueGmailThreadWindows({});
-        for (const window of due) {
-          if (stopped) break;
-          const flushed = await flushGmailThreadWindow(window, env, abort.signal).catch((error) => {
-            captureException(error, {
-              event: "opencompany.goat_gmail_flush_failed",
-              integration_id: window.integrationId,
-              thread_id: window.threadId,
-            });
-            logger.error("opencompany Gmail window flush failed", {
-              event: "opencompany.goat_gmail_flush_failed",
-              integration_id: window.integrationId,
-              thread_id: window.threadId,
-              error,
-            });
-            return null;
+  return createPollingWorker({
+    pollIntervalMs,
+    poll: async ({ signal, stopping }) => {
+      signal.throwIfAborted();
+      const due = await listDueGmailThreadWindows({});
+      for (const window of due) {
+        if (stopping()) break;
+        const flushed = await flushGmailThreadWindow(window, env, signal).catch((error) => {
+          if (signal.aborted) throw error;
+          captureException(error, {
+            event: "opencompany.goat_gmail_flush_failed",
+            integration_id: window.integrationId,
+            thread_id: window.threadId,
           });
-          if (flushed) {
-            logger.info("opencompany Gmail window flushed", {
-              event: "opencompany.goat_gmail_window_flushed",
-              integration_id: window.integrationId,
-              thread_id: window.threadId,
-              source_item_id: flushed.sourceItemId,
-              event_count: flushed.eventCount,
-              enqueued: flushed.enqueued,
-            });
-          }
-        }
-      } catch (error) {
-        captureException(error, { event: "opencompany.goat_gmail_flush_worker_failed" });
-        logger.error("opencompany Gmail flush worker failed", {
-          event: "opencompany.goat_gmail_flush_worker_failed",
-          error,
+          logger.error("opencompany Gmail window flush failed", {
+            event: "opencompany.goat_gmail_flush_failed",
+            integration_id: window.integrationId,
+            thread_id: window.threadId,
+            error,
+          });
+          return null;
         });
+        if (flushed) {
+          logger.info("opencompany Gmail window flushed", {
+            event: "opencompany.goat_gmail_window_flushed",
+            integration_id: window.integrationId,
+            thread_id: window.threadId,
+            source_item_id: flushed.sourceItemId,
+            event_count: flushed.eventCount,
+            enqueued: flushed.enqueued,
+          });
+        }
       }
-      if (stopped) break;
-      await sleep();
-    }
-  })();
-
-  return {
-    notify: () => wake?.(),
-    stop: async () => {
-      stopped = true;
-      abort.abort();
-      wake?.();
-      await loop;
     },
-  };
+    onError: (error) => {
+      captureException(error, { event: "opencompany.goat_gmail_flush_worker_failed" });
+      logger.error("opencompany Gmail flush worker failed", {
+        event: "opencompany.goat_gmail_flush_worker_failed",
+        error,
+      });
+    },
+  });
 }
 
 async function previewBufferedGmailMessages(window: GmailDueWindow) {

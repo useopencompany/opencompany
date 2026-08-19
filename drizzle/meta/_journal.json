@@ -1534,6 +1534,13 @@
       "when": 1787137200000,
       "tag": "0218_goat_postgres_queue_hygiene",
       "breakpoints": true
+    },
+    {
+      "idx": 219,
+      "version": "7",
+      "when": 1787140800000,
+      "tag": "0219_goat_run_attempt_deploy_version",
+      "breakpoints": true
     }
   ]
 }

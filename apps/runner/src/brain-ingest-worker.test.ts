@@ -9,6 +9,7 @@ import {
 import {
   BRAIN_INGEST_MAX_ATTEMPTS,
   BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
+  type BrainIngestJobWithSource,
   type BrainIngestStore,
   runClaimedBrainIngestJob,
   startBrainIngestWorker,
@@ -412,6 +413,111 @@ describe("opencompany Brain ingest worker", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("releases an in-flight job for immediate retry when runner shutdown aborts it", async () => {
+    const shutdown = new AbortController();
+    const normalizedPayload = {
+      sourceProvider: "attio" as const,
+      sourceType: "activity" as const,
+      externalId: "window_shutdown",
+      sourceRef: "attio:workspace_1:person:record_shutdown",
+      title: "Shutdown handoff",
+      occurredAt: "2026-08-19T10:00:00.000Z",
+      capturedAt: "2026-08-19T10:01:00.000Z",
+      contentHash: "hash_shutdown",
+      contentHashInput: {},
+      content: {},
+    };
+    let markStarted = () => {};
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let finishRun = (_result: Record<string, unknown>) => {};
+    const run = vi.fn(
+      async (_input: { signal?: AbortSignal }): Promise<Record<string, unknown>> => {
+        markStarted();
+        return await new Promise<Record<string, unknown>>((resolve) => {
+          finishRun = resolve;
+        });
+      },
+    );
+    const release = vi.fn(async () => true);
+    const complete = vi.fn(async () => true);
+    const fail = vi.fn(async () => true);
+    const store: BrainIngestStore = {
+      claimNext: vi.fn(async () => null),
+      heartbeat: vi.fn(async () => true),
+      release,
+      complete,
+      skip: vi.fn(async () => true),
+      fail,
+    };
+    const job: BrainIngestJobWithSource = {
+      id: "gbjob_shutdown",
+      sourceItemId: "gbsrc_shutdown",
+      userWorkosId: "user_123",
+      workspaceId: "workspace_shutdown",
+      sourceProvider: "attio",
+      sourceConnectionId: "gint_shutdown",
+      integrationId: "gint_shutdown",
+      brainRef: "gbrain_123",
+      sourceType: "activity",
+      kind: "brain_agent_ingest",
+      contentHash: "hash_shutdown",
+      status: "running",
+      attempts: 1,
+      nextRunAt: new Date("2026-08-19T10:00:00.000Z"),
+      leaseId: "lease_shutdown",
+      leaseOwner: "runner_shutdown",
+      leaseExpiresAt: new Date("2026-08-19T10:05:00.000Z"),
+      lastError: null,
+      result: {},
+      completedAt: null,
+      createdAt: new Date("2026-08-19T10:00:00.000Z"),
+      updatedAt: new Date("2026-08-19T10:00:00.000Z"),
+      normalizedPayload,
+    };
+
+    const processing = runClaimedBrainIngestJob({
+      env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
+      store,
+      signal: shutdown.signal,
+      handlers: [
+        {
+          descriptor: {
+            kind: "brain_agent_ingest",
+            sourceProvider: "attio",
+            sourceType: "activity",
+          },
+          isPayload: (value): value is typeof normalizedPayload => value === normalizedPayload,
+          run,
+        },
+      ],
+      job,
+    });
+
+    await started;
+    shutdown.abort(new Error("runner shutdown"));
+    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
+    finishRun({ handled: true });
+    await expect(processing).resolves.toBeUndefined();
+
+    expect(release).toHaveBeenCalledWith({
+      id: job.id,
+      sourceItemId: job.sourceItemId,
+      leaseId: "lease_shutdown",
+      leaseOwner: "runner_shutdown",
+      now: expect.any(Date),
+    });
+    expect(complete).not.toHaveBeenCalled();
+    expect(fail).not.toHaveBeenCalled();
+    expect(telemetry.recordBrainIngestRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "aborted",
+        attributes: expect.objectContaining({ "goat.failure_category": "runner_shutdown" }),
+      }),
+    );
   });
 
   it("records agent ingestion model cost with the brain_ingest surface", async () => {

@@ -497,6 +497,29 @@ export async function completeGoogleDriveFile(input: {
     );
 }
 
+export async function releaseGoogleDriveFile(input: {
+  id: string;
+  leaseId: string;
+  now?: Date;
+  db?: DbLike;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  await db
+    .update(googleDriveFileStates)
+    .set({
+      leaseId: null,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      attempts: sql`GREATEST(${googleDriveFileStates.attempts} - 1, 0)`,
+      nextIngestAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(eq(googleDriveFileStates.id, input.id), eq(googleDriveFileStates.leaseId, input.leaseId)),
+    );
+}
+
 export async function failGoogleDriveFile(input: {
   id: string;
   leaseId: string;

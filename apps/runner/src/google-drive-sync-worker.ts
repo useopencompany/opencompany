@@ -18,6 +18,7 @@ import {
   listActiveGoogleDriveWatchChannels,
   listEnabledGoogleDriveSources,
   observeGoogleDriveFile,
+  releaseGoogleDriveFile,
   releaseGoogleDriveSyncCursor,
   stopGoogleDriveWatchChannel,
 } from "@opencompany/db/google-drive";
@@ -39,6 +40,7 @@ import {
   readGoogleDriveDocument,
   watchGoogleDriveChanges,
 } from "./google-drive-api";
+import { createPollingWorker } from "./polling-worker";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -100,65 +102,22 @@ export function startGoogleDriveSyncWorker(
   options: { pollIntervalMs?: number } = {},
 ) {
   const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? POLL_INTERVAL_MS);
-  let stopped = false;
-  let running = false;
-  let pendingWake = true;
-  let wake: (() => void) | null = null;
-
-  const notify = () => {
-    if (wake) wake();
-    else pendingWake = true;
-  };
-
-  const waitForPollOrWake = () => {
-    if (pendingWake) {
-      pendingWake = false;
-      return Promise.resolve();
-    }
-    return new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        wake = null;
-        resolve();
-      }, pollIntervalMs);
-      wake = () => {
-        clearTimeout(timer);
-        wake = null;
-        resolve();
-      };
-    });
-  };
-
-  const loop = (async () => {
-    while (!stopped) {
-      running = true;
-      try {
-        await runGoogleDriveTick(env);
-      } catch (error) {
-        captureException(error, { event: "opencompany.goat_google_drive_sync_worker_failed" });
-        logger.error("opencompany Google Drive sync worker failed", {
-          event: "opencompany.goat_google_drive_sync_worker_failed",
-          error,
-        });
-      } finally {
-        running = false;
-      }
-      if (!stopped) await waitForPollOrWake();
-    }
-  })();
-
-  return {
-    notify,
-    activeCount: () => (running ? 1 : 0),
-    stop: async () => {
-      stopped = true;
-      notify();
-      await loop;
+  return createPollingWorker({
+    pollIntervalMs,
+    poll: ({ signal }) => runGoogleDriveTick(env, signal),
+    onError: (error) => {
+      captureException(error, { event: "opencompany.goat_google_drive_sync_worker_failed" });
+      logger.error("opencompany Google Drive sync worker failed", {
+        event: "opencompany.goat_google_drive_sync_worker_failed",
+        error,
+      });
     },
-  };
+  });
 }
 
-async function runGoogleDriveTick(env: RunnerEnv) {
+async function runGoogleDriveTick(env: RunnerEnv, signal: AbortSignal) {
   for (let count = 0; count < MAX_CURSOR_CLAIMS_PER_TICK; count += 1) {
+    signal.throwIfAborted();
     const now = new Date();
     const row = await claimNextGoogleDriveSyncCursor({
       leaseId: `ggdc_lease_${randomUUID()}`,
@@ -169,10 +128,11 @@ async function runGoogleDriveTick(env: RunnerEnv) {
       db: getDb(),
     });
     if (!row) break;
-    await syncClaimedCursor(env, row as ClaimedCursor);
+    await syncClaimedCursor(env, row as ClaimedCursor, signal);
   }
 
   for (let count = 0; count < MAX_FILE_CLAIMS_PER_TICK; count += 1) {
+    signal.throwIfAborted();
     const now = new Date();
     const row = await claimNextGoogleDriveFile({
       leaseId: `ggdf_lease_${randomUUID()}`,
@@ -182,18 +142,49 @@ async function runGoogleDriveTick(env: RunnerEnv) {
       db: getDb(),
     });
     if (!row) break;
-    await processClaimedFile(env, row as ClaimedFile);
+    await processClaimedFile(env, row as ClaimedFile, signal);
   }
 }
 
-async function syncClaimedCursor(env: RunnerEnv, cursor: ClaimedCursor) {
+async function syncClaimedCursor(env: RunnerEnv, cursor: ClaimedCursor, signal: AbortSignal) {
   const now = new Date();
-  const context = await loadDriveContext(env, cursor.integrationId, cursor.userWorkosId);
+  let context: GoogleDriveApiContext | null = null;
   let pageToken = cursor.pageToken;
   let resetAt: Date | undefined;
+  let shutdownReleasePromise: Promise<void> | null = null;
+  const releaseForShutdown = () => {
+    if (shutdownReleasePromise) return shutdownReleasePromise;
+    shutdownReleasePromise = releaseGoogleDriveSyncCursor({
+      cursorId: cursor.id,
+      leaseId: cursor.leaseId,
+      pageToken,
+      lastPolledAt: new Date(),
+      db: getDb(),
+    }).then(() => undefined);
+    void shutdownReleasePromise.catch((error) => {
+      captureException(error, {
+        event: "opencompany.goat_google_drive_cursor_shutdown_release_failed",
+        cursor_id: cursor.id,
+      });
+      logger.error("Google Drive cursor shutdown lease release failed", {
+        event: "opencompany.goat_google_drive_cursor_shutdown_release_failed",
+        cursor_id: cursor.id,
+        error,
+      });
+    });
+    return shutdownReleasePromise;
+  };
+  const requestShutdownHandoff = () => {
+    void releaseForShutdown();
+  };
+  if (signal.aborted) requestShutdownHandoff();
+  else signal.addEventListener("abort", requestShutdownHandoff, { once: true });
   try {
+    signal.throwIfAborted();
+    context = await loadDriveContext(env, cursor.integrationId, cursor.userWorkosId, signal);
     const routes: DriveRoute[] = await listEnabledGoogleDriveSources(cursor.integrationId, getDb());
     while (true) {
+      signal.throwIfAborted();
       const page = await listGoogleDriveChanges(context, {
         pageToken,
         driveId: cursor.driveId,
@@ -219,6 +210,7 @@ async function syncClaimedCursor(env: RunnerEnv, cursor: ClaimedCursor) {
     }
 
     await ensureDriveWatchChannel(context, cursor, pageToken, now);
+    signal.throwIfAborted();
     await releaseGoogleDriveSyncCursor({
       cursorId: cursor.id,
       leaseId: cursor.leaseId,
@@ -230,7 +222,11 @@ async function syncClaimedCursor(env: RunnerEnv, cursor: ClaimedCursor) {
       db: getDb(),
     });
   } catch (error) {
-    if (error instanceof GoogleApiRequestError && error.status === 410) {
+    if (signal.aborted) {
+      await releaseForShutdown();
+      return;
+    }
+    if (context && error instanceof GoogleApiRequestError && error.status === 410) {
       pageToken = await getGoogleDriveStartPageToken(context, cursor.driveId);
       resetAt = new Date();
       logger.warn("Google Drive change cursor expired; anchored without backfill", {
@@ -254,6 +250,8 @@ async function syncClaimedCursor(env: RunnerEnv, cursor: ClaimedCursor) {
       db: getDb(),
     });
     if (!resetAt) throw error;
+  } finally {
+    signal.removeEventListener("abort", requestShutdownHandoff);
   }
 }
 
@@ -348,10 +346,37 @@ async function observeDriveFile(
   });
 }
 
-async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
+async function processClaimedFile(env: RunnerEnv, state: ClaimedFile, signal: AbortSignal) {
   const leaseId = state.leaseId;
+  let shutdownReleasePromise: Promise<void> | null = null;
+  const releaseForShutdown = () => {
+    if (shutdownReleasePromise) return shutdownReleasePromise;
+    shutdownReleasePromise = releaseGoogleDriveFile({
+      id: state.id,
+      leaseId,
+      db: getDb(),
+    }).then(() => undefined);
+    void shutdownReleasePromise.catch((error) => {
+      captureException(error, {
+        event: "opencompany.goat_google_drive_file_shutdown_release_failed",
+        file_state_id: state.id,
+      });
+      logger.error("Google Drive file shutdown lease release failed", {
+        event: "opencompany.goat_google_drive_file_shutdown_release_failed",
+        file_state_id: state.id,
+        error,
+      });
+    });
+    return shutdownReleasePromise;
+  };
+  const requestShutdownHandoff = () => {
+    void releaseForShutdown();
+  };
+  if (signal.aborted) requestShutdownHandoff();
+  else signal.addEventListener("abort", requestShutdownHandoff, { once: true });
   try {
-    const context = await loadDriveContext(env, state.integrationId, state.userWorkosId);
+    signal.throwIfAborted();
+    const context = await loadDriveContext(env, state.integrationId, state.userWorkosId, signal);
     let file: GoogleDriveFileMetadata;
     try {
       file = await getGoogleDriveFileMetadata(context, state.fileId);
@@ -396,6 +421,7 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
           skipReason: "Google Drive no longer permits this file to be read.",
         });
         captureProductIngestionQuotaAnalytics(upserted.quotaUpdates);
+        signal.throwIfAborted();
         await completeGoogleDriveFile({
           id: state.id,
           leaseId,
@@ -414,6 +440,7 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
       ? []
       : await matchingDriveRoutes(context, routes, file, state.lastObservedAt);
     if (matching.length === 0) {
+      signal.throwIfAborted();
       await completeGoogleDriveFile({
         id: state.id,
         leaseId,
@@ -458,6 +485,7 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
       skipReason: skippedReason,
     });
     captureProductIngestionQuotaAnalytics(upserted.quotaUpdates);
+    signal.throwIfAborted();
     await completeGoogleDriveFile({
       id: state.id,
       leaseId,
@@ -468,6 +496,10 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
     });
     if (upserted.enqueued) wakeBrainIngestWorker();
   } catch (error) {
+    if (signal.aborted) {
+      await releaseForShutdown();
+      return;
+    }
     const now = new Date();
     await failGoogleDriveFile({
       id: state.id,
@@ -478,6 +510,8 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
       db: getDb(),
     });
     throw error;
+  } finally {
+    signal.removeEventListener("abort", requestShutdownHandoff);
   }
 }
 
@@ -603,6 +637,7 @@ async function loadDriveContext(
   env: RunnerEnv,
   integrationId: string,
   userWorkosId: string,
+  signal: AbortSignal,
 ): Promise<GoogleDriveApiContext> {
   const [integration] = await getDb()
     .select({ accountEmail: integrations.accountEmail })
@@ -614,7 +649,7 @@ async function loadDriveContext(
     provider: "google_drive",
     accountEmail: integration?.accountEmail ?? null,
   };
-  return { env, userWorkosId, account, signal: new AbortController().signal };
+  return { env, userWorkosId, account, signal };
 }
 
 function selectedBefore(resource: GoogleDriveResourceRef, observedAt: Date) {

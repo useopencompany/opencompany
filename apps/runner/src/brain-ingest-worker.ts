@@ -75,6 +75,7 @@ import {
 import { runBrainPointerHydrate } from "./brain-pointer-hydrators";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
+import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({
@@ -350,6 +351,13 @@ export type BrainIngestStore = {
     now: Date;
     leaseExpiresAt: Date;
   }): Promise<boolean>;
+  release?(input: {
+    id: string;
+    sourceItemId: string;
+    leaseId: string;
+    leaseOwner: string;
+    now: Date;
+  }): Promise<boolean>;
   complete(input: {
     id: string;
     sourceItemId: string;
@@ -465,6 +473,26 @@ export function createDbBrainIngestStore(): BrainIngestStore {
         SET lease_expires_at = ${input.leaseExpiresAt},
             updated_at = ${input.now}
         WHERE id = ${input.id}
+          AND lease_id = ${input.leaseId}
+          AND lease_owner = ${input.leaseOwner}
+          AND status = 'running'
+        RETURNING id
+      `);
+      return rowsFromExecute<{ id: string }>(result).length > 0;
+    },
+
+    async release(input) {
+      const result = await getDb().execute(sql`
+        UPDATE goat.brain_ingest_jobs
+        SET status = 'queued',
+            attempts = GREATEST(attempts - 1, 0),
+            lease_id = NULL,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            next_run_at = ${input.now},
+            updated_at = ${input.now}
+        WHERE id = ${input.id}
+          AND source_item_id = ${input.sourceItemId}
           AND lease_id = ${input.leaseId}
           AND lease_owner = ${input.leaseOwner}
           AND status = 'running'
@@ -645,6 +673,7 @@ export async function runClaimedBrainIngestJob(input: {
   };
   handlers?: readonly BrainIngestHandler[];
   store?: BrainIngestStore;
+  signal?: AbortSignal;
 }) {
   const runStartedAt = performance.now();
   const store = input.store ?? createDbBrainIngestStore();
@@ -666,6 +695,8 @@ export async function runClaimedBrainIngestJob(input: {
   } satisfies TelemetryAttributes;
   const runSpan = startSpan(SPANS.brainIngestRun, baseAttributes);
   let leaseActive = true;
+  let shutdownRequested = false;
+  let shutdownReleasePromise: Promise<void> | null = null;
   let telemetryFinished = false;
   const runAbort = new AbortController();
 
@@ -728,6 +759,41 @@ export async function runClaimedBrainIngestJob(input: {
     }
   };
 
+  const releaseForShutdown = () => {
+    if (shutdownReleasePromise) return shutdownReleasePromise;
+    shutdownReleasePromise = (async () => {
+      if (!leaseActive) return;
+      const released = store.release
+        ? await store.release({
+            id: input.job.id,
+            sourceItemId: input.job.sourceItemId,
+            leaseId,
+            leaseOwner,
+            now: new Date(),
+          })
+        : false;
+      leaseActive = false;
+      finishTelemetry("aborted", {
+        "goat.status": released === false ? "running" : "queued",
+        "goat.failure_category": released === false ? "lease_lost" : "runner_shutdown",
+      });
+    })();
+    // The shutdown signal can arrive while a handler is indefinitely blocked. Attach a rejection
+    // handler immediately, then surface the same promise at the normal awaited boundary if it fails.
+    void shutdownReleasePromise.catch((error) => {
+      captureException(error, {
+        event: "opencompany.goat_brain_ingest_shutdown_release_failed",
+        job_id: input.job.id,
+      });
+      logger.error("opencompany Brain ingest shutdown lease release failed", {
+        event: "opencompany.goat_brain_ingest_shutdown_release_failed",
+        job_id: input.job.id,
+        error,
+      });
+    });
+    return shutdownReleasePromise;
+  };
+
   const heartbeat = async () => {
     const now = new Date();
     const active = await store.heartbeat({
@@ -741,6 +807,7 @@ export async function runClaimedBrainIngestJob(input: {
   };
 
   const heartbeatTimer = setInterval(() => {
+    if (!leaseActive) return;
     void heartbeat().catch((error) => {
       captureException(error, {
         event: "opencompany.goat_brain_ingest_heartbeat_failed",
@@ -755,7 +822,21 @@ export async function runClaimedBrainIngestJob(input: {
     });
   }, BRAIN_INGEST_HEARTBEAT_INTERVAL_MS);
 
+  const requestShutdownHandoff = () => {
+    if (shutdownRequested) return;
+    shutdownRequested = true;
+    runAbort.abort(new Error("opencompany Brain ingestion was handed off during shutdown."));
+    // Release the durable lease immediately even if the handler ignores its AbortSignal.
+    void releaseForShutdown();
+  };
+  if (input.signal?.aborted) requestShutdownHandoff();
+  else input.signal?.addEventListener("abort", requestShutdownHandoff, { once: true });
+
   try {
+    if (shutdownRequested) {
+      await releaseForShutdown();
+      return;
+    }
     // Revalidate immediately before starting expensive work. Disable/remove
     // transitions revoke the lease, and the shared signal then stops the model
     // loop and CLI before its final Brain sync.
@@ -829,6 +910,10 @@ export async function runClaimedBrainIngestJob(input: {
       ),
     );
     const resultWithDuration = withBrainIngestRunDuration(result, runStartedAt);
+    if (shutdownRequested) {
+      await releaseForShutdown();
+      return;
+    }
     recordBrainIngestModelCost(result);
     await debitIngestModelCost(input.job, result);
     if (!leaseActive) {
@@ -904,6 +989,10 @@ export async function runClaimedBrainIngestJob(input: {
       ...brainIngestBudgetAttributes(result),
     });
   } catch (error) {
+    if (shutdownRequested) {
+      await releaseForShutdown();
+      return;
+    }
     if (error instanceof BrainIngestBudgetError) {
       recordBrainIngestModelCost(error.result);
       // The agent ran and spent real provider money before the budget error;
@@ -964,6 +1053,7 @@ export async function runClaimedBrainIngestJob(input: {
     throw error;
   } finally {
     clearInterval(heartbeatTimer);
+    input.signal?.removeEventListener("abort", requestShutdownHandoff);
     // Flush the job's spans promptly; the runner is long-lived and may not shut
     // down (its only other flush point) for a long time. No-ops when disabled.
     await flushBraintrust();
@@ -1120,92 +1210,57 @@ export function startBrainIngestWorker(
   const concurrency = Math.max(1, options.concurrency ?? Math.min(2, env.workerConcurrency));
   const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? BRAIN_INGEST_POLL_INTERVAL_MS);
   const active = new Set<Promise<void>>();
-  let stopped = false;
-  let pendingWake = false;
-  let wake: (() => void) | null = null;
-
-  const notify = () => {
-    if (wake) {
-      wake();
-    } else {
-      pendingWake = true;
-    }
-  };
-
-  const waitForPollOrWake = () => {
-    if (pendingWake) {
-      pendingWake = false;
-      return Promise.resolve();
-    }
-    return new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        wake = null;
-        resolve();
-      }, pollIntervalMs);
-      wake = () => {
-        clearTimeout(timer);
-        wake = null;
-        resolve();
-      };
-    });
-  };
-
-  const runLoop = async () => {
-    while (!stopped) {
-      try {
-        while (!stopped && active.size < concurrency) {
-          const job = await claimNextBrainIngestJob({
-            leaseOwner: env.instanceId,
-            supportedJobs,
-            store,
-            leaseTtlMs: BRAIN_INGEST_LEASE_TTL_MS,
-            releasePendingReservations: true,
-          });
-          if (!job) break;
-          const running = runClaimedBrainIngestJob({
-            job,
-            env,
-            handlers,
-            store,
+  const worker = createPollingWorker({
+    pollIntervalMs,
+    poll: async ({ signal, stopping }) => {
+      while (!stopping() && active.size < concurrency) {
+        signal.throwIfAborted();
+        const job = await claimNextBrainIngestJob({
+          leaseOwner: env.instanceId,
+          supportedJobs,
+          store,
+          leaseTtlMs: BRAIN_INGEST_LEASE_TTL_MS,
+          releasePendingReservations: true,
+        });
+        if (!job) break;
+        const running = runClaimedBrainIngestJob({
+          job,
+          env,
+          handlers,
+          store,
+          signal,
+        })
+          .catch((error) => {
+            captureException(error, {
+              event: "opencompany.goat_brain_ingest_job_failed",
+              job_id: job.id,
+            });
+            logger.error("opencompany Brain ingest job failed", {
+              event: "opencompany.goat_brain_ingest_job_failed",
+              job_id: job.id,
+              error,
+            });
           })
-            .catch((error) => {
-              captureException(error, {
-                event: "opencompany.goat_brain_ingest_job_failed",
-                job_id: job.id,
-              });
-              logger.error("opencompany Brain ingest job failed", {
-                event: "opencompany.goat_brain_ingest_job_failed",
-                job_id: job.id,
-                error,
-              });
-            })
-            .finally(() => active.delete(running));
-          active.add(running);
-        }
-      } catch (error) {
-        captureException(error, {
-          event: "opencompany.goat_brain_ingest_worker_failed",
-        });
-        logger.error("opencompany Brain ingest worker failed", {
-          event: "opencompany.goat_brain_ingest_worker_failed",
-          error,
-        });
+          .finally(() => active.delete(running));
+        active.add(running);
       }
-      if (stopped) break;
-      await waitForPollOrWake();
-    }
-  };
-
-  const loop = runLoop();
-  return {
-    notify,
-    activeCount: () => active.size,
-    stop: async () => {
-      stopped = true;
-      notify();
-      await loop;
+    },
+    onError: (error) => {
+      captureException(error, {
+        event: "opencompany.goat_brain_ingest_worker_failed",
+      });
+      logger.error("opencompany Brain ingest worker failed", {
+        event: "opencompany.goat_brain_ingest_worker_failed",
+        error,
+      });
+    },
+    drain: async () => {
       await Promise.allSettled(Array.from(active));
     },
+  });
+  return {
+    ...worker,
+    activeCount: () => active.size,
   };
 }
 

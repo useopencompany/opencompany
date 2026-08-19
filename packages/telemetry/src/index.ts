@@ -52,6 +52,8 @@ export const METRICS = {
   capabilityApprovalsTotal: "goat.capability.approvals_total",
   capabilityWalletBalanceUsdMicros: "goat.capability.wallet_balance_usd_micros",
   codexChatQueueWaitMs: "goat.codex_chat.queue_wait_ms",
+  runnerShutdownActiveWorkTotal: "goat.runner.shutdown.active_work_total",
+  runnerShutdownInterruptedWorkTotal: "goat.runner.shutdown.interrupted_work_total",
   postgresNotifyQueueUsage: "goat.postgres.notify_queue_usage",
   postgresQueueDeadTupleRatio: "goat.postgres.queue.dead_tuple_ratio",
   postgresQueueDeadTuples: "goat.postgres.queue.dead_tuples",
