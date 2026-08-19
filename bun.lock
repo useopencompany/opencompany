@@ -266,6 +266,7 @@
         "@opencompany/core": "workspace:*",
         "@opencompany/crypto": "workspace:*",
         "@opencompany/db": "workspace:*",
+        "@opencompany/file-extract": "workspace:*",
         "@opencompany/observability": "workspace:*",
         "@opencompany/telemetry": "workspace:*",
         "@opencompany/wiki": "workspace:*",

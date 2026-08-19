@@ -44,11 +44,11 @@ export type DocumentExtraction = {
 export type ExtractDocumentInput = {
   bytes: Buffer;
   // Original filename, used only to resolve signature-less formats (CSV) and the text path.
-  filename?: string;
+  filename?: string | undefined;
   // Declared media type, used the same way as `filename`.
-  mediaType?: string;
+  mediaType?: string | undefined;
   // Cap on retained Markdown; defaults to 200 KB.
-  maxOutputBytes?: number;
+  maxOutputBytes?: number | undefined;
 };
 
 // Single parsing entry point. Binary formats are detected from the bytes themselves; the filename

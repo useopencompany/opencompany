@@ -102,6 +102,7 @@ describe("resolveGmailActions", () => {
       "gmail.search_messages",
       "gmail.get_message",
       "gmail.get_thread",
+      "gmail.read_attachment",
       "gmail.create_draft",
       "gmail.send_email",
     ]);
@@ -136,6 +137,7 @@ describe("resolveGmailActions", () => {
       "gmail.search_messages",
       "gmail.get_message",
       "gmail.get_thread",
+      "gmail.read_attachment",
     ]);
 
     mocks.dbRows = [
@@ -674,5 +676,232 @@ describe("gmail.get_message and gmail.get_thread", () => {
     await expect(
       getMessage.execute({ id: "m1", account: "missing@example.com" }, CONTEXT),
     ).rejects.toThrow("No connected Gmail account");
+  });
+
+  it("surfaces attachment metadata from the MIME tree", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.loadCredential.mockResolvedValue(freshCredential());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          id: "m1",
+          threadId: "t1",
+          payload: {
+            mimeType: "multipart/mixed",
+            headers: [{ name: "From", value: "jane@example.com" }],
+            parts: [
+              { partId: "0", mimeType: "text/plain", body: { data: "" } },
+              {
+                partId: "1",
+                mimeType: "application/pdf",
+                filename: "contract.pdf",
+                body: { attachmentId: "att_1", size: 4096 },
+              },
+            ],
+          },
+        }),
+      ),
+    );
+
+    const getMessage = findAction(await resolveGmailActions("user_1"), "gmail.get_message");
+    const result = (await getMessage.execute({ id: "m1" }, CONTEXT)) as {
+      message: { attachments?: Array<Record<string, unknown>> };
+    };
+    expect(result.message.attachments).toEqual([
+      {
+        partId: "1",
+        filename: "contract.pdf",
+        mediaType: "application/pdf",
+        attachmentId: "att_1",
+        size: 4096,
+      },
+    ]);
+  });
+});
+
+describe("gmail.read_attachment", () => {
+  function messageWithCsvAttachment() {
+    return {
+      id: "m1",
+      threadId: "t1",
+      payload: {
+        mimeType: "multipart/mixed",
+        parts: [
+          {
+            partId: "1",
+            mimeType: "text/csv",
+            filename: "figures.csv",
+            body: { attachmentId: "att_1", size: 24 },
+          },
+        ],
+      },
+    };
+  }
+
+  it("downloads an attachment and returns bounded Markdown", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.loadCredential.mockResolvedValue(freshCredential());
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      const url = String(args[0]);
+      if (url.includes("/attachments/att_1")) {
+        return jsonResponse({
+          data: Buffer.from("metric,value\nrevenue,120\n").toString("base64url"),
+        });
+      }
+      return jsonResponse(messageWithCsvAttachment());
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const read = findAction(await resolveGmailActions("user_1"), "gmail.read_attachment");
+    const result = (await read.execute({ message_id: "m1", part_id: "1" }, CONTEXT)) as {
+      filename: string;
+      format: string;
+      markdown: string;
+      offset: number;
+      nextOffset?: number;
+      truncated: boolean;
+    };
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/messages/m1");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/messages/m1/attachments/att_1");
+    expect(result.filename).toBe("figures.csv");
+    expect(result.format).toBe("csv");
+    expect(result.markdown).toContain("| metric | value |");
+    expect(result.markdown).toContain("| revenue | 120 |");
+    expect(result.offset).toBe(0);
+    expect(result.nextOffset).toBeUndefined();
+    expect(result.truncated).toBe(false);
+  });
+
+  it("pages long attachments with offset and nextOffset", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.loadCredential.mockResolvedValue(freshCredential());
+    const longText = "x".repeat(45_000);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          id: "m1",
+          threadId: "t1",
+          payload: {
+            parts: [
+              {
+                partId: "1",
+                mimeType: "text/plain",
+                filename: "notes.txt",
+                body: { data: Buffer.from(longText).toString("base64url"), size: longText.length },
+              },
+            ],
+          },
+        }),
+      ),
+    );
+
+    const read = findAction(await resolveGmailActions("user_1"), "gmail.read_attachment");
+    const first = (await read.execute({ message_id: "m1", part_id: "1" }, CONTEXT)) as {
+      markdown: string;
+      nextOffset?: number;
+      truncated: boolean;
+    };
+    expect(first.markdown).toHaveLength(40_000);
+    expect(first.nextOffset).toBe(40_000);
+    expect(first.truncated).toBe(true);
+
+    const second = (await read.execute(
+      { message_id: "m1", part_id: "1", offset: 40_000 },
+      CONTEXT,
+    )) as { markdown: string; nextOffset?: number; truncated: boolean };
+    expect(second.markdown).toHaveLength(5_000);
+    expect(second.nextOffset).toBeUndefined();
+    expect(second.truncated).toBe(false);
+  });
+
+  it("returns a stable error for an unreadable attachment", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.loadCredential.mockResolvedValue(freshCredential());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+        const url = String(args[0]);
+        if (url.includes("/attachments/att_img")) {
+          // A PNG has no extractable text layer.
+          return jsonResponse({
+            data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString(
+              "base64url",
+            ),
+          });
+        }
+        return jsonResponse({
+          id: "m1",
+          payload: {
+            parts: [
+              {
+                partId: "2",
+                mimeType: "image/png",
+                filename: "logo.png",
+                body: { attachmentId: "att_img", size: 8 },
+              },
+            ],
+          },
+        });
+      }),
+    );
+
+    const read = findAction(await resolveGmailActions("user_1"), "gmail.read_attachment");
+    const result = (await read.execute({ message_id: "m1", part_id: "2" }, CONTEXT)) as {
+      error?: string;
+      markdown?: string;
+    };
+    expect(result.error).toBe("unsupported");
+    expect(result.markdown).toBeUndefined();
+  });
+
+  it("rejects an attachment larger than the 20 MB limit before downloading", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.loadCredential.mockResolvedValue(freshCredential());
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        id: "m1",
+        payload: {
+          parts: [
+            {
+              partId: "1",
+              mimeType: "application/pdf",
+              filename: "huge.pdf",
+              body: { attachmentId: "att_big", size: 21 * 1024 * 1024 },
+            },
+          ],
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const read = findAction(await resolveGmailActions("user_1"), "gmail.read_attachment");
+    const result = (await read.execute({ message_id: "m1", part_id: "1" }, CONTEXT)) as {
+      error?: string;
+    };
+    expect(result.error).toBe("too_large");
+    // Only the message was fetched; the attachment body was never downloaded.
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("errors when the part id is not an attachment", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.loadCredential.mockResolvedValue(freshCredential());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          id: "m1",
+          payload: { parts: [{ partId: "0", mimeType: "text/plain", body: { data: "" } }] },
+        }),
+      ),
+    );
+
+    const read = findAction(await resolveGmailActions("user_1"), "gmail.read_attachment");
+    await expect(read.execute({ message_id: "m1", part_id: "9" }, CONTEXT)).rejects.toThrow(
+      "No attachment found",
+    );
   });
 });
