@@ -20,7 +20,10 @@ import {
 
 type ShareStatus = "idle" | "loading" | "ready" | "error";
 type ShareOperation = "copying" | "revoking" | null;
-type ChatShareSubject = "chat" | "task run" | "Codex chat" | "Claude Code chat";
+// A human-readable noun for what is being shared (e.g. "chat", "task run", "Claude Code chat").
+// Engine chat subjects come from the engine registry, so this stays an open string rather than a
+// closed per-engine union.
+type ChatShareSubject = string;
 
 export function ChatShareButton({
   chatSessionId,
