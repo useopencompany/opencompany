@@ -14,6 +14,28 @@ export type SandboxLatencyObservation = {
   errorName?: string;
 };
 
+export const OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY = "opencompany_managed";
+export const OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY = "opencompany_owner_kind";
+export const OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY = "opencompany_owner_id";
+
+export type ManagedSandboxOwnerKind =
+  | "codex_chat_session"
+  | "codex_device_auth_flow"
+  | "infisical_auth_flow";
+
+export function managedSandboxMetadata(input: {
+  ownerKind: ManagedSandboxOwnerKind;
+  ownerId: string;
+  metadata?: Record<string, string>;
+}) {
+  return {
+    ...input.metadata,
+    [OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY]: "true",
+    [OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY]: input.ownerKind,
+    [OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY]: input.ownerId,
+  };
+}
+
 // Must stay >= the longest agent turn cap (RUNNER_CODEX_TIMEOUT_MS defaults to the same 1h):
 // this timeout is armed once at create/connect and e2b pauses the sandbox when it elapses, so a
 // turn outliving it would be frozen mid-command until autoResume wakes the sandbox.
@@ -286,16 +308,16 @@ export function guardCommandStreamCallbacks<
   const guard = (callback: CommandStreamCallback | undefined) =>
     callback &&
     ((data: string): Promise<void> => {
-      if (failed) return Promise.resolve();
-      const invocation = (async () => {
+      const invocation = settled.then(async () => {
+        if (failed) return;
         try {
           await callback(data);
         } catch (error) {
           failed = true;
           callbackError = error;
         }
-      })();
-      settled = settled.then(() => invocation);
+      });
+      settled = invocation;
       return invocation;
     });
 

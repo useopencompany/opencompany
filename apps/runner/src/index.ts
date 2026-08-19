@@ -8,6 +8,7 @@ import {
   setExceptionReporter,
 } from "@opencompany/observability";
 import { flushBraintrust } from "@opencompany/observability/braintrust";
+import { METRICS, recordCounter } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
 import { registerNodeObservability, shutdownNodeObservability } from "@opencompany/telemetry/node";
 import * as Sentry from "@sentry/bun";
@@ -31,10 +32,13 @@ import { startGranolaPollWorker } from "./granola-poll-worker";
 import { startHubspotFlushWorker } from "./hubspot-flush-worker";
 import { startLinearFlushWorker } from "./linear-flush-worker";
 import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
+import { drainRunnerTasks, type RunnerDrainTask, settlesWithin } from "./runner-shutdown";
+import { startSandboxReconciler } from "./sandbox-reconciler";
 import { startTaskScheduleWorker } from "./scheduler";
 import { createServer } from "./server";
 import { activeSlackBotEventCount, drainSlackBotEvents } from "./slack-bot-events";
 import { startSlackFlushWorker } from "./slack-flush-worker";
+import { startStuckWorkMonitor } from "./stuck-work-monitor";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -44,8 +48,10 @@ const logger = createLogger({
 // render.yaml). Workers stop claiming immediately, then active runner jobs and durable opencompany Codex
 // turns get most of that window to finish in place. The remaining minute covers interruption or
 // handoff, stream/telemetry flushes, and closing the DB pool before Render's hard kill.
-const RENDER_SHUTDOWN_DRAIN_MS = 240_000;
+const RENDER_SHUTDOWN_DRAIN_MS = 230_000;
 const RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS = 30_000;
+const RENDER_SHUTDOWN_DB_CLOSE_MS = 10_000;
+const RENDER_SHUTDOWN_TELEMETRY_FLUSH_MS = 10_000;
 
 initializeExceptionReporting();
 registerNodeObservability({ serviceName: "opencompany-runner-goat" });
@@ -96,6 +102,12 @@ const gmailFlushWorker = env.taskWorkerEnabled ? startGmailFlushWorker(env) : nu
 const granolaPollWorker = env.taskWorkerEnabled ? startGranolaPollWorker() : null;
 const fathomPollWorker = env.taskWorkerEnabled ? startFathomPollWorker() : null;
 const googleDriveSyncWorker = env.taskWorkerEnabled ? startGoogleDriveSyncWorker(env) : null;
+const stuckWorkMonitor = env.taskWorkerEnabled
+  ? startStuckWorkMonitor({
+      turnThresholdMs: Math.max(env.codexTimeoutMs + 15 * 60_000, 20 * 60_000),
+    })
+  : null;
+const sandboxReconciler = env.taskWorkerEnabled ? startSandboxReconciler() : null;
 const taskScheduleWorker = codexChatWorker
   ? startTaskScheduleWorker({
       onTaskCreated: () => {
@@ -132,8 +144,11 @@ const brainWorkerAdmissionListener = env.taskWorkerEnabled
   : null;
 const server = createServer(env);
 
+let shutdownStarted = false;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
     logger.info("Runner shutdown started", {
       event: "opencompany.runner_shutdown_started",
       signal,
@@ -144,57 +159,134 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       active_goat_slack_bot_event_count: activeSlackBotEventCount(),
     });
     clearInterval(llmBrokerSweepTimer);
-    // Stop accepting work and drain in-flight requests first, then close the DB pool so
-    // no checked-out connection is cut mid-query, then flush telemetry.
-    void Promise.allSettled([
-      taskScheduleWorker?.stop() ?? Promise.resolve(),
-      codexChatWorker?.stop({
-        handoffAfterMs: RENDER_SHUTDOWN_DRAIN_MS,
-        postHandoffWaitMs: RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS,
-        onHandoff: (activeCount) => {
-          logger.info("Runner shutdown handing off opencompany Codex chat turns", {
-            event: "opencompany.runner_shutdown_handing_off_goat_codex_chat",
-            active_goat_codex_chat_count: activeCount,
-          });
-        },
-      }) ?? Promise.resolve(),
-      brainIngestWorker?.stop() ?? Promise.resolve(),
-      brainImportWorker?.stop() ?? Promise.resolve(),
-      slackFlushWorker?.stop() ?? Promise.resolve(),
-      drainSlackBotEvents(),
-      linearFlushWorker?.stop() ?? Promise.resolve(),
-      gitHubFlushWorker?.stop() ?? Promise.resolve(),
-      hubspotFlushWorker?.stop() ?? Promise.resolve(),
-      attioFlushWorker?.stop() ?? Promise.resolve(),
-      gmailPollWorker?.stop() ?? Promise.resolve(),
-      gmailFlushWorker?.stop() ?? Promise.resolve(),
-      granolaPollWorker?.stop() ?? Promise.resolve(),
-      fathomPollWorker?.stop() ?? Promise.resolve(),
-      googleDriveSyncWorker?.stop() ?? Promise.resolve(),
-      brainWorkerAdmissionListener?.stop() ?? Promise.resolve(),
-      server.close(),
-      chatPresentation?.close() ?? Promise.resolve(),
-    ])
-      .then(() => Promise.allSettled([closeDb()]))
-      .then(() => {
-        logger.info("Runner shutdown finished", {
-          event: "opencompany.runner_shutdown_finished",
-          signal,
-        });
-        return Promise.allSettled([
-          flushObservability(),
-          flushBraintrust(),
-          flushLatitude(),
-          shutdownNodeObservability(),
-        ]);
-      })
-      .finally(() => {
-        process.exit(0);
-      });
+    setBrainIngestWakeup(null);
+    setGoogleDriveSyncWakeup(null);
+    setBrainImportWakeup(null);
+    setCodexChatWakeup(null);
+    void shutdownRunner(signal);
   });
 }
 
 await server.listen({ host: "0.0.0.0", port: env.port });
+
+async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
+  const tasks = [
+    runnerDrainTask("task_schedule", taskScheduleWorker),
+    codexChatWorker
+      ? {
+          name: "codex_chat",
+          activeCount: codexChatWorker.activeCount,
+          stop: ({ signal: abortSignal }: Parameters<RunnerDrainTask["stop"]>[0]) =>
+            codexChatWorker.stop({
+              ...(abortSignal ? { signal: abortSignal } : {}),
+              onHandoff: (activeCount) => {
+                logger.info("Runner shutdown handing off opencompany Codex chat turns", {
+                  event: "opencompany.runner_shutdown_handing_off_goat_codex_chat",
+                  active_goat_codex_chat_count: activeCount,
+                });
+              },
+            }),
+        }
+      : null,
+    runnerDrainTask("brain_ingest", brainIngestWorker),
+    runnerDrainTask("brain_import", brainImportWorker),
+    runnerDrainTask("slack_flush", slackFlushWorker),
+    {
+      name: "slack_bot_events",
+      activeCount: activeSlackBotEventCount,
+      stop: async () => drainSlackBotEvents(),
+    },
+    runnerDrainTask("linear_flush", linearFlushWorker),
+    runnerDrainTask("github_flush", gitHubFlushWorker),
+    runnerDrainTask("hubspot_flush", hubspotFlushWorker),
+    runnerDrainTask("attio_flush", attioFlushWorker),
+    runnerDrainTask("gmail_poll", gmailPollWorker),
+    runnerDrainTask("gmail_flush", gmailFlushWorker),
+    runnerDrainTask("granola_poll", granolaPollWorker),
+    runnerDrainTask("fathom_poll", fathomPollWorker),
+    runnerDrainTask("google_drive_sync", googleDriveSyncWorker),
+    runnerDrainTask("stuck_work_monitor", stuckWorkMonitor),
+    runnerDrainTask("sandbox_reconciler", sandboxReconciler),
+    runnerDrainTask("brain_worker_admission", brainWorkerAdmissionListener),
+    { name: "http_server", stop: async () => server.close() },
+    chatPresentation
+      ? { name: "chat_presentation", stop: async () => chatPresentation.close() }
+      : null,
+  ].filter((task): task is RunnerDrainTask => task !== null);
+
+  try {
+    const drain = await drainRunnerTasks({
+      tasks,
+      drainMs: RENDER_SHUTDOWN_DRAIN_MS,
+      postAbortWaitMs: RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS,
+      onDeadline: ({ activeAtStart, interruptedAtDeadline }) => {
+        const error = new Error("Runner shutdown drain deadline exceeded.");
+        captureException(error, {
+          event: "opencompany.runner_shutdown_drain_deadline_exceeded",
+          active_at_start: activeAtStart,
+          interrupted_at_deadline: interruptedAtDeadline,
+        });
+        logger.error("Runner shutdown drain deadline exceeded; aborting active work", {
+          event: "opencompany.runner_shutdown_drain_deadline_exceeded",
+          active_at_start: activeAtStart,
+          interrupted_at_deadline: interruptedAtDeadline,
+        });
+      },
+    });
+    if (drain.activeAtStart > 0) {
+      recordCounter(METRICS.runnerShutdownActiveWorkTotal, drain.activeAtStart);
+    }
+    if (drain.interruptedAtDeadline > 0) {
+      recordCounter(METRICS.runnerShutdownInterruptedWorkTotal, drain.interruptedAtDeadline);
+    }
+    if (drain.unfinishedTasks.length > 0) {
+      logger.error("Runner shutdown continuing with unfinished drain tasks", {
+        event: "opencompany.runner_shutdown_drain_unfinished",
+        unfinished_tasks: drain.unfinishedTasks,
+      });
+    }
+
+    const dbClosed = await settlesWithin(
+      Promise.allSettled([closeDb()]),
+      RENDER_SHUTDOWN_DB_CLOSE_MS,
+    );
+    if (!dbClosed) {
+      logger.error("Runner DB close exceeded its shutdown budget", {
+        event: "opencompany.runner_shutdown_db_close_timeout",
+      });
+    }
+    logger.info("Runner shutdown finished", {
+      event: "opencompany.runner_shutdown_finished",
+      signal,
+      drain_deadline_exceeded: drain.deadlineExceeded,
+    });
+    await settlesWithin(
+      Promise.allSettled([
+        flushObservability(),
+        flushBraintrust(),
+        flushLatitude(),
+        shutdownNodeObservability(),
+      ]),
+      RENDER_SHUTDOWN_TELEMETRY_FLUSH_MS,
+    );
+  } catch (error) {
+    reportProcessError("opencompany.runner_shutdown_failed", error);
+  } finally {
+    process.exit(0);
+  }
+}
+
+function runnerDrainTask(
+  name: string,
+  worker: { stop: RunnerDrainTask["stop"]; activeCount?: () => number } | null,
+): RunnerDrainTask | null {
+  if (!worker) return null;
+  return {
+    name,
+    stop: (options) => worker.stop(options),
+    ...(worker.activeCount ? { activeCount: worker.activeCount } : {}),
+  };
+}
 
 function createChatPresentationStream() {
   const url = process.env.REDIS_URL?.trim();

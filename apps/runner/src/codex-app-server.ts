@@ -4,7 +4,7 @@ import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { createLogger } from "@opencompany/observability";
 import { buildCodexConfigForAuth, type CodexCliAuth } from "./codex-cli";
 import { buildGitHubCommandEnv, truncateText } from "./coding-agent-shared";
-import type { SandboxHandle } from "./sandbox";
+import { guardCommandStreamCallbacks, type SandboxHandle } from "./sandbox";
 
 const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
 const CODEX_APP_SERVER_SOCKET = "app-server.sock";
@@ -955,6 +955,18 @@ class AppServerProxyClient {
       event: "opencompany.codex_app_server_proxy_starting",
     });
     await stopOrphanedAppServerProxy(this.input.sandbox, this.input.statePath);
+    const guarded = guardCommandStreamCallbacks({
+      onStdout: (data: string) => this.onStdout(data),
+      onStderr: async (data: string) => {
+        if (data.trim()) this.lastStderr = truncateText(data.trim(), 500);
+      },
+    });
+    const observe = (callback: ((data: string) => void | Promise<void>) | undefined) =>
+      callback &&
+      ((data: string) =>
+        Promise.resolve(callback(data))
+          .then(() => guarded.rethrow())
+          .catch((error) => this.fail(error)));
     this.handle = await this.input.sandbox.commands.run(this.input.command, {
       background: true,
       stdin: true,
@@ -963,12 +975,8 @@ class AppServerProxyClient {
       // deadline lets E2B terminate the transport before waitForTurnCompletion can interrupt the
       // turn and preserve its partial result. stop() owns the proxy lifetime instead.
       timeoutMs: CODEX_APP_SERVER_PROXY_TIMEOUT_MS,
-      onStdout: (data: string) => {
-        void this.onStdout(data).catch((error) => this.fail(error));
-      },
-      onStderr: async (data: string) => {
-        if (data.trim()) this.lastStderr = truncateText(data.trim(), 500);
-      },
+      onStdout: observe(guarded.options.onStdout)!,
+      onStderr: observe(guarded.options.onStderr)!,
     });
     logger.info("Started Codex app-server proxy", {
       event: "opencompany.codex_app_server_proxy_started",

@@ -22,6 +22,7 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
+import { createPollingWorker } from "./polling-worker";
 import {
   fetchSlackConversationContext,
   getSlackConversationLabel,
@@ -247,75 +248,48 @@ async function previewBufferedSlackMessages(window: SlackDueWindow) {
 
 export function startSlackFlushWorker(options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? SLACK_FLUSH_POLL_INTERVAL_MS);
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let wake: (() => void) | null = null;
-
-  const sleep = () =>
-    new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        wake = null;
-        resolve();
-      }, pollIntervalMs);
-      timer.unref?.();
-      wake = () => {
-        if (timer) clearTimeout(timer);
-        wake = null;
-        resolve();
-      };
-    });
-
-  const loop = (async () => {
-    while (!stopped) {
-      try {
-        const due = await listDueSlackConversationWindows({});
-        for (const window of due) {
-          if (stopped) break;
-          const flushed = await flushSlackConversationWindow(window).catch((error) => {
-            captureException(error, {
-              event: "opencompany.goat_slack_flush_failed",
-              integration_id: window.integrationId,
-              channel_id: window.channelId,
-            });
-            logger.error("opencompany Slack window flush failed", {
-              event: "opencompany.goat_slack_flush_failed",
-              integration_id: window.integrationId,
-              channel_id: window.channelId,
-              error,
-            });
-            return null;
+  return createPollingWorker({
+    pollIntervalMs,
+    poll: async ({ signal, stopping }) => {
+      signal.throwIfAborted();
+      const due = await listDueSlackConversationWindows({});
+      for (const window of due) {
+        if (stopping()) break;
+        const flushed = await flushSlackConversationWindow(window).catch((error) => {
+          if (signal.aborted) throw error;
+          captureException(error, {
+            event: "opencompany.goat_slack_flush_failed",
+            integration_id: window.integrationId,
+            channel_id: window.channelId,
           });
-          if (flushed) {
-            logger.info("opencompany Slack window flushed", {
-              event: "opencompany.goat_slack_window_flushed",
-              integration_id: window.integrationId,
-              channel_id: window.channelId,
-              source_item_id: flushed.sourceItemId,
-              message_count: flushed.messageCount,
-              enqueued: flushed.enqueued,
-            });
-          }
-        }
-      } catch (error) {
-        captureException(error, { event: "opencompany.goat_slack_flush_worker_failed" });
-        logger.error("opencompany Slack flush worker failed", {
-          event: "opencompany.goat_slack_flush_worker_failed",
-          error,
+          logger.error("opencompany Slack window flush failed", {
+            event: "opencompany.goat_slack_flush_failed",
+            integration_id: window.integrationId,
+            channel_id: window.channelId,
+            error,
+          });
+          return null;
         });
+        if (flushed) {
+          logger.info("opencompany Slack window flushed", {
+            event: "opencompany.goat_slack_window_flushed",
+            integration_id: window.integrationId,
+            channel_id: window.channelId,
+            source_item_id: flushed.sourceItemId,
+            message_count: flushed.messageCount,
+            enqueued: flushed.enqueued,
+          });
+        }
       }
-      if (stopped) break;
-      await sleep();
-    }
-  })();
-
-  return {
-    notify: () => wake?.(),
-    stop: async () => {
-      stopped = true;
-      wake?.();
-      await loop;
     },
-  };
+    onError: (error) => {
+      captureException(error, { event: "opencompany.goat_slack_flush_worker_failed" });
+      logger.error("opencompany Slack flush worker failed", {
+        event: "opencompany.goat_slack_flush_worker_failed",
+        error,
+      });
+    },
+  });
 }
 
 async function loadSlackIntegrationContext(window: SlackDueWindow): Promise<{

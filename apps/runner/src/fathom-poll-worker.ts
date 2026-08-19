@@ -39,6 +39,7 @@ import {
   listFathomMeetings,
   mergeFathomRecordingContent,
 } from "./fathom-api";
+import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-fathom-poll" });
@@ -459,74 +460,42 @@ async function markFathomNeedsReauth(candidate: FathomPollCandidate, reason: str
 
 export function startFathomPollWorker(options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? FATHOM_POLL_INTERVAL_MS);
-  const abort = new AbortController();
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let wake: (() => void) | null = null;
-
-  const sleep = () =>
-    new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        wake = null;
-        resolve();
-      }, pollIntervalMs);
-      timer.unref?.();
-      wake = () => {
-        if (timer) clearTimeout(timer);
-        wake = null;
-        resolve();
-      };
-    });
-
-  const loop = (async () => {
-    while (!stopped) {
-      try {
-        const candidates = await listFathomPollCandidates();
-        for (const candidate of candidates) {
-          if (stopped) break;
-          const polled = await pollFathomIntegration({
-            candidate,
-            signal: abort.signal,
-          }).catch((error) => {
-            captureException(error, {
-              event: "opencompany.goat_fathom_poll_failed",
-              integration_id: candidate.integrationId,
-            });
-            logger.error("opencompany Fathom integration poll failed", {
-              event: "opencompany.goat_fathom_poll_failed",
-              integration_id: candidate.integrationId,
-              error,
-            });
-            return null;
+  return createPollingWorker({
+    pollIntervalMs,
+    poll: async ({ signal, stopping }) => {
+      signal.throwIfAborted();
+      const candidates = await listFathomPollCandidates();
+      for (const candidate of candidates) {
+        if (stopping()) break;
+        const polled = await pollFathomIntegration({ candidate, signal }).catch((error) => {
+          if (signal.aborted) throw error;
+          captureException(error, {
+            event: "opencompany.goat_fathom_poll_failed",
+            integration_id: candidate.integrationId,
           });
-          if (polled && polled.enqueued > 0) {
-            logger.info("opencompany Fathom meetings enqueued", {
-              event: "opencompany.goat_fathom_meetings_enqueued",
-              integration_id: candidate.integrationId,
-              enqueued_count: polled.enqueued,
-              seen_count: polled.seen,
-            });
-          }
-        }
-      } catch (error) {
-        captureException(error, { event: "opencompany.goat_fathom_poll_worker_failed" });
-        logger.error("opencompany Fathom poll worker failed", {
-          event: "opencompany.goat_fathom_poll_worker_failed",
-          error,
+          logger.error("opencompany Fathom integration poll failed", {
+            event: "opencompany.goat_fathom_poll_failed",
+            integration_id: candidate.integrationId,
+            error,
+          });
+          return null;
         });
+        if (polled && polled.enqueued > 0) {
+          logger.info("opencompany Fathom meetings enqueued", {
+            event: "opencompany.goat_fathom_meetings_enqueued",
+            integration_id: candidate.integrationId,
+            enqueued_count: polled.enqueued,
+            seen_count: polled.seen,
+          });
+        }
       }
-      if (stopped) break;
-      await sleep();
-    }
-  })();
-
-  return {
-    notify: () => wake?.(),
-    stop: async () => {
-      stopped = true;
-      abort.abort();
-      wake?.();
-      await loop;
     },
-  };
+    onError: (error) => {
+      captureException(error, { event: "opencompany.goat_fathom_poll_worker_failed" });
+      logger.error("opencompany Fathom poll worker failed", {
+        event: "opencompany.goat_fathom_poll_worker_failed",
+        error,
+      });
+    },
+  });
 }

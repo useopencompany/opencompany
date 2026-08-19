@@ -81,6 +81,7 @@ import {
   armSandboxIdleTimeout,
   createOrConnectSandbox,
   isRetryableCommandStreamError,
+  managedSandboxMetadata,
   type SandboxHandle,
 } from "./sandbox";
 import {
@@ -180,7 +181,7 @@ export async function runClaudeCodeChatTurn(input: {
   env: RunnerEnv;
   taskContext?: TaskTurnContext | undefined;
   canonicalAttemptId?: string;
-  recovery?: { reason: "lease_reclaimed" };
+  recovery?: { reason: "lease_reclaimed" | "cross_deploy" };
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
   const { turn, session, env, shouldAbort } = input;
@@ -287,9 +288,11 @@ export async function runClaudeCodeChatTurn(input: {
       sandboxId: session.sandboxId,
       template: env.codexE2bTemplate ?? "codex",
       envs: {},
-      metadata: {
-        user_id: turn.userWorkosId,
-      },
+      metadata: managedSandboxMetadata({
+        ownerKind: "codex_chat_session",
+        ownerId: session.id,
+        metadata: { user_id: turn.userWorkosId },
+      }),
       network: CODING_WORKSPACE_SANDBOX_NETWORK,
       idleTimeoutMs: env.codexChatIdleTimeoutMs,
     });

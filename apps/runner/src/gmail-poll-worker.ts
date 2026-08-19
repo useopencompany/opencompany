@@ -16,6 +16,7 @@ import {
   listGmailHistoryMessagesAdded,
 } from "./gmail-api";
 import { googleApiCall } from "./google-api-auth";
+import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-gmail-poll" });
@@ -176,80 +177,48 @@ export async function pollGmailIntegration(input: {
 
 export function startGmailPollWorker(env: RunnerEnv, options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GMAIL_POLL_INTERVAL_MS);
-  const abort = new AbortController();
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let wake: (() => void) | null = null;
-
-  const sleep = () =>
-    new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        wake = null;
-        resolve();
-      }, pollIntervalMs);
-      timer.unref?.();
-      wake = () => {
-        if (timer) clearTimeout(timer);
-        wake = null;
-        resolve();
-      };
+  const enabled = Boolean(env.googleOAuthClientId && env.googleOAuthClientSecret);
+  if (!enabled) {
+    logger.info("opencompany Gmail poll worker disabled (Google OAuth not configured)", {
+      event: "opencompany.goat_gmail_poll_disabled",
     });
-
-  const loop = (async () => {
-    if (!env.googleOAuthClientId || !env.googleOAuthClientSecret) {
-      logger.info("opencompany Gmail poll worker disabled (Google OAuth not configured)", {
-        event: "opencompany.goat_gmail_poll_disabled",
-      });
-      return;
-    }
-    while (!stopped) {
-      try {
-        const candidates = await listGmailPollCandidates();
-        for (const candidate of candidates) {
-          if (stopped) break;
-          const polled = await pollGmailIntegration({
-            candidate,
-            env,
-            signal: abort.signal,
-          }).catch((error) => {
-            captureException(error, {
-              event: "opencompany.goat_gmail_poll_failed",
-              integration_id: candidate.integrationId,
-            });
-            logger.error("opencompany Gmail integration poll failed", {
-              event: "opencompany.goat_gmail_poll_failed",
-              integration_id: candidate.integrationId,
-              error,
-            });
-            return null;
+  }
+  return createPollingWorker({
+    pollIntervalMs,
+    poll: async ({ signal, stopping }) => {
+      if (!enabled) return;
+      signal.throwIfAborted();
+      const candidates = await listGmailPollCandidates();
+      for (const candidate of candidates) {
+        if (stopping()) break;
+        const polled = await pollGmailIntegration({ candidate, env, signal }).catch((error) => {
+          if (signal.aborted) throw error;
+          captureException(error, {
+            event: "opencompany.goat_gmail_poll_failed",
+            integration_id: candidate.integrationId,
           });
-          if (polled && polled.buffered > 0) {
-            logger.info("opencompany Gmail messages buffered", {
-              event: "opencompany.goat_gmail_messages_buffered",
-              integration_id: candidate.integrationId,
-              buffered_count: polled.buffered,
-            });
-          }
-        }
-      } catch (error) {
-        captureException(error, { event: "opencompany.goat_gmail_poll_worker_failed" });
-        logger.error("opencompany Gmail poll worker failed", {
-          event: "opencompany.goat_gmail_poll_worker_failed",
-          error,
+          logger.error("opencompany Gmail integration poll failed", {
+            event: "opencompany.goat_gmail_poll_failed",
+            integration_id: candidate.integrationId,
+            error,
+          });
+          return null;
         });
+        if (polled && polled.buffered > 0) {
+          logger.info("opencompany Gmail messages buffered", {
+            event: "opencompany.goat_gmail_messages_buffered",
+            integration_id: candidate.integrationId,
+            buffered_count: polled.buffered,
+          });
+        }
       }
-      if (stopped) break;
-      await sleep();
-    }
-  })();
-
-  return {
-    notify: () => wake?.(),
-    stop: async () => {
-      stopped = true;
-      abort.abort();
-      wake?.();
-      await loop;
     },
-  };
+    onError: (error) => {
+      captureException(error, { event: "opencompany.goat_gmail_poll_worker_failed" });
+      logger.error("opencompany Gmail poll worker failed", {
+        event: "opencompany.goat_gmail_poll_worker_failed",
+        error,
+      });
+    },
+  });
 }

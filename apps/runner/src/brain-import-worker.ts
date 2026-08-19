@@ -40,6 +40,7 @@ import {
   isGranolaAuthError,
   listGranolaNotes,
 } from "./granola-api";
+import { createPollingWorker } from "./polling-worker";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -73,7 +74,11 @@ export function wakeBrainImportWorker() {
   registeredWakeup?.();
 }
 
-export async function processNextBrainImportRun(env: RunnerEnv): Promise<boolean> {
+export async function processNextBrainImportRun(
+  env: RunnerEnv,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  signal?.throwIfAborted();
   const db = getDb();
   const now = new Date();
   const [run] = await db
@@ -110,11 +115,50 @@ export async function processNextBrainImportRun(env: RunnerEnv): Promise<boolean
     .returning();
   if (!claimed) return true;
 
+  let shutdownReleasePromise: Promise<void> | null = null;
+  const releaseForShutdown = () => {
+    if (shutdownReleasePromise) return shutdownReleasePromise;
+    shutdownReleasePromise = db
+      .update(brainImportRuns)
+      .set({
+        leaseId: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        nextRunAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(brainImportRuns.id, run.id), eq(brainImportRuns.leaseId, leaseId)))
+      .then(() => undefined);
+    void shutdownReleasePromise.catch((error) => {
+      captureException(error, {
+        event: "opencompany.goat_brain_import_shutdown_release_failed",
+        import_run_id: run.id,
+      });
+      logger.error("opencompany Brain import shutdown lease release failed", {
+        event: "opencompany.goat_brain_import_shutdown_release_failed",
+        import_run_id: run.id,
+        error,
+      });
+    });
+    return shutdownReleasePromise;
+  };
+  const requestShutdownHandoff = () => {
+    void releaseForShutdown();
+  };
+  if (signal?.aborted) requestShutdownHandoff();
+  else signal?.addEventListener("abort", requestShutdownHandoff, { once: true });
+
   try {
-    if (claimed.status === "discovering") await discoverImport(claimed, env);
-    else if (claimed.status === "ingesting") await monitorChildren(claimed);
-    else if (claimed.status === "finalizing") await finishImport(claimed);
+    signal?.throwIfAborted();
+    if (claimed.status === "discovering") await discoverImport(claimed, env, signal);
+    else if (claimed.status === "ingesting") await monitorChildren(claimed, signal);
+    else if (claimed.status === "finalizing") await finishImport(claimed, signal);
+    signal?.throwIfAborted();
   } catch (error) {
+    if (signal?.aborted) {
+      await releaseForShutdown();
+      return true;
+    }
     captureException(error, {
       event: "opencompany.goat_brain_import_failed",
       import_run_id: run.id,
@@ -131,15 +175,18 @@ export async function processNextBrainImportRun(env: RunnerEnv): Promise<boolean
         updatedAt: new Date(),
       })
       .where(and(eq(brainImportRuns.id, run.id), eq(brainImportRuns.leaseId, leaseId)));
+  } finally {
+    signal?.removeEventListener("abort", requestShutdownHandoff);
   }
   return true;
 }
 
-async function discoverImport(run: BrainImportRun, env: RunnerEnv) {
+async function discoverImport(run: BrainImportRun, env: RunnerEnv, signal?: AbortSignal) {
   if (!run.leaseId) throw new Error("Import discovery lease is missing.");
   const db = getDb();
   const summary: BrainImportDiscoverySummary = {};
   for (const provider of PROVIDERS) {
+    signal?.throwIfAborted();
     if (!(await renewImportLease(run, "discovering"))) return;
     const selection = run.sourceSelection[provider];
     if (!selection?.enabled) {
@@ -148,10 +195,10 @@ async function discoverImport(run: BrainImportRun, env: RunnerEnv) {
     }
     try {
       if (provider === "public_web") {
-        summary[provider] = await discoverPublicResearch(run, env);
+        summary[provider] = await discoverPublicResearch(run, env, signal);
       } else {
-        if (provider === "granola") await hydrateGranolaImportSourceItems(run);
-        if (provider === "fathom") await hydrateFathomImportSourceItems(run);
+        if (provider === "granola") await hydrateGranolaImportSourceItems(run, signal);
+        if (provider === "fathom") await hydrateFathomImportSourceItems(run, signal);
         const counts = await discoverStoredBrainImportCandidates({
           run,
           provider,
@@ -167,6 +214,7 @@ async function discoverImport(run: BrainImportRun, env: RunnerEnv) {
         };
       }
     } catch (error) {
+      if (signal?.aborted) throw error;
       summary[provider] = {
         ...emptyProvider("failed"),
         error: error instanceof Error ? error.message : String(error),
@@ -181,7 +229,7 @@ async function discoverImport(run: BrainImportRun, env: RunnerEnv) {
   });
 }
 
-async function hydrateGranolaImportSourceItems(run: BrainImportRun) {
+async function hydrateGranolaImportSourceItems(run: BrainImportRun, signal?: AbortSignal) {
   const selection = run.sourceSelection.granola;
   if (!selection?.enabled || !selection.integrationId) return;
   const credential = await loadIntegrationCredential({
@@ -199,6 +247,7 @@ async function hydrateGranolaImportSourceItems(run: BrainImportRun) {
   let truncated = false;
   const seenCursors = new Set<string>();
   for (let page = 0; page < GRANOLA_IMPORT_MAX_LIST_PAGES; page += 1) {
+    signal?.throwIfAborted();
     if (!(await renewImportLease(run, "discovering"))) {
       throw new Error("Import discovery lease was lost.");
     }
@@ -207,6 +256,7 @@ async function hydrateGranolaImportSourceItems(run: BrainImportRun) {
       createdAfter: run.historyStartAt.toISOString(),
       createdBefore: run.historyEndAt.toISOString(),
       ...(cursor ? { cursor } : {}),
+      ...(signal ? { signal } : {}),
     });
     notes.push(...result.notes);
     if (!result.hasMore) break;
@@ -227,11 +277,16 @@ async function hydrateGranolaImportSourceItems(run: BrainImportRun) {
 
   const candidates = selectGranolaImportNotes(notes);
   for (const note of candidates) {
+    signal?.throwIfAborted();
     if (!(await renewImportLease(run, "discovering"))) {
       throw new Error("Import discovery lease was lost.");
     }
     try {
-      const payload = await fetchGranolaNote({ apiKey, noteId: note.id });
+      const payload = await fetchGranolaNote({
+        apiKey,
+        noteId: note.id,
+        ...(signal ? { signal } : {}),
+      });
       const item = normalizeGranolaMeetingNote(payload, { capturedAt: new Date().toISOString() });
       await upsertBrainSourceItemAndEnqueue({
         userWorkosId: run.userWorkosId,
@@ -260,7 +315,7 @@ async function hydrateGranolaImportSourceItems(run: BrainImportRun) {
   }
 }
 
-async function hydrateFathomImportSourceItems(run: BrainImportRun) {
+async function hydrateFathomImportSourceItems(run: BrainImportRun, signal?: AbortSignal) {
   const selection = run.sourceSelection.fathom;
   if (!selection?.enabled || !selection.integrationId) return;
   const credential = await loadIntegrationCredential({
@@ -280,6 +335,7 @@ async function hydrateFathomImportSourceItems(run: BrainImportRun) {
   let truncated = false;
   const seenCursors = new Set<string>();
   for (let page = 0; page < FATHOM_IMPORT_MAX_LIST_PAGES; page += 1) {
+    signal?.throwIfAborted();
     if (!(await renewImportLease(run, "discovering"))) {
       throw new Error("Import discovery lease was lost.");
     }
@@ -288,6 +344,7 @@ async function hydrateFathomImportSourceItems(run: BrainImportRun) {
       createdAfter: run.historyStartAt.toISOString(),
       createdBefore: run.historyEndAt.toISOString(),
       ...(cursor ? { cursor } : {}),
+      ...(signal ? { signal } : {}),
     });
     meetings.push(...result.meetings);
     if (!result.nextCursor) break;
@@ -308,6 +365,7 @@ async function hydrateFathomImportSourceItems(run: BrainImportRun) {
 
   const candidates = selectFathomImportMeetings(meetings);
   for (const meeting of candidates) {
+    signal?.throwIfAborted();
     if (!(await renewImportLease(run, "discovering"))) {
       throw new Error("Import discovery lease was lost.");
     }
@@ -373,7 +431,7 @@ function timestamp(value: string | null) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-async function discoverPublicResearch(run: BrainImportRun, env: RunnerEnv) {
+async function discoverPublicResearch(run: BrainImportRun, env: RunnerEnv, signal?: AbortSignal) {
   if (!env.exaApiKey)
     throw new Error("Public research is unavailable because Exa is not configured.");
   const queries: Array<{
@@ -394,10 +452,13 @@ async function discoverPublicResearch(run: BrainImportRun, env: RunnerEnv) {
   ];
   const results = new Map<string, ImportResearchResult>();
   for (const search of queries) {
+    signal?.throwIfAborted();
     if (!(await renewImportLease(run, "discovering"))) {
       throw new Error("Import discovery lease was lost.");
     }
     const controller = new AbortController();
+    const abortForShutdown = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", abortForShutdown, { once: true });
     const timeout = setTimeout(() => controller.abort(), 20_000);
     try {
       const response = await executeExaSearchRequest({
@@ -425,6 +486,7 @@ async function discoverPublicResearch(run: BrainImportRun, env: RunnerEnv) {
       }
     } finally {
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", abortForShutdown);
     }
     if (results.size >= 40) break;
   }
@@ -469,7 +531,8 @@ async function discoverPublicResearch(run: BrainImportRun, env: RunnerEnv) {
   };
 }
 
-async function monitorChildren(run: BrainImportRun) {
+async function monitorChildren(run: BrainImportRun, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const db = getDb();
   await enqueuePendingCandidates(run);
   const progress = await getBrainImportJobProgress(run.id, db);
@@ -636,7 +699,8 @@ async function enqueuePendingCandidates(run: BrainImportRun) {
   if (candidates.length > 0) wakeBrainIngestWorker();
 }
 
-async function finishImport(run: BrainImportRun) {
+async function finishImport(run: BrainImportRun, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const db = getDb();
   const progress = await getBrainImportJobProgress(run.id, db);
   const finalizer = progress.rows.find(isFinalizerJob);
@@ -768,52 +832,11 @@ function redactPersonalContactData(value: string) {
 }
 
 export function startBrainImportWorker(env: RunnerEnv) {
-  let stopped = false;
-  let active = 0;
-  let wake: (() => void) | null = null;
-  let pendingNotification = false;
-  const notify = () => {
-    if (wake) wake();
-    else pendingNotification = true;
-  };
-  const loop = (async () => {
-    while (!stopped) {
-      let processed = false;
-      try {
-        active += 1;
-        processed = await processNextBrainImportRun(env);
-      } catch (error) {
-        logger.error("opencompany Brain import worker failed", { error });
-      } finally {
-        active -= 1;
-      }
-      if (stopped) break;
-      if (processed) continue;
-      if (pendingNotification) {
-        pendingNotification = false;
-        continue;
-      }
-      await new Promise<void>((resolve) => {
-        let settled = false;
-        const finishWait = () => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          wake = null;
-          resolve();
-        };
-        const timer = setTimeout(finishWait, POLL_INTERVAL_MS);
-        wake = finishWait;
-      });
-    }
-  })();
-  return {
-    notify,
-    activeCount: () => active,
-    stop: async () => {
-      stopped = true;
-      notify();
-      await loop;
+  return createPollingWorker({
+    pollIntervalMs: POLL_INTERVAL_MS,
+    poll: ({ signal }) => processNextBrainImportRun(env, signal),
+    onError: (error) => {
+      logger.error("opencompany Brain import worker failed", { error });
     },
-  };
+  });
 }
