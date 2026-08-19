@@ -9,7 +9,6 @@
 - [ ] Updated `.env.example` and docs for any new env vars.
 - [ ] Added a Drizzle migration for database schema DDL changes.
 - [ ] Checked that no secrets, tokens, private URLs, or sensitive user data were added.
-- [ ] Every commit includes a `Signed-off-by` line certifying the Developer Certificate of Origin.
 
 ## Design Approval
 

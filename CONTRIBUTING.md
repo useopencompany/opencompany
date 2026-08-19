@@ -17,24 +17,6 @@ Keep pull requests focused. Explain the problem, the chosen boundary, user-visib
 and anything reviewers cannot verify locally. UI changes need a browser check of the real route,
 including the primary flow and an obvious error or empty state.
 
-## Developer Certificate of Origin
-
-This project uses the [Developer Certificate of Origin 1.1](https://developercertificate.org/).
-By adding a `Signed-off-by` line to a commit, you certify that you have the right to submit that work
-under the repository's current license and agree to the DCO for that contribution. This is the
-project's inbound-equals-outbound contribution model; no separate contributor license agreement is
-required.
-
-Sign each commit with:
-
-```bash
-git commit --signoff
-```
-
-If necessary, add a sign-off to your latest local commit with `git commit --amend --signoff`. Do not
-add someone else's sign-off. Every author in a multi-author contribution must certify their own
-work.
-
 ## Local Checks
 
 Use Bun `1.3.2` and Node `20.20.0` or newer. Install exactly the committed dependency graph:
@@ -61,10 +43,10 @@ bun run secrets:check
 ```
 
 TruffleHog must be installed for the local secret scan. The pull request gate scans the exact PR
-commit range without repository credentials. It also checks every non-merge commit for a valid DCO
-trailer and reviews new high- or critical-severity dependency vulnerabilities. `boundary:check`
-enforces the permanent application and naming boundaries. For focused development, use Turborepo
-filters such as `bun run test --filter @opencompany/web`, but run the full gate before review.
+commit range without repository credentials and reviews new high- or critical-severity dependency
+vulnerabilities. `boundary:check` enforces the permanent application and naming boundaries. For
+focused development, use Turborepo filters such as `bun run test --filter @opencompany/web`, but run
+the full gate before review.
 
 ## Schema and Environment Changes
 
@@ -80,7 +62,7 @@ filters such as `bun run test --filter @opencompany/web`, but run the full gate 
 Biome owns formatting and import ordering. ESLint owns lint rules. Tests use Vitest. Prefer existing
 components, helpers, and fixture styles over new abstractions.
 
-External pull requests require one maintainer approval, the `PR gate` and CodeQL, and resolved review
-conversations. New commits dismiss stale approvals. The main rules apply to administrators; do not
-bypass them. Mandatory critical-path CODEOWNER approval remains deferred until a second active
+External pull requests require the `PR gate`, CodeQL, and resolved review conversations. Reviews are
+encouraged but are not a merge requirement. The main rules apply to administrators; do not bypass
+them. Mandatory critical-path CODEOWNER approval remains deferred until a second active
 maintainer is assigned.
