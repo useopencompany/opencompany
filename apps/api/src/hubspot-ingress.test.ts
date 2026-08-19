@@ -85,10 +85,10 @@ function dealEvent(overrides: Record<string, unknown> = {}) {
 describe("HubSpot ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
-    vi.stubEnv("GOAT_HUBSPOT_CLIENT_ID", "hubspot-client");
-    vi.stubEnv("GOAT_HUBSPOT_CLIENT_SECRET", CLIENT_SECRET);
-    vi.stubEnv("GOAT_HUBSPOT_STATE_SECRET", "hubspot-state-secret-hubspot-state-secret");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+    vi.stubEnv("OPENCOMPANY_HUBSPOT_CLIENT_ID", "hubspot-client");
+    vi.stubEnv("OPENCOMPANY_HUBSPOT_CLIENT_SECRET", CLIENT_SECRET);
+    vi.stubEnv("OPENCOMPANY_HUBSPOT_STATE_SECRET", "hubspot-state-secret-hubspot-state-secret");
     vi.mocked(listHubspotIntegrationsForPortal).mockResolvedValue([
       { id: "gint_hubspot_1", userWorkosId: "user_1", status: "connected" },
     ] as never);

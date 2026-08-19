@@ -3,6 +3,12 @@
 import { spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
+import {
+  cleanVercelWorkDirectory,
+  restorePreparedVercelDirectory,
+  vercelCurlArgs,
+} from "./lib/release-vercel.mjs";
+
 const TERMINAL_FAILURE_STATES = new Set(["ERROR", "CANCELED"]);
 
 main().catch((error) => {
@@ -15,10 +21,22 @@ async function main() {
   const token = requiredEnv("VERCEL_TOKEN");
   const teamId = requiredEnv("VERCEL_ORG_ID");
   const projectId = requiredEnv(options.projectEnv);
-  const deployTimeoutMs = Number(process.env.VERCEL_DEPLOY_TIMEOUT_MS ?? 8 * 60 * 1000);
-  const readyTimeoutMs = Number(process.env.VERCEL_READY_TIMEOUT_MS ?? 8 * 60 * 1000);
-  const pollDelayMs = Number(process.env.VERCEL_READY_POLL_MS ?? 2 * 1000);
 
+  try {
+    if (options.preparedDir) {
+      restorePreparedVercelDirectory(options.preparedDir);
+    }
+
+    await deployPreparedOutput(options, { token, teamId, projectId });
+  } finally {
+    if (options.preparedDir) cleanVercelWorkDirectory();
+  }
+}
+
+async function deployPreparedOutput(options, { token, teamId, projectId }) {
+  const deployTimeoutMs = Number(process.env.VERCEL_DEPLOY_TIMEOUT_MS ?? 10 * 60 * 1000);
+  const readyTimeoutMs = Number(process.env.VERCEL_READY_TIMEOUT_MS ?? 10 * 60 * 1000);
+  const pollDelayMs = Number(process.env.VERCEL_READY_POLL_MS ?? 2 * 1000);
   const deployOutput = await runCommand(
     "bunx",
     [
@@ -78,6 +96,20 @@ async function main() {
     },
   );
 
+  if (options.smokePath) {
+    await runCommand(
+      "bunx",
+      [
+        ...vercelCurlArgs(options.smokePath, `https://${deployment.url}`),
+        "--",
+        "--fail-with-body",
+        "--silent",
+        "--show-error",
+      ],
+      { timeoutMs: 2 * 60 * 1000 },
+    );
+  }
+
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(process.env.GITHUB_OUTPUT, `url=https://${deployment.url}\n`);
   }
@@ -88,8 +120,10 @@ async function main() {
 function parseArgs(args) {
   const parsed = {
     label: "Vercel",
-    projectEnv: "GOAT_VERCEL_PROJECT_ID",
+    projectEnv: "OPENCOMPANY_VERCEL_PROJECT_ID",
     promoteTimeout: "3m",
+    preparedDir: "",
+    smokePath: "",
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -100,6 +134,10 @@ function parseArgs(args) {
       parsed.projectEnv = requireArg(args, ++index, arg);
     } else if (arg === "--promote-timeout") {
       parsed.promoteTimeout = requireArg(args, ++index, arg);
+    } else if (arg === "--prepared-dir") {
+      parsed.preparedDir = requireArg(args, ++index, arg);
+    } else if (arg === "--smoke-path") {
+      parsed.smokePath = requireArg(args, ++index, arg);
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }

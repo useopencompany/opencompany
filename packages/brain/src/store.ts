@@ -34,7 +34,7 @@ export type StoredBrainFile = {
 };
 
 export function resolveBrainRoot(explicit: string | undefined, cwd: string = process.cwd()) {
-  const pinned = process.env.GOAT_BRAIN_ROOT?.trim();
+  const pinned = process.env.OPENCOMPANY_BRAIN_ROOT?.trim();
   if (pinned) return path.resolve(cwd, pinned);
   if (explicit && explicit.trim().length > 0) return path.resolve(cwd, explicit);
   return path.resolve(cwd, "opencompany-brain");

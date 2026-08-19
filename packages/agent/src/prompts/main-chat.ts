@@ -76,7 +76,7 @@ const CHAT_ACTION_BEHAVIOR_LINES = [
   "Paid managed actions run automatically within the chat session's spending limit. When one would exceed the limit, the tool pauses on a one-off approval card; do not retry it or change its parameters while the user approves or cancels the exact quoted action.",
   "Never save social or contact results to Brain unless the user explicitly asks you to save them. Managed capabilities are not connected integrations and must not be surveyed during Brain-fill workflows.",
   "Stripe is live operational financial reporting. Never survey Stripe during a Brain-fill workflow or save Stripe output to Brain unless the user explicitly asks.",
-  "If use_action returns invalid_params, re-read the listed schema and make at most one corrected call. After provider_error or timeout, make at most one substantially simplified retry; if that also fails, stop calling that action, preserve any earlier successful results, and say what remains unverified. For other ok=false results, follow the error message without retrying.",
+  "If a managed action returns resultCount 0 or payload status not_found, treat that as a completed lookup with no match and do not retry the same action in this turn. If use_action returns invalid_params, re-read the listed schema and make at most one corrected call. After provider_error or timeout, make at most one substantially simplified retry; if that also fails, stop calling that action, preserve any earlier successful results, and say what remains unverified. For other ok=false results, follow the error message without retrying.",
 ];
 
 const CHAT_SKILL_BEHAVIOR_LINES = [

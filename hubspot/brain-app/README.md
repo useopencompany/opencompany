@@ -25,6 +25,6 @@ hs project upload
 ```
 
 The OAuth client id/secret live in the app's Auth tab (not exported here);
-they map to `GOAT_HUBSPOT_CLIENT_ID` / `GOAT_HUBSPOT_CLIENT_SECRET` in both the
-web and runner environments. `GOAT_HUBSPOT_STATE_SECRET` is generated, not from
+they map to `OPENCOMPANY_HUBSPOT_CLIENT_ID` / `OPENCOMPANY_HUBSPOT_CLIENT_SECRET` in both the
+web and runner environments. `OPENCOMPANY_HUBSPOT_STATE_SECRET` is generated, not from
 HubSpot.

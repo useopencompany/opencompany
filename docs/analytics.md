@@ -43,8 +43,8 @@ event properties unless the registry explicitly includes the field.
 The current product project uses:
 
 ```bash
-NEXT_PUBLIC_GOAT_POSTHOG_TOKEN=""
-NEXT_PUBLIC_GOAT_POSTHOG_HOST=""
+NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN=""
+NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST=""
 NEXT_PUBLIC_ANALYTICS_DEBUG="false"
 ```
 

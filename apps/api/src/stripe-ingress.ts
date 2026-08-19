@@ -44,7 +44,7 @@ export function createStripeIngress(input: {
       try {
         // Stripe signs the exact incoming bytes. Reading the body as text here
         // preserves that raw payload and must happen before any JSON parsing.
-        event = input.stripe.webhooks.constructEvent(
+        event = await input.stripe.webhooks.constructEventAsync(
           await request.text(),
           signature,
           input.webhookSecret,

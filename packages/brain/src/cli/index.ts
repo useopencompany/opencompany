@@ -195,7 +195,7 @@ Commands:
   doctor            Check validation, links, folder shape, and weak provenance.
 
 Global options:
-  --root <path>     Brain root (default: opencompany-brain; GOAT_BRAIN_ROOT pins it).
+  --root <path>     Brain root (default: opencompany-brain; OPENCOMPANY_BRAIN_ROOT pins it).
   --json            Machine-readable output.
   --help            Show help for a command.
 
@@ -775,13 +775,13 @@ async function ingest(ctx: CommandContext): Promise<CommandResult> {
   const reporting = gatewayReportingFromEnv(process.env);
   const gateway = createGateway({
     apiKey,
-    ...(process.env.GOAT_BRAIN_GATEWAY_BASE_URL
-      ? { baseUrl: process.env.GOAT_BRAIN_GATEWAY_BASE_URL }
+    ...(process.env.OPENCOMPANY_BRAIN_GATEWAY_BASE_URL
+      ? { baseUrl: process.env.OPENCOMPANY_BRAIN_GATEWAY_BASE_URL }
       : {}),
     ...(reporting ? { reporting } : {}),
     chatModel:
       ctx.args.get("model")?.trim() ||
-      process.env.GOAT_BRAIN_INGEST_MODEL?.trim() ||
+      process.env.OPENCOMPANY_BRAIN_INGEST_MODEL?.trim() ||
       "openai/gpt-5.5",
     onUsage: (entry) => usage.push(entry),
   });

@@ -22,10 +22,10 @@ export type SlackOAuthResult = {
 
 const SLACK_PROVIDER = "slack" as const;
 const SLACK_INTEGRATION_ENVS = [
-  "GOAT_SLACK_CLIENT_ID",
-  "GOAT_SLACK_CLIENT_SECRET",
-  "GOAT_SLACK_SIGNING_SECRET",
-  "GOAT_SLACK_STATE_SECRET",
+  "OPENCOMPANY_SLACK_CLIENT_ID",
+  "OPENCOMPANY_SLACK_CLIENT_SECRET",
+  "OPENCOMPANY_SLACK_SIGNING_SECRET",
+  "OPENCOMPANY_SLACK_STATE_SECRET",
 ] as const;
 
 // User-token scopes: the app reads what the connected user can read (their
@@ -124,7 +124,7 @@ export function verifySlackIntegrationState(state: string): SlackIntegrationStat
 
 export function buildSlackAuthorizationUrl(state: string) {
   const url = new URL("https://slack.com/oauth/v2/authorize");
-  url.searchParams.set("client_id", requiredEnv("GOAT_SLACK_CLIENT_ID"));
+  url.searchParams.set("client_id", requiredEnv("OPENCOMPANY_SLACK_CLIENT_ID"));
   // user_scope (not scope): we request a user token only, no bot token.
   url.searchParams.set("user_scope", SLACK_USER_SCOPES.join(","));
   url.searchParams.set("redirect_uri", slackCallbackUrl());
@@ -139,8 +139,8 @@ export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult>
   }>({
     method: "oauth.v2.access",
     form: {
-      client_id: requiredEnv("GOAT_SLACK_CLIENT_ID"),
-      client_secret: requiredEnv("GOAT_SLACK_CLIENT_SECRET"),
+      client_id: requiredEnv("OPENCOMPANY_SLACK_CLIENT_ID"),
+      client_secret: requiredEnv("OPENCOMPANY_SLACK_CLIENT_SECRET"),
       code,
       redirect_uri: slackCallbackUrl(),
     },
@@ -244,7 +244,7 @@ function sanitizeReturnTo(value: string) {
 }
 
 function signStateBody(body: string) {
-  return createHmac("sha256", requiredEnv("GOAT_SLACK_STATE_SECRET"))
+  return createHmac("sha256", requiredEnv("OPENCOMPANY_SLACK_STATE_SECRET"))
     .update(body)
     .digest("base64url");
 }

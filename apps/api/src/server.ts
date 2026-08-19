@@ -55,6 +55,7 @@ import { createOnboardingEmailService } from "./onboarding-emails";
 import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createRunnerClient } from "./runner-client";
+import { resolveApiPort } from "./server-port";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackBotSettingsService } from "./slack-bot-settings";
 import { createSlackIngress } from "./slack-ingress";
@@ -222,7 +223,7 @@ const app = createApiApp({
   ...(presentation ? { presentation } : {}),
   ...(readModels ? { readModels } : {}),
 });
-const port = resolvePort();
+const port = resolveApiPort(process.env);
 const server = serve({ fetch: app.fetch, port });
 logger.info("API server started", { event: "opencompany.api_started", port });
 
@@ -264,14 +265,6 @@ function createWorkOSClient() {
   const clientId = process.env.WORKOS_CLIENT_ID?.trim();
   if (!apiKey || !clientId) throw new Error("WORKOS_API_KEY and WORKOS_CLIENT_ID are required.");
   return new WorkOS(apiKey, { clientId });
-}
-
-function resolvePort() {
-  const value = Number(process.env.PORT ?? "3001");
-  if (!Number.isInteger(value) || value < 1 || value > 65_535) {
-    throw new Error("PORT must be an integer between 1 and 65535.");
-  }
-  return value;
 }
 
 function createElectricReadModels() {

@@ -244,7 +244,7 @@ export function createApiApp(input: CreateApiAppInput) {
       const requestedModel =
         body.model ??
         input.defaultModel ??
-        process.env.GOAT_DEFAULT_CHAT_MODEL ??
+        process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ??
         "moonshotai/kimi-k3";
       let autoResolution: AutoModelRoutingResolution | null = null;
       if (requestedModel === "auto") {
@@ -1281,7 +1281,7 @@ export function createApiApp(input: CreateApiAppInput) {
         body.model ??
         existingConversation?.model ??
         input.defaultModel ??
-        process.env.GOAT_DEFAULT_CHAT_MODEL ??
+        process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ??
         "moonshotai/kimi-k3";
       let autoResolution: AutoModelRoutingResolution | null = null;
       if (requestedModel === "auto") {
@@ -1327,7 +1327,7 @@ export function createApiApp(input: CreateApiAppInput) {
         engine: body.engine,
         model: autoResolution?.model ?? requestedModel,
         defaultProductModel:
-          input.defaultModel ?? process.env.GOAT_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
+          input.defaultModel ?? process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
         auth: input.engineAuth,
       });
       const { engine: _engine, model: _model, ...message } = body;

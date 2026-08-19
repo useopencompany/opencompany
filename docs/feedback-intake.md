@@ -12,12 +12,12 @@ when exercising feedback:
 
 ```bash
 LINEAR_API_KEY="lin_api_..."
-GOAT_FEEDBACK_LINEAR_TEAM_ID=""
-GOAT_FEEDBACK_LINEAR_PROJECT_ID=""
-GOAT_FEEDBACK_LINEAR_LABELS=""
+OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID=""
+OPENCOMPANY_FEEDBACK_LINEAR_PROJECT_ID=""
+OPENCOMPANY_FEEDBACK_LINEAR_LABELS=""
 ```
 
-`LINEAR_API_KEY` and `GOAT_FEEDBACK_LINEAR_TEAM_ID` are required for delivery. The project and
+`LINEAR_API_KEY` and `OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID` are required for delivery. The project and
 additional labels are optional. The service always applies the report-kind label and attempts to
 create missing labels; insufficient label permissions do not block issue creation. Missing required
 configuration fails only the feedback request, not the rest of the product.

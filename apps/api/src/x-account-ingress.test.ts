@@ -75,10 +75,10 @@ function stubXFetch() {
 describe("X account ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
-    vi.stubEnv("GOAT_X_CLIENT_ID", "x-client");
-    vi.stubEnv("GOAT_X_CLIENT_SECRET", "x-client-secret");
-    vi.stubEnv("GOAT_X_STATE_SECRET", "x-state-secret-x-state-secret");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+    vi.stubEnv("OPENCOMPANY_X_CLIENT_ID", "x-client");
+    vi.stubEnv("OPENCOMPANY_X_CLIENT_SECRET", "x-client-secret");
+    vi.stubEnv("OPENCOMPANY_X_STATE_SECRET", "x-state-secret-x-state-secret");
   });
 
   afterEach(() => {

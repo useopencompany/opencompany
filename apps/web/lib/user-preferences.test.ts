@@ -41,7 +41,7 @@ function okEnvelope() {
 describe("user preference API actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_API_ORIGIN", "https://api.example.test");
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.example.test");
     vi.mocked(headers).mockResolvedValue(
       new Headers({
         Cookie: "wos-session=sealed",

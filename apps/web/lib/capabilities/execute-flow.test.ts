@@ -56,7 +56,7 @@ import {
 describe("executeManagedCapability", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
-    vi.stubEnv("GOAT_MANAGED_CAPABILITIES_KILL_SWITCH", "");
+    vi.stubEnv("OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH", "");
     mocks.getBalance.mockResolvedValue(10_000_000);
     mocks.getBudget.mockResolvedValue(5_000_000);
     mocks.sumSpend.mockResolvedValue(0);
@@ -360,29 +360,81 @@ describe("executeManagedCapability", () => {
     expect(mocks.recordDebit).not.toHaveBeenCalled();
   });
 
-  it("settles explicit zero-cost provider failures without a credit debit", async () => {
+  it("returns an explicit zero-cost provider miss as a completed lookup", async () => {
+    const mapOutput = vi.fn(() => {
+      throw new Error("a no-result response must not be parsed as successful provider output");
+    });
+    const client = fakeClient({
+      inspection: inspectPrice(0.3),
+      run: providerRun({
+        provider: "pdl",
+        endpoint: "/v5/person/enrich",
+        cost: { value: 0, currency: "USD" },
+        output: null,
+        providerResponse: { httpStatus: 404 },
+        resultCount: 0,
+      }),
+    });
+    const result = await executeManagedCapability({
+      spec: {
+        ...spec("lead.find_person_email", "lead", "pdl", "/v5/person/enrich"),
+        mapOutput,
+      },
+      params: { query: "openai" },
+      context: context(),
+      client,
+    });
+
+    expect(mapOutput).not.toHaveBeenCalled();
+    expect(mocks.recordDebit).not.toHaveBeenCalled();
+    expect(mocks.settleRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "succeeded",
+        providerHttpStatus: 404,
+        resultCount: 0,
+        providerCostUsdMicros: 0,
+        totalCostUsdMicros: 0,
+      }),
+    );
+    expect(result).toMatchObject({
+      resultCount: 0,
+      cost: { totalUsdMicros: 0, state: "settled" },
+      payload: {
+        status: "not_found",
+        message: "No qualifying work email was found for this person.",
+      },
+    });
+  });
+
+  it("settles provider failures before attempting to map their output", async () => {
+    const mapOutput = vi.fn(() => {
+      throw new Error("provider output should not be mapped");
+    });
     const client = fakeClient({
       inspection: inspectPrice(0.0015),
       run: providerRun({
         cost: { value: 0, currency: "USD" },
         output: null,
-        providerResponse: { httpStatus: 404 },
+        providerResponse: { httpStatus: 500 },
+        resultCount: 0,
       }),
     });
+
     await expect(
       executeManagedCapability({
-        spec: spec(),
+        spec: { ...spec(), mapOutput },
         params: { query: "openai" },
         context: context(),
         client,
       }),
     ).rejects.toMatchObject({ code: "provider_error" });
-    expect(mocks.recordDebit).not.toHaveBeenCalled();
+
+    expect(mapOutput).not.toHaveBeenCalled();
     expect(mocks.settleRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "failed",
-        providerCostUsdMicros: 0,
-        totalCostUsdMicros: 0,
+        providerHttpStatus: 500,
+        errorCode: "provider_http_500",
       }),
     );
   });
@@ -415,7 +467,7 @@ describe("executeManagedCapability", () => {
   });
 
   it("fails closed before inspection when the global kill switch is enabled", async () => {
-    vi.stubEnv("GOAT_MANAGED_CAPABILITIES_KILL_SWITCH", "true");
+    vi.stubEnv("OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH", "true");
     const client = fakeClient({
       inspection: inspectPrice(0.0015),
       run: providerRun(),
@@ -434,7 +486,7 @@ describe("executeManagedCapability", () => {
 
   it("fails closed before inspection when the exact reviewed action is disabled", async () => {
     vi.stubEnv(
-      "GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS",
+      "OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS",
       "linkedin.list_comments, x.search_posts",
     );
     const client = fakeClient({

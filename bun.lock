@@ -83,6 +83,7 @@
       "name": "@opencompany/docs",
       "version": "0.1.0",
       "dependencies": {
+        "@opencompany/protocol": "workspace:*",
         "fumadocs-core": "16.14.4",
         "fumadocs-mdx": "^15.2.3",
         "fumadocs-openapi": "^11.2.4",

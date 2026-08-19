@@ -61,7 +61,7 @@ function ingress(overrides: { noWorkspaces?: boolean; authError?: ApiError } = {
 describe("Google ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "google-client");
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "google-secret");
     vi.stubEnv("GOOGLE_INTEGRATION_STATE_SECRET", "google-state-secret-google-state-secret");

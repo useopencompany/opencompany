@@ -131,6 +131,7 @@ describe("createProductChatSystemPrompt integrations", () => {
     expect(prompt).toContain("If use_action returns invalid_params");
     expect(prompt).toContain("make at most one corrected call");
     expect(prompt).toContain("make at most one substantially simplified retry");
+    expect(prompt).toContain("treat that as a completed lookup with no match");
     expect(prompt).toContain("chat session's spending limit");
     expect(prompt).toContain("one-off approval card");
     expect(prompt).toContain("<brain_fill>");
