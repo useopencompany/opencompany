@@ -55,6 +55,7 @@ import { createOnboardingEmailService } from "./onboarding-emails";
 import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createRunnerClient } from "./runner-client";
+import { closeHttpServer } from "./server-lifecycle";
 import { resolveApiPort } from "./server-port";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackBotSettingsService } from "./slack-bot-settings";
@@ -67,6 +68,7 @@ import { createXAccountIngress } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
 registerNodeObservability({ serviceName: "opencompany-api" });
+const shutdownController = new AbortController();
 
 const database = createPooledDb(resolveApiDatabaseUrl(), { max: resolvePoolMax() });
 const execute = (query: Parameters<typeof database.db.execute>[0]) => database.db.execute(query);
@@ -221,6 +223,7 @@ const app = createApiApp({
       db: database.db,
     }),
   ...(presentation ? { presentation } : {}),
+  shutdownSignal: shutdownController.signal,
   ...(readModels ? { readModels } : {}),
 });
 const port = resolveApiPort(process.env);
@@ -232,15 +235,28 @@ async function close(signal: string) {
   if (closing) return;
   closing = true;
   logger.info("API server stopping", { event: "opencompany.api_stopping", signal });
-  server.close();
+  shutdownController.abort();
+  await closeHttpServer(server);
   await notifier.close();
   await presentation?.close();
   await database.close();
+  logger.info("API server stopped", { event: "opencompany.api_stopped", signal });
   await shutdownNodeObservability();
 }
 
-process.once("SIGINT", () => void close("SIGINT"));
-process.once("SIGTERM", () => void close("SIGTERM"));
+function handleSignal(signal: "SIGINT" | "SIGTERM") {
+  void close(signal).catch((error) => {
+    logger.error("API server shutdown failed", {
+      event: "opencompany.api_shutdown_failed",
+      signal,
+      error,
+    });
+    process.exitCode = 1;
+  });
+}
+
+process.once("SIGINT", () => handleSignal("SIGINT"));
+process.once("SIGTERM", () => handleSignal("SIGTERM"));
 
 export function resolveApiDatabaseUrl() {
   const explicit = process.env.API_DATABASE_URL?.trim() ?? process.env.RUNNER_DATABASE_URL?.trim();

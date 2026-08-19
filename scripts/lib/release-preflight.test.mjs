@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
+import { renderSurfaceConfig } from "./release-orchestration.mjs";
 import { surfaceConfig } from "./release-vercel.mjs";
 
 const preflightUrl = new URL("../release-preflight.mjs", import.meta.url);
@@ -61,6 +62,14 @@ test("production preflight follows the deployed runtime boundaries", async () =>
       .filter((key) => key !== "RUNNER_PUBLIC_URL")
       .sort(),
   );
+  assert.equal(
+    readRenderShutdownDelay(render, "opencompany-api"),
+    renderSurfaceConfig("api").maxShutdownDelaySeconds,
+  );
+  assert.equal(
+    readRenderShutdownDelay(render, "opencompany-runner"),
+    renderSurfaceConfig("runner").maxShutdownDelaySeconds,
+  );
 });
 
 function readGroups(source) {
@@ -90,6 +99,16 @@ function readRenderKeys(render, serviceName) {
   return [...service.matchAll(/^\s+- key: (?<key>[A-Z][A-Z0-9_]*)$/gmu)].map(
     (match) => match.groups.key,
   );
+}
+
+function readRenderShutdownDelay(render, serviceName) {
+  const serviceStart = render.indexOf(`name: ${serviceName}`);
+  const nextService = render.indexOf("\n  - type:", serviceStart);
+  assert.notEqual(serviceStart, -1, `${serviceName} is missing from render.yaml`);
+  const service = render.slice(serviceStart, nextService === -1 ? undefined : nextService);
+  const match = service.match(/^\s+maxShutdownDelaySeconds:\s+(\d+)$/mu);
+  assert.ok(match, `${serviceName} is missing maxShutdownDelaySeconds`);
+  return Number(match[1]);
 }
 
 function groupKeys(group) {

@@ -1,3 +1,20 @@
+const RENDER_SURFACE_CONFIG = {
+  api: {
+    serviceIdEnv: "RENDER_API_SERVICE_ID",
+    maxShutdownDelaySeconds: 60,
+  },
+  runner: {
+    serviceIdEnv: "RENDER_SERVICE_ID",
+    maxShutdownDelaySeconds: 300,
+  },
+};
+
+export function renderSurfaceConfig(surface) {
+  const config = RENDER_SURFACE_CONFIG[surface];
+  if (!config) throw new Error(`Unknown Render surface: ${surface}`);
+  return config;
+}
+
 export function renderSurfaceResults(selectedSurfaces, settledBySurface) {
   return Object.fromEntries(
     ["api", "runner"].map((surface) => {

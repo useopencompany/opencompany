@@ -3,10 +3,23 @@ import test from "node:test";
 
 import {
   deploymentFinalState,
+  renderSurfaceConfig,
   renderSurfaceResults,
   unsuccessfulSelectedSurfaces,
   webDependenciesPassed,
 } from "./release-orchestration.mjs";
+
+test("defines the production shutdown contract for each Render surface", () => {
+  assert.deepEqual(renderSurfaceConfig("api"), {
+    serviceIdEnv: "RENDER_API_SERVICE_ID",
+    maxShutdownDelaySeconds: 60,
+  });
+  assert.deepEqual(renderSurfaceConfig("runner"), {
+    serviceIdEnv: "RENDER_SERVICE_ID",
+    maxShutdownDelaySeconds: 300,
+  });
+  assert.throws(() => renderSurfaceConfig("unknown"), /Unknown Render surface/u);
+});
 
 test("preserves API success when the runner fails", () => {
   const results = renderSurfaceResults(["api", "runner"], {
