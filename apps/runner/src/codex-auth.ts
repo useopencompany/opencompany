@@ -7,7 +7,7 @@ import { Sandbox } from "e2b";
 import { ensureCodexInstalled } from "./codex-cli";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
-import { killSandbox, type SandboxHandle } from "./sandbox";
+import { killSandbox, managedSandboxMetadata, type SandboxHandle } from "./sandbox";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "codex-auth" });
 
@@ -34,11 +34,14 @@ export async function startCodexDeviceAuthFlow(input: {
   env: RunnerEnv;
 }): Promise<CodexDeviceAuthFlowStatus> {
   await supersedeActiveCodexAuthFlows(input.userWorkosId);
+  const id = newCodexDeviceAuthFlowId();
   const sandbox = await createCodexAuthSandbox({
     ownerLogFields: { user_workos_id: input.userWorkosId },
-    metadata: {
-      user_id: input.userWorkosId,
-    },
+    metadata: managedSandboxMetadata({
+      ownerKind: "codex_device_auth_flow",
+      ownerId: id,
+      metadata: { user_id: input.userWorkosId },
+    }),
     template: input.env.codexE2bTemplate ?? "codex",
   });
 
@@ -46,7 +49,6 @@ export async function startCodexDeviceAuthFlow(input: {
     await prepareCodexAuthHome(sandbox);
     await spawnCodexDeviceLogin(sandbox);
 
-    const id = newCodexDeviceAuthFlowId();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + CODEX_AUTH_FLOW_TTL_MS);
 

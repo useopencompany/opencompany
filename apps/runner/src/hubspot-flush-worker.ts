@@ -34,6 +34,7 @@ import {
   getHubspotAccessToken,
   type HubspotObjectSnapshot,
 } from "./hubspot-api";
+import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({
@@ -297,79 +298,52 @@ export function buildHubspotObjectWindowItem(input: {
 
 export function startHubspotFlushWorker(env: RunnerEnv, options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? HUBSPOT_FLUSH_POLL_INTERVAL_MS);
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let wake: (() => void) | null = null;
-
-  const sleep = () =>
-    new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        wake = null;
-        resolve();
-      }, pollIntervalMs);
-      timer.unref?.();
-      wake = () => {
-        if (timer) clearTimeout(timer);
-        wake = null;
-        resolve();
-      };
-    });
-
-  const loop = (async () => {
-    while (!stopped) {
-      try {
-        const due = await listDueHubspotObjectWindows({});
-        for (const window of due) {
-          if (stopped) break;
-          const flushed = await flushHubspotObjectWindow(window, env).catch((error) => {
-            captureException(error, {
-              event: "opencompany.goat_hubspot_flush_failed",
-              integration_id: window.integrationId,
-              object_type: window.objectType,
-              object_id: window.objectId,
-            });
-            logger.error("opencompany HubSpot window flush failed", {
-              event: "opencompany.goat_hubspot_flush_failed",
-              integration_id: window.integrationId,
-              object_type: window.objectType,
-              object_id: window.objectId,
-              error,
-            });
-            return null;
+  return createPollingWorker({
+    pollIntervalMs,
+    poll: async ({ signal, stopping }) => {
+      signal.throwIfAborted();
+      const due = await listDueHubspotObjectWindows({});
+      for (const window of due) {
+        if (stopping()) break;
+        const flushed = await flushHubspotObjectWindow(window, env).catch((error) => {
+          if (signal.aborted) throw error;
+          captureException(error, {
+            event: "opencompany.goat_hubspot_flush_failed",
+            integration_id: window.integrationId,
+            object_type: window.objectType,
+            object_id: window.objectId,
           });
-          if (flushed) {
-            logger.info("opencompany HubSpot window flushed", {
-              event: "opencompany.goat_hubspot_window_flushed",
-              integration_id: window.integrationId,
-              object_type: window.objectType,
-              object_id: window.objectId,
-              source_item_id: flushed.sourceItemId,
-              event_count: flushed.eventCount,
-              enqueued: flushed.enqueued,
-              skipped: flushed.skipped,
-            });
-          }
-        }
-      } catch (error) {
-        captureException(error, { event: "opencompany.goat_hubspot_flush_worker_failed" });
-        logger.error("opencompany HubSpot flush worker failed", {
-          event: "opencompany.goat_hubspot_flush_worker_failed",
-          error,
+          logger.error("opencompany HubSpot window flush failed", {
+            event: "opencompany.goat_hubspot_flush_failed",
+            integration_id: window.integrationId,
+            object_type: window.objectType,
+            object_id: window.objectId,
+            error,
+          });
+          return null;
         });
+        if (flushed) {
+          logger.info("opencompany HubSpot window flushed", {
+            event: "opencompany.goat_hubspot_window_flushed",
+            integration_id: window.integrationId,
+            object_type: window.objectType,
+            object_id: window.objectId,
+            source_item_id: flushed.sourceItemId,
+            event_count: flushed.eventCount,
+            enqueued: flushed.enqueued,
+            skipped: flushed.skipped,
+          });
+        }
       }
-      if (stopped) break;
-      await sleep();
-    }
-  })();
-
-  return {
-    notify: () => wake?.(),
-    stop: async () => {
-      stopped = true;
-      wake?.();
-      await loop;
     },
-  };
+    onError: (error) => {
+      captureException(error, { event: "opencompany.goat_hubspot_flush_worker_failed" });
+      logger.error("opencompany HubSpot flush worker failed", {
+        event: "opencompany.goat_hubspot_flush_worker_failed",
+        error,
+      });
+    },
+  });
 }
 
 async function previewBufferedHubspotEvents(window: HubspotDueWindow) {

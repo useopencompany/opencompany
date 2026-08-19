@@ -23,6 +23,7 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
+import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-github-flush" });
@@ -235,78 +236,51 @@ export function buildGitHubPullRequestWindowItem(input: {
 
 export function startGitHubFlushWorker(options: { pollIntervalMs?: number } = {}) {
   const pollIntervalMs = Math.max(1_000, options.pollIntervalMs ?? GITHUB_FLUSH_POLL_INTERVAL_MS);
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let wake: (() => void) | null = null;
-
-  const sleep = () =>
-    new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        wake = null;
-        resolve();
-      }, pollIntervalMs);
-      timer.unref?.();
-      wake = () => {
-        if (timer) clearTimeout(timer);
-        wake = null;
-        resolve();
-      };
-    });
-
-  const loop = (async () => {
-    while (!stopped) {
-      try {
-        const due = await listDueGitHubPullRequestWindows({});
-        for (const window of due) {
-          if (stopped) break;
-          const flushed = await flushGitHubPullRequestWindow(window).catch((error) => {
-            captureException(error, {
-              event: "opencompany.goat_github_flush_failed",
-              integration_id: window.integrationId,
-              repository_id: window.repositoryId,
-              pull_request_number: window.pullRequestNumber,
-            });
-            logger.error("opencompany GitHub pull-request window flush failed", {
-              event: "opencompany.goat_github_flush_failed",
-              integration_id: window.integrationId,
-              repository_id: window.repositoryId,
-              pull_request_number: window.pullRequestNumber,
-              error,
-            });
-            return null;
+  return createPollingWorker({
+    pollIntervalMs,
+    poll: async ({ signal, stopping }) => {
+      signal.throwIfAborted();
+      const due = await listDueGitHubPullRequestWindows({});
+      for (const window of due) {
+        if (stopping()) break;
+        const flushed = await flushGitHubPullRequestWindow(window).catch((error) => {
+          if (signal.aborted) throw error;
+          captureException(error, {
+            event: "opencompany.goat_github_flush_failed",
+            integration_id: window.integrationId,
+            repository_id: window.repositoryId,
+            pull_request_number: window.pullRequestNumber,
           });
-          if (flushed) {
-            logger.info("opencompany GitHub pull-request window flushed", {
-              event: "opencompany.goat_github_window_flushed",
-              integration_id: window.integrationId,
-              repository_id: window.repositoryId,
-              pull_request_number: window.pullRequestNumber,
-              source_item_id: flushed.sourceItemId,
-              event_count: flushed.eventCount,
-              enqueued: flushed.enqueued,
-            });
-          }
-        }
-      } catch (error) {
-        captureException(error, { event: "opencompany.goat_github_flush_worker_failed" });
-        logger.error("opencompany GitHub flush worker failed", {
-          event: "opencompany.goat_github_flush_worker_failed",
-          error,
+          logger.error("opencompany GitHub pull-request window flush failed", {
+            event: "opencompany.goat_github_flush_failed",
+            integration_id: window.integrationId,
+            repository_id: window.repositoryId,
+            pull_request_number: window.pullRequestNumber,
+            error,
+          });
+          return null;
         });
+        if (flushed) {
+          logger.info("opencompany GitHub pull-request window flushed", {
+            event: "opencompany.goat_github_window_flushed",
+            integration_id: window.integrationId,
+            repository_id: window.repositoryId,
+            pull_request_number: window.pullRequestNumber,
+            source_item_id: flushed.sourceItemId,
+            event_count: flushed.eventCount,
+            enqueued: flushed.enqueued,
+          });
+        }
       }
-      if (stopped) break;
-      await sleep();
-    }
-  })();
-
-  return {
-    notify: () => wake?.(),
-    stop: async () => {
-      stopped = true;
-      wake?.();
-      await loop;
     },
-  };
+    onError: (error) => {
+      captureException(error, { event: "opencompany.goat_github_flush_worker_failed" });
+      logger.error("opencompany GitHub flush worker failed", {
+        event: "opencompany.goat_github_flush_worker_failed",
+        error,
+      });
+    },
+  });
 }
 
 async function previewBufferedGitHubPullRequestEvents(window: GitHubDueWindow) {

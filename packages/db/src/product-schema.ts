@@ -4244,6 +4244,7 @@ export const runAttempts = productSchema.table(
     number: integer("number").notNull(),
     status: text("status").$type<RunAttemptStatus>().notNull(),
     workerId: text("worker_id").notNull(),
+    deployVersion: text("deploy_version"),
     leaseId: text("lease_id"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),

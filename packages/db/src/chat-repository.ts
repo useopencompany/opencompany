@@ -1678,6 +1678,14 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           AND lease_id = ${input.leaseId}
           AND lease_owner = ${input.worker.workerId}
       ),
+      previous_attempt AS MATERIALIZED (
+        SELECT attempt.deploy_version
+        FROM goat.run_attempts AS attempt
+        INNER JOIN fenced_run ON fenced_run.id = attempt.run_id
+        WHERE attempt.lease_id IS DISTINCT FROM ${input.leaseId}
+        ORDER BY attempt.number DESC
+        LIMIT 1
+      ),
       abandoned AS (
         UPDATE goat.run_attempts AS attempt
         SET status = 'abandoned',
@@ -1691,21 +1699,25 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
       ),
       inserted AS (
         INSERT INTO goat.run_attempts (
-          id, run_id, number, status, worker_id, lease_id, started_at, created_at
+          id, run_id, number, status, worker_id, deploy_version, lease_id, started_at, created_at
         )
         SELECT
           ${input.attemptId}, fenced_run.id, fenced_run.attempts, 'running',
-          ${input.worker.workerId}, ${input.leaseId}, ${startedAt}, ${startedAt}
+          ${input.worker.workerId}, ${input.worker.deployVersion ?? null}, ${input.leaseId},
+          ${startedAt}, ${startedAt}
         FROM fenced_run
         LEFT JOIN (SELECT COUNT(*) AS abandoned_count FROM abandoned) AS recovery ON TRUE
         ON CONFLICT DO NOTHING
         RETURNING *
       )
-      SELECT * FROM inserted
+      SELECT inserted.*, previous_attempt.deploy_version AS previous_deploy_version
+      FROM inserted
+      LEFT JOIN previous_attempt ON true
       UNION ALL
-      SELECT attempt.*
+      SELECT attempt.*, previous_attempt.deploy_version AS previous_deploy_version
       FROM goat.run_attempts AS attempt
       JOIN fenced_run ON fenced_run.id = attempt.run_id
+      LEFT JOIN previous_attempt ON true
       WHERE attempt.lease_id = ${input.leaseId}
         AND NOT EXISTS (SELECT 1 FROM inserted)
       LIMIT 1
@@ -2019,6 +2031,10 @@ type RunAttemptRow = {
   status: RunAttempt["status"];
   worker_id?: string;
   workerId?: string;
+  deploy_version?: string | null;
+  deployVersion?: string | null;
+  previous_deploy_version?: string | null;
+  previousDeployVersion?: string | null;
   started_at?: Date | string;
   startedAt?: Date | string;
   completed_at?: Date | string | null;
@@ -2292,6 +2308,8 @@ function mapRunAttempt(row: RunAttemptRow): RunAttempt {
     number: row.number,
     status: row.status,
     workerId: row.workerId ?? row.worker_id ?? "",
+    deployVersion: row.deployVersion ?? row.deploy_version ?? null,
+    previousDeployVersion: row.previousDeployVersion ?? row.previous_deploy_version ?? null,
     startedAt: asDate(row.startedAt ?? row.started_at ?? new Date(0)),
     completedAt:
       (row.completedAt ?? row.completed_at)

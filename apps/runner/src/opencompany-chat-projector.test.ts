@@ -20,6 +20,7 @@ const startAttempt = vi.fn(
     number: 1,
     status: "running",
     workerId: "runner_1",
+    deployVersion: null,
     startedAt: new Date("2026-07-30T10:00:00.000Z"),
     completedAt: null,
     errorCode: null,

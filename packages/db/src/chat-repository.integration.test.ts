@@ -29,6 +29,7 @@ const migrationPaths = [
   "0214_goat_chat_attachment_texts_invariant.sql",
   "0215_goat_chat_sidebar_state.sql",
   "0216_goat_conversation_runtime_summary.sql",
+  "0217_goat_run_attempt_deploy_version.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -1002,7 +1003,7 @@ describe("Postgres Chat repositories", () => {
       () => new Date("2026-08-10T20:02:00.000Z"),
     );
     await execution.startAttempt({
-      worker: { workerId: "worker_old" },
+      worker: { workerId: "worker_old", deployVersion: "deploy_old" },
       runId: created.runId,
       attemptId: "attempt_old",
       leaseId: "lease_old",
@@ -1016,16 +1017,35 @@ describe("Postgres Chat repositories", () => {
 
     await expect(
       execution.startAttempt({
-        worker: { workerId: "worker_new" },
+        worker: { workerId: "worker_new", deployVersion: "deploy_new" },
         runId: created.runId,
         attemptId: "attempt_new",
         leaseId: "lease_new",
       }),
-    ).resolves.toMatchObject({ id: "attempt_new", number: 2, status: "running" });
+    ).resolves.toMatchObject({
+      id: "attempt_new",
+      number: 2,
+      status: "running",
+      deployVersion: "deploy_new",
+      previousDeployVersion: "deploy_old",
+    });
+    await expect(
+      execution.startAttempt({
+        worker: { workerId: "worker_new", deployVersion: "deploy_new" },
+        runId: created.runId,
+        attemptId: "attempt_new",
+        leaseId: "lease_new",
+      }),
+    ).resolves.toMatchObject({ previousDeployVersion: "deploy_old" });
     expect(
       (
-        await database.query<{ id: string; status: string; error_code: string | null }>(
-          `SELECT id, status, error_code
+        await database.query<{
+          id: string;
+          status: string;
+          error_code: string | null;
+          deploy_version: string | null;
+        }>(
+          `SELECT id, status, error_code, deploy_version
            FROM goat.run_attempts
            WHERE run_id = $1
            ORDER BY number`,
@@ -1033,8 +1053,18 @@ describe("Postgres Chat repositories", () => {
         )
       ).rows,
     ).toEqual([
-      { id: "attempt_old", status: "abandoned", error_code: "lease_reclaimed" },
-      { id: "attempt_new", status: "running", error_code: null },
+      {
+        id: "attempt_old",
+        status: "abandoned",
+        error_code: "lease_reclaimed",
+        deploy_version: "deploy_old",
+      },
+      {
+        id: "attempt_new",
+        status: "running",
+        error_code: null,
+        deploy_version: "deploy_new",
+      },
     ]);
   });
 

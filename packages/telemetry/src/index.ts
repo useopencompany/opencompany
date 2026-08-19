@@ -52,6 +52,8 @@ export const METRICS = {
   capabilityApprovalsTotal: "goat.capability.approvals_total",
   capabilityWalletBalanceUsdMicros: "goat.capability.wallet_balance_usd_micros",
   codexChatQueueWaitMs: "goat.codex_chat.queue_wait_ms",
+  runnerShutdownActiveWorkTotal: "goat.runner.shutdown.active_work_total",
+  runnerShutdownInterruptedWorkTotal: "goat.runner.shutdown.interrupted_work_total",
   taskDispatchesTotal: "goat.task_dispatches_total",
   taskDispatchDurationMs: "goat.task_dispatch_duration_ms",
   taskRunsTotal: "goat.task_runs_total",

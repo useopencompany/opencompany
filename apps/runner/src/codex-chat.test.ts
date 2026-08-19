@@ -103,6 +103,16 @@ vi.mock("./codex-chat-events", () => ({
 }));
 
 vi.mock("./sandbox", () => ({
+  managedSandboxMetadata: (input: {
+    ownerKind: string;
+    ownerId: string;
+    metadata?: Record<string, string>;
+  }) => ({
+    ...input.metadata,
+    opencompany_managed: "true",
+    opencompany_owner_kind: input.ownerKind,
+    opencompany_owner_id: input.ownerId,
+  }),
   armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,

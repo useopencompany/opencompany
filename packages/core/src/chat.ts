@@ -126,6 +126,9 @@ export type RunAttempt = {
   number: number;
   status: RunAttemptStatus;
   workerId: string;
+  deployVersion: string | null;
+  // Populated by startAttempt so recovery can classify the lease predecessor.
+  previousDeployVersion?: string | null;
   startedAt: Date;
   completedAt: Date | null;
   errorCode: string | null;
@@ -209,6 +212,7 @@ export type RunEventPage = {
 
 export type WorkerIdentity = {
   workerId: string;
+  deployVersion?: string;
 };
 
 export type RunEventDraft = {
