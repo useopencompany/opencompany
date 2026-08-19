@@ -11,6 +11,7 @@ const conversation = {
   title: "Launch plan",
   engine: "opencompany",
   model: "anthropic/claude-sonnet-5",
+  runtime: null,
   activityState: "idle",
   hasUnseen: true,
   createdAt: "2026-08-13T09:00:00.000Z",
@@ -53,10 +54,20 @@ describe("canonical Chat server reads", () => {
     expect((upstream as unknown as Request).headers.get("cookie")).toBe("wos-session=session");
   });
 
-  it("loads Conversation metadata while Electric owns transcript hydration", async () => {
+  it("loads authoritative Conversation runtime while Electric owns transcript hydration", async () => {
+    const activeConversation = {
+      ...conversation,
+      runtime: {
+        status: "running" as const,
+        activeRunId: "run_1",
+        hasError: false,
+        updatedAt: "2026-08-13T09:59:00.000Z",
+      },
+      activityState: "working" as const,
+    };
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => Response.json({ data: conversation, meta })),
+      vi.fn(async () => Response.json({ data: activeConversation, meta })),
     );
 
     await expect(loadCurrentChatSessionById(" goat_chat_1 ")).resolves.toEqual({
@@ -65,8 +76,8 @@ describe("canonical Chat server reads", () => {
       engine: conversation.engine,
       model: conversation.model,
       codexComposerSettings: null,
-      codexRuntime: null,
-      activityState: conversation.activityState,
+      runtime: activeConversation.runtime,
+      activityState: activeConversation.activityState,
       hasUnseen: conversation.hasUnseen,
       updatedAt: conversation.updatedAt,
       messages: [],

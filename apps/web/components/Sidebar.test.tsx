@@ -43,10 +43,10 @@ const recentChatsMock = vi.hoisted(() => ({
     model: string;
     engine: string;
     codexComposerSettings: null;
-    codexRuntime?: {
+    runtime?: {
       status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
-      activeTurnId?: string | null;
-      error: string | null;
+      activeRunId: string | null;
+      hasError: boolean;
       updatedAt: string;
     } | null;
     activityState?: "working" | "idle";
@@ -593,10 +593,10 @@ describe("Sidebar", () => {
         model: "claude-sonnet-5",
         engine: "opencompany",
         codexComposerSettings: null,
-        codexRuntime: {
+        runtime: {
           status: "idle",
-          activeTurnId: "goat_codex_chat_turn_1",
-          error: null,
+          activeRunId: "goat_codex_chat_turn_1",
+          hasError: false,
           updatedAt: "2026-07-14T09:00:30.000Z",
         },
         activityState: "working",
@@ -649,10 +649,10 @@ describe("Sidebar", () => {
         model: "claude-sonnet-5",
         engine: "opencompany",
         codexComposerSettings: null,
-        codexRuntime: {
+        runtime: {
           status: "running",
-          activeTurnId: "goat_codex_chat_turn_1",
-          error: null,
+          activeRunId: "goat_codex_chat_turn_1",
+          hasError: false,
           updatedAt: "2026-07-14T09:01:00.000Z",
         },
         activityState: "working",
@@ -689,10 +689,10 @@ describe("Sidebar", () => {
         model: "claude-sonnet-5",
         engine: "opencompany",
         codexComposerSettings: null,
-        codexRuntime: {
+        runtime: {
           status: "idle",
-          activeTurnId: "goat_codex_chat_turn_1",
-          error: null,
+          activeRunId: "goat_codex_chat_turn_1",
+          hasError: false,
           updatedAt: "2026-07-14T09:00:30.000Z",
         },
         preview: "Ready",

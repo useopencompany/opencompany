@@ -10,11 +10,11 @@ import {
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { BrowserToolName } from "@opencompany/browser-tools";
+import type { ConversationRuntimeStatus } from "@opencompany/core";
 import type {
   ChatAttachmentKind,
   ChatEngine,
   ChatMessage,
-  CodexChatSessionStatus,
   HarnessEngine,
   TaskStatus,
 } from "@opencompany/db/product-schema";
@@ -620,17 +620,17 @@ export type ChatSessionView = {
   model: AgentModelId;
   engine?: ChatEngine;
   codexComposerSettings?: CodexComposerSettingsView | null;
-  codexRuntime?: CodexRuntimeView | null;
+  runtime?: ConversationRuntimeView | null;
   activityState?: "working" | "idle";
   hasUnseen?: boolean;
   updatedAt?: string;
   messages: ChatUiMessage[];
 };
 
-export type CodexRuntimeView = {
-  status: CodexChatSessionStatus;
-  activeTurnId?: string | null;
-  error: string | null;
+export type ConversationRuntimeView = {
+  status: ConversationRuntimeStatus;
+  activeRunId: string | null;
+  hasError: boolean;
   updatedAt: string;
 };
 
@@ -642,7 +642,7 @@ export type ChatSummaryView = {
   model: AgentModelId;
   engine?: ChatEngine;
   codexComposerSettings?: CodexComposerSettingsView | null;
-  codexRuntime?: CodexRuntimeView | null;
+  runtime?: ConversationRuntimeView | null;
   activityState?: "working" | "idle";
   hasUnseen?: boolean;
   // Compatibility fallback for optimistic and rolling-deploy snapshots. Live API rows own
@@ -666,7 +666,7 @@ export function chatSummaryState(
 }
 
 export function isChatRuntimeActive(
-  runtime: { status?: string | null; activeTurnId?: string | null } | null | undefined,
+  runtime: { status?: string | null; activeRunId?: string | null } | null | undefined,
 ): boolean {
   if (
     runtime?.status === "queued" ||
@@ -675,7 +675,7 @@ export function isChatRuntimeActive(
   ) {
     return true;
   }
-  if (!runtime?.activeTurnId) return false;
+  if (!runtime?.activeRunId) return false;
   return (
     runtime.status !== "failed" && runtime.status !== "interrupted" && runtime.status !== "closed"
   );
