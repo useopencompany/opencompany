@@ -13,8 +13,12 @@ const mocks = vi.hoisted(() => {
     isLoading: true,
   };
   return {
+    liveQueryResult,
     getHeadlessChatConversations: vi.fn(() => ({})),
     getHeadlessEngineSessions: vi.fn(() => ({})),
+    preloadHeadlessChatMessages: vi.fn(async (conversationId: string) => {
+      void conversationId;
+    }),
     getHeadlessIntegrationAccounts: vi.fn(() => ({})),
     getHeadlessTaskSchedules: vi.fn(() => ({})),
     getHeadlessTasks: vi.fn(() => ({})),
@@ -30,6 +34,7 @@ vi.mock("@tanstack/react-db", () => ({
 vi.mock("@/lib/headless-chat-collections", () => ({
   getHeadlessChatConversations: mocks.getHeadlessChatConversations,
   getHeadlessEngineSessions: mocks.getHeadlessEngineSessions,
+  preloadHeadlessChatMessages: mocks.preloadHeadlessChatMessages,
 }));
 
 vi.mock("@/lib/headless-integration-collections", () => ({
@@ -55,8 +60,10 @@ describe("AppDataProvider", () => {
     mocks.getHeadlessTasks.mockClear();
     mocks.getHeadlessTaskSchedules.mockClear();
     mocks.getHeadlessIntegrationAccounts.mockClear();
+    mocks.preloadHeadlessChatMessages.mockClear();
     mocks.listLegacyTaskCompatibility.mockClear();
-    mocks.useLiveQuery.mockClear();
+    mocks.useLiveQuery.mockReset();
+    mocks.useLiveQuery.mockImplementation(() => mocks.liveQueryResult);
   });
 
   afterEach(() => {
@@ -83,6 +90,77 @@ describe("AppDataProvider", () => {
 
     expect(mocks.useLiveQuery).toHaveBeenCalled();
     expect(mocks.getHeadlessTaskSchedules).not.toHaveBeenCalled();
+  });
+
+  it("preloads only the first eight sidebar transcripts after live conversations are ready", async () => {
+    const now = Date.now();
+    const chatRows = Array.from({ length: 10 }, (_, index) => ({
+      id: `chat_preload_${index}`,
+      title: `Chat ${index}`,
+      model: "anthropic/claude-sonnet-5",
+      engine: "opencompany" as const,
+      archivedAt: null,
+      pinnedAt: null,
+      lastSeenAt: null,
+      createdAt: new Date(now - index * 1_000).toISOString(),
+      updatedAt: new Date(now - index * 1_000).toISOString(),
+    }));
+    const perCollection = [
+      { data: [], isLoading: true },
+      { data: [], isLoading: true },
+      { data: chatRows, isLoading: false },
+      { data: [], isLoading: false },
+      { data: [], isLoading: true },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(() => {
+      const result = perCollection[call % perCollection.length]!;
+      call += 1;
+      return result;
+    });
+
+    const data = initialData();
+    data.workspace = {
+      id: "workspace_preload",
+      name: "Preload",
+      role: "admin",
+    };
+    render(
+      <AppDataProvider initialData={data}>
+        <DataProbe />
+      </AppDataProvider>,
+    );
+
+    await waitFor(() => expect(mocks.preloadHeadlessChatMessages).toHaveBeenCalledTimes(8));
+    expect(mocks.preloadHeadlessChatMessages.mock.calls.map(([chatId]) => chatId)).toEqual(
+      chatRows.slice(0, 8).map((chat) => chat.id),
+    );
+  });
+
+  it("does not fan out transcript preloads from the server fallback", () => {
+    const data = initialData();
+    data.recentChats = [
+      {
+        id: "chat_server_fallback",
+        title: "Server fallback",
+        model: "anthropic/claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        codexRuntime: null,
+        preview: "Fallback",
+        updatedAt: new Date().toISOString(),
+        lastSeenAt: null,
+        pinnedAt: null,
+      },
+    ];
+
+    render(
+      <AppDataProvider initialData={data}>
+        <DataProbe />
+      </AppDataProvider>,
+    );
+
+    expect(mocks.preloadHeadlessChatMessages).not.toHaveBeenCalled();
   });
 
   it("resubscribes Task reads when the active workspace changes", async () => {

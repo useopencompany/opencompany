@@ -89,6 +89,10 @@ export function getHeadlessChatMessages(conversationId: string) {
   return collection;
 }
 
+export function preloadHeadlessChatMessages(conversationId: string) {
+  return getHeadlessChatMessages(conversationId).preload();
+}
+
 export function getHeadlessChatRuns(conversationId: string) {
   const cached = runsByConversation.get(conversationId);
   if (cached) return cached;
