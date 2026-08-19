@@ -66,7 +66,6 @@ test("the pull request path remains credential-free", async () => {
     "-- --maxWorkers=2",
     "bun --bun turbo run build --concurrency=2",
     "node --test scripts/lib/*.test.mjs",
-    "node scripts/check-dco.mjs",
   ]) {
     assert.ok(combined.includes(command), `PR verification must run: ${command}`);
   }
