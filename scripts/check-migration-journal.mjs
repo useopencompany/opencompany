@@ -8,11 +8,16 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const drizzleDirectory = path.join(repositoryRoot, "drizzle");
 const journalPath = path.join(drizzleDirectory, "meta", "_journal.json");
-// This historical data migration predates the guard and may have been applied
-// manually. Registering it now would make Drizzle re-run destructive cleanup.
-const legacyUnjournaledMigrations = new Set(["0102_goat_brain_folder_defaults"]);
+// Migration history is append-only, so the duplicate 0183 prefix cannot be
+// renamed safely. Keep the exact historical collision visible while rejecting
+// every new duplicate prefix.
+const historicalDuplicatePrefixes = new Map([
+  ["0183", new Set(["0183_goat_imessage_integration", "0183_goat_workflow_step_coding_settings"])],
+]);
 
-const migrationTags = (await readdir(drizzleDirectory))
+const sqlFileNames = (await readdir(drizzleDirectory)).filter((name) => name.endsWith(".sql"));
+const invalidMigrationFileNames = sqlFileNames.filter((name) => !/^\d+_.+\.sql$/.test(name));
+const migrationTags = sqlFileNames
   .filter((name) => /^\d+_.+\.sql$/.test(name))
   .map((name) => name.slice(0, -".sql".length))
   .sort();
@@ -20,6 +25,10 @@ const journal = JSON.parse(await readFile(journalPath, "utf8"));
 const entries = Array.isArray(journal.entries) ? journal.entries : [];
 const journalTags = entries.map((entry) => entry.tag);
 const errors = [];
+
+if (invalidMigrationFileNames.length > 0) {
+  errors.push(`Invalid SQL migration filenames: ${invalidMigrationFileNames.join(", ")}`);
+}
 
 const baseJournal = JSON.parse(
   execFileSync("git", ["show", "origin/main:drizzle/meta/_journal.json"], {
@@ -47,9 +56,7 @@ if (duplicateTags.length > 0) {
 
 const journalTagSet = new Set(journalTags);
 const migrationTagSet = new Set(migrationTags);
-const unjournaledMigrations = migrationTags.filter(
-  (tag) => !journalTagSet.has(tag) && !legacyUnjournaledMigrations.has(tag),
-);
+const unjournaledMigrations = migrationTags.filter((tag) => !journalTagSet.has(tag));
 if (unjournaledMigrations.length > 0) {
   errors.push(`SQL migrations missing from the journal: ${unjournaledMigrations.join(", ")}`);
 }
@@ -59,11 +66,33 @@ if (missingMigrationFiles.length > 0) {
   errors.push(`Journal entries missing SQL files: ${missingMigrationFiles.join(", ")}`);
 }
 
-const obsoleteLegacyExceptions = [...legacyUnjournaledMigrations].filter(
-  (tag) => !migrationTagSet.has(tag) || journalTagSet.has(tag),
-);
-if (obsoleteLegacyExceptions.length > 0) {
-  errors.push(`Obsolete legacy exceptions: ${obsoleteLegacyExceptions.join(", ")}`);
+const tagsByPrefix = new Map();
+for (const tag of migrationTags) {
+  const prefix = tag.slice(0, tag.indexOf("_"));
+  const tags = tagsByPrefix.get(prefix) ?? [];
+  tags.push(tag);
+  tagsByPrefix.set(prefix, tags);
+}
+for (const [prefix, tags] of tagsByPrefix) {
+  if (tags.length < 2) continue;
+  const historicalTags = historicalDuplicatePrefixes.get(prefix);
+  if (
+    !historicalTags ||
+    tags.length !== historicalTags.size ||
+    tags.some((tag) => !historicalTags.has(tag))
+  ) {
+    errors.push(`Duplicate migration prefix ${prefix}: ${tags.join(", ")}`);
+  }
+}
+
+for (const [prefix, historicalTags] of historicalDuplicatePrefixes) {
+  const currentTags = tagsByPrefix.get(prefix) ?? [];
+  if (
+    currentTags.length !== historicalTags.size ||
+    currentTags.some((tag) => !historicalTags.has(tag))
+  ) {
+    errors.push(`Obsolete historical duplicate-prefix exception: ${prefix}`);
+  }
 }
 
 for (let index = 0; index < entries.length; index += 1) {
@@ -84,6 +113,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log(
-  `Migration journal check passed (${journalTags.length} journaled migrations, ${legacyUnjournaledMigrations.size} historical exception).`,
-);
+console.log(`Migration journal check passed (${journalTags.length} journaled migrations).`);
