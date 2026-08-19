@@ -42,6 +42,37 @@ Compatibility tables must not be dropped as incidental cleanup. Retiring their s
 separate, explicitly destructive migration plan with production data verification and rollback
 analysis.
 
+## Queue retention and maintenance
+
+The one-shot `bun run db:queue:maintenance --execute` command prunes execution-plane history in
+small `FOR UPDATE SKIP LOCKED` batches. It is not started by the runner: schedule it only after the
+retention policy below has human approval. A session advisory lock keeps overlapping invocations
+from duplicating the work. The proposed policy is:
+
+- `run_events`, `codex_chat_events`, and canonical `task_events` are retained for 30 days after the
+  owning Run or Task reaches a terminal state.
+- Terminal `codex_chat_turns` are retained for 90 days and are deleted only after their event rows
+  have drained. Cascades remove execution attempts, approvals, and interactions; artifact source
+  references become null as defined by their foreign key.
+- `chat_messages`, `task_messages`, and the canonical read models are not pruned, so user-visible
+  transcripts and lightweight Run history remain available.
+- Sessionless pre-cutover Task events remain protected by ADR 0002 and are excluded until that
+  compatibility retention gate is approved independently.
+
+Migration `0218_goat_postgres_queue_hygiene.sql` adds retention indexes and tighter table-level
+autovacuum thresholds, especially for lease- and heartbeat-heavy `codex_chat_turns`. Each command
+invocation exports dead-tuple count and ratio gauges per queue table and warns when at least 1,000
+dead tuples exceed 20% of the estimated row population.
+
+## LISTEN/NOTIFY policy
+
+Existing LISTEN/NOTIFY paths are latency hints over durable polling. PostgreSQL releases before 19
+serialize NOTIFY-adjacent commits on a database-wide lock, so do not add channels or consumers
+without revisiting the architecture; new wakeups use the existing poll+wake pattern. The Brain
+worker listener samples `pg_notification_queue_usage()` once per minute, exports
+`goat.postgres.notify_queue_usage`, and logs a threshold warning at 25% usage. Polling remains the
+correctness path if notifications or the listener fail.
+
 ## Canonical execution projections
 
 Canonical Chat, Task, and automation repositories map the public `Conversation`, `Message`, `Run`,
