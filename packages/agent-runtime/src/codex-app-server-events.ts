@@ -1,38 +1,10 @@
 import { PUBLISH_ARTIFACT_TOOL_NAME, parsePublishedChatArtifact } from "./chat-artifacts";
+import type { HarnessEventType, HarnessNormalizedEvent } from "./harness-events";
 
-export type CodexAppServerEventType =
-  | "assistant.delta"
-  | "assistant.completed"
-  | "reasoning.completed"
-  | "command.started"
-  | "command.output"
-  | "command.completed"
-  | "command.failed"
-  | "file_change.started"
-  | "file_change.completed"
-  | "mcp_tool.started"
-  | "mcp_tool.completed"
-  | "subagent.started"
-  | "subagent.completed"
-  | "dynamic_tool.started"
-  | "dynamic_tool.completed"
-  | "web_search.started"
-  | "web_search.completed"
-  | "plan.updated"
-  | "goal.updated"
-  | "question.requested"
-  | "approval.requested"
-  | "turn.started"
-  | "turn.completed"
-  | "usage.updated"
-  | "error"
-  | "unknown";
-
-export type CodexAppServerNormalizedEvent = {
-  type: CodexAppServerEventType;
-  payload: Record<string, unknown>;
-  rawEvent: Record<string, unknown>;
-};
+// Compatibility names for the Codex adapter. The canonical boundary is harness-neutral;
+// existing consumers can migrate without a flag-day rename.
+export type CodexAppServerEventType = HarnessEventType;
+export type CodexAppServerNormalizedEvent = HarnessNormalizedEvent;
 
 export function normalizeCodexAppServerEvent(
   event: Record<string, unknown>,

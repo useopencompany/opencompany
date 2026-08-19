@@ -9,6 +9,7 @@ import {
   offerCodexPlanImplementation,
   parseCodexUiMessageParts,
   parsePublishedChatArtifact,
+  resolveCodexUiApproval,
   resolveCodexUiInteraction,
 } from "@opencompany/agent-runtime";
 import type { ProductAnalyticsEngine } from "@opencompany/analytics/product/events";
@@ -35,8 +36,8 @@ import { settleDurableTurn, type TaskTurnCompletion } from "./task-turn";
 
 const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1" as const;
 
-// Event types that are persisted to goat.codex_chat_events. Deltas are volume, not chunks:
-// they never land in the audit log or the message row.
+// Event types that are persisted to goat.codex_chat_events. High-volume deltas skip the audit
+// log, while assistant deltas still update the message row so an interrupt preserves partial text.
 const PERSISTED_EVENT_TYPES = new Set<CodexChatEventType>(
   CODEX_CHAT_EVENT_TYPES.filter((eventType) => eventType !== "unknown"),
 );
@@ -246,7 +247,15 @@ export function createCodexChatProjector(input: {
       outputAccumulator.push(event);
       return;
     }
-    if (event.type === "assistant.delta" || event.type === "unknown") return;
+    if (event.type === "unknown") return;
+
+    if (event.type === "assistant.delta") {
+      const projection = applyCodexEventToUiMessageParts(parts, event);
+      if (!projection.changed) return;
+      parts = projection.parts;
+      await writeAssistantMessage({ error: turnError });
+      return;
+    }
 
     const isNewEvent = await insertEventRow(event);
 
@@ -287,6 +296,18 @@ export function createCodexChatProjector(input: {
           AND interaction.status = 'pending'
           AND EXISTS (${turnLeaseSubquery({ runningOnly: true })})
         RETURNING interaction.id
+      ), canceled_approvals AS (
+        UPDATE goat.run_approvals AS approval
+        SET status = 'canceled',
+            resolution = 'canceled',
+            response = jsonb_build_object('resolution', 'canceled'),
+            resolved_at = ${now},
+            updated_at = ${now}
+        WHERE approval.run_id = ${target.turnId}
+          AND approval.kind = 'acp_permission'
+          AND approval.status = 'pending'
+          AND EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+        RETURNING approval.id
       ), resolved AS (
         SELECT interaction.id, interaction.response
         FROM goat.codex_chat_interactions AS interaction
@@ -306,6 +327,9 @@ export function createCodexChatProjector(input: {
       SELECT canceled.id, 'canceled'::text AS status
       FROM canceled
       UNION ALL
+      SELECT approval.id, 'approval-canceled'::text AS status
+      FROM canceled_approvals AS approval
+      UNION ALL
       SELECT interaction.id,
              CASE
                WHEN interaction.response -> 'answers' = '{}'::jsonb THEN 'auto-resolved'
@@ -316,8 +340,18 @@ export function createCodexChatProjector(input: {
     let didChange = false;
     for (const row of rowsFromExecute<{
       id: string;
-      status: "auto-resolved" | "canceled" | "resolved";
+      status: "approval-canceled" | "auto-resolved" | "canceled" | "resolved";
     }>(result)) {
+      if (row.status === "approval-canceled") {
+        const projection = resolveCodexUiApproval(parts, {
+          approvalId: row.id,
+          status: "canceled",
+        });
+        if (!projection.changed) continue;
+        parts = projection.parts;
+        didChange = true;
+        continue;
+      }
       const projection = resolveCodexUiInteraction(parts, {
         interactionId: row.id,
         status:
@@ -501,6 +535,55 @@ export function createCodexChatProjector(input: {
       });
     },
 
+    requestApproval(request: CodexAppServerRequest) {
+      return serializeProjection(async () => {
+        if (request.method !== "session/request_permission") {
+          throw new Error(`Unsupported ACP client request: ${request.method}`);
+        }
+        const toolCall = isRecord(request.params.toolCall) ? request.params.toolCall : null;
+        const toolCallId =
+          toolCall && typeof toolCall.toolCallId === "string" ? toolCall.toolCallId : null;
+        const title = toolCall && typeof toolCall.title === "string" ? toolCall.title.trim() : "";
+        const options = Array.isArray(request.params.options) ? request.params.options : [];
+        if (!toolCallId || !title || options.length === 0) {
+          throw new Error("ACP sent an invalid permission request.");
+        }
+        const optionIds = options.flatMap((option) => {
+          const record = isRecord(option) ? option : null;
+          return typeof record?.optionId === "string" ? [record.optionId] : [];
+        });
+        if (optionIds.length === 0) throw new Error("ACP permission request has no valid options.");
+
+        const approvalId = `opencompany_acp_permission_${randomUUID()}`;
+        const rawEvent: Record<string, unknown> = { ...request, interactionId: approvalId };
+        const [event] = normalizeEvent(rawEvent);
+        if (!event || event.type !== "approval.requested") {
+          throw new Error("ACP sent an invalid permission request.");
+        }
+        const now = new Date();
+        assertRowsChanged(
+          await getDb().execute(sql`
+            INSERT INTO goat.run_approvals (
+              id, run_id, attempt_id, tool_call_id, kind, prompt, options,
+              status, created_at, updated_at
+            )
+            SELECT ${approvalId}, ${target.turnId}, ${target.canonicalAttemptId ?? null},
+                   ${toolCallId}, 'acp_permission', ${redact(title)},
+                   ${JSON.stringify(optionIds)}::jsonb, 'pending', ${now}, ${now}
+            WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+            RETURNING id
+          `),
+        );
+        await insertEventRow(event);
+        const projection = applyCodexEventToUiMessageParts(parts, event);
+        if (projection.changed) {
+          parts = projection.parts;
+          await writeAssistantMessage({ error: turnError });
+        }
+        return { approvalId };
+      });
+    },
+
     resolveInteraction(interactionId: string, status: "answered" | "auto-resolved" | "canceled") {
       return serializeProjection(async () => {
         const now = new Date();
@@ -522,6 +605,15 @@ export function createCodexChatProjector(input: {
             AND approval.status = 'pending'
         `);
         const projection = resolveCodexUiInteraction(parts, { interactionId, status });
+        if (!projection.changed) return;
+        parts = projection.parts;
+        await writeAssistantMessage({ error: turnError });
+      });
+    },
+
+    resolveApproval(approvalId: string, status: "approved" | "denied" | "canceled") {
+      return serializeProjection(async () => {
+        const projection = resolveCodexUiApproval(parts, { approvalId, status });
         if (!projection.changed) return;
         parts = projection.parts;
         await writeAssistantMessage({ error: turnError });

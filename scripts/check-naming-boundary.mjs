@@ -189,7 +189,12 @@ const baseEnvKeys = envKeys(
     encoding: "utf8",
   }),
 );
-const expectedEnvKeys = baseEnvKeys.map((key) => migratedEnvironmentName(key) ?? key).sort();
+const expectedEnvKeys = [
+  ...new Set([
+    ...baseEnvKeys.map((key) => migratedEnvironmentName(key) ?? key),
+    "RUNNER_CLAUDE_CODE_ACP_ENABLED",
+  ]),
+].sort();
 if (currentEnvKeys.join("\n") !== expectedEnvKeys.join("\n")) {
   failures.push(".env.example: environment keys do not match the accepted hard-cut mapping");
 }

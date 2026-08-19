@@ -1,3 +1,4 @@
+import { createAcpEventNormalizer } from "@opencompany/agent-runtime";
 import type { RunExecutionRepository } from "@opencompany/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CodexChatLeaseLostError } from "./codex-chat-errors";
@@ -321,6 +322,83 @@ describe("createCodexChatProjector", () => {
     expect(mocks.execute).toHaveBeenCalledTimes(6);
     expect(mocks.execute.mock.calls.map(([query]) => sqlText(query))).toContainEqual(
       expect.stringContaining("UPDATE goat.run_approvals AS approval"),
+    );
+  });
+
+  it("persists and resolves an ACP permission through run_approvals", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const normalizer = createAcpEventNormalizer();
+    normalizer.beginRun("claude_session_1");
+    const projector = createCodexChatProjector({
+      target: projectorTarget({ engine: "claude_code" }),
+      redact: (value) => value,
+      normalizeEvent: normalizer.normalize,
+    });
+
+    const approval = await projector.requestApproval({
+      id: 7,
+      method: "session/request_permission",
+      params: {
+        sessionId: "claude_session_1",
+        toolCall: {
+          toolCallId: "command_1",
+          title: "Run tests",
+          rawInput: { command: "bun test" },
+        },
+        options: [
+          { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+          { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+        ],
+      },
+    });
+
+    expect(approval.approvalId).toMatch(/^opencompany_acp_permission_/);
+    expect(mocks.execute.mock.calls.map(([query]) => sqlText(query))).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/INSERT INTO goat\.run_approvals[\s\S]*'acp_permission'/),
+        expect.stringContaining("INSERT INTO goat.codex_chat_events"),
+        expect.stringContaining("UPDATE goat.chat_messages AS message"),
+      ]),
+    );
+    expect(mocks.execute.mock.calls.flatMap(([query]) => queryValues(query))).toEqual(
+      expect.arrayContaining(["command_1", JSON.stringify(["allow_once", "reject_once"])]),
+    );
+
+    await projector.resolveApproval(approval.approvalId, "approved");
+    expect(mocks.execute.mock.calls.map(([query]) => sqlText(query))).toContainEqual(
+      expect.stringContaining("UPDATE goat.chat_messages AS message"),
+    );
+  });
+
+  it("writes ACP assistant deltas directly to the durable partial message", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const normalizer = createAcpEventNormalizer();
+    normalizer.beginRun("claude_session_1");
+    const projector = createCodexChatProjector({
+      target: projectorTarget({ engine: "claude_code" }),
+      redact: (value) => value,
+      normalizeEvent: normalizer.normalize,
+    });
+
+    await projector.push([
+      {
+        method: "session/update",
+        params: {
+          sessionId: "claude_session_1",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: "message_1",
+            content: { type: "text", text: "Persist this before interrupt." },
+          },
+        },
+      },
+    ]);
+
+    expect(mocks.execute).toHaveBeenCalledOnce();
+    const [query] = mocks.execute.mock.calls[0] ?? [];
+    expect(sqlText(query)).toContain("UPDATE goat.chat_messages AS message");
+    expect(queryValues(query)).toContainEqual(
+      expect.stringContaining("Persist this before interrupt."),
     );
   });
 
