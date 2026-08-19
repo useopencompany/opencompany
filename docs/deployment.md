@@ -33,8 +33,10 @@ web/API/runner configuration, and builds selected Vercel artifacts in runner-loc
 changing production. It then rechecks the current `main` SHA, runs production migrations once when
 needed, rechecks `main` again, and deploys the API and runner concurrently. Web waits for selected
 backend dependencies; marketing is independent. Every deployed surface is marked successful only
-after its own release-aware health check. A superseded run leaves unattempted surfaces inactive and
-cannot publish stale code.
+after its own release-aware health check. Before triggering Render, release automation also verifies
+that the live API and runner shutdown delays match `render.yaml` (60 seconds and 300 seconds,
+respectively), so a dashboard or service-config drift cannot silently shorten graceful draining. A
+superseded run leaves unattempted surfaces inactive and cannot publish stale code.
 
 Manual dispatch from `main` forces the requested surfaces through the same verification, preflight,
 deployment, and health checks. Do not bypass preflight or branch protection.
@@ -71,6 +73,12 @@ deploy where possible; another surface that already passed remains a valid succe
 Application rollback redeploys a known-good commit through the same protected release workflow.
 Database migrations remain forward-only. Accepted Runs keep their stable IDs and continue through
 the API/runner path; do not reintroduce a web execution path or move work to a retired queue.
+
+Render switches new traffic to a healthy replacement before signaling the old instance. The API
+then stops accepting requests, ends long-lived Run streams, drains in-flight HTTP work, and only
+afterward closes Redis and Postgres. The runner stops claiming new work and gives active Codex turns
+up to four minutes to settle. Remaining turns are cooperatively handed off through their durable
+leases, leaving the final minute of Render's shutdown window for cleanup and telemetry flushing.
 
 Canonical Chat is fix-forward. Existing Runs continue to settle through the API and runner while a
 corrective release is prepared. Production browser traffic connects directly to
