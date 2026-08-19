@@ -11,19 +11,13 @@ import type { BrainCitation } from "./assistant-items";
 export function AssistantTextBubble({
   text,
   citations = [],
-  error,
 }: {
   text: string;
   citations?: BrainCitation[];
-  error?: string | undefined;
 }) {
   return (
     <div className="flex justify-start">
-      <div
-        className={`max-w-[80%] text-[13px] leading-5 ${
-          error ? "rounded-2xl rounded-bl-md bg-danger-bg px-3 py-2 text-danger" : "text-ink"
-        }`}
-      >
+      <div className="max-w-[80%] text-[13px] leading-5 text-ink">
         <Markdown content={text} />
         {citations.length > 0 ? <BrainCitationChips citations={citations} /> : null}
       </div>

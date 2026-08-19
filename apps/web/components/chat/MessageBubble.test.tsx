@@ -134,7 +134,7 @@ describe("MessageBubble generated files", () => {
 });
 
 describe("MessageBubble assistant errors", () => {
-  it("renders the turn error even when the assistant produced no parts", () => {
+  it("renders a friendly standalone notice when the assistant produced no parts", () => {
     const message: ChatUiMessage = {
       id: "assistant_1",
       role: "assistant",
@@ -147,10 +147,14 @@ describe("MessageBubble assistant errors", () => {
 
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
-    expect(screen.getByText(/Codex sandbox could not be started/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Response stopped");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The response stopped unexpectedly. Please try again.",
+    );
+    expect(screen.queryByText(/Codex sandbox could not be started/)).not.toBeInTheDocument();
   });
 
-  it("renders the error after tool-only turns", () => {
+  it("renders a friendly notice after tool-only turns", () => {
     const message: ChatUiMessage = {
       id: "assistant_2",
       role: "assistant",
@@ -168,10 +172,13 @@ describe("MessageBubble assistant errors", () => {
 
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
-    expect(screen.getByText("Codex turn failed.")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The response stopped unexpectedly. Everything completed above is still available.",
+    );
+    expect(screen.queryByText("Codex turn failed.")).not.toBeInTheDocument();
   });
 
-  it("does not duplicate the error when a text bubble already carries it", () => {
+  it("preserves partial text styling and appends one friendly notice", () => {
     const message: ChatUiMessage = {
       id: "assistant_3",
       role: "assistant",
@@ -181,13 +188,40 @@ describe("MessageBubble assistant errors", () => {
 
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
-    expect(screen.getByText("Partial answer before the failure.")).toBeInTheDocument();
+    const partialAnswer = screen.getByText("Partial answer before the failure.");
+    expect(partialAnswer).toBeInTheDocument();
+    expect(partialAnswer.closest(".bg-danger-bg")).toBeNull();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The response stopped unexpectedly. Everything completed above is still available.",
+    );
     expect(screen.queryByText("boom")).not.toBeInTheDocument();
+  });
+
+  it("explains content inspection failures without exposing the provider error", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_4",
+      role: "assistant",
+      metadata: {
+        sessionId: "goat_chat_1",
+        error:
+          "<400> InternalError.Algo.DataInspectionFailed: Input text data may contain inappropriate content.",
+      },
+      parts: [{ type: "text", text: "Research completed before the failure." }],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByText("Research completed before the failure.")).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The selected model couldn’t process some content returned by a source. Everything completed above is still available. Try another model to continue.",
+    );
+    expect(screen.queryByText(/DataInspectionFailed/)).not.toBeInTheDocument();
   });
 
   it("renders source chips for text after successful brain reads", () => {
     const message: ChatUiMessage = {
-      id: "assistant_4",
+      id: "assistant_5",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
       parts: [
@@ -237,7 +271,7 @@ describe("MessageBubble assistant errors", () => {
 
   it("cites wiki pages without their underlying evidence", () => {
     const message: ChatUiMessage = {
-      id: "assistant_5",
+      id: "assistant_6",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
       parts: [
