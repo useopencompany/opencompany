@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-08-19
+
+### Changed
+- Switching between chats in the sidebar is now instant instead of waiting on each chat to load (#1290) — @opencompany-bot.
+
+### Fixed
+- Coding chats that hit a rare internal error no longer get stuck endlessly retrying, and reopening one mid-run now shows your messages right away instead of a blank "Connecting" screen (#1283) — @louis.
+- Background chats no longer show a false timeout error while they're actually still running and finish fine (#1286) — @louis.
+- Editing a workflow, task, or wiki page no longer flashes a false "not saved" warning when your change actually went through (#1291, #1296) — @louis.
+- Starting a new chat and clicking into it right away no longer bounces you back to Home (#1288) — @louis.
+- A finished chat reply no longer keeps showing a running timer as if it were still working (#1319) — @louis.
+- Chat unread indicators are more accurate and no longer disagree between the sidebar and the chat itself (#1292) — @louis.
+- A Claude Code session no longer briefly shows as a Codex session while it's connecting (#1312) — @opencompany-bot.
+- Asking opencompany to find someone's work email now tells you plainly when there isn't one, instead of showing a failed step and retrying (#1285) — @louis.
+- Fixed a billing bug that could cause valid Stripe payment webhooks to be rejected (#1282) — @louis.
+
 ## [1.15.0] - 2026-08-17
 
 ### Fixed
