@@ -43,12 +43,5 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     );
   }
 
-  return (
-    <WorkflowEditor
-      workflow={workflow}
-      workspaceId={context.workspace.id}
-      canEdit
-      skillCatalog={skillCatalog}
-    />
-  );
+  return <WorkflowEditor workflow={workflow} canEdit skillCatalog={skillCatalog} />;
 }

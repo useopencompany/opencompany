@@ -10,10 +10,7 @@ import {
   type UpdateTaskScheduleBody,
   type UpdateWorkflowBody,
 } from "@opencompany/protocol";
-import {
-  awaitHeadlessTaskScheduleTransaction,
-  awaitHeadlessWorkflowTransaction,
-} from "./headless-automation-collections";
+import { awaitHeadlessTaskScheduleTransaction } from "./headless-automation-collections";
 import { workflowDtoToCatalogItem } from "./headless-automation-types";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import { reconcileCommittedProjection } from "./headless-collection-reconciliation";
@@ -33,54 +30,44 @@ export async function listHeadlessWorkflowCatalog(options: ClientOptions = {}) {
   });
 }
 
+// Workflow CRUD callers use the committed API response or navigate to a server-rendered route.
+// Electric reconciles live lists independently; awaiting it here can stall an already-saved command.
 export async function createHeadlessWorkflow(
   command: CreateWorkflowBody,
-  options: ScopedClientOptions,
+  options: ClientOptions = {},
 ) {
   const response = await automationClient(options).v1.workflows.$post({
     header: { "idempotency-key": `web-workflow:${crypto.randomUUID()}` },
     json: command,
   });
   if (!response.ok) throw await automationResponseError(response, "Workflow creation failed");
-  const data = (await response.json()).data;
-  await reconcileCommittedProjection(
-    awaitHeadlessWorkflowTransaction(data.transactionId, collectionOptions(options)),
-  );
-  return data.workflow;
+  return (await response.json()).data.workflow;
 }
 
 export async function updateHeadlessWorkflow(
   workflowId: string,
   command: UpdateWorkflowBody,
-  options: ScopedClientOptions,
+  options: ClientOptions = {},
 ) {
   const response = await automationClient(options).v1.workflows[":workflowId"].$patch({
     param: { workflowId },
     json: command,
   });
   if (!response.ok) throw await automationResponseError(response, "Workflow update failed");
-  const data = (await response.json()).data;
-  await reconcileCommittedProjection(
-    awaitHeadlessWorkflowTransaction(data.transactionId, collectionOptions(options)),
-  );
-  return data.workflow;
+  return (await response.json()).data.workflow;
 }
 
 export async function archiveHeadlessWorkflow(
   workflowId: string,
   command: ArchiveVersionBody,
-  options: ScopedClientOptions,
+  options: ClientOptions = {},
 ) {
   const response = await automationClient(options).v1.workflows[":workflowId"].archive.$post({
     param: { workflowId },
     json: command,
   });
   if (!response.ok) throw await automationResponseError(response, "Workflow archive failed");
-  const data = (await response.json()).data;
-  await reconcileCommittedProjection(
-    awaitHeadlessWorkflowTransaction(data.transactionId, collectionOptions(options)),
-  );
-  return data;
+  return (await response.json()).data;
 }
 
 export async function invokeHeadlessWorkflow(

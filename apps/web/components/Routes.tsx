@@ -920,7 +920,7 @@ export function WorkflowsRoute({
           descriptionPlaceholder="What this workflow does"
           submitLabel="Create workflow"
           create={async (input) => {
-            const workflow = await createHeadlessWorkflow(input, { scopeKey: workspaceId });
+            const workflow = await createHeadlessWorkflow(input);
             return { ok: true, slug: workflow.slug };
           }}
           onClose={() => setCreating(false)}

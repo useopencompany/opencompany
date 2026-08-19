@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  awaitHeadlessTaskScheduleTransaction,
-  awaitHeadlessWorkflowTransaction,
-} from "./headless-automation-collections";
+import { awaitHeadlessTaskScheduleTransaction } from "./headless-automation-collections";
 import {
   archiveHeadlessTaskSchedule,
   createHeadlessTaskSchedule,
@@ -17,7 +14,6 @@ import { awaitHeadlessTaskTransaction } from "./headless-task-collections";
 
 vi.mock("./headless-automation-collections", () => ({
   awaitHeadlessTaskScheduleTransaction: vi.fn(async () => undefined),
-  awaitHeadlessWorkflowTransaction: vi.fn(async () => undefined),
 }));
 
 vi.mock("./headless-task-collections", () => ({
@@ -70,7 +66,7 @@ const task = {
 describe("headless automation commands", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("creates a Workflow through /v1 with an idempotency key and reconciles its projection", async () => {
+  it("creates a Workflow through /v1 and returns the committed response directly", async () => {
     let request: Request | null = null;
     const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       request = input instanceof Request ? input : new Request(input, init);
@@ -86,7 +82,6 @@ describe("headless automation commands", () => {
         {
           baseUrl: "https://app.example.test",
           fetch: fetchMock as typeof fetch,
-          scopeKey: "workspace_1",
         },
       ),
     ).resolves.toMatchObject({ id: "workflow_1", version: 1 });
@@ -99,12 +94,9 @@ describe("headless automation commands", () => {
       name: workflow.name,
       description: workflow.description,
     });
-    expect(awaitHeadlessWorkflowTransaction).toHaveBeenCalledWith("51", {
-      scopeKey: "workspace_1",
-    });
   });
 
-  it("sends optimistic Workflow versions and waits for its scoped projection", async () => {
+  it("returns a committed Workflow update without waiting for its live projection", async () => {
     let request: Request | null = null;
     const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       request = input instanceof Request ? input : new Request(input, init);
@@ -128,19 +120,17 @@ describe("headless automation commands", () => {
       },
     };
 
-    await updateHeadlessWorkflow("workflow_1", command, {
-      baseUrl: "https://app.example.test",
-      fetch: fetchMock as typeof fetch,
-      scopeKey: "workspace_1",
-    });
+    await expect(
+      updateHeadlessWorkflow("workflow_1", command, {
+        baseUrl: "https://app.example.test",
+        fetch: fetchMock as typeof fetch,
+      }),
+    ).resolves.toMatchObject({ id: "workflow_1", version: 2 });
 
     const sent = request as unknown as Request;
     expect(sent.method).toBe("PATCH");
     expect(new URL(sent.url).pathname).toBe("/v1/workflows/workflow_1");
     await expect(sent.json()).resolves.toEqual(command);
-    expect(awaitHeadlessWorkflowTransaction).toHaveBeenCalledWith("52", {
-      scopeKey: "workspace_1",
-    });
   });
 
   it("invokes a Workflow with skill and attachment ids, then reconciles the workspace Task", async () => {
@@ -304,10 +294,8 @@ describe("headless automation commands", () => {
         {
           baseUrl: "https://app.example.test",
           fetch: fetchMock as typeof fetch,
-          scopeKey: "workspace_1",
         },
       ),
     ).rejects.toThrow("The Workflow changed in another session. (request request_1)");
-    expect(awaitHeadlessWorkflowTransaction).not.toHaveBeenCalled();
   });
 });

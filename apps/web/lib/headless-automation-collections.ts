@@ -58,14 +58,6 @@ export function getHeadlessTaskSchedules(scopeKey: string) {
   return collection;
 }
 
-export async function awaitHeadlessWorkflowTransaction(
-  transactionIdValue: string,
-  options: { scopeKey: string; timeoutMs?: number },
-) {
-  const transactionId = transactionIdFromApi(transactionIdValue);
-  await getHeadlessWorkflows(options.scopeKey).utils.awaitTxId(transactionId, options.timeoutMs);
-}
-
 export async function awaitHeadlessTaskScheduleTransaction(
   transactionIdValue: string,
   options: { scopeKey: string; timeoutMs?: number },

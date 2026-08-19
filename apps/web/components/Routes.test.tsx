@@ -211,13 +211,10 @@ describe("WorkflowsRoute", () => {
     await user.click(screen.getByRole("button", { name: "Create workflow" }));
 
     await waitFor(() =>
-      expect(workflowActionsMock.createHeadlessWorkflow).toHaveBeenCalledWith(
-        {
-          name: "Test workflow",
-          description: "Run the test",
-        },
-        { scopeKey: "workspace_1" },
-      ),
+      expect(workflowActionsMock.createHeadlessWorkflow).toHaveBeenCalledWith({
+        name: "Test workflow",
+        description: "Run the test",
+      }),
     );
     expect(routerMock.push).toHaveBeenCalledWith("/workflows/test-workflow");
   });
