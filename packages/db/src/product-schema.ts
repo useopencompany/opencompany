@@ -538,6 +538,7 @@ export type TaskDebugTrace = {
 
 export type ChatRole = "user" | "assistant";
 export type ChatEngine = "opencompany" | "codex" | "claude_code";
+export type ChatActivityState = "working" | "idle";
 // Engines whose durable turns run through the legacy-named goat.codex_chat_* queue.
 export type CodexChatEngine = ChatEngine;
 
@@ -3436,6 +3437,7 @@ export const chatSessions = productSchema.table(
     closedAt: timestamp("closed_at", { withTimezone: true }),
     pinnedAt: timestamp("pinned_at", { withTimezone: true }),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    hasUnseen: boolean("has_unseen").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -4376,6 +4378,8 @@ export const conversationReadModelV1 = productSchema.table(
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     pinnedAt: timestamp("pinned_at", { withTimezone: true }),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    activityState: text("activity_state").$type<ChatActivityState>().notNull().default("idle"),
+    hasUnseen: boolean("has_unseen").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
@@ -4383,6 +4387,10 @@ export const conversationReadModelV1 = productSchema.table(
     actorWorkspaceUpdatedIdx: index(
       "goat_conversation_read_model_v1_actor_workspace_updated_idx",
     ).on(table.actorId, table.workspaceId, table.updatedAt),
+    activityStateCheck: check(
+      "goat_conversation_read_model_v1_activity_state_check",
+      sql`${table.activityState} IN ('working', 'idle')`,
+    ),
   }),
 );
 

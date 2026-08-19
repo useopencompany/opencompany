@@ -60,6 +60,8 @@ export type Conversation = {
   title: string;
   engine: ChatEngine;
   model: string;
+  activityState: "working" | "idle";
+  hasUnseen: boolean;
   createdAt: Date;
   updatedAt: Date;
 };

@@ -29,9 +29,9 @@ function shapeOptions(readModel: ChatReadModel) {
 function createConversations() {
   return createCollection(
     electricCollectionOptions({
-      id: "headless-chat:conversations:v1",
+      id: "headless-chat:conversations:v2",
       schema: ConversationReadModelSchema,
-      shapeOptions: shapeOptions("chat-conversations-v1"),
+      shapeOptions: shapeOptions("chat-conversations-v2"),
       getKey: (row) => row.id,
     }),
   );

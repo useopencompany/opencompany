@@ -8,6 +8,7 @@ import {
   BrainIngestJobReadModelSchema,
   BrainTimelineReadModelSchema,
   ConversationReadModelSchema,
+  ConversationReadModelV1Schema,
   EngineSessionReadModelSchema,
   IntegrationAccountReadModelSchema,
   MessageReadModelSchema,
@@ -179,6 +180,25 @@ function readModelShape(input: {
           "archived_at",
           "pinned_at",
           "last_seen_at",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
+        params: [input.actor.userId, input.actor.workspaceId],
+      };
+    case "chat-conversations-v2":
+      return {
+        table: "goat.conversation_read_model_v1",
+        columns: [
+          "id",
+          "title",
+          "engine",
+          "model",
+          "archived_at",
+          "pinned_at",
+          "last_seen_at",
+          "activity_state",
+          "has_unseen",
           "created_at",
           "updated_at",
         ],
@@ -558,6 +578,10 @@ function projectReadModelValue(
   }
   switch (readModel) {
     case "chat-conversations-v1":
+      return (
+        partial ? ConversationReadModelV1Schema.partial() : ConversationReadModelV1Schema
+      ).parse(projected);
+    case "chat-conversations-v2":
       return (partial ? ConversationReadModelSchema.partial() : ConversationReadModelSchema).parse(
         projected,
       );
@@ -871,6 +895,19 @@ const READ_MODEL_COLUMN_NAMES = {
     archived_at: "archivedAt",
     pinned_at: "pinnedAt",
     last_seen_at: "lastSeenAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "chat-conversations-v2": {
+    id: "id",
+    title: "title",
+    engine: "engine",
+    model: "model",
+    archived_at: "archivedAt",
+    pinned_at: "pinnedAt",
+    last_seen_at: "lastSeenAt",
+    activity_state: "activityState",
+    has_unseen: "hasUnseen",
     created_at: "createdAt",
     updated_at: "updatedAt",
   },

@@ -818,12 +818,16 @@ export async function settleDurableTurn(input: {
         AND runtime.user_workos_id = ${target.userWorkosId}
         AND (runtime.active_turn_id IS NULL OR runtime.active_turn_id = ${target.turnId})
         AND EXISTS (SELECT 1 FROM settled_turn)
-      RETURNING runtime.id, runtime.chat_session_id
+      RETURNING runtime.id, runtime.chat_session_id, runtime.status
     ),
     updated_task_chat AS (
       UPDATE goat.chat_sessions AS chat
       SET engine = COALESCE(${next?.engine ?? null}, chat.engine),
           model = COALESCE(${next?.chatModel ?? null}, chat.model),
+          has_unseen = CASE
+            WHEN runtime.status = 'queued' THEN chat.has_unseen
+            ELSE true
+          END,
           updated_at = ${input.completedAt}
       FROM updated_runtime AS runtime
       WHERE chat.id = runtime.chat_session_id
@@ -877,7 +881,7 @@ export async function settleDurableTurn(input: {
     ),
     touched_origin_chat AS (
       UPDATE goat.chat_sessions AS chat
-      SET updated_at = ${input.completedAt}
+      SET has_unseen = true, updated_at = ${input.completedAt}
       FROM inserted_notification AS notification
       WHERE chat.id = notification.session_id
       RETURNING chat.id

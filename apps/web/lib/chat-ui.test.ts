@@ -4,7 +4,6 @@ import {
   CODEX_COMMAND_TOOL_PART_TYPE,
   chatSummaryState,
   compareChatMessageOrder,
-  deriveChatState,
   LIST_ACTIONS_TOOL_PART_TYPE,
   LIST_SKILLS_TOOL_PART_TYPE,
   listedActionSourceIdsFromMessages,
@@ -19,45 +18,30 @@ import {
 import { DEFAULT_MODEL } from "@/lib/model-options";
 
 describe("chatSummaryState", () => {
-  it("shows active agent runtime as working before unread", () => {
+  it("shows API-owned activity as working before unseen state", () => {
     expect(
       chatSummaryState({
-        codexRuntime: {
-          status: "running",
-          error: null,
-          updatedAt: "2026-08-02T20:59:00.000Z",
-        },
-        lastSeenAt: "2026-08-02T20:55:00.000Z",
-        state: "done_unseen",
-        updatedAt: "2026-08-02T21:00:00.000Z",
+        activityState: "working",
+        hasUnseen: true,
       }),
     ).toBe("working");
   });
 
-  it("marks completed newer agent work as unseen after runtime stops", () => {
+  it("shows an API-owned unseen flag after activity becomes idle", () => {
     expect(
-      deriveChatState({
-        codexRuntime: { status: "idle" },
-        lastSeenAt: "2026-08-02T20:55:00.000Z",
-        updatedAt: "2026-08-02T21:00:00.000Z",
+      chatSummaryState({
+        activityState: "idle",
+        hasUnseen: true,
       }),
     ).toBe("done_unseen");
   });
 
-  it("shows a runtime with an active turn as working even if status lags", () => {
+  it("uses an explicit local state only when the API projection is unavailable", () => {
     expect(
       chatSummaryState({
-        codexRuntime: {
-          status: "idle",
-          activeTurnId: "goat_codex_chat_turn_1",
-          error: null,
-          updatedAt: "2026-08-02T20:59:00.000Z",
-        },
-        lastSeenAt: "2026-08-02T20:55:00.000Z",
         state: "done_unseen",
-        updatedAt: "2026-08-02T21:00:00.000Z",
       }),
-    ).toBe("working");
+    ).toBe("done_unseen");
   });
 });
 
