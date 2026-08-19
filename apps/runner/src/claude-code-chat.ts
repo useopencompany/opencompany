@@ -3,6 +3,7 @@ import {
   CLOUD_CODING_ENGINE_CONFIG,
   type ClaudeCodeTurnSummary,
   claudeCodeModelSupportsReasoningEffort,
+  createAcpEventNormalizer,
   createClaudeActionGatewayTicket,
   createClaudeCodeEventNormalizer,
   isActionHostToolContractVersion,
@@ -16,13 +17,26 @@ import {
   markClaudeCodeCredentialValidated,
 } from "@opencompany/db/claude-code-auth";
 import { getWorkflowHarnessSkillSnapshots } from "@opencompany/db/harness";
-import type { CodexChatSession, CodexChatTurn } from "@opencompany/db/product-schema";
-import { captureException, createLogger } from "@opencompany/observability";
-import { sql } from "drizzle-orm";
 import {
+  type CodexChatSession,
+  type CodexChatTurn,
+  codexChatTurns,
+  runApprovals,
+} from "@opencompany/db/product-schema";
+import { captureException, createLogger } from "@opencompany/observability";
+import { and, eq, sql } from "drizzle-orm";
+import {
+  AcpHarness,
+  type AcpMcpServer,
+  type AcpPermissionRequest,
+  type AcpPermissionResponse,
+} from "./acp-harness";
+import {
+  buildClaudeAcpCommandEnv,
   buildClaudeCommandEnv,
   buildClaudeTurnCommand,
   type ClaudeCodeCliAuth,
+  ensureClaudeAcpAdapterInstalled,
   ensureClaudeInstalled,
   killLeftoverClaudeTurnProcesses,
   runClaudeCodeCliProcess,
@@ -97,6 +111,7 @@ const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
 const CLAUDE_TASK_ABORT_POLL_INTERVAL_MS = 500;
+const CLAUDE_ACP_PERMISSION_POLL_INTERVAL_MS = 500;
 
 // Claude Code recovery re-runs `claude --resume` against the persisted sandbox. Fence off any CLI
 // process left over from the prior attempt before touching the checkout so recovery runs are
@@ -360,12 +375,14 @@ export async function runClaudeCodeChatTurn(input: {
     ...repositoryBootstrap.secretValues,
     ...infisicalAuth.redactionValues,
   ]);
-  const normalizer = createClaudeCodeEventNormalizer();
+  const useAcp = env.claudeCodeAcpEnabled;
+  const legacyNormalizer = createClaudeCodeEventNormalizer();
+  const acpNormalizer = createAcpEventNormalizer();
   const projector = createCodexChatProjector({
     target: projectorTarget,
     redact,
     initialParts,
-    normalizeEvent: normalizer.normalize,
+    normalizeEvent: useAcp ? acpNormalizer.normalize : legacyNormalizer.normalize,
   });
 
   const checkAbort = createTurnAbortCheck({
@@ -399,6 +416,9 @@ export async function runClaudeCodeChatTurn(input: {
         maxRecoveryAttempts: CLAUDE_CHAT_MAX_RECOVERY_ATTEMPTS,
         exhaustedMessage: CLAUDE_CHAT_RECOVERY_EXHAUSTED_MESSAGE,
       });
+      // Permission requests are bound to the dead ACP connection. Cancel them before the
+      // recovered prompt starts so stale cards cannot answer a request no agent is awaiting.
+      await projector.cancelPendingInteractions();
     }
     const attachments = await loadCodexChatAttachments(turn);
     await checkAbort();
@@ -411,8 +431,12 @@ export async function runClaudeCodeChatTurn(input: {
     executionStage = "stage_repository_configs";
     await stageRepositoryBootstrap({ sandbox, bootstrap: repositoryBootstrap });
     await checkAbort();
-    executionStage = "ensure_claude";
-    await ensureClaudeInstalled(sandbox);
+    executionStage = useAcp ? "ensure_claude_acp" : "ensure_claude";
+    if (useAcp) {
+      await ensureClaudeAcpAdapterInstalled(sandbox);
+    } else {
+      await ensureClaudeInstalled(sandbox);
+    }
     await checkAbort();
     executionStage = "load_skills";
     const sessionSkills = await loadCodexChatSessionSkills(turn);
@@ -505,18 +529,26 @@ export async function runClaudeCodeChatTurn(input: {
     await checkAbort();
 
     executionStage = "write_mcp_config";
-    const mcpConfigPath = actionGatewayTicket
-      ? await writeClaudeActionsMcpConfig({
-          sandbox,
-          turnId: turn.id,
-          runnerPublicUrl: env.runnerPublicUrl,
-          ticket: actionGatewayTicket,
-        })
-      : null;
+    const mcpConfigPath =
+      actionGatewayTicket && !useAcp
+        ? await writeClaudeActionsMcpConfig({
+            sandbox,
+            turnId: turn.id,
+            runnerPublicUrl: env.runnerPublicUrl,
+            ticket: actionGatewayTicket,
+          })
+        : null;
+    const acpMcpServers =
+      actionGatewayTicket && useAcp
+        ? buildClaudeActionsAcpMcpServers({
+            runnerPublicUrl: env.runnerPublicUrl,
+            ticket: actionGatewayTicket,
+          })
+        : [];
     await checkAbort();
     let sessionIdPersisted = false;
     const persistEngineSessionId = async () => {
-      const engineSessionId = normalizer.sessionId();
+      const engineSessionId = useAcp ? acpNormalizer.sessionId() : legacyNormalizer.sessionId();
       if (sessionIdPersisted || !engineSessionId || engineSessionId === session.codexThreadId) {
         return;
       }
@@ -529,36 +561,39 @@ export async function runClaudeCodeChatTurn(input: {
       });
     };
 
+    const reasoningEffort =
+      claudeCodeModelSupportsReasoningEffort(session.model) &&
+      typeof turn.settings?.reasoningEffort === "string" &&
+      isCodexReasoningEffort(turn.settings.reasoningEffort)
+        ? turn.settings.reasoningEffort
+        : null;
+    const commandEnv = buildClaudeCommandEnv({
+      auth,
+      ...(github
+        ? {
+            githubEnv: buildGitHubCommandEnv({
+              githubAuthHeader: github.githubAuthHeader,
+              githubToken: github.githubToken,
+              toolCallId: turn.id,
+            }),
+          }
+        : {}),
+    });
+
     executionStage = "run_turn";
-    const runOnce = (resume: string | null) => {
-      normalizer.beginRun();
+    const runLegacyOnce = (resume: string | null) => {
+      legacyNormalizer.beginRun();
       return runClaudeCodeCliProcess({
         sandbox,
         command: buildClaudeTurnCommand({
           workdir: CLAUDE_CHAT_WORKDIR,
           promptPath,
           model: session.model || null,
-          reasoningEffort:
-            claudeCodeModelSupportsReasoningEffort(session.model) &&
-            typeof turn.settings?.reasoningEffort === "string" &&
-            isCodexReasoningEffort(turn.settings.reasoningEffort)
-              ? turn.settings.reasoningEffort
-              : null,
+          reasoningEffort,
           resumeSessionId: resume,
           mcpConfigPath,
         }),
-        envs: buildClaudeCommandEnv({
-          auth,
-          ...(github
-            ? {
-                githubEnv: buildGitHubCommandEnv({
-                  githubAuthHeader: github.githubAuthHeader,
-                  githubToken: github.githubToken,
-                  toolCallId: turn.id,
-                }),
-              }
-            : {}),
-        }),
+        envs: commandEnv,
         timeoutMs: env.codexTimeoutMs,
         redact,
         checkAbort,
@@ -580,69 +615,155 @@ export async function runClaudeCodeChatTurn(input: {
         },
       });
     };
-
-    let runResult = await runOnce(resumeSessionId);
-    let summary = normalizer.summary();
-    // A stored session id can be stale (sandbox files pruned, claude upgraded). Retry
-    // once without --resume rather than failing the whole turn.
-    if (resumeSessionId && isUnresumableSessionFailure(summary, runResult)) {
-      logger.warn("Claude Code session resume failed; retrying with a fresh session", {
-        event: "opencompany.goat_claude_chat_resume_failed",
-        turn_id: turn.id,
-        codex_chat_session_id: session.id,
+    const runAcpOnce = async (resume: string | null, prompt: string) => {
+      const harness = new AcpHarness();
+      return harness.runTurn({
+        sandbox,
+        workdir: CLAUDE_CHAT_WORKDIR,
+        envs: buildClaudeAcpCommandEnv({
+          auth,
+          ...(github
+            ? {
+                githubEnv: buildGitHubCommandEnv({
+                  githubAuthHeader: github.githubAuthHeader,
+                  githubToken: github.githubToken,
+                  toolCallId: turn.id,
+                }),
+              }
+            : {}),
+          model: session.model || null,
+        }),
+        task: prompt,
+        prepareFreshTask: prepareBootstrapTask,
+        mcpServers: acpMcpServers,
+        existingSessionId: resume,
+        model: session.model || null,
+        reasoningEffort,
+        permissionMode: taskContext ? "bypassPermissions" : "default",
+        timeoutMs: env.codexTimeoutMs,
+        redact,
+        checkAbort,
+        onEngineSessionId: async (sessionId) => {
+          acpNormalizer.beginRun(sessionId);
+          await persistEngineSessionId();
+        },
+        onExistingSessionInvalidated: async () => {
+          sessionIdPersisted = false;
+          await updateCodexChatSessionIfLeaseHeld({
+            turn,
+            leaseId,
+            leaseOwner,
+            setSql: sql`codex_thread_id = NULL, updated_at = ${new Date()}`,
+          });
+        },
+        onRuntimeEvents: async (events) => {
+          for (const event of events) {
+            const nextScheduledWakeup = extractAcpScheduleWakeup(event);
+            if (!nextScheduledWakeup) continue;
+            await persistCodexChatScheduledWakeup({
+              turnId: turn.id,
+              userWorkosId: turn.userWorkosId,
+              codexChatSessionId: turn.codexChatSessionId,
+              leaseId,
+              leaseOwner,
+              wakeup: nextScheduledWakeup,
+            });
+            scheduledWakeup = nextScheduledWakeup;
+          }
+          await projector.push(events);
+        },
+        onPermissionRequest: async (request) => {
+          if (taskContext) return acpPermissionResponse(request, "approved");
+          const { approvalId } = await projector.requestApproval(request);
+          const resolution = await waitForAcpPermission({
+            approvalId,
+            leaseId,
+            timeoutMs: env.codexTimeoutMs,
+            checkAbort,
+          });
+          await projector.resolveApproval(approvalId, resolution);
+          return acpPermissionResponse(request, resolution);
+        },
       });
-      await updateCodexChatSessionIfLeaseHeld({
-        turn,
-        leaseId,
-        leaseOwner,
-        setSql: sql`codex_thread_id = NULL, updated_at = ${new Date()}`,
-      });
-      await sandbox.files.write(promptPath, await prepareBootstrapTask());
-      runResult = await runOnce(null);
-      summary = normalizer.summary();
-    }
+    };
 
-    if (normalizer.needsBackgroundAgentContinuation() && claudeRunCompletedCleanly(runResult)) {
-      const continuationSessionId = normalizer.sessionId();
-      if (continuationSessionId) {
-        executionStage = "continue_after_background_agents";
-        await sandbox.files.write(promptPath, CLAUDE_CHAT_BACKGROUND_AGENT_CONTINUATION_PROMPT);
-        await checkAbort();
-        logger.info("Resuming Claude Code after background Agent completion", {
-          event: "opencompany.goat_claude_chat_background_agent_continuation",
+    let summary: ClaudeCodeTurnSummary | null;
+    let stderrTail = "";
+    let missingSummaryReason = "Claude Code ended without a result.";
+    if (useAcp) {
+      const acpResult = await runAcpOnce(resumeSessionId, task);
+      stderrTail = acpResult.stderrTail;
+      summary = acpNormalizer.summary();
+    } else {
+      let runResult = await runLegacyOnce(resumeSessionId);
+      summary = legacyNormalizer.summary();
+      // A stored session id can be stale (sandbox files pruned, claude upgraded). Retry
+      // once without --resume rather than failing the whole turn.
+      if (resumeSessionId && isUnresumableSessionFailure(summary, runResult)) {
+        logger.warn("Claude Code session resume failed; retrying with a fresh session", {
+          event: "opencompany.goat_claude_chat_resume_failed",
           turn_id: turn.id,
           codex_chat_session_id: session.id,
         });
-        runResult = await runOnce(continuationSessionId);
-        summary = normalizer.summary();
-      } else {
-        summary = backgroundAgentIncompleteSummary(normalizer.sessionId());
+        await updateCodexChatSessionIfLeaseHeld({
+          turn,
+          leaseId,
+          leaseOwner,
+          setSql: sql`codex_thread_id = NULL, updated_at = ${new Date()}`,
+        });
+        await sandbox.files.write(promptPath, await prepareBootstrapTask());
+        runResult = await runLegacyOnce(null);
+        summary = legacyNormalizer.summary();
       }
-    }
 
-    if (normalizer.needsBackgroundAgentContinuation()) {
-      summary = claudeRunCompletedCleanly(runResult)
-        ? backgroundAgentIncompleteSummary(normalizer.sessionId())
-        : null;
+      if (
+        legacyNormalizer.needsBackgroundAgentContinuation() &&
+        claudeRunCompletedCleanly(runResult)
+      ) {
+        const continuationSessionId = legacyNormalizer.sessionId();
+        if (continuationSessionId) {
+          executionStage = "continue_after_background_agents";
+          await sandbox.files.write(promptPath, CLAUDE_CHAT_BACKGROUND_AGENT_CONTINUATION_PROMPT);
+          await checkAbort();
+          logger.info("Resuming Claude Code after background Agent completion", {
+            event: "opencompany.goat_claude_chat_background_agent_continuation",
+            turn_id: turn.id,
+            codex_chat_session_id: session.id,
+          });
+          runResult = await runLegacyOnce(continuationSessionId);
+          summary = legacyNormalizer.summary();
+        } else {
+          summary = backgroundAgentIncompleteSummary(legacyNormalizer.sessionId());
+        }
+      }
+
+      if (legacyNormalizer.needsBackgroundAgentContinuation()) {
+        summary = claudeRunCompletedCleanly(runResult)
+          ? backgroundAgentIncompleteSummary(legacyNormalizer.sessionId())
+          : null;
+      }
+      stderrTail = runResult.stderrTail;
+      missingSummaryReason = runResult.timedOut
+        ? "Claude Code timed out before finishing the turn."
+        : `Claude Code exited (code ${runResult.exitCode ?? "unknown"}) without a result.`;
     }
 
     executionStage = "finalize";
     await persistEngineSessionId();
     if (!summary) {
-      const stderrTail = redact(runResult.stderrTail.trim());
-      const reason = runResult.timedOut
-        ? "Claude Code timed out before finishing the turn."
-        : `Claude Code exited (code ${runResult.exitCode ?? "unknown"}) without a result.`;
+      const redactedStderrTail = redact(stderrTail.trim());
       summary = {
         status: "failure",
         result: null,
-        error: stderrTail ? `${reason} ${lastLine(stderrTail)}` : reason,
+        error: redactedStderrTail
+          ? `${missingSummaryReason} ${lastLine(redactedStderrTail)}`
+          : missingSummaryReason,
         usage: null,
-        sessionId: normalizer.sessionId(),
+        sessionId: useAcp ? acpNormalizer.sessionId() : legacyNormalizer.sessionId(),
       };
     }
     if (summary.status === "failure") {
-      const failureText = `${summary.error ?? ""}\n${runResult.stderrTail}`;
+      const failureText = `${summary.error ?? ""}\n${stderrTail}`;
       if (isClaudeCodeAuthenticationFailure(failureText)) {
         await markClaudeCodeCredentialNeedsReauth({
           db: getDb(),
@@ -791,7 +912,15 @@ export async function runClaudeCodeChatTurn(input: {
         effectiveError,
       );
     } else {
-      const message = redact(errorMessage(effectiveError));
+      let message = redact(errorMessage(effectiveError));
+      if (useAcp && isClaudeCodeAuthenticationFailure(message)) {
+        await markClaudeCodeCredentialNeedsReauth({
+          db: getDb(),
+          userWorkosId: turn.userWorkosId,
+          statusReason: "Claude Code rejected the stored token. Reconnect in opencompany settings.",
+        });
+        message = CLAUDE_CODE_CHAT_REAUTH_MESSAGE;
+      }
       logger.warn("opencompany Claude Code chat turn execution failed", {
         event: "opencompany.goat_claude_chat_turn_execution_failed",
         turn_id: turn.id,
@@ -926,6 +1055,127 @@ export function extractClaudeScheduleWakeup(
   return wakeup;
 }
 
+export function extractAcpScheduleWakeup(
+  event: Record<string, unknown>,
+): CodexChatScheduledWakeup | null {
+  if (event.method !== "session/update") return null;
+  const params = recordFromUnknown(event.params);
+  const update = recordFromUnknown(params?.update);
+  if (update?.sessionUpdate !== "tool_call") return null;
+  const claudeMeta = recordFromUnknown(recordFromUnknown(update._meta)?.claudeCode);
+  const toolName =
+    typeof claudeMeta?.toolName === "string"
+      ? claudeMeta.toolName
+      : typeof update.name === "string"
+        ? update.name
+        : null;
+  if (toolName !== "ScheduleWakeup" && !toolName?.endsWith("__ScheduleWakeup")) return null;
+  return scheduleWakeupFromToolInput(recordFromUnknown(update.rawInput));
+}
+
+function scheduleWakeupFromToolInput(
+  toolInput: Record<string, unknown> | null,
+): CodexChatScheduledWakeup | null {
+  if (!toolInput) return null;
+  const rawDelay = toolInput.delaySeconds ?? toolInput.delay_seconds;
+  const reason = typeof toolInput.reason === "string" ? toolInput.reason.trim() : "";
+  if (typeof rawDelay !== "number" || !Number.isFinite(rawDelay) || rawDelay <= 0 || !reason) {
+    return null;
+  }
+  return {
+    delaySeconds: Math.min(
+      CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
+      Math.max(CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS, Math.round(rawDelay)),
+    ),
+    reason: reason.slice(0, 500),
+    prompt: typeof toolInput.prompt === "string" ? toolInput.prompt.trim().slice(0, 10_000) : "",
+  };
+}
+
+async function waitForAcpPermission(input: {
+  approvalId: string;
+  leaseId: string;
+  timeoutMs: number;
+  checkAbort: () => Promise<void>;
+}): Promise<"approved" | "denied" | "canceled"> {
+  const deadline = Date.now() + input.timeoutMs;
+  while (true) {
+    await input.checkAbort();
+    const [approval] = await getDb()
+      .select({ status: runApprovals.status, resolution: runApprovals.resolution })
+      .from(runApprovals)
+      .innerJoin(codexChatTurns, eq(codexChatTurns.id, runApprovals.runId))
+      .where(
+        and(
+          eq(runApprovals.id, input.approvalId),
+          eq(codexChatTurns.leaseId, input.leaseId),
+          eq(codexChatTurns.status, "running"),
+        ),
+      )
+      .limit(1);
+    if (!approval || approval.status === "canceled") return "canceled";
+    if (approval.status === "resolved") {
+      return approval.resolution === "approved"
+        ? "approved"
+        : approval.resolution === "denied"
+          ? "denied"
+          : "canceled";
+    }
+    if (Date.now() >= deadline) {
+      const now = new Date();
+      const [canceled] = await getDb()
+        .update(runApprovals)
+        .set({
+          status: "canceled",
+          resolution: "canceled",
+          response: { resolution: "canceled" },
+          resolvedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(runApprovals.id, input.approvalId),
+            eq(runApprovals.status, "pending"),
+            sql`EXISTS (
+              SELECT 1
+              FROM ${codexChatTurns} AS turn
+              WHERE turn.id = ${runApprovals.runId}
+                AND turn.status = 'running'
+                AND turn.lease_id = ${input.leaseId}
+            )`,
+          ),
+        )
+        .returning({ id: runApprovals.id });
+      if (canceled) return "canceled";
+      continue;
+    }
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        Math.min(CLAUDE_ACP_PERMISSION_POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())),
+      ),
+    );
+  }
+}
+
+function acpPermissionResponse(
+  request: AcpPermissionRequest,
+  resolution: "approved" | "denied" | "canceled",
+): AcpPermissionResponse {
+  if (resolution === "canceled") return { outcome: { outcome: "cancelled" } };
+  const preferredKinds =
+    resolution === "approved" ? ["allow_once", "allow_always"] : ["reject_once", "reject_always"];
+  const options = Array.isArray(request.params.options) ? request.params.options : [];
+  for (const kind of preferredKinds) {
+    for (const value of options) {
+      const option = recordFromUnknown(value);
+      if (option?.kind !== kind || typeof option.optionId !== "string") continue;
+      return { outcome: { outcome: "selected", optionId: option.optionId } };
+    }
+  }
+  return { outcome: { outcome: "cancelled" } };
+}
+
 async function writeClaudeActionsMcpConfig(input: {
   sandbox: SandboxHandle;
   turnId: string;
@@ -948,6 +1198,23 @@ async function writeClaudeActionsMcpConfig(input: {
   const configPath = `${CLAUDE_CHAT_PROMPTS_ROOT}/mcp-${input.turnId}.json`;
   await input.sandbox.files.write(configPath, JSON.stringify(config));
   return configPath;
+}
+
+function buildClaudeActionsAcpMcpServers(input: {
+  runnerPublicUrl: string | undefined;
+  ticket: string;
+}): AcpMcpServer[] {
+  if (!input.runnerPublicUrl) {
+    throw new Error("runnerPublicUrl is required to enable Claude Code action tools.");
+  }
+  return [
+    {
+      name: CLAUDE_CHAT_ACTIONS_MCP_SERVER_NAME,
+      type: "http",
+      url: new URL(CLAUDE_CHAT_ACTIONS_GATEWAY_PATH, input.runnerPublicUrl).toString(),
+      headers: [{ name: "x-goat-action-ticket", value: input.ticket }],
+    },
+  ];
 }
 
 function buildClaudeChatTask(input: {

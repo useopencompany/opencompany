@@ -47,6 +47,7 @@ const env = {
   codexTimeoutMs: 1_200_000,
   codexModel: "gpt-5.5",
   codexChatIdleTimeoutMs: 1_800_000,
+  claudeCodeAcpEnabled: false,
   jobLeaseTtlMs: 300_000,
   taskWorkerEnabled: false,
   workerConcurrency: 2,

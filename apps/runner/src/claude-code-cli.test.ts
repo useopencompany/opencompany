@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildClaudeAcpCommand,
+  buildClaudeAcpCommandEnv,
   buildClaudeCommandEnv,
   buildClaudeTurnCommand,
   KILL_LEFTOVER_CLAUDE_TURN_COMMAND,
@@ -42,6 +44,32 @@ describe("buildClaudeCommandEnv", () => {
     expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     expect(env.GH_TOKEN).toBe("gh-token");
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-test-token");
+  });
+});
+
+describe("buildClaudeAcpCommandEnv", () => {
+  it("keeps OAuth auth isolated while selecting the configured model", () => {
+    expect(
+      buildClaudeAcpCommandEnv({
+        auth,
+        githubEnv: { GH_TOKEN: "gh-token", ANTHROPIC_API_KEY: "leaked" },
+        model: "claude-sonnet-5",
+      }),
+    ).toEqual({
+      CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test-token",
+      GH_TOKEN: "gh-token",
+      ANTHROPIC_MODEL: "claude-sonnet-5",
+    });
+  });
+});
+
+describe("buildClaudeAcpCommand", () => {
+  it("runs the pinned adapter over stdio from the chat workdir", () => {
+    const command = buildClaudeAcpCommand("/home/user/opencompany-goat/claude-chat");
+    expect(command).toContain("cd '/home/user/opencompany-goat/claude-chat'");
+    expect(command).toContain("unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN");
+    expect(command).toContain('export PATH="$HOME/.claude-cli/bin":"$PATH"');
+    expect(command).toContain("exec claude-agent-acp");
   });
 });
 
@@ -116,5 +144,9 @@ describe("KILL_LEFTOVER_CLAUDE_TURN_COMMAND", () => {
 
   it("tolerates no matching process", () => {
     expect(KILL_LEFTOVER_CLAUDE_TURN_COMMAND).toMatch(/\|\| true$/);
+  });
+
+  it("also fences a leftover ACP adapter", () => {
+    expect(KILL_LEFTOVER_CLAUDE_TURN_COMMAND).toContain("pkill -9 -f '[c]laude-agent-acp'");
   });
 });

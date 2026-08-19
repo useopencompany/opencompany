@@ -32,7 +32,7 @@ export type CodexCommandToolOutput = {
   outputPreview?: string;
 };
 
-export type CodexUiTextPart = { type: "text"; text: string };
+export type CodexUiTextPart = { type: "text"; text: string; itemId?: string };
 export type CodexUiReasoningPart = { type: "reasoning"; text: string; state: "done" };
 export type CodexUiArtifactPart = {
   type: typeof CHAT_ARTIFACT_DATA_PART_TYPE;
@@ -62,12 +62,16 @@ export type CodexUiStatusPart = {
   input: Record<string, unknown>;
 } & (
   | { state: "input-available" }
-  | { state: "approval-requested" }
+  | { state: "approval-requested"; approval?: { id: string } }
   | { state: "output-available"; output: Record<string, unknown> }
 );
 type CodexUiStatusPartPayload =
   | { state: "input-available"; input: Record<string, unknown> }
-  | { state: "approval-requested"; input: Record<string, unknown> }
+  | {
+      state: "approval-requested";
+      input: Record<string, unknown>;
+      approval?: { id: string };
+    }
   | {
       state: "output-available";
       input: Record<string, unknown>;
@@ -135,10 +139,33 @@ export function applyCodexEventToUiMessageParts(
     return applyEventToSubagentChild(parts, parentToolCallId, event, options);
   }
   switch (event.type) {
+    case "assistant.delta": {
+      const delta =
+        typeof event.payload.delta === "string" && event.payload.delta ? event.payload.delta : null;
+      if (!delta) return unchanged(parts);
+      const itemId = readString(event.payload.itemId) ?? `assistant-${parts.length}`;
+      const index = parts.findIndex((part) => part.type === "text" && part.itemId === itemId);
+      if (index < 0) return changed([...parts, { type: "text", text: delta, itemId }]);
+      return changed(
+        parts.map((part, currentIndex) =>
+          currentIndex === index && part.type === "text"
+            ? { ...part, text: `${part.text}${delta}` }
+            : part,
+        ),
+      );
+    }
     case "assistant.completed": {
       const text = readString(event.payload.content);
       if (!text) return unchanged(parts);
-      return changed([...parts, { type: "text", text }]);
+      const itemId = readString(event.payload.itemId);
+      if (!itemId) return changed([...parts, { type: "text", text }]);
+      const index = parts.findIndex((part) => part.type === "text" && part.itemId === itemId);
+      if (index < 0) return changed([...parts, { type: "text", text }]);
+      return changed(
+        parts.map((part, currentIndex) =>
+          currentIndex === index && part.type === "text" ? { type: "text", text } : part,
+        ),
+      );
     }
     case "reasoning.completed": {
       const text = readString(event.payload.text);
@@ -271,6 +298,36 @@ export function resolveCodexUiInteraction(
   return didChange ? changed(next) : unchanged(parts);
 }
 
+export function resolveCodexUiApproval(
+  parts: readonly CodexUiMessagePart[],
+  input: {
+    approvalId: string;
+    status: "approved" | "denied" | "canceled";
+  },
+): CodexUiMessageProjection {
+  let didChange = false;
+  const next = parts.map((part): CodexUiMessagePart => {
+    if (
+      part.type !== "dynamic-tool" ||
+      part.toolName !== CODEX_APPROVAL_TOOL_NAME ||
+      part.state !== "approval-requested" ||
+      part.approval?.id !== input.approvalId
+    ) {
+      return part;
+    }
+    didChange = true;
+    return {
+      type: "dynamic-tool",
+      toolName: part.toolName,
+      toolCallId: part.toolCallId,
+      state: "output-available",
+      input: part.input,
+      output: { status: input.status },
+    };
+  });
+  return didChange ? changed(next) : unchanged(parts);
+}
+
 // The Codex TUI offers implementation only after a successful Plan-mode turn, not as soon as
 // the proposed-plan item arrives. Keeping this as an explicit terminal transition prevents an
 // actionable card from appearing while the runner is still streaming the turn.
@@ -386,7 +443,11 @@ export function parseCodexUiMessageParts(value: unknown): CodexUiMessagePart[] {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
     const part = raw as Record<string, unknown>;
     if (part.type === "text" && typeof part.text === "string") {
-      parts.push({ type: "text", text: part.text });
+      parts.push({
+        type: "text",
+        text: part.text,
+        ...(typeof part.itemId === "string" ? { itemId: part.itemId } : {}),
+      });
       continue;
     }
     if (part.type === "reasoning" && typeof part.text === "string") {
@@ -491,6 +552,22 @@ export function parseCodexUiMessageParts(value: unknown): CodexUiMessagePart[] {
           toolCallId: part.toolCallId,
           state: "approval-requested",
           input,
+          ...(isRecord(part.approval) && typeof part.approval.id === "string"
+            ? { approval: { id: part.approval.id } }
+            : {}),
+        });
+      } else if (
+        part.state === "approval-responded" &&
+        part.toolName === CODEX_APPROVAL_TOOL_NAME
+      ) {
+        const approval = isRecord(part.approval) ? part.approval : null;
+        parts.push({
+          type: "dynamic-tool",
+          toolName: part.toolName,
+          toolCallId: part.toolCallId,
+          state: "output-available",
+          input,
+          output: { status: approval?.approved === true ? "approved" : "denied" },
         });
       } else if (part.state === "output-available") {
         parts.push({
@@ -636,6 +713,16 @@ function createStatusPart(
       state: "output-available",
       input: payload.input,
       output: payload.output,
+    };
+  }
+  if (payload.state === "approval-requested") {
+    return {
+      type: "dynamic-tool",
+      toolName,
+      toolCallId,
+      state: "approval-requested",
+      input: payload.input,
+      ...(payload.approval ? { approval: payload.approval } : {}),
     };
   }
   return {
@@ -878,13 +965,19 @@ function questionStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatus
 }
 
 function approvalStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+  const approvalId = readString(event.payload.interactionId);
+  const options = Array.isArray(event.payload.options) ? event.payload.options : null;
+  const rawInput = isRecord(event.payload.rawInput) ? event.payload.rawInput : null;
   return {
     state: "approval-requested",
     input: {
       label: "Approval",
       title: readString(event.payload.title),
       action: readString(event.payload.action),
+      ...(options ? { options } : {}),
+      ...(rawInput ? { rawInput } : {}),
     },
+    ...(approvalId ? { approval: { id: approvalId } } : {}),
   };
 }
 

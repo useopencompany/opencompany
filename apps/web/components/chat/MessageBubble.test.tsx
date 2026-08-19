@@ -1,5 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/agent-runtime";
+import {
+  CODEX_APPROVAL_TOOL_NAME,
+  CODEX_PLAN_TOOL_NAME,
+  CODEX_QUESTION_TOOL_NAME,
+} from "@opencompany/agent-runtime";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -548,6 +552,46 @@ describe("MessageBubble assistant errors", () => {
       expect(onActionApproval).toHaveBeenCalledWith({
         approvalId: "approval_1",
         action: "lead.find_person_email",
+        decision: "accept",
+      }),
+    );
+  });
+
+  it("renders an ACP permission as a one-time approval", async () => {
+    const user = userEvent.setup();
+    const onActionApproval = vi.fn(async () => undefined);
+    const message: ChatUiMessage = {
+      id: "assistant_acp_approval",
+      role: "assistant",
+      metadata: { sessionId: "chat_session_1", runId: "run_1" },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_APPROVAL_TOOL_NAME,
+          toolCallId: "acp-approval-command_1",
+          state: "approval-requested",
+          input: { title: "Run tests", action: "bun test" },
+          approval: { id: "opencompany_acp_permission_1" },
+        },
+      ],
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onActionApproval={onActionApproval}
+        allowActionApproval
+      />,
+    );
+
+    expect(screen.getByText("Run bun test?")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Accept" }));
+    await waitFor(() =>
+      expect(onActionApproval).toHaveBeenCalledWith({
+        approvalId: "opencompany_acp_permission_1",
+        action: "bun test",
         decision: "accept",
       }),
     );
