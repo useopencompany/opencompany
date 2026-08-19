@@ -32,6 +32,18 @@ export type WorkflowEngineSelection = {
   reasoningEffort?: WorkflowStep["reasoningEffort"];
 };
 
+// Raised when an expected external dependency needed to prepare a workflow run
+// (currently the connected-integration lookup that decides the available tools)
+// fails. It is distinct from WorkflowMentionError/SkillMentionError, which are
+// user input problems; this signals a transient dependency failure the caller
+// can surface as retryable rather than as an opaque internal error.
+export class WorkflowPreparationError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "WorkflowPreparationError";
+  }
+}
+
 const DEFAULT_WORKFLOW_SELECTION: WorkflowEngineSelection = workflowModelSelection({
   model: DEFAULT_WORKFLOW_MODEL_TOKEN,
 });
@@ -322,7 +334,15 @@ export async function prepareWorkflowRunForUser(
     workspaceId: input.workspaceId,
     mentions: skillRefs,
   });
-  const tools = await dependencies.getAvailableTools(input.userWorkosId);
+  let tools: TaskToolName[];
+  try {
+    tools = await dependencies.getAvailableTools(input.userWorkosId);
+  } catch (error) {
+    throw new WorkflowPreparationError(
+      "We couldn't load the integrations available to this workflow. Please try again.",
+      { cause: error },
+    );
+  }
   const description = input.description.trim() || workflow.name;
 
   const harnessSpec = compileWorkflowHarnessSpec({

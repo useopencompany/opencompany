@@ -1,7 +1,10 @@
 import { generateChatTitle } from "@opencompany/agent/chat-title";
 import { normalizeScheduleDefinition } from "@opencompany/agent/schedule-rules";
 import { SkillMentionError } from "@opencompany/agent/skills";
-import { prepareWorkflowRunForUser } from "@opencompany/agent/workflow-tasks";
+import {
+  prepareWorkflowRunForUser,
+  WorkflowPreparationError,
+} from "@opencompany/agent/workflow-tasks";
 import { validateWorkflowFields, WorkflowMentionError } from "@opencompany/agent/workflows";
 import {
   type Actor,
@@ -68,7 +71,51 @@ export function createAutomationServices(input: AutomationServicesInput) {
         },
       ),
   };
-  const taskCreator: AutomationTaskCreator = {
+  const taskCreator = createAutomationTaskCreator({
+    execute: input.execute,
+    resolveAttachments: input.resolveAttachments,
+    ...(input.gatewayApiKey ? { gatewayApiKey: input.gatewayApiKey } : {}),
+    ...(input.defer ? { defer: input.defer } : {}),
+    ...(input.now ? { now: input.now } : {}),
+  });
+  const options = {
+    scheduleRules: { normalize: normalizeScheduleDefinition },
+    planner,
+    taskCreator,
+    ...(input.now ? { now: input.now } : {}),
+  };
+  return {
+    workflows: new WorkflowApplicationService(new PostgresWorkflowRepository(input.execute), {
+      ...options,
+      validateDefinition: (definition) =>
+        validateWorkflowFields({
+          ...definition,
+          steps: definition.steps as never,
+          trigger: definition.trigger as never,
+        }),
+    }),
+    schedules: new TaskScheduleApplicationService(
+      new PostgresTaskScheduleRepository(input.execute),
+      options,
+    ),
+  };
+}
+
+type AutomationTaskCreatorInput = {
+  execute: WorkflowSqlExecute;
+  resolveAttachments(input: {
+    actor: Actor;
+    attachmentIds: readonly string[];
+  }): Promise<ResolvedChatAttachments>;
+  gatewayApiKey?: string;
+  defer?: (promise: Promise<void>) => void;
+  now?: () => Date;
+};
+
+export function createAutomationTaskCreator(
+  input: AutomationTaskCreatorInput,
+): AutomationTaskCreator {
+  return {
     create: async (command) => {
       const harness = harnessSpec(command.execution.payload);
       const service = new TaskApplicationService(
@@ -76,6 +123,15 @@ export function createAutomationServices(input: AutomationServicesInput) {
           resolveAttachments: ({ actor, attachmentIds }) =>
             input.resolveAttachments({ actor, attachmentIds }),
           resolveHarness: async () => harness,
+          // Workflow harnesses frame the first turn as "Task: <name>\n\n<goal>",
+          // so the persisted user message must match that framing. Without this
+          // the repository's canonical-command check compares the framed harness
+          // message against the bare goal and throws, masking every workflow
+          // invocation as a generic 500. Mirrors the runner scheduler and the
+          // shared task-creation helper.
+          compatibility: {
+            initialMessageContent: harness.initialUserMessage.trim() || command.goal,
+          },
           ...(input.now ? { now: input.now } : {}),
         }),
       );
@@ -105,27 +161,6 @@ export function createAutomationServices(input: AutomationServicesInput) {
       }
       return created;
     },
-  };
-  const options = {
-    scheduleRules: { normalize: normalizeScheduleDefinition },
-    planner,
-    taskCreator,
-    ...(input.now ? { now: input.now } : {}),
-  };
-  return {
-    workflows: new WorkflowApplicationService(new PostgresWorkflowRepository(input.execute), {
-      ...options,
-      validateDefinition: (definition) =>
-        validateWorkflowFields({
-          ...definition,
-          steps: definition.steps as never,
-          trigger: definition.trigger as never,
-        }),
-    }),
-    schedules: new TaskScheduleApplicationService(
-      new PostgresTaskScheduleRepository(input.execute),
-      options,
-    ),
   };
 }
 
@@ -176,11 +211,27 @@ async function prepareWorkflow(
       ...(input.skillIds?.length ? { skillMentions: input.skillIds.map((id) => ({ id })) } : {}),
     });
   } catch (error) {
-    if (error instanceof SkillMentionError || error instanceof WorkflowMentionError) {
-      throw new CoreError("invalid_argument", error.message);
-    }
-    throw error;
+    throw mapWorkflowPreparationError(error);
   }
+}
+
+// Translates the expected, user-actionable failures from workflow preparation
+// into typed CoreErrors so the API returns a specific status and message rather
+// than a masked 500. Anything not matched here is rethrown unchanged so genuine
+// bugs still surface as 500s and stay visible in observability.
+export function mapWorkflowPreparationError(error: unknown): unknown {
+  // A CoreError is already typed and actionable; keep it as-is.
+  if (error instanceof CoreError) return error;
+  // Skill and workflow mention problems are caused by user input.
+  if (error instanceof SkillMentionError || error instanceof WorkflowMentionError) {
+    return new CoreError("invalid_argument", error.message);
+  }
+  // A failed integration-state lookup is a transient dependency failure the
+  // user can retry, not an internal bug.
+  if (error instanceof WorkflowPreparationError) {
+    return new CoreError("unavailable", error.message);
+  }
+  return error;
 }
 
 async function planTaskScheduleHarness(
