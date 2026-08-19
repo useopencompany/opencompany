@@ -2192,6 +2192,14 @@ export function createApiApp(input: CreateApiAppInput) {
               span.setAttributes({ "goat.http_status_code": c.res.status });
               return c.res;
             } catch (error) {
+              if (!(error instanceof ApiError) && !(error instanceof CoreError)) {
+                captureException(error, {
+                  event: "opencompany.api_request_failed",
+                  request_id: requestIdFrom(c),
+                  method: c.req.method,
+                  path: c.req.path,
+                });
+              }
               c.res = apiErrorResponse(c, error);
               return c.res;
             } finally {

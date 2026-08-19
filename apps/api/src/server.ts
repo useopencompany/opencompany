@@ -62,7 +62,7 @@ import { createOnboardingEmailService } from "./onboarding-emails";
 import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createRunnerClient } from "./runner-client";
-import { closeHttpServer } from "./server-lifecycle";
+import { closeHttpServer, createDrainAwareFetch } from "./server-lifecycle";
 import { resolveApiPort } from "./server-port";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackBotSettingsService } from "./slack-bot-settings";
@@ -252,7 +252,7 @@ const app = createApiApp({
   ...(readModels ? { readModels } : {}),
 });
 const port = resolveApiPort(process.env);
-const server = serve({ fetch: app.fetch, port });
+const server = serve({ fetch: createDrainAwareFetch(app.fetch, shutdownController.signal), port });
 logger.info("API server started", { event: "opencompany.api_started", port });
 
 let closing = false;
@@ -270,14 +270,17 @@ async function close(signal: string) {
 }
 
 function handleSignal(signal: "SIGINT" | "SIGTERM") {
-  void close(signal).catch((error) => {
-    logger.error("API server shutdown failed", {
-      event: "opencompany.api_shutdown_failed",
-      signal,
-      error,
-    });
-    process.exitCode = 1;
-  });
+  void close(signal).then(
+    () => process.exit(0),
+    (error) => {
+      logger.error("API server shutdown failed", {
+        event: "opencompany.api_shutdown_failed",
+        signal,
+        error,
+      });
+      process.exit(1);
+    },
+  );
 }
 
 process.once("SIGINT", () => handleSignal("SIGINT"));
