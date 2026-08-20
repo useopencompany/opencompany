@@ -1,7 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WorkflowEditor } from "./WorkflowEditor";
+import { WorkflowEditor as WorkflowEditorComponent } from "./WorkflowEditor";
 
 const routerMock = vi.hoisted(() => ({
   push: vi.fn(),
@@ -11,6 +12,7 @@ const routerMock = vi.hoisted(() => ({
 const workflowActionsMock = vi.hoisted(() => ({
   update: vi.fn(async () => ({ version: 2 })),
   archive: vi.fn(async () => ({ workflowId: "workflow_1", version: 2 })),
+  runNow: vi.fn(async () => ({ task: { displayId: "TASK-42" } })),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -20,7 +22,14 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/headless-automation-commands", () => ({
   updateHeadlessWorkflow: workflowActionsMock.update,
   archiveHeadlessWorkflow: workflowActionsMock.archive,
+  runHeadlessWorkflowNow: workflowActionsMock.runNow,
 }));
+
+function WorkflowEditor(
+  props: Omit<ComponentProps<typeof WorkflowEditorComponent>, "workspaceId">,
+) {
+  return <WorkflowEditorComponent {...props} workspaceId="workspace_1" />;
+}
 
 vi.mock("@/components/MarkdownBrainEditor", () => ({
   MarkdownBrainEditor: ({
@@ -70,6 +79,7 @@ describe("WorkflowEditor", () => {
     vi.clearAllMocks();
     workflowActionsMock.update.mockResolvedValue({ version: 2 });
     workflowActionsMock.archive.mockResolvedValue({ workflowId: "workflow_1", version: 2 });
+    workflowActionsMock.runNow.mockResolvedValue({ task: { displayId: "TASK-42" } });
   });
 
   afterEach(() => {
@@ -311,6 +321,69 @@ describe("WorkflowEditor", () => {
         },
       }),
     );
+  });
+
+  it("runs an active scheduled workflow now and opens the created Task", async () => {
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          status: "active",
+          trigger: {
+            type: "schedule",
+            cron: "0 9 * * 1",
+            timezone: "UTC",
+            prompt: "Run the weekly report.",
+            enabled: true,
+            lastRunAt: null,
+            nextRunAt: "2026-08-17T09:00:00.000Z",
+          },
+        }}
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Run now" }));
+      await Promise.resolve();
+    });
+
+    expect(workflowActionsMock.runNow).toHaveBeenCalledWith("workflow_1", {
+      scopeKey: "workspace_1",
+    });
+    expect(routerMock.push).toHaveBeenCalledWith("/tasks/TASK-42");
+  });
+
+  it("surfaces an error when a scheduled workflow cannot be started", async () => {
+    workflowActionsMock.runNow.mockRejectedValueOnce(new Error("Workflow launch failed."));
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          status: "active",
+          trigger: {
+            type: "schedule",
+            cron: "0 9 * * 1",
+            timezone: "UTC",
+            prompt: "Run the weekly report.",
+            enabled: true,
+            lastRunAt: null,
+            nextRunAt: "2026-08-17T09:00:00.000Z",
+          },
+        }}
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Run now" }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Workflow launch failed.");
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 
   it("archives from the editor menu", async () => {
