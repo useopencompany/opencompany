@@ -41,10 +41,6 @@ const protectedCompatibilityTokens = [
   ["chat source-provider values", /["']goat-chat["']/gu, '["\x27]goat-chat["\x27]'],
   ["import source-provider values", /["']goat-import["']/gu, '["\x27]goat-import["\x27]'],
 ];
-const acceptedCompatibilityTokenReductions = new Map([
-  // The ACP cutover deletes the direct Codex app-server implementation and its protocol fixtures.
-  ["physical and stored quoted goat_* identifiers", 29],
-]);
 const requiredCompatibilityFragments = new Map([
   ["packages/db/src/product-schema.ts", ['pgSchema("goat")', "'goat-chat', 'goat-import'"]],
   ["packages/agent/src/brain-capture.ts", ['"goat-chat"']],
@@ -145,11 +141,8 @@ for (const [relativePath, fragments] of requiredCompatibilityFragments) {
 for (const [label, currentPattern, gitPattern] of protectedCompatibilityTokens) {
   const currentCount = currentCompatibilityCorpus.match(currentPattern)?.length ?? 0;
   const baseCount = gitMatchCount(gitPattern);
-  const expectedCount = baseCount - (acceptedCompatibilityTokenReductions.get(label) ?? 0);
-  if (currentCount !== expectedCount) {
-    failures.push(
-      `${label}: expected ${expectedCount} retained occurrences, found ${currentCount}`,
-    );
+  if (currentCount !== baseCount) {
+    failures.push(`${label}: expected ${baseCount} retained occurrences, found ${currentCount}`);
   }
 }
 
