@@ -179,8 +179,13 @@ function fileExtension(filename: string | undefined): string | null {
 }
 
 function capBytes(text: string, maxBytes: number): string {
-  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
-  const truncated = Buffer.from(text, "utf8").subarray(0, maxBytes).toString("utf8");
-  // Drop a possibly split trailing code point left by the byte-boundary cut.
-  return truncated.replace(/�+$/, "");
+  const encoded = Buffer.from(text, "utf8");
+  if (encoded.byteLength <= maxBytes) return text;
+
+  // If the byte limit lands inside a multi-byte code point, walk back over its
+  // continuation bytes and exclude the partial code point. This avoids both a
+  // replacement character and a regex over parser-controlled document text.
+  let end = Math.max(0, Math.floor(maxBytes));
+  while (end > 0 && ((encoded[end] ?? 0) & 0xc0) === 0x80) end -= 1;
+  return encoded.subarray(0, end).toString("utf8");
 }

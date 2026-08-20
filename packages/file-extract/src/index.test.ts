@@ -29,6 +29,18 @@ describe("extractDocumentMarkdown", () => {
     expect(result.markdown).toContain("| revenue | 120 |");
   });
 
+  it.each([
+    ["sample.doc", "doc"],
+    ["sample.ppt", "ppt"],
+    ["sample.pptx", "pptx"],
+    ["sample.xls", "xlsx"],
+    ["sample.rtf", "rtf"],
+  ])("extracts the advertised %s format", async (filename, format) => {
+    const result = await extractDocumentMarkdown({ bytes: fixture(filename), filename });
+    expect(result.format).toBe(format);
+    expect(result.markdown.trim().length).toBeGreaterThan(0);
+  });
+
   it("extracts text-based PDF as Markdown", async () => {
     const result = await extractDocumentMarkdown({
       bytes: fixture("sample.pdf"),
@@ -114,6 +126,20 @@ describe("extractUtf8Text", () => {
     expect(text).toContain("hello");
     expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(20);
     expect(text).not.toContain("�");
+  });
+
+  it("backs up to a UTF-8 code-point boundary when the byte cap splits a character", () => {
+    const text = extractUtf8Text(Buffer.from("é".repeat(10)), { maxBytes: 19 });
+    expect(text).toBe("é".repeat(9));
+    expect(Buffer.byteLength(text, "utf8")).toBe(18);
+  });
+
+  it("handles long replacement-character runs without scanning them with a regex", () => {
+    const prefix = "�".repeat(20_000);
+    const text = extractUtf8Text(Buffer.from(`${prefix}x${"tail".repeat(1_000)}`), {
+      maxBytes: Buffer.byteLength(prefix, "utf8") + 1,
+    });
+    expect(text).toBe(`${prefix}x`);
   });
 
   it("rejects invalid UTF-8", () => {
