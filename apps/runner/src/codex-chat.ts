@@ -875,15 +875,18 @@ async function handleAcpElicitationRequest(input: {
   });
   await input.projector.resolveInteraction(interactionId, resolution?.status ?? "canceled");
   if (!resolution) return { action: "cancel" };
-  const content = elicitationContent(input.request.params, resolution.response);
   if (input.request.params.mode === "url") {
-    const decision = typeof content.confirm === "string" ? content.confirm : "";
+    const answers = isRecord(resolution.response.answers) ? resolution.response.answers : {};
+    const confirm = isRecord(answers.confirm) ? answers.confirm.answers : null;
+    const decision = Array.isArray(confirm) && typeof confirm[0] === "string" ? confirm[0] : "";
     return { action: decision === "Accept" ? "accept" : "decline", content: null };
   }
+  const content = elicitationContent(input.request.params, resolution.response);
+  if (!content) return { action: "decline" };
   return { action: "accept", content };
 }
 
-function elicitationUserInputParams(input: {
+export function elicitationUserInputParams(input: {
   params: Record<string, unknown>;
   engineSessionId: string | null;
   turnId: string;
@@ -912,44 +915,33 @@ function elicitationUserInputParams(input: {
       ],
     };
   }
-  if (input.params.mode !== "form") return null;
+  if (input.params.mode !== undefined && input.params.mode !== "form") return null;
   const schema = isRecord(input.params.requestedSchema) ? input.params.requestedSchema : null;
   const properties = schema && isRecord(schema.properties) ? schema.properties : null;
   if (!properties) return null;
-  const questions = Object.entries(properties)
-    .slice(0, 3)
-    .flatMap(([id, value]) => {
-      const property = isRecord(value) ? value : null;
-      if (!property) return [];
-      const choices = Array.isArray(property.oneOf)
-        ? property.oneOf.flatMap((choice) => {
-            const record = isRecord(choice) ? choice : null;
-            const label = typeof record?.title === "string" ? record.title : record?.const;
-            return typeof label === "string"
-              ? [
-                  {
-                    label,
-                    description: typeof record?.description === "string" ? record.description : "",
-                  },
-                ]
-              : [];
-          })
-        : [];
-      return [
-        {
-          id,
-          header: typeof property.title === "string" ? property.title : id,
-          question:
-            typeof property.description === "string" && property.description.trim()
-              ? property.description
-              : message || `Provide ${id}.`,
-          ...(choices.length ? { options: choices, isOther: true } : {}),
-          isSecret:
-            isRecord(property._meta) && readNestedBoolean(property._meta, ["codex", "isSecret"]),
-        },
-      ];
+  const entries = Object.entries(properties).filter(([, value]) => {
+    const property = isRecord(value) ? value : null;
+    return !property || !isCodexOtherAnswerProperty(property, properties);
+  });
+  if (entries.length === 0 || entries.length > 3) return null;
+  const questions: Array<Record<string, unknown>> = [];
+  for (const [id, value] of entries) {
+    const property = isRecord(value) ? value : null;
+    if (!property || !isSupportedElicitationProperty(property)) return null;
+    const choices = elicitationChoices(property);
+    const isOther = readNestedBoolean(property._meta, ["codex", "isOther"]);
+    questions.push({
+      id,
+      header: typeof property.title === "string" ? property.title : id,
+      question:
+        typeof property.description === "string" && property.description.trim()
+          ? property.description
+          : message || `Provide ${id}.`,
+      ...(choices.length ? { options: choices } : {}),
+      ...(isOther && choices.length ? { isOther: true } : {}),
+      isSecret: readNestedBoolean(property._meta, ["codex", "isSecret"]),
     });
-  if (questions.length === 0) return null;
+  }
   const autoResolutionMs = readNestedNumber(input.params, ["_meta", "codex", "autoResolutionMs"]);
   return {
     threadId: input.engineSessionId ?? "acp-session",
@@ -960,10 +952,10 @@ function elicitationUserInputParams(input: {
   };
 }
 
-function elicitationContent(
+export function elicitationContent(
   params: Record<string, unknown>,
   response: Record<string, unknown>,
-): Record<string, unknown> {
+): Record<string, unknown> | null {
   const answers = isRecord(response.answers) ? response.answers : {};
   const schema = isRecord(params.requestedSchema) ? params.requestedSchema : {};
   const properties = isRecord(schema.properties) ? schema.properties : {};
@@ -973,18 +965,181 @@ function elicitationContent(
     const strings = values.filter((value): value is string => typeof value === "string");
     if (strings.length === 0) continue;
     const property = isRecord(properties[id]) ? properties[id] : {};
-    const selected = elicitationConstForLabel(property, strings[0] as string);
-    content[id] = property.type === "array" ? strings : selected;
+    const first = strings[0] as string;
+    const otherFieldId = codexOtherAnswerFieldId(properties, id);
+    const choice = elicitationChoiceValue(property, first);
+    if (otherFieldId && !choice.matched) {
+      content[otherFieldId] = first;
+      continue;
+    }
+    const converted = elicitationPropertyValue(property, strings);
+    if (!converted.ok) return null;
+    content[id] = converted.value;
   }
+  if (Object.keys(answers).length === 0) return content;
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((value): value is string => typeof value === "string")
+    : [];
+  if (required.some((id) => content[id] === undefined)) return null;
   return content;
 }
 
-function elicitationConstForLabel(property: Record<string, unknown>, label: string) {
+function elicitationChoices(property: Record<string, unknown>) {
+  if (property.type === "boolean") {
+    return [
+      { label: "Yes", description: "Use true." },
+      { label: "No", description: "Use false." },
+    ];
+  }
+  const choices = elicitationChoiceRecords(property);
+  return choices.map((choice) => ({
+    label: choice.label,
+    description: choice.description,
+  }));
+}
+
+type ElicitationChoiceRecord = { value: string; label: string; description: string };
+
+function elicitationChoiceRecords(property: Record<string, unknown>): ElicitationChoiceRecord[] {
+  const source = property.type === "array" && isRecord(property.items) ? property.items : property;
+  const variants = Array.isArray(source.oneOf)
+    ? source.oneOf
+    : Array.isArray(source.anyOf)
+      ? source.anyOf
+      : null;
+  if (variants) {
+    return variants.flatMap((value) => {
+      const choice = isRecord(value) ? value : null;
+      if (!choice || typeof choice.const !== "string") return [];
+      return [
+        {
+          value: choice.const,
+          label: typeof choice.title === "string" ? choice.title : choice.const,
+          description: typeof choice.description === "string" ? choice.description : "",
+        },
+      ];
+    });
+  }
+  if (!Array.isArray(source.enum)) return [];
+  const names = Array.isArray(source.enumNames) ? source.enumNames : [];
+  return source.enum.flatMap((value, index) =>
+    typeof value === "string"
+      ? [
+          {
+            value,
+            label: typeof names[index] === "string" ? names[index] : value,
+            description: "",
+          },
+        ]
+      : [],
+  );
+}
+
+function elicitationChoiceValue(property: Record<string, unknown>, label: string) {
   for (const choice of Array.isArray(property.oneOf) ? property.oneOf : []) {
     const record = isRecord(choice) ? choice : null;
-    if (record?.title === label && record.const !== undefined) return record.const;
+    if (typeof record?.const === "string" && (record.title === label || record.const === label)) {
+      return { matched: true as const, value: record.const };
+    }
   }
-  return label;
+  for (const choice of elicitationChoiceRecords(property)) {
+    if (choice.label === label || choice.value === label) {
+      return { matched: true as const, value: choice.value };
+    }
+  }
+  return { matched: false as const, value: label };
+}
+
+function elicitationPropertyValue(
+  property: Record<string, unknown>,
+  answers: string[],
+): { ok: true; value: unknown } | { ok: false } {
+  if (property.type === "array") {
+    const items = isRecord(property.items) ? property.items : null;
+    if (!items) return { ok: false };
+    const values: unknown[] = [];
+    for (const answer of answers.filter((value) => !value.startsWith("user_note: "))) {
+      const converted = elicitationPropertyValue(items, [answer]);
+      if (!converted.ok) return converted;
+      values.push(converted.value);
+    }
+    const minItems = typeof property.minItems === "number" ? property.minItems : 0;
+    const maxItems = typeof property.maxItems === "number" ? property.maxItems : Number.MAX_VALUE;
+    return values.length >= minItems && values.length <= maxItems
+      ? { ok: true, value: values }
+      : { ok: false };
+  }
+  const answer = answers[0];
+  if (answer === undefined) return { ok: false };
+  if (property.type === "boolean") {
+    if (/^(?:yes|true)$/i.test(answer)) return { ok: true, value: true };
+    if (/^(?:no|false)$/i.test(answer)) return { ok: true, value: false };
+    return { ok: false };
+  }
+  if (property.type === "number" || property.type === "integer") {
+    const value = Number(answer);
+    if (!Number.isFinite(value) || (property.type === "integer" && !Number.isInteger(value))) {
+      return { ok: false };
+    }
+    if (typeof property.minimum === "number" && value < property.minimum) return { ok: false };
+    if (typeof property.maximum === "number" && value > property.maximum) return { ok: false };
+    return { ok: true, value };
+  }
+  const choices = elicitationChoiceRecords(property);
+  // Titled multi-select item schemas use `anyOf` without repeating `type: "string"`.
+  if (property.type !== "string" && !(property.type === undefined && choices.length > 0)) {
+    return { ok: false };
+  }
+  const choice = elicitationChoiceValue(property, answer);
+  if (choices.length > 0 && !choice.matched) return { ok: false };
+  const value = String(choice.value);
+  if (typeof property.minLength === "number" && value.length < property.minLength) {
+    return { ok: false };
+  }
+  if (typeof property.maxLength === "number" && value.length > property.maxLength) {
+    return { ok: false };
+  }
+  return { ok: true, value };
+}
+
+function isSupportedElicitationProperty(property: Record<string, unknown>) {
+  if (
+    property.type === "string" ||
+    property.type === "number" ||
+    property.type === "integer" ||
+    property.type === "boolean"
+  ) {
+    return true;
+  }
+  return (
+    property.type === "array" &&
+    elicitationChoiceRecords(property).length > 0 &&
+    (typeof property.minItems !== "number" || property.minItems <= 1) &&
+    (typeof property.maxItems !== "number" || property.maxItems >= 1)
+  );
+}
+
+function codexOtherAnswerFieldId(properties: Record<string, unknown>, questionId: string) {
+  for (const [id, value] of Object.entries(properties)) {
+    const property = isRecord(value) ? value : null;
+    const meta = property && isRecord(property._meta) ? property._meta.codex : null;
+    const codexMeta = isRecord(meta) ? meta : null;
+    if (codexMeta?.isOtherAnswer === true && codexMeta.questionId === questionId) return id;
+  }
+  return null;
+}
+
+function isCodexOtherAnswerProperty(
+  property: Record<string, unknown>,
+  properties: Record<string, unknown>,
+) {
+  const meta = isRecord(property._meta) ? property._meta.codex : null;
+  return (
+    isRecord(meta) &&
+    meta.isOtherAnswer === true &&
+    typeof meta.questionId === "string" &&
+    isRecord(properties[meta.questionId])
+  );
 }
 
 function readNestedNumber(value: unknown, path: string[]): number | null {

@@ -10,6 +10,7 @@ import {
   CODEX_CHAT_EVENT_TYPES,
   CODING_HARNESS_EVENT_TYPES,
   codexChatEvents,
+  codexChatInteractions,
   runApprovals,
   runAttempts,
   runEvents,
@@ -30,6 +31,18 @@ describe("Codex event constraints", () => {
   });
 });
 
+describe("ACP interaction constraints", () => {
+  it("accepts ACP elicitation while preserving rolling-deploy compatibility", () => {
+    const methodCheck = getTableConfig(codexChatInteractions).checks.find((constraint) =>
+      pgDialect.sqlToQuery(constraint.value).sql.includes("elicitation/create"),
+    );
+    expect(methodCheck).toBeDefined();
+    expect(pgDialect.sqlToQuery(methodCheck!.value).sql).toContain(
+      `"method" IN ('elicitation/create', 'item/tool/requestUserInput')`,
+    );
+  });
+});
+
 describe("canonical Run constraints", () => {
   it("keeps attempt and semantic event values aligned with the application core", () => {
     expect(checkParams(runAttempts, "goat_run_attempts_status_check")).toEqual(
@@ -46,10 +59,27 @@ describe("canonical Run constraints", () => {
 });
 
 function checkParams(
-  table: typeof codexChatEvents | typeof runAttempts | typeof runApprovals | typeof runEvents,
+  table:
+    | typeof codexChatEvents
+    | typeof codexChatInteractions
+    | typeof runAttempts
+    | typeof runApprovals
+    | typeof runEvents,
+  constraintName: string,
+) {
+  return checkQuery(table, constraintName).params;
+}
+
+function checkQuery(
+  table:
+    | typeof codexChatEvents
+    | typeof codexChatInteractions
+    | typeof runAttempts
+    | typeof runApprovals
+    | typeof runEvents,
   constraintName: string,
 ) {
   const constraint = getTableConfig(table).checks.find((check) => check.name === constraintName);
   expect(constraint, `Missing ${constraintName}`).toBeDefined();
-  return pgDialect.sqlToQuery(constraint!.value).params;
+  return pgDialect.sqlToQuery(constraint!.value);
 }

@@ -4792,7 +4792,10 @@ export const codexChatInteractions = productSchema.table(
     ),
     methodCheck: check(
       "goat_codex_chat_interactions_method_check",
-      sql`${table.method} = 'elicitation/create'`,
+      // Keep the retired app-server method valid at the physical DB boundary for one rolling
+      // deployment. New runtime code writes only the ACP method; a later cleanup migration can
+      // remove this compatibility value once no old runner can still be serving a turn.
+      sql`${table.method} IN ('elicitation/create', 'item/tool/requestUserInput')`,
     ),
   }),
 );

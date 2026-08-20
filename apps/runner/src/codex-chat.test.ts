@@ -11,6 +11,8 @@ import {
   CodexChatInterruptedError,
   claimCodexChatRecovery,
   createTurnAbortCheck,
+  elicitationContent,
+  elicitationUserInputParams,
   materializeCodingChatHistory,
   runCodexChatTurn,
   summarizeCodexChatRecoveryProgress,
@@ -192,6 +194,166 @@ describe("materializeCodingChatHistory", () => {
       new Set(["attachment_missing"]),
     );
     expect(result.imagePromptBlocks).toEqual([]);
+  });
+});
+
+describe("ACP elicitation translation", () => {
+  const codexOtherSchema = {
+    mode: "form",
+    message: "Choose a branch",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        branch: {
+          type: "string",
+          title: "Branch",
+          description: "Which branch should be used?",
+          oneOf: [
+            { const: "main", title: "Main" },
+            { const: "feature", title: "Feature" },
+          ],
+          _meta: { codex: { isOther: true, isSecret: false } },
+        },
+        branch_other: {
+          type: "string",
+          title: "Other",
+          _meta: {
+            codex: { questionId: "branch", isOtherAnswer: true, isSecret: false },
+          },
+        },
+      },
+      required: [],
+    },
+  };
+
+  it("folds Codex's hidden Other field into one logical question", () => {
+    expect(
+      elicitationUserInputParams({
+        params: codexOtherSchema,
+        engineSessionId: "session_1",
+        turnId: "turn_1",
+      }),
+    ).toMatchObject({
+      threadId: "session_1",
+      turnId: "turn_1",
+      questions: [
+        {
+          id: "branch",
+          header: "Branch",
+          question: "Which branch should be used?",
+          options: [
+            { label: "Main", description: "" },
+            { label: "Feature", description: "" },
+          ],
+          isOther: true,
+          isSecret: false,
+        },
+      ],
+    });
+  });
+
+  it("returns Codex option and custom answers under the schema's correct fields", () => {
+    expect(
+      elicitationContent(codexOtherSchema, {
+        answers: { branch: { answers: ["Feature"] } },
+      }),
+    ).toEqual({ branch: "feature" });
+    expect(
+      elicitationContent(codexOtherSchema, {
+        answers: { branch: { answers: ["release/next"] } },
+      }),
+    ).toEqual({ branch_other: "release/next" });
+  });
+
+  it("coerces standard MCP boolean, integer, and enum form answers", () => {
+    const params = {
+      message: "Configure the event",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          newsletter: { type: "boolean", title: "Newsletter" },
+          duration: { type: "integer", minimum: 15, maximum: 480 },
+          visibility: {
+            type: "string",
+            enum: ["private", "public"],
+            enumNames: ["Private", "Public"],
+          },
+        },
+        required: ["newsletter", "duration", "visibility"],
+      },
+    };
+    expect(
+      elicitationUserInputParams({
+        params,
+        engineSessionId: "session_1",
+        turnId: "turn_1",
+      }),
+    ).toMatchObject({
+      questions: [
+        { id: "newsletter", options: [{ label: "Yes" }, { label: "No" }] },
+        { id: "duration" },
+        { id: "visibility", options: [{ label: "Private" }, { label: "Public" }] },
+      ],
+    });
+    expect(
+      elicitationContent(params, {
+        answers: {
+          newsletter: { answers: ["Yes"] },
+          duration: { answers: ["45"] },
+          visibility: { answers: ["Public"] },
+        },
+      }),
+    ).toEqual({ newsletter: true, duration: 45, visibility: "public" });
+  });
+
+  it("supports one selection from a titled MCP multi-select schema", () => {
+    const params = {
+      mode: "form",
+      message: "Choose tags",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          tags: {
+            type: "array",
+            minItems: 1,
+            items: {
+              anyOf: [
+                { const: "urgent", title: "Urgent" },
+                { const: "customer", title: "Customer" },
+              ],
+            },
+          },
+        },
+        required: ["tags"],
+      },
+    };
+    expect(
+      elicitationContent(params, {
+        answers: { tags: { answers: ["Customer"] } },
+      }),
+    ).toEqual({ tags: ["customer"] });
+  });
+
+  it("declines forms that cannot fit the durable question surface", () => {
+    expect(
+      elicitationUserInputParams({
+        params: {
+          mode: "form",
+          message: "Too many fields",
+          requestedSchema: {
+            type: "object",
+            properties: {
+              one: { type: "string" },
+              two: { type: "string" },
+              three: { type: "string" },
+              four: { type: "string" },
+            },
+          },
+        },
+        engineSessionId: "session_1",
+        turnId: "turn_1",
+      }),
+    ).toBeNull();
   });
 });
 

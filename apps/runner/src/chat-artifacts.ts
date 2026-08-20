@@ -381,8 +381,6 @@ export async function publishExternalEngineChatArtifact(input: {
   }
 }
 
-export const publishClaudeChatArtifact = publishExternalEngineChatArtifact;
-
 function normalizePublishArtifactInput(value: unknown): PublishArtifactInput {
   if (!isRecord(value)) throw new Error("publish_artifact expects an object input.");
   const requestedPath = boundedText(value.path, 4_096);

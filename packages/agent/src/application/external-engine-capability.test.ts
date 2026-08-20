@@ -49,7 +49,7 @@ function state(
 const now = new Date("2026-08-11T12:00:00.000Z");
 
 describe("External engine tool capability authority", () => {
-  it("authorizes only the active persisted Claude attempt", () => {
+  it("authorizes only the active persisted external-engine attempt", () => {
     expect(authorizeExternalEngineToolCapability({ capability, state: state(), now })).toEqual({
       actorId: "user_1",
       workspaceId: "workspace_1",
