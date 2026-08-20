@@ -23,7 +23,7 @@ import {
   WEB_FETCH_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
-import { CLAUDE_CHAT_DEFAULT_MODEL_ID } from "@/lib/engine-registry";
+import { CLAUDE_CHAT_DEFAULT_MODEL_ID, CODEX_CHAT_DEFAULT_MODEL_ID } from "@/lib/engine-registry";
 import { updateHeadlessChatConversation } from "@/lib/headless-chat-commands";
 import { HeadlessChatTransport } from "@/lib/headless-chat-transport";
 import { DEFAULT_MODEL } from "@/lib/model-options";
@@ -42,9 +42,14 @@ const chatMock = vi.hoisted(() => ({
   finishSessionId: null as string | null,
   startWithSessionId: null as ((sessionId: string, model: string) => void) | null,
   finishWithSessionId: null as ((sessionId: string, model?: string) => void) | null,
+  renderAssistantMessage: null as ((message: ChatUiMessage) => void) | null,
   sendError: null as Error | null,
   preparedRequestBodies: [] as unknown[],
   lastResume: null as boolean | null,
+}));
+
+const productAnalyticsMock = vi.hoisted(() => ({
+  capture: vi.fn(() => true),
 }));
 
 const routerMock = vi.hoisted(() => ({
@@ -148,6 +153,10 @@ vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock.value,
 }));
 
+vi.mock("@opencompany/analytics/product/client", () => ({
+  captureProductEvent: productAnalyticsMock.capture,
+}));
+
 vi.mock("@/lib/chat-actions", () => ({
   createChatShareAction: vi.fn(async () => ({
     ok: true,
@@ -249,6 +258,12 @@ vi.mock("@ai-sdk/react", async () => {
             parts: [{ type: "text", text: "Done." }],
           },
         });
+      };
+      chatMock.renderAssistantMessage = (message: ChatUiMessage) => {
+        setMessages((current) => [
+          ...current.filter((candidate) => candidate.id !== message.id),
+          message,
+        ]);
       };
 
       return {
@@ -419,10 +434,12 @@ describe("Surface chat streaming UI", () => {
     chatMock.finishSessionId = null;
     chatMock.startWithSessionId = null;
     chatMock.finishWithSessionId = null;
+    chatMock.renderAssistantMessage = null;
     chatMock.sendError = null;
     chatMock.sendMessage.mockReset();
     chatMock.stop.mockReset();
     chatMock.resumeStream.mockClear();
+    productAnalyticsMock.capture.mockClear();
     routerMock.prefetch.mockReset();
     chatMock.preparedRequestBodies = [];
     routerMock.push.mockReset();
@@ -478,6 +495,93 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello opencompany" });
     expect(textarea).toHaveValue("");
     expect(await screen.findAllByText("Hello opencompany")).toHaveLength(2);
+  });
+
+  it.each([
+    {
+      engine: "codex" as const,
+      model: CODEX_CHAT_DEFAULT_MODEL_ID,
+      connection: { codexConnected: true },
+    },
+    {
+      engine: "claude_code" as const,
+      model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
+      connection: { claudeCodeConnected: true },
+    },
+  ])("captures $engine send-to-first-render latency once per foreground turn", async ({
+    engine,
+    model,
+    connection,
+  }) => {
+    const user = userEvent.setup();
+    let currentTime = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => currentTime);
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: `goat_chat_${engine}_latency`,
+          title: "Latency test",
+          model,
+          engine,
+          messages: [],
+        }}
+        workspaceId="workspace_1"
+        {...connection}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Measure this turn");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(productAnalyticsMock.capture).not.toHaveBeenCalled();
+
+    currentTime = 2_750;
+    acceptHeadlessConversation(`goat_chat_${engine}_latency`);
+    act(() => {
+      chatMock.renderAssistantMessage?.({
+        id: "assistant_accepted_1",
+        role: "assistant",
+        metadata: {
+          sessionId: `goat_chat_${engine}_latency`,
+          runId: "run_accepted_1",
+          model,
+        },
+        parts: [{ type: "reasoning", text: "I’ll inspect the repository.", state: "streaming" }],
+      });
+    });
+
+    await waitFor(() =>
+      expect(productAnalyticsMock.capture).toHaveBeenCalledWith("chat_first_output_rendered", {
+        workspace_id: "workspace_1",
+        session_id: `goat_chat_${engine}_latency`,
+        run_id: "run_accepted_1",
+        message_id: "assistant_accepted_1",
+        engine,
+        model,
+        selected_model: model,
+        is_new_session: false,
+        sandbox_status_at_send: "unknown",
+        send_source: "composer",
+        output_kind: "reasoning",
+        time_to_first_output_ms: 1_750,
+      }),
+    );
+
+    act(() => {
+      chatMock.renderAssistantMessage?.({
+        id: "assistant_accepted_1",
+        role: "assistant",
+        metadata: {
+          sessionId: `goat_chat_${engine}_latency`,
+          runId: "run_accepted_1",
+          model,
+        },
+        parts: [{ type: "text", text: "The repository is ready." }],
+      });
+    });
+    expect(productAnalyticsMock.capture).toHaveBeenCalledOnce();
   });
 
   it("shows transcript loading instead of an unexplained empty persisted chat", () => {
@@ -1880,6 +1984,8 @@ describe("Surface chat streaming UI", () => {
 
   it("submits Codex engine chats through the canonical Message transport", async () => {
     const user = userEvent.setup();
+    let currentTime = 3_000;
+    vi.spyOn(performance, "now").mockImplementation(() => currentTime);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void input;
       return new Response(
@@ -1895,7 +2001,15 @@ describe("Surface chat streaming UI", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        workspaceId="workspace_1"
+        codexConnected
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
@@ -1918,11 +2032,40 @@ describe("Surface chat streaming UI", () => {
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
 
+    currentTime = 4_200;
     acceptHeadlessConversation(String(body.newSessionId));
+    act(() => {
+      chatMock.renderAssistantMessage?.({
+        id: "assistant_accepted_1",
+        role: "assistant",
+        metadata: {
+          sessionId: String(body.newSessionId),
+          runId: "run_accepted_1",
+          model: CODEX_CHAT_DEFAULT_MODEL_ID,
+        },
+        parts: [{ type: "text", text: "The sandbox is ready." }],
+      });
+    });
 
     expect(routerMock.replace).toHaveBeenCalledWith(`/chat/${body.newSessionId}`, {
       scroll: false,
     });
+    await waitFor(() =>
+      expect(productAnalyticsMock.capture).toHaveBeenCalledWith("chat_first_output_rendered", {
+        workspace_id: "workspace_1",
+        session_id: body.newSessionId,
+        run_id: "run_accepted_1",
+        message_id: "assistant_accepted_1",
+        engine: "codex",
+        model: CODEX_CHAT_DEFAULT_MODEL_ID,
+        selected_model: CODEX_CHAT_DEFAULT_MODEL_ID,
+        is_new_session: true,
+        sandbox_status_at_send: "not_created",
+        send_source: "composer",
+        output_kind: "text",
+        time_to_first_output_ms: 1_200,
+      }),
+    );
   });
 
   it("selects a Claude model and submits per-turn reasoning effort", async () => {
