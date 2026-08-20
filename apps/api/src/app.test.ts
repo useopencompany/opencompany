@@ -4442,8 +4442,13 @@ function populatedAutomationServices() {
         steps: input.steps,
         status: input.status,
         trigger:
-          input.trigger.type === "manual"
-            ? { type: "manual" }
+          input.trigger.type === "manual" || input.trigger.type === "event"
+            ? input.trigger.type === "event"
+              ? {
+                  ...input.trigger,
+                  prompt: input.trigger.prompt ?? "Review and triage this Linear issue.",
+                }
+              : { type: "manual" }
             : {
                 type: "schedule",
                 cron: input.schedule?.definition.cron ?? input.trigger.cron,

@@ -1,6 +1,6 @@
 ---
 title: Workflows and schedules
-description: Define reusable ordered work, invoke it from Chat, or run it on a schedule.
+description: Define reusable ordered work and invoke it manually, on a schedule, or from an event.
 ---
 
 A Workflow is a workspace-owned, reusable ordered definition. Each step has instructions and an
@@ -10,7 +10,7 @@ Conversation, Run history, status, and outcome.
 Workspace admins create and edit Workflows. In Chat, type `#` to attach and fire an active Workflow.
 The resulting work appears under Tasks instead of being hidden inside the foreground Chat.
 
-## Manual and scheduled triggers
+## Manual, scheduled, and event triggers
 
 A Workflow can be manual or scheduled. A schedule records a cron expression, timezone, prompt, and
 enabled state, along with its last and next run times. When a scheduled trigger is due, opencompany
@@ -20,8 +20,18 @@ Recurring Tasks are actor-owned schedules for a repeated prompt. Workflow schedu
 reusable Workflow definition. In both cases, disabling the schedule stops future invocations; it
 does not erase Tasks that were already accepted.
 
+An event trigger starts the Workflow when a matching connected-app event arrives. The first
+available event is **Linear issue enters triage**: choose a connected Linear account, a team with
+Triage enabled, and the task request that should accompany the issue. Both issues created directly
+in Triage and issues later moved into Triage start exactly one Task per Linear webhook delivery.
+
+Event deliveries are accepted into a durable queue before opencompany starts the Task. This keeps
+the provider webhook fast and prevents transient runner failures or deploys from dropping accepted
+work.
+
 ## Editing safely
 
 Workflow definitions are versioned. An invocation records the version it used, so later edits do not
 rewrite an already-created Task. Keep instructions specific, use separate steps when the handoff is
-meaningful, and inspect a completed Task before placing a new Workflow on a recurring schedule.
+meaningful, and inspect a completed Task before placing a new Workflow on a recurring or event
+trigger.

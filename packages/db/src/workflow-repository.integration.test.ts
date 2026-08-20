@@ -20,10 +20,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PostgresTaskScheduleRepository, PostgresWorkflowRepository } from "./workflow-repository";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const migrationPath = path.join(
-  repositoryRoot,
+const migrationPaths = [
   "drizzle/0207_goat_headless_workflow_foundation.sql",
-);
+  "drizzle/0222_goat_workflow_event_triggers.sql",
+].map((migration) => path.join(repositoryRoot, migration));
 const dialect = new PgDialect();
 const now = new Date("2026-08-12T08:00:00.000Z");
 const nextRunAt = new Date("2026-08-13T09:00:00.000Z");
@@ -67,9 +67,11 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         '2026-08-13T09:00:00.000Z'
       );
     `);
-    const migration = await readFile(migrationPath, "utf8");
-    for (const statement of migration.split("--> statement-breakpoint")) {
-      if (statement.trim()) await database.exec(statement);
+    for (const migrationPath of migrationPaths) {
+      const migration = await readFile(migrationPath, "utf8");
+      for (const statement of migration.split("--> statement-breakpoint")) {
+        if (statement.trim()) await database.exec(statement);
+      }
     }
     const [migrationRow] = (
       await database.query<{
@@ -343,6 +345,62 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     ).resolves.toMatchObject({ rows: [{ count: 0 }] });
   });
 
+  it("persists and projects a Linear issue-entered-triage event trigger", async () => {
+    const created = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "workflow-event-1",
+      name: "Triage issues",
+    });
+    const trigger = {
+      type: "event" as const,
+      provider: "linear" as const,
+      event: "issue_enters_triage" as const,
+      integrationId: "gint_linear_1",
+      team: {
+        id: "team_1",
+        name: "Engineering",
+        key: "ENG",
+        triageStateId: "state_triage_1",
+      },
+      prompt: "Assess the issue and recommend an owner.",
+    };
+
+    const updated = await workflows.updateWorkflow(actor(), created.workflow.id, {
+      expectedVersion: 1,
+      name: "Triage issues",
+      description: "Review incoming work",
+      steps: [
+        {
+          id: "step_1",
+          title: "Assess",
+          model: "provider/model",
+          instructions: "Assess the issue.",
+        },
+      ],
+      status: "active",
+      trigger,
+    });
+
+    expect(updated.workflow.trigger).toEqual(trigger);
+    await expect(
+      database.query<{ trigger: Record<string, unknown>; run_as: string; planned: boolean }>(
+        `SELECT projection.trigger, workflow.event_user_workos_id AS run_as,
+                workflow.event_harness_spec IS NOT NULL AS planned
+         FROM goat.workflows AS workflow
+         JOIN goat.workflow_read_model_v1 AS projection ON projection.id = workflow.id
+         WHERE workflow.id = $1`,
+        [created.workflow.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          trigger,
+          run_as: "user_1",
+          planned: true,
+        },
+      ],
+    });
+  });
+
   it("keeps Recurring Tasks actor-owned, feature-gated, idempotent, and versioned", async () => {
     const command = {
       idempotencyKey: "schedule-create-1",
@@ -570,7 +628,9 @@ const BASE_SCHEMA = `
     created_by_workos_id text REFERENCES goat.users(workos_user_id) ON DELETE SET NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    archived_at timestamptz
+    archived_at timestamptz,
+    CONSTRAINT goat_workflows_trigger_check
+      CHECK (trigger IN ('manual', 'slack', 'linear', 'schedule'))
   );
   CREATE UNIQUE INDEX goat_workflows_workspace_slug_idx
     ON goat.workflows(workspace_id, slug) WHERE archived_at IS NULL;

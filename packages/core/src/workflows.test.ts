@@ -155,6 +155,55 @@ describe("WorkflowApplicationService", () => {
     expect(repository.updateWorkflow).not.toHaveBeenCalled();
   });
 
+  it("plans a durable Linear event trigger before persisting it", async () => {
+    const repository = fakeWorkflowRepository();
+    const planner = fakePlanner();
+    const service = workflowService(repository, { planner });
+    const trigger = {
+      type: "event" as const,
+      provider: "linear" as const,
+      event: "issue_enters_triage" as const,
+      integrationId: "gint_linear_1",
+      team: {
+        id: "team_1",
+        name: "Engineering",
+        key: "ENG",
+        triageStateId: "state_triage_1",
+      },
+      prompt: "Assess impact and recommend an owner.",
+    };
+
+    await service.updateWorkflow(actor(), "workflow_1", {
+      expectedVersion: 1,
+      name: "Triage issues",
+      description: "Review incoming issues",
+      steps: [
+        {
+          id: "step_1",
+          title: "Assess",
+          model: "provider/model",
+          instructions: "Assess the issue.",
+        },
+      ],
+      status: "active",
+      trigger,
+    });
+
+    expect(planner.prepareWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: actor(),
+        prompt: trigger.prompt,
+        workflow: expect.objectContaining({ trigger }),
+      }),
+    );
+    expect(repository.updateWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger,
+        event: { execution: executionPlan() },
+      }),
+    );
+  });
+
   it("routes invoke and run-now through canonical Task creation", async () => {
     const scheduled = workflow({
       trigger: {

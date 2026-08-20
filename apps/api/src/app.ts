@@ -2811,13 +2811,13 @@ function workflowDto(workflow: Workflow) {
   return {
     ...workflow,
     trigger:
-      workflow.trigger.type === "manual"
-        ? workflow.trigger
-        : {
+      workflow.trigger.type === "schedule"
+        ? {
             ...workflow.trigger,
             lastRunAt: workflow.trigger.lastRunAt?.toISOString() ?? null,
             nextRunAt: workflow.trigger.nextRunAt?.toISOString() ?? null,
-          },
+          }
+        : workflow.trigger,
     archivedAt: workflow.archivedAt?.toISOString() ?? null,
     createdAt: workflow.createdAt.toISOString(),
     updatedAt: workflow.updatedAt.toISOString(),

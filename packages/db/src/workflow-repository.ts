@@ -39,13 +39,14 @@ type WorkflowRow = {
   model: string;
   steps: unknown;
   status: "draft" | "active";
-  trigger: "manual" | "slack" | "linear" | "schedule";
+  trigger: "manual" | "slack" | "linear" | "schedule" | "event";
   scheduleCron: string | null;
   scheduleTimezone: string;
   schedulePrompt: string;
   scheduleEnabled: boolean;
   scheduleLastRunAt: Date | string | null;
   scheduleNextRunAt: Date | string | null;
+  eventConfig: unknown;
   version: number | string;
   archivedAt: Date | string | null;
   createdAt: Date | string;
@@ -254,6 +255,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.schedule_enabled AS "scheduleEnabled",
         workflow.schedule_last_run_at AS "scheduleLastRunAt",
         workflow.schedule_next_run_at AS "scheduleNextRunAt",
+        workflow.event_config AS "eventConfig",
         workflow.version,
         workflow.archived_at AS "archivedAt",
         workflow.created_at AS "createdAt",
@@ -276,6 +278,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   async updateWorkflow(input: Parameters<WorkflowRepository["updateWorkflow"]>[0]) {
     const now = this.options.now?.() ?? new Date();
     const scheduled = input.trigger.type === "schedule";
+    const eventDriven = input.trigger.type === "event";
     const scheduleEnabled = input.trigger.type === "schedule" && input.trigger.enabled !== false;
     const schedulePrompt =
       input.trigger.type === "schedule" ? input.trigger.prompt?.trim() || "Run this workflow." : "";
@@ -284,7 +287,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       SET name = ${input.name},
           description = ${input.description},
           steps = ${JSON.stringify(input.steps)}::jsonb,
-          trigger = ${scheduled ? "schedule" : "manual"},
+          trigger = ${scheduled ? "schedule" : eventDriven ? "event" : "manual"},
           schedule_cron = ${scheduled ? (input.schedule?.definition.cron ?? null) : null},
           schedule_timezone = ${scheduled ? (input.schedule?.definition.timezone ?? "UTC") : "UTC"},
           schedule_prompt = ${schedulePrompt},
@@ -298,6 +301,11 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
               ? (input.schedule?.definition.nextRunAt ?? null)
               : null
           },
+          event_config = ${eventDriven ? JSON.stringify(input.trigger) : null}::jsonb,
+          event_user_workos_id = ${eventDriven ? input.actor.userId : null},
+          event_harness_spec = ${
+            input.event?.execution ? JSON.stringify(input.event.execution.payload) : null
+          }::jsonb,
           status = ${input.status},
           version = workflow.version + 1,
           updated_at = ${now}
@@ -322,6 +330,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         workflow.schedule_enabled AS "scheduleEnabled",
         workflow.schedule_last_run_at AS "scheduleLastRunAt",
         workflow.schedule_next_run_at AS "scheduleNextRunAt",
+        workflow.event_config AS "eventConfig",
         workflow.version,
         workflow.archived_at AS "archivedAt",
         workflow.created_at AS "createdAt",
@@ -914,6 +923,7 @@ function workflowSelect() {
       workflow.schedule_enabled AS "scheduleEnabled",
       workflow.schedule_last_run_at AS "scheduleLastRunAt",
       workflow.schedule_next_run_at AS "scheduleNextRunAt",
+      workflow.event_config AS "eventConfig",
       workflow.version,
       workflow.archived_at AS "archivedAt",
       workflow.created_at AS "createdAt",
@@ -1009,6 +1019,7 @@ function workflowStep(value: unknown): WorkflowStep {
 }
 
 function workflowTrigger(row: WorkflowRow): WorkflowTrigger {
+  if (row.trigger === "event") return workflowEventTrigger(row.eventConfig);
   if (row.trigger !== "schedule") return { type: "manual" };
   return {
     type: "schedule",
@@ -1018,6 +1029,27 @@ function workflowTrigger(row: WorkflowRow): WorkflowTrigger {
     enabled: row.scheduleEnabled,
     lastRunAt: nullableDate(row.scheduleLastRunAt),
     nextRunAt: nullableDate(row.scheduleNextRunAt),
+  };
+}
+
+function workflowEventTrigger(value: unknown): Extract<WorkflowTrigger, { type: "event" }> {
+  if (!isRecord(value) || value.provider !== "linear" || value.event !== "issue_enters_triage") {
+    throw new Error("Workflow storage contains an invalid event trigger.");
+  }
+  const team = isRecord(value.team) ? value.team : null;
+  const key = team ? stringValue(team.key) : null;
+  return {
+    type: "event",
+    provider: "linear",
+    event: "issue_enters_triage",
+    integrationId: requiredString(value.integrationId, "integrationId"),
+    team: {
+      id: requiredString(team?.id, "team.id"),
+      name: requiredString(team?.name, "team.name"),
+      triageStateId: requiredString(team?.triageStateId, "team.triageStateId"),
+      ...(key ? { key } : {}),
+    },
+    prompt: requiredString(value.prompt, "prompt"),
   };
 }
 
