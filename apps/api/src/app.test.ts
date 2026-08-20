@@ -1338,6 +1338,63 @@ describe("canonical Hono API", () => {
     await expect(response.json()).resolves.toMatchObject({ error: { code: "conflict" } });
   });
 
+  it("continues a completed workflow Task through its Conversation", async () => {
+    const repository = fakeRepository();
+    repository.getConversation = async () => null;
+    repository.createMessageAndRun = async ({ command }) => {
+      repository.lastCommand = command;
+      return {
+        conversationId: command.conversationId ?? "conversation_unexpected",
+        messageId: "message_task_follow_up_user",
+        assistantMessageId: "message_task_follow_up_assistant",
+        runId: "run_task_follow_up",
+        transactionId: "43",
+        idempotentReplay: false,
+      };
+    };
+    const tasks = fakeTaskRepository();
+    tasks.getTaskByConversation = async ({ conversationId }) =>
+      conversationId === "conversation_task_1"
+        ? fakeTask({
+            status: "succeeded",
+            source: "workflow",
+            model: "provider/task-model",
+          })
+        : null;
+    const generate = vi.fn(async () => ({
+      conversationId: "conversation_task_1",
+      title: "Workflow task",
+      generated: true,
+    }));
+
+    const response = await testApp(repository, {
+      tasks: new TaskApplicationService(tasks),
+      chatTitles: { generate },
+    }).request("/v1/messages", {
+      method: "POST",
+      headers: messageHeaders("send_task_follow_up_1"),
+      body: JSON.stringify({
+        conversationId: "conversation_task_1",
+        content: "Please check the afternoon too",
+        engine: { type: "opencompany", schemaVersion: 1 },
+      }),
+    });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        conversationId: "conversation_task_1",
+        runId: "run_task_follow_up",
+      },
+    });
+    expect(repository.lastCommand).toMatchObject({
+      conversationId: "conversation_task_1",
+      engine: "opencompany",
+      model: "provider/task-model",
+    });
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it("resolves Auto inside the authenticated command boundary", async () => {
     const repository = fakeRepository();
     const resolveAutoModel = vi.fn(async () => ({
