@@ -53,6 +53,32 @@ describe("opencompany Chat Task host tools", () => {
     });
   });
 
+  it("rejects a task model that the selected coding engine cannot run", async () => {
+    const createTask = vi.fn(async () => taskResult);
+    const dependencies = testDependencies({ createTask });
+
+    await expect(
+      executeChatHostToolService({
+        command: {
+          operation: "start_task",
+          sessionId: "runtime_1",
+          runId: "run_1",
+          input: {
+            name: "Review code",
+            prompt: "Review the code.",
+            model: "anthropic/claude-sonnet-5",
+            engine: "codex",
+          },
+        },
+        dependencies,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: 'Model "anthropic/claude-sonnet-5" is not available for the Codex engine.',
+    });
+    expect(createTask).not.toHaveBeenCalled();
+  });
+
   it("delegates an agent-created Workflow invocation through the Workflow Task creator", async () => {
     const createWorkflowTask = vi.fn(async () => taskResult);
     const dependencies = testDependencies({ createWorkflowTask });

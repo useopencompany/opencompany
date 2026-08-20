@@ -59,15 +59,33 @@ describe("loadHostTools", () => {
     await expect(
       tools?.browserTools?.({ name: "browser_open", args: { url: "https://github.com" } }),
     ).resolves.toMatchObject({ ok: true, output: "opened" });
+    await tools?.startTask?.(
+      {
+        name: "Review code",
+        prompt: "Review the code.",
+        model: "openai/gpt-5.6-sol",
+        engine: "codex",
+      },
+      { toolCallId: "call_task_1" },
+    );
     await tools?.close();
 
     expect(requests.map((request) => request.operation)).toEqual([
       "bootstrap",
       "browser_use_profile",
       "browser",
+      "start_task",
       "browser_end_profile",
     ]);
-    expect(execute).toHaveBeenCalledTimes(4);
+    expect(requests[3]).toMatchObject({
+      operation: "start_task",
+      toolCallId: "call_task_1",
+      input: {
+        model: "openai/gpt-5.6-sol",
+        engine: "codex",
+      },
+    });
+    expect(execute).toHaveBeenCalledTimes(5);
   });
 
   it("does not call the web origin", async () => {

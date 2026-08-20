@@ -225,12 +225,23 @@ describe("normalizeCodexAppServerEvent", () => {
       normalizeCodexAppServerEvent({
         method: "item/started",
         params: {
-          item: { id: "mcp_1", type: "mcpToolCall", server: "linear", tool: "create_issue" },
+          item: {
+            id: "mcp_1",
+            type: "mcpToolCall",
+            server: "linear",
+            tool: "create_issue",
+            arguments: { title: "Fix login" },
+          },
         },
       })[0],
     ).toMatchObject({
       type: "mcp_tool.started",
-      payload: { itemId: "mcp_1", server: "linear", tool: "create_issue" },
+      payload: {
+        itemId: "mcp_1",
+        server: "linear",
+        tool: "create_issue",
+        arguments: { title: "Fix login" },
+      },
     });
 
     expect(
