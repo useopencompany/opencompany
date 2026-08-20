@@ -4,6 +4,8 @@ import { WorkflowEditor } from "@/components/WorkflowEditor";
 import { currentUser } from "@/lib/auth";
 import { getHeadlessWorkflow } from "@/lib/headless-automation-server";
 import { listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
+import type { IntegrationAccountView } from "@/lib/integration-state";
+import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
 
 type WorkflowEditorPageProps = {
   params: Promise<{ slug: string }>;
@@ -16,9 +18,10 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     return <TasksWorkflowsDisabledRoute />;
   }
 
-  const [workflow, skillCatalog] = await Promise.all([
+  const [workflow, skillCatalog, personalAccounts] = await Promise.all([
     getHeadlessWorkflow(slug),
     listHeadlessSkillCatalog(),
+    getPersonalAccounts(),
   ]);
 
   if (!workflow) {
@@ -43,12 +46,19 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     );
   }
 
+  const linearAccounts = personalAccounts.linear
+    .filter((account: IntegrationAccountView) => account.connected)
+    .map((account: IntegrationAccountView) => ({
+      integrationId: account.integrationId,
+      label: account.connectionLabel ?? account.accountName ?? account.accountEmail ?? "Linear",
+    }));
   return (
     <WorkflowEditor
       workflow={workflow}
       workspaceId={context.workspace.id}
       canEdit
       skillCatalog={skillCatalog}
+      linearAccounts={linearAccounts}
     />
   );
 }

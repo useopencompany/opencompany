@@ -48,6 +48,14 @@ const WORKFLOW_SCHEDULE_PROMPT_MAX_LENGTH = 10_000;
 export type WorkflowTriggerInput =
   | { type: "manual" }
   | {
+      type: "event";
+      provider: "linear";
+      event: "issue_enters_triage";
+      integrationId: string;
+      team: { id: string; name: string; key?: string; triageStateId: string };
+      prompt?: string | null;
+    }
+  | {
       type: "schedule";
       cron: string;
       timezone?: string | null;
@@ -56,6 +64,14 @@ export type WorkflowTriggerInput =
 
 export type WorkflowTriggerDetail =
   | { type: "manual" }
+  | {
+      type: "event";
+      provider: "linear";
+      event: "issue_enters_triage";
+      integrationId: string;
+      team: { id: string; name: string; key?: string; triageStateId: string };
+      prompt: string;
+    }
   | {
       type: "schedule";
       cron: string;
@@ -363,6 +379,12 @@ export async function updateWorkflow(input: {
   if (invalid) return { ok: false, message: invalid };
   const trigger = normalizeWorkflowTriggerInput(input.trigger, input.now);
   if (!trigger.ok) return { ok: false, message: trigger.message };
+  if (trigger.value.type === "event") {
+    return {
+      ok: false,
+      message: "Linear event triggers must be updated through the Workflow API.",
+    };
+  }
   if (trigger.value.type === "schedule" && input.status === "active") {
     if (!input.scheduleUserWorkosId?.trim()) {
       return { ok: false, message: "Scheduled workflows need a user to run as." };
@@ -443,6 +465,11 @@ export function workflowTriggerFromRow(input: {
   scheduleLastRunAt: Date | null;
   scheduleNextRunAt: Date | null;
 }): WorkflowTriggerDetail {
+  if (input.trigger === "event") {
+    // The legacy Drizzle authoring path does not persist event config. Event
+    // triggers are authored through the headless Workflow API.
+    return { type: "manual" };
+  }
   if (input.trigger !== "schedule") return { type: "manual" };
   return {
     type: "schedule",
@@ -463,10 +490,58 @@ function normalizeWorkflowTriggerInput(
       ok: true;
       value:
         | { type: "manual" }
+        | {
+            type: "event";
+            provider: "linear";
+            event: "issue_enters_triage";
+            integrationId: string;
+            team: { id: string; name: string; key?: string; triageStateId: string };
+            prompt: string;
+          }
         | { type: "schedule"; cron: string; timezone: string; prompt: string };
     }
   | { ok: false; message: string } {
   if (!input || input.type === "manual") return { ok: true, value: { type: "manual" } };
+  if (input.type === "event") {
+    const integrationId = input.integrationId.trim();
+    const teamId = input.team.id.trim();
+    const teamName = input.team.name.trim();
+    const triageStateId = input.team.triageStateId.trim();
+    const teamKey = input.team.key?.trim();
+    const prompt = input.prompt?.trim() || "Review and triage this Linear issue.";
+    if (
+      input.provider !== "linear" ||
+      input.event !== "issue_enters_triage" ||
+      !integrationId ||
+      !teamId ||
+      !teamName ||
+      !triageStateId
+    ) {
+      return { ok: false, message: "Linear event triggers need a connected account and team." };
+    }
+    if (prompt.length > WORKFLOW_SCHEDULE_PROMPT_MAX_LENGTH) {
+      return {
+        ok: false,
+        message: `Event task requests must be ${WORKFLOW_SCHEDULE_PROMPT_MAX_LENGTH.toLocaleString()} characters or fewer.`,
+      };
+    }
+    return {
+      ok: true,
+      value: {
+        type: "event",
+        provider: "linear",
+        event: "issue_enters_triage",
+        integrationId,
+        team: {
+          id: teamId,
+          name: teamName,
+          triageStateId,
+          ...(teamKey ? { key: teamKey } : {}),
+        },
+        prompt,
+      },
+    };
+  }
   if (input.type !== "schedule") return { ok: false, message: "That workflow trigger is invalid." };
 
   const cron = input.cron.trim().replace(/\s+/g, " ");

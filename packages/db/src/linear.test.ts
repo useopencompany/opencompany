@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isLinearIssueEnteringTriage,
   linearEventTypeFor,
   linearRouteMatchesEvent,
   linearSelectedEventTypes,
@@ -57,5 +58,55 @@ describe("opencompany Linear brain source config", () => {
     expect(linearEventTypeFor({ entityType: "issue", action: "remove" })).toBe("issue_removed");
     expect(linearEventTypeFor({ entityType: "comment", action: "create" })).toBe("comment_created");
     expect(linearEventTypeFor({ entityType: "comment", action: "update" })).toBe("comment_updated");
+  });
+
+  it("matches creates and state changes into triage without retriggering unrelated updates", () => {
+    expect(
+      isLinearIssueEnteringTriage({
+        type: "Issue",
+        action: "create",
+        data: { state: { type: "triage", name: "Triage" } },
+      }),
+    ).toBe(true);
+    expect(
+      isLinearIssueEnteringTriage({
+        type: "Issue",
+        action: "update",
+        data: { state: { name: "Triage" } },
+        updatedFrom: { stateId: "previous_state" },
+      }),
+    ).toBe(true);
+    expect(
+      isLinearIssueEnteringTriage({
+        type: "Issue",
+        action: "update",
+        data: { state: { type: "triage" } },
+        updatedFrom: { priority: 2 },
+      }),
+    ).toBe(false);
+    expect(
+      isLinearIssueEnteringTriage(
+        {
+          type: "Issue",
+          action: "update",
+          data: { stateId: "state_triage" },
+          updatedFrom: { stateId: "previous_state" },
+        },
+        "state_triage",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not trust a triage label when Linear supplies a different state id", () => {
+    expect(
+      isLinearIssueEnteringTriage(
+        {
+          type: "Issue",
+          action: "create",
+          data: { state: { id: "state_backlog", name: "Triage", type: "triage" } },
+        },
+        "state_triage",
+      ),
+    ).toBe(false);
   });
 });

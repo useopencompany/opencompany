@@ -59,7 +59,15 @@ export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancel
 // editable-but-not-yet-usable, `active` is available to fire (workflows) or
 // attach (skills). Mirrors the frontmatter `status` the Brain docs carried.
 export type WorkflowStatus = "draft" | "active";
-export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule";
+export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule" | "event";
+export type WorkflowEventConfig = {
+  provider: "linear";
+  event: "issue_enters_triage";
+  integrationId: string;
+  team: { id: string; name: string; key?: string; triageStateId: string };
+  prompt: string;
+};
+export type WorkflowEventRunStatus = "pending" | "created" | "ignored" | "failed";
 export type AutomationCommandOperation = "workflow.create" | "task_schedule.create";
 export type KnowledgeCommandOperation =
   | "brain_document.create"
@@ -2873,6 +2881,11 @@ export const workflows = productSchema.table(
     scheduleEnabled: boolean("schedule_enabled").notNull().default(false),
     scheduleLastRunAt: timestamp("schedule_last_run_at", { withTimezone: true }),
     scheduleNextRunAt: timestamp("schedule_next_run_at", { withTimezone: true }),
+    eventConfig: jsonb("event_config").$type<WorkflowEventConfig | null>(),
+    eventUserWorkosId: text("event_user_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    eventHarnessSpec: jsonb("event_harness_spec").$type<HarnessSpec | null>(),
     status: text("status").$type<WorkflowStatus>().notNull().default("active"),
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
@@ -2901,8 +2914,11 @@ export const workflows = productSchema.table(
     statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
     triggerCheck: check(
       "goat_workflows_trigger_check",
-      sql`${table.trigger} IN ('manual', 'slack', 'linear', 'schedule')`,
+      sql`${table.trigger} IN ('manual', 'slack', 'linear', 'schedule', 'event')`,
     ),
+    eventRouteIdx: index("opencompany_workflows_event_route_idx")
+      .on(table.eventUserWorkosId, table.trigger)
+      .where(sql`${table.trigger} = 'event' AND ${table.archivedAt} IS NULL`),
   }),
 );
 
@@ -3166,6 +3182,59 @@ export const workflowScheduleRuns = productSchema.table(
     statusCheck: check(
       "goat_workflow_schedule_runs_status_check",
       sql`${table.status} IN ('pending', 'created', 'failed')`,
+    ),
+  }),
+);
+
+// Durable inbox for provider events that matched an active workflow. Webhook
+// handlers only enqueue these rows; the runner materializes Tasks so provider
+// response deadlines and deploys cannot drop workflow runs.
+export const workflowEventRuns = productSchema.table(
+  "workflow_event_runs",
+  {
+    id: text("id").primaryKey(),
+    workflowId: text("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    workflowSlug: text("workflow_slug").notNull(),
+    workflowName: text("workflow_name").notNull(),
+    provider: text("provider").notNull(),
+    eventType: text("event_type").notNull(),
+    deliveryId: text("delivery_id").notNull(),
+    goal: text("goal").notNull(),
+    harnessSpec: jsonb("harness_spec").$type<HarnessSpec>().notNull(),
+    eventAt: timestamp("event_at", { withTimezone: true }).notNull(),
+    taskId: text("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    status: text("status").$type<WorkflowEventRunStatus>().notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workflowDeliveryIdx: uniqueIndex("opencompany_workflow_event_runs_workflow_delivery_idx").on(
+      table.workflowId,
+      table.provider,
+      table.deliveryId,
+    ),
+    pendingIdx: index("opencompany_workflow_event_runs_pending_idx")
+      .on(table.status, table.nextAttemptAt, table.createdAt)
+      .where(sql`${table.status} = 'pending'`),
+    taskIdx: index("opencompany_workflow_event_runs_task_idx").on(table.taskId),
+    providerCheck: check(
+      "opencompany_workflow_event_runs_provider_check",
+      sql`${table.provider} IN ('linear')`,
+    ),
+    statusCheck: check(
+      "opencompany_workflow_event_runs_status_check",
+      sql`${table.status} IN ('pending', 'created', 'ignored', 'failed')`,
     ),
   }),
 );

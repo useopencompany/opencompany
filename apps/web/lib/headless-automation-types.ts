@@ -12,6 +12,14 @@ export type WorkflowStep = {
 export type WorkflowTrigger =
   | { type: "manual" }
   | {
+      type: "event";
+      provider: "linear";
+      event: "issue_enters_triage";
+      integrationId: string;
+      team: { id: string; name: string; key?: string; triageStateId: string };
+      prompt: string;
+    }
+  | {
       type: "schedule";
       cron: string;
       timezone: string;

@@ -19,3 +19,10 @@ OAuth scope and action matrix is coming soon.
 
 Choose the Linear teams and issue or comment event types in the destination Brain's Sources
 settings. Authorizing Linear without that selection does not feed issue activity into Brain.
+
+## Workflow triggers
+
+The same ingestion connection can trigger a Workflow when an issue for a selected team enters
+Triage. Configure this from the Workflow's **Trigger** section. The team must have Linear Triage
+enabled; opencompany uses that team's provider-native Triage state ID so ordinary status edits do
+not retrigger the Workflow.

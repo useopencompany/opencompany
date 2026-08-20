@@ -15,6 +15,13 @@ const workflowActionsMock = vi.hoisted(() => ({
   runNow: vi.fn(async () => ({ task: { displayId: "TASK-42" } })),
 }));
 
+const brainSourceActionsMock = vi.hoisted(() => ({
+  listLinearTeams: vi.fn(async () => ({
+    ok: true as const,
+    teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
+  })),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
 }));
@@ -30,6 +37,10 @@ function WorkflowEditor(
 ) {
   return <WorkflowEditorComponent {...props} workspaceId="workspace_1" />;
 }
+
+vi.mock("@/lib/brain-source-actions", () => ({
+  listLinearTeamsAction: brainSourceActionsMock.listLinearTeams,
+}));
 
 vi.mock("@/components/MarkdownBrainEditor", () => ({
   MarkdownBrainEditor: ({
@@ -80,6 +91,10 @@ describe("WorkflowEditor", () => {
     workflowActionsMock.update.mockResolvedValue({ version: 2 });
     workflowActionsMock.archive.mockResolvedValue({ workflowId: "workflow_1", version: 2 });
     workflowActionsMock.runNow.mockResolvedValue({ task: { displayId: "TASK-42" } });
+    brainSourceActionsMock.listLinearTeams.mockResolvedValue({
+      ok: true,
+      teams: [{ id: "team_1", name: "Core", key: "CORE", triageStateId: "state_triage" }],
+    });
   });
 
   afterEach(() => {
@@ -106,6 +121,46 @@ describe("WorkflowEditor", () => {
       trigger: { type: "manual" },
     });
     expect(screen.getByText("Saved")).toBeInTheDocument();
+  });
+
+  it("saves a Linear team entering triage as an event trigger", async () => {
+    render(
+      <WorkflowEditor
+        workflow={workflow}
+        canEdit
+        skillCatalog={[]}
+        linearAccounts={[{ integrationId: "gint_1", label: "Acme Linear" }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "On an event" }));
+    await act(async () => Promise.resolve());
+    expect(workflowActionsMock.update).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Team"), { target: { value: "team_1" } });
+    fireEvent.change(screen.getByLabelText("Task request"), {
+      target: { value: "Investigate the issue and propose the next step." },
+    });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        trigger: {
+          type: "event",
+          provider: "linear",
+          event: "issue_enters_triage",
+          integrationId: "gint_1",
+          team: {
+            id: "team_1",
+            name: "Core",
+            key: "CORE",
+            triageStateId: "state_triage",
+          },
+          prompt: "Investigate the issue and propose the next step.",
+        },
+      }),
+    );
   });
 
   it("collapses edits made during an in-flight save into one trailing save", async () => {

@@ -39,6 +39,7 @@ import { createServer } from "./server";
 import { activeSlackBotEventCount, drainSlackBotEvents } from "./slack-bot-events";
 import { startSlackFlushWorker } from "./slack-flush-worker";
 import { startStuckWorkMonitor } from "./stuck-work-monitor";
+import { startWorkflowEventWorker } from "./workflow-event-worker";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -115,6 +116,13 @@ const taskScheduleWorker = codexChatWorker
       },
     })
   : null;
+const workflowEventWorker = codexChatWorker
+  ? startWorkflowEventWorker({
+      onTaskCreated: () => {
+        codexChatWorker.notify();
+      },
+    })
+  : null;
 if (!codexChatWorker) {
   logger.info("opencompany task worker disabled", {
     event: "opencompany.goat_task_worker_disabled",
@@ -172,6 +180,7 @@ await server.listen({ host: "0.0.0.0", port: env.port });
 async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
   const tasks = [
     runnerDrainTask("task_schedule", taskScheduleWorker),
+    runnerDrainTask("workflow_event", workflowEventWorker),
     codexChatWorker
       ? {
           name: "codex_chat",

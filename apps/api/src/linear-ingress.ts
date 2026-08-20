@@ -12,13 +12,16 @@ import {
 import { verifyLinearWebhookSignature } from "@opencompany/agent/integrations/linear-signature";
 import { connectLinearIngestIntegration } from "@opencompany/db/integrations";
 import {
+  enqueueLinearWorkflowEventRuns,
   insertLinearIssueEvents,
+  isLinearIssueEnteringTriage,
   type LinearIssueEventInsert,
   linearEventTypeFor,
   linearRouteMatchesEvent,
   linearSelectedTeamIds,
   listEnabledLinearBrainSourceRoutes,
   listLinearIntegrationsForOrganization,
+  listLinearWorkflowTriggerRoutes,
 } from "@opencompany/db/linear";
 import type { LinearEventAction, LinearEventEntityType } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
@@ -171,8 +174,9 @@ async function handleWebhook(input: IngressInput, request: Request): Promise<Res
     return Response.json({ error: "Invalid Linear signature." }, { status: 401 });
   }
 
-  // Linear pauses webhooks for apps that keep failing, so after the signature
-  // check every path acks with 200 — errors are logged, not surfaced.
+  // A verified delivery is only acknowledged after its durable writes finish.
+  // Linear retries non-2xx responses and every downstream insert is idempotent,
+  // so a transient database failure must not silently drop a workflow run.
   try {
     return Response.json(await handleLinearEvent(input.db, envelope, request, rawBody));
   } catch (error) {
@@ -182,9 +186,13 @@ async function handleWebhook(input: IngressInput, request: Request): Promise<Res
       action: envelope.action,
       error_message: error instanceof Error ? error.message : String(error),
     });
+    return Response.json(
+      { error: "Linear event processing failed; retry this delivery." },
+      {
+        status: 503,
+      },
+    );
   }
-
-  return Response.json({ ok: true });
 }
 
 async function handleLinearEvent(
@@ -229,6 +237,43 @@ async function handleLinearEvent(
   const connected = integrations.filter((integration) => integration.status === "connected");
   if (connected.length === 0) return { ok: true, dropped: true };
 
+  const deliveryId =
+    request.headers.get("linear-delivery")?.trim() ||
+    (envelope.webhookId && envelope.webhookTimestamp
+      ? `${envelope.webhookId}:${envelope.webhookTimestamp}`
+      : createHash("sha256").update(rawBody).digest("hex"));
+  const eventTime = envelope.createdAt ? new Date(envelope.createdAt) : new Date();
+  const normalizedEventTime = Number.isNaN(eventTime.getTime()) ? new Date() : eventTime;
+
+  let workflowRuns = 0;
+  if (teamId && entityType === "issue") {
+    const workflowRoutes = await listLinearWorkflowTriggerRoutes(
+      { integrations: connected, teamId },
+      db,
+    );
+    const matchedWorkflowRoutes = workflowRoutes.filter((route) =>
+      isLinearIssueEnteringTriage(
+        {
+          ...(envelope.type ? { type: envelope.type } : {}),
+          ...(envelope.action ? { action: envelope.action } : {}),
+          data,
+          ...(envelope.updatedFrom ? { updatedFrom: envelope.updatedFrom } : {}),
+        },
+        route.triageStateId,
+      ),
+    );
+    workflowRuns = await enqueueLinearWorkflowEventRuns(
+      {
+        routes: matchedWorkflowRoutes,
+        deliveryId,
+        eventAt: normalizedEventTime,
+        issue: data,
+        ...(envelope.url ? { issueUrl: envelope.url } : {}),
+      },
+      db,
+    );
+  }
+
   const routes = await listEnabledLinearBrainSourceRoutes(
     connected.map((integration) => integration.id),
     db,
@@ -246,14 +291,9 @@ async function handleLinearEvent(
       })
       .map((route) => route.integrationId),
   );
-  if (matchedIntegrationIds.size === 0) return { ok: true, dropped: true };
-
-  const deliveryId =
-    request.headers.get("linear-delivery")?.trim() ||
-    (envelope.webhookId && envelope.webhookTimestamp
-      ? `${envelope.webhookId}:${envelope.webhookTimestamp}`
-      : createHash("sha256").update(rawBody).digest("hex"));
-  const eventTime = envelope.createdAt ? new Date(envelope.createdAt) : new Date();
+  if (matchedIntegrationIds.size === 0) {
+    return workflowRuns > 0 ? { ok: true, buffered: 0, workflowRuns } : { ok: true, dropped: true };
+  }
 
   const inserts: LinearIssueEventInsert[] = connected
     .filter((integration) => matchedIntegrationIds.has(integration.id))
@@ -277,11 +317,11 @@ async function handleLinearEvent(
         data,
         ...(envelope.updatedFrom ? { updatedFrom: envelope.updatedFrom } : {}),
       },
-      eventTime: Number.isNaN(eventTime.getTime()) ? new Date() : eventTime,
+      eventTime: normalizedEventTime,
     }));
 
   const buffered = await insertLinearIssueEvents(inserts, db);
-  return { ok: true, buffered };
+  return { ok: true, buffered, workflowRuns };
 }
 
 function linearEntityType(type: string | undefined): LinearEventEntityType | null {
