@@ -348,7 +348,6 @@ export type TaskConversation = {
   taskId: string;
   status: TaskStatus;
   startedAtMs: number;
-  sessionBacked?: boolean;
   activeRunId?: string | null;
 };
 
@@ -367,6 +366,7 @@ export function Surface({
   userName = "there",
   userWorkosId = "",
   taskConversation = null,
+  readOnlyNotice = null,
 }: {
   tasks: readonly TaskView[];
   schedules?: readonly TaskScheduleView[];
@@ -382,9 +382,10 @@ export function Surface({
   userName?: string;
   // Scopes chat attachment uploads; attachments are disabled when absent.
   userWorkosId?: string;
-  // Workflow task details reuse this chat surface, while task messages remain
-  // backed by the durable task transcript instead of chat session rows.
+  // Task details reuse the canonical Conversation surface with additional Task metadata.
   taskConversation?: TaskConversation | null;
+  // Bounded compatibility views may reuse transcript rendering without enabling mutations.
+  readOnlyNotice?: string | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -554,8 +555,8 @@ export function Surface({
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
   const workflowMentionsEnabled =
     taskSpawningEnabled && (!activeTaskConversation || backgroundDirectiveActive);
-  const skillMentionsEnabled =
-    !activeTaskConversation || activeTaskConversation.sessionBacked || backgroundDirectiveActive;
+  const readOnly = readOnlyNotice !== null;
+  const skillMentionsEnabled = !readOnly;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!chatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
@@ -588,9 +589,6 @@ export function Surface({
       })
     : null;
   const composerChatModel = backgroundLaunchSelection?.model ?? chatModel;
-  const legacyTaskReadOnly = Boolean(
-    activeTaskConversation && !activeTaskConversation.sessionBacked,
-  );
   const activeTaskId = activeTaskConversation?.taskId ?? null;
   const activeTaskStatus = activeTaskConversation?.status ?? null;
   const isTaskConversationStopping = Boolean(
@@ -756,7 +754,7 @@ export function Surface({
     id: chatInstanceKey,
     // useChat holds only this surface's in-flight overlay; persisted history
     // comes from the Electric-synced liveChat state and is merged below.
-    resume: Boolean(initialChat && taskConversation?.sessionBacked !== false),
+    resume: Boolean(initialChat && !readOnly),
     // Batch stream chunks into ~20fps UI updates instead of rendering the
     // whole thread on every token.
     experimental_throttle: 50,
@@ -916,10 +914,7 @@ export function Surface({
 
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   const liveTranscriptSessionId =
-    mode === "chat" &&
-    (!activeTaskConversation || activeTaskConversation.sessionBacked) &&
-    chatSessionId &&
-    persistedChatSessionId === chatSessionId
+    mode === "chat" && !readOnly && chatSessionId && persistedChatSessionId === chatSessionId
       ? chatSessionId
       : null;
   const liveChat = useHeadlessChatTranscript(liveTranscriptSessionId);
@@ -1045,7 +1040,8 @@ export function Surface({
   });
   const isForegroundTurnWorking = isChatTurnWorking(chatTurnPhase);
   const isTaskConversationWorking = Boolean(
-    activeTaskConversation?.sessionBacked &&
+    !readOnly &&
+      activeTaskConversation &&
       !isTaskConversationStopping &&
       (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
   );
@@ -1627,6 +1623,7 @@ export function Surface({
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (readOnly) return;
     const prompt = (pendingProgrammaticPromptRef.current ?? input).trim();
     pendingProgrammaticPromptRef.current = null;
     const backgroundChat = parseBackgroundChatDirective(prompt);
@@ -2714,7 +2711,7 @@ export function Surface({
                     isTask={Boolean(activeTaskConversation)}
                   />
                   <div className="flex shrink-0 items-center gap-2">
-                    {(!activeTaskConversation || activeTaskConversation.sessionBacked) &&
+                    {!readOnly &&
                     chatSessionId &&
                     persistedChatSessionId === chatSessionId &&
                     hasMessages ? (
@@ -2841,13 +2838,12 @@ export function Surface({
             className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
           >
             <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
-              {legacyTaskReadOnly ? (
+              {readOnlyNotice ? (
                 <p
                   className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
                   role="status"
                 >
-                  This pre-cutover task is available as read-only history. Start a new task to
-                  continue the work.
+                  {readOnlyNotice}
                 </p>
               ) : chatSendBlocked ? (
                 <p
@@ -3039,7 +3035,7 @@ export function Surface({
                           event.currentTarget.selectionStart,
                         )
                       }
-                      disabled={backgroundTaskSubmitting || legacyTaskReadOnly}
+                      disabled={backgroundTaskSubmitting || readOnly}
                       readOnly={voiceDictation.isActive}
                       className={cn(
                         "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
@@ -3077,7 +3073,7 @@ export function Surface({
                       (!isBackgroundSubmit && isForegroundTurnWorking) ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
-                      legacyTaskReadOnly ||
+                      readOnly ||
                       chatSendBlocked
                     }
                     isGenerating={
@@ -3108,9 +3104,7 @@ export function Surface({
                       <button
                         type="button"
                         aria-label="Attach files"
-                        disabled={
-                          isForegroundTurnWorking || legacyTaskReadOnly || voiceDictation.isActive
-                        }
+                        disabled={isForegroundTurnWorking || readOnly || voiceDictation.isActive}
                         onClick={() => attachmentFileInputRef.current?.click()}
                         className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
                       >
@@ -3124,7 +3118,7 @@ export function Surface({
                     disabled={
                       isForegroundTurnWorking ||
                       backgroundTaskSubmitting ||
-                      legacyTaskReadOnly ||
+                      readOnly ||
                       voiceDictation.isActive ||
                       newChatCommandOpen
                     }
@@ -3160,7 +3154,7 @@ export function Surface({
                       isForegroundTurnWorking ||
                       Boolean(chatSessionId) ||
                       voiceDictation.isActive ||
-                      legacyTaskReadOnly
+                      readOnly
                     }
                     codexConnected={codexConnected}
                     claudeCodeConnected={claudeCodeConnected}
@@ -3191,13 +3185,11 @@ export function Surface({
                       goalModeEnabled={codexGoalModeEnabled}
                       goalObjective={codexGoalObjective}
                       goalTokenBudget={codexGoalTokenBudget}
-                      disabled={
-                        isForegroundTurnWorking || legacyTaskReadOnly || voiceDictation.isActive
-                      }
+                      disabled={isForegroundTurnWorking || readOnly || voiceDictation.isActive}
                       modelDisabled={
                         isForegroundTurnWorking ||
                         Boolean(activeEngineChat) ||
-                        legacyTaskReadOnly ||
+                        readOnly ||
                         voiceDictation.isActive
                       }
                       onReasoningEffortChange={setCodexReasoningEffort}

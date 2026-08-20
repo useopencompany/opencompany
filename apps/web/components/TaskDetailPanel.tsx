@@ -69,7 +69,6 @@ function CanonicalTaskDetailPanel({
         taskId: run.task.id,
         status: activeRun ? "running" : (liveTask?.status ?? run.task.status),
         startedAtMs: taskActivityStartedAtMs(run),
-        sessionBacked: true,
         activeRunId: activeRun?.id ?? null,
       }}
     />
@@ -106,8 +105,8 @@ function LegacyTaskDetailPanel({ initialRun }: { initialRun: HarnessRunViewModel
         taskId: initialRun.task.id,
         status: initialRun.task.status,
         startedAtMs: taskActivityStartedAtMs(initialRun),
-        sessionBacked: false,
       }}
+      readOnlyNotice="This pre-cutover task is available as read-only history. Start a new task to continue the work."
     />
   );
 }
