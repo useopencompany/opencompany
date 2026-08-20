@@ -203,7 +203,6 @@ describe("MessageBubble assistant errors", () => {
       id: "assistant_4",
       role: "assistant",
       metadata: {
-        sessionId: "goat_chat_1",
         error:
           "<400> InternalError.Algo.DataInspectionFailed: Input text data may contain inappropriate content.",
       },
