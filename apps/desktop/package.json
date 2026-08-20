@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "Thin Electron shell that wraps the production opencompany web app for macOS.",
+  "homepage": "https://opencompany.ai",
+  "author": "opencompany <louis@acta.so>",
   "main": "dist/main.js",
   "scripts": {
     "build:src": "node scripts/build.mjs",

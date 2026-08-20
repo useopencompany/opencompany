@@ -1,17 +1,15 @@
 {
   "$schema": "https://download.todesktop.com/config-schema.json",
-  "id": "REPLACE_WITH_TODESKTOP_APP_ID",
+  "schemaVersion": 1,
+  "id": "260820qy6fin4",
   "appId": "chat.opencompany.desktop",
+  "appProtocolScheme": "opencompany",
   "productName": "opencompany",
   "icon": "./assets/icon.png",
+  "nodeVersion": "22.11.0",
+  "packageManager": "bun",
+  "bunVersion": "1.3.2",
   "mac": {
-    "category": "public.app-category.productivity",
-    "arch": ["arm64"]
-  },
-  "protocols": [
-    {
-      "name": "opencompany",
-      "schemes": ["opencompany"]
-    }
-  ]
+    "category": "public.app-category.productivity"
+  }
 }
