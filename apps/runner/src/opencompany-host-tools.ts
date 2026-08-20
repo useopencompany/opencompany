@@ -42,12 +42,15 @@ type Context = {
 export type HostTools = {
   bootstrap: ChatHostBootstrap;
   activeSkills: ChatHostBootstrap["activeSkills"];
-  startTask?: (input: {
-    prompt: string;
-    name?: string;
-    model: AgentModelId;
-    engine?: HarnessEngine;
-  }) => Promise<StartedTask>;
+  startTask?: (
+    input: {
+      prompt: string;
+      name?: string;
+      model: AgentModelId;
+      engine?: HarnessEngine;
+    },
+    context: { toolCallId: string },
+  ) => Promise<StartedTask>;
   scheduleTask?: (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
   editTaskSchedule?: (input: EditTaskScheduleToolInput) => Promise<EditTaskScheduleToolOutput>;
   deleteTaskSchedule?: (
@@ -95,7 +98,8 @@ export async function loadHostTools(
     activeSkills: bootstrap.activeSkills,
     ...(bootstrap.taskToolsEnabled
       ? {
-          startTask: (input) => call("start_task", input) as Promise<StartedTask>,
+          startTask: (input, toolContext) =>
+            call("start_task", input, toolContext.toolCallId) as Promise<StartedTask>,
           scheduleTask: (input) => call("schedule_task", input) as Promise<ScheduleTaskToolOutput>,
           editTaskSchedule: (input) =>
             call("edit_task_schedule", input) as Promise<EditTaskScheduleToolOutput>,
