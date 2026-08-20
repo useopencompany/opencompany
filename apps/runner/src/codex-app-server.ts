@@ -414,7 +414,6 @@ async function runTurnThroughProxy(input: {
       input: {
         ...input,
         dynamicTools,
-        allowFreshThreadOnResumeFailure: !input.reattachExistingTurn,
         ...(input.prepareBootstrapTurn ? { prepareBootstrapTurn: input.prepareBootstrapTurn } : {}),
       },
     });
@@ -422,13 +421,18 @@ async function runTurnThroughProxy(input: {
     if (threadId !== input.existingEngineSessionId) {
       await input.onEngineSessionId?.(threadId);
     }
+    // A recovery attempt only truly reattaches when the prior thread actually resumed. If
+    // thread/resume failed and we bootstrapped a fresh thread, there is no in-flight turn or
+    // existing goal to adopt, so fall through to a guarded fresh recovery turn (see onRecoveryStart
+    // below) instead of reading stale state.
+    const reattaching = Boolean(input.reattachExistingTurn) && thread.resumed;
     if (input.goalMode) {
-      const goal = input.reattachExistingTurn
+      const goal = reattaching
         ? await getThreadGoal({ client, threadId })
         : await setThreadGoal({ client, threadId, goalMode: input.goalMode });
       accumulator.setGoal(goal);
     }
-    const existingTurn = input.reattachExistingTurn
+    const existingTurn = reattaching
       ? findThreadTurn({
           thread: thread.value,
           turnId: input.existingEngineTurnId ?? null,
@@ -561,7 +565,6 @@ async function startOrResumeThread(input: {
     reasoningEffort: CodexReasoningEffort;
     planModeReasoningEffort: CodexReasoningEffort | null;
     dynamicTools: CodexAppServerDynamicTool[];
-    allowFreshThreadOnResumeFailure: boolean;
     prepareBootstrapTurn?: () => Promise<CodexAppServerBootstrapTurn>;
     plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
   };
@@ -583,7 +586,11 @@ async function startOrResumeThread(input: {
         bootstrapTurn: null,
       };
     } catch (error) {
-      if (!input.input.allowFreshThreadOnResumeFailure) throw error;
+      // A failed resume means the prior thread state is gone (e.g. the sandbox was paused or reset
+      // after a hard worker death mid-turn). Bootstrapping a fresh thread lets a recovery turn
+      // re-orient from persisted progress and continue, rather than failing the turn terminally and
+      // surfacing "Response stopped" to the user. Recovery attempts still flow through the
+      // onRecoveryStart guard downstream, so a genuine poison loop is bounded.
       logger.warn("Codex thread resume failed; bootstrapping a fresh thread", {
         event: "opencompany.codex_app_server_thread_resume_failed",
         error_name: error instanceof Error ? error.name : typeof error,
