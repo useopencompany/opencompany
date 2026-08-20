@@ -278,7 +278,7 @@ jobs:
           docker build --file Dockerfile.runner --tag "$image" .
           docker run --rm --entrypoint bun "$image" -e '
             import { readFileSync } from "node:fs";
-            import { extractDocumentMarkdown } from "@opencompany/file-extract";
+            import { extractDocumentMarkdown } from "./packages/file-extract/src/index.ts";
 
             const bytes = readFileSync("packages/file-extract/src/fixtures/sample.pptx");
             const result = await extractDocumentMarkdown({ bytes, filename: "sample.pptx" });
