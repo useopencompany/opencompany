@@ -7,6 +7,7 @@ todesktop.init();
 import { app, type BrowserWindow, dialog, Menu } from "electron";
 import { handleAuthDeepLink, registerDesktopAuth } from "./auth";
 import { buildApplicationMenu } from "./menu";
+import { registerDesktopNavigation } from "./navigation";
 import { APP_URL } from "./urls";
 import { createMainWindow } from "./window";
 
@@ -54,6 +55,7 @@ if (!app.requestSingleInstanceLock()) {
 
     Menu.setApplicationMenu(buildApplicationMenu(getWindow));
     registerDesktopAuth();
+    registerDesktopNavigation(getWindow);
 
     mainWindow = createMainWindow();
     mainWindow.on("closed", () => {

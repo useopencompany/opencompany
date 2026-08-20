@@ -10,6 +10,8 @@ declare global {
       platform: "darwin";
       // Opens Google sign-in in the system browser via the PKCE handoff.
       signInWithGoogle: () => void;
+      // Asks the shell to reload its configured app URL from the offline page.
+      retryConnection: () => void;
     };
   }
 }

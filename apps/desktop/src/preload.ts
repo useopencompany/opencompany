@@ -12,4 +12,5 @@ contextBridge.exposeInMainWorld("opencompanyDesktop", {
   version,
   platform: "darwin",
   signInWithGoogle: () => ipcRenderer.send("desktop-auth:start-google"),
+  retryConnection: () => ipcRenderer.send("desktop-navigation:retry"),
 });

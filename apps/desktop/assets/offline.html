@@ -63,9 +63,8 @@
       <button id="retry" type="button">Retry</button>
     </div>
     <script>
-      const appUrl = new URLSearchParams(location.search).get("appUrl");
       document.getElementById("retry").addEventListener("click", () => {
-        if (appUrl) location.href = appUrl;
+        window.opencompanyDesktop?.retryConnection();
       });
     </script>
   </body>

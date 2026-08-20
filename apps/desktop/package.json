@@ -8,6 +8,7 @@
     "build:src": "node scripts/build.mjs",
     "dev": "bun run build:src && electron .",
     "dev:local": "bun run build:src && OPENCOMPANY_DESKTOP_APP_URL=https://localhost:3443 electron .",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src scripts",
     "release": "bun run build:src && todesktop build"
@@ -20,6 +21,7 @@
     "@types/node": "^25.9.1",
     "electron": "43.4.1",
     "esbuild": "0.28.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }
