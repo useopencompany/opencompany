@@ -14,6 +14,10 @@ export type AcpTurnSummary = {
   sessionId: string | null;
 };
 
+// Upper bound on the MCP tool result echoed into the assistant part. Matches the command output
+// preview budget so a large tool result cannot bloat the persisted message row.
+const MCP_TOOL_RESULT_LIMIT = 4_000;
+
 type AcpToolKind = "command" | "file_change" | "web_search" | "subagent" | "tool";
 
 type AcpToolCall = {
@@ -376,6 +380,14 @@ function toolCompletedEvent(
         server: toolCall.server,
         tool: toolCall.tool ?? toolCall.name,
         status,
+        // Carry the call arguments and result through completion so the expanded tool row
+        // shows what actually happened instead of a bare "completed". A published artifact
+        // renders as its own part, so its raw JSON echo is intentionally omitted here.
+        rawInput: toolCall.rawInput,
+        result:
+          status === "completed" && !artifact
+            ? (truncate(outputText, MCP_TOOL_RESULT_LIMIT) ?? undefined)
+            : undefined,
         error: status === "failed" ? (truncate(outputText, 600) ?? "Tool failed.") : undefined,
         artifact: artifact ?? undefined,
       });

@@ -603,6 +603,41 @@ describe("applyCodexEventToUiMessageParts", () => {
     ]);
   });
 
+  it("folds MCP tool arguments and result into the durable part", () => {
+    const parts = reduceNormalized(
+      [],
+      [
+        normalizedEvent("mcp_tool.started", {
+          itemId: "search_1",
+          tool: "ToolSearch",
+          rawInput: { query: "select:Read", max_results: 5 },
+        }),
+        normalizedEvent("mcp_tool.completed", {
+          itemId: "search_1",
+          tool: "ToolSearch",
+          status: "completed",
+          rawInput: { query: "select:Read", max_results: 5 },
+          result: "Found 3 tools.",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_MCP_TOOL_NAME,
+        toolCallId: "search_1",
+        state: "output-available",
+        input: {
+          label: "MCP tool",
+          tool: "ToolSearch",
+          arguments: { query: "select:Read", max_results: 5 },
+        },
+        output: { status: "completed", result: "Found 3 tools." },
+      },
+    ]);
+  });
+
   it("projects a Brain host tool call as a durable generic tool part", () => {
     const parts = reduce(
       [],

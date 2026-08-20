@@ -373,6 +373,7 @@ function mcpToolCallPayload(item: Record<string, unknown>) {
   return {
     server: firstString(item.server),
     tool: firstString(item.tool),
+    arguments: readRecord(item.arguments) ?? item.arguments,
     error: firstString(stringFromPath(item, ["error", "message"]), item.error),
   };
 }

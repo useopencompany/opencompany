@@ -144,6 +144,49 @@ describe("createAcpEventNormalizer", () => {
     ).toEqual(["command.output", "command.completed"]);
   });
 
+  it("carries MCP tool arguments and result through the completed event", () => {
+    const normalizer = createAcpEventNormalizer();
+    normalizer.beginRun("session_1");
+
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "search_1",
+          title: "ToolSearch",
+          name: "ToolSearch",
+          rawInput: { query: "select:Read", max_results: 5 },
+          status: "in_progress",
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "mcp_tool.started",
+        payload: { itemId: "search_1", tool: "ToolSearch", rawInput: { query: "select:Read" } },
+      },
+    ]);
+
+    const [event] = normalizer.normalize(
+      update({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "search_1",
+        status: "completed",
+        content: [{ type: "content", content: { type: "text", text: "Found 3 tools." } }],
+      }),
+    );
+
+    expect(event).toMatchObject({
+      type: "mcp_tool.completed",
+      payload: {
+        itemId: "search_1",
+        tool: "ToolSearch",
+        status: "completed",
+        rawInput: { query: "select:Read", max_results: 5 },
+        result: "Found 3 tools.",
+      },
+    });
+  });
+
   it("extracts safe file metadata from a completed publish_artifact call", () => {
     const normalizer = createAcpEventNormalizer();
     normalizer.beginRun("session_1");
