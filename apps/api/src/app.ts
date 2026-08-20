@@ -1284,15 +1284,15 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "message", 30);
       const body = c.req.valid("json");
       const idempotencyKey = c.req.valid("header")["idempotency-key"];
-      const existingConversation = body.conversationId
-        ? await input.chat.getConversation(actor, body.conversationId)
+      const existingTarget = body.conversationId
+        ? await getConversationOrTask(input, actor, body.conversationId)
         : null;
-      if (existingConversation && existingConversation.engine !== body.engine.type) {
+      if (existingTarget && existingTarget.engine !== body.engine.type) {
         throw new ApiError(409, "conflict", "This conversation uses a different engine.");
       }
       const requestedModel =
         body.model ??
-        existingConversation?.model ??
+        existingTarget?.model ??
         input.defaultModel ??
         process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ??
         "moonshotai/kimi-k3";
@@ -1352,7 +1352,7 @@ export function createApiApp(input: CreateApiAppInput) {
         runtimeModel: admitted.runtimeModel,
         ...(admitted.settings ? { settings: admitted.settings } : {}),
       });
-      if (!result.idempotentReplay && !existingConversation && input.chatTitles) {
+      if (!result.idempotentReplay && !existingTarget && input.chatTitles) {
         void input.chatTitles
           .generate(actor, result.conversationId, result.messageId)
           .catch((error) =>
@@ -1368,7 +1368,7 @@ export function createApiApp(input: CreateApiAppInput) {
           input.captureChatMessage({
             actor,
             conversationId: result.conversationId,
-            firstMessage: !existingConversation,
+            firstMessage: !existingTarget,
             engine: admitted.engine,
             model: admitted.model,
             messageLength: body.content.length,
@@ -2925,11 +2925,20 @@ async function authorizeConversationRead(
   actor: Actor,
   conversationId: string,
 ) {
+  await getConversationOrTask(input, actor, conversationId, { includeArchived: true });
+}
+
+async function getConversationOrTask(
+  input: Pick<CreateApiAppInput, "chat" | "tasks">,
+  actor: Actor,
+  conversationId: string,
+  options: { includeArchived?: boolean } = {},
+) {
   try {
-    await input.chat.getConversation(actor, conversationId, { includeArchived: true });
+    return await input.chat.getConversation(actor, conversationId, options);
   } catch (error) {
     if (!(error instanceof CoreError) || error.code !== "not_found") throw error;
-    await input.tasks.getTaskByConversation(actor, conversationId);
+    return input.tasks.getTaskByConversation(actor, conversationId);
   }
 }
 
