@@ -124,7 +124,7 @@ describe("TaskDetailPanel", () => {
     expect(chat.messages.map((entry) => entry.id)).toEqual(["user_1", "assistant_1"]);
     expect(mocks.surfaceProps?.readOnlyNotice).toMatch(/pre-cutover task/i);
     expect(mocks.surfaceProps?.taskConversation).toMatchObject({
-      taskId: "goat_task_1",
+      taskId: run.task.id,
       status: "succeeded",
     });
   });
