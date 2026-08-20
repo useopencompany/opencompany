@@ -1196,7 +1196,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "succeeded",
           startedAtMs: Date.now(),
-          sessionBacked: true,
         }}
       />,
     );
@@ -1241,8 +1240,8 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_legacy_1",
           status: "succeeded",
           startedAtMs: Date.now(),
-          sessionBacked: false,
         }}
+        readOnlyNotice="This pre-cutover task is available as read-only history. Start a new task to continue the work."
       />,
     );
 
@@ -1252,6 +1251,11 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByRole("button", { name: "Attach files" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start voice dictation" })).toBeDisabled();
     expect(screen.getByLabelText("Model")).toBeDisabled();
+
+    const form = screen.getByRole("button", { name: "Send message" }).closest("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
   it("offers Brain skill mentions when continuing a session-backed task", async () => {
@@ -1287,7 +1291,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "succeeded",
           startedAtMs: Date.now(),
-          sessionBacked: true,
         }}
         userWorkosId="user_1"
       />,
@@ -1331,7 +1334,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "running",
           startedAtMs: Date.now(),
-          sessionBacked: true,
         }}
         taskSpawningEnabled
       />,
@@ -1391,7 +1393,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "running",
           startedAtMs: Date.now(),
-          sessionBacked: true,
           activeRunId: "run_1",
         }}
       />,
@@ -1433,7 +1434,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "canceled",
           startedAtMs: Date.now(),
-          sessionBacked: true,
           activeRunId: null,
         }}
       />,
@@ -1464,7 +1464,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "running",
           startedAtMs: Date.now(),
-          sessionBacked: true,
           activeRunId: "run_1",
         }}
       />,
