@@ -767,18 +767,28 @@ function fileChangeStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStat
 }
 
 function mcpToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+  // ACP (Claude Code) carries the call arguments as `rawInput`; the Codex app-server carries them
+  // as `arguments`. Surface whichever is present so the expanded row shows the real input.
+  const args = isRecord(event.payload.rawInput)
+    ? event.payload.rawInput
+    : isRecord(event.payload.arguments)
+      ? event.payload.arguments
+      : null;
   const input = {
     label: "MCP tool",
     ...(readString(event.payload.server) ? { server: event.payload.server } : {}),
     ...(readString(event.payload.tool) ? { tool: event.payload.tool } : {}),
+    ...(args ? { arguments: args } : {}),
   };
   if (event.type === "mcp_tool.started") return { state: "input-available", input };
   const error = readString(event.payload.error);
+  const result = readString(event.payload.result);
   return {
     state: "output-available",
     input,
     output: {
       status: readString(event.payload.status) ?? "completed",
+      ...(result ? { result } : {}),
       ...(error ? { error } : {}),
     },
   };
