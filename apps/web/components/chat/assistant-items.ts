@@ -44,6 +44,8 @@ export type AssistantRenderItem =
   | { type: "tool"; key: string; tool: ToolCallView }
   | { type: "subagent"; key: string; subagent: SubagentRenderView };
 
+export type AssistantVisibleOutputKind = AssistantRenderItem["type"] | "error";
+
 // A Claude Code Task call: the tool header plus the subagent's own nested trace, already
 // resolved into render items so the UI can render them under an expandable subagent row.
 export type SubagentRenderView = {
@@ -120,6 +122,16 @@ export function getOrderedAssistantItems(
   }
 
   return items;
+}
+
+export function firstVisibleAssistantOutputKind(
+  message: ChatUiMessage,
+  taskLookup: ChatTaskLookup,
+  options: AssistantRenderOptions = {},
+): AssistantVisibleOutputKind | null {
+  const firstItem = getOrderedAssistantItems(message, taskLookup, options)[0];
+  if (firstItem) return firstItem.type;
+  return message.metadata?.error ? "error" : null;
 }
 
 // Shared by the top-level turn and each subagent's nested trace: folds a parts array into ordered

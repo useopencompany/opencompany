@@ -12,6 +12,7 @@ import {
   claudeCodeModelSupportsReasoningEffort,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import { captureProductEvent } from "@opencompany/analytics/product/client";
 import type { ChatEngine as ChatEngine } from "@opencompany/core";
 import type { EngineRuntimeStatus, MessageEngine } from "@opencompany/protocol";
 import {
@@ -90,7 +91,10 @@ import {
   type CodingWorkspacePanelHandle,
 } from "@/components/CodingWorkspacePanel";
 import { ConversationRuntimeSync } from "@/components/ConversationRuntimeSync";
-import { buildChatTaskLookup } from "@/components/chat/assistant-items";
+import {
+  buildChatTaskLookup,
+  firstVisibleAssistantOutputKind,
+} from "@/components/chat/assistant-items";
 import {
   ComposerAttachments,
   ComposerDropOverlay,
@@ -233,6 +237,19 @@ type ActiveMentionToken = {
   query: string;
   // "@" opens engine/skill mentions; "#" opens task/workflow mentions.
   sigil: "@" | "#";
+};
+
+type PendingChatFirstOutputMeasurement = {
+  startedAt: number;
+  workspaceId: string;
+  conversationId: string;
+  runId: string | null;
+  assistantMessageId: string | null;
+  engine: ChatEngine;
+  selectedModel: string;
+  isNewSession: boolean;
+  sandboxStatusAtSend: EngineRuntimeStatus | "not_applicable" | "not_created" | "unknown";
+  sendSource: "composer" | "plan_implementation";
 };
 
 type MentionOption =
@@ -390,6 +407,7 @@ export function Surface({
   const onboardingKickoffReadRef = useRef(false);
   const onboardingKickoffPromptRef = useRef<string | null>(null);
   const activeTurnRef = useRef<ActiveChatTurn | null>(null);
+  const pendingChatFirstOutputRef = useRef<PendingChatFirstOutputMeasurement | null>(null);
   const lastSeenMarkRef = useRef<string | null>(null);
   const wasAgentWorkingRef = useRef(false);
   const optimisticAttachmentPreviewUrlsRef = useRef<ReadonlyMap<string, string[]>>(new Map());
@@ -595,20 +613,38 @@ export function Surface({
   }, []);
 
   const beginActiveTurn = useCallback(
-    (assistantMessageId: string | null = null) => {
+    (measurement: {
+      engine: ChatEngine;
+      selectedModel: string;
+      isNewSession: boolean;
+      sandboxStatusAtSend: PendingChatFirstOutputMeasurement["sandboxStatusAtSend"];
+      sendSource: PendingChatFirstOutputMeasurement["sendSource"];
+    }) => {
       const conversationId = routedChatSessionIdRef.current;
       if (!conversationId) return;
       const turn: ActiveChatTurn = {
         conversationId,
         runId: null,
-        assistantMessageId,
+        assistantMessageId: null,
         startedAtMs: Date.now(),
+      };
+      pendingChatFirstOutputRef.current = {
+        startedAt: performance.now(),
+        workspaceId,
+        conversationId,
+        runId: null,
+        assistantMessageId: null,
+        ...measurement,
       };
       replaceActiveTurn(turn);
       setLocalChatState(conversationId, "working");
     },
-    [replaceActiveTurn],
+    [replaceActiveTurn, workspaceId],
   );
+
+  const cancelChatFirstOutputMeasurement = useCallback(() => {
+    pendingChatFirstOutputRef.current = null;
+  }, []);
 
   const clearLocalActiveTurnState = useCallback((sessionId: string | null | undefined) => {
     clearLocalChatState(sessionId ?? activeTurnRef.current?.conversationId ?? null, "working");
@@ -665,6 +701,14 @@ export function Surface({
   const handleHeadlessAccepted = useCallback(
     ({ conversationId, runId, assistantMessageId }: HeadlessMessageAccepted) => {
       if (routedChatSessionIdRef.current === conversationId) {
+        const pendingMeasurement = pendingChatFirstOutputRef.current;
+        if (pendingMeasurement?.conversationId === conversationId) {
+          pendingChatFirstOutputRef.current = {
+            ...pendingMeasurement,
+            runId,
+            assistantMessageId,
+          };
+        }
         const currentTurn = activeTurnRef.current;
         replaceActiveTurn({
           conversationId,
@@ -737,6 +781,7 @@ export function Surface({
     onError: (error) => {
       clearLocalActiveTurnState(null);
       recordOptimisticTurnDuration(activeTurnRef.current?.assistantMessageId);
+      cancelChatFirstOutputMeasurement();
       clearActiveTurn();
       if (error.message?.includes(CHAT_OUT_OF_CREDITS_MESSAGE)) {
         void refetchCreditBalance();
@@ -1070,6 +1115,42 @@ export function Surface({
         : new Map(),
     [chatMessages, liveChatTasks, taskSpawningEnabled, tasks],
   );
+  useEffect(() => {
+    const pending = pendingChatFirstOutputRef.current;
+    if (!pending?.runId || !pending.assistantMessageId) return;
+
+    const assistantMessage = chatMessages.find(
+      (message) =>
+        message.id === pending.assistantMessageId &&
+        message.role === "assistant" &&
+        message.metadata?.runId === pending.runId,
+    );
+    if (!assistantMessage) return;
+
+    const outputKind = firstVisibleAssistantOutputKind(assistantMessage, chatTaskLookup, {
+      includeMetadataTaskCard: !Boolean(activeTaskConversation),
+    });
+    if (!outputKind) return;
+
+    // Passive effects run after React commits the assistant output to the DOM. Clear first so
+    // Strict Mode replays and subsequent stream chunks cannot emit a duplicate measurement.
+    pendingChatFirstOutputRef.current = null;
+    if (!pending.workspaceId) return;
+    captureProductEvent("chat_first_output_rendered", {
+      workspace_id: pending.workspaceId,
+      session_id: pending.conversationId,
+      run_id: pending.runId,
+      message_id: pending.assistantMessageId,
+      engine: pending.engine,
+      model: assistantMessage.metadata?.model ?? pending.selectedModel,
+      selected_model: pending.selectedModel,
+      is_new_session: pending.isNewSession,
+      sandbox_status_at_send: pending.sandboxStatusAtSend,
+      send_source: pending.sendSource,
+      output_kind: outputKind,
+      time_to_first_output_ms: Math.max(0, Math.round(performance.now() - pending.startedAt)),
+    });
+  }, [activeTaskConversation, chatMessages, chatTaskLookup]);
   const activeChatSummary = chatSessionId
     ? (recentChats.find((chat) => chat.id === chatSessionId) ?? null)
     : null;
@@ -1191,6 +1272,7 @@ export function Surface({
         runtime?: ConversationRuntimeView | null;
       } | null,
     ) => {
+      cancelChatFirstOutputMeasurement();
       if (chatSessionId && isEngineChat) {
         const currentComposerState = currentCodexComposerUiState({
           reasoningEffort: codexReasoningEffort,
@@ -1248,6 +1330,7 @@ export function Surface({
     },
     [
       applyCodexComposerUiState,
+      cancelChatFirstOutputMeasurement,
       chatSessionId,
       clearActiveTurn,
       clearError,
@@ -1983,7 +2066,18 @@ export function Surface({
       setCodexGoalTokenBudget("");
     }
     clearComposerDraft(chatSessionId);
-    beginActiveTurn();
+    beginActiveTurn({
+      engine: messageEngine.type,
+      selectedModel: String(model),
+      isNewSession: Boolean(newSessionId),
+      sandboxStatusAtSend:
+        messageEngine.type === "opencompany"
+          ? "not_applicable"
+          : newSessionId
+            ? "not_created"
+            : (codingSandboxStatus ?? "unknown"),
+      sendSource: "composer",
+    });
     // Clear without revoking previews: the optimistic bubble still shows them.
     composerAttachments.setAttachments([]);
     void sendMessage(message, {
@@ -1998,6 +2092,7 @@ export function Surface({
       if (newSessionId) removeOptimisticChatSummary(newSessionId);
       const requestChatSessionId = requestSessionId ?? newSessionId;
       clearLocalActiveTurnState(requestChatSessionId);
+      cancelChatFirstOutputMeasurement();
       clearActiveTurn();
       if (requestChatSessionId && routedChatSessionIdRef.current === requestChatSessionId) {
         setInput(prompt);
@@ -2098,7 +2193,13 @@ export function Surface({
     };
 
     clearError();
-    beginActiveTurn();
+    beginActiveTurn({
+      engine,
+      selectedModel: engineChatModel[engine],
+      isNewSession: false,
+      sandboxStatusAtSend: codingSandboxStatus ?? "unknown",
+      sendSource: "plan_implementation",
+    });
     setEngineSubmitting(true);
     try {
       setCodexPlanModeEnabled(false);
@@ -2120,6 +2221,7 @@ export function Surface({
       setChatSessionId(sessionId);
       router.refresh();
     } catch (error) {
+      cancelChatFirstOutputMeasurement();
       clearActiveTurn();
       throw error;
     } finally {
@@ -2148,6 +2250,7 @@ export function Surface({
   ]);
 
   const stopGeneration = useCallback(() => {
+    cancelChatFirstOutputMeasurement();
     if (activeTaskConversation) {
       if (isTaskConversationStopping) return;
       const taskId = activeTaskConversation.taskId;
@@ -2199,6 +2302,7 @@ export function Surface({
     activeTaskConversation,
     chatInstanceKey,
     chatSessionId,
+    cancelChatFirstOutputMeasurement,
     clearLocalActiveTurnState,
     conversationRuntime?.activeRunId,
     foregroundTurn?.runId,
