@@ -188,6 +188,7 @@ export type StartTaskToolInput = {
   prompt: string;
   name: string;
   engine?: HarnessEngine;
+  model?: AgentModelId;
   reason?: string;
 };
 

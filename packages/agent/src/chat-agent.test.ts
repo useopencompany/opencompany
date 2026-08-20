@@ -1,4 +1,4 @@
-import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
+import { CLAUDE_CODE_DEFAULT_MODEL_ID, CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
   CHAT_MAX_STEPS,
@@ -37,12 +37,15 @@ describe("start_task tool", () => {
       reason: "Requires connected source-control access.",
     });
 
-    expect(startTask).toHaveBeenCalledWith({
-      name: "Test repo access",
-      prompt: "Check repo access and report whether development work can start.",
-      model: CODEX_DEFAULT_MODEL_ID,
-      engine: "codex",
-    });
+    expect(startTask).toHaveBeenCalledWith(
+      {
+        name: "Test repo access",
+        prompt: "Check repo access and report whether development work can start.",
+        model: CODEX_DEFAULT_MODEL_ID,
+        engine: "codex",
+      },
+      { toolCallId: expect.any(String) },
+    );
   });
 
   it("preserves an already Codex-compatible task model", async () => {
@@ -66,12 +69,131 @@ describe("start_task tool", () => {
       prompt: "Check repo access and report whether development work can start.",
     });
 
-    expect(startTask).toHaveBeenCalledWith({
-      name: "Test repo access",
-      prompt: "Check repo access and report whether development work can start.",
-      model: "openai/gpt-5.5",
-      engine: "codex",
+    expect(startTask).toHaveBeenCalledWith(
+      {
+        name: "Test repo access",
+        prompt: "Check repo access and report whether development work can start.",
+        model: "openai/gpt-5.5",
+        engine: "codex",
+      },
+      { toolCallId: expect.any(String) },
+    );
+  });
+
+  it("uses the model explicitly requested for an opencompany task", async () => {
+    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: task.name ?? "Analyze launch",
+      prompt: task.prompt,
+    }));
+    const context = createProductChatToolContext({ model, startTask });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+      execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown>;
+    };
+
+    await startTaskTool.execute(
+      {
+        name: "Analyze launch",
+        prompt: "Analyze the launch plan.",
+        engine: "opencompany",
+        model: "xai/grok-4.3",
+      },
+      { toolCallId: "call_model" },
+    );
+
+    expect(startTask).toHaveBeenCalledWith(
+      {
+        name: "Analyze launch",
+        prompt: "Analyze the launch plan.",
+        model: "xai/grok-4.3",
+        engine: "opencompany",
+      },
+      { toolCallId: "call_model" },
+    );
+  });
+
+  it("defaults Claude Code tasks to a Claude Code-compatible model", async () => {
+    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: task.name ?? "Review code",
+      prompt: task.prompt,
+    }));
+    const context = createProductChatToolContext({
+      model: "moonshotai/kimi-k3",
+      requestedEngine: "claude_code",
+      startTask,
     });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await startTaskTool.execute({ name: "Review code", prompt: "Review the code." });
+
+    expect(startTask).toHaveBeenCalledWith(
+      {
+        name: "Review code",
+        prompt: "Review the code.",
+        model: CLAUDE_CODE_DEFAULT_MODEL_ID,
+        engine: "claude_code",
+      },
+      { toolCallId: expect.any(String) },
+    );
+  });
+
+  it("rejects a model that is incompatible with the requested coding engine", async () => {
+    const startTask = vi.fn();
+    const context = createProductChatToolContext({ model, startTask });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await expect(
+      startTaskTool.execute({
+        name: "Review code",
+        prompt: "Review the code.",
+        engine: "codex",
+        model: "anthropic/claude-sonnet-5",
+      }),
+    ).rejects.toThrow("not available for the Codex engine");
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
+  it("starts distinct tasks for separate calls in the same turn", async () => {
+    const startTask = vi.fn(
+      async (task: { prompt: string; name?: string }, context: { toolCallId: string }) => ({
+        id: `task_${context.toolCallId}`,
+        displayId: `TASK-${context.toolCallId}`,
+        name: task.name ?? "Task",
+        prompt: task.prompt,
+      }),
+    );
+    const context = createProductChatToolContext({ model, startTask });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+      execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown>;
+    };
+
+    const results = await Promise.all([
+      startTaskTool.execute(
+        { name: "Fix search", prompt: "Fix search.", model: "xai/grok-4.3" },
+        { toolCallId: "call_1" },
+      ),
+      startTaskTool.execute(
+        { name: "Fix billing", prompt: "Fix billing.", model: "xai/grok-4.3" },
+        { toolCallId: "call_2" },
+      ),
+    ]);
+
+    expect(results).toEqual([
+      expect.objectContaining({ taskId: "task_call_1", status: "queued" }),
+      expect.objectContaining({ taskId: "task_call_2", status: "queued" }),
+    ]);
+    expect(startTask).toHaveBeenCalledTimes(2);
+    expect(startTask.mock.calls.map(([, callContext]) => callContext.toolCallId)).toEqual([
+      "call_1",
+      "call_2",
+    ]);
   });
 });
 
@@ -209,7 +331,7 @@ describe("start_workflow tool", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("shares the one-task-per-turn guard with start_task", async () => {
+  it("does not start a workflow after a task has already started", async () => {
     let releaseTask!: (task: {
       id: string;
       displayId: string;

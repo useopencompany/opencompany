@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChatHostToolServiceDependencies } from "./host-tools";
-import { executePersistedChatHostTool } from "./persisted-host-tools";
+import { executePersistedChatHostTool, taskSpawnIdempotencyKey } from "./persisted-host-tools";
 
 function executeHostTool(input: {
   request: Parameters<typeof executePersistedChatHostTool>[0]["request"];
@@ -18,6 +18,19 @@ function executeHostTool(input: {
 }
 
 describe("headless Chat host tools", () => {
+  it("derives stable, distinct task idempotency keys from each tool call", () => {
+    expect(taskSpawnIdempotencyKey("turn_1", "call_1")).toBe(
+      taskSpawnIdempotencyKey("turn_1", "call_1"),
+    );
+    expect(taskSpawnIdempotencyKey("turn_1", "call_1")).not.toBe(
+      taskSpawnIdempotencyKey("turn_1", "call_2"),
+    );
+    expect(taskSpawnIdempotencyKey("turn_1")).toBe("agent:turn_1");
+    expect(taskSpawnIdempotencyKey("turn_1", "provider id with spaces")).toMatch(
+      /^agent:turn_1:tool:[a-f0-9]{64}$/,
+    );
+  });
+
   it("reattaches the matching authenticated browser profile after a worker recovery", async () => {
     const createAgentSession = vi.fn();
     const endAgentSession = vi.fn();
