@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   dbRows: [] as unknown[],
   googleApiCall: vi.fn(),
+  googleApiDownload: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -20,10 +22,17 @@ vi.mock("@opencompany/db/client", () => ({
 vi.mock("@opencompany/agent/integrations/google-access-token", async (importOriginal) => {
   const original =
     await importOriginal<typeof import("@opencompany/agent/integrations/google-access-token")>();
-  return { ...original, googleApiCall: mocks.googleApiCall };
+  return {
+    ...original,
+    googleApiCall: mocks.googleApiCall,
+    googleApiDownload: mocks.googleApiDownload,
+  };
 });
 
-import { GoogleAccessAuthError } from "@opencompany/agent/integrations/google-access-token";
+import {
+  GoogleAccessAuthError,
+  GoogleDownloadLimitError,
+} from "@opencompany/agent/integrations/google-access-token";
 import { resolveGoogleDriveActions } from "@/lib/actions/google-drive";
 import {
   ActionAuthError,
@@ -98,6 +107,7 @@ describe("resolveGoogleDriveActions", () => {
       "google_drive.search_files",
       "google_drive.get_document",
       "google_drive.get_spreadsheet_values",
+      "google_drive.read_file",
       "google_drive.create_document",
       "google_drive.replace_document_text",
       "google_drive.update_spreadsheet_values",
@@ -156,6 +166,7 @@ describe("resolveGoogleDriveActions", () => {
       "google_drive.search_files",
       "google_drive.get_document",
       "google_drive.get_spreadsheet_values",
+      "google_drive.read_file",
     ]);
   });
 
@@ -201,6 +212,7 @@ describe("resolveGoogleDriveActions", () => {
       "google_drive.search_files",
       "google_drive.get_document",
       "google_drive.get_spreadsheet_values",
+      "google_drive.read_file",
     ]);
 
     mocks.dbRows = [
@@ -1162,6 +1174,196 @@ describe("Google Drive account and auth handling", () => {
       "GET",
       expect.any(URL),
       { signal: CONTEXT.signal },
+    );
+  });
+});
+
+describe("google_drive.read_file", () => {
+  function fileMeta(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "file_1",
+      name: "figures.csv",
+      mimeType: "text/csv",
+      size: "24",
+      capabilities: { canDownload: true },
+      webViewLink: "https://drive.google.com/file/d/file_1/view",
+      ...overrides,
+    };
+  }
+
+  function readAction() {
+    return resolveGoogleDriveActions("user_1").then((catalog) =>
+      findAction(catalog, "google_drive.read_file"),
+    );
+  }
+
+  function lastDownloadUrl() {
+    return mocks.googleApiDownload.mock.calls.at(-1)?.[1] as URL;
+  }
+
+  it("downloads an ordinary file and returns bounded Markdown", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue(fileMeta());
+    mocks.googleApiDownload.mockResolvedValue({
+      bytes: Buffer.from("metric,value\nrevenue,120\n"),
+      contentType: "text/csv",
+    });
+
+    const action = await readAction();
+    const result = (await action.execute({ file_id: "file_1" }, CONTEXT)) as {
+      file: { id: string; name: string; mimeType: string; sourceRef: string; size?: number };
+      format: string;
+      markdown: string;
+      truncated: boolean;
+    };
+
+    expect(lastDownloadUrl().searchParams.get("alt")).toBe("media");
+    expect(result.file).toMatchObject({
+      id: "file_1",
+      name: "figures.csv",
+      mimeType: "text/csv",
+      sourceRef: "google-drive:file:file_1",
+      size: 24,
+    });
+    expect(result.format).toBe("csv");
+    expect(result.markdown).toContain("| metric | value |");
+    expect(result.truncated).toBe(false);
+  });
+
+  it("exports a Google Doc to Markdown", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue(
+      fileMeta({ name: "Plan", mimeType: "application/vnd.google-apps.document", size: undefined }),
+    );
+    mocks.googleApiDownload.mockResolvedValue({
+      bytes: Buffer.from("# Plan\n\nShip it."),
+      contentType: "text/markdown",
+    });
+
+    const action = await readAction();
+    const result = (await action.execute({ file_id: "file_1" }, CONTEXT)) as {
+      format: string;
+      markdown: string;
+    };
+
+    const url = lastDownloadUrl();
+    expect(url.pathname.endsWith("/export")).toBe(true);
+    expect(url.searchParams.get("mimeType")).toBe("text/markdown");
+    expect(result.format).toBe("text");
+    expect(result.markdown).toBe("# Plan\n\nShip it.");
+  });
+
+  it("exports a Google Sheet to an AnyDoc-supported format", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue(
+      fileMeta({
+        name: "Numbers",
+        mimeType: "application/vnd.google-apps.spreadsheet",
+        size: undefined,
+      }),
+    );
+    mocks.googleApiDownload.mockResolvedValue({
+      bytes: readFileSync(
+        new URL("../../../../packages/file-extract/src/fixtures/sample.xlsx", import.meta.url),
+      ),
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const action = await readAction();
+    const result = (await action.execute({ file_id: "file_1" }, CONTEXT)) as {
+      format: string;
+      markdown: string;
+    };
+
+    expect(lastDownloadUrl().searchParams.get("mimeType")).toBe(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    expect(result.format).toBe("xlsx");
+    expect(result.markdown).toContain("| metric | value |");
+  });
+
+  it("pages long files with offset and nextOffset", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue(
+      fileMeta({ name: "notes.txt", mimeType: "text/plain", size: undefined }),
+    );
+    mocks.googleApiDownload.mockResolvedValue({
+      bytes: Buffer.from("y".repeat(45_000)),
+      contentType: "text/plain",
+    });
+
+    const action = await readAction();
+    const first = (await action.execute({ file_id: "file_1" }, CONTEXT)) as {
+      markdown: string;
+      nextOffset?: number;
+      truncated: boolean;
+    };
+    expect(first.markdown).toHaveLength(40_000);
+    expect(first.nextOffset).toBe(40_000);
+    expect(first.truncated).toBe(true);
+
+    const second = (await action.execute({ file_id: "file_1", offset: 40_000 }, CONTEXT)) as {
+      markdown: string;
+      nextOffset?: number;
+      truncated: boolean;
+    };
+    expect(second.markdown).toHaveLength(5_000);
+    expect(second.nextOffset).toBeUndefined();
+    expect(second.truncated).toBe(false);
+  });
+
+  it("returns a stable error for an unreadable file and never downloads it", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue(
+      fileMeta({ mimeType: "application/vnd.google-apps.form", size: undefined }),
+    );
+
+    const action = await readAction();
+    const result = (await action.execute({ file_id: "file_1" }, CONTEXT)) as { error?: string };
+    expect(result.error).toBe("unsupported");
+    expect(mocks.googleApiDownload).not.toHaveBeenCalled();
+  });
+
+  it("refuses files the account cannot download", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue(fileMeta({ capabilities: { canDownload: false } }));
+
+    const action = await readAction();
+    const result = (await action.execute({ file_id: "file_1" }, CONTEXT)) as { error?: string };
+    expect(result.error).toBe("forbidden");
+    expect(mocks.googleApiDownload).not.toHaveBeenCalled();
+  });
+
+  it("rejects a file whose declared size exceeds the 20 MB limit before downloading", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue(
+      fileMeta({ mimeType: "application/pdf", size: String(21 * 1024 * 1024) }),
+    );
+
+    const action = await readAction();
+    const result = (await action.execute({ file_id: "file_1" }, CONTEXT)) as { error?: string };
+    expect(result.error).toBe("too_large");
+    expect(mocks.googleApiDownload).not.toHaveBeenCalled();
+  });
+
+  it("maps a mid-download size overrun to a too_large error", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue(
+      fileMeta({ mimeType: "application/pdf", size: undefined }),
+    );
+    mocks.googleApiDownload.mockRejectedValue(new GoogleDownloadLimitError(20 * 1024 * 1024));
+
+    const action = await readAction();
+    const result = (await action.execute({ file_id: "file_1" }, CONTEXT)) as { error?: string };
+    expect(result.error).toBe("too_large");
+  });
+
+  it("requires an explicit account when multiple accounts are connected", async () => {
+    mocks.dbRows = [connectedRow("a@example.com"), connectedRow("b@example.com")];
+    const action = await readAction();
+    expect(action.params.required).toEqual(["file_id", "account"]);
+    await expect(action.execute({ file_id: "file_1" }, CONTEXT)).rejects.toThrow(
+      "Multiple Google Drive accounts",
     );
   });
 });

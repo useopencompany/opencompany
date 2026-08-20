@@ -12,7 +12,7 @@ import {
   type ChatAttachmentUpload,
   PostgresChatAttachmentRepository,
 } from "@opencompany/db/chat-repository";
-import { extractDocxText, extractUtf8Text, extractXlsxText } from "@opencompany/file-extract";
+import { extractDocumentMarkdown } from "@opencompany/file-extract";
 import { del, put } from "@vercel/blob";
 import { ApiError } from "./errors";
 
@@ -74,7 +74,12 @@ export function createAttachmentUploadService(input: {
           sizeBytes: bytes.byteLength,
           blobPathname: stored.pathname,
           blobUrl: stored.url,
-          extractedText: await extractAttachmentText(validation.format, bytes),
+          extractedText: await extractAttachmentText(
+            validation.format,
+            bytes,
+            filename,
+            validation.mediaType,
+          ),
           expiresAt: new Date(createdAt.getTime() + CHAT_ATTACHMENT_UPLOAD_TTL_MS),
         });
         if (!created) {
@@ -105,21 +110,28 @@ function vercelBlobStorage(): AttachmentStorage {
   };
 }
 
-async function extractAttachmentText(format: ChatAttachmentFormat, bytes: Buffer) {
+async function extractAttachmentText(
+  format: ChatAttachmentFormat,
+  bytes: Buffer,
+  filename: string,
+  mediaType: string,
+) {
+  // PDFs and images are handed to supported models natively rather than extracted here.
+  if (!isTextExtractableChatAttachment(format)) {
+    return null;
+  }
   try {
-    if (format === "docx") {
-      return (await extractDocxText(bytes, { maxBytes: EXTRACTED_TEXT_MAX_BYTES })) || null;
-    }
-    if (format === "xlsx") {
-      return (await extractXlsxText(bytes, { maxBytes: EXTRACTED_TEXT_MAX_BYTES })) || null;
-    }
-    if (isTextExtractableChatAttachment(format)) {
-      return extractUtf8Text(bytes, { maxBytes: EXTRACTED_TEXT_MAX_BYTES }) || null;
-    }
+    const { markdown } = await extractDocumentMarkdown({
+      bytes,
+      filename,
+      mediaType,
+      maxOutputBytes: EXTRACTED_TEXT_MAX_BYTES,
+    });
+    return markdown || null;
   } catch {
     // Extraction is best effort. The private file still remains available to supported models.
+    return null;
   }
-  return null;
 }
 
 function normalizedFilename(value: string) {

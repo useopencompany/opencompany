@@ -78,6 +78,84 @@ export async function googleApiCall(
   return text ? (JSON.parse(text) as unknown) : {};
 }
 
+// Thrown when a download would exceed the caller's byte ceiling, either from the
+// declared Content-Length or once the streamed body crosses it mid-download.
+export class GoogleDownloadLimitError extends Error {
+  readonly limitBytes: number;
+
+  constructor(limitBytes: number) {
+    super(`Download exceeds the ${Math.floor(limitBytes / (1024 * 1024))} MB limit.`);
+    this.name = "GoogleDownloadLimitError";
+    this.limitBytes = limitBytes;
+  }
+}
+
+// Authenticated binary download for one connected account. Shares googleApiCall's
+// token refresh, single 401 retry, and needs_reauth handling, but returns the raw
+// bytes and enforces `maxBytes` both from the declared length and while streaming.
+// Bytes are held only in memory and never logged.
+export async function googleApiDownload(
+  connection: GoogleAccessConnection,
+  url: URL,
+  options: { signal?: AbortSignal; maxBytes: number },
+): Promise<{ bytes: Buffer; contentType: string | null }> {
+  const signal = options.signal ?? null;
+  const run = async (accessToken: string) =>
+    fetch(url, { method: "GET", headers: { Authorization: `Bearer ${accessToken}` }, signal });
+
+  const tokenOptions = signal ? { signal } : {};
+  let token = await getGoogleAccessToken(connection, tokenOptions);
+  let response = await run(token);
+  if (response.status === 401) {
+    token = await getGoogleAccessToken(connection, { ...tokenOptions, forceRefresh: true });
+    response = await run(token);
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    if (response.status === 401 || isGooglePermissionError(response.status, text)) {
+      await markGoogleNeedsReauth(connection, "Google rejected API access.");
+      throw new GoogleAccessAuthError("Google rejected access for this account.");
+    }
+    const detail = googleApiErrorDetail(text);
+    throw new Error(
+      detail
+        ? `Google API request failed with ${response.status}: ${detail}.`
+        : `Google API request failed with ${response.status}.`,
+    );
+  }
+
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > options.maxBytes) {
+    throw new GoogleDownloadLimitError(options.maxBytes);
+  }
+  const bytes = await readBoundedBody(response, options.maxBytes);
+  return { bytes, contentType: response.headers.get("content-type") };
+}
+
+async function readBoundedBody(response: Response, maxBytes: number): Promise<Buffer> {
+  const body = response.body;
+  if (!body) {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.byteLength > maxBytes) throw new GoogleDownloadLimitError(maxBytes);
+    return buffer;
+  }
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new GoogleDownloadLimitError(maxBytes);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
 export async function getGoogleAccessToken(
   connection: GoogleAccessConnection,
   options?: { signal?: AbortSignal; forceRefresh?: boolean },

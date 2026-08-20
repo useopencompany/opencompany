@@ -3,12 +3,25 @@ import { getDb } from "@opencompany/db/client";
 import { integrations } from "@opencompany/db/product-schema";
 import type { JSONSchema7 } from "ai";
 import { and, desc, eq, ne } from "drizzle-orm";
-import { GoogleAccessAuthError, googleApiCall } from "../integrations/google-access-token";
+import {
+  GoogleAccessAuthError,
+  GoogleDownloadLimitError,
+  googleApiCall,
+  googleApiDownload,
+} from "../integrations/google-access-token";
 import {
   hasGoogleDocsWriteScope,
   hasGoogleSheetsWriteScope,
 } from "../integrations/google-drive-scopes";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
+import {
+  DOCUMENT_READ_MAX_RESULT_CHARS,
+  DOCUMENT_READ_TIMEOUT_MS,
+  documentContentFields,
+  MAX_DOCUMENT_INPUT_BYTES,
+  readDocumentWindow,
+  readOffsetParam,
+} from "./document-read";
 import {
   ACTION_EFFECTS_READ,
   ACTION_EFFECTS_WRITE,
@@ -29,6 +42,8 @@ const GOOGLE_DOCS_URL = "https://docs.googleapis.com/v1/documents";
 const GOOGLE_SHEETS_URL = "https://sheets.googleapis.com/v4/spreadsheets";
 const GOOGLE_DOC_MIME_TYPE = "application/vnd.google-apps.document";
 const GOOGLE_SHEET_MIME_TYPE = "application/vnd.google-apps.spreadsheet";
+const GOOGLE_SLIDES_MIME_TYPE = "application/vnd.google-apps.presentation";
+const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const DEFAULT_SEARCH_RESULTS = 10;
 const MAX_SEARCH_RESULTS = 25;
 const MAX_QUERY_CHARS = 200;
@@ -85,6 +100,7 @@ export async function resolveGoogleDriveActions(
       searchFilesAction(readConnections),
       getDocumentAction(readConnections),
       getSpreadsheetValuesAction(readConnections),
+      readFileAction(readConnections),
     );
   }
   if (docsWriteConnections.length > 0) {
@@ -853,6 +869,176 @@ function appendSpreadsheetValuesAction(
       };
     },
   };
+}
+
+function readFileAction(connections: readonly GoogleDriveConnection[]): ResolvedAction {
+  const accountParam = accountParamSchema(connections);
+  const required = ["file_id"];
+  if (connections.length > 1) required.push("account");
+
+  return {
+    id: "google_drive.read_file",
+    provider: "google_drive",
+    capability: "read",
+    effects: ACTION_EFFECTS_READ,
+    timeoutMs: DOCUMENT_READ_TIMEOUT_MS,
+    maxResultChars: DOCUMENT_READ_MAX_RESULT_CHARS,
+    ...permissionAnnotation("read", connections),
+    description:
+      "Read a Drive file's text as Markdown by Drive file id: ordinary files (PDF, Word, Excel, PowerPoint, CSV, RTF, text, Markdown) and Google Docs, Sheets, and Slides. Long files page with offset/nextOffset. Scanned or image-only PDFs cannot be read. For Google Docs revision ids or precise Sheet ranges, prefer google_drive.get_document or google_drive.get_spreadsheet_values.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      required,
+      properties: {
+        file_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_FILE_ID_CHARS,
+          description: "Google Drive file id, usually from google_drive.search_files.",
+        },
+        offset: {
+          type: "integer",
+          minimum: 0,
+          description: "Character offset to resume from; pass nextOffset from a previous call.",
+        },
+        ...accountParam,
+      },
+    },
+    execute: async (params, context) => {
+      const hasMultipleAccounts = connections.length > 1;
+      assertOnlyKnownParams(params, ["file_id", "offset"], hasMultipleAccounts);
+      const account = hasMultipleAccounts
+        ? boundedOptionalString(params, "account", MAX_ACCOUNT_CHARS)
+        : undefined;
+      const connection = resolveConnection(connections, account);
+      const fileId = requiredBoundedString(params, "file_id", MAX_FILE_ID_CHARS);
+      const offset = readOffsetParam(params);
+
+      const metaUrl = new URL(`${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}`);
+      metaUrl.searchParams.set("supportsAllDrives", "true");
+      metaUrl.searchParams.set(
+        "fields",
+        "id,name,mimeType,size,capabilities(canDownload),webViewLink,driveId",
+      );
+      const meta = asRecord(await googleDriveApiCall(context, connection, "GET", metaUrl));
+      const mimeType = readString(meta.mimeType, 200);
+      if (!mimeType) throw new Error("Google Drive returned invalid file metadata.");
+      const name = truncateText(readString(meta.name, 32_768) ?? "Untitled", MAX_FILE_NAME_CHARS);
+      const declaredSize = parseDriveSize(meta.size);
+      const metadata = {
+        account: connectionLabel(connection),
+        integrationId: connection.integrationId,
+        file: {
+          id: fileId,
+          name,
+          mimeType,
+          sourceRef: driveFileSourceRef(fileId),
+          ...(readGoogleUrl(meta.webViewLink) ? { url: readGoogleUrl(meta.webViewLink) } : {}),
+          ...(declaredSize !== null ? { size: declaredSize } : {}),
+        },
+      };
+
+      const mode = driveReadMode(mimeType);
+      if (!mode) {
+        return {
+          ...metadata,
+          error: "unsupported",
+          reason: `Unsupported Google Drive file type: ${mimeType}.`,
+        };
+      }
+      if (asRecord(meta.capabilities).canDownload === false) {
+        return {
+          ...metadata,
+          error: "forbidden",
+          reason: "Google Drive does not allow this file to be downloaded.",
+        };
+      }
+      if (declaredSize !== null && declaredSize > MAX_DOCUMENT_INPUT_BYTES) {
+        return { ...metadata, error: "too_large", reason: "File exceeds the 20 MB limit." };
+      }
+
+      const downloadUrl = new URL(`${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}`);
+      if (mode.exportMimeType) {
+        downloadUrl.pathname += "/export";
+        downloadUrl.searchParams.set("mimeType", mode.exportMimeType);
+      } else {
+        downloadUrl.searchParams.set("alt", "media");
+        downloadUrl.searchParams.set("supportsAllDrives", "true");
+      }
+
+      let bytes: Buffer;
+      try {
+        ({ bytes } = await googleDriveDownload(context, connection, downloadUrl));
+      } catch (error) {
+        if (error instanceof GoogleDownloadLimitError) {
+          return { ...metadata, error: "too_large", reason: "File exceeds the 20 MB limit." };
+        }
+        throw error;
+      }
+      const content = await readDocumentWindow({
+        bytes,
+        filename: name,
+        mediaType: mode.contentType,
+        offset,
+      });
+      return { ...metadata, ...documentContentFields(content) };
+    },
+  };
+}
+
+// Resolves how to fetch a Drive file and the media type its bytes will carry.
+// Google-native Docs/Sheets/Slides export into an AnyDoc-supported format; other
+// Google-native types (folders, forms, drawings) are not readable; everything
+// else downloads verbatim and is detected from its bytes. `null` means unreadable.
+function driveReadMode(
+  mimeType: string,
+): { exportMimeType: string | null; contentType: string } | null {
+  if (mimeType === GOOGLE_DOC_MIME_TYPE) {
+    return { exportMimeType: "text/markdown", contentType: "text/markdown" };
+  }
+  if (mimeType === GOOGLE_SHEET_MIME_TYPE) {
+    return { exportMimeType: XLSX_MIME_TYPE, contentType: XLSX_MIME_TYPE };
+  }
+  if (mimeType === GOOGLE_SLIDES_MIME_TYPE) {
+    return { exportMimeType: "text/plain", contentType: "text/plain" };
+  }
+  if (mimeType.startsWith("application/vnd.google-apps")) return null;
+  return { exportMimeType: null, contentType: mimeType };
+}
+
+async function googleDriveDownload(
+  context: ActionExecuteContext,
+  connection: GoogleDriveConnection,
+  url: URL,
+): Promise<{ bytes: Buffer; contentType: string | null }> {
+  try {
+    return await googleApiDownload(
+      {
+        userWorkosId: context.userWorkosId,
+        integrationId: connection.integrationId,
+        provider: "google_drive",
+      },
+      url,
+      { signal: context.signal, maxBytes: MAX_DOCUMENT_INPUT_BYTES },
+    );
+  } catch (error) {
+    if (error instanceof GoogleAccessAuthError) {
+      throw new ActionAuthError(
+        "auth_expired",
+        "google_drive",
+        `Reconnect Google Drive for ${connectionLabel(connection)} in Settings → Integrations, then retry.`,
+      );
+    }
+    throw error;
+  }
+}
+
+function parseDriveSize(value: unknown): number | null {
+  const text = readString(value, 32);
+  if (!text) return null;
+  const size = Number(text);
+  return Number.isSafeInteger(size) && size >= 0 ? size : null;
 }
 
 function accountParamSchema(connections: readonly GoogleDriveConnection[]) {

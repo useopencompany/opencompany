@@ -6,6 +6,14 @@ import { hasGmailDraftScope, hasGmailSendScope } from "../integrations/gmail-sco
 import { GoogleAccessAuthError, googleApiCall } from "../integrations/google-access-token";
 import { type CapabilityId, effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
+  DOCUMENT_READ_MAX_RESULT_CHARS,
+  DOCUMENT_READ_TIMEOUT_MS,
+  documentContentFields,
+  MAX_DOCUMENT_INPUT_BYTES,
+  readDocumentWindow,
+  readOffsetParam,
+} from "./document-read";
+import {
   ACTION_EFFECTS_READ,
   ACTION_EFFECTS_WRITE,
   ActionAuthError,
@@ -42,9 +50,19 @@ type GmailConnection = {
 type GmailHeader = { name?: string; value?: string };
 
 type GmailPayloadPart = {
+  partId?: string;
   mimeType?: string;
-  body?: { data?: string };
+  filename?: string;
+  body?: { data?: string; attachmentId?: string; size?: number };
   parts?: GmailPayloadPart[];
+};
+
+type GmailAttachment = {
+  partId: string;
+  filename: string;
+  mediaType?: string;
+  attachmentId?: string;
+  size?: number;
 };
 
 type GmailMessagePayload = GmailPayloadPart & { headers?: GmailHeader[] };
@@ -228,6 +246,67 @@ export async function resolveGmailActions(
             withGmailSource(compactFullMessage(message, MAX_THREAD_MESSAGE_BODY_CHARS), connection),
           ),
         };
+      },
+    },
+    {
+      id: "gmail.read_attachment",
+      provider: "gmail",
+      capability: "read",
+      effects: ACTION_EFFECTS_READ,
+      timeoutMs: DOCUMENT_READ_TIMEOUT_MS,
+      maxResultChars: DOCUMENT_READ_MAX_RESULT_CHARS,
+      ...permissionAnnotation("read", connections),
+      description:
+        "Read a Gmail attachment's text as Markdown (PDF, Word, Excel, PowerPoint, CSV, RTF, text, Markdown). Take message_id and part_id from the attachments list on gmail.get_message or gmail.get_thread. Long files page with offset/nextOffset. Scanned or image-only PDFs cannot be read.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["message_id", "part_id"],
+        properties: {
+          message_id: {
+            type: "string",
+            description: "Gmail message id the attachment belongs to.",
+          },
+          part_id: {
+            type: "string",
+            description: "MIME part id of the attachment, from the message's attachments list.",
+          },
+          offset: {
+            type: "number",
+            description: "Character offset to resume from; pass nextOffset from a previous call.",
+          },
+          ...accountParam,
+        },
+      },
+      execute: async (params, context) => {
+        const connection = resolveConnection(connections, optionalStringParam(params, "account"));
+        const messageId = requiredStringParam(params, "message_id");
+        const partId = requiredStringParam(params, "part_id");
+        const offset = readOffsetParam(params);
+        const url = new URL(`${GMAIL_BASE}/messages/${messageId}`);
+        url.searchParams.set("format", "full");
+        const message = (await gmailApiCall(context, connection, url)) as GmailMessage;
+        const part = findPartById(message.payload, partId);
+        if (!part || !part.filename?.trim()) {
+          throw new ActionInvalidParamsError(
+            `No attachment found at part ${JSON.stringify(partId)} in message ${JSON.stringify(messageId)}. Use the attachments list from gmail.get_message.`,
+          );
+        }
+        const metadata = attachmentMetadata(connection, messageId, part);
+        if (typeof part.body?.size === "number" && part.body.size > MAX_DOCUMENT_INPUT_BYTES) {
+          return { ...metadata, error: "too_large", reason: "Attachment exceeds the 20 MB limit." };
+        }
+        const bytes = await downloadGmailAttachment(context, connection, messageId, part);
+        if (bytes.byteLength > MAX_DOCUMENT_INPUT_BYTES) {
+          return { ...metadata, error: "too_large", reason: "Attachment exceeds the 20 MB limit." };
+        }
+        const content = await readDocumentWindow({
+          bytes,
+          filename: part.filename,
+          mediaType: part.mimeType,
+          offset,
+        });
+        return { ...metadata, ...documentContentFields(content) };
       },
     },
   ];
@@ -832,6 +911,7 @@ function compactMessageMetadata(message: GmailMessage) {
 
 function compactFullMessage(message: GmailMessage, maxBodyChars: number) {
   const headers = headerMap(message.payload?.headers);
+  const attachments = collectAttachments(message.payload);
   return {
     id: message.id,
     threadId: message.threadId,
@@ -842,6 +922,77 @@ function compactFullMessage(message: GmailMessage, maxBodyChars: number) {
     date: headers.date,
     snippet: truncateText(message.snippet, 300),
     bodyText: truncateText(extractBodyText(message.payload), maxBodyChars),
+    ...(attachments.length > 0 ? { attachments } : {}),
+  };
+}
+
+// Walks the MIME tree for parts that carry a filename, preserving the identifiers
+// gmail.read_attachment needs (part id, attachment id) plus media type and size.
+function collectAttachments(payload: GmailMessagePayload | undefined): GmailAttachment[] {
+  const attachments: GmailAttachment[] = [];
+  const walk = (part: GmailPayloadPart) => {
+    if (part.partId && part.filename?.trim()) {
+      attachments.push({
+        partId: part.partId,
+        filename: part.filename,
+        ...(part.mimeType ? { mediaType: part.mimeType } : {}),
+        ...(part.body?.attachmentId ? { attachmentId: part.body.attachmentId } : {}),
+        ...(typeof part.body?.size === "number" ? { size: part.body.size } : {}),
+      });
+    }
+    for (const child of part.parts ?? []) walk(child);
+  };
+  if (payload) walk(payload);
+  return attachments;
+}
+
+function findPartById(
+  payload: GmailMessagePayload | undefined,
+  partId: string,
+): GmailPayloadPart | undefined {
+  const walk = (part: GmailPayloadPart): GmailPayloadPart | undefined => {
+    if (part.partId === partId) return part;
+    for (const child of part.parts ?? []) {
+      const found = walk(child);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  return payload ? walk(payload) : undefined;
+}
+
+// Small inline attachments carry their bytes directly; larger ones are fetched by
+// attachment id. Both encode base64url.
+async function downloadGmailAttachment(
+  context: ActionExecuteContext,
+  connection: GmailConnection,
+  messageId: string,
+  part: GmailPayloadPart,
+): Promise<Buffer> {
+  if (part.body?.data) return Buffer.from(part.body.data, "base64url");
+  const attachmentId = part.body?.attachmentId;
+  if (!attachmentId) {
+    throw new ActionInvalidParamsError("That message part has no downloadable attachment content.");
+  }
+  const url = new URL(`${GMAIL_BASE}/messages/${messageId}/attachments/${attachmentId}`);
+  const attachment = (await gmailApiCall(context, connection, url)) as { data?: string };
+  if (!attachment.data) throw new Error("Gmail returned no data for the attachment.");
+  return Buffer.from(attachment.data, "base64url");
+}
+
+function attachmentMetadata(
+  connection: GmailConnection,
+  messageId: string,
+  part: GmailPayloadPart,
+): Record<string, unknown> {
+  return {
+    account: connectionLabel(connection),
+    integrationId: connection.integrationId,
+    messageId,
+    partId: part.partId,
+    filename: part.filename,
+    ...(part.mimeType ? { mediaType: part.mimeType } : {}),
+    ...(typeof part.body?.size === "number" ? { size: part.body.size } : {}),
   };
 }
 
