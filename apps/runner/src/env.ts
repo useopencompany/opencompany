@@ -48,7 +48,7 @@ export type RunnerEnv = {
   codexTimeoutMs: number;
   codexModel: string;
   // Idle timeout for persistent opencompany codex-chat sandboxes. Unlike per-task sandboxes (killed after
-  // each run), a chat sandbox stays alive across turns so files and the app-server daemon survive;
+  // each run), a chat sandbox stays alive across turns so files and ACP session state survive;
   // on idle timeout E2B pauses it and Sandbox.connect auto-resumes on the next message.
   codexChatIdleTimeoutMs: number;
   // Delivery-lease TTL for runner jobs. The lease heartbeats every 5s while a job runs, so this only

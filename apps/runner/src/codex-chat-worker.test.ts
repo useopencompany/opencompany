@@ -65,7 +65,7 @@ vi.mock("@opencompany/telemetry", async (importOriginal) => {
 
 const eventMocks = vi.hoisted(() => ({
   fail: vi.fn(),
-  createCodexChatProjector: vi.fn(() => ({ fail: eventMocks.fail })),
+  createExternalEngineProjector: vi.fn(() => ({ fail: eventMocks.fail })),
   loadCodexChatAssistantMessageParts: vi.fn(async () => []),
 }));
 
@@ -82,7 +82,7 @@ vi.mock("./opencompany-chat", () => ({
 }));
 
 vi.mock("./codex-chat-events", () => ({
-  createCodexChatProjector: eventMocks.createCodexChatProjector,
+  createExternalEngineProjector: eventMocks.createExternalEngineProjector,
   loadCodexChatAssistantMessageParts: eventMocks.loadCodexChatAssistantMessageParts,
 }));
 

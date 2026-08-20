@@ -3,7 +3,8 @@
 This shared Codex and Claude Code chat template extends E2B's `codex` template and bakes in the
 runner's repo workflow toolbox:
 `rg`, `fd`, `jq`, `curl`, `git`, `gh`, `tmux`, `ss`, Node/npm 22+, Bun `1.3.2`,
-`@openai/codex@0.144.6`, `@anthropic-ai/claude-code@2.1.220`, Playwright `1.60.0`,
+`@agentclientprotocol/codex-acp@1.6.0`, `@openai/codex@0.148.0`,
+`@anthropic-ai/claude-code@2.1.220`, Playwright `1.60.0`,
 Infisical CLI `0.43.118`, and Playwright-managed Chromium.
 
 ## Build

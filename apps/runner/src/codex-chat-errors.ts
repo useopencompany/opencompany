@@ -29,8 +29,8 @@ export class CodexChatRetryableInfrastructureError extends Error {
   }
 }
 
-// A runner shutdown transfers observation of the Codex turn to another worker. Unlike a user
-// interrupt, this must only detach the app-server proxy: the turn itself keeps running in E2B.
+// A runner shutdown transfers ownership of the engine turn to another worker. Unlike a user
+// interrupt, it leaves the durable turn available for ACP session recovery in the next worker.
 export class CodexChatHandoffError extends Error {
   constructor() {
     super("Codex chat turn is being handed off to another runner.");

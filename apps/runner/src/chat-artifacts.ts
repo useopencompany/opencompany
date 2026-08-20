@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import { authorizePersistedClaudeToolCapability } from "@opencompany/agent/application/persisted-claude-capability";
+import { authorizePersistedExternalEngineToolCapability } from "@opencompany/agent/application/persisted-external-engine-capability";
 import {
   CHAT_ARTIFACT_MAX_BYTES,
   CHAT_ARTIFACT_MAX_PER_TURN,
+  CLOUD_CODING_ENGINE_CONFIG,
   PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA,
   PUBLISH_ARTIFACT_TOOL_DESCRIPTION,
   PUBLISH_ARTIFACT_TOOL_NAME,
@@ -22,13 +23,13 @@ import {
 import { createLogger } from "@opencompany/observability";
 import { del, put } from "@vercel/blob";
 import { and, eq, sql } from "drizzle-orm";
-import type {
-  CodexAppServerDynamicTool,
-  CodexAppServerDynamicToolCall,
-  CodexAppServerDynamicToolResponse,
-} from "./codex-app-server";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
+import type {
+  ExternalEngineTool,
+  ExternalEngineToolCall,
+  ExternalEngineToolResponse,
+} from "./external-engine-contract";
 import { connectSandbox, type SandboxHandle } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
 
@@ -78,7 +79,7 @@ type PublishArtifactInput = {
 
 export function createPublishArtifactDynamicTool(
   context: PublishArtifactContext,
-): CodexAppServerDynamicTool {
+): ExternalEngineTool {
   return {
     spec: {
       type: "function",
@@ -92,8 +93,8 @@ export function createPublishArtifactDynamicTool(
 
 export async function executePublishArtifactDynamicTool(input: {
   context: PublishArtifactContext;
-  call: CodexAppServerDynamicToolCall;
-}): Promise<CodexAppServerDynamicToolResponse> {
+  call: ExternalEngineToolCall;
+}): Promise<ExternalEngineToolResponse> {
   let response: PublishArtifactToolResponse;
   try {
     response = await publishChatArtifact({
@@ -268,7 +269,7 @@ export async function publishChatArtifact(input: {
   return { ok: true, artifact };
 }
 
-export async function publishClaudeChatArtifact(input: {
+export async function publishExternalEngineChatArtifact(input: {
   codexChatSessionId: string;
   codexChatTurnId: string;
   toolCallId: string;
@@ -279,12 +280,12 @@ export async function publishClaudeChatArtifact(input: {
   signal?: AbortSignal;
 }): Promise<PublishArtifactToolResponse> {
   if (Boolean(input.attemptId) !== Boolean(input.leaseId)) {
-    return { ok: false, error: "The Claude Code capability is incomplete." };
+    return { ok: false, error: "The engine capability is incomplete." };
   }
   if (
     input.attemptId &&
     input.leaseId &&
-    !(await authorizePersistedClaudeToolCapability({
+    !(await authorizePersistedExternalEngineToolCapability({
       capability: {
         codexChatSessionId: input.codexChatSessionId,
         codexChatTurnId: input.codexChatTurnId,
@@ -293,7 +294,7 @@ export async function publishClaudeChatArtifact(input: {
       },
     }))
   ) {
-    return { ok: false, error: "This Claude Code turn is no longer active." };
+    return { ok: false, error: "This engine turn is no longer active." };
   }
   const [row] = await getDb()
     .select({
@@ -319,7 +320,7 @@ export async function publishClaudeChatArtifact(input: {
     .limit(1);
   if (
     !row ||
-    row.session.engine !== "claude_code" ||
+    (row.session.engine !== "claude_code" && row.session.engine !== "codex") ||
     row.session.status !== "running" ||
     row.session.activeTurnId !== row.turn.id ||
     row.turn.status !== "running" ||
@@ -328,7 +329,7 @@ export async function publishClaudeChatArtifact(input: {
     !row.turn.leaseId ||
     !row.turn.leaseOwner
   ) {
-    return { ok: false, error: "This Claude Code turn is no longer active." };
+    return { ok: false, error: "This engine turn is no longer active." };
   }
   const checkAbort = async () => {
     if (input.signal?.aborted) throw new Error("The file publication was canceled.");
@@ -347,24 +348,25 @@ export async function publishClaudeChatArtifact(input: {
       )
       .limit(1);
     if (!active || active.status !== "running" || active.interruptAt) {
-      throw new Error("This Claude Code turn is no longer active.");
+      throw new Error("This engine turn is no longer active.");
     }
   };
   try {
     await checkAbort();
     const sandbox = await connectSandbox({ sandboxId: row.session.sandboxId });
-    if (!sandbox) return { ok: false, error: "The Claude Code sandbox is no longer available." };
+    if (!sandbox) return { ok: false, error: "The engine sandbox is no longer available." };
+    const engine = row.session.engine as "codex" | "claude_code";
     return await publishChatArtifact({
       context: {
         sandbox,
-        workDirectory: "/home/user/opencompany-goat/claude-chat",
+        workDirectory: CLOUD_CODING_ENGINE_CONFIG[engine].workDirectory,
         workspaceId: row.session.workspaceId,
         userWorkosId: row.turn.userWorkosId,
         chatSessionId: row.turn.chatSessionId,
         codexChatSessionId: row.session.id,
         turnId: row.turn.id,
         assistantMessageId: row.turn.assistantMessageId,
-        engine: "claude_code",
+        engine,
         env: input.env,
         checkAbort,
       },

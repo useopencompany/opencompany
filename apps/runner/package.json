@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fastify/rate-limit": "11.2.0",
     "@modelcontextprotocol/sdk": "1.26.0",
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",

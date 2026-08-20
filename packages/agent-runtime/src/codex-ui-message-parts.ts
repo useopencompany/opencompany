@@ -4,9 +4,9 @@ import {
   type PublishedChatArtifact,
   parsePublishedChatArtifact,
 } from "./chat-artifacts";
-import type { CodexAppServerNormalizedEvent } from "./codex-app-server-events";
+import type { HarnessNormalizedEvent } from "./harness-events";
 
-// Shared projection of normalized Codex app-server events into AI SDK UIMessage parts.
+// Shared projection of normalized coding-harness events into AI SDK UIMessage parts.
 // The cloud Codex chat runner folds events through this reducer so every coding
 // engine persists the same normalized assistant-turn shape (reasoning parts,
 // codex_command tool parts, text parts) in chat_messages.debug_trace.uiMessageParts.
@@ -118,7 +118,7 @@ type ApplyCodexEventOptions = {
 
 export function applyCodexEventToUiMessageParts(
   parts: readonly CodexUiMessagePart[],
-  event: CodexAppServerNormalizedEvent,
+  event: HarnessNormalizedEvent,
   options: ApplyCodexEventOptions = {},
 ): CodexUiMessageProjection {
   // A published file belongs to the main assistant response even when a Claude subagent made the
@@ -132,8 +132,8 @@ export function applyCodexEventToUiMessageParts(
   ) {
     return applyPublishedArtifactEvent(parts, event);
   }
-  // Subagent steps carry the parent Agent tool call id; fold them into that part's children
-  // rather than the top-level turn.
+  // Subagent steps carry the parent Task's tool call id; fold them into that part's children
+  // rather than the top-level turn (the ACP normalizer stamps the parent relationship).
   const parentToolCallId = readString(event.payload.parentToolCallId);
   if (parentToolCallId) {
     return applyEventToSubagentChild(parts, parentToolCallId, event, options);
@@ -260,7 +260,7 @@ export function applyCodexEventToUiMessageParts(
       );
     }
     case "error": {
-      const message = readString(event.payload.message) ?? "Codex app-server error.";
+      const message = readString(event.payload.message) ?? "The coding engine failed.";
       return { ...unchanged(parts), error: message, changed: true };
     }
     default:
@@ -586,7 +586,7 @@ export function parseCodexUiMessageParts(value: unknown): CodexUiMessagePart[] {
 
 function applyPublishedArtifactEvent(
   parts: readonly CodexUiMessagePart[],
-  event: CodexAppServerNormalizedEvent,
+  event: HarnessNormalizedEvent,
 ): CodexUiMessageProjection {
   if (event.type !== "dynamic_tool.completed" && event.type !== "mcp_tool.completed") {
     return unchanged(parts);
@@ -620,7 +620,7 @@ export function createCodexCommandOutputAccumulator(
 ) {
   const buffers = new Map<string, string>();
   return {
-    push(event: CodexAppServerNormalizedEvent) {
+    push(event: HarnessNormalizedEvent) {
       if (event.type !== "command.output") return;
       const itemId = readString(event.payload.itemId);
       const delta = typeof event.payload.delta === "string" ? event.payload.delta : "";
@@ -639,7 +639,7 @@ export function createCodexCommandOutputAccumulator(
 
 function replaceCommandPart(
   parts: readonly CodexUiMessagePart[],
-  event: CodexAppServerNormalizedEvent,
+  event: HarnessNormalizedEvent,
   replace: (
     existing: Extract<CodexUiCommandPart, { state: "input-available" }>,
   ) => CodexUiCommandPart,
@@ -681,7 +681,7 @@ function replaceCommandPart(
 
 function upsertStatusPart(
   parts: readonly CodexUiMessagePart[],
-  event: CodexAppServerNormalizedEvent,
+  event: HarnessNormalizedEvent,
   toolName: CodexUiStatusPart["toolName"],
   nextPart: CodexUiStatusPartPayload,
 ): CodexUiMessagePart[] {
@@ -755,7 +755,7 @@ function appendPlanDelta(
   };
 }
 
-function fileChangeStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+function fileChangeStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayload {
   const changes = Array.isArray(event.payload.changes) ? event.payload.changes : [];
   const input = { label: "File change", changes };
   if (event.type === "file_change.started") return { state: "input-available", input };
@@ -766,9 +766,7 @@ function fileChangeStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStat
   };
 }
 
-function mcpToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
-  // ACP (Claude Code) carries the call arguments as `rawInput`; the Codex app-server carries them
-  // as `arguments`. Surface whichever is present so the expanded row shows the real input.
+function mcpToolStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayload {
   const args = isRecord(event.payload.rawInput)
     ? event.payload.rawInput
     : isRecord(event.payload.arguments)
@@ -800,7 +798,7 @@ function mcpToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusP
 function applyEventToSubagentChild(
   parts: readonly CodexUiMessagePart[],
   parentToolCallId: string,
-  event: CodexAppServerNormalizedEvent,
+  event: HarnessNormalizedEvent,
   options: ApplyCodexEventOptions,
 ): CodexUiMessageProjection {
   const index = parts.findIndex(
@@ -809,7 +807,7 @@ function applyEventToSubagentChild(
   if (index < 0) return unchanged(parts);
   const parent = parts[index] as CodexUiSubagentPart;
   const { parentToolCallId: _ignored, ...childPayload } = event.payload;
-  const childEvent: CodexAppServerNormalizedEvent = { ...event, payload: childPayload };
+  const childEvent: HarnessNormalizedEvent = { ...event, payload: childPayload };
   const projection = applyCodexEventToUiMessageParts(parent.children, childEvent, options);
   if (!projection.changed) return unchanged(parts);
   const next = [...parts];
@@ -819,7 +817,7 @@ function applyEventToSubagentChild(
 
 function upsertSubagentPart(
   parts: readonly CodexUiMessagePart[],
-  event: CodexAppServerNormalizedEvent,
+  event: HarnessNormalizedEvent,
 ): CodexUiMessagePart[] {
   const toolCallId =
     readString(event.payload.itemId) ?? `${CODEX_SUBAGENT_TOOL_NAME}_${parts.length + 1}`;
@@ -848,7 +846,7 @@ function upsertSubagentPart(
   return parts.map((current, currentIndex) => (currentIndex === index ? part : current));
 }
 
-function subagentInput(event: CodexAppServerNormalizedEvent): CodexUiSubagentPart["input"] {
+function subagentInput(event: HarnessNormalizedEvent): CodexUiSubagentPart["input"] {
   return {
     label: "Subagent",
     ...(readString(event.payload.subagentType)
@@ -864,7 +862,7 @@ function subagentInput(event: CodexAppServerNormalizedEvent): CodexUiSubagentPar
 }
 
 function subagentOutput(
-  event: CodexAppServerNormalizedEvent,
+  event: HarnessNormalizedEvent,
 ): Extract<CodexUiSubagentPart, { state: "output-available" }>["output"] {
   const error = readString(event.payload.error);
   const result = readString(event.payload.result);
@@ -879,7 +877,7 @@ function isSubagentPart(part: CodexUiMessagePart): part is CodexUiSubagentPart {
   return part.type === CODEX_SUBAGENT_TOOL_PART_TYPE;
 }
 
-function dynamicToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+function dynamicToolStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayload {
   const tool = readString(event.payload.tool);
   const namespace = readString(event.payload.namespace);
   const label =
@@ -907,7 +905,7 @@ function dynamicToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiSta
   };
 }
 
-function webSearchStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+function webSearchStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayload {
   const input = {
     label: "Web search",
     ...(readString(event.payload.query) ? { query: event.payload.query } : {}),
@@ -920,7 +918,7 @@ function webSearchStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatu
   };
 }
 
-function planStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+function planStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayload {
   const text = readString(event.payload.text) ?? "";
   const completed = readString(event.payload.status) === "completed";
   const source = readString(event.payload.source);
@@ -939,7 +937,7 @@ function planStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPart
       };
 }
 
-function goalStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+function goalStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayload {
   const output = Object.fromEntries(
     Object.entries({
       objective: readString(event.payload.objective),
@@ -957,7 +955,7 @@ function goalStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPart
   };
 }
 
-function questionStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+function questionStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayload {
   const interactionId = readString(event.payload.interactionId);
   const questions = Array.isArray(event.payload.questions) ? event.payload.questions : null;
   const autoResolutionMs =
@@ -974,7 +972,7 @@ function questionStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatus
   };
 }
 
-function approvalStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+function approvalStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayload {
   const approvalId = readString(event.payload.interactionId);
   const options = Array.isArray(event.payload.options) ? event.payload.options : null;
   const rawInput = isRecord(event.payload.rawInput) ? event.payload.rawInput : null;
@@ -992,7 +990,7 @@ function approvalStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatus
 }
 
 function statusToolCallId(
-  event: CodexAppServerNormalizedEvent,
+  event: HarnessNormalizedEvent,
   toolName: CodexUiStatusPart["toolName"],
   parts: readonly CodexUiMessagePart[],
 ) {
@@ -1016,20 +1014,15 @@ function isCodexStatusToolName(value: string): value is CodexUiStatusPart["toolN
   );
 }
 
-function commandToolCallId(
-  event: CodexAppServerNormalizedEvent,
-  parts: readonly CodexUiMessagePart[],
-) {
+function commandToolCallId(event: HarnessNormalizedEvent, parts: readonly CodexUiMessagePart[]) {
   return readString(event.payload.itemId) ?? `codex-cmd-${parts.length}`;
 }
 
-function commandFromPayload(event: CodexAppServerNormalizedEvent) {
+function commandFromPayload(event: HarnessNormalizedEvent) {
   return readString(event.payload.command) ?? "command";
 }
 
-function commandOutputStatus(
-  event: CodexAppServerNormalizedEvent,
-): CodexCommandToolOutput["status"] {
+function commandOutputStatus(event: HarnessNormalizedEvent): CodexCommandToolOutput["status"] {
   const output = event.payload.output;
   const status =
     output && typeof output === "object" && !Array.isArray(output)
@@ -1040,7 +1033,7 @@ function commandOutputStatus(
   return "completed";
 }
 
-function commandExitCode(event: CodexAppServerNormalizedEvent): number | null {
+function commandExitCode(event: HarnessNormalizedEvent): number | null {
   const output = event.payload.output;
   if (!output || typeof output !== "object" || Array.isArray(output)) return null;
   const exitCode = (output as Record<string, unknown>).exitCode;

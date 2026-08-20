@@ -12,6 +12,15 @@ export type AcpTurnSummary = {
     cache_creation_input_tokens?: number;
   } | null;
   sessionId: string | null;
+  goal: AcpGoalSummary | null;
+};
+
+export type AcpGoalSummary = {
+  objective: string;
+  status: string;
+  tokenBudget: number | null;
+  tokensUsed: number | null;
+  timeUsedSeconds: number | null;
 };
 
 // Upper bound on the MCP tool result echoed into the assistant part. Matches the command output
@@ -34,17 +43,19 @@ type AcpToolCall = {
   outputText: string;
 };
 
-export function createAcpEventNormalizer() {
+export function createAcpEventNormalizer(input: { engineName?: string } = {}) {
   const toolCalls = new Map<string, AcpToolCall>();
   const messageText = new Map<string, string>();
   const messageOrder: string[] = [];
   let currentSessionId: string | null = null;
   let summary: AcpTurnSummary | null = null;
+  let goal: AcpGoalSummary | null = null;
   let generatedMessageId = 0;
 
   const beginRun = (sessionId: string) => {
     currentSessionId = sessionId;
     summary = null;
+    goal = null;
     toolCalls.clear();
     messageText.clear();
     messageOrder.length = 0;
@@ -74,7 +85,9 @@ export function createAcpEventNormalizer() {
           itemId: `acp-approval-${toolCallId}`,
           requestId: jsonRpcRequestId(raw.id),
           interactionId: readString(raw.interactionId),
-          title: readString(toolCall.title) ?? "Claude needs permission",
+          title:
+            readString(toolCall.title) ??
+            `${input.engineName ?? "The coding engine"} needs permission`,
           action:
             readString(readRecord(toolCall.rawInput)?.command) ??
             readString(toolCall.name) ??
@@ -100,6 +113,7 @@ export function createAcpEventNormalizer() {
         error,
         usage,
         sessionId: currentSessionId,
+        goal,
       };
       return [
         normalized("turn.completed", raw, {
@@ -119,7 +133,7 @@ export function createAcpEventNormalizer() {
     const update = readRecord(params.update);
     if (!update) return [normalized("unknown", raw, { method })];
     const updateType = readString(update.sessionUpdate);
-    const parentToolCallId = claudeMetaString(update, "parentToolUseId");
+    const parentToolCallId = providerParentToolCallId(update);
 
     if (updateType === "agent_message_chunk") {
       const content = readRecord(update.content);
@@ -169,6 +183,19 @@ export function createAcpEventNormalizer() {
             }),
           ]
         : [];
+    }
+
+    if (updateType === "session_info_update") {
+      const nextGoal = readGoal(readRecord(update._meta)?.goal);
+      if (nextGoal !== undefined) {
+        goal = nextGoal;
+        return [
+          normalized("goal.updated", raw, {
+            itemId: "acp-goal",
+            ...(goal ?? { status: "cleared" }),
+          }),
+        ];
+      }
     }
 
     if (updateType === "usage_update") {
@@ -396,7 +423,13 @@ function toolCompletedEvent(
 }
 
 function classifyTool(update: Record<string, unknown>, name: string): AcpToolKind {
-  if (claudeMetaBoolean(update, "subagent") || name === "Agent" || name === "Task") {
+  if (
+    claudeMetaBoolean(update, "subagent") ||
+    (codexSubagentMeta(update) && !readString(codexSubagentMeta(update)?.parentToolCallId)) ||
+    codexCollaborationMeta(update) ||
+    name === "Agent" ||
+    name === "Task"
+  ) {
     return "subagent";
   }
   const kind = readString(update.kind);
@@ -407,7 +440,18 @@ function classifyTool(update: Record<string, unknown>, name: string): AcpToolKin
 }
 
 function acpToolName(update: Record<string, unknown>, fallback = "tool") {
-  return claudeMetaString(update, "toolName") ?? readString(update.name) ?? fallback;
+  const rawInput = readRecord(update.rawInput);
+  const mcpName =
+    readString(rawInput?.server) && readString(rawInput?.tool)
+      ? `mcp__${readString(rawInput?.server)}__${readString(rawInput?.tool)}`
+      : null;
+  return (
+    claudeMetaString(update, "toolName") ??
+    mcpName ??
+    readString(update.name) ??
+    readString(update.title) ??
+    fallback
+  );
 }
 
 function commandFromTool(rawInput: Record<string, unknown> | undefined, title: string) {
@@ -452,7 +496,19 @@ function toolOutputText(update: Record<string, unknown>) {
   if (texts.length) return texts.join("\n");
   if (typeof update.rawOutput === "string") return update.rawOutput;
   const rawOutput = readRecord(update.rawOutput);
-  return rawOutput ? (readString(rawOutput.output) ?? readString(rawOutput.content) ?? "") : "";
+  if (rawOutput) {
+    const formatted =
+      readStringAllowEmpty(rawOutput.formatted_output) ??
+      readStringAllowEmpty(rawOutput.output) ??
+      readStringAllowEmpty(rawOutput.content);
+    if (formatted) return formatted;
+  }
+  const meta = readRecord(update._meta);
+  for (const key of ["terminal_output", "terminal_output_delta", "mcp_output_delta"]) {
+    const data = readStringAllowEmpty(readRecord(meta?.[key])?.data);
+    if (data) return data;
+  }
+  return "";
 }
 
 function commandExitCode(update: Record<string, unknown>) {
@@ -462,11 +518,18 @@ function commandExitCode(update: Record<string, unknown>) {
 
 function mcpToolInfo(name: string) {
   const match = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(name);
-  return match ? { server: match[1], tool: match[2] } : { server: undefined, tool: name };
+  if (match) return { server: match[1], tool: match[2] };
+  const dotted = /^mcp\.([^.]+)\.(.+)$/.exec(name);
+  return dotted ? { server: dotted[1], tool: dotted[2] } : { server: undefined, tool: name };
 }
 
 function renderPlan(update: Record<string, unknown>) {
-  const markdown = readString(update.markdown) ?? readString(update.text);
+  const plan = readRecord(update.plan);
+  const markdown =
+    readString(update.markdown) ??
+    readString(update.text) ??
+    readString(plan?.content) ??
+    readString(plan?.text);
   if (markdown) return markdown;
   const entries = Array.isArray(update.entries)
     ? update.entries
@@ -502,11 +565,11 @@ function readPromptUsage(value: unknown): AcpTurnSummary["usage"] {
 }
 
 function promptFailureMessage(stopReason: string) {
-  if (stopReason === "cancelled") return "Claude was interrupted.";
-  if (stopReason === "max_tokens") return "Claude reached its token limit.";
-  if (stopReason === "max_turn_requests") return "Claude reached its turn limit.";
-  if (stopReason === "refusal") return "Claude declined the request.";
-  return `Claude stopped with reason: ${stopReason}.`;
+  if (stopReason === "cancelled") return "The coding engine was interrupted.";
+  if (stopReason === "max_tokens") return "The coding engine reached its token limit.";
+  if (stopReason === "max_turn_requests") return "The coding engine reached its turn limit.";
+  if (stopReason === "refusal") return "The coding engine declined the request.";
+  return `The coding engine stopped with reason: ${stopReason}.`;
 }
 
 function publishedArtifact(rawOutput: unknown, outputText: string) {
@@ -535,6 +598,42 @@ function claudeMetaString(update: Record<string, unknown>, key: string) {
 
 function claudeMetaBoolean(update: Record<string, unknown>, key: string) {
   return claudeMeta(update)?.[key] === true;
+}
+
+function codexMeta(update: Record<string, unknown>) {
+  return readRecord(readRecord(update._meta)?.codex);
+}
+
+function codexSubagentMeta(update: Record<string, unknown>) {
+  return readRecord(codexMeta(update)?.subagent);
+}
+
+function codexCollaborationMeta(update: Record<string, unknown>) {
+  return readRecord(codexMeta(update)?.collaboration);
+}
+
+function providerParentToolCallId(update: Record<string, unknown>) {
+  return (
+    claudeMetaString(update, "parentToolUseId") ??
+    readString(codexSubagentMeta(update)?.parentToolCallId) ??
+    readString(codexCollaborationMeta(update)?.senderThreadId)
+  );
+}
+
+function readGoal(value: unknown): AcpGoalSummary | null | undefined {
+  if (value === null) return null;
+  const record = readRecord(value);
+  if (!record) return undefined;
+  const objective = readString(record.objective);
+  const status = readString(record.status);
+  if (!objective || !status) return undefined;
+  return {
+    objective,
+    status,
+    tokenBudget: readNumber(record.tokenBudget),
+    tokensUsed: readNumber(record.tokensUsed),
+    timeUsedSeconds: readNumber(record.timeUsedSeconds),
+  };
 }
 
 function normalized(

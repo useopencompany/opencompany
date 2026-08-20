@@ -1,7 +1,7 @@
 import { CODEX_SAVE_TO_BRAIN_TOOL_NAME } from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
-import type { CodexAppServerDynamicToolCall } from "./codex-app-server";
 import { createCodexBrainCaptureDynamicTool } from "./codex-brain-capture-tool";
+import type { ExternalEngineToolCall } from "./external-engine-contract";
 
 const context = {
   codexChatSessionId: "codex_session_1",
@@ -114,7 +114,7 @@ describe("createCodexBrainCaptureDynamicTool", () => {
   });
 });
 
-function call(argumentsValue: unknown): CodexAppServerDynamicToolCall {
+function call(argumentsValue: unknown): ExternalEngineToolCall {
   return {
     threadId: "thread_1",
     turnId: "turn_1",
