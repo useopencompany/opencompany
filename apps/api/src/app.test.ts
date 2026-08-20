@@ -27,6 +27,7 @@ import {
   WorkflowApplicationService,
   type WorkflowRepository,
 } from "@opencompany/core";
+import { setExceptionReporter } from "@opencompany/observability";
 import {
   PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
@@ -3003,6 +3004,34 @@ describe("canonical Hono API", () => {
     });
     expect(JSON.stringify(body)).not.toMatch(/stripeCustomerId|paymentMethodId|ledgerId/u);
     expect(getOverview).toHaveBeenCalledWith(actor);
+  });
+
+  it("reports unexpected request failures with correlation context", async () => {
+    const failure = new Error("database pool is closed");
+    const captureException = vi.fn();
+    setExceptionReporter({ captureException });
+    try {
+      const app = testApp(fakeRepository(), {
+        authenticate: async () => {
+          throw failure;
+        },
+      });
+
+      const response = await app.request("/v1/billing/balance");
+
+      expect(response.status).toBe(500);
+      expect(captureException).toHaveBeenCalledWith(
+        failure,
+        expect.objectContaining({
+          event: "opencompany.api_request_failed",
+          method: "GET",
+          path: "/v1/billing/balance",
+          request_id: expect.stringMatching(/^request_/u),
+        }),
+      );
+    } finally {
+      setExceptionReporter(undefined);
+    }
   });
 
   it("forwards the required idempotency key to billing commands", async () => {
