@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
   applyCodexEventToUiMessageParts,
-  type CodexAppServerNormalizedEvent,
   type CodexUiMessagePart,
   createCodexCommandOutputAccumulator,
   finalizeCodexUiMessageParts,
-  normalizeCodexAppServerEvent,
+  type HarnessNormalizedEvent,
   offerCodexPlanImplementation,
   parseCodexUiMessageParts,
   parsePublishedChatArtifact,
@@ -28,9 +27,9 @@ import {
 } from "@opencompany/db/product-schema";
 import { captureException } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
-import type { CodexAppServerRequest, CodexAppServerSummary } from "./codex-app-server";
 import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import { getDb } from "./db";
+import type { ExternalEngineRequest, ExternalEngineTurnSummary } from "./external-engine-contract";
 import { rowsFromExecute } from "./sql-exec";
 import { settleDurableTurn, type TaskTurnCompletion } from "./task-turn";
 
@@ -42,7 +41,7 @@ const PERSISTED_EVENT_TYPES = new Set<CodexChatEventType>(
   CODEX_CHAT_EVENT_TYPES.filter((eventType) => eventType !== "unknown"),
 );
 
-export type CodexChatProjectorTarget = {
+export type ExternalEngineProjectorTarget = {
   userWorkosId: string;
   workspaceId?: string | null;
   codexChatSessionId: string;
@@ -59,23 +58,21 @@ export type CodexChatProjectorTarget = {
   turnCreatedAt?: Date;
 };
 
-// Folds normalized Codex app-server events into the turn's assistant chat_messages row (the
+// Folds normalized coding-harness events into the turn's assistant chat_messages row (the
 // Electric-synced streaming surface), the codex_chat_events audit log, and turn/session status.
 // One message UPDATE per logical chunk; Electric ships the full row so the client is always
 // consistent, including across reloads.
-export function createCodexChatProjector(input: {
-  target: CodexChatProjectorTarget;
+export function createExternalEngineProjector(input: {
+  target: ExternalEngineProjectorTarget;
   redact: (value: string) => string;
   initialParts?: CodexUiMessagePart[];
-  // Engines that don't speak the codex app-server protocol (Claude Code) inject their
-  // own raw-event → normalized-event translation; everything downstream is shared.
-  normalizeEvent?: (raw: Record<string, unknown>) => CodexAppServerNormalizedEvent[];
+  normalizeEvent?: (raw: Record<string, unknown>) => HarnessNormalizedEvent[];
   execution?: RunExecutionRepository;
 }) {
   const { target, redact } = input;
   const execution =
     input.execution ?? new PostgresRunExecutionRepository((query) => getDb().execute(query));
-  const normalizeEvent = input.normalizeEvent ?? normalizeCodexAppServerEvent;
+  const normalizeEvent = input.normalizeEvent ?? (() => []);
   let parts: CodexUiMessagePart[] = input.initialParts ?? [];
   let turnError: string | null = null;
   let auditFailureReported = false;
@@ -152,7 +149,7 @@ export function createCodexChatProjector(input: {
     return content;
   };
 
-  const insertEventRow = async (event: CodexAppServerNormalizedEvent) => {
+  const insertEventRow = async (event: HarnessNormalizedEvent) => {
     if (!PERSISTED_EVENT_TYPES.has(event.type as CodexChatEventType)) return true;
     const eventKey = codexChatEventKey(event);
     try {
@@ -242,7 +239,7 @@ export function createCodexChatProjector(input: {
     );
   };
 
-  const handleEvent = async (event: CodexAppServerNormalizedEvent) => {
+  const handleEvent = async (event: HarnessNormalizedEvent) => {
     if (event.type === "command.output") {
       outputAccumulator.push(event);
       return;
@@ -438,7 +435,7 @@ export function createCodexChatProjector(input: {
       ${options.runningOnly ? sql`AND lease_turn.status = 'running'` : sql``}
   `;
 
-  // Notifications are already batched serially, but app-server requests are handled on a
+  // Notifications are already batched serially, but ACP client requests are handled on a
   // separate async path. Serialize every projection mutation so concurrent question/event writes
   // cannot land out of order and overwrite newer message parts.
   let projectionChain: Promise<void> = Promise.resolve();
@@ -462,20 +459,33 @@ export function createCodexChatProjector(input: {
       });
     },
 
-    requestUserInput(request: CodexAppServerRequest) {
+    requestUserInput(request: ExternalEngineRequest) {
       return serializeProjection(async () => {
-        if (request.method !== "item/tool/requestUserInput") {
-          throw new Error(`Unsupported Codex app-server request: ${request.method}`);
+        if (request.method !== "elicitation/create") {
+          throw new Error(`Unsupported external-engine request: ${request.method}`);
         }
-        if (!isValidCodexUserInputRequest(request.params)) {
-          throw new Error("Codex sent an invalid user-input request.");
+        if (!isValidEngineUserInputRequest(request.params)) {
+          throw new Error("The coding engine sent an invalid user-input request.");
         }
+        const questions = request.params.questions as Array<Record<string, unknown>>;
         const interactionId = `goat_codex_chat_interaction_${randomUUID()}`;
-        const rawEvent: Record<string, unknown> = { ...request, interactionId };
-        const [event] = normalizeCodexAppServerEvent(rawEvent);
-        if (!event || event.type !== "question.requested") {
-          throw new Error("Codex sent an invalid user-input request.");
-        }
+        const event: HarnessNormalizedEvent = {
+          type: "question.requested",
+          rawEvent: { ...request, interactionId },
+          payload: {
+            threadId: typeof request.params.threadId === "string" ? request.params.threadId : null,
+            turnId: typeof request.params.turnId === "string" ? request.params.turnId : null,
+            itemId: typeof request.params.itemId === "string" ? request.params.itemId : null,
+            requestId: request.id,
+            method: request.method,
+            interactionId,
+            question: typeof questions[0]?.question === "string" ? questions[0].question : null,
+            questions,
+            ...(typeof request.params.autoResolutionMs === "number"
+              ? { autoResolutionMs: request.params.autoResolutionMs }
+              : {}),
+          },
+        };
         const now = new Date();
         assertRowsChanged(
           await getDb().execute(sql`
@@ -535,7 +545,7 @@ export function createCodexChatProjector(input: {
       });
     },
 
-    requestApproval(request: CodexAppServerRequest) {
+    requestApproval(request: ExternalEngineRequest) {
       return serializeProjection(async () => {
         if (request.method !== "session/request_permission") {
           throw new Error(`Unsupported ACP client request: ${request.method}`);
@@ -629,7 +639,7 @@ export function createCodexChatProjector(input: {
     },
 
     finalize(
-      summary: CodexAppServerSummary,
+      summary: ExternalEngineTurnSummary,
       options: {
         taskCompletion?: TaskTurnCompletion | null;
         replacementContent?: string | null;
@@ -753,8 +763,8 @@ export function createCodexChatProjector(input: {
 }
 
 async function captureExternalHarnessUsage(input: {
-  target: CodexChatProjectorTarget;
-  summary: CodexAppServerSummary;
+  target: ExternalEngineProjectorTarget;
+  summary: ExternalEngineTurnSummary;
   taskCompletion?: TaskTurnCompletion | null | undefined;
 }) {
   const usage = input.summary.usage;
@@ -928,7 +938,7 @@ function collectProjectedArtifactVersionIds(parts: readonly CodexUiMessagePart[]
   return ids;
 }
 
-function codexChatEventKey(event: CodexAppServerNormalizedEvent) {
+function codexChatEventKey(event: HarnessNormalizedEvent) {
   const itemId = typeof event.payload.itemId === "string" ? event.payload.itemId : null;
   if (itemId && ITEM_LIFECYCLE_EVENT_TYPES.has(event.type)) return `${event.type}:${itemId}`;
   const turnId = typeof event.payload.turnId === "string" ? event.payload.turnId : null;
@@ -938,7 +948,7 @@ function codexChatEventKey(event: CodexAppServerNormalizedEvent) {
   return null;
 }
 
-const ITEM_LIFECYCLE_EVENT_TYPES = new Set<CodexAppServerNormalizedEvent["type"]>([
+const ITEM_LIFECYCLE_EVENT_TYPES = new Set<HarnessNormalizedEvent["type"]>([
   "assistant.completed",
   "reasoning.completed",
   "command.started",
@@ -965,7 +975,7 @@ function databaseErrorCode(error: unknown): string | undefined {
   return undefined;
 }
 
-function isValidCodexUserInputRequest(params: Record<string, unknown>) {
+function isValidEngineUserInputRequest(params: Record<string, unknown>) {
   if (
     typeof params.threadId !== "string" ||
     !params.threadId ||

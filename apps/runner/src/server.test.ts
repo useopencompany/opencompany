@@ -84,7 +84,7 @@ describe("runner server CORS", () => {
     expect(response.headers["access-control-allow-origin"]).toBe("https://app.example.com");
     expect(response.headers.vary).toBe("Origin");
     expect(response.json()).toMatchObject({
-      capabilities: { claudeActionsMcp: "v2", brainWorkerAdmission: "postgres-v1" },
+      capabilities: { acpToolsMcp: "v3", brainWorkerAdmission: "postgres-v1" },
     });
   });
 

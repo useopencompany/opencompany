@@ -2,7 +2,10 @@ import { createAcpEventNormalizer } from "@opencompany/agent-runtime";
 import type { RunExecutionRepository } from "@opencompany/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CodexChatLeaseLostError } from "./codex-chat-errors";
-import { type CodexChatProjectorTarget, createCodexChatProjector } from "./codex-chat-events";
+import {
+  createExternalEngineProjector,
+  type ExternalEngineProjectorTarget,
+} from "./codex-chat-events";
 
 const mocks = vi.hoisted(() => ({
   captureProductLlmUsageRecorded: vi.fn(async () => undefined),
@@ -29,7 +32,7 @@ vi.mock("./db", () => ({
   getDb: () => ({ execute: mocks.execute }),
 }));
 
-describe("createCodexChatProjector", () => {
+describe("createExternalEngineProjector", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -41,9 +44,10 @@ describe("createCodexChatProjector", () => {
     mocks.execute
       .mockRejectedValueOnce(databaseError)
       .mockResolvedValueOnce({ rows: [{ id: "goat_chat_msg_assistant_1" }] });
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget(),
       redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
     });
 
     await expect(projector.push([fileChangeStartedEvent()])).resolves.toBeUndefined();
@@ -66,9 +70,10 @@ describe("createCodexChatProjector", () => {
 
   it("still aborts projection when the event insert proves the turn lease was lost", async () => {
     mocks.execute.mockResolvedValueOnce({ rows: [] });
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget(),
       redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
     });
 
     await expect(projector.push([fileChangeStartedEvent()])).rejects.toBeInstanceOf(
@@ -85,9 +90,10 @@ describe("createCodexChatProjector", () => {
     mocks.execute
       .mockRejectedValueOnce(cyclicError)
       .mockResolvedValueOnce({ rows: [{ id: "goat_chat_msg_assistant_1" }] });
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget(),
       redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
     });
 
     await expect(projector.push([fileChangeStartedEvent()])).resolves.toBeUndefined();
@@ -104,16 +110,23 @@ describe("createCodexChatProjector", () => {
       .mockResolvedValueOnce({ rows: [{ id: "message_1" }] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ id: "event_1" }] });
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget(),
       redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
     });
     const event = {
-      method: "item/completed",
+      method: "session/update",
       params: {
-        threadId: "thread_1",
-        turnId: "turn_1",
-        item: { id: "message_item_1", type: "agentMessage", text: "Done." },
+        sessionId: "codex_session_1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "file_change_1",
+          title: "Edit src/index.ts",
+          kind: "edit",
+          status: "completed",
+          locations: [{ path: "src/index.ts" }],
+        },
       },
     };
 
@@ -129,9 +142,10 @@ describe("createCodexChatProjector", () => {
 
   it("keeps the session queued until a queued follow-up turn is claimed", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget(),
       redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
     });
 
     await projector.finalize({
@@ -174,7 +188,7 @@ describe("createCodexChatProjector", () => {
         ],
       })
       .mockResolvedValue({ rows: [{ id: "updated_row" }] });
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget(),
       redact: (value) => value,
     });
@@ -200,7 +214,7 @@ describe("createCodexChatProjector", () => {
 
   it("captures Codex token usage in PostHog analytics when a turn finalizes", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget({
         workspaceId: "workspace_1",
         engine: "codex",
@@ -253,7 +267,7 @@ describe("createCodexChatProjector", () => {
 
   it("captures Claude Code token usage in PostHog analytics when a turn finalizes", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget({
         workspaceId: "workspace_1",
         engine: "claude_code",
@@ -294,14 +308,14 @@ describe("createCodexChatProjector", () => {
     );
   });
 
-  it("durably projects and resolves an app-server user-input request", async () => {
+  it("durably projects and resolves an ACP user-input request", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const execution = {
       appendEvents: vi.fn(async (input: Parameters<RunExecutionRepository["appendEvents"]>[0]) =>
         input.events.map((event, index) => ({ ...event, sequence: index + 1 })),
       ),
     } as unknown as RunExecutionRepository;
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget({ canonicalAttemptId: "attempt_1" }),
       redact: (value) => value,
       execution,
@@ -329,7 +343,7 @@ describe("createCodexChatProjector", () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const normalizer = createAcpEventNormalizer();
     normalizer.beginRun("claude_session_1");
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget({ engine: "claude_code" }),
       redact: (value) => value,
       normalizeEvent: normalizer.normalize,
@@ -374,7 +388,7 @@ describe("createCodexChatProjector", () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const normalizer = createAcpEventNormalizer();
     normalizer.beginRun("claude_session_1");
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget({ engine: "claude_code" }),
       redact: (value) => value,
       normalizeEvent: normalizer.normalize,
@@ -403,7 +417,7 @@ describe("createCodexChatProjector", () => {
   });
 
   it("rejects malformed user-input requests before persistence", async () => {
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget(),
       redact: (value) => value,
     });
@@ -429,9 +443,10 @@ describe("createCodexChatProjector", () => {
           }),
       )
       .mockResolvedValue({ rows: [{ id: "updated_row" }] });
-    const projector = createCodexChatProjector({
+    const projector = createExternalEngineProjector({
       target: projectorTarget(),
       redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
     });
 
     const first = projector.push([fileChangeStartedEvent("file_change_1")]);
@@ -444,11 +459,11 @@ describe("createCodexChatProjector", () => {
   });
 });
 
-function projectorTarget(overrides: Partial<CodexChatProjectorTarget> = {}) {
+function projectorTarget(overrides: Partial<ExternalEngineProjectorTarget> = {}) {
   return { ...projectorTargetBase(), ...overrides };
 }
 
-function projectorTargetBase(): CodexChatProjectorTarget {
+function projectorTargetBase(): ExternalEngineProjectorTarget {
   return {
     userWorkosId: "user_1",
     workspaceId: null,
@@ -467,21 +482,31 @@ function projectorTargetBase(): CodexChatProjectorTarget {
 
 function fileChangeStartedEvent(id = "file_change_1") {
   return {
-    method: "item/started",
+    method: "session/update",
     params: {
-      item: {
-        id,
-        type: "fileChange",
-        changes: [{ path: "src/index.ts", kind: "edit" }],
+      sessionId: "codex_session_1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: id,
+        title: "Edit src/index.ts",
+        kind: "edit",
+        status: "pending",
+        locations: [{ path: "src/index.ts" }],
       },
     },
   };
 }
 
+function acpNormalizer() {
+  const normalizer = createAcpEventNormalizer({ engineName: "Codex" });
+  normalizer.beginRun("codex_session_1");
+  return normalizer.normalize;
+}
+
 function userInputRequest() {
   return {
     id: "request_1",
-    method: "item/tool/requestUserInput",
+    method: "elicitation/create",
     params: {
       threadId: "thread_1",
       turnId: "turn_1",

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { CLAUDE_ACP_ENGINE_ADAPTER, CODEX_ACP_ENGINE_ADAPTER } from "./acp-engine-adapters";
 import { AcpHarness, type AcpHarnessTurnInput } from "./acp-harness";
 import type { SandboxHandle } from "./sandbox";
 
@@ -39,6 +40,7 @@ function harnessInput(
   overrides: Partial<AcpHarnessTurnInput> = {},
 ): AcpHarnessTurnInput {
   return {
+    adapter: CLAUDE_ACP_ENGINE_ADAPTER,
     sandbox,
     workdir: "/home/user/opencompany-goat/claude-chat",
     task: "Inspect the repository.",
@@ -125,7 +127,7 @@ describe("AcpHarness", () => {
           name: "opencompany-actions",
           type: "http",
           url: "https://runner.example.test/mcp",
-          headers: [{ name: "x-goat-action-ticket", value: "ticket" }],
+          headers: [{ name: "x-opencompany-tool-ticket", value: "ticket" }],
         },
       ],
       onRuntimeEvents: vi.fn(async (events) => {
@@ -151,7 +153,7 @@ describe("AcpHarness", () => {
             name: "opencompany-actions",
             type: "http",
             url: "https://runner.example.test/mcp",
-            headers: [{ name: "x-goat-action-ticket", value: "ticket" }],
+            headers: [{ name: "x-opencompany-tool-ticket", value: "ticket" }],
           },
         ],
         _meta: { claudeCode: { options: { maxTurns: 250, strictMcpConfig: true } } },
@@ -225,6 +227,124 @@ describe("AcpHarness", () => {
     });
   });
 
+  it("applies Codex configuration, goals, multimodal prompts, and elicitation", async () => {
+    let resolveElicitation: (() => void) | null = null;
+    const elicitationAnswered = new Promise<void>((resolve) => {
+      resolveElicitation = resolve;
+    });
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { agentCapabilities: { loadSession: true } },
+        });
+      } else if (message.method === "session/new") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            sessionId: "codex_session",
+            configOptions: [
+              { id: "model" },
+              { id: "reasoning_effort" },
+              { id: "mode" },
+              { id: "collaboration_mode" },
+            ],
+          },
+        });
+      } else if (
+        message.method === "session/set_config_option" ||
+        message.method === "_session/goal"
+      ) {
+        await emit({ jsonrpc: "2.0", id: message.id, result: {} });
+      } else if (message.method === "session/prompt") {
+        await emit({
+          jsonrpc: "2.0",
+          id: "elicitation_1",
+          method: "elicitation/create",
+          params: {
+            mode: "form",
+            message: "Choose a branch",
+            requestedSchema: {
+              type: "object",
+              properties: { branch: { type: "string" } },
+              required: ["branch"],
+            },
+          },
+        });
+        await elicitationAnswered;
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { stopReason: "end_turn" },
+        });
+      } else if (message.id === "elicitation_1") {
+        resolveElicitation?.();
+      }
+    });
+    const onElicitationRequest = vi.fn(async () => ({
+      action: "accept" as const,
+      content: { branch: "feature/acp" },
+    }));
+    const input = harnessInput(transport.sandbox, {
+      adapter: CODEX_ACP_ENGINE_ADAPTER,
+      workdir: "/home/user/opencompany-goat/codex-chat",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "xhigh",
+      permissionMode: "bypassPermissions",
+      collaborationMode: "plan",
+      goal: { objective: "Finish issue 1324", tokenBudget: 50_000 },
+      prompt: [
+        { type: "text", text: "Inspect this screenshot." },
+        { type: "image", data: "aW1hZ2U=", mimeType: "image/png" },
+      ],
+      onElicitationRequest,
+    });
+
+    await new AcpHarness().runTurn(input);
+
+    expect(
+      transport.requests
+        .filter((request) => request.method === "session/set_config_option")
+        .map((request) => request.params),
+    ).toEqual([
+      { sessionId: "codex_session", configId: "model", value: "gpt-5.6-sol" },
+      { sessionId: "codex_session", configId: "reasoning_effort", value: "xhigh" },
+      { sessionId: "codex_session", configId: "mode", value: "agent-full-access" },
+      { sessionId: "codex_session", configId: "collaboration_mode", value: "plan" },
+    ]);
+    expect(transport.requests).toContainEqual({
+      jsonrpc: "2.0",
+      id: expect.any(Number),
+      method: "_session/goal",
+      params: {
+        sessionId: "codex_session",
+        action: "set",
+        objective: "Finish issue 1324",
+        tokenBudget: 50_000,
+      },
+    });
+    expect(transport.requests.find((request) => request.method === "session/prompt")).toMatchObject(
+      {
+        params: {
+          prompt: [
+            { type: "text", text: "Inspect this screenshot." },
+            { type: "image", data: "aW1hZ2U=", mimeType: "image/png" },
+          ],
+        },
+      },
+    );
+    expect(onElicitationRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "elicitation_1", method: "elicitation/create" }),
+    );
+    expect(transport.requests).toContainEqual({
+      jsonrpc: "2.0",
+      id: "elicitation_1",
+      result: { action: "accept", content: { branch: "feature/acp" } },
+    });
+  });
+
   it("loads a stored session without projecting its replayed transcript", async () => {
     const transport = fakeAcpSandbox(async (message, emit) => {
       if (message.method === "initialize") {
@@ -278,6 +398,50 @@ describe("AcpHarness", () => {
     expect(result.loadedSession).toBe(true);
     expect(JSON.stringify(runtimeEvents)).not.toContain("Historical answer");
     expect(JSON.stringify(runtimeEvents)).toContain("Current answer");
+  });
+
+  it("injects Codex steering through the provider extension while a prompt is active", async () => {
+    let promptRequestId: number | string | null = null;
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { agentCapabilities: { loadSession: true } },
+        });
+      } else if (message.method === "session/new") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "codex_steer" } });
+      } else if (message.method === "session/prompt") {
+        promptRequestId = message.id as number | string;
+      } else if (message.method === "_session/steering") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { outcome: "injected" } });
+        await emit({
+          jsonrpc: "2.0",
+          id: promptRequestId,
+          result: { stopReason: "end_turn" },
+        });
+      }
+    });
+    async function* steering() {
+      yield [{ type: "text" as const, text: "Also inspect the worker registry." }];
+    }
+
+    await new AcpHarness().runTurn(
+      harnessInput(transport.sandbox, {
+        adapter: CODEX_ACP_ENGINE_ADAPTER,
+        steering: steering(),
+      }),
+    );
+
+    expect(transport.requests).toContainEqual({
+      jsonrpc: "2.0",
+      id: expect.any(Number),
+      method: "_session/steering",
+      params: {
+        sessionId: "codex_steer",
+        prompt: [{ type: "text", text: "Also inspect the worker registry." }],
+      },
+    });
   });
 
   it("cancels an interrupted prompt after persisting its partial updates", async () => {

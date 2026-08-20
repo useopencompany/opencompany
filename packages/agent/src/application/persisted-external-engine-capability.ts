@@ -7,19 +7,21 @@ import {
 } from "@opencompany/db/product-schema";
 import { and, eq } from "drizzle-orm";
 import {
-  authorizeClaudeToolCapability,
-  type ClaudeToolAuthorityState,
-  type ClaudeToolAuthorizedContext,
-  type ClaudeToolCapability,
-} from "./claude-capability";
+  authorizeExternalEngineToolCapability,
+  type ExternalEngineToolAuthorityState,
+  type ExternalEngineToolAuthorizedContext,
+  type ExternalEngineToolCapability,
+} from "./external-engine-capability";
 
-export async function authorizePersistedClaudeToolCapability(input: {
-  capability: ClaudeToolCapability;
+export async function authorizePersistedExternalEngineToolCapability(input: {
+  capability: ExternalEngineToolCapability;
   now?: Date;
-  loadState?: (capability: ClaudeToolCapability) => Promise<ClaudeToolAuthorityState | null>;
-}): Promise<ClaudeToolAuthorizedContext | null> {
+  loadState?: (
+    capability: ExternalEngineToolCapability,
+  ) => Promise<ExternalEngineToolAuthorityState | null>;
+}): Promise<ExternalEngineToolAuthorizedContext | null> {
   const state = await (input.loadState ?? loadPersistedAuthorityState)(input.capability);
-  return authorizeClaudeToolCapability({
+  return authorizeExternalEngineToolCapability({
     capability: input.capability,
     state,
     now: input.now ?? new Date(),
@@ -27,8 +29,8 @@ export async function authorizePersistedClaudeToolCapability(input: {
 }
 
 async function loadPersistedAuthorityState(
-  capability: ClaudeToolCapability,
-): Promise<ClaudeToolAuthorityState | null> {
+  capability: ExternalEngineToolCapability,
+): Promise<ExternalEngineToolAuthorityState | null> {
   const [row] = await getDb()
     .select({
       sessionId: codexChatSessions.id,
@@ -52,6 +54,9 @@ async function loadPersistedAuthorityState(
       turnLeaseExpiresAt: codexChatTurns.leaseExpiresAt,
       interruptRequestedAt: codexChatTurns.interruptRequestedAt,
       membershipId: workspaceMembers.id,
+      brainRef: codexChatSessions.brainRef,
+      userMessageId: codexChatTurns.userMessageId,
+      assistantMessageId: codexChatTurns.assistantMessageId,
     })
     .from(codexChatSessions)
     .innerJoin(

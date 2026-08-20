@@ -6,9 +6,9 @@ import { ACTION_TOOL_CONTRACT, type ActionGatewayRequest } from "@opencompany/ag
 import { describe, expect, it, vi } from "vitest";
 import { createInMemoryActionTurnGovernance, serveActionRequest } from "../actions/service";
 import {
-  type ClaudeActionToolDependencies,
-  registerClaudeActionServiceTools,
-} from "./claude-tools";
+  type ExternalEngineToolDependencies,
+  registerExternalEngineServiceTools,
+} from "./external-engine-tools";
 
 type RegisteredTool = {
   config: Record<string, unknown>;
@@ -23,8 +23,8 @@ type RegisteredTool = {
 };
 
 function registerTools(
-  executeAction: ClaudeActionToolDependencies["executeAction"],
-  publishArtifact = vi.fn<ClaudeActionToolDependencies["publishArtifact"]>(),
+  executeAction: ExternalEngineToolDependencies["executeAction"],
+  publishArtifact = vi.fn<ExternalEngineToolDependencies["publishArtifact"]>(),
 ) {
   const tools = new Map<string, RegisteredTool>();
   const server = {
@@ -34,7 +34,7 @@ function registerTools(
       },
     ),
   } as unknown as McpServerType;
-  registerClaudeActionServiceTools(
+  registerExternalEngineServiceTools(
     server,
     { sessionId: "codex_session_1", runId: "codex_turn_1" },
     { executeAction, publishArtifact },
@@ -48,9 +48,9 @@ function getTool(tools: Map<string, RegisteredTool>, name: string): RegisteredTo
   return tool;
 }
 
-describe("registerClaudeActionServiceTools", () => {
+describe("registerExternalEngineServiceTools", () => {
   it("registers file publication and action tools", () => {
-    const tools = registerTools(vi.fn<ClaudeActionToolDependencies["executeAction"]>());
+    const tools = registerTools(vi.fn<ExternalEngineToolDependencies["executeAction"]>());
     expect([...tools.keys()]).toEqual(["publish_artifact", "list_actions", "use_action"]);
     expect(getTool(tools, "list_actions").config.annotations).toEqual(
       ACTION_TOOL_CONTRACT.list.annotations,
@@ -62,7 +62,7 @@ describe("registerClaudeActionServiceTools", () => {
   });
 
   it("publishes a sandbox file through the turn-scoped runner bridge", async () => {
-    const publishArtifact = vi.fn<ClaudeActionToolDependencies["publishArtifact"]>(async () => ({
+    const publishArtifact = vi.fn<ExternalEngineToolDependencies["publishArtifact"]>(async () => ({
       ok: true,
       artifact: {
         artifactId: "artifact_1",
@@ -76,7 +76,7 @@ describe("registerClaudeActionServiceTools", () => {
       },
     }));
     const tools = registerTools(
-      vi.fn<ClaudeActionToolDependencies["executeAction"]>(),
+      vi.fn<ExternalEngineToolDependencies["executeAction"]>(),
       publishArtifact,
     );
 
@@ -104,7 +104,7 @@ describe("registerClaudeActionServiceTools", () => {
   });
 
   it("translates a list_actions call into a gateway list request", async () => {
-    const executeAction = vi.fn<ClaudeActionToolDependencies["executeAction"]>(async () => ({
+    const executeAction = vi.fn<ExternalEngineToolDependencies["executeAction"]>(async () => ({
       ok: true,
       sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
     }));
@@ -128,7 +128,7 @@ describe("registerClaudeActionServiceTools", () => {
   });
 
   it("derives stable, distinct invocation ids from separate MCP requests", async () => {
-    const executeAction = vi.fn<ClaudeActionToolDependencies["executeAction"]>(async () => ({
+    const executeAction = vi.fn<ExternalEngineToolDependencies["executeAction"]>(async () => ({
       ok: true,
       action: "gmail.list",
       result: [],
@@ -176,7 +176,7 @@ describe("registerClaudeActionServiceTools", () => {
 
   it("surfaces call_budget on call 17 from the shared service", async () => {
     const governance = createInMemoryActionTurnGovernance();
-    const executeAction = vi.fn<ClaudeActionToolDependencies["executeAction"]>(
+    const executeAction = vi.fn<ExternalEngineToolDependencies["executeAction"]>(
       async ({ request }) =>
         serveActionRequest({
           request,
@@ -218,7 +218,7 @@ describe("registerClaudeActionServiceTools", () => {
   });
 
   it("marks the MCP result as an error when the gateway response is not ok", async () => {
-    const executeAction = vi.fn<ClaudeActionToolDependencies["executeAction"]>(async () => ({
+    const executeAction = vi.fn<ExternalEngineToolDependencies["executeAction"]>(async () => ({
       ok: false,
       error: { code: "not_permitted", message: "nope" },
     }));
@@ -237,16 +237,17 @@ describe("registerClaudeActionServiceTools", () => {
   // wouldn't slip through.
   it("survives a real MCP client/server round-trip", async () => {
     const server = new McpServer({ name: "test", version: "0.1.0" });
-    registerClaudeActionServiceTools(
+    registerExternalEngineServiceTools(
       server,
       { sessionId: "codex_session_1", runId: "codex_turn_1" },
       {
-        executeAction: vi.fn<ClaudeActionToolDependencies["executeAction"]>(async ({ request }) =>
-          request.operation === "list"
-            ? { ok: true, sources: [{ id: "gmail", label: "Gmail", description: "d" }] }
-            : { ok: true, action: request.action, result: { echoedParams: request.params } },
+        executeAction: vi.fn<ExternalEngineToolDependencies["executeAction"]>(
+          async ({ request }) =>
+            request.operation === "list"
+              ? { ok: true, sources: [{ id: "gmail", label: "Gmail", description: "d" }] }
+              : { ok: true, action: request.action, result: { echoedParams: request.params } },
         ),
-        publishArtifact: vi.fn<ClaudeActionToolDependencies["publishArtifact"]>(),
+        publishArtifact: vi.fn<ExternalEngineToolDependencies["publishArtifact"]>(),
       },
     );
 

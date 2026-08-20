@@ -1,19 +1,22 @@
 import { ACTION_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
+import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 import { describe, expect, it } from "vitest";
 import {
-  authorizeClaudeToolCapability,
-  type ClaudeToolAuthorityState,
-  type ClaudeToolCapability,
-} from "./claude-capability";
+  authorizeExternalEngineToolCapability,
+  type ExternalEngineToolAuthorityState,
+  type ExternalEngineToolCapability,
+} from "./external-engine-capability";
 
-const capability: ClaudeToolCapability = {
+const capability: ExternalEngineToolCapability = {
   codexChatSessionId: "session_1",
   codexChatTurnId: "run_1",
   attemptId: "attempt_1",
   leaseId: "lease_1",
 };
 
-function state(overrides: Partial<ClaudeToolAuthorityState> = {}): ClaudeToolAuthorityState {
+function state(
+  overrides: Partial<ExternalEngineToolAuthorityState> = {},
+): ExternalEngineToolAuthorityState {
   return {
     sessionId: "session_1",
     turnId: "run_1",
@@ -36,20 +39,44 @@ function state(overrides: Partial<ClaudeToolAuthorityState> = {}): ClaudeToolAut
     turnLeaseExpiresAt: new Date("2026-08-11T12:01:00.000Z"),
     interruptRequestedAt: null,
     membershipId: "member_1",
+    brainRef: null,
+    userMessageId: "message_user_1",
+    assistantMessageId: "message_assistant_1",
     ...overrides,
   };
 }
 
 const now = new Date("2026-08-11T12:00:00.000Z");
 
-describe("Claude tool capability authority", () => {
-  it("authorizes only the active persisted Claude attempt", () => {
-    expect(authorizeClaudeToolCapability({ capability, state: state(), now })).toEqual({
+describe("External engine tool capability authority", () => {
+  it("authorizes only the active persisted external-engine attempt", () => {
+    expect(authorizeExternalEngineToolCapability({ capability, state: state(), now })).toEqual({
       actorId: "user_1",
       workspaceId: "workspace_1",
       conversationId: "conversation_1",
       sandboxId: "sandbox_1",
+      engine: "claude_code",
+      brainRef: null,
+      userMessageId: "message_user_1",
+      assistantMessageId: "message_assistant_1",
+      hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
     });
+  });
+
+  it.each([
+    ["Codex", { engine: "codex" }],
+    [
+      "a legacy Brain-pinned Codex session",
+      {
+        engine: "codex",
+        brainRef: "brain_1",
+        hostToolContractVersion: CODEX_BRAIN_TOOL_CONTRACT_VERSION,
+      },
+    ],
+  ])("authorizes %s through the shared capability boundary", (_name, overrides) => {
+    expect(
+      authorizeExternalEngineToolCapability({ capability, state: state(overrides), now }),
+    ).toMatchObject(overrides);
   });
 
   it.each([
@@ -61,6 +88,8 @@ describe("Claude tool capability authority", () => {
     ["interrupted turn", { interruptRequestedAt: now }],
     ["settled attempt", { attemptStatus: "succeeded" }],
   ])("rejects %s authority", (_name, overrides) => {
-    expect(authorizeClaudeToolCapability({ capability, state: state(overrides), now })).toBeNull();
+    expect(
+      authorizeExternalEngineToolCapability({ capability, state: state(overrides), now }),
+    ).toBeNull();
   });
 });

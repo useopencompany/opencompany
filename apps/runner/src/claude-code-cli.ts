@@ -6,7 +6,7 @@ import {
 import type { SandboxHandle } from "./sandbox";
 
 // The npm prefix is kept away from ~/.claude on purpose: that directory is Claude
-// Code's config/session store and must survive across ACP sessions.
+// Code's config/session store and must survive across turns for `--resume`.
 const CLAUDE_CLI_PREFIX = '"$HOME/.claude-cli"';
 const CLAUDE_BIN_PATH = '"$HOME/.claude-cli/bin"';
 
@@ -65,12 +65,12 @@ export function buildClaudeAcpCommandEnv(input: {
   };
 }
 
-// Match the ACP adapter without matching the cleanup shell itself: the bracketed pattern does not
-// occur literally in its own command line. pkill exits 1 when nothing matched.
+// The bracketed pattern does not occur literally in the cleanup shell's own command line.
+// pkill exits 1 when nothing matched, so the command ends with true.
 export const KILL_LEFTOVER_CLAUDE_TURN_COMMAND = "pkill -9 -f '[c]laude-agent-acp' || true";
 
 // A hard runner death (crash, OOM kill, SIGKILL at the end of a deploy grace period)
-// never reaches handle.kill(), so the background ACP adapter survives in the
+// never reaches handle.kill(), so the background `claude` process survives in the
 // sandbox. Reclaiming the turn into the same sandbox would then run two agents in one
 // checkout — they race each other (file reverts, duplicate commits and PRs). Every run
 // against a reused sandbox must fence off leftover turn processes first.

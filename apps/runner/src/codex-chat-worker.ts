@@ -11,18 +11,19 @@ import {
 import { captureException, createLogger } from "@opencompany/observability";
 import { METRICS, recordHistogram } from "@opencompany/telemetry";
 import { and, eq, sql } from "drizzle-orm";
-import { runClaudeCodeChatTurn } from "./claude-code-chat";
-import { runCodexChatTurn } from "./codex-chat";
 import {
   CodexChatHandoffError,
   CodexChatLeaseLostError,
   CodexChatRetryableInfrastructureError,
 } from "./codex-chat-errors";
-import { createCodexChatProjector, loadCodexChatAssistantMessageParts } from "./codex-chat-events";
+import {
+  createExternalEngineProjector,
+  loadCodexChatAssistantMessageParts,
+} from "./codex-chat-events";
+import { runCodingEngineTurn } from "./coding-engine-registry";
 import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
-import { runProductChatTurn } from "./opencompany-chat";
 import { recoveryReasonForDeployVersions, runnerDeployVersion } from "./runner-deploy-version";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
@@ -367,12 +368,7 @@ export async function runClaimedTurn(
         shouldAbort: () =>
           options.handoffSignal?.aborted ? new CodexChatHandoffError() : heartbeatAbort,
       };
-      const outcome =
-        session.engine === "opencompany"
-          ? await runProductChatTurn(turnInput)
-          : session.engine === "claude_code"
-            ? await runClaudeCodeChatTurn(turnInput)
-            : await runCodexChatTurn(turnInput);
+      const outcome = await runCodingEngineTurn(turnInput);
       return outcome;
     })().catch((error) => {
       if (error instanceof CodexChatHandoffError) {
@@ -498,7 +494,7 @@ async function failClaimedTurn(input: {
   const leaseOwner = turn.leaseOwner;
   if (!leaseId || !leaseOwner) throw new CodexChatLeaseLostError();
   const initialParts = await loadCodexChatAssistantMessageParts(turn.assistantMessageId);
-  const projector = createCodexChatProjector({
+  const projector = createExternalEngineProjector({
     target: {
       userWorkosId: turn.userWorkosId,
       workspaceId: session.workspaceId,

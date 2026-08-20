@@ -572,7 +572,7 @@ export type CodexChatTurnStatus =
   | "completed"
   | "failed"
   | "interrupted";
-export const CODEX_APP_SERVER_EVENT_TYPES = [
+export const CODING_HARNESS_EVENT_TYPES = [
   "assistant.delta",
   "assistant.completed",
   "reasoning.completed",
@@ -600,13 +600,13 @@ export const CODEX_APP_SERVER_EVENT_TYPES = [
   "error",
   "unknown",
 ] as const;
-export type CodexAppServerEventType = (typeof CODEX_APP_SERVER_EVENT_TYPES)[number];
+export type CodingHarnessEventType = (typeof CODING_HARNESS_EVENT_TYPES)[number];
 export type CodexChatEventType = Exclude<
-  CodexAppServerEventType,
+  CodingHarnessEventType,
   "assistant.delta" | "command.output"
 >;
 export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
-  CODEX_APP_SERVER_EVENT_TYPES.filter(
+  CODING_HARNESS_EVENT_TYPES.filter(
     (eventType): eventType is CodexChatEventType =>
       eventType !== "assistant.delta" && eventType !== "command.output",
   );
@@ -4792,7 +4792,10 @@ export const codexChatInteractions = productSchema.table(
     ),
     methodCheck: check(
       "goat_codex_chat_interactions_method_check",
-      sql`${table.method} = 'item/tool/requestUserInput'`,
+      // Keep the retired app-server method valid at the physical DB boundary for one rolling
+      // deployment. New runtime code writes only the ACP method; a later cleanup migration can
+      // remove this compatibility value once no old runner can still be serving a turn.
+      sql`${table.method} IN ('elicitation/create', 'item/tool/requestUserInput')`,
     ),
   }),
 );

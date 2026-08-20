@@ -709,10 +709,10 @@ function CodexQuestionRow({
       data-testid="chat-codex-question"
       className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
     >
-      <div className="text-[12px] font-semibold text-ink">Codex needs your input</div>
+      <div className="text-[12px] font-semibold text-ink">The coding engine needs your input</div>
       {input.autoResolutionMs !== null ? (
         <p className="mt-1 text-[11px] text-ink-subtle">
-          Codex will continue automatically if this question expires.
+          The coding engine will continue automatically if this question expires.
         </p>
       ) : null}
       <div className="mt-3 space-y-4">

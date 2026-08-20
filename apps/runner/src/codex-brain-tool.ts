@@ -23,13 +23,13 @@ import { brainToolRuns } from "@opencompany/db/product-schema";
 import { getBrainAccess } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { createGatewayAttribution } from "@opencompany/telemetry";
-import type {
-  CodexAppServerDynamicTool,
-  CodexAppServerDynamicToolCall,
-  CodexAppServerDynamicToolResponse,
-} from "./codex-app-server";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
+import type {
+  ExternalEngineTool,
+  ExternalEngineToolCall,
+  ExternalEngineToolResponse,
+} from "./external-engine-contract";
 
 const CODEX_BRAIN_TOOL_NAME = "goat_brain";
 const CODEX_BRAIN_RESULT_MAX_CHARS = 120_000;
@@ -67,9 +67,7 @@ type CodexBrainToolOutput = {
   durationMs: number;
 };
 
-export function createCodexBrainDynamicTool(
-  context: CodexBrainToolContext,
-): CodexAppServerDynamicTool {
+export function createCodexBrainDynamicTool(context: CodexBrainToolContext): ExternalEngineTool {
   return {
     spec: {
       type: "function",
@@ -83,9 +81,9 @@ export function createCodexBrainDynamicTool(
 
 export async function executeCodexBrainTool(input: {
   context: CodexBrainToolContext;
-  call: CodexAppServerDynamicToolCall;
+  call: ExternalEngineToolCall;
   dependencies?: Partial<CodexBrainToolDependencies>;
-}): Promise<CodexAppServerDynamicToolResponse> {
+}): Promise<ExternalEngineToolResponse> {
   const dependencies = { ...defaultDependencies, ...input.dependencies };
   const db = dependencies.db ?? getDb();
   const startedAt = dependencies.now();
@@ -489,7 +487,7 @@ async function recordBrainToolRun(input: {
   traceId: string;
   startedAt: Date;
   context: CodexBrainToolContext;
-  call: CodexAppServerDynamicToolCall;
+  call: ExternalEngineToolCall;
   toolInput: BrainReadToolInput | null;
   output: CodexBrainToolOutput;
 }) {
