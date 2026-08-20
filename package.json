@@ -20,6 +20,8 @@
     "dev:docs": "turbo dev --ui=tui --filter=@opencompany/docs",
     "dev:marketing": "turbo dev --ui=tui --filter=@opencompany/marketing",
     "dev:runner": "turbo dev --ui=stream --filter=@opencompany/runner",
+    "dev:electron": "bun run --cwd apps/desktop dev",
+    "dev:electron:local": "bun run --cwd apps/desktop dev:local",
     "dev:kill-port": "node scripts/kill-port.mjs",
     "dev:kill-3000": "node scripts/kill-port.mjs 3000",
     "build": "bun --bun turbo build",
@@ -82,6 +84,9 @@
   "overrides": {
     "postcss": "$postcss"
   },
+  "trustedDependencies": [
+    "electron"
+  ],
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
     "@testing-library/jest-dom": "^6.9.1",

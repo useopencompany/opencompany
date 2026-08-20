@@ -11,7 +11,7 @@ import {
 } from "@opencompany/ui/components/card";
 import { Input } from "@opencompany/ui/components/input";
 import { Label } from "@opencompany/ui/components/label";
-import { useState, useTransition } from "react";
+import { type FormEvent, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import {
   requestMagicCode,
@@ -24,6 +24,7 @@ import type { AuthMethod, OrganizationOption } from "@/lib/auth-methods";
 
 type AuthCardProps = {
   mode: "sign-in" | "sign-up";
+  desktop?: boolean;
   invitationToken?: string;
   prefillEmail?: string;
   lastUsedMethod: AuthMethod | null;
@@ -81,8 +82,51 @@ function GoogleSubmitButton({ lastUsedMethod }: { lastUsedMethod: AuthMethod | n
   );
 }
 
+// In the Electron shell, Google OAuth must open in the system browser (Google
+// blocks embedded webviews), so the button calls the contextBridge global. If
+// the global is somehow absent, the form's server action fires as a graceful
+// fallback to the standard web redirect.
+function DesktopGoogleButton({
+  invitationToken,
+  lastUsedMethod,
+}: {
+  invitationToken?: string;
+  lastUsedMethod: AuthMethod | null;
+}) {
+  const [pending, setPending] = useState(false);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    const bridge = window.opencompanyDesktop;
+    if (bridge?.signInWithGoogle) {
+      event.preventDefault();
+      setPending(true);
+      bridge.signInWithGoogle(invitationToken);
+    }
+    // No bridge: let the server action submit and redirect the window normally.
+  }
+
+  return (
+    <form action={startGoogleAuth} onSubmit={handleSubmit}>
+      {invitationToken ? (
+        <input type="hidden" name="invitationToken" value={invitationToken} />
+      ) : null}
+      <Button
+        type="submit"
+        variant="outline"
+        className="w-full justify-center gap-2"
+        disabled={pending}
+      >
+        <GoogleGlyph />
+        {pending ? "Opening browser…" : "Continue with Google"}
+        {!pending && lastUsedMethod === "google" ? <UsedLastBadge /> : null}
+      </Button>
+    </form>
+  );
+}
+
 export function AuthCard({
   mode,
+  desktop = false,
   invitationToken,
   prefillEmail,
   lastUsedMethod,
@@ -194,12 +238,19 @@ export function AuthCard({
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <form action={startGoogleAuth}>
-          {invitationToken ? (
-            <input type="hidden" name="invitationToken" value={invitationToken} />
-          ) : null}
-          <GoogleSubmitButton lastUsedMethod={lastUsedMethod} />
-        </form>
+        {desktop ? (
+          <DesktopGoogleButton
+            {...(invitationToken ? { invitationToken } : {})}
+            lastUsedMethod={lastUsedMethod}
+          />
+        ) : (
+          <form action={startGoogleAuth}>
+            {invitationToken ? (
+              <input type="hidden" name="invitationToken" value={invitationToken} />
+            ) : null}
+            <GoogleSubmitButton lastUsedMethod={lastUsedMethod} />
+          </form>
+        )}
 
         <div className="flex items-center gap-3 text-xs text-ink-faint">
           <div className="h-px flex-1 bg-border" />

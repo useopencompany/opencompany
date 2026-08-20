@@ -16,12 +16,19 @@ type OrganizationSelection = {
   pendingAuthenticationToken: string;
   organizations: OrganizationOption[];
   returnPathname: string;
+  // Present when the org-selection interstitial was reached on the desktop
+  // handoff path; carried through so the final selection mints a handoff token
+  // instead of completing the browser session.
+  desktopChallenge?: string;
 };
 
 export type OAuthStateCookiePayload = {
   state: string;
   invitationToken?: string;
   returnPathname?: string;
+  // Set by /auth/desktop/start; its presence in the callback switches the flow
+  // to the desktop handoff (seal a token, do not complete the browser session).
+  desktopChallenge?: string;
 };
 
 // Normalize a return target from an unauthenticated cookie to a same-origin
@@ -163,6 +170,9 @@ async function readOrganizationSelection(): Promise<OrganizationSelection | null
       pendingAuthenticationToken: parsed.pendingAuthenticationToken,
       organizations,
       returnPathname: safeReturnPathname(parsed.returnPathname),
+      ...(typeof parsed.desktopChallenge === "string"
+        ? { desktopChallenge: parsed.desktopChallenge }
+        : {}),
     };
   } catch {
     return null;

@@ -59,6 +59,11 @@ fix-forward as documented in [Chat operations](./chat-operations.md).
 `CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
 
+`OPENCOMPANY_DESKTOP_AUTH_SECRET` is a web-only base64 32-byte key (same convention as
+`INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`) that seals the macOS desktop app's Google sign-in handoff
+token. Add it to prod `/web` before enabling desktop distribution. The release preflight requires it
+for the web app so a deployment cannot expose the desktop auth flow without its sealing key.
+
 `REDIS_URL` is optional for correctness but required by the production activation preflight. When
 configured for both `apps/api` and `apps/runner`, it
 enables the canonical Chat transient presentation lane; without it both services retain durable

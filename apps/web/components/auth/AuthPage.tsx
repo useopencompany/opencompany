@@ -3,12 +3,14 @@ import { AuthCard } from "@/components/auth/AuthCard";
 import { Mark } from "@/components/Mark";
 import { currentIdentity } from "@/lib/auth";
 import { readLastAuthMethod, readOrganizationOptions } from "@/lib/auth-methods";
+import { isDesktopRequest } from "@/lib/desktop";
 
 type AuthPageSearchParams = Promise<{ invitation_token?: string; email?: string; error?: string }>;
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   oauth_state: "That sign-in link expired. Try continuing with Google again.",
   oauth_failed: "We couldn't complete Google sign-in. Try again.",
+  desktop_handoff: "We couldn't finish desktop sign-in. Try continuing with Google again.",
 };
 
 export async function AuthPage({
@@ -21,10 +23,11 @@ export async function AuthPage({
   const identity = await currentIdentity({ optional: true });
   if (identity) redirect(identity.workspaces.length > 0 ? "/" : "/onboarding");
 
-  const [params, lastUsedMethod, organizationOptions] = await Promise.all([
+  const [params, lastUsedMethod, organizationOptions, desktop] = await Promise.all([
     searchParams,
     readLastAuthMethod(),
     readOrganizationOptions(),
+    isDesktopRequest(),
   ]);
 
   return (
@@ -52,6 +55,7 @@ export async function AuthPage({
 
         <AuthCard
           mode={mode}
+          desktop={desktop}
           lastUsedMethod={lastUsedMethod}
           organizationOptions={organizationOptions}
           initialError={params.error ? (OAUTH_ERROR_MESSAGES[params.error] ?? null) : null}
