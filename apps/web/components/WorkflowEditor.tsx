@@ -230,7 +230,7 @@ export function WorkflowEditor({
   };
 
   const archive = () => {
-    if (!canEdit) return;
+    if (!canEdit || isRunning) return;
     setSaveError(null);
     startArchiving(async () => {
       try {
@@ -260,6 +260,9 @@ export function WorkflowEditor({
     draft,
     saveState,
   });
+  const runActionDisabledReason = isArchiving
+    ? "Wait for the archive action to finish before running."
+    : runDisabledReason;
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -277,8 +280,8 @@ export function WorkflowEditor({
               {draft.trigger.type === "schedule" && canEdit ? (
                 <button
                   type="button"
-                  disabled={isRunning || runDisabledReason !== null}
-                  title={runDisabledReason ?? "Run this workflow now"}
+                  disabled={isRunning || runActionDisabledReason !== null}
+                  title={runActionDisabledReason ?? "Run this workflow now"}
                   onClick={runNow}
                   className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -294,7 +297,7 @@ export function WorkflowEditor({
                 <EditorMoreMenu
                   onArchive={archive}
                   isArchiving={isArchiving}
-                  saveInProgress={saveState === "saving"}
+                  saveInProgress={saveState === "saving" || isRunning}
                 />
               ) : null}
             </div>

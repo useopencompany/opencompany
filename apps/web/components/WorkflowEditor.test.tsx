@@ -79,6 +79,7 @@ describe("WorkflowEditor", () => {
     vi.clearAllMocks();
     workflowActionsMock.update.mockResolvedValue({ version: 2 });
     workflowActionsMock.archive.mockResolvedValue({ workflowId: "workflow_1", version: 2 });
+    workflowActionsMock.runNow.mockResolvedValue({ task: { displayId: "TASK-42" } });
   });
 
   afterEach(() => {
@@ -352,6 +353,37 @@ describe("WorkflowEditor", () => {
       scopeKey: "workspace_1",
     });
     expect(routerMock.push).toHaveBeenCalledWith("/tasks/TASK-42");
+  });
+
+  it("surfaces an error when a scheduled workflow cannot be started", async () => {
+    workflowActionsMock.runNow.mockRejectedValueOnce(new Error("Workflow launch failed."));
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          status: "active",
+          trigger: {
+            type: "schedule",
+            cron: "0 9 * * 1",
+            timezone: "UTC",
+            prompt: "Run the weekly report.",
+            enabled: true,
+            lastRunAt: null,
+            nextRunAt: "2026-08-17T09:00:00.000Z",
+          },
+        }}
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Run now" }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Workflow launch failed.");
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 
   it("archives from the editor menu", async () => {
