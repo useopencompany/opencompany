@@ -61,9 +61,8 @@ while the API owns onboarding-email persistence.
 
 `OPENCOMPANY_DESKTOP_AUTH_SECRET` is a web-only base64 32-byte key (same convention as
 `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`) that seals the macOS desktop app's Google sign-in handoff
-token. It is only exercised by the `/auth/desktop/*` routes, so it is optional until the desktop app
-ships; add it to prod `/web` before enabling desktop distribution. It is not required by the release
-preflight yet — wire it into the required web group when the desktop app goes live.
+token. Add it to prod `/web` before enabling desktop distribution. The release preflight requires it
+for the web app so a deployment cannot expose the desktop auth flow without its sealing key.
 
 `REDIS_URL` is optional for correctness but required by the production activation preflight. When
 configured for both `apps/api` and `apps/runner`, it

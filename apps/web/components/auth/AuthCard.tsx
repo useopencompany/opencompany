@@ -100,7 +100,7 @@ function DesktopGoogleButton({
     if (bridge?.signInWithGoogle) {
       event.preventDefault();
       setPending(true);
-      bridge.signInWithGoogle();
+      bridge.signInWithGoogle(invitationToken);
     }
     // No bridge: let the server action submit and redirect the window normally.
   }

@@ -17,6 +17,7 @@ const groups = {
       "WORKOS_API_KEY",
       "WORKOS_COOKIE_PASSWORD",
       "WORKOS_COOKIE_DOMAIN",
+      "OPENCOMPANY_DESKTOP_AUTH_SECRET",
       "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
       "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
       "RUNNER_PUBLIC_URL",
@@ -405,6 +406,12 @@ if (!isUnset(cookiePassword) && cookiePassword.length < 32) {
   console.log("\nWORKOS_COOKIE_PASSWORD must be at least 32 characters.");
 }
 
+const desktopAuthSecret = process.env.OPENCOMPANY_DESKTOP_AUTH_SECRET?.trim();
+if (desktopAuthSecret && !isBase64Encoded32ByteKey(desktopAuthSecret)) {
+  failed = true;
+  console.log("\nOPENCOMPANY_DESKTOP_AUTH_SECRET must be a base64-encoded 32-byte key.");
+}
+
 const githubIntegrationStateSecret = process.env.GITHUB_INTEGRATION_STATE_SECRET;
 if (!isUnset(githubIntegrationStateSecret) && githubIntegrationStateSecret.length < 32) {
   failed = true;
@@ -475,6 +482,10 @@ function selectGroups() {
     .filter((arg) => groups[arg]);
 
   return requested.length > 0 ? requested : ["web", "api", "runner"];
+}
+
+function isBase64Encoded32ByteKey(value) {
+  return /^[A-Za-z0-9+/]+={0,2}$/u.test(value) && Buffer.from(value, "base64").length === 32;
 }
 
 function isUnset(value) {

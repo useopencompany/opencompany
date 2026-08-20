@@ -16,7 +16,11 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   ]);
   const groups = readGroups(source);
 
-  assertIncludes(groups.web.required, ["DATABASE_URL", "BLOB_READ_WRITE_TOKEN"]);
+  assertIncludes(groups.web.required, [
+    "DATABASE_URL",
+    "BLOB_READ_WRITE_TOKEN",
+    "OPENCOMPANY_DESKTOP_AUTH_SECRET",
+  ]);
   assertExcludes(
     [...groups.web.required, ...groups.web.optional],
     [

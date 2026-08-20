@@ -11,6 +11,7 @@ const version = versionArg?.split("=")[1] ?? "0.0.0";
 contextBridge.exposeInMainWorld("opencompanyDesktop", {
   version,
   platform: "darwin",
-  signInWithGoogle: () => ipcRenderer.send("desktop-auth:start-google"),
+  signInWithGoogle: (invitationToken?: string) =>
+    ipcRenderer.send("desktop-auth:start-google", invitationToken),
   retryConnection: () => ipcRenderer.send("desktop-navigation:retry"),
 });

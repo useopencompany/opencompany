@@ -14,6 +14,7 @@ const WORKOS_CLIENT_ID = process.env.WORKOS_CLIENT_ID ?? "";
 // session back to the app instead of signing the browser in.
 export async function GET(request: NextRequest) {
   const challenge = request.nextUrl.searchParams.get("challenge");
+  const invitationToken = request.nextUrl.searchParams.get("invitation_token")?.trim();
   if (!isValidDesktopChallenge(challenge)) {
     const url = new URL("/signin", getAppUrl());
     url.searchParams.set("error", "desktop_handoff");
@@ -21,7 +22,11 @@ export async function GET(request: NextRequest) {
   }
 
   const state = randomUUID();
-  await setOAuthStateCookie({ state, desktopChallenge: challenge });
+  await setOAuthStateCookie({
+    state,
+    desktopChallenge: challenge,
+    ...(invitationToken ? { invitationToken } : {}),
+  });
 
   const url = getWorkOSClient().userManagement.getAuthorizationUrl({
     clientId: WORKOS_CLIENT_ID,
