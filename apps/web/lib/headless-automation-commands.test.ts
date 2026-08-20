@@ -7,6 +7,7 @@ import {
   invokeHeadlessWorkflow,
   listHeadlessWorkflowCatalog,
   runHeadlessTaskScheduleNow,
+  runHeadlessWorkflowNow,
   updateHeadlessTaskSchedule,
   updateHeadlessWorkflow,
 } from "./headless-automation-commands";
@@ -169,6 +170,40 @@ describe("headless automation commands", () => {
     expect(sent.headers.get("idempotency-key")).toMatch(/^web-workflow-invoke:/u);
     await expect(sent.json()).resolves.toEqual(command);
     expect(awaitHeadlessTaskTransaction).toHaveBeenCalledWith("53", {
+      scopeKey: "workspace_1",
+    });
+  });
+
+  it("runs a scheduled Workflow now and reconciles the created Task", async () => {
+    let request: Request | null = null;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      request = input instanceof Request ? input : new Request(input, init);
+      return Response.json(
+        {
+          data: {
+            task,
+            messageId: "message_2",
+            runId: "run_2",
+            transactionId: "54",
+            replayed: false,
+          },
+          meta,
+        },
+        { status: 202 },
+      );
+    });
+
+    await runHeadlessWorkflowNow("workflow_1", {
+      baseUrl: "https://app.example.test",
+      fetch: fetchMock as typeof fetch,
+      scopeKey: "workspace_1",
+    });
+
+    const sent = request as unknown as Request;
+    expect(sent.method).toBe("POST");
+    expect(new URL(sent.url).pathname).toBe("/v1/workflows/workflow_1/run-now");
+    expect(sent.headers.get("idempotency-key")).toMatch(/^web-workflow-run:/u);
+    expect(awaitHeadlessTaskTransaction).toHaveBeenCalledWith("54", {
       scopeKey: "workspace_1",
     });
   });

@@ -18,6 +18,7 @@ import {
   Clock,
   Loader2,
   MoreHorizontal,
+  Play,
   Plus,
   Sparkles,
   Trash2,
@@ -29,6 +30,7 @@ import { Markdown } from "@/components/Markdown";
 import { MarkdownBrainEditor } from "@/components/MarkdownBrainEditor";
 import {
   archiveHeadlessWorkflow,
+  runHeadlessWorkflowNow,
   updateHeadlessWorkflow,
 } from "@/lib/headless-automation-commands";
 import type { WorkflowDetail } from "@/lib/headless-automation-types";
@@ -75,10 +77,12 @@ const DEFAULT_MODEL_LABEL =
 
 export function WorkflowEditor({
   workflow,
+  workspaceId,
   canEdit,
   skillCatalog,
 }: {
   workflow: WorkflowDetail;
+  workspaceId: string;
   canEdit: boolean;
   skillCatalog: SkillCatalogItem[];
 }) {
@@ -86,6 +90,7 @@ export function WorkflowEditor({
   const [draft, setDraft] = useState<WorkflowDraft>(() => workflowDraft(workflow));
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isRunning, startRunning] = useTransition();
   const [isArchiving, startArchiving] = useTransition();
   const draftRef = useRef(draft);
   const versionRef = useRef(workflow.version);
@@ -237,6 +242,25 @@ export function WorkflowEditor({
     });
   };
 
+  const runNow = () => {
+    if (draft.trigger.type !== "schedule") return;
+    setSaveError(null);
+    startRunning(async () => {
+      try {
+        const result = await runHeadlessWorkflowNow(workflow.id, { scopeKey: workspaceId });
+        router.push(`/tasks/${encodeURIComponent(result.task.displayId)}`);
+      } catch (error) {
+        setSaveError(workflowCommandError(error, "run"));
+      }
+    });
+  };
+
+  const runDisabledReason = workflowRunDisabledReason({
+    canEdit,
+    draft,
+    saveState,
+  });
+
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
@@ -250,6 +274,22 @@ export function WorkflowEditor({
                 </span>
               ) : null}
               <SaveIndicator state={saveState} canEdit={canEdit} onRetry={saveLatest} />
+              {draft.trigger.type === "schedule" && canEdit ? (
+                <button
+                  type="button"
+                  disabled={isRunning || runDisabledReason !== null}
+                  title={runDisabledReason ?? "Run this workflow now"}
+                  onClick={runNow}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isRunning ? (
+                    <Loader2 size={13} strokeWidth={2} className="animate-spin" />
+                  ) : (
+                    <Play size={13} strokeWidth={2} />
+                  )}
+                  {isRunning ? "Starting…" : "Run now"}
+                </button>
+              ) : null}
               {canEdit ? (
                 <EditorMoreMenu
                   onArchive={archive}
@@ -1264,8 +1304,29 @@ function newWorkflowStepId() {
   return `step-${globalThis.crypto.randomUUID()}`;
 }
 
-function workflowCommandError(error: unknown, operation: "saved" | "archived") {
-  return error instanceof Error
-    ? error.message
-    : `The workflow could not be ${operation}. Try again.`;
+function workflowRunDisabledReason({
+  canEdit,
+  draft,
+  saveState,
+}: {
+  canEdit: boolean;
+  draft: WorkflowDraft;
+  saveState: SaveState;
+}) {
+  if (!canEdit) return "Only workspace admins can run workflows.";
+  if (draft.status !== "active") return "Set the workflow to Active before running it.";
+  if (draft.steps.length === 0 || draft.steps.some((step) => !step.instructions.trim())) {
+    return "Add instructions to every step before running the workflow.";
+  }
+  if (saveState === "saving") return "Wait for the latest changes to save before running.";
+  if (saveState === "error") return "Save the latest changes before running.";
+  return null;
+}
+
+function workflowCommandError(error: unknown, operation: "saved" | "archived" | "run") {
+  const fallback =
+    operation === "run"
+      ? "The workflow could not be run. Try again."
+      : `The workflow could not be ${operation}. Try again.`;
+  return error instanceof Error ? error.message : fallback;
 }
