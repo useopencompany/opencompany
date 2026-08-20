@@ -704,6 +704,74 @@ describe("runCodexAppServerTurn", () => {
     expect(sandbox.sentMethods()).not.toContain("turn/start");
   });
 
+  it("bootstraps a guarded recovery turn when the prior thread cannot be resumed", async () => {
+    // A hard worker death mid-turn (e.g. a deploy that SIGKILLs the pod before it can hand off) can
+    // leave the sandbox's thread state unresumable. Recovery must continue with a fresh guarded turn
+    // instead of throwing, which previously surfaced as a terminal "Response stopped".
+    const sandbox = fakeSandbox({ resumeError: true });
+    const onRecoveryStart = vi.fn(async () => undefined);
+    const persistedThreadIds: string[] = [];
+    const persistedTurnIds: string[] = [];
+    const prepareBootstrapTurn = vi.fn(async () => ({
+      task: "durable conversation history\n\ncontinue the migration",
+    }));
+
+    const summary = await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "continue the migration",
+      prepareBootstrapTurn,
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: null,
+      existingEngineSessionId: "thread_existing",
+      existingEngineTurnId: "turn_existing",
+      reattachExistingTurn: true,
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async () => undefined,
+      onEngineSessionId: async (threadId) => {
+        persistedThreadIds.push(threadId);
+      },
+      onEngineTurnId: async (turnId) => {
+        persistedTurnIds.push(turnId);
+      },
+      onRecoveryStart,
+      onActivity: async () => undefined,
+    });
+
+    expect(sandbox.sentMethods()).toEqual([
+      "initialize",
+      "initialized",
+      "thread/resume",
+      "thread/start",
+      "turn/start",
+    ]);
+    // The recovery guard still runs, so a genuine poison loop is bounded by the recovery ceiling.
+    expect(onRecoveryStart).toHaveBeenCalledOnce();
+    expect(prepareBootstrapTurn).toHaveBeenCalledOnce();
+    expect(persistedThreadIds).toEqual(["thread_started"]);
+    expect(persistedTurnIds).toEqual(["turn_1"]);
+    expect(sandbox.sentMessages().find((message) => message.method === "turn/start")).toMatchObject(
+      {
+        params: {
+          input: [
+            {
+              type: "text",
+              text: "durable conversation history\n\ncontinue the migration",
+              text_elements: [],
+            },
+          ],
+        },
+      },
+    );
+    expect(summary).toMatchObject({ status: "success", result: "Codex completed." });
+  });
+
   it("reconciles a completion missed while no runner was connected", async () => {
     const sandbox = fakeSandbox({ resumedTurn: "completed" });
 
