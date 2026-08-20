@@ -47,6 +47,23 @@ describe("runner ACP tools MCP", () => {
     expect(missing.statusCode).toBe(401);
   });
 
+  it("rate-limits invalid capabilities before authorization", async () => {
+    const app = Fastify();
+    apps.push(app);
+    const authorize = vi.fn(async () => authorized);
+    registerAcpToolsMcpRoute(app, env, { authorize, rateLimitMax: 2 });
+
+    const request = {
+      method: "POST" as const,
+      url: "/internal/goat/acp-tools",
+      headers: { "x-opencompany-tool-ticket": "invalid" },
+    };
+    expect((await app.inject(request)).statusCode).toBe(401);
+    expect((await app.inject(request)).statusCode).toBe(401);
+    expect((await app.inject(request)).statusCode).toBe(429);
+    expect(authorize).not.toHaveBeenCalled();
+  });
+
   it("rejects an oversized MCP body before tool dispatch", async () => {
     const app = Fastify();
     apps.push(app);

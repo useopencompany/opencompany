@@ -1,3 +1,4 @@
+import fastifyRateLimit from "@fastify/rate-limit";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -15,7 +16,7 @@ import {
   verifyExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import { createLogger } from "@opencompany/observability";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { publishExternalEngineChatArtifact } from "./chat-artifacts";
 import { createCodexBrainCaptureDynamicTool } from "./codex-brain-capture-tool";
@@ -23,6 +24,8 @@ import { createCodexBrainDynamicTool } from "./codex-brain-tool";
 import type { RunnerEnv } from "./env";
 
 const MAX_MCP_BODY_BYTES = 256 * 1024;
+const DEFAULT_RATE_LIMIT_MAX = 300;
+const RATE_LIMIT_WINDOW_MS = 60_000;
 const logger = createLogger({
   service: "opencompany-runner",
   runtime: "goat-acp-tools-mcp",
@@ -32,12 +35,14 @@ type AcpToolsMcpDependencies = {
   authorize: typeof authorizePersistedExternalEngineToolCapability;
   executeAction: ExternalEngineToolDependencies["executeAction"];
   publishArtifact: typeof publishExternalEngineChatArtifact;
+  rateLimitMax: number;
 };
 
 const defaultDependencies: AcpToolsMcpDependencies = {
   authorize: authorizePersistedExternalEngineToolCapability,
   executeAction: executeActionGateway,
   publishArtifact: publishExternalEngineChatArtifact,
+  rateLimitMax: DEFAULT_RATE_LIMIT_MAX,
 };
 
 export function registerAcpToolsMcpRoute(
@@ -46,11 +51,9 @@ export function registerAcpToolsMcpRoute(
   dependencies: Partial<AcpToolsMcpDependencies> = {},
 ) {
   const resolved = { ...defaultDependencies, ...dependencies };
-  app.route({
-    method: ["GET", "POST", "DELETE"],
-    url: "/internal/goat/acp-tools",
-    bodyLimit: MAX_MCP_BODY_BYTES,
-    handler: async (request, reply) => {
+  app.register(async (scopedApp) => {
+    await scopedApp.register(fastifyRateLimit, { global: false });
+    const handler = async (request: FastifyRequest, reply: FastifyReply) => {
       const capability = verifiedCapability(request.headers["x-opencompany-tool-ticket"], env);
       if (!capability) {
         reply.status(401).send({ error: "Unauthorized." });
@@ -142,8 +145,30 @@ export function registerAcpToolsMcpRoute(
         }
         reply.raw.destroy(error instanceof Error ? error : undefined);
       }
-    },
+    };
+    const routeOptions = {
+      bodyLimit: MAX_MCP_BODY_BYTES,
+      config: {
+        rateLimit: {
+          max: resolved.rateLimitMax,
+          timeWindow: RATE_LIMIT_WINDOW_MS,
+          groupId: "acp-tools",
+          keyGenerator: (request: FastifyRequest) => rateLimitKey(request, env),
+        },
+      },
+      handler,
+    };
+
+    scopedApp.get("/internal/goat/acp-tools", routeOptions);
+    scopedApp.post("/internal/goat/acp-tools", routeOptions);
+    scopedApp.delete("/internal/goat/acp-tools", routeOptions);
   });
+}
+
+function rateLimitKey(request: FastifyRequest, env: RunnerEnv): string {
+  const capability = verifiedCapability(request.headers["x-opencompany-tool-ticket"], env);
+  if (!capability) return `ip:${request.ip}`;
+  return `turn:${capability.codexChatTurnId}:${capability.attemptId}`;
 }
 
 function verifiedCapability(
