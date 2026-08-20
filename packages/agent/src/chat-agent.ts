@@ -1,7 +1,10 @@
 import {
   ACTION_TOOL_CONTRACT,
+  AGENT_MODEL_CATALOG,
+  CLAUDE_CODE_DEFAULT_MODEL_ID,
   CODEX_DEFAULT_MODEL_ID,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
+  isClaudeCodeModelId,
   isCodexModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
@@ -134,6 +137,7 @@ import {
   SEND_USER_MESSAGE_MESSAGE_DESCRIPTION,
   SEND_USER_MESSAGE_TOOL_DESCRIPTION,
   START_TASK_ENGINE_DESCRIPTION,
+  START_TASK_MODEL_DESCRIPTION,
   START_TASK_NAME_DESCRIPTION,
   START_TASK_PROMPT_DESCRIPTION,
   START_TASK_REASON_DESCRIPTION,
@@ -163,6 +167,7 @@ export const CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
 export const CHAT_MAX_STEPS = 8;
 export const CHAT_MAX_STEPS_WITH_SANDBOX = 16;
 export const MAX_LIST_SKILL_RESULTS = 20;
+export const MAX_START_TASK_CALLS_PER_TURN = 10;
 
 // Task-only tool. It exists only when a caller explicitly injects an
 // `updateTaskStatus` runner. Normal background task execution does not expose
@@ -323,11 +328,15 @@ type StartTaskRequest = {
   engine?: HarnessEngine;
 };
 
+type StartTaskExecutionContext = {
+  toolCallId: string;
+};
+
 export async function runProductChatAgent(input: {
   messages: readonly ProductChatAgentMessage[];
   model: AgentModelId;
   gatewayApiKey: string;
-  startTask?: (task: StartTaskRequest) => Promise<StartedTask>;
+  startTask?: (task: StartTaskRequest, context: StartTaskExecutionContext) => Promise<StartedTask>;
   requestedEngine?: HarnessEngine;
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
@@ -481,7 +490,7 @@ export async function runProductChatAgent(input: {
 
 export function createProductChatToolContext(input: {
   model: AgentModelId;
-  startTask?: (task: StartTaskRequest) => Promise<StartedTask>;
+  startTask?: (task: StartTaskRequest, context: StartTaskExecutionContext) => Promise<StartedTask>;
   requestedEngine?: HarnessEngine;
   latestUserMessage?: string;
   scheduleTask?: ScheduleTaskRunner;
@@ -522,6 +531,8 @@ export function createProductChatToolContext(input: {
   const actionCap = input.limits?.actionCallsPerTurn ?? MAX_ACTION_CALLS_PER_TURN;
   let startedTask: StartedTask | null = null;
   let startedTaskInFlight: Promise<StartedTask> | null = null;
+  let startTaskCallCount = 0;
+  let internalTaskInvocationSequence = 0;
   let scheduledTask: ScheduleTaskToolOutput | null = null;
   let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
   let visibleToolActivity = false;
@@ -608,11 +619,22 @@ export function createProductChatToolContext(input: {
             enum: ["opencompany", "codex", "claude_code"],
             description: START_TASK_ENGINE_DESCRIPTION,
           },
+          model: {
+            type: "string",
+            enum: AGENT_MODEL_CATALOG.map((model) => model.id),
+            description: START_TASK_MODEL_DESCRIPTION,
+          },
         },
         required: ["prompt", "name"],
       }),
-      execute: async (args) => {
+      execute: async (args, executionContext) => {
         visibleToolActivity = true;
+        startTaskCallCount += 1;
+        if (startTaskCallCount > MAX_START_TASK_CALLS_PER_TURN) {
+          throw new Error(
+            `start_task limit reached for this turn (${MAX_START_TASK_CALLS_PER_TURN}).`,
+          );
+        }
         const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
         if (!prompt) {
           throw new Error("start_task prompt is required.");
@@ -624,15 +646,32 @@ export function createProductChatToolContext(input: {
           normalizeStartTaskEngine(args.engine) ??
           inferStartTaskEngine(input.latestUserMessage) ??
           inferStartTaskEngine([name, prompt, reason].join("\n"));
-
-        return startTrackedTask(() =>
-          startTask({
+        const requestedModel = normalizeStartTaskModel(args.model);
+        const model = modelForStartTaskEngine(engine, input.model, requestedModel);
+        const toolCallId =
+          executionContext &&
+          typeof executionContext === "object" &&
+          "toolCallId" in executionContext &&
+          typeof executionContext.toolCallId === "string"
+            ? executionContext.toolCallId
+            : `ai-sdk:start-task:${++internalTaskInvocationSequence}`;
+        const taskPromise = startTask(
+          {
             prompt,
             ...(name ? { name } : {}),
-            model: modelForStartTaskEngine(engine, input.model),
+            model,
             ...(engine ? { engine } : {}),
-          }),
+          },
+          { toolCallId },
         );
+        if (!startedTask && !startedTaskInFlight) startedTaskInFlight = taskPromise;
+        try {
+          const task = await taskPromise;
+          startedTask ??= task;
+          return toStartTaskToolOutput(task, "queued");
+        } finally {
+          if (startedTaskInFlight === taskPromise) startedTaskInFlight = null;
+        }
       },
     });
   }
@@ -1443,12 +1482,33 @@ function normalizeStartTaskEngine(value: unknown): HarnessEngine | undefined {
     : undefined;
 }
 
+function normalizeStartTaskModel(value: unknown): AgentModelId | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !AGENT_MODEL_CATALOG.some((model) => model.id === value)) {
+    throw new Error(`Unsupported task model "${String(value)}".`);
+  }
+  return value as AgentModelId;
+}
+
 function modelForStartTaskEngine(
   engine: HarnessEngine | undefined,
-  model: AgentModelId,
+  chatModel: AgentModelId,
+  requestedModel?: AgentModelId,
 ): AgentModelId {
-  if (engine !== "codex") return model;
-  return isCodexModelId(model) ? model : CODEX_DEFAULT_MODEL_ID;
+  const model = requestedModel ?? chatModel;
+  if (engine === "codex") {
+    if (requestedModel && !isCodexModelId(requestedModel)) {
+      throw new Error(`Model "${requestedModel}" is not available for the Codex engine.`);
+    }
+    return isCodexModelId(model) ? model : CODEX_DEFAULT_MODEL_ID;
+  }
+  if (engine === "claude_code") {
+    if (requestedModel && !isClaudeCodeModelId(requestedModel)) {
+      throw new Error(`Model "${requestedModel}" is not available for the Claude Code engine.`);
+    }
+    return isClaudeCodeModelId(model) ? model : CLAUDE_CODE_DEFAULT_MODEL_ID;
+  }
+  return model;
 }
 
 function inferStartTaskEngine(value: string | undefined): HarnessEngine | undefined {

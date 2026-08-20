@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   CHAT_HOST_TOOL_CONTRACT_VERSION,
   type ChatHostToolGatewayRequest,
@@ -104,7 +105,7 @@ export function executePersistedChatHostTool(input: {
         {
           ...task,
           source: "agent",
-          idempotencyKey: `agent:${input.request.turnId}`,
+          idempotencyKey: taskSpawnIdempotencyKey(input.request.turnId, input.request.toolCallId),
         },
         taskDependencies,
       ),
@@ -188,6 +189,12 @@ export function executePersistedChatHostTool(input: {
     ...(input.signal ? { signal: input.signal } : {}),
     dependencies,
   });
+}
+
+export function taskSpawnIdempotencyKey(turnId: string, toolCallId?: string) {
+  if (!toolCallId) return `agent:${turnId}`;
+  const invocationHash = createHash("sha256").update(toolCallId).digest("hex");
+  return `agent:${turnId}:tool:${invocationHash}`;
 }
 
 async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostContext | null> {

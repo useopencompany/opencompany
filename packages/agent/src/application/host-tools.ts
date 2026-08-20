@@ -3,6 +3,8 @@ import {
   type ChatHostBootstrap,
   type ChatHostToolGatewayResponse,
   type ChatHostToolOperation,
+  isClaudeCodeModelId,
+  isCodexModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { isBrowserToolName } from "@opencompany/browser-tools";
@@ -246,6 +248,7 @@ async function executeOperation(
       const model = requiredModel(toolInput.model);
       const name = optionalString(toolInput.name);
       const engine = optionalEngine(toolInput.engine);
+      assertModelSupportsEngine(model, engine);
       const created = await dependencies.createTask({
         actorId: context.actorId,
         workspaceId: context.workspaceId,
@@ -520,6 +523,18 @@ function optionalEngine(value: unknown) {
   return value === "opencompany" || value === "codex" || value === "claude_code"
     ? value
     : undefined;
+}
+
+function assertModelSupportsEngine(
+  model: AgentModelId,
+  engine: "opencompany" | "codex" | "claude_code" | undefined,
+) {
+  if (engine === "codex" && !isCodexModelId(model)) {
+    throw new Error(`Model "${model}" is not available for the Codex engine.`);
+  }
+  if (engine === "claude_code" && !isClaudeCodeModelId(model)) {
+    throw new Error(`Model "${model}" is not available for the Claude Code engine.`);
+  }
 }
 
 function browserToolName(value: unknown) {
