@@ -14,8 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "exceljs": "^4.4.0",
-    "mammoth": "^1.11.0"
+    "@firecrawl/anydoc": "0.1.9"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

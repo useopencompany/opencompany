@@ -1,53 +1,145 @@
-import ExcelJS from "exceljs";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { extractUtf8Text, extractXlsxText } from "./index";
+import { DocumentExtractionError, extractDocumentMarkdown, extractUtf8Text } from "./index";
 
-async function workbookBytes(build: (workbook: ExcelJS.Workbook) => void): Promise<Buffer> {
-  const workbook = new ExcelJS.Workbook();
-  build(workbook);
-  return Buffer.from(await workbook.xlsx.writeBuffer());
+function fixture(name: string): Buffer {
+  return readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)));
 }
 
-describe("extractXlsxText", () => {
-  it("renders sheets as headed CSV blocks", async () => {
-    const bytes = await workbookBytes((workbook) => {
-      const sheet = workbook.addWorksheet("Q1");
-      sheet.addRow(["metric", "value"]);
-      sheet.addRow(["revenue", 120]);
-      sheet.addRow(["notes", 'said "up", strongly']);
+describe("extractDocumentMarkdown", () => {
+  it("extracts DOCX as Markdown", async () => {
+    const result = await extractDocumentMarkdown({
+      bytes: fixture("sample.docx"),
+      filename: "sample.docx",
     });
-    const text = await extractXlsxText(bytes);
-    expect(text).toContain("## Sheet: Q1");
-    expect(text).toContain("metric,value");
-    expect(text).toContain("revenue,120");
-    // Quotes and commas get CSV-escaped.
-    expect(text).toContain('"said ""up"", strongly"');
+    expect(result.format).toBe("docx");
+    expect(result.truncated).toBe(false);
+    expect(result.markdown).toContain("Quarterly Report");
+    expect(result.markdown).toContain("Revenue grew to 120");
   });
 
-  it("caps the output size with a truncation marker", async () => {
-    const bytes = await workbookBytes((workbook) => {
-      const sheet = workbook.addWorksheet("Big");
-      for (let index = 0; index < 200; index += 1) {
-        sheet.addRow([`row-${index}`, "x".repeat(50)]);
-      }
+  it("extracts XLSX as a Markdown table", async () => {
+    const result = await extractDocumentMarkdown({
+      bytes: fixture("sample.xlsx"),
+      filename: "sample.xlsx",
     });
-    const text = await extractXlsxText(bytes, { maxBytes: 500 });
-    expect(Buffer.byteLength(text, "utf8")).toBeLessThan(1000);
-    expect(text).toContain("truncated");
+    expect(result.format).toBe("xlsx");
+    expect(result.markdown).toContain("| metric | value |");
+    expect(result.markdown).toContain("| revenue | 120 |");
+  });
+
+  it.each([
+    ["sample.doc", "doc"],
+    ["sample.ppt", "ppt"],
+    ["sample.pptx", "pptx"],
+    ["sample.xls", "xlsx"],
+    ["sample.rtf", "rtf"],
+  ])("extracts the advertised %s format", async (filename, format) => {
+    const result = await extractDocumentMarkdown({ bytes: fixture(filename), filename });
+    expect(result.format).toBe(format);
+    expect(result.markdown.trim().length).toBeGreaterThan(0);
+  });
+
+  it("extracts text-based PDF as Markdown", async () => {
+    const result = await extractDocumentMarkdown({
+      bytes: fixture("sample.pdf"),
+      filename: "sample.pdf",
+    });
+    expect(result.format).toBe("pdf");
+    expect(result.markdown).toContain("Contract Summary");
+  });
+
+  it("detects the format from bytes even when the filename lies", async () => {
+    // A DOCX handed over with a .txt name must still be parsed as DOCX, not decoded as text.
+    const result = await extractDocumentMarkdown({
+      bytes: fixture("sample.docx"),
+      filename: "notes.txt",
+    });
+    expect(result.format).toBe("docx");
+    expect(result.markdown).toContain("Quarterly Report");
+  });
+
+  it("renders CSV as a Markdown table using the filename hint", async () => {
+    const result = await extractDocumentMarkdown({
+      bytes: Buffer.from("metric,value\nrevenue,120\n"),
+      filename: "figures.csv",
+    });
+    expect(result.format).toBe("csv");
+    expect(result.markdown).toContain("| metric | value |");
+    expect(result.markdown).toContain("| revenue | 120 |");
+  });
+
+  it("passes plain text and Markdown through the UTF-8 path", async () => {
+    const result = await extractDocumentMarkdown({
+      bytes: Buffer.from("# Title\n\nHello **world**."),
+      mediaType: "text/markdown",
+    });
+    expect(result.format).toBe("text");
+    expect(result.markdown).toBe("# Title\n\nHello **world**.");
+  });
+
+  it("reports a scanned/image-only PDF as image_only_pdf", async () => {
+    await expect(
+      extractDocumentMarkdown({ bytes: fixture("image-only.pdf"), filename: "scan.pdf" }),
+    ).rejects.toMatchObject({ kind: "image_only_pdf" });
+  });
+
+  it("reports malformed documents", async () => {
+    await expect(
+      extractDocumentMarkdown({
+        bytes: Buffer.from("%PDF-1.7\nnot a real pdf\n"),
+        filename: "broken.pdf",
+      }),
+    ).rejects.toMatchObject({ kind: "malformed" });
+  });
+
+  it("reports unsupported input when nothing identifies a format", async () => {
+    const error = await extractDocumentMarkdown({
+      bytes: Buffer.from([0x00, 0x01, 0x02, 0x03]),
+    }).catch((e) => e);
+    expect(error).toBeInstanceOf(DocumentExtractionError);
+    expect(error.kind).toBe("unsupported");
+  });
+
+  it("rejects invalid UTF-8 on the text path as malformed", async () => {
+    await expect(
+      extractDocumentMarkdown({ bytes: Buffer.from([0xff, 0xfe, 0xfd]), mediaType: "text/plain" }),
+    ).rejects.toMatchObject({ kind: "malformed" });
+  });
+
+  it("caps output at maxOutputBytes and flags truncation", async () => {
+    const bytes = Buffer.from(`col\n${"x".repeat(5_000)}\n`);
+    const result = await extractDocumentMarkdown({
+      bytes,
+      filename: "big.csv",
+      maxOutputBytes: 500,
+    });
+    expect(result.truncated).toBe(true);
+    expect(Buffer.byteLength(result.markdown, "utf8")).toBeLessThanOrEqual(500);
   });
 });
 
 describe("extractUtf8Text", () => {
   it("decodes and caps UTF-8 text", () => {
-    const text = extractUtf8Text(
-      Buffer.from(`1\n00:00:00,000 --> 00:00:01,000\n${"é".repeat(20)}`),
-      {
-        maxBytes: 50,
-      },
-    );
-    expect(text).toContain("00:00:00,000 --> 00:00:01,000");
-    expect(text).toContain("truncated");
+    const text = extractUtf8Text(Buffer.from(`hello ${"é".repeat(20)}`), { maxBytes: 20 });
+    expect(text).toContain("hello");
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(20);
     expect(text).not.toContain("�");
+  });
+
+  it("backs up to a UTF-8 code-point boundary when the byte cap splits a character", () => {
+    const text = extractUtf8Text(Buffer.from("é".repeat(10)), { maxBytes: 19 });
+    expect(text).toBe("é".repeat(9));
+    expect(Buffer.byteLength(text, "utf8")).toBe(18);
+  });
+
+  it("handles long replacement-character runs without scanning them with a regex", () => {
+    const prefix = "�".repeat(20_000);
+    const text = extractUtf8Text(Buffer.from(`${prefix}x${"tail".repeat(1_000)}`), {
+      maxBytes: Buffer.byteLength(prefix, "utf8") + 1,
+    });
+    expect(text).toBe(`${prefix}x`);
   });
 
   it("rejects invalid UTF-8", () => {

@@ -19,6 +19,7 @@ import {
   SubagentRow,
   ToolCallItem,
 } from "./ToolCallItem";
+import { TurnErrorNotice } from "./TurnErrorNotice";
 import { UserMessageBubble } from "./UserMessageBubble";
 
 export function MessageBubble({
@@ -100,22 +101,11 @@ function AssistantTurn({
     stopped: stopped || message.metadata?.aborted === true,
     includeMetadataTaskCard: !isTaskSession,
   });
-  // Failed turns often end without any text part (sandbox start failure, disconnected auth);
-  // the error must still get a bubble or the turn renders as nothing.
-  const showStandaloneError = Boolean(error) && !items.some((item) => item.type === "text");
-
   // `nested` is set when rendering a subagent's own trace: its steps are historical, so they render
-  // as plain read-only rows (no plan-implement / approval affordances) and no turn-level error.
+  // as plain read-only rows (no plan-implement / approval affordances).
   const renderItem = (item: AssistantRenderItem, nested: boolean): ReactNode => {
     if (item.type === "text") {
-      return (
-        <AssistantTextBubble
-          key={item.key}
-          text={item.text}
-          citations={item.citations}
-          {...(!nested && error ? { error } : {})}
-        />
-      );
+      return <AssistantTextBubble key={item.key} text={item.text} citations={item.citations} />;
     }
     if (item.type === "reasoning") return <ReasoningItem key={item.key} text={item.text} />;
     if (item.type === "artifact") {
@@ -161,7 +151,7 @@ function AssistantTurn({
   return (
     <div className="flex flex-col gap-2">
       {items.map((item) => renderItem(item, false))}
-      {showStandaloneError && error ? <AssistantTextBubble text={error} error={error} /> : null}
+      {error ? <TurnErrorNotice error={error} hasPartialOutput={items.length > 0} /> : null}
       {typeof durationMs === "number" ? <TurnDuration durationMs={durationMs} /> : null}
     </div>
   );

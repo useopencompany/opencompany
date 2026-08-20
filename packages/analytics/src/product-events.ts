@@ -51,6 +51,26 @@ export type ProductAnalyticsEventPropertiesByName = {
     routing_outcome?: string;
     routing_duration_ms?: number;
   };
+  chat_first_output_rendered: {
+    workspace_id: string;
+    session_id: string;
+    run_id: string;
+    message_id: string;
+    engine: ProductAnalyticsEngine;
+    model: string;
+    selected_model: string;
+    is_new_session: boolean;
+    sandbox_status_at_send:
+      | "not_applicable"
+      | "not_created"
+      | "running"
+      | "sleeping"
+      | "deleted"
+      | "unknown";
+    send_source: "composer" | "plan_implementation";
+    output_kind: "text" | "reasoning" | "tool" | "subagent" | "task" | "artifact" | "error";
+    time_to_first_output_ms: number;
+  };
   llm_usage_recorded: {
     workspace_id?: string;
     surface: "chat" | "task";
@@ -196,6 +216,25 @@ export const productAnalyticsEvents = {
       "routing_reason",
       "routing_outcome",
       "routing_duration_ms",
+    ],
+  },
+  chat_first_output_rendered: {
+    name: "chat_first_output_rendered",
+    description:
+      "The first assistant text, reasoning, tool, subagent, task, artifact, or error committed to the browser after a foreground send.",
+    safeProperties: [
+      "workspace_id",
+      "session_id",
+      "run_id",
+      "message_id",
+      "engine",
+      "model",
+      "selected_model",
+      "is_new_session",
+      "sandbox_status_at_send",
+      "send_source",
+      "output_kind",
+      "time_to_first_output_ms",
     ],
   },
   llm_usage_recorded: {

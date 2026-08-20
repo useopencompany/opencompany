@@ -25,6 +25,25 @@ Treat SigNoz, Latitude, Braintrust, and platform-log access as production-data a
 contain prompts, output, tool arguments, or provider payloads even when ordinary structured logs do
 not.
 
+## Chat felt latency
+
+The browser emits `chat_first_output_rendered` to the product PostHog project for foreground Chat
+turns. It measures from a valid composer submit action, immediately before transport dispatch,
+until React commits the first visible assistant text, reasoning, tool, subagent, task, artifact, or
+error. The optimistic working indicator does not stop the timer.
+
+The event includes Conversation, Run, and assistant Message IDs for investigation, plus engine,
+resolved model, selected model, new-session/follow-up status, last-known sandbox status at Send,
+send source, output kind, and `time_to_first_output_ms`. The sandbox status distinguishes running,
+sleeping, deleted, not-yet-created, unknown, and non-sandbox turns. Use
+engine/model/new-session/sandbox-status dimensions for percentile dashboards and the IDs only for
+individual-turn drilldown. Do not add those IDs to OpenTelemetry histogram dimensions; metrics
+intentionally keep low-cardinality attributes.
+
+Background sends are excluded because their first output is not presented in the initiating browser.
+Reloaded or reconnected Runs are also excluded because that browser did not observe the original Send
+action. A canceled or failed submission that never commits assistant output produces no event.
+
 ## Logging contract
 
 Logs may contain internal IDs, coarse status, duration, count, route name, release, environment,
