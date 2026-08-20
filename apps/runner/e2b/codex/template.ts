@@ -100,6 +100,17 @@ export const template = Template()
   )
   .runCmd(
     [
+      "curl -fsSL https://get.docker.com | sh",
+      "usermod -aG docker user",
+      "command -v docker",
+      "docker --version",
+      "docker compose version",
+      "docker run --rm hello-world",
+    ].join(" && "),
+    root,
+  )
+  .runCmd(
+    [
       "if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(\".\")[0]) >= 22 ? 0 : 1)'; then",
       "  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -;",
       "  export DEBIAN_FRONTEND=noninteractive;",
@@ -161,4 +172,5 @@ export const template = Template()
       "rm -f /tmp/playwright-chromium-smoke.png",
     ].join(" && "),
     user,
-  );
+  )
+  .runCmd(["id -nG | tr ' ' '\\n' | grep -qx docker", "docker version"].join(" && "), user);
