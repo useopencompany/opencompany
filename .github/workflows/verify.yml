@@ -267,6 +267,27 @@ jobs:
           if [[ "$RESOLVED_SCOPE" == "affected" ]]; then scope_args+=(--affected); fi
           bun --bun turbo run build --concurrency=2 "${scope_args[@]}"
 
+      - name: Smoke test document extraction in the runner image
+        run: |
+          if git diff --quiet "$TURBO_SCM_BASE" "$TURBO_SCM_HEAD" -- Dockerfile.runner packages/file-extract; then
+            echo "Runner image document extraction is unaffected."
+            exit 0
+          fi
+
+          image="opencompany-runner-verify:${TURBO_SCM_HEAD}"
+          docker build --file Dockerfile.runner --tag "$image" .
+          docker run --rm --entrypoint bun "$image" -e '
+            import { readFileSync } from "node:fs";
+            import { extractDocumentMarkdown } from "@opencompany/file-extract";
+
+            const bytes = readFileSync("packages/file-extract/src/fixtures/sample.pptx");
+            const result = await extractDocumentMarkdown({ bytes, filename: "sample.pptx" });
+            if (result.format !== "pptx" || result.markdown.trim().length === 0) {
+              throw new Error("Runner image document extraction smoke test returned no content.");
+            }
+            console.log("Runner image document extraction smoke test passed.");
+          '
+
       - name: Save trusted build caches
         if: ${{ success() && inputs.cache_write && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
