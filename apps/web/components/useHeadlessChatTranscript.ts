@@ -1,7 +1,7 @@
 "use client";
 
 import type { CollectionStatus } from "@tanstack/react-db";
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import {
   type ChatUiMessage,
@@ -15,12 +15,14 @@ import {
   type HeadlessChatMessageReadModel,
   type HeadlessChatRunReadModel,
 } from "@/lib/headless-chat-collections";
+import { clearChatSyncError, useChatSyncFailed } from "@/lib/headless-chat-sync-status";
 
 export type HeadlessChatTranscript = {
   sessionId: string | null;
   messages: ChatUiMessage[];
   runsById: ReadonlyMap<string, HeadlessChatRunReadModel>;
   isLoading: boolean;
+  syncFailed: boolean;
 };
 
 type ReadableCollection<TRow extends object> = {
@@ -73,11 +75,19 @@ export function useHeadlessChatTranscript(sessionId: string | null): HeadlessCha
       .map((row) => headlessChatMessageRowToUiMessage(row, runsByAssistantMessage.get(row.id)));
   }, [rows, runRows]);
 
+  const syncFailed = useChatSyncFailed(sessionId);
+  // A successful (re)sync delivers durable rows; clear any prior failure so the retry surface hides
+  // itself without waiting for the user. Empty conversations recover via an explicit retry instead.
+  useEffect(() => {
+    if (sessionId && messages.length > 0) clearChatSyncError(sessionId);
+  }, [sessionId, messages.length]);
+
   return {
     sessionId,
     messages,
     runsById,
     isLoading: Boolean(sessionId) && (!hydrated || messagesLoading),
+    syncFailed,
   };
 }
 

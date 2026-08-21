@@ -90,9 +90,9 @@ describe("AppDataProvider", () => {
     expect(mocks.getHeadlessTaskSchedules).not.toHaveBeenCalled();
   });
 
-  it("preloads only the first eight sidebar transcripts after live conversations are ready", async () => {
+  it("preloads only active-runtime transcripts after live conversations are ready", async () => {
     const now = Date.now();
-    const chatRows = Array.from({ length: 10 }, (_, index) => ({
+    const chatRows = Array.from({ length: 6 }, (_, index) => ({
       id: `chat_preload_${index}`,
       title: `Chat ${index}`,
       model: "anthropic/claude-sonnet-5",
@@ -100,7 +100,9 @@ describe("AppDataProvider", () => {
       archivedAt: null,
       pinnedAt: null,
       lastSeenAt: null,
-      activityState: "idle" as const,
+      // Only chats 1 and 3 have a live runtime turn; idle transcripts preload on demand via
+      // sidebar hover/focus, so boot must not fan out a shape for them.
+      activityState: (index === 1 || index === 3 ? "working" : "idle") as "working" | "idle",
       hasUnseen: false,
       createdAt: new Date(now - index * 1_000).toISOString(),
       updatedAt: new Date(now - index * 1_000).toISOString(),
@@ -130,10 +132,10 @@ describe("AppDataProvider", () => {
       </AppDataProvider>,
     );
 
-    await waitFor(() => expect(mocks.preloadHeadlessChatMessages).toHaveBeenCalledTimes(8));
-    expect(mocks.preloadHeadlessChatMessages.mock.calls.map(([chatId]) => chatId)).toEqual(
-      chatRows.slice(0, 8).map((chat) => chat.id),
-    );
+    await waitFor(() => expect(mocks.preloadHeadlessChatMessages).toHaveBeenCalledTimes(2));
+    expect(
+      mocks.preloadHeadlessChatMessages.mock.calls.map(([chatId]) => chatId).toSorted(),
+    ).toEqual(["chat_preload_1", "chat_preload_3"]);
   });
 
   it("does not fan out transcript preloads from the server fallback", () => {

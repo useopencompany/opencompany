@@ -93,7 +93,9 @@ import {
   type TaskTurnContext,
 } from "./task-turn";
 
-const ASSISTANT_PARTS_FLUSH_INTERVAL_MS = 500;
+// Durable chat_messages write cadence. Live text streams via the separate 50ms presentation-delta
+// path below, so this interval only bounds how often the Electric read-model row is rewritten.
+const ASSISTANT_PARTS_FLUSH_INTERVAL_MS = 2000;
 const PRESENTATION_DELTA_FLUSH_INTERVAL_MS = 50;
 const INTERRUPT_POLL_INTERVAL_MS = 500;
 

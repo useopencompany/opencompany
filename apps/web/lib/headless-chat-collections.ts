@@ -14,6 +14,7 @@ import {
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
+import { clearChatSyncError, recordChatSyncError } from "./headless-chat-sync-status";
 
 function readModelUrl(readModel: ChatReadModel) {
   return `${headlessChatApiBaseUrl()}/v1/read-models/${readModel}`;
@@ -45,6 +46,14 @@ function createMessages(conversationId: string) {
       shapeOptions: {
         ...shapeOptions("chat-messages-v1"),
         params: { conversationId },
+        // Electric already marks the collection ready on error, so without this the transcript
+        // renders as a silent empty conversation. Record the failure for the retry surface and
+        // return {} to keep the shape stream retrying with Electric's backoff.
+        onError: (error) => {
+          console.warn("Chat transcript sync failed; retrying.", { conversationId, error });
+          recordChatSyncError(conversationId);
+          return {};
+        },
       },
       getKey: (row) => row.id,
     }),
@@ -95,6 +104,13 @@ export function getHeadlessChatMessages(conversationId: string) {
 
 export function preloadHeadlessChatMessages(conversationId: string) {
   return getHeadlessChatMessages(conversationId).preload();
+}
+
+// Clears the failed-sync flag and re-preloads so a manual retry dismisses the error surface and
+// nudges the shape stream (which is already retrying via the onError backoff above).
+export function retryHeadlessChatMessages(conversationId: string) {
+  clearChatSyncError(conversationId);
+  return preloadHeadlessChatMessages(conversationId);
 }
 
 export function getHeadlessChatRuns(conversationId: string) {
