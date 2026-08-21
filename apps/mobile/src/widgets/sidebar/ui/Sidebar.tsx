@@ -8,7 +8,7 @@ import {
   labelStyle,
   scaleEffect,
 } from "@expo/ui/swift-ui/modifiers";
-import { Href, Link } from "expo-router";
+import { Href, Link, router } from "expo-router";
 import { useDrawerProgress } from "expo-router/drawer";
 import type { SFSymbol } from "expo-symbols";
 import { useState } from "react";
@@ -160,6 +160,7 @@ export function Sidebar() {
                 buttonBorderShape("circle"),
                 scaleEffect(SIDEBAR_ACTION_CONTROL_SCALE),
               ]}
+              onPress={() => router.navigate("/settings-sheet")}
             >
               <Label
                 title="Settings"

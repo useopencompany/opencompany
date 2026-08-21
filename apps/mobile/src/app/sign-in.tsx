@@ -1,8 +1,7 @@
-import { Button, Host } from "@expo/ui";
+import { Button, Host, ProgressView } from "@expo/ui/swift-ui";
+import { buttonStyle, controlSize } from "@expo/ui/swift-ui/modifiers";
 import { useState } from "react";
-import { Text, View } from "react-native";
-import { useCSSVariable } from "uniwind";
-
+import { View } from "react-native";
 import wordmark from "@/assets/images/wordmark.png";
 import wordmarkDark from "@/assets/images/wordmark-dark.png";
 import { useAuth } from "@/features/auth-provider";
@@ -11,7 +10,6 @@ import { StyledImage } from "@/shared/ui/styled-image";
 export default function SignInScreen() {
   const { initializationError, loading, signIn } = useAuth();
   const [error, setError] = useState<string | null>(null);
-  const accent = useCSSVariable("--color-accent") as string;
   const visibleError = error ?? initializationError;
 
   async function handleSignIn() {
@@ -42,25 +40,20 @@ export default function SignInScreen() {
         </View>
 
         <View className="mt-10">
-          <Host matchContents seedColor={accent}>
-            <Button
-              disabled={loading}
-              label={loading ? "Signing in…" : "Sign in"}
-              onPress={() => void handleSignIn()}
-              testID="sign-in-button"
-              variant="filled"
-            />
+          <Host matchContents={{ horizontal: true, vertical: false }} style={{ height: 48 }}>
+            {loading ? (
+              <ProgressView />
+            ) : (
+              <Button
+                label="Sign in"
+                onPress={() => void handleSignIn()}
+                testID="sign-in-button"
+                systemImage="rectangle.portrait.and.arrow.right"
+                modifiers={[buttonStyle("glassProminent"), controlSize("large")]}
+              />
+            )}
           </Host>
         </View>
-
-        {visibleError ? (
-          <Text
-            className="mt-5 max-w-[280px] text-center text-[15px] leading-5 text-muted-foreground"
-            selectable
-          >
-            {visibleError}
-          </Text>
-        ) : null}
       </View>
     </View>
   );

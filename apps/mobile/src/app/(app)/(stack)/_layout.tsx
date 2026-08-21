@@ -1,11 +1,13 @@
-import { Stack, useNavigation } from "expo-router";
+import { router, Stack, useNavigation } from "expo-router";
 import { KeyboardController } from "react-native-keyboard-controller";
+import { useCSSVariable } from "uniwind";
 
 export default function StackLayout() {
   // TS doesn't know the type of navigation, so we cast it to include openDrawer
   const navigation = useNavigation() as ReturnType<typeof useNavigation> & {
     openDrawer: () => void;
   };
+  const backgroundColor = useCSSVariable("--color-background") as string;
   return (
     <Stack
       screenOptions={{
@@ -38,6 +40,32 @@ export default function StackLayout() {
           sheetGrabberVisible: true,
           contentStyle: { backgroundColor: "transparent" },
           sheetAllowedDetents: [0.65],
+        }}
+      />
+      <Stack.Screen
+        name="settings-sheet"
+        options={{
+          headerTransparent: true,
+          presentation: "formSheet",
+          headerTitle: "Settings",
+          animation: "default",
+          headerShown: true,
+          gestureEnabled: true,
+          sheetGrabberVisible: true,
+          contentStyle: { backgroundColor },
+          sheetAllowedDetents: [1],
+          unstable_headerLeftItems: () => [],
+          unstable_headerRightItems: () => [
+            {
+              type: "button",
+              label: "Close",
+              icon: {
+                type: "sfSymbol",
+                name: "xmark",
+              },
+              onPress: () => router.dismiss(),
+            },
+          ],
         }}
       />
     </Stack>
