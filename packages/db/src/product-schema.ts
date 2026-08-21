@@ -428,7 +428,8 @@ export type ManagedCapabilitySource =
   | "instagram"
   | "tiktok"
   | "lead"
-  | "seo";
+  | "seo"
+  | "image";
 export type CapabilityRunStatus =
   | "awaiting_approval"
   | "approved"
@@ -847,7 +848,7 @@ export const workspaceCapabilities = productSchema.table(
     pk: primaryKey({ columns: [table.workspaceId, table.source] }),
     sourceCheck: check(
       "goat_workspace_capabilities_source_check",
-      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo')`,
+      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo', 'image')`,
     ),
   }),
 );
@@ -3663,11 +3664,11 @@ export const capabilityRuns = productSchema.table(
     ),
     sourceCheck: check(
       "goat_capability_runs_source_check",
-      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo')`,
+      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo', 'image')`,
     ),
     providerCheck: check(
       "goat_capability_runs_provider_check",
-      sql`${table.provider} IN ('tikhub', 'apify', 'pdl', 'semrush')`,
+      sql`${table.provider} IN ('tikhub', 'apify', 'pdl', 'semrush', 'vercel-ai-gateway')`,
     ),
     inputHashCheck: check(
       "goat_capability_runs_input_hash_check",
@@ -4816,7 +4817,7 @@ export const chatArtifactVersions = productSchema.table(
     ),
     sourceEngineCheck: check(
       "goat_chat_artifact_versions_source_engine_check",
-      sql`${table.sourceEngine} IN ('codex', 'claude_code')`,
+      sql`${table.sourceEngine} IN ('opencompany', 'codex', 'claude_code')`,
     ),
   }),
 );

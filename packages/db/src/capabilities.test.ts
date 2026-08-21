@@ -38,6 +38,7 @@ describe("opencompany workspace capabilities", () => {
       { source: "tiktok", enabled: true },
       { source: "lead", enabled: true },
       { source: "seo", enabled: true },
+      { source: "image", enabled: true },
     ]);
   });
 

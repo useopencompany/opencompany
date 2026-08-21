@@ -22,20 +22,40 @@ export type ManagedCapabilityMappedInput = {
   canonicalLinks: string[];
 };
 
-export type ManagedCapabilityActionSpec = {
+type ManagedCapabilityActionSpecBase = {
   id: string;
-  source: ManagedCapabilitySource;
   description: string;
   params: JSONSchema7;
-  provider: "tikhub" | "apify" | "pdl" | "semrush";
   endpoint: string;
-  priceType: "PER_CALL" | "PER_RESULT";
   executionMode: ManagedCapabilityExecutionMode;
-  inputLocation?: ManagedCapabilityInputLocation;
   maxActionResultChars?: number;
   mapInput: (params: Record<string, unknown>) => ManagedCapabilityMappedInput;
+};
+
+export type ManagedCapabilityMonidActionSpec = ManagedCapabilityActionSpecBase & {
+  source: Exclude<ManagedCapabilitySource, "image">;
+  executionProvider?: "monid";
+  provider: "tikhub" | "apify" | "pdl" | "semrush";
+  priceType: "PER_CALL" | "PER_RESULT";
+  inputLocation?: ManagedCapabilityInputLocation;
   mapOutput?: (output: unknown, params: Record<string, unknown>) => unknown;
 };
+
+export type ManagedCapabilityImageActionSpec = ManagedCapabilityActionSpecBase & {
+  source: "image";
+  executionProvider: "ai-gateway";
+  provider: "vercel-ai-gateway";
+};
+
+export type ManagedCapabilityActionSpec =
+  | ManagedCapabilityMonidActionSpec
+  | ManagedCapabilityImageActionSpec;
+
+export function isImageGenerationActionSpec(
+  spec: ManagedCapabilityActionSpec,
+): spec is ManagedCapabilityImageActionSpec {
+  return spec.executionProvider === "ai-gateway";
+}
 
 export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
   ManagedCapabilitySource,
@@ -72,6 +92,11 @@ export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
     label: "SEO",
     description:
       "Research search visibility, ranking keywords, top pages, competitors, and backlinks with Semrush.",
+  },
+  image: {
+    label: "AI image generation",
+    description:
+      "Generate a new image or recreate and restyle an attached reference image with Nano Banana.",
   },
 };
 
@@ -321,6 +346,18 @@ const SEO_LIMIT_SCHEMA = {
   maximum: 10,
   description: "Maximum number of SEO rows returned, from 1 to 10.",
 } as const;
+const IMAGE_ASPECT_RATIOS = [
+  "1:1",
+  "2:3",
+  "3:2",
+  "3:4",
+  "4:3",
+  "4:5",
+  "5:4",
+  "9:16",
+  "16:9",
+  "21:9",
+] as const;
 
 export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] = [
   {
@@ -1271,6 +1308,86 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
       };
     },
   },
+  {
+    id: "image.generate",
+    source: "image",
+    description:
+      "Generate one image from a prompt, optionally using an image attached in this chat as a reference to recreate, edit, or restyle it. Returns a durable image file in the chat.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        prompt: {
+          type: "string",
+          minLength: 1,
+          maxLength: 4_000,
+          description:
+            "Detailed image-generation or restyling instructions. When using a reference, say what to preserve and what to change.",
+        },
+        referenceImageAttachmentId: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+          description:
+            "Optional exact attachment id shown beside an image attached in this chat, for example attachment_123. Do not pass a URL or invent an id.",
+        },
+        aspectRatio: {
+          type: "string",
+          enum: [...IMAGE_ASPECT_RATIOS],
+          default: "1:1",
+          description: "Output aspect ratio. Defaults to 1:1.",
+        },
+        resolution: {
+          type: "string",
+          enum: ["1K", "2K"],
+          default: "1K",
+          description: "Output resolution. Use 1K unless the user explicitly needs more detail.",
+        },
+        quality: {
+          type: "string",
+          enum: ["standard", "pro"],
+          default: "standard",
+          description:
+            "Use standard for fast Gemini 3.1 Flash Image generation. Use pro only when the user explicitly prioritizes maximum visual fidelity.",
+        },
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: 160,
+          description: "Optional short title for the generated image file.",
+        },
+      },
+      required: ["prompt"],
+    },
+    executionProvider: "ai-gateway",
+    provider: "vercel-ai-gateway",
+    endpoint: "google/gemini-3.1-flash-image",
+    executionMode: "sync",
+    mapInput: (raw) => {
+      const params = checkedParams(raw, [
+        "prompt",
+        "referenceImageAttachmentId",
+        "aspectRatio",
+        "resolution",
+        "quality",
+        "title",
+      ]);
+      const quality = enumParam(params, "quality", ["standard", "pro"], "standard");
+      return {
+        providerInput: compact({
+          prompt: requiredText(params, "prompt", 4_000),
+          referenceImageAttachmentId: optionalText(params, "referenceImageAttachmentId", 256),
+          aspectRatio: enumParam(params, "aspectRatio", IMAGE_ASPECT_RATIOS, "1:1"),
+          resolution: enumParam(params, "resolution", ["1K", "2K"], "1K"),
+          quality,
+          title: optionalText(params, "title", 160),
+          model: quality === "pro" ? "google/gemini-3-pro-image" : "google/gemini-3.1-flash-image",
+        }),
+        resultLimit: 1,
+        canonicalLinks: [],
+      };
+    },
+  },
 ];
 
 export const MANAGED_CAPABILITY_ACTIONS_BY_ID = new Map(
@@ -1284,6 +1401,9 @@ export function managedCapabilityActionsForSource(source: ManagedCapabilitySourc
 // Stable, non-sensitive probes used by the opt-in inspect-only contract check.
 // They exercise every adapter without calling the paid run API.
 export function managedCapabilityContractProbeParams(id: string): Record<string, unknown> {
+  if (id === "image.generate") {
+    return { prompt: "A clean technical diagram of a small electric motor." };
+  }
   if (id === "seo.get_keyword_metrics") {
     return { keyword: "artificial intelligence", country: "US" };
   }
@@ -1373,11 +1493,11 @@ export function managedCapabilityContractProbeParams(id: string): Record<string,
 
 function profileAction(input: {
   id: string;
-  source: ManagedCapabilitySource;
+  source: ManagedCapabilityMonidActionSpec["source"];
   description: string;
   endpoint: string;
   platform: "x";
-}): ManagedCapabilityActionSpec {
+}): ManagedCapabilityMonidActionSpec {
   return {
     ...input,
     params: PROFILE_PARAMS,
@@ -1398,12 +1518,12 @@ function profileAction(input: {
 
 function profileListAction(input: {
   id: string;
-  source: ManagedCapabilitySource;
+  source: ManagedCapabilityMonidActionSpec["source"];
   description: string;
   endpoint: string;
   platform: "x";
   defaultLimit: number;
-}): ManagedCapabilityActionSpec {
+}): ManagedCapabilityMonidActionSpec {
   return {
     ...input,
     params: PROFILE_LIST_PARAMS,
@@ -1424,12 +1544,12 @@ function profileListAction(input: {
 
 function idAction(input: {
   id: string;
-  source: ManagedCapabilitySource;
+  source: ManagedCapabilityMonidActionSpec["source"];
   description: string;
   endpoint: string;
   field: string;
   platform: "x_post" | "tiktok_video";
-}): ManagedCapabilityActionSpec {
+}): ManagedCapabilityMonidActionSpec {
   return {
     ...input,
     params: CONTENT_PARAMS,
@@ -1450,7 +1570,7 @@ function idAction(input: {
 
 function idListAction(input: {
   id: string;
-  source: ManagedCapabilitySource;
+  source: ManagedCapabilityMonidActionSpec["source"];
   description: string;
   endpoint: string;
   field: string;
@@ -1459,7 +1579,7 @@ function idListAction(input: {
   countField?: string;
   defaultLimit: number;
   maxLimit: number;
-}): ManagedCapabilityActionSpec {
+}): ManagedCapabilityMonidActionSpec {
   return {
     ...input,
     params: CONTENT_LIST_PARAMS,
@@ -1903,11 +2023,11 @@ function tiktokSearchAction(
 
 function noInputAction(
   id: string,
-  source: ManagedCapabilitySource,
+  source: ManagedCapabilityMonidActionSpec["source"],
   description: string,
   endpoint: string,
   defaultLimit: number,
-): ManagedCapabilityActionSpec {
+): ManagedCapabilityMonidActionSpec {
   return {
     id,
     source,

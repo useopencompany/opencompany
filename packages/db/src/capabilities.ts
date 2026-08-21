@@ -19,6 +19,7 @@ export const MANAGED_CAPABILITY_SOURCES = [
   "tiktok",
   "lead",
   "seo",
+  "image",
 ] as const satisfies readonly ManagedCapabilitySource[];
 
 export const CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS = 5_000_000;

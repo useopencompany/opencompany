@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
+import type { ManagedCapabilityMonidActionSpec } from "@/lib/capabilities/catalog";
 import {
   assertInspectionMatches,
   calculateMaximumProviderQuoteUsdMicros,
@@ -154,7 +154,7 @@ function inspection(
   };
 }
 
-function actionSpec(): ManagedCapabilityActionSpec {
+function actionSpec(): ManagedCapabilityMonidActionSpec {
   return {
     id: "x.search_posts",
     source: "x",

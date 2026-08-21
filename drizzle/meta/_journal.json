@@ -1569,6 +1569,13 @@
       "when": 1787270400000,
       "tag": "0223_goat_task_projection_preservation",
       "breakpoints": true
+    },
+    {
+      "idx": 224,
+      "version": "7",
+      "when": 1787356800000,
+      "tag": "0224_goat_image_generation_capability",
+      "breakpoints": true
     }
   ]
 }

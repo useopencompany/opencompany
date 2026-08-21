@@ -41,6 +41,10 @@ const CAPABILITY_COPY: Record<ManagedCapabilitySource, { label: string; descript
     description:
       "Research search visibility, ranking keywords, top pages, competitors, and backlinks with Semrush.",
   },
+  image: {
+    label: "AI image generation",
+    description: "Create or restyle images from a prompt and an optional reference image.",
+  },
 };
 
 export function CapabilitiesPanel({
@@ -114,7 +118,7 @@ export function CapabilitiesPanel({
   return (
     <SettingsContent
       title="Capabilities"
-      description="Choose which managed research and enrichment sources are available in the main chat."
+      description="Choose which managed capabilities are available in the main chat."
     >
       <section className="rounded-lg border border-ink/10 px-4 py-4">
         <h2 className="text-[14px] font-medium text-ink">Per-chat spending limit</h2>

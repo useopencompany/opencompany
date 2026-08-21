@@ -1,9 +1,9 @@
 import { ActionExecutionError } from "../actions/types";
-import type { ManagedCapabilityActionSpec, ManagedCapabilityMappedInput } from "./catalog";
+import type { ManagedCapabilityMappedInput, ManagedCapabilityMonidActionSpec } from "./catalog";
 import type { MonidInspection } from "./monid";
 
 export function assertManagedCapabilityInspection(
-  spec: ManagedCapabilityActionSpec,
+  spec: ManagedCapabilityMonidActionSpec,
   mapped: ManagedCapabilityMappedInput,
   inspection: MonidInspection,
 ) {
@@ -45,7 +45,7 @@ export function assertManagedCapabilityInspection(
   }
 }
 
-function inspectedProviderInput(spec: ManagedCapabilityActionSpec, input: unknown) {
+function inspectedProviderInput(spec: ManagedCapabilityMonidActionSpec, input: unknown) {
   if (!spec.inputLocation) return input;
   if (!isPlainRecord(input) || !isPlainRecord(input[spec.inputLocation])) {
     throw new ActionExecutionError(

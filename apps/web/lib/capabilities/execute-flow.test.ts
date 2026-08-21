@@ -40,7 +40,7 @@ vi.mock("@opencompany/billing/auto-refill", () => ({
 
 import type { ActionExecuteContext } from "@/lib/actions/types";
 import { ActionInvalidParamsError } from "@/lib/actions/types";
-import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
+import type { ManagedCapabilityMonidActionSpec } from "@/lib/capabilities/catalog";
 import {
   CAPABILITY_ASYNC_RUNS_PER_TURN,
   evaluateManagedCapabilityApproval,
@@ -876,10 +876,10 @@ function context(): ActionExecuteContext {
 
 function spec(
   id = "x.search_posts",
-  source: ManagedCapabilityActionSpec["source"] = "x",
-  provider: ManagedCapabilityActionSpec["provider"] = "tikhub",
+  source: ManagedCapabilityMonidActionSpec["source"] = "x",
+  provider: ManagedCapabilityMonidActionSpec["provider"] = "tikhub",
   endpoint = "/api/v1/twitter/web/fetch_search_timeline",
-): ManagedCapabilityActionSpec {
+): ManagedCapabilityMonidActionSpec {
   return {
     id,
     source,

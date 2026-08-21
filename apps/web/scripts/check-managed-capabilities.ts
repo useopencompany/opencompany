@@ -1,4 +1,5 @@
 import {
+  isImageGenerationActionSpec,
   MANAGED_CAPABILITY_ACTIONS,
   managedCapabilityContractProbeParams,
 } from "../lib/capabilities/catalog";
@@ -33,6 +34,7 @@ let failed = 0;
 let knownDrifted = 0;
 const inspections = new Map<string, { response: Response; value: unknown }>();
 for (const action of MANAGED_CAPABILITY_ACTIONS) {
+  if (isImageGenerationActionSpec(action)) continue;
   const contractKey = `${action.provider}:${action.endpoint}`;
   let inspected = inspections.get(contractKey);
   if (!inspected) {

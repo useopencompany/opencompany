@@ -97,6 +97,7 @@ export type GatewayFeature =
   | "chat"
   | "chat-router"
   | "chat-title"
+  | "capability"
   | "task"
   | "brain-ingest"
   | "brain-query"

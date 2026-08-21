@@ -29,8 +29,10 @@ import { createSendUserMessageRunner } from "@opencompany/agent/imessage/send-us
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import {
   AGENT_MODEL_CATALOG,
+  CHAT_ARTIFACT_DATA_PART_TYPE,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
+  parsePublishedChatArtifact,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
@@ -623,6 +625,18 @@ export async function consumeProductChatStream(input: {
           } else {
             replacePart(index, { ...parts[index], ...nextPart });
           }
+          const artifact = publishedArtifactFromActionResult(toolName, part.output);
+          if (
+            artifact &&
+            !parts.some(
+              (candidate) =>
+                candidate.type === CHAT_ARTIFACT_DATA_PART_TYPE &&
+                isRecord(candidate.data) &&
+                candidate.data.artifactVersionId === artifact.artifactVersionId,
+            )
+          ) {
+            appendPart({ type: CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact });
+          }
           await flush(true);
         }
       } else if (part.type === "tool-error") {
@@ -692,6 +706,12 @@ export async function consumeProductChatStream(input: {
   present(true);
   await flush(true);
   return projection();
+}
+
+function publishedArtifactFromActionResult(toolName: string, output: unknown) {
+  if (toolName !== "use_action" || !isRecord(output) || output.ok !== true) return null;
+  const result = isRecord(output.result) ? output.result : null;
+  return result ? parsePublishedChatArtifact({ ok: true, artifact: result.artifact }) : null;
 }
 
 export async function opencompanyModelMessagesFromStored(
@@ -980,6 +1000,9 @@ async function resolveProductChatRuntime(input: {
               workspaceId,
               chatSessionId: session.chatSessionId,
               toolCallId: call.toolCallId,
+              sourceTurnId: turn.id,
+              sourceMessageId: turn.assistantMessageId,
+              sourceEngine: "opencompany",
               signal,
               currentDate: new Date(),
               userTimezone: "UTC",
