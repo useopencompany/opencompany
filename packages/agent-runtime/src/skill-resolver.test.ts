@@ -1,17 +1,15 @@
 import { describe, expect, test } from "vitest";
 import {
   discoverSkillDirectories,
-  ensureSkillMountId,
-  normalizeSkillCommand,
-  parseSkillFrontmatter,
   parseSkillUrl,
   resolveSkill,
   SkillResolverError,
   type SkillResolverFetcher,
   type SkillTreeEntry,
-  slugifySkillName,
-  validateSkillFiles,
 } from "./skill-resolver";
+
+const enc = new TextEncoder();
+const dec = new TextDecoder();
 
 describe("parseSkillUrl", () => {
   test("parses a github repo url", () => {
@@ -74,17 +72,6 @@ describe("parseSkillUrl", () => {
   });
 });
 
-describe("slugifySkillName / ensureSkillMountId", () => {
-  test("slugifies a display name", () => {
-    expect(slugifySkillName("Improve Codebase Architecture")).toBe("improve-codebase-architecture");
-  });
-
-  test("suffixes when colliding with a reserved workspace id", () => {
-    const id = ensureSkillMountId("pdf", "sha256:abcdef1234567890", new Set(["pdf"]));
-    expect(id).toBe("pdf-abcdef");
-  });
-});
-
 describe("discoverSkillDirectories", () => {
   const tree: SkillTreeEntry[] = [
     { path: "SKILL.md", type: "blob", mode: "100644" },
@@ -102,132 +89,120 @@ describe("discoverSkillDirectories", () => {
   });
 });
 
-describe("parseSkillFrontmatter", () => {
-  test("reads name and description", () => {
-    expect(parseSkillFrontmatter("---\nname: Foo\ndescription: Bar\n---\nbody")).toEqual({
-      name: "Foo",
-      description: "Bar",
-    });
-  });
-
-  test("returns null without frontmatter or required fields", () => {
-    expect(parseSkillFrontmatter("no frontmatter")).toBeNull();
-    expect(parseSkillFrontmatter("---\nname: Foo\n---\nbody")).toBeNull();
-  });
-
-  test("reads an optional command slug", () => {
-    expect(
-      parseSkillFrontmatter("---\nname: Foo\ndescription: Bar\ncommand: /Graph-ify\n---\nbody"),
-    ).toEqual({ name: "Foo", description: "Bar", command: "graph_ify" });
-  });
-
-  test("omits command when absent or empty after normalization", () => {
-    expect(parseSkillFrontmatter("---\nname: Foo\ndescription: Bar\n---\nbody")).not.toHaveProperty(
-      "command",
-    );
-    expect(
-      parseSkillFrontmatter("---\nname: Foo\ndescription: Bar\ncommand: '!!!'\n---\nbody"),
-    ).not.toHaveProperty("command");
-  });
-});
-
-describe("normalizeSkillCommand", () => {
-  test("strips leading slash, lowercases, and collapses separators to underscores", () => {
-    expect(normalizeSkillCommand("/Graph-ify")).toBe("graph_ify");
-    expect(normalizeSkillCommand("Deep Research")).toBe("deep_research");
-    expect(normalizeSkillCommand("deep_research")).toBe("deep_research");
-  });
-
-  test("returns null for non-strings or empty slugs", () => {
-    expect(normalizeSkillCommand(undefined)).toBeNull();
-    expect(normalizeSkillCommand(42)).toBeNull();
-    expect(normalizeSkillCommand("///")).toBeNull();
-  });
-});
-
-describe("validateSkillFiles", () => {
-  test("accepts a valid skill", () => {
-    expect(
-      validateSkillFiles([
-        { path: "SKILL.md", content: "---\nname: a\ndescription: b\n---\nhi" },
-        { path: "LANGUAGE.md", content: "more" },
-      ]),
-    ).toBeNull();
-  });
-
-  test("requires a SKILL.md", () => {
-    expect(validateSkillFiles([{ path: "README.md", content: "x" }])).toMatch(/SKILL\.md/);
-  });
-
-  test("rejects path traversal", () => {
-    expect(
-      validateSkillFiles([
-        { path: "SKILL.md", content: "x" },
-        { path: "../escape.md", content: "x" },
-      ]),
-    ).toMatch(/unsafe/);
-  });
-
-  test("rejects a binary file", () => {
-    expect(
-      validateSkillFiles([{ path: "SKILL.md", content: `bad${String.fromCharCode(0)}byte` }]),
-    ).toMatch(/text file/);
-  });
-});
+type Blob = Uint8Array | string;
 
 function fakeFetcher(input: {
   tree: SkillTreeEntry[];
-  blobs: Record<string, string>;
+  blobs: Record<string, Blob>;
+  truncated?: boolean;
   defaultBranch?: string;
   commit?: string;
 }): SkillResolverFetcher {
   return {
     defaultBranch: async () => input.defaultBranch ?? "main",
     resolveCommit: async () => input.commit ?? "a".repeat(40),
-    fetchTree: async () => input.tree,
+    fetchTree: async () => ({ entries: input.tree, truncated: input.truncated ?? false }),
     fetchBlob: async (_o, _r, _c, path) => {
       if (!(path in input.blobs)) throw new Error(`missing blob ${path}`);
-      return input.blobs[path]!;
+      const value = input.blobs[path]!;
+      return typeof value === "string" ? enc.encode(value) : value;
     },
   };
 }
 
-describe("resolveSkill", () => {
-  test("resolves a single-skill repo", async () => {
+// A minimal valid SKILL.md whose name matches directory `name`.
+function skillMd(name: string, body = "Body."): string {
+  return `---\nname: ${name}\ndescription: Does ${name} things.\n---\n${body}`;
+}
+
+describe("resolveSkill: happy paths", () => {
+  test("resolves a single subdirectory skill and keeps raw bytes", async () => {
     const fetcher = fakeFetcher({
       tree: [
-        { path: "SKILL.md", type: "blob", mode: "100644" },
-        { path: "LANGUAGE.md", type: "blob", mode: "100644" },
+        { path: "skills/my-skill/SKILL.md", type: "blob", mode: "100644" },
+        { path: "skills/my-skill/notes.md", type: "blob", mode: "100644" },
       ],
       blobs: {
-        "SKILL.md": "---\nname: My Skill\ndescription: Does things.\n---\nbody",
-        "LANGUAGE.md": "secondary",
+        "skills/my-skill/SKILL.md": skillMd("my-skill", "Do the thing."),
+        "skills/my-skill/notes.md": "secondary",
       },
     });
     const result = await resolveSkill({ url: "https://github.com/o/r", fetcher });
     expect(result.status).toBe("resolved");
     if (result.status !== "resolved") return;
-    expect(result.skill.skillId).toBe("my-skill");
-    expect(result.skill.source.path).toBe("");
-    expect(result.skill.files.map((f) => f.path).sort()).toEqual(["LANGUAGE.md", "SKILL.md"]);
+    expect(result.skill.name).toBe("my-skill");
+    expect(result.skill.body).toBe("Do the thing.");
+    expect(result.skill.source.path).toBe("skills/my-skill");
+    expect(result.skill.files.map((f) => f.path).sort()).toEqual(["SKILL.md", "notes.md"]);
     expect(result.skill.integrity).toMatch(/^sha256:[0-9a-f]{64}$/);
+    const skillFile = result.skill.files.find((f) => f.path === "SKILL.md");
+    expect(skillFile?.content).toBeInstanceOf(Uint8Array);
+    expect(dec.decode(skillFile?.content)).toContain("name: my-skill");
   });
 
-  test("returns candidates when the repo has multiple skills", async () => {
+  test("resolves a repository-root skill by matching the repo name", async () => {
+    const fetcher = fakeFetcher({
+      tree: [{ path: "SKILL.md", type: "blob", mode: "100644" }],
+      blobs: { "SKILL.md": skillMd("r") },
+    });
+    const result = await resolveSkill({ url: "https://github.com/o/r", fetcher });
+    expect(result.status).toBe("resolved");
+    if (result.status !== "resolved") return;
+    expect(result.skill.name).toBe("r");
+    expect(result.skill.source.path).toBe("");
+  });
+
+  test("retains the executable bit from the git mode", async () => {
+    const fetcher = fakeFetcher({
+      tree: [
+        { path: "s/SKILL.md", type: "blob", mode: "100644" },
+        { path: "s/run.sh", type: "blob", mode: "100755" },
+      ],
+      blobs: { "s/SKILL.md": skillMd("s"), "s/run.sh": "#!/bin/sh\n" },
+    });
+    const result = await resolveSkill({ url: "https://github.com/o/r/tree/main/s", fetcher });
+    expect(result.status).toBe("resolved");
+    if (result.status !== "resolved") return;
+    const files = Object.fromEntries(result.skill.files.map((f) => [f.path, f.executable]));
+    expect(files["run.sh"]).toBe(true);
+    expect(files["SKILL.md"]).toBe(false);
+  });
+
+  test("retains binary bytes and empty files without decoding them", async () => {
+    const binary = Uint8Array.from([0x00, 0xff, 0x10, 0x80]);
+    const fetcher = fakeFetcher({
+      tree: [
+        { path: "s/SKILL.md", type: "blob", mode: "100644" },
+        { path: "s/logo.bin", type: "blob", mode: "100644" },
+        { path: "s/empty.txt", type: "blob", mode: "100644" },
+      ],
+      blobs: { "s/SKILL.md": skillMd("s"), "s/logo.bin": binary, "s/empty.txt": enc.encode("") },
+    });
+    const result = await resolveSkill({ url: "https://github.com/o/r/tree/main/s", fetcher });
+    expect(result.status).toBe("resolved");
+    if (result.status !== "resolved") return;
+    const binFile = result.skill.files.find((f) => f.path === "logo.bin");
+    expect(binFile?.content).toEqual(binary);
+    const emptyFile = result.skill.files.find((f) => f.path === "empty.txt");
+    expect(emptyFile?.content.length).toBe(0);
+  });
+
+  test("returns candidates when the repo has multiple valid skills", async () => {
     const fetcher = fakeFetcher({
       tree: [
         { path: "skills/a/SKILL.md", type: "blob", mode: "100644" },
         { path: "skills/b/SKILL.md", type: "blob", mode: "100644" },
       ],
       blobs: {
-        "skills/a/SKILL.md": "---\nname: A\ndescription: a.\n---\nx",
-        "skills/b/SKILL.md": "---\nname: B\ndescription: b.\n---\ny",
+        "skills/a/SKILL.md": skillMd("a"),
+        "skills/b/SKILL.md": skillMd("b"),
       },
     });
     const result = await resolveSkill({ url: "https://github.com/o/r", fetcher });
     expect(result.status).toBe("ambiguous");
     if (result.status !== "ambiguous") return;
     expect(result.candidates.map((c) => c.path)).toEqual(["skills/a", "skills/b"]);
+    expect(result.candidates.map((c) => c.name)).toEqual(["a", "b"]);
   });
 
   test("resolves a chosen candidate by path", async () => {
@@ -236,10 +211,7 @@ describe("resolveSkill", () => {
         { path: "skills/a/SKILL.md", type: "blob", mode: "100644" },
         { path: "skills/b/SKILL.md", type: "blob", mode: "100644" },
       ],
-      blobs: {
-        "skills/a/SKILL.md": "---\nname: A\ndescription: a.\n---\nx",
-        "skills/b/SKILL.md": "---\nname: B\ndescription: b.\n---\ny",
-      },
+      blobs: { "skills/a/SKILL.md": skillMd("a"), "skills/b/SKILL.md": skillMd("b") },
     });
     const result = await resolveSkill({
       url: "https://github.com/o/r",
@@ -248,7 +220,7 @@ describe("resolveSkill", () => {
     });
     expect(result.status).toBe("resolved");
     if (result.status !== "resolved") return;
-    expect(result.skill.skillId).toBe("b");
+    expect(result.skill.name).toBe("b");
     expect(result.skill.source.path).toBe("skills/b");
   });
 
@@ -256,12 +228,11 @@ describe("resolveSkill", () => {
     const fetcher = fakeFetcher({
       tree: [
         { path: "skills/a/SKILL.md", type: "blob", mode: "100644" },
-        { path: "skills/improve/SKILL.md", type: "blob", mode: "100644" },
+        { path: "skills/improve-codebase-architecture/SKILL.md", type: "blob", mode: "100644" },
       ],
       blobs: {
-        "skills/a/SKILL.md": "---\nname: A\ndescription: a.\n---\nx",
-        "skills/improve/SKILL.md":
-          "---\nname: Improve Codebase Architecture\ndescription: i.\n---\ny",
+        "skills/a/SKILL.md": skillMd("a"),
+        "skills/improve-codebase-architecture/SKILL.md": skillMd("improve-codebase-architecture"),
       },
     });
     const result = await resolveSkill({
@@ -270,29 +241,111 @@ describe("resolveSkill", () => {
     });
     expect(result.status).toBe("resolved");
     if (result.status !== "resolved") return;
-    expect(result.skill.skillId).toBe("improve-codebase-architecture");
+    expect(result.skill.name).toBe("improve-codebase-architecture");
   });
+});
 
-  test("throws when no SKILL.md exists", async () => {
-    const fetcher = fakeFetcher({
+describe("resolveSkill: rejection fixtures", () => {
+  type Rejection = {
+    label: string;
+    tree: SkillTreeEntry[];
+    blobs: Record<string, Blob>;
+    truncated?: boolean;
+    match: RegExp;
+  };
+
+  const cases: Rejection[] = [
+    {
+      label: "no SKILL.md anywhere",
       tree: [{ path: "README.md", type: "blob", mode: "100644" }],
       blobs: {},
-    });
-    await expect(resolveSkill({ url: "https://github.com/o/r", fetcher })).rejects.toThrow(
-      SkillResolverError,
-    );
-  });
-
-  test("rejects a symlink in the skill folder", async () => {
-    const fetcher = fakeFetcher({
+      match: /No SKILL\.md/,
+    },
+    {
+      label: "truncated github tree",
+      tree: [{ path: "s/SKILL.md", type: "blob", mode: "100644" }],
+      blobs: { "s/SKILL.md": skillMd("s") },
+      truncated: true,
+      match: /too large to read completely/,
+    },
+    {
+      label: "symlink inside the skill folder",
       tree: [
-        { path: "SKILL.md", type: "blob", mode: "100644" },
-        { path: "link", type: "blob", mode: "120000" },
+        { path: "s/SKILL.md", type: "blob", mode: "100644" },
+        { path: "s/link", type: "blob", mode: "120000" },
       ],
-      blobs: { "SKILL.md": "---\nname: A\ndescription: a.\n---\nx", link: "../somewhere" },
+      blobs: { "s/SKILL.md": skillMd("s"), "s/link": "../secret" },
+      match: /Symlink/i,
+    },
+    {
+      label: "submodule inside the skill folder",
+      tree: [
+        { path: "s/SKILL.md", type: "blob", mode: "100644" },
+        { path: "s/vendor", type: "commit", mode: "160000" },
+      ],
+      blobs: { "s/SKILL.md": skillMd("s") },
+      match: /submodule/i,
+    },
+    {
+      label: ".git path inside the skill folder",
+      tree: [
+        { path: "s/SKILL.md", type: "blob", mode: "100644" },
+        { path: "s/.git/config", type: "blob", mode: "100644" },
+      ],
+      blobs: { "s/SKILL.md": skillMd("s"), "s/.git/config": "x" },
+      match: /\.git/,
+    },
+    {
+      label: "directory-name mismatch",
+      tree: [{ path: "skills/foo/SKILL.md", type: "blob", mode: "100644" }],
+      blobs: { "skills/foo/SKILL.md": skillMd("bar") },
+      match: /must match its directory name/,
+    },
+    {
+      label: "unknown frontmatter field",
+      tree: [{ path: "skills/foo/SKILL.md", type: "blob", mode: "100644" }],
+      blobs: {
+        "skills/foo/SKILL.md": "---\nname: foo\ndescription: d\nunexpected: 1\n---\nbody",
+      },
+      match: /Unknown frontmatter field/,
+    },
+    {
+      label: "oversize single file",
+      tree: [
+        { path: "s/SKILL.md", type: "blob", mode: "100644" },
+        { path: "s/big.txt", type: "blob", mode: "100644" },
+      ],
+      blobs: {
+        "s/SKILL.md": skillMd("s"),
+        "s/big.txt": enc.encode("a".repeat(512 * 1024 + 1)),
+      },
+      match: /too large/,
+    },
+  ];
+
+  for (const testCase of cases) {
+    test(testCase.label, async () => {
+      const fetcher = fakeFetcher({
+        tree: testCase.tree,
+        blobs: testCase.blobs,
+        ...(testCase.truncated ? { truncated: true } : {}),
+      });
+      await expect(resolveSkill({ url: "https://github.com/o/r", fetcher })).rejects.toThrow(
+        testCase.match,
+      );
     });
-    await expect(resolveSkill({ url: "https://github.com/o/r", fetcher })).rejects.toThrow(
-      /symlink/,
-    );
+  }
+
+  test("too many files exceeds the skill file-count limit", async () => {
+    const tree: SkillTreeEntry[] = [{ path: "s/SKILL.md", type: "blob", mode: "100644" }];
+    const blobs: Record<string, Blob> = { "s/SKILL.md": skillMd("s") };
+    for (let i = 0; i < 64; i++) {
+      tree.push({ path: `s/f${i}.txt`, type: "blob", mode: "100644" });
+      blobs[`s/f${i}.txt`] = "x";
+    }
+    const fetcher = fakeFetcher({ tree, blobs });
+    await expect(
+      resolveSkill({ url: "https://github.com/o/r/tree/main/s", fetcher }),
+    ).rejects.toThrow(/too many files/);
   });
 });
