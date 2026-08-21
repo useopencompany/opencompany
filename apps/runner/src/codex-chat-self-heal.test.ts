@@ -58,7 +58,7 @@ describe("selfHealCodexChatSession", () => {
     vi.clearAllMocks();
   });
 
-  it("clears only the thread id when the session still holds one", async () => {
+  it("clears only the thread id (no sandbox tier, no watermark) when the session still holds one", async () => {
     database.execute.mockResolvedValue({ rows: [{ id: "s1" }] });
     const session: FastFailingCodexChatSession = {
       id: "s1",
@@ -66,17 +66,21 @@ describe("selfHealCodexChatSession", () => {
       codexThreadId: "t1",
     };
 
-    const tier = await selfHealCodexChatSession(session, new Date("2026-08-21T12:00:00.000Z"));
+    const tier = await selfHealCodexChatSession(session, { now: new Date("2026-08-21T12:00:00Z") });
 
     expect(tier).toBe("thread");
     const query = lastQuery();
     expect(query).toContain("codex_thread_id = NULL");
     expect(query).not.toContain("sandbox_id = NULL");
-    expect(query).toContain("codex_thread_id IS NOT NULL");
+    expect(query).toContain("session.codex_thread_id IS NOT NULL");
+    // The cheap thread repair must never gate on the escalation watermark.
+    expect(query).not.toContain("newest_fail_at >= session.updated_at");
+    // Re-validates the fast-fail signature atomically so a recovered session no-ops (race guard).
+    expect(query).toContain("stats.fast_fail_count =");
     expect(query).toContain("active.status IN ('queued', 'running')");
   });
 
-  it("clears the sandbox id once the thread is already null and the loop persists", async () => {
+  it("escalates to the sandbox tier only after a post-repair fast-fail (watermark)", async () => {
     database.execute.mockResolvedValue({ rows: [{ id: "s1" }] });
     const session: FastFailingCodexChatSession = {
       id: "s1",
@@ -89,10 +93,15 @@ describe("selfHealCodexChatSession", () => {
     expect(tier).toBe("sandbox");
     const query = lastQuery();
     expect(query).toContain("sandbox_id = NULL");
-    expect(query).toContain("codex_thread_id IS NULL AND sandbox_id IS NOT NULL");
+    expect(query).toContain("session.codex_thread_id IS NULL");
+    expect(query).toContain("session.sandbox_id IS NOT NULL");
+    // Discards the warm sandbox only once a fast-fail has landed since the last repair bumped
+    // updated_at — otherwise the thread-only repair has not actually been exercised yet.
+    expect(query).toContain("stats.newest_fail_at >= session.updated_at");
+    expect(query).toContain("stats.fast_fail_count =");
   });
 
-  it("is a no-op when a turn started in the meantime", async () => {
+  it("is a no-op when a turn started or recovered in the meantime", async () => {
     database.execute.mockResolvedValue({ rows: [] });
 
     const tier = await selfHealCodexChatSession({
