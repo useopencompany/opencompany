@@ -128,7 +128,13 @@ export function subscribeHeadlessChatMessagesGeneration(listener: () => void) {
 // resubscribes to a new ShapeStream that fetches from scratch.
 export function retryHeadlessChatMessages(conversationId: string) {
   clearChatSyncError(conversationId);
+  const previous = messagesByConversation.get(conversationId);
   messagesByConversation.delete(conversationId);
+  // Stop the previous ShapeStream before replacing it. TanStack DB otherwise defers cleanup (~5min
+  // by default), during which the old stream keeps retrying the same heavy transcript and a stale
+  // onError could re-flag this conversation after the fresh stream has recovered; repeated retries
+  // would stack streams.
+  void previous?.cleanup();
   const collection = getHeadlessChatMessages(conversationId);
   messagesGenerationByConversation.set(
     conversationId,

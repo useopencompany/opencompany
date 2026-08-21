@@ -1,5 +1,5 @@
 import { createCollection } from "@tanstack/react-db";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import {
   getHeadlessChatConversations,
   getHeadlessChatEngineSession,
@@ -17,6 +17,7 @@ vi.mock("@tanstack/react-db", () => ({
   createCollection: vi.fn((options) => ({
     options,
     preload: vi.fn(async () => undefined),
+    cleanup: vi.fn(async () => undefined),
     utils: { awaitTxId: vi.fn(async () => undefined) },
   })),
 }));
@@ -31,6 +32,11 @@ type TestCollection = {
     id: string;
     shapeOptions: { url: string; params?: Record<string, string> };
   };
+};
+
+type MockCollection = {
+  preload: Mock;
+  cleanup: Mock;
 };
 
 describe("headless Chat collections", () => {
@@ -61,10 +67,12 @@ describe("headless Chat collections", () => {
     });
   });
 
-  it("recreates the message collection and clears the failure flag on retry", async () => {
+  it("stops the old stream and recreates the message collection on retry", async () => {
     const conversationId = "conversation_retry";
-    const first = getHeadlessChatMessages(conversationId);
-    expect(getHeadlessChatMessages(conversationId)).toBe(first); // cached until retry
+    const first = getHeadlessChatMessages(conversationId) as unknown as MockCollection;
+    expect(getHeadlessChatMessages(conversationId)).toBe(
+      first as unknown as ReturnType<typeof getHeadlessChatMessages>,
+    ); // cached until retry
     const generationBefore = getHeadlessChatMessagesGeneration(conversationId);
     recordChatSyncError(conversationId);
     expect(getChatSyncFailed(conversationId)).toBe(true);
@@ -74,7 +82,14 @@ describe("headless Chat collections", () => {
     // A no-op preload on the ready collection would leave a persistently-failed stream stuck, so
     // retry must hand back a fresh collection (new ShapeStream) and clear the surfaced failure.
     expect(getChatSyncFailed(conversationId)).toBe(false);
-    expect(getHeadlessChatMessages(conversationId)).not.toBe(first);
+    const fresh = getHeadlessChatMessages(conversationId) as unknown as MockCollection;
+    expect(fresh).not.toBe(first);
     expect(getHeadlessChatMessagesGeneration(conversationId)).toBe(generationBefore + 1);
+    // The previous stream must be stopped before the fresh one starts fetching, so both never race
+    // on the same heavy transcript and a stale onError cannot re-flag the conversation.
+    expect(first.cleanup).toHaveBeenCalledTimes(1);
+    expect(first.cleanup.mock.invocationCallOrder[0]).toBeLessThan(
+      fresh.preload.mock.invocationCallOrder[0]!,
+    );
   });
 });
