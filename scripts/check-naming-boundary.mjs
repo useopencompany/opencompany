@@ -192,7 +192,11 @@ const baseEnvKeys = envKeys(
 // Keys added after the GOAT→OPENCOMPANY hard cut. The boundary enforces that
 // `.env.example` still matches origin/main modulo the rename map; genuinely new
 // variables are declared here so the check accepts them.
-const addedEnvKeys = ["API_INTERNAL_TOKEN", "OPENCOMPANY_DESKTOP_AUTH_SECRET"];
+const addedEnvKeys = [
+  "API_INTERNAL_TOKEN",
+  "OPENCOMPANY_DESKTOP_AUTH_SECRET",
+  "RUNNER_CODEX_CHAT_SELF_HEAL_ENABLED",
+];
 const retiredEnvKeys = new Set([["RUNNER", "CLAUDE", "CODE", "ACP", "ENABLED"].join("_")]);
 const expectedEnvKeys = [
   ...new Set([

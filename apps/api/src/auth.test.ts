@@ -42,6 +42,44 @@ describe("API authentication", () => {
     });
   });
 
+  it("accepts the encoded browser session and preferences used by identity sync", async () => {
+    const loadSealedSession = vi.fn(async () => ({
+      authenticate: async () => ({
+        authenticated: true,
+        user: { id: "user_1" },
+        organizationId: "org_1",
+        sessionId: "session_1",
+      }),
+    }));
+    const identify = createWorkOsApiIdentityVerifier({
+      cookiePassword: "a-secure-cookie-password-with-32-chars",
+      workos: { userManagement: { loadSealedSession } } as never,
+    });
+
+    await expect(
+      identify(
+        new Request("https://api.example.test/v1/identity/sync", {
+          method: "POST",
+          headers: {
+            Cookie:
+              "wos-session=fresh%2Fsession%3D%3D; goat-active-workspace=workspace_1; goat-active-brain=brain_1",
+            Origin: "https://my.opencompany.chat",
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      userId: "user_1",
+      organizationId: "org_1",
+      activeWorkspaceId: "workspace_1",
+      activeBrainId: "brain_1",
+      method: "session",
+    });
+    expect(loadSealedSession).toHaveBeenCalledWith({
+      sessionData: "fresh/session==",
+      cookiePassword: "a-secure-cookie-password-with-32-chars",
+    });
+  });
+
   it("accepts a verified pre-organization bearer identity for onboarding and identity sync", async () => {
     const identify = createWorkOsApiIdentityVerifier({
       audience: "api_resource",

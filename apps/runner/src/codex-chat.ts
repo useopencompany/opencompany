@@ -55,7 +55,11 @@ import {
   createExternalEngineProjector,
   loadCodexChatAssistantMessageParts,
 } from "./codex-chat-events";
-import { buildCodexAcpCommandEnv, ensureCodexAcpAdapterInstalled } from "./codex-cli";
+import {
+  buildCodexAcpCommandEnv,
+  ensureCodexAcpAdapterInstalled,
+  killLeftoverCodexTurnProcesses,
+} from "./codex-cli";
 import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
 import {
   buildGitHubCommandEnv,
@@ -83,6 +87,7 @@ import {
   armSandboxActiveTimeoutById,
   armSandboxIdleTimeout,
   createOrConnectSandbox,
+  isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError,
   managedSandboxMetadata,
   type SandboxHandle,
@@ -370,9 +375,24 @@ export async function runCodexChatTurn(input: {
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
   let authCacheStaged = false;
-  let executionStage = "load_attachments";
+  let executionStage = "fence_previous_turn";
   try {
+    // Fence any leftover codex process before the first fallible preflight await. A replaced
+    // sandbox is fresh (its thread id was already nulled above), so only a reused sandbox can hold
+    // a detached engine from a hard-killed previous attempt.
+    if (!sandboxReplaced) {
+      try {
+        await killLeftoverCodexTurnProcesses(sandbox);
+      } catch (error) {
+        throw new CodexChatRetryableInfrastructureError(
+          "Codex could not fence the previous sandbox process before recovery.",
+          error,
+          failureDiagnostic(executionStage, error, redact),
+        );
+      }
+    }
     checkExternalAbort();
+    executionStage = "load_attachments";
     const attachments = await loadCodexChatAttachments(turn);
     checkExternalAbort();
     executionStage = "prepare_directories";
@@ -697,6 +717,16 @@ export async function runCodexChatTurn(input: {
       // Another worker owns the turn now; leave all rows to it.
       leaseLost = true;
       throw effectiveError;
+    } else if (effectiveError instanceof CodexChatRetryableInfrastructureError) {
+      // A transient setup failure (e.g. the fence) preserves the durable turn: the worker defers
+      // and retries from scratch instead of projecting a failed assistant message.
+      throw effectiveError;
+    } else if (isRetryableCommandStreamError(effectiveError)) {
+      throw new CodexChatRetryableInfrastructureError(
+        "Codex lost contact with its sandbox command stream before the turn completed.",
+        effectiveError,
+        failureDiagnostic(executionStage, effectiveError, redact),
+      );
     } else {
       const message = redact(errorMessage(effectiveError));
       logger.warn("opencompany Codex chat turn execution failed", {
@@ -709,12 +739,16 @@ export async function runCodexChatTurn(input: {
         error_name: effectiveError instanceof Error ? effectiveError.name : typeof effectiveError,
         error: message,
       });
+      // The user-facing message stays the clean upstream string; the stage-prefixed diagnostic is
+      // persisted to the durable attempt (run_attempts.error_message) for forensics.
+      const diagnostic = failureDiagnostic(executionStage, effectiveError, redact);
       if (taskContext) {
         await projector.fail(message, {
           taskCompletion: buildTaskTerminalProjection(taskContext),
+          failureDiagnostic: diagnostic,
         });
       } else {
-        await projector.fail(message);
+        await projector.fail(message, { failureDiagnostic: diagnostic });
       }
     }
   } finally {
@@ -1424,69 +1458,15 @@ export async function markCodexChatSandboxTimeoutArmed(input: {
   `);
 }
 
-async function persistCodexChatEngineTurnId(input: {
-  turn: CodexChatTurn;
-  leaseId: string;
-  leaseOwner: string;
-  codexTurnId: string;
-}) {
-  // Recovery is guarded per persisted engine turn. Only durably adopting a replacement turn
-  // rearms the guard; if the runner dies before this write, another worker cannot start a
-  // duplicate continuation for the same missing engine turn.
-  const result = await getDb().execute(sql`
-    UPDATE goat.codex_chat_turns AS turn
-    SET codex_turn_id = ${input.codexTurnId},
-        recovery_attempts = CASE
-          WHEN turn.codex_turn_id IS DISTINCT FROM ${input.codexTurnId} THEN 0
-          ELSE turn.recovery_attempts
-        END,
-        updated_at = ${new Date()}
-    WHERE turn.id = ${input.turn.id}
-      AND turn.user_workos_id = ${input.turn.userWorkosId}
-      AND turn.lease_id = ${input.leaseId}
-      AND turn.lease_owner = ${input.leaseOwner}
-      AND turn.status = 'running'
-    RETURNING turn.id
-  `);
-  if (rowsFromExecute(result).length === 0) throw new CodexChatLeaseLostError();
-}
-
-async function persistCodexChatEngineTurnBaseline(input: {
-  turn: CodexChatTurn;
-  leaseId: string;
-  leaseOwner: string;
-  baselineTurnIds: string[];
-}) {
-  // Snapshot the thread immediately before turn/start. If this worker disappears after the write,
-  // the next owner can identify the newly-created turn as the id absent from this baseline instead
-  // of adopting unrelated active work. Setup and sandbox-acquisition retries never reach here.
-  const result = await getDb().execute(sql`
-    UPDATE goat.codex_chat_turns AS turn
-    SET engine_recovery_required = true,
-        engine_turn_baseline_ids = COALESCE(
-          turn.engine_turn_baseline_ids,
-          ${JSON.stringify(input.baselineTurnIds)}::jsonb
-        ),
-        updated_at = ${new Date()}
-    WHERE turn.id = ${input.turn.id}
-      AND turn.user_workos_id = ${input.turn.userWorkosId}
-      AND turn.lease_id = ${input.leaseId}
-      AND turn.lease_owner = ${input.leaseOwner}
-      AND turn.status = 'running'
-    RETURNING turn.id
-  `);
-  if (rowsFromExecute(result).length === 0) throw new CodexChatLeaseLostError();
-}
-
 export async function claimCodexChatRecovery(input: {
   turn: CodexChatTurn;
   leaseId: string;
   leaseOwner: string;
-  // Codex caps recovery at a single attempt and rearms the guard only after durably adopting a
-  // replacement engine turn (see persistCodexChatEngineTurnId). Engines whose recovery reruns the
-  // prompt against a persisted session, such as Claude Code over ACP, pass a higher ceiling so
-  // several handoffs (e.g. back-to-back deploys during one long turn) do not strand the turn,
-  // while still breaking a genuine poison loop.
+  // A simple per-turn ceiling on how many times a reclaimed turn may re-run its recovery prompt
+  // against the persisted engine session. It only ever increments (there is no rearm), so a genuine
+  // poison loop is broken after `maxRecoveryAttempts`, while a run of legitimate back-to-back deploy
+  // handoffs during one long turn stays under the ceiling. Codex recovery hinges on
+  // `codex_turn_id != null` (see codex-chat-worker.ts), not on this counter.
   maxRecoveryAttempts?: number;
   exhaustedMessage?: string;
 }) {
@@ -1919,6 +1899,13 @@ function readGoalMode(value: unknown): { objective: string; tokenBudget?: number
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+// Stage-prefixed diagnostic persisted to the durable attempt (not shown to the user). Lets a
+// bare upstream string like "Internal error" be traced back to where in the turn it failed.
+function failureDiagnostic(stage: string, error: unknown, redact: (value: string) => string) {
+  const errorName = error instanceof Error ? error.name : typeof error;
+  return `[${stage}] ${errorName}: ${redact(errorMessage(error))}`.slice(0, 2_000);
 }
 
 function readString(value: unknown) {

@@ -16,6 +16,7 @@ import { startAttioFlushWorker } from "./attio-flush-worker";
 import { setBrainImportWakeup, startBrainImportWorker } from "./brain-import-worker";
 import { setBrainIngestWakeup, startBrainIngestWorker } from "./brain-ingest-worker";
 import { startBrainWorkerAdmissionListener } from "./brain-worker-admission";
+import { startCodexChatSelfHealSweeper } from "./codex-chat-self-heal";
 import {
   setCodexChatWakeup,
   startCodexChatWorker,
@@ -108,6 +109,8 @@ const stuckWorkMonitor = env.taskWorkerEnabled
       turnThresholdMs: Math.max(env.codexTimeoutMs + 15 * 60_000, 20 * 60_000),
     })
   : null;
+const codexChatSelfHealSweeper =
+  env.taskWorkerEnabled && env.codexChatSelfHealEnabled ? startCodexChatSelfHealSweeper() : null;
 const sandboxReconciler = env.taskWorkerEnabled ? startSandboxReconciler() : null;
 const taskScheduleWorker = codexChatWorker
   ? startTaskScheduleWorker({
@@ -215,6 +218,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
     runnerDrainTask("fathom_poll", fathomPollWorker),
     runnerDrainTask("google_drive_sync", googleDriveSyncWorker),
     runnerDrainTask("stuck_work_monitor", stuckWorkMonitor),
+    runnerDrainTask("codex_chat_self_heal", codexChatSelfHealSweeper),
     runnerDrainTask("sandbox_reconciler", sandboxReconciler),
     runnerDrainTask("brain_worker_admission", brainWorkerAdmissionListener),
     { name: "http_server", stop: async () => server.close() },

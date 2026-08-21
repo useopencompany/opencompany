@@ -952,6 +952,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     codexChatIdleTimeoutMs: 300_000,
     jobLeaseTtlMs: 300_000,
     taskWorkerEnabled: false,
+    codexChatSelfHealEnabled: true,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

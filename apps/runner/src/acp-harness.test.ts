@@ -185,7 +185,21 @@ describe("AcpHarness", () => {
     expect(transport.kill).toHaveBeenCalledWith(41);
   });
 
-  it("falls back to a fresh session when ACP cannot load the stored session", async () => {
+  // Any application-level (JSON-RPC) session/load failure means the saved thread is unusable on
+  // this process — including the sticky variants that previously escaped the message-regex allowlist
+  // and permanently bricked the session (-32603 "Internal error", "no rollout found …").
+  it.each([
+    { errorCode: -32002, errorText: "Session not found", label: "a missing session" },
+    { errorCode: -32603, errorText: "Internal error", label: "an internal error" },
+    {
+      errorCode: -32000,
+      errorText: "no rollout found for thread id 9b5fee11",
+      label: "a non-matching error message",
+    },
+  ])("invalidates the stored session and starts fresh when session/load fails with $label", async ({
+    errorCode,
+    errorText,
+  }) => {
     const transport = fakeAcpSandbox(async (message, emit) => {
       if (message.method === "initialize") {
         await emit({
@@ -197,7 +211,7 @@ describe("AcpHarness", () => {
         await emit({
           jsonrpc: "2.0",
           id: message.id,
-          error: { code: -32002, message: "Session not found" },
+          error: { code: errorCode, message: errorText },
         });
       } else if (message.method === "session/new") {
         await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "session_fresh" } });
@@ -208,7 +222,7 @@ describe("AcpHarness", () => {
     const prepareFreshTask = vi.fn(async () => "Recover with full history.");
     const onExistingSessionInvalidated = vi.fn(async () => {});
     const input = harnessInput(transport.sandbox, {
-      existingSessionId: "session_missing",
+      existingSessionId: "session_stale",
       prepareFreshTask,
       onExistingSessionInvalidated,
     });
@@ -225,6 +239,54 @@ describe("AcpHarness", () => {
         prompt: [{ type: "text", text: "Recover with full history." }],
       },
     });
+  });
+
+  it("aborts the turn without invalidating the thread when session/load fails at the transport level", async () => {
+    let resolveExit: (() => void) | null = null;
+    let onStdout: ((data: string) => void | Promise<void>) | null = null;
+    const requests: JsonRpcMessage[] = [];
+    const kill = vi.fn(async () => true);
+    const sendStdin = vi.fn(async (_pid: number, data: string) => {
+      for (const line of data.split("\n").filter(Boolean)) {
+        const message = JSON.parse(line) as JsonRpcMessage;
+        requests.push(message);
+        if (message.method === "initialize") {
+          await onStdout?.(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { agentCapabilities: { loadSession: true } },
+            })}\n`,
+          );
+        } else if (message.method === "session/load") {
+          // Simulate the adapter process dying mid-load: the client fails every pending request
+          // with a plain (non-AcpRpcError) transport error.
+          resolveExit?.();
+        }
+      }
+    });
+    const run = vi.fn(
+      async (_command: string, options: { onStdout?: (data: string) => void | Promise<void> }) => {
+        onStdout = options.onStdout ?? null;
+        return {
+          pid: 41,
+          wait: () =>
+            new Promise<void>((resolve) => {
+              resolveExit = resolve;
+            }),
+        };
+      },
+    );
+    const sandbox = { commands: { run, sendStdin, kill } } as unknown as SandboxHandle;
+    const onExistingSessionInvalidated = vi.fn(async () => {});
+    const input = harnessInput(sandbox, {
+      existingSessionId: "session_dead",
+      onExistingSessionInvalidated,
+    });
+
+    await expect(new AcpHarness().runTurn(input)).rejects.toThrow(/exited unexpectedly/);
+    expect(onExistingSessionInvalidated).not.toHaveBeenCalled();
+    expect(requests.find((request) => request.method === "session/new")).toBeUndefined();
   });
 
   it("applies Codex configuration, goals, multimodal prompts, and elicitation", async () => {

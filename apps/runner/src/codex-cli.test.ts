@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildCodexAcpCommand,
   buildCodexAcpCommandEnv,
   buildCodexConfig,
   buildCodexConfigForAuth,
@@ -7,6 +8,8 @@ import {
   CODEX_FALLBACK_NPM_PACKAGE,
   ensureCodexAcpAdapterInstalled,
   ensureCodexInstalled,
+  KILL_LEFTOVER_CODEX_TURN_COMMAND,
+  killLeftoverCodexTurnProcesses,
 } from "./codex-cli";
 
 describe("ensureCodexInstalled", () => {
@@ -150,5 +153,30 @@ describe("buildCodexAcpCommandEnv", () => {
       cli_auth_credentials_store: "file",
       forced_login_method: "chatgpt",
     });
+  });
+});
+
+describe("KILL_LEFTOVER_CODEX_TURN_COMMAND", () => {
+  it("matches a codex/codex-acp process but not its own command line", () => {
+    const pattern = /'(.+)'/.exec(KILL_LEFTOVER_CODEX_TURN_COMMAND)?.[1];
+    expect(pattern).toBeTruthy();
+    const regex = new RegExp(pattern as string);
+    expect(regex.test(buildCodexAcpCommand("/work"))).toBe(true);
+    expect(regex.test(KILL_LEFTOVER_CODEX_TURN_COMMAND)).toBe(false);
+  });
+
+  it("tolerates no matching process", () => {
+    expect(KILL_LEFTOVER_CODEX_TURN_COMMAND).toMatch(/\|\| true$/);
+  });
+});
+
+describe("killLeftoverCodexTurnProcesses", () => {
+  it("runs the fence command in the sandbox", async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: "", exitCode: 0 });
+
+    await killLeftoverCodexTurnProcesses({ commands: { run } } as never);
+
+    expect(run).toHaveBeenCalledOnce();
+    expect(run.mock.calls[0]?.[0]).toBe(KILL_LEFTOVER_CODEX_TURN_COMMAND);
   });
 });
