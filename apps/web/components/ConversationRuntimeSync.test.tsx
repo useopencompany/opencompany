@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
     isError: false,
   },
   collection: {},
-  getConversation: vi.fn(),
+  getEngineSession: vi.fn(),
   getRuntimeStatus: vi.fn(async () => null),
 }));
 
@@ -23,7 +23,7 @@ vi.mock("@/components/useHydrated", () => ({
 }));
 
 vi.mock("@/lib/headless-chat-collections", () => ({
-  getHeadlessChatConversation: mocks.getConversation,
+  getHeadlessChatEngineSession: mocks.getEngineSession,
 }));
 
 vi.mock("@/lib/headless-chat-commands", () => ({
@@ -37,22 +37,24 @@ describe("ConversationRuntimeSync", () => {
     mocks.liveQuery.data = [];
     mocks.liveQuery.isLoading = false;
     mocks.liveQuery.isError = false;
-    mocks.getConversation.mockReturnValue(mocks.collection);
+    mocks.getEngineSession.mockReturnValue(mocks.collection);
   });
 
   it("live-syncs only the viewed Conversation runtime through completion", async () => {
     const setRuntime = vi.fn();
     const setSandboxStatus = vi.fn();
-    const running = {
-      status: "running" as const,
-      activeRunId: "run_1",
-      hasError: false,
-      updatedAt: "2026-08-19T10:00:00.000Z",
+    const lastSyncedRuntime = () => {
+      const update = setRuntime.mock.lastCall?.[0];
+      return typeof update === "function" ? update(null) : update;
     };
     mocks.liveQuery.data = [
       {
-        id: "conversation_1",
-        runtime: running,
+        conversationId: "conversation_1",
+        engine: "codex",
+        status: "running",
+        activeRunId: "run_1",
+        error: null,
+        updatedAt: "2026-08-19T10:00:00.000Z",
       },
     ];
 
@@ -65,19 +67,24 @@ describe("ConversationRuntimeSync", () => {
       />,
     );
 
-    await waitFor(() => expect(setRuntime).toHaveBeenLastCalledWith(running));
-    expect(mocks.getConversation).toHaveBeenCalledWith("conversation_1");
+    await waitFor(() =>
+      expect(lastSyncedRuntime()).toEqual({
+        status: "running",
+        activeRunId: "run_1",
+        hasError: false,
+        updatedAt: "2026-08-19T10:00:00.000Z",
+      }),
+    );
+    expect(mocks.getEngineSession).toHaveBeenCalledWith("conversation_1");
 
-    const completed = {
-      status: "idle" as const,
-      activeRunId: null,
-      hasError: false,
-      updatedAt: "2026-08-19T10:01:00.000Z",
-    };
     mocks.liveQuery.data = [
       {
-        id: "conversation_1",
-        runtime: completed,
+        conversationId: "conversation_1",
+        engine: "codex",
+        status: "failed",
+        activeRunId: null,
+        error: "sandbox lease lost",
+        updatedAt: "2026-08-19T10:01:00.000Z",
       },
     ];
     rerender(
@@ -89,7 +96,14 @@ describe("ConversationRuntimeSync", () => {
       />,
     );
 
-    await waitFor(() => expect(setRuntime).toHaveBeenLastCalledWith(completed));
+    await waitFor(() =>
+      expect(lastSyncedRuntime()).toEqual({
+        status: "failed",
+        activeRunId: null,
+        hasError: true,
+        updatedAt: "2026-08-19T10:01:00.000Z",
+      }),
+    );
   });
 
   it("preserves the server runtime snapshot when detail sync is unavailable", () => {

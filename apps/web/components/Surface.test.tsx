@@ -2531,6 +2531,37 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("Expired")).not.toBeInTheDocument();
   });
 
+  it("shows the synced engine session status on a Task Conversation", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        codexConnected
+        initialChat={{
+          id: "conversation_task_codex_1",
+          title: "Codex task",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_1",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "task_codex_1",
+          status: "running",
+          startedAtMs: Date.now(),
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Codex status: Working")).toHaveTextContent("Working");
+    expect(screen.queryByLabelText("Codex status: Connecting")).not.toBeInTheDocument();
+  });
+
   it("shows the context token usage in a tooltip", async () => {
     const user = userEvent.setup();
 

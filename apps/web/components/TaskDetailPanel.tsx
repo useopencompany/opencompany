@@ -42,14 +42,16 @@ function CanonicalTaskDetailPanel({
         .toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null,
     [runRows],
   );
-  const title = taskDetailTitle(run);
-  const initialChat: ChatSessionView = {
-    id: conversationId,
-    title,
-    model: normalizeModel(run.task.model),
-    engine: run.task.engine,
-    messages: run.chat?.messages ?? [],
-  };
+  const initialChat: ChatSessionView = useMemo(
+    () => ({
+      id: conversationId,
+      title: taskDetailTitle(run),
+      model: normalizeModel(run.task.model),
+      engine: run.task.engine,
+      messages: run.chat?.messages ?? [],
+    }),
+    [conversationId, run],
+  );
 
   return (
     <Surface

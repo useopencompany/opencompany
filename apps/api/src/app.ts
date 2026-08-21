@@ -1742,10 +1742,16 @@ export function createApiApp(input: CreateApiAppInput) {
         if (query.conversationId) {
           await input.chat.getConversation(actor, query.conversationId);
         }
-      } else if (
-        params.readModel !== "chat-conversations-v1" &&
-        params.readModel !== "engine-sessions-v1"
-      ) {
+      } else if (params.readModel === "engine-sessions-v1") {
+        if (query.brainId) {
+          throw new ApiError(400, "invalid_request", "brainId is not valid for this read model.");
+        }
+        // Task Conversations resolve through the Task boundary, so the chat-only lookup is not
+        // enough here.
+        if (query.conversationId) {
+          await authorizeConversationRead(input, actor, query.conversationId);
+        }
+      } else if (params.readModel !== "chat-conversations-v1") {
         if (!query.conversationId || query.brainId) {
           throw new ApiError(
             400,

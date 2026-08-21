@@ -1,8 +1,8 @@
 import { createCollection } from "@tanstack/react-db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  getHeadlessChatConversation,
   getHeadlessChatConversations,
+  getHeadlessChatEngineSession,
 } from "./headless-chat-collections";
 
 vi.mock("@tanstack/electric-db-collection", () => ({
@@ -32,14 +32,14 @@ type TestCollection = {
 describe("headless Chat collections", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("keeps the sidebar list global and caches detail shapes by Conversation", () => {
+  it("keeps the sidebar list global and caches engine session shapes by Conversation", () => {
     const sidebar = getHeadlessChatConversations();
-    const firstDetail = getHeadlessChatConversation("conversation_1");
-    const sameDetail = getHeadlessChatConversation("conversation_1");
-    const otherDetail = getHeadlessChatConversation("conversation_2");
+    const firstSession = getHeadlessChatEngineSession("conversation_1");
+    const sameSession = getHeadlessChatEngineSession("conversation_1");
+    const otherSession = getHeadlessChatEngineSession("conversation_2");
 
-    expect(firstDetail).toBe(sameDetail);
-    expect(firstDetail).not.toBe(otherDetail);
+    expect(firstSession).toBe(sameSession);
+    expect(firstSession).not.toBe(otherSession);
     expect(createCollection).toHaveBeenCalledTimes(3);
     expect((sidebar as unknown as TestCollection).options).toMatchObject({
       id: "headless-chat:conversations:v2",
@@ -48,10 +48,10 @@ describe("headless Chat collections", () => {
       },
     });
     expect((sidebar as unknown as TestCollection).options.shapeOptions.params).toBeUndefined();
-    expect((firstDetail as unknown as TestCollection).options).toMatchObject({
-      id: "headless-chat:conversation:v2:conversation_1",
+    expect((firstSession as unknown as TestCollection).options).toMatchObject({
+      id: "headless-chat:engine-session:v1:conversation_1",
       shapeOptions: {
-        url: "https://api.example.test/v1/read-models/chat-conversations-v2",
+        url: "https://api.example.test/v1/read-models/engine-sessions-v1",
         params: { conversationId: "conversation_1" },
       },
     });

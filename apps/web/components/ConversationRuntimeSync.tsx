@@ -6,8 +6,8 @@ import { type Dispatch, type SetStateAction, useEffect, useMemo } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import type { ConversationRuntimeView } from "@/lib/chat-ui";
 import {
-  getHeadlessChatConversation,
-  type HeadlessChatConversationReadModel,
+  getHeadlessChatEngineSession,
+  type HeadlessChatEngineSessionReadModel,
 } from "@/lib/headless-chat-collections";
 import { getEngineRuntimeStatus } from "@/lib/headless-chat-commands";
 
@@ -47,23 +47,50 @@ function ConversationRuntimeSubscriber({
   setRuntime: Dispatch<SetStateAction<ConversationRuntimeView | null>>;
   pollSandbox: boolean;
 }) {
-  const conversation = useMemo(() => getHeadlessChatConversation(conversationId), [conversationId]);
+  // The engine session shape streams flat status columns, so Electric partial updates merge
+  // per column. The nested Conversation runtime object cannot offer that: a partial update
+  // carrying only runtime_updated_at replaced the whole object and dropped its status.
+  const engineSession = useMemo(
+    () => getHeadlessChatEngineSession(conversationId),
+    [conversationId],
+  );
   const {
     data: rows,
     isLoading,
     isError,
-  } = useLiveQuery((q) => q.from({ conversation }), [conversation]);
+  } = useLiveQuery((q) => q.from({ engineSession }), [engineSession]);
   const row =
-    ((rows ?? []) as HeadlessChatConversationReadModel[]).find(
-      (candidate) => candidate.id === conversationId,
+    ((rows ?? []) as HeadlessChatEngineSessionReadModel[]).find(
+      (candidate) => candidate.conversationId === conversationId,
     ) ?? null;
-  const runtime = row ? row.runtime : null;
-  const status = runtime?.status ?? null;
+  const status = row?.status ?? null;
+  const runtime = useMemo<ConversationRuntimeView | null>(
+    () =>
+      row
+        ? {
+            status: row.status,
+            activeRunId: row.activeRunId,
+            hasError: row.error !== null,
+            updatedAt: row.updatedAt,
+          }
+        : null,
+    [row],
+  );
 
   useEffect(() => {
     // Preserve the authoritative server snapshot until this detail shape has a valid row.
     if (isLoading || isError || !row) return;
-    setRuntime(runtime);
+    // Keep state identity stable across live-query emissions that carry no runtime change.
+    setRuntime((previous) =>
+      previous &&
+      runtime &&
+      previous.status === runtime.status &&
+      previous.activeRunId === runtime.activeRunId &&
+      previous.hasError === runtime.hasError &&
+      previous.updatedAt === runtime.updatedAt
+        ? previous
+        : runtime,
+    );
   }, [isError, isLoading, row, runtime, setRuntime]);
 
   useEffect(() => {

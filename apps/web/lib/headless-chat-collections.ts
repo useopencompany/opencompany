@@ -4,6 +4,8 @@ import {
   type ChatReadModel,
   type ConversationReadModel,
   ConversationReadModelSchema,
+  type EngineSessionReadModel,
+  EngineSessionReadModelSchema,
   type MessageReadModel,
   MessageReadModelSchema,
   type RunReadModel,
@@ -30,20 +32,6 @@ function createConversations() {
       id: "headless-chat:conversations:v2",
       schema: ConversationReadModelSchema,
       shapeOptions: shapeOptions("chat-conversations-v2"),
-      getKey: (row) => row.id,
-    }),
-  );
-}
-
-function createConversation(conversationId: string) {
-  return createCollection(
-    electricCollectionOptions({
-      id: `headless-chat:conversation:v2:${conversationId}`,
-      schema: ConversationReadModelSchema,
-      shapeOptions: {
-        ...shapeOptions("chat-conversations-v2"),
-        params: { conversationId },
-      },
       getKey: (row) => row.id,
     }),
   );
@@ -77,9 +65,24 @@ function createRuns(conversationId: string) {
   );
 }
 
+function createEngineSession(conversationId: string) {
+  return createCollection(
+    electricCollectionOptions({
+      id: `headless-chat:engine-session:v1:${conversationId}`,
+      schema: EngineSessionReadModelSchema,
+      shapeOptions: {
+        ...shapeOptions("engine-sessions-v1"),
+        params: { conversationId },
+      },
+      // goat_codex_chat_sessions_chat_session_idx guarantees one engine session per Conversation.
+      getKey: (row) => row.conversationId,
+    }),
+  );
+}
+
 const messagesByConversation = new Map<string, ReturnType<typeof createMessages>>();
 const runsByConversation = new Map<string, ReturnType<typeof createRuns>>();
-const conversationsById = new Map<string, ReturnType<typeof createConversation>>();
+const engineSessionsByConversation = new Map<string, ReturnType<typeof createEngineSession>>();
 let conversations: ReturnType<typeof createConversations> | null = null;
 
 export function getHeadlessChatMessages(conversationId: string) {
@@ -107,11 +110,11 @@ export function getHeadlessChatConversations() {
   return conversations;
 }
 
-export function getHeadlessChatConversation(conversationId: string) {
-  const cached = conversationsById.get(conversationId);
+export function getHeadlessChatEngineSession(conversationId: string) {
+  const cached = engineSessionsByConversation.get(conversationId);
   if (cached) return cached;
-  const collection = createConversation(conversationId);
-  conversationsById.set(conversationId, collection);
+  const collection = createEngineSession(conversationId);
+  engineSessionsByConversation.set(conversationId, collection);
   return collection;
 }
 
@@ -148,3 +151,4 @@ export async function awaitHeadlessConversationTransaction(
 export type HeadlessChatMessageReadModel = MessageReadModel;
 export type HeadlessChatRunReadModel = RunReadModel;
 export type HeadlessChatConversationReadModel = ConversationReadModel;
+export type HeadlessChatEngineSessionReadModel = EngineSessionReadModel;
