@@ -106,11 +106,36 @@ export function preloadHeadlessChatMessages(conversationId: string) {
   return getHeadlessChatMessages(conversationId).preload();
 }
 
-// Clears the failed-sync flag and re-preloads so a manual retry dismisses the error surface and
-// nudges the shape stream (which is already retrying via the onError backoff above).
+// Bumped whenever a conversation's message collection is recreated. useHeadlessChatTranscript reads
+// this so it re-runs getHeadlessChatMessages and resubscribes to the fresh Electric stream.
+const messagesGenerationByConversation = new Map<string, number>();
+const messagesGenerationListeners = new Set<() => void>();
+
+export function getHeadlessChatMessagesGeneration(conversationId: string | null) {
+  return conversationId ? (messagesGenerationByConversation.get(conversationId) ?? 0) : 0;
+}
+
+export function subscribeHeadlessChatMessagesGeneration(listener: () => void) {
+  messagesGenerationListeners.add(listener);
+  return () => {
+    messagesGenerationListeners.delete(listener);
+  };
+}
+
+// Electric already marked the failed collection ready, and .preload() on a cached, ready collection
+// is a no-op — so once Electric exhausts its bounded onError retries the stream never restarts.
+// Drop the cached collection, create a fresh one, and bump the generation so the transcript hook
+// resubscribes to a new ShapeStream that fetches from scratch.
 export function retryHeadlessChatMessages(conversationId: string) {
   clearChatSyncError(conversationId);
-  return preloadHeadlessChatMessages(conversationId);
+  messagesByConversation.delete(conversationId);
+  const collection = getHeadlessChatMessages(conversationId);
+  messagesGenerationByConversation.set(
+    conversationId,
+    (messagesGenerationByConversation.get(conversationId) ?? 0) + 1,
+  );
+  for (const listener of messagesGenerationListeners) listener();
+  return collection.preload();
 }
 
 export function getHeadlessChatRuns(conversationId: string) {

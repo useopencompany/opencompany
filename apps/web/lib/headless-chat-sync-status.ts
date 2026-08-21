@@ -24,6 +24,10 @@ export function clearChatSyncError(conversationId: string) {
   notify();
 }
 
+export function getChatSyncFailed(conversationId: string | null): boolean {
+  return conversationId ? failedConversations.has(conversationId) : false;
+}
+
 export function useChatSyncFailed(conversationId: string | null): boolean {
   const subscribe = useCallback((listener: () => void) => {
     listeners.add(listener);
@@ -31,9 +35,6 @@ export function useChatSyncFailed(conversationId: string | null): boolean {
       listeners.delete(listener);
     };
   }, []);
-  const getSnapshot = useCallback(
-    () => (conversationId ? failedConversations.has(conversationId) : false),
-    [conversationId],
-  );
+  const getSnapshot = useCallback(() => getChatSyncFailed(conversationId), [conversationId]);
   return useSyncExternalStore(subscribe, getSnapshot, () => false);
 }

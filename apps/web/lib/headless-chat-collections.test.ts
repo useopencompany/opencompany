@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getHeadlessChatConversations,
   getHeadlessChatEngineSession,
+  getHeadlessChatMessages,
+  getHeadlessChatMessagesGeneration,
+  retryHeadlessChatMessages,
 } from "./headless-chat-collections";
+import { getChatSyncFailed, recordChatSyncError } from "./headless-chat-sync-status";
 
 vi.mock("@tanstack/electric-db-collection", () => ({
   electricCollectionOptions: vi.fn((options) => options),
@@ -55,5 +59,22 @@ describe("headless Chat collections", () => {
         params: { conversationId: "conversation_1" },
       },
     });
+  });
+
+  it("recreates the message collection and clears the failure flag on retry", async () => {
+    const conversationId = "conversation_retry";
+    const first = getHeadlessChatMessages(conversationId);
+    expect(getHeadlessChatMessages(conversationId)).toBe(first); // cached until retry
+    const generationBefore = getHeadlessChatMessagesGeneration(conversationId);
+    recordChatSyncError(conversationId);
+    expect(getChatSyncFailed(conversationId)).toBe(true);
+
+    await retryHeadlessChatMessages(conversationId);
+
+    // A no-op preload on the ready collection would leave a persistently-failed stream stuck, so
+    // retry must hand back a fresh collection (new ShapeStream) and clear the surfaced failure.
+    expect(getChatSyncFailed(conversationId)).toBe(false);
+    expect(getHeadlessChatMessages(conversationId)).not.toBe(first);
+    expect(getHeadlessChatMessagesGeneration(conversationId)).toBe(generationBefore + 1);
   });
 });

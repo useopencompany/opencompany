@@ -49,6 +49,8 @@ vi.mock("@/components/useHydrated", () => ({
 vi.mock("@/lib/headless-chat-collections", () => ({
   getHeadlessChatMessages: mocks.getHeadlessChatMessages,
   getHeadlessChatRuns: mocks.getHeadlessChatRuns,
+  getHeadlessChatMessagesGeneration: () => 0,
+  subscribeHeadlessChatMessagesGeneration: () => () => undefined,
 }));
 
 describe("useHeadlessChatTranscript", () => {

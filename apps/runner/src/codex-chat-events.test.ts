@@ -423,7 +423,7 @@ describe("createExternalEngineProjector", () => {
   });
 
   it("debounces durable chat_messages writes across rapid assistant deltas", async () => {
-    mocks.execute.mockResolvedValue({ rows: [{ id: "goat_chat_msg_assistant_1" }] });
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     let clock = 0;
     const projector = createExternalEngineProjector({
       target: projectorTarget(),
@@ -449,7 +449,7 @@ describe("createExternalEngineProjector", () => {
   });
 
   it("emits the live SSE projection for every delta while the durable write is debounced", async () => {
-    mocks.execute.mockResolvedValue({ rows: [{ id: "goat_chat_msg_assistant_1" }] });
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const appendEvents = vi.fn(
       async (input: Parameters<RunExecutionRepository["appendEvents"]>[0]) =>
         input.events.map((event, index) => ({ ...event, sequence: index + 1 })),
@@ -481,7 +481,7 @@ describe("createExternalEngineProjector", () => {
   });
 
   it("forces a durable write on a part boundary inside the debounce window", async () => {
-    mocks.execute.mockResolvedValue({ rows: [{ id: "goat_chat_msg_assistant_1" }] });
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     let clock = 0;
     const projector = createExternalEngineProjector({
       target: projectorTarget(),
@@ -499,7 +499,7 @@ describe("createExternalEngineProjector", () => {
   });
 
   it("forces a final durable write when the turn finalizes inside the debounce window", async () => {
-    mocks.execute.mockResolvedValue({ rows: [{ id: "goat_chat_msg_assistant_1" }] });
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     let clock = 0;
     const projector = createExternalEngineProjector({
       target: projectorTarget(),
@@ -522,6 +522,28 @@ describe("createExternalEngineProjector", () => {
 
     // Terminal settle commits the final row even though the debounce window is still open.
     expect(messageUpdates()).toHaveLength(2);
+  });
+
+  it("debounces streamed reasoning chunks like text deltas", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    let clock = 0;
+    const projector = createExternalEngineProjector({
+      target: projectorTarget({ engine: "claude_code" }),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+      now: () => clock,
+      assistantWriteDebounceMs: 2000,
+    });
+
+    // ACP maps every agent_thought_chunk to reasoning.completed; a reasoning-heavy turn streams many.
+    await projector.push([agentThoughtChunk("Considering. ")]); // clock 0: first write
+    clock = 400;
+    await projector.push([agentThoughtChunk("Still thinking. ")]); // debounced
+    clock = 800;
+    await projector.push([agentThoughtChunk("Almost there.")]); // debounced
+
+    // Only the first chunk commits the durable row; the rest stay within the debounce window.
+    expect(messageUpdates()).toHaveLength(1);
   });
 
   it("emits redacted tool metadata and parent linkage for the live transcript", async () => {
@@ -708,6 +730,19 @@ function agentMessageChunk(text: string, messageId = "assistant_message_1") {
       update: {
         sessionUpdate: "agent_message_chunk",
         messageId,
+        content: { type: "text", text },
+      },
+    },
+  };
+}
+
+function agentThoughtChunk(text: string) {
+  return {
+    method: "session/update",
+    params: {
+      sessionId: "codex_session_1",
+      update: {
+        sessionUpdate: "agent_thought_chunk",
         content: { type: "text", text },
       },
     },

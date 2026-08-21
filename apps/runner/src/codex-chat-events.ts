@@ -46,6 +46,15 @@ const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1" as const;
 // activity. Part boundaries and terminal settles bypass the debounce via a forced write.
 const ASSISTANT_DURABLE_WRITE_DEBOUNCE_MS = 2000;
 
+// Streamed projection events that must NOT force a durable write. assistant.delta has its own branch
+// below; the ACP normalizer maps every agent_thought_chunk to reasoning.completed, so a
+// reasoning-heavy Claude Code turn emits many of these per second. Debounce them like text deltas
+// and reserve forced writes for true part boundaries (tool lifecycle, questions, plan/goal, etc.).
+const STREAMED_PROJECTION_EVENT_TYPES = new Set<HarnessNormalizedEvent["type"]>([
+  "assistant.delta",
+  "reasoning.completed",
+]);
+
 // Event types that are persisted to goat.codex_chat_events. High-volume deltas skip the audit log.
 const PERSISTED_EVENT_TYPES = new Set<CodexChatEventType>(
   CODEX_CHAT_EVENT_TYPES.filter((eventType) => eventType !== "unknown"),
@@ -312,8 +321,12 @@ export function createExternalEngineProjector(input: {
     if (!projection.changed) return;
     parts = projection.parts;
     if (projection.error) turnError = projection.error;
-    // Part boundary (tool/reasoning/plan/etc.): commit the durable row immediately.
-    await syncAssistantMessage({ error: turnError, force: true });
+    // True part boundaries (tool lifecycle, questions, plan/goal, etc.) commit immediately; streamed
+    // reasoning chunks debounce like text so a reasoning-heavy turn cannot grow the shape log.
+    await syncAssistantMessage({
+      error: turnError,
+      force: !STREAMED_PROJECTION_EVENT_TYPES.has(event.type),
+    });
   };
 
   const cancelPendingInteractions = async () => {

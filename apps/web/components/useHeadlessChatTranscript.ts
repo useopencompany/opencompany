@@ -11,9 +11,11 @@ import {
 } from "@/lib/chat-ui";
 import {
   getHeadlessChatMessages,
+  getHeadlessChatMessagesGeneration,
   getHeadlessChatRuns,
   type HeadlessChatMessageReadModel,
   type HeadlessChatRunReadModel,
+  subscribeHeadlessChatMessagesGeneration,
 } from "@/lib/headless-chat-collections";
 import { clearChatSyncError, useChatSyncFailed } from "@/lib/headless-chat-sync-status";
 
@@ -41,10 +43,18 @@ type CollectionSnapshot<TRow extends object> = {
 
 export function useHeadlessChatTranscript(sessionId: string | null): HeadlessChatTranscript {
   const hydrated = useHydrated();
-  const messagesCollection = useMemo(
-    () => (hydrated && sessionId ? getHeadlessChatMessages(sessionId) : null),
-    [hydrated, sessionId],
+  // A manual retry recreates the message collection; resubscribe to the fresh instance when it does.
+  const messagesGeneration = useSyncExternalStore(
+    subscribeHeadlessChatMessagesGeneration,
+    useCallback(() => getHeadlessChatMessagesGeneration(sessionId), [sessionId]),
+    () => 0,
   );
+  const messagesCollection = useMemo(() => {
+    // getHeadlessChatMessages reads a module cache whose identity changes when a retry recreates the
+    // collection; messagesGeneration is the signal that re-runs this memo so we pick up the fresh one.
+    void messagesGeneration;
+    return hydrated && sessionId ? getHeadlessChatMessages(sessionId) : null;
+  }, [hydrated, sessionId, messagesGeneration]);
   const runsCollection = useMemo(
     () => (hydrated && sessionId ? getHeadlessChatRuns(sessionId) : null),
     [hydrated, sessionId],

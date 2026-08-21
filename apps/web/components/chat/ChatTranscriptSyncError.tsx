@@ -9,7 +9,7 @@ export function ChatTranscriptSyncError({ onRetry }: { onRetry: () => void }) {
       role="alert"
       className="flex flex-col items-start gap-2 rounded-lg border border-border bg-surface px-3 py-2.5"
     >
-      <p className="text-[13px] leading-5 text-ink">We couldn't load this conversation.</p>
+      <p className="text-[13px] leading-5 text-ink">We couldn&apos;t load this conversation.</p>
       <Button variant="outline" size="sm" onClick={onRetry}>
         Retry
       </Button>
