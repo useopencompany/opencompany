@@ -377,10 +377,13 @@ export async function withSpan<T>(
     name,
     { attributes: sanitizeAttributes(attributes) },
     async (span) => {
-      const handle = createSpanHandle(span);
+      let failed = false;
+      const handle = createSpanHandle(span, () => {
+        failed = true;
+      });
       try {
         const result = await run(handle);
-        span.setStatus({ code: SpanStatusCode.OK });
+        if (!failed) span.setStatus({ code: SpanStatusCode.OK });
         return result;
       } catch (error) {
         handle.fail(error);
@@ -561,7 +564,7 @@ export function recordModelCost(input: {
   });
 }
 
-function createSpanHandle(span: Span): SpanHandle {
+function createSpanHandle(span: Span, onFail?: () => void): SpanHandle {
   return {
     setAttributes(attributes) {
       span.setAttributes(sanitizeAttributes(attributes));
@@ -570,6 +573,7 @@ function createSpanHandle(span: Span): SpanHandle {
       return context.with(trace.setSpan(context.active(), span), run);
     },
     fail(error, attributes) {
+      onFail?.();
       const failureCategory = categorizeFailure(error);
       span.setAttributes(
         sanitizeAttributes({

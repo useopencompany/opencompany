@@ -101,6 +101,10 @@ describe("opencompany public routes", () => {
     expect(isUnauthenticatedPath("/api/stripe/webhook")).toBe(true);
   });
 
+  it("lets the cron-secret-protected observability probe reach its page", () => {
+    expect(isUnauthenticatedPath("/internal/observability/server-error")).toBe(true);
+  });
+
   it("keeps normal chats behind authentication", () => {
     expect(isUnauthenticatedPath("/chat/goat_chat_123")).toBe(false);
     expect(isUnauthenticatedPath("/share")).toBe(false);
