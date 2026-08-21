@@ -175,16 +175,22 @@ describe("applyCodexEventToUiMessageParts", () => {
       [],
       [
         normalizedEvent("mcp_tool.started", {
-          itemId: "search_1",
-          tool: "ToolSearch",
-          rawInput: { query: "select:Read", max_results: 5 },
+          itemId: "read_1",
+          toolName: "Read",
+          kind: "read",
+          title: "Read the package manifest",
+          tool: "Read",
+          rawInput: { file_path: "package.json" },
         }),
         normalizedEvent("mcp_tool.completed", {
-          itemId: "search_1",
-          tool: "ToolSearch",
+          itemId: "read_1",
+          toolName: "Read",
+          kind: "read",
+          title: "Read the package manifest",
+          tool: "Read",
           status: "completed",
-          rawInput: { query: "select:Read", max_results: 5 },
-          result: "Found 3 tools.",
+          rawInput: { file_path: "package.json" },
+          result: '{ "name": "opencompany" }',
         }),
       ],
     );
@@ -193,14 +199,86 @@ describe("applyCodexEventToUiMessageParts", () => {
       {
         type: "dynamic-tool",
         toolName: CODEX_MCP_TOOL_NAME,
-        toolCallId: "search_1",
+        toolCallId: "read_1",
         state: "output-available",
         input: {
           label: "MCP tool",
-          tool: "ToolSearch",
-          arguments: { query: "select:Read", max_results: 5 },
+          toolName: "Read",
+          kind: "read",
+          title: "Read the package manifest",
+          tool: "Read",
+          arguments: { file_path: "package.json" },
         },
-        output: { status: "completed", result: "Found 3 tools." },
+        output: { status: "completed", result: '{ "name": "opencompany" }' },
+      },
+    ]);
+  });
+
+  it("replaces a command placeholder and persists its description", () => {
+    const parts = reduceNormalized(
+      [],
+      [
+        normalizedEvent("command.started", { itemId: "command_1", command: "Terminal" }),
+        normalizedEvent("command.completed", {
+          itemId: "command_1",
+          command: "git status --short",
+          description: "Check the working tree",
+          output: { status: "completed", exitCode: 0 },
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: CODEX_COMMAND_TOOL_PART_TYPE,
+        toolCallId: "command_1",
+        state: "output-available",
+        input: {
+          command: "git status --short",
+          description: "Check the working tree",
+        },
+        output: { status: "completed", exitCode: 0 },
+      },
+    ]);
+    expect(parseCodexUiMessageParts(JSON.parse(JSON.stringify(parts)))).toEqual(parts);
+  });
+
+  it("folds web-search tool semantics into the durable part", () => {
+    const parts = reduceNormalized(
+      [],
+      [
+        normalizedEvent("web_search.started", {
+          itemId: "grep_1",
+          toolName: "Grep",
+          kind: "search",
+          title: "Search source files",
+          query: "normalizeToolCallUpdate",
+        }),
+        normalizedEvent("web_search.completed", {
+          itemId: "grep_1",
+          toolName: "Grep",
+          kind: "search",
+          title: "Search source files",
+          query: "normalizeToolCallUpdate",
+          status: "completed",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_WEB_SEARCH_TOOL_NAME,
+        toolCallId: "grep_1",
+        state: "output-available",
+        input: {
+          label: "Web search",
+          toolName: "Grep",
+          kind: "search",
+          title: "Search source files",
+          query: "normalizeToolCallUpdate",
+        },
+        output: { status: "completed" },
       },
     ]);
   });
@@ -323,7 +401,7 @@ describe("parseCodexUiMessageParts", () => {
         type: CODEX_COMMAND_TOOL_PART_TYPE,
         toolCallId: "cmd_1",
         state: "output-available",
-        input: { command: "ls" },
+        input: { command: "ls", description: "List files" },
         output: { status: "completed", exitCode: 0, outputPreview: "apps" },
       },
       {
