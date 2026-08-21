@@ -853,6 +853,8 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
   const Icon = meta.icon;
   const hasOutput = tool.output !== undefined;
   const screenshotUrl = browserScreenshotUrl(tool.output);
+  const detailChips =
+    tool.detailChips.length > 0 ? tool.detailChips : tool.detail ? [tool.detail] : [];
   return (
     <div
       data-testid={`chat-tool-call-${tool.name}`}
@@ -880,14 +882,9 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
           <span title={tool.label} className="min-w-0 truncate font-medium text-ink/65">
             {tool.label}
           </span>
-          {tool.detail ? (
-            <span
-              title={tool.detail}
-              className="inline-flex min-w-0 max-w-[min(440px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
-            >
-              <span className="min-w-0 truncate">{tool.detail}</span>
-            </span>
-          ) : null}
+          {detailChips.map((detail, index) => (
+            <ToolDetailChip key={`${detail}-${index}`} detail={detail} />
+          ))}
           {tool.statusText !== "Done" && tool.statusText !== "Failed" ? (
             <span className={`${meta.className} shrink-0 text-[10.5px] font-medium`}>
               {tool.statusText}
@@ -1078,10 +1075,7 @@ function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
 
 function CodexCommandRow({ tool }: { tool: ToolCallView }) {
   const [expanded, setExpanded] = useState(false);
-  const command =
-    isRecord(tool.input) && typeof tool.input.command === "string"
-      ? tool.input.command
-      : (tool.detail ?? CODEX_COMMAND_TOOL_NAME);
+  const command = tool.detailChips[0] ?? tool.detail;
   const output = isCodexCommandToolOutput(tool.output) ? tool.output : null;
   const outputPreview = output?.outputPreview?.trim() ? output.outputPreview : null;
   return (
@@ -1104,13 +1098,8 @@ function CodexCommandRow({ tool }: { tool: ToolCallView }) {
           <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
             <Terminal size={11} strokeWidth={1.75} />
           </span>
-          <span className="shrink-0 font-medium text-ink/65">Command</span>
-          <span
-            title={command}
-            className="inline-flex min-w-0 max-w-[min(440px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
-          >
-            <span className="min-w-0 truncate">{command}</span>
-          </span>
+          <span className="shrink-0 font-medium text-ink/65">{tool.label}</span>
+          {command ? <ToolDetailChip detail={command} /> : null}
           <CodexCommandStatusText tool={tool} output={output} />
         </button>
       </div>
@@ -1219,6 +1208,17 @@ function ToolPreviewBlock({ label, value }: { label: string; value: string }) {
         {value}
       </pre>
     </div>
+  );
+}
+
+function ToolDetailChip({ detail }: { detail: string }) {
+  return (
+    <span
+      title={detail}
+      className="inline-flex min-w-0 max-w-[min(440px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
+    >
+      <span className="min-w-0 truncate">{detail}</span>
+    </span>
   );
 }
 

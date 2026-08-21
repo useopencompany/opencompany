@@ -6,6 +6,7 @@ import { Markdown } from "@/components/Markdown";
 
 export function ReasoningItem({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
+  const preview = text.replace(/\s+/g, " ").trim();
   return (
     <div
       data-testid="chat-reasoning-item"
@@ -23,7 +24,10 @@ export function ReasoningItem({ text }: { text: string }) {
             strokeWidth={1.9}
             className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
           />
-          <span className="shrink-0 font-medium text-ink/65">Thought</span>
+          <span className="shrink-0 font-medium text-ink/65">Thinking</span>
+          <span title={preview} className="min-w-0 truncate text-ink/45">
+            {preview}
+          </span>
         </button>
       </div>
       {expanded ? (

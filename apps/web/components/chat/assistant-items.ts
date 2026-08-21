@@ -1,6 +1,7 @@
 import type { TaskStatus } from "@opencompany/agent/task-runtime-types";
 import {
   CHAT_ARTIFACT_DATA_PART_TYPE,
+  CODEX_DYNAMIC_TOOL_NAME,
   type PublishedChatArtifact,
   parsePublishedChatArtifact,
 } from "@opencompany/agent-runtime";
@@ -35,6 +36,7 @@ import {
   WEB_FETCH_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
+import { codingToolPresentation } from "@/lib/coding-tool-presentation";
 
 export type AssistantRenderItem =
   | { type: "text"; key: string; text: string; citations: BrainCitation[] }
@@ -81,6 +83,7 @@ export type ToolCallView = {
   status: "running" | "completed" | "failed" | "waiting" | "stopped";
   statusText: string;
   detail: string | null;
+  detailChips: string[];
   input: unknown;
   output: unknown;
   errorText: string | null;
@@ -241,6 +244,12 @@ export function toolCallViewFromPart(
 ): ToolCallView | null {
   const name = toolNameFromPart(part);
   if (!name) return null;
+  const presentation = codingToolPresentation({
+    name,
+    input: part.input,
+    output: part.output,
+    metadata: part,
+  });
   const state = typeof part.state === "string" ? part.state : "";
   const output = part.output;
   const failedBrain =
@@ -305,7 +314,10 @@ export function toolCallViewFromPart(
   return {
     toolCallId: typeof part.toolCallId === "string" ? part.toolCallId : "",
     name,
-    label: name === USE_ACTION_TOOL_NAME ? actionToolLabel(part.input) : toolLabel(name),
+    label:
+      name === USE_ACTION_TOOL_NAME
+        ? actionToolLabel(part.input)
+        : (presentation?.label ?? toolLabel(name)),
     status,
     statusText:
       codexPromptOutcome === "answered"
@@ -319,7 +331,8 @@ export function toolCallViewFromPart(
             : awaitingCapabilityApproval
               ? "Approval needed"
               : toolStatusText(status, state),
-    detail: toolDetail(name, part, status),
+    detail: presentation?.detail ?? toolDetail(name, part, status),
+    detailChips: presentation?.detailChips ?? [],
     input: part.input,
     output: part.output,
     errorText: typeof part.errorText === "string" ? part.errorText : null,
@@ -379,7 +392,7 @@ export function toolLabel(name: string) {
   if (name === CODEX_QUESTION_TOOL_NAME) return "Question";
   if (name === CODEX_APPROVAL_TOOL_NAME) return "Approval";
   if (name === CODEX_FILE_CHANGE_TOOL_NAME) return "File change";
-  if (name === CODEX_MCP_TOOL_NAME) return "MCP tool";
+  if (name === CODEX_MCP_TOOL_NAME || name === CODEX_DYNAMIC_TOOL_NAME) return "Tool";
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) return "Web search";
   if (name === CODEX_SUBAGENT_TOOL_NAME) return "Subagent";
   if (name === START_TASK_TOOL_NAME) return "Task";
@@ -718,9 +731,9 @@ function codexStateToolDetail(name: string, part: Record<string, unknown>) {
     return truncateToolPreview(`${paths.length} files: ${paths.join(", ")}`);
   }
   if (name === CODEX_MCP_TOOL_NAME) {
-    const target = [readString(input.server), readString(input.tool)].filter(Boolean).join(".");
+    const target = [readString(input.server), readString(input.tool)].filter(Boolean).join(" · ");
     const error = readString(output.error);
-    return truncateToolPreview([target || "MCP tool call", error].filter(Boolean).join(" - "));
+    return truncateToolPreview([target, error].filter(Boolean).join(" - "));
   }
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) {
     return truncateToolPreview(readString(input.query) ?? "Web search");
