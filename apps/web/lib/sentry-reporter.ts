@@ -18,8 +18,9 @@ export function scrubSentryEvent(event: SentryEvent): SentryEvent {
   const userId = event.user?.id;
   event.user = {
     ...(userId ? { id: userId } : {}),
-    // The SDK adds {{auto}} after beforeSend unless null explicitly disables IP inference.
-    ip_address: null,
+    // Better Stack replaces null with the ingest connection IP; an explicit zero address remains
+    // anonymous and also prevents Sentry's post-beforeSend {{auto}} inference.
+    ip_address: "0.0.0.0",
   };
 
   return event;
