@@ -62,7 +62,7 @@ test("the pull request path remains credential-free", async () => {
     "bun run boundary:check",
     "bun --filter @opencompany/protocol openapi:check",
     "bun --bun turbo run lint typecheck --concurrency=2",
-    "bun --bun turbo run test --concurrency=2",
+    "bun turbo run test --concurrency=2",
     "-- --maxWorkers=2",
     "bun --bun turbo run build --concurrency=2",
     "node --test scripts/lib/*.test.mjs",
