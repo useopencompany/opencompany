@@ -31,6 +31,8 @@ not exist yet; they do not accept client-supplied user or workspace authority.
 
 `API_BROWSER_ORIGINS` controls credentialed CORS. Unsafe cookie-authenticated requests additionally
 require an exact allowed `Origin`; bearer-authenticated clients retain their token contract.
+Authentication completion forwards the newly sealed browser session and the trusted web origin to
+`POST /v1/identity/sync`; AuthKit browser access tokens are not Connect OAuth API bearer tokens.
 
 ## Runner and integrations
 

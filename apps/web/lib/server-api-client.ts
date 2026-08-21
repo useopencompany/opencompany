@@ -3,14 +3,30 @@ import "server-only";
 import { createApiClient } from "@opencompany/protocol";
 import { headers } from "next/headers";
 
+type ServerApiClientOptions =
+  | {
+      authorization?: string;
+      sessionCookie?: never;
+      origin?: string;
+    }
+  | {
+      authorization?: never;
+      sessionCookie: { name: string; value: string };
+      origin: string;
+    };
+
 // Server-side typed /v1 client for Server Actions and Server Components.
 // Forwards the caller's Cookie/Authorization credentials and browser Origin so
 // the canonical API can enforce its cookie-mutation origin check.
-export async function serverApiClient(options: { authorization?: string } = {}) {
+export async function serverApiClient(options: ServerApiClientOptions = {}) {
   const incoming = await headers();
-  const cookie = incoming.get("cookie");
-  const authorization = options.authorization ?? incoming.get("authorization");
-  const browserOrigin = incoming.get("origin");
+  const cookie = options.sessionCookie
+    ? cookieHeaderWithOverride(incoming.get("cookie"), options.sessionCookie)
+    : incoming.get("cookie");
+  const authorization = options.sessionCookie
+    ? null
+    : (options.authorization ?? incoming.get("authorization"));
+  const browserOrigin = options.origin ?? incoming.get("origin");
   const fetchWithActor: typeof globalThis.fetch = async (input, init) => {
     const forwarded = new Headers(init?.headers);
     if (cookie) forwarded.set("Cookie", cookie);
@@ -21,6 +37,17 @@ export async function serverApiClient(options: { authorization?: string } = {}) 
   return createApiClient(serverApiOrigin(process.env.OPENCOMPANY_API_ORIGIN), {
     fetch: fetchWithActor,
   });
+}
+
+function cookieHeaderWithOverride(
+  existing: string | null,
+  replacement: { name: string; value: string },
+) {
+  const retained = (existing ?? "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part && part.slice(0, part.indexOf("=")).trim() !== replacement.name);
+  return [`${replacement.name}=${encodeURIComponent(replacement.value)}`, ...retained].join("; ");
 }
 
 // The protocol error message alone — for user-facing form errors that should
