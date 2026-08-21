@@ -116,6 +116,8 @@ describe("consumeProductChatStream", () => {
       ),
       sink: { project, present, recordStepUsage: vi.fn(async () => undefined) },
       signal: new AbortController().signal,
+      flushIntervalMs: 500,
+      presentationFlushIntervalMs: 50,
       now: () => clock,
     });
 

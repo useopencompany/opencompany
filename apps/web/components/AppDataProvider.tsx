@@ -48,8 +48,6 @@ import {
 import type { TaskRow } from "@/lib/task-collections";
 import { deriveTaskWorkflowSteps } from "@/lib/task-workflow-activity";
 
-const SIDEBAR_CHAT_TRANSCRIPT_PRELOAD_LIMIT = 8;
-
 type UserView = {
   // Scopes client-side chat attachment uploads (blob prefix goat-chat/{id}/).
   workosUserId: string;
@@ -334,7 +332,12 @@ function AppLiveDataSubscriptions({
     // Wait for the authoritative conversation shape so the larger server
     // fallback cannot accidentally fan out into one Electric shape per chat.
     if (chatsLoading && !chatRows?.length) return;
-    for (const chat of recentChats.slice(0, SIDEBAR_CHAT_TRANSCRIPT_PRELOAD_LIMIT)) {
+    // Only warm chats with a live runtime turn: they have an active SSE stream the user is likely
+    // watching, and there are rarely more than a couple. Idle transcripts preload on demand via
+    // sidebar hover/focus (Sidebar.tsx), so boot no longer fans out one shape per recent chat —
+    // heavy transcripts could otherwise cost hundreds of MB of Electric replay at startup.
+    for (const chat of recentChats) {
+      if (chat.activityState !== "working") continue;
       void preloadHeadlessChatMessages(chat.id).catch((error: unknown) => {
         console.warn("Could not preload a sidebar chat transcript.", {
           conversationId: chat.id,

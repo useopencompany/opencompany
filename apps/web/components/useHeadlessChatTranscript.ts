@@ -1,7 +1,7 @@
 "use client";
 
 import type { CollectionStatus } from "@tanstack/react-db";
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import {
   type ChatUiMessage,
@@ -11,16 +11,20 @@ import {
 } from "@/lib/chat-ui";
 import {
   getHeadlessChatMessages,
+  getHeadlessChatMessagesGeneration,
   getHeadlessChatRuns,
   type HeadlessChatMessageReadModel,
   type HeadlessChatRunReadModel,
+  subscribeHeadlessChatMessagesGeneration,
 } from "@/lib/headless-chat-collections";
+import { clearChatSyncError, useChatSyncFailed } from "@/lib/headless-chat-sync-status";
 
 export type HeadlessChatTranscript = {
   sessionId: string | null;
   messages: ChatUiMessage[];
   runsById: ReadonlyMap<string, HeadlessChatRunReadModel>;
   isLoading: boolean;
+  syncFailed: boolean;
 };
 
 type ReadableCollection<TRow extends object> = {
@@ -39,10 +43,18 @@ type CollectionSnapshot<TRow extends object> = {
 
 export function useHeadlessChatTranscript(sessionId: string | null): HeadlessChatTranscript {
   const hydrated = useHydrated();
-  const messagesCollection = useMemo(
-    () => (hydrated && sessionId ? getHeadlessChatMessages(sessionId) : null),
-    [hydrated, sessionId],
+  // A manual retry recreates the message collection; resubscribe to the fresh instance when it does.
+  const messagesGeneration = useSyncExternalStore(
+    subscribeHeadlessChatMessagesGeneration,
+    useCallback(() => getHeadlessChatMessagesGeneration(sessionId), [sessionId]),
+    () => 0,
   );
+  const messagesCollection = useMemo(() => {
+    // getHeadlessChatMessages reads a module cache whose identity changes when a retry recreates the
+    // collection; messagesGeneration is the signal that re-runs this memo so we pick up the fresh one.
+    void messagesGeneration;
+    return hydrated && sessionId ? getHeadlessChatMessages(sessionId) : null;
+  }, [hydrated, sessionId, messagesGeneration]);
   const runsCollection = useMemo(
     () => (hydrated && sessionId ? getHeadlessChatRuns(sessionId) : null),
     [hydrated, sessionId],
@@ -73,11 +85,19 @@ export function useHeadlessChatTranscript(sessionId: string | null): HeadlessCha
       .map((row) => headlessChatMessageRowToUiMessage(row, runsByAssistantMessage.get(row.id)));
   }, [rows, runRows]);
 
+  const syncFailed = useChatSyncFailed(sessionId);
+  // A successful (re)sync delivers durable rows; clear any prior failure so the retry surface hides
+  // itself without waiting for the user. Empty conversations recover via an explicit retry instead.
+  useEffect(() => {
+    if (sessionId && messages.length > 0) clearChatSyncError(sessionId);
+  }, [sessionId, messages.length]);
+
   return {
     sessionId,
     messages,
     runsById,
     isLoading: Boolean(sessionId) && (!hydrated || messagesLoading),
+    syncFailed,
   };
 }
 

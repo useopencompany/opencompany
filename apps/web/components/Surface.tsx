@@ -100,6 +100,7 @@ import {
   ComposerDropOverlay,
 } from "@/components/chat/ChatComposerAttachments";
 import { ChatShareButton } from "@/components/chat/ChatShareButton";
+import { ChatTranscriptSyncError } from "@/components/chat/ChatTranscriptSyncError";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
@@ -180,6 +181,7 @@ import {
 } from "@/lib/headless-automation-commands";
 import type { TaskScheduleView, WorkflowCatalogItem } from "@/lib/headless-automation-types";
 import { uploadHeadlessChatAttachment } from "@/lib/headless-chat-attachment-upload";
+import { retryHeadlessChatMessages } from "@/lib/headless-chat-collections";
 import {
   cancelHeadlessChatRun,
   resolveEngineQuestions,
@@ -2811,6 +2813,12 @@ export function Surface({
                             : `${ENGINE_REGISTRY[activeEngine].label} is working`
                           : "opencompany is working"
                       }
+                    />
+                  ) : chatMessages.length === 0 && liveChat.syncFailed ? (
+                    <ChatTranscriptSyncError
+                      onRetry={() => {
+                        if (chatSessionId) void retryHeadlessChatMessages(chatSessionId);
+                      }}
                     />
                   ) : chatMessages.length === 0 && persistedTranscriptLoading ? (
                     <PendingActivityIndicator label="Loading conversation…" />

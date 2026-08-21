@@ -40,8 +40,22 @@ import { settleDurableTurn, type TaskTurnCompletion } from "./task-turn";
 
 const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1" as const;
 
-// Event types that are persisted to goat.codex_chat_events. High-volume deltas skip the audit
-// log, while assistant deltas still update the message row so an interrupt preserves partial text.
+// Live deltas already stream to the client over SSE run_events; the durable chat_messages row only
+// needs periodic checkpoints plus a guaranteed terminal write. Debouncing the row write (instead of
+// writing on every token) keeps the Electric read-model shape log from growing with streaming
+// activity. Part boundaries and terminal settles bypass the debounce via a forced write.
+const ASSISTANT_DURABLE_WRITE_DEBOUNCE_MS = 2000;
+
+// Streamed projection events that must NOT force a durable write. assistant.delta has its own branch
+// below; the ACP normalizer maps every agent_thought_chunk to reasoning.completed, so a
+// reasoning-heavy Claude Code turn emits many of these per second. Debounce them like text deltas
+// and reserve forced writes for true part boundaries (tool lifecycle, questions, plan/goal, etc.).
+const STREAMED_PROJECTION_EVENT_TYPES = new Set<HarnessNormalizedEvent["type"]>([
+  "assistant.delta",
+  "reasoning.completed",
+]);
+
+// Event types that are persisted to goat.codex_chat_events. High-volume deltas skip the audit log.
 const PERSISTED_EVENT_TYPES = new Set<CodexChatEventType>(
   CODEX_CHAT_EVENT_TYPES.filter((eventType) => eventType !== "unknown"),
 );
@@ -65,23 +79,31 @@ export type ExternalEngineProjectorTarget = {
 
 // Folds normalized coding-harness events into the turn's assistant chat_messages row (the
 // Electric-synced streaming surface), the codex_chat_events audit log, and turn/session status.
-// One message UPDATE per logical chunk; Electric ships the full row so the client is always
-// consistent, including across reloads.
+// The live surface is the SSE run_events stream (emitted per event); the durable chat_messages
+// UPDATE is debounced so the Electric read-model shape log stays bounded, with a forced write on
+// every part boundary and terminal settle so reloads always see the latest committed state.
 export function createExternalEngineProjector(input: {
   target: ExternalEngineProjectorTarget;
   redact: (value: string) => string;
   initialParts?: CodexUiMessagePart[];
   normalizeEvent?: (raw: Record<string, unknown>) => HarnessNormalizedEvent[];
   execution?: RunExecutionRepository;
+  now?: () => number;
+  assistantWriteDebounceMs?: number;
 }) {
   const { target, redact } = input;
   const execution =
     input.execution ?? new PostgresRunExecutionRepository((query) => getDb().execute(query));
   const normalizeEvent = input.normalizeEvent ?? (() => []);
+  const now = input.now ?? Date.now;
+  const assistantWriteDebounceMs =
+    input.assistantWriteDebounceMs ?? ASSISTANT_DURABLE_WRITE_DEBOUNCE_MS;
   let parts: CodexUiMessagePart[] = input.initialParts ?? [];
   let turnError: string | null = null;
   let auditFailureReported = false;
   let lastProjectedContent: string | null = null;
+  // Persist the first delta immediately (crash/interrupt safety), then debounce subsequent writes.
+  let lastDurableWriteAt = now() - assistantWriteDebounceMs;
   const toolEventStates = new Map<string, "started" | "completed" | "failed">();
   const publishedArtifactIds = new Set<string>();
   const outputAccumulator = createCodexCommandOutputAccumulator();
@@ -111,16 +133,15 @@ export function createExternalEngineProjector(input: {
     if (inserted.length !== events.length) throw new CodexChatLeaseLostError();
   };
 
-  const writeAssistantMessage = async (
-    options: {
-      error?: string | null;
-      aborted?: boolean;
-      usage?: ChatMessageDebugTrace["usage"];
-      durationMs?: number | undefined;
-    } = {},
-  ) => {
-    const redactedParts = redactJson(parts, redact) as unknown[];
-    const content = redact(
+  type AssistantWriteOptions = {
+    error?: string | null;
+    aborted?: boolean;
+    usage?: ChatMessageDebugTrace["usage"];
+    durationMs?: number | undefined;
+  };
+
+  const computeContent = () =>
+    redact(
       parts
         .filter(
           (part): part is Extract<CodexUiMessagePart, { type: "text" }> => part.type === "text",
@@ -129,6 +150,9 @@ export function createExternalEngineProjector(input: {
         .filter((text) => text.trim())
         .join("\n\n"),
     );
+
+  const persistAssistantMessage = async (content: string, options: AssistantWriteOptions) => {
+    const redactedParts = redactJson(parts, redact) as unknown[];
     const debugTrace: ChatMessageDebugTrace = {
       schemaVersion: CODEX_CHAT_DEBUG_SCHEMA_VERSION,
       model: target.model,
@@ -150,7 +174,21 @@ export function createExternalEngineProjector(input: {
         RETURNING message.id
       `),
     );
+  };
+
+  // Emits the live SSE projection on every call and commits the durable chat_messages row when
+  // forced (a part boundary or terminal settle) or once the debounce window elapses. Both live
+  // rendering and lease-loss detection run through appendProjectionEvents, so a debounced skip of
+  // the DB write never hides a lost lease or stalls the client.
+  const syncAssistantMessage = async (
+    options: AssistantWriteOptions & { force?: boolean } = {},
+  ) => {
+    const content = computeContent();
     await appendProjectionEvents(content);
+    const nowMs = now();
+    if (!options.force && nowMs - lastDurableWriteAt < assistantWriteDebounceMs) return content;
+    lastDurableWriteAt = nowMs;
+    await persistAssistantMessage(content, options);
     return content;
   };
 
@@ -255,7 +293,8 @@ export function createExternalEngineProjector(input: {
       const projection = applyCodexEventToUiMessageParts(parts, event);
       if (!projection.changed) return;
       parts = projection.parts;
-      await writeAssistantMessage({ error: turnError });
+      // High-frequency token stream: debounce the durable write; the live SSE delta still flows.
+      await syncAssistantMessage({ error: turnError });
       return;
     }
 
@@ -282,7 +321,12 @@ export function createExternalEngineProjector(input: {
     if (!projection.changed) return;
     parts = projection.parts;
     if (projection.error) turnError = projection.error;
-    await writeAssistantMessage({ error: turnError });
+    // True part boundaries (tool lifecycle, questions, plan/goal, etc.) commit immediately; streamed
+    // reasoning chunks debounce like text so a reasoning-heavy turn cannot grow the shape log.
+    await syncAssistantMessage({
+      error: turnError,
+      force: !STREAMED_PROJECTION_EVENT_TYPES.has(event.type),
+    });
   };
 
   const cancelPendingInteractions = async () => {
@@ -548,7 +592,7 @@ export function createExternalEngineProjector(input: {
         const projection = applyCodexEventToUiMessageParts(parts, event);
         if (projection.changed) {
           parts = projection.parts;
-          await writeAssistantMessage({ error: turnError });
+          await syncAssistantMessage({ error: turnError, force: true });
         }
         return { interactionId };
       });
@@ -597,7 +641,7 @@ export function createExternalEngineProjector(input: {
         const projection = applyCodexEventToUiMessageParts(parts, event);
         if (projection.changed) {
           parts = projection.parts;
-          await writeAssistantMessage({ error: turnError });
+          await syncAssistantMessage({ error: turnError, force: true });
         }
         return { approvalId };
       });
@@ -626,7 +670,7 @@ export function createExternalEngineProjector(input: {
         const projection = resolveCodexUiInteraction(parts, { interactionId, status });
         if (!projection.changed) return;
         parts = projection.parts;
-        await writeAssistantMessage({ error: turnError });
+        await syncAssistantMessage({ error: turnError, force: true });
       });
     },
 
@@ -635,14 +679,14 @@ export function createExternalEngineProjector(input: {
         const projection = resolveCodexUiApproval(parts, { approvalId, status });
         if (!projection.changed) return;
         parts = projection.parts;
-        await writeAssistantMessage({ error: turnError });
+        await syncAssistantMessage({ error: turnError, force: true });
       });
     },
 
     cancelPendingInteractions() {
       return serializeProjection(async () => {
         const didCancel = await cancelPendingInteractions();
-        if (didCancel) await writeAssistantMessage({ error: turnError });
+        if (didCancel) await syncAssistantMessage({ error: turnError, force: true });
         return didCancel;
       });
     },
@@ -687,10 +731,11 @@ export function createExternalEngineProjector(input: {
           if (target.planMode) {
             parts = offerCodexPlanImplementation(parts).parts;
           }
-          const content = await writeAssistantMessage({
+          const content = await syncAssistantMessage({
             error: null,
             usage,
             durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+            force: true,
           });
           await settleTurn({
             turnStatus: "completed",
@@ -705,10 +750,11 @@ export function createExternalEngineProjector(input: {
         const error =
           summary.error ?? turnError ?? `Codex finished with status: ${summary.status}.`;
         parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
-        const content = await writeAssistantMessage({
+        const content = await syncAssistantMessage({
           error,
           usage,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+          force: true,
         });
         await settleTurn({
           turnStatus: "failed",
@@ -727,9 +773,10 @@ export function createExternalEngineProjector(input: {
         await cancelPendingInteractions();
         await reconcilePublishedArtifacts();
         parts = finalizeCodexUiMessageParts(parts, "interrupted").parts;
-        const content = await writeAssistantMessage({
+        const content = await syncAssistantMessage({
           aborted: true,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+          force: true,
         });
         await settleTurn({
           turnStatus: "interrupted",
@@ -755,9 +802,10 @@ export function createExternalEngineProjector(input: {
         await cancelPendingInteractions();
         await reconcilePublishedArtifacts();
         parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
-        const content = await writeAssistantMessage({
+        const content = await syncAssistantMessage({
           error,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+          force: true,
         });
         await settleTurn({
           turnStatus: "failed",

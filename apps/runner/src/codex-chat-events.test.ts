@@ -422,6 +422,130 @@ describe("createExternalEngineProjector", () => {
     );
   });
 
+  it("debounces durable chat_messages writes across rapid assistant deltas", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    let clock = 0;
+    const projector = createExternalEngineProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+      now: () => clock,
+      assistantWriteDebounceMs: 2000,
+    });
+
+    await projector.push([agentMessageChunk("First. ")]); // clock 0: first delta persists immediately
+    clock = 500;
+    await projector.push([agentMessageChunk("Second. ")]); // debounced
+    clock = 1000;
+    await projector.push([agentMessageChunk("Third. ")]); // debounced
+    clock = 2000;
+    await projector.push([agentMessageChunk("Fourth.")]); // window elapsed: persists again
+
+    const messageWrites = messageUpdates();
+    expect(messageWrites).toHaveLength(2);
+    expect(queryValues(messageWrites[1])).toContainEqual(
+      expect.stringContaining("First. Second. Third. Fourth."),
+    );
+  });
+
+  it("emits the live SSE projection for every delta while the durable write is debounced", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const appendEvents = vi.fn(
+      async (input: Parameters<RunExecutionRepository["appendEvents"]>[0]) =>
+        input.events.map((event, index) => ({ ...event, sequence: index + 1 })),
+    );
+    let clock = 0;
+    const projector = createExternalEngineProjector({
+      target: projectorTarget({ canonicalAttemptId: "attempt_1" }),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+      execution: { appendEvents } as unknown as RunExecutionRepository,
+      now: () => clock,
+      assistantWriteDebounceMs: 2000,
+    });
+
+    await projector.push([agentMessageChunk("First. ")]);
+    clock = 500;
+    await projector.push([agentMessageChunk("Second. ")]);
+    clock = 1000;
+    await projector.push([agentMessageChunk("Third.")]);
+
+    // Only the first delta committed the durable row; the rest were debounced.
+    expect(messageUpdates()).toHaveLength(1);
+    // The live surface still received a content update for all three deltas.
+    const contentUpdates = appendEvents.mock.calls
+      .flatMap(([input]) => input.events)
+      .filter((event) => event.type === "message.content_updated");
+    expect(contentUpdates).toHaveLength(3);
+    expect(contentUpdates.at(-1)?.payload).toMatchObject({ content: "First. Second. Third." });
+  });
+
+  it("forces a durable write on a part boundary inside the debounce window", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    let clock = 0;
+    const projector = createExternalEngineProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+      now: () => clock,
+      assistantWriteDebounceMs: 2000,
+    });
+
+    await projector.push([agentMessageChunk("Thinking. ")]); // clock 0: first write
+    clock = 100;
+    await projector.push([fileChangeStartedEvent()]); // boundary: forced despite the open window
+
+    expect(messageUpdates()).toHaveLength(2);
+  });
+
+  it("forces a final durable write when the turn finalizes inside the debounce window", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    let clock = 0;
+    const projector = createExternalEngineProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+      now: () => clock,
+      assistantWriteDebounceMs: 2000,
+    });
+
+    await projector.push([agentMessageChunk("Working. ")]); // clock 0: first write
+    clock = 100;
+    await projector.finalize({
+      sessionId: "codex_thread_1",
+      status: "success",
+      result: "Working. Done.",
+      error: null,
+      usage: null,
+      goal: null,
+    });
+
+    // Terminal settle commits the final row even though the debounce window is still open.
+    expect(messageUpdates()).toHaveLength(2);
+  });
+
+  it("debounces streamed reasoning chunks like text deltas", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    let clock = 0;
+    const projector = createExternalEngineProjector({
+      target: projectorTarget({ engine: "claude_code" }),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+      now: () => clock,
+      assistantWriteDebounceMs: 2000,
+    });
+
+    // ACP maps every agent_thought_chunk to reasoning.completed; a reasoning-heavy turn streams many.
+    await projector.push([agentThoughtChunk("Considering. ")]); // clock 0: first write
+    clock = 400;
+    await projector.push([agentThoughtChunk("Still thinking. ")]); // debounced
+    clock = 800;
+    await projector.push([agentThoughtChunk("Almost there.")]); // debounced
+
+    // Only the first chunk commits the durable row; the rest stay within the debounce window.
+    expect(messageUpdates()).toHaveLength(1);
+  });
+
   it("emits redacted tool metadata and parent linkage for the live transcript", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const appendEvents = vi.fn(
@@ -596,6 +720,46 @@ function fileChangeStartedEvent(id = "file_change_1") {
       },
     },
   };
+}
+
+function agentMessageChunk(text: string, messageId = "assistant_message_1") {
+  return {
+    method: "session/update",
+    params: {
+      sessionId: "codex_session_1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId,
+        content: { type: "text", text },
+      },
+    },
+  };
+}
+
+function agentThoughtChunk(text: string) {
+  return {
+    method: "session/update",
+    params: {
+      sessionId: "codex_session_1",
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text },
+      },
+    },
+  };
+}
+
+// The durable assistant row is written via `UPDATE goat.chat_messages … WHERE message.role =
+// 'assistant'`. Match on the role predicate so we count only the debounced/forced content writes
+// and not the settle path's task-tagging CTE (which also updates goat.chat_messages).
+function messageUpdates() {
+  return mocks.execute.mock.calls
+    .map(([query]) => query)
+    .filter(
+      (query) =>
+        sqlText(query).includes("UPDATE goat.chat_messages AS message") &&
+        sqlText(query).includes("message.role = 'assistant'"),
+    );
 }
 
 function acpNormalizer() {
