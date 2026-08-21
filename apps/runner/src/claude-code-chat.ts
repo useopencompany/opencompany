@@ -86,6 +86,7 @@ import {
   armSandboxIdleTimeout,
   createOrConnectSandbox,
   isRetryableCommandStreamError,
+  isRetryableSandboxAcquisitionError,
   managedSandboxMetadata,
 } from "./sandbox";
 import {
@@ -295,6 +296,18 @@ export async function runClaudeCodeChatTurn(input: {
       idleTimeoutMs: env.codexChatIdleTimeoutMs,
     });
   } catch (error) {
+    const abort = shouldAbort?.();
+    if (abort) throw abort;
+    if (session.sandboxId || isRetryableSandboxAcquisitionError(error)) {
+      const redactAcquisitionError = createKnownSecretRedactor([auth.token, env.internalToken]);
+      throw new CodexChatRetryableInfrastructureError(
+        session.sandboxId
+          ? "Claude Code could not reconnect to the existing sandbox before recovery."
+          : "Claude Code sandbox capacity is temporarily unavailable.",
+        error,
+        failureDiagnostic("connect_sandbox", error, redactAcquisitionError),
+      );
+    }
     await bareProjector().fail(
       `Claude Code sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`,
       {
@@ -304,71 +317,14 @@ export async function runClaudeCodeChatTurn(input: {
     return "settled";
   }
 
-  // A replacement sandbox has a fresh home directory, so any stored Claude session id
-  // points at state that no longer exists; start a fresh engine session in that case.
-  const sandboxReplaced = sandbox.sandboxId !== session.sandboxId;
-  if (sandboxReplaced) {
-    await updateCodexChatSessionIfLeaseHeld({
-      turn,
-      leaseId,
-      leaseOwner,
-      setSql: sql`sandbox_id = ${sandbox.sandboxId}, codex_thread_id = NULL, updated_at = ${new Date()}`,
-    });
-  }
-
-  const [repositoryBootstrap, conversationHistory] = await Promise.all([
-    repositoryBootstrapPromise,
-    conversationHistoryPromise,
-  ]);
-  const infisicalAuth = await reconcileInfisicalSandboxAuth({
-    sandbox,
-    workspaceId: session.workspaceId,
-    userWorkosId: turn.userWorkosId,
-  });
-  const github = await loadGitHubAuthForUser(turn.userWorkosId);
-  const canonicalAttemptId = input.canonicalAttemptId;
-  const hostGatewayEnabled =
-    isActionHostToolContractVersion(session.hostToolContractVersion) &&
-    Boolean(session.workspaceId) &&
-    Boolean(env.runnerPublicUrl) &&
-    Boolean(canonicalAttemptId);
-  const actionToolsEnabled = hostGatewayEnabled;
-  const artifactToolsEnabled = hostGatewayEnabled;
-  const brainToolsEnabled = hostGatewayEnabled && Boolean(session.brainRef);
-  const brainCaptureEnabled =
-    brainToolsEnabled && session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION;
-  // Minted before the redactor so a leaked ticket (e.g. the agent cats its own MCP
-  // config) is scrubbed from logs the same way the other sandbox credentials are.
-  const actionGatewayTicket =
-    hostGatewayEnabled && canonicalAttemptId
-      ? createExternalEngineGatewayTicket({
-          codexChatSessionId: session.id,
-          codexChatTurnId: turn.id,
-          attemptId: canonicalAttemptId,
-          leaseId,
-          secret: env.internalToken,
-          // Covers the ACP turn plus headroom for setup and a stale-session fallback to a new
-          // session. Every capability invocation still reauthorizes the current turn lease.
-          ttlMs: env.codexTimeoutMs * 2 + 10 * 60_000,
-        }).ticket
-      : null;
-  const redact = createKnownSecretRedactor([
-    auth.token,
-    github?.githubToken ?? null,
-    github?.githubAuthHeader ?? null,
-    env.internalToken,
-    actionGatewayTicket,
-    ...repositoryBootstrap.secretValues,
-    ...infisicalAuth.redactionValues,
-  ]);
   const acpNormalizer = createAcpEventNormalizer({ engineName: "Claude Code" });
+  let redact = createKnownSecretRedactor([auth.token, env.internalToken]);
   const projector = createExternalEngineProjector({
     target: projectorTarget,
-    redact,
+    redact: (value) => redact(value),
     initialParts,
     normalizeEvent: acpNormalizer.normalize,
   });
-
   const checkAbort = createTurnAbortCheck({
     turnId: turn.id,
     leaseId,
@@ -378,19 +334,35 @@ export async function runClaudeCodeChatTurn(input: {
 
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
-  // A recovery run may not replay the raw assistant event that requested this wakeup, so restore
-  // the request persisted by the previous worker before resuming the Claude session.
-  let scheduledWakeup = scheduledWakeupFromTurnSettings(turn.settings);
-  let executionStage = "load_attachments";
+  let executionStage = "fence_previous_turn";
   try {
-    await checkAbort();
+    // Fence the old adapter before any fallible preflight awaits. Otherwise repository, auth, or
+    // history preparation can fail the durable Run while the detached Claude process keeps
+    // editing files and performing external side effects in the same sandbox.
+    const sandboxReplaced = sandbox.sandboxId !== session.sandboxId;
     if (!sandboxReplaced) {
-      // Fence the reused checkout before any preparation writes. After a hard runner death,
-      // the prior adapter can still be editing files until this process is explicitly killed.
-      executionStage = "kill_leftover_turn_processes";
-      await killLeftoverClaudeTurnProcesses(sandbox);
-      await checkAbort();
+      try {
+        await killLeftoverClaudeTurnProcesses(sandbox);
+      } catch (error) {
+        throw new CodexChatRetryableInfrastructureError(
+          "Claude Code could not fence the previous sandbox process before recovery.",
+          error,
+          failureDiagnostic(executionStage, error, redact),
+        );
+      }
+    } else {
+      // A replacement sandbox has a fresh home directory, so any stored Claude session id
+      // points at state that no longer exists; start a fresh engine session in that case.
+      executionStage = "persist_replacement_sandbox";
+      await updateCodexChatSessionIfLeaseHeld({
+        turn,
+        leaseId,
+        leaseOwner,
+        setSql: sql`sandbox_id = ${sandbox.sandboxId}, codex_thread_id = NULL, updated_at = ${new Date()}`,
+      });
     }
+    await checkAbort();
+
     if (input.recovery) {
       executionStage = "claim_recovery";
       await claimCodexChatRecovery({
@@ -400,10 +372,70 @@ export async function runClaudeCodeChatTurn(input: {
         maxRecoveryAttempts: CLAUDE_CHAT_MAX_RECOVERY_ATTEMPTS,
         exhaustedMessage: CLAUDE_CHAT_RECOVERY_EXHAUSTED_MESSAGE,
       });
+    }
+
+    executionStage = "load_repository_bootstrap";
+    const repositoryBootstrap = await repositoryBootstrapPromise;
+    redact = createKnownSecretRedactor([
+      auth.token,
+      env.internalToken,
+      ...repositoryBootstrap.secretValues,
+    ]);
+    executionStage = "load_conversation_history";
+    const conversationHistory = await conversationHistoryPromise;
+    executionStage = "reconcile_infisical";
+    const infisicalAuth = await reconcileInfisicalSandboxAuth({
+      sandbox,
+      workspaceId: session.workspaceId,
+      userWorkosId: turn.userWorkosId,
+    });
+    executionStage = "load_github_auth";
+    const github = await loadGitHubAuthForUser(turn.userWorkosId);
+    const canonicalAttemptId = input.canonicalAttemptId;
+    const hostGatewayEnabled =
+      isActionHostToolContractVersion(session.hostToolContractVersion) &&
+      Boolean(session.workspaceId) &&
+      Boolean(env.runnerPublicUrl) &&
+      Boolean(canonicalAttemptId);
+    const actionToolsEnabled = hostGatewayEnabled;
+    const artifactToolsEnabled = hostGatewayEnabled;
+    const brainToolsEnabled = hostGatewayEnabled && Boolean(session.brainRef);
+    const brainCaptureEnabled =
+      brainToolsEnabled && session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION;
+    // Minted before the redactor so a leaked ticket (e.g. the agent cats its own MCP
+    // config) is scrubbed from logs the same way the other sandbox credentials are.
+    const actionGatewayTicket =
+      hostGatewayEnabled && canonicalAttemptId
+        ? createExternalEngineGatewayTicket({
+            codexChatSessionId: session.id,
+            codexChatTurnId: turn.id,
+            attemptId: canonicalAttemptId,
+            leaseId,
+            secret: env.internalToken,
+            // Covers the ACP turn plus headroom for setup and a stale-session fallback to a new
+            // session. Every capability invocation still reauthorizes the current turn lease.
+            ttlMs: env.codexTimeoutMs * 2 + 10 * 60_000,
+          }).ticket
+        : null;
+    redact = createKnownSecretRedactor([
+      auth.token,
+      github?.githubToken ?? null,
+      github?.githubAuthHeader ?? null,
+      env.internalToken,
+      actionGatewayTicket,
+      ...repositoryBootstrap.secretValues,
+      ...infisicalAuth.redactionValues,
+    ]);
+    if (input.recovery) {
       // Permission requests are bound to the dead ACP connection. Cancel them before the
       // recovered prompt starts so stale cards cannot answer a request no agent is awaiting.
       await projector.cancelPendingInteractions();
     }
+
+    // A recovery run may not replay the raw assistant event that requested this wakeup, so restore
+    // the request persisted by the previous worker before resuming the Claude session.
+    let scheduledWakeup = scheduledWakeupFromTurnSettings(turn.settings);
+    executionStage = "load_attachments";
     const attachments = await loadCodexChatAttachments(turn);
     await checkAbort();
     executionStage = "prepare_directories";
@@ -770,6 +802,7 @@ export async function runClaudeCodeChatTurn(input: {
       throw new CodexChatRetryableInfrastructureError(
         "Claude Code lost contact with its sandbox command stream before the turn completed.",
         effectiveError,
+        failureDiagnostic(executionStage, effectiveError, redact),
       );
     } else {
       let message = redact(errorMessage(effectiveError));
@@ -793,6 +826,7 @@ export async function runClaudeCodeChatTurn(input: {
       });
       await projector.fail(message, {
         ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
+        failureDiagnostic: failureDiagnostic(executionStage, effectiveError, redact),
       });
     }
   } finally {
@@ -1069,6 +1103,11 @@ function lastLine(value: string) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function failureDiagnostic(stage: string, error: unknown, redact: (value: string) => string) {
+  const errorName = error instanceof Error ? error.name : typeof error;
+  return `[${stage}] ${errorName}: ${redact(errorMessage(error))}`.slice(0, 2_000);
 }
 
 function recordFromUnknown(value: unknown): Record<string, unknown> | null {

@@ -349,6 +349,168 @@ describe("createAcpEventNormalizer", () => {
     ).toEqual(["command.output", "command.completed"]);
   });
 
+  it("replaces an initial command placeholder and carries its description", () => {
+    const normalizer = createAcpEventNormalizer();
+    normalizer.beginRun("session_1");
+
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "command_1",
+          title: "Terminal",
+          kind: "execute",
+          _meta: { claudeCode: { toolName: "Bash" } },
+          status: "in_progress",
+        }),
+      ),
+    ).toMatchObject([{ type: "command.started", payload: { command: "Terminal" } }]);
+
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "tool_call_update",
+          toolCallId: "command_1",
+          rawInput: {
+            command: "git status --short",
+            description: "Check the working tree",
+          },
+          status: "completed",
+          rawOutput: { exitCode: 0 },
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "command.completed",
+        payload: {
+          command: "git status --short",
+          description: "Check the working tree",
+        },
+      },
+    ]);
+  });
+
+  it("preserves Claude tool names, ACP kinds, titles, and streamed queries", () => {
+    const normalizer = createAcpEventNormalizer();
+    normalizer.beginRun("session_1");
+
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "read_1",
+          title: "Read the package manifest",
+          kind: "read",
+          _meta: { claudeCode: { toolName: "Read" } },
+          rawInput: { file_path: "package.json" },
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "mcp_tool.started",
+        payload: {
+          toolName: "Read",
+          kind: "read",
+          title: "Read the package manifest",
+        },
+      },
+    ]);
+
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "grep_1",
+          title: "Search source files",
+          kind: "search",
+          _meta: { claudeCode: { toolName: "Grep" } },
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "web_search.started",
+        payload: {
+          toolName: "Grep",
+          kind: "search",
+          title: "Search source files",
+          query: "Search source files",
+        },
+      },
+    ]);
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "tool_call_update",
+          toolCallId: "grep_1",
+          rawInput: { query: "normalizeToolCallUpdate" },
+          status: "completed",
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "web_search.completed",
+        payload: {
+          toolName: "Grep",
+          kind: "search",
+          title: "Search source files",
+          query: "normalizeToolCallUpdate",
+        },
+      },
+    ]);
+
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: "todo_1",
+          title: "Update the task list",
+          kind: "think",
+          _meta: { claudeCode: { toolName: "TodoWrite" } },
+          rawInput: { todos: [] },
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "mcp_tool.started",
+        payload: { toolName: "TodoWrite", kind: "think", title: "Update the task list" },
+      },
+    ]);
+  });
+
+  it("prefers streamed MCP server and tool identity over initial values", () => {
+    const normalizer = createAcpEventNormalizer();
+    normalizer.beginRun("session_1");
+    normalizer.normalize(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "mcp_1",
+        name: "mcp__placeholder__placeholder",
+        title: "MCP tool",
+        status: "in_progress",
+      }),
+    );
+
+    expect(
+      normalizer.normalize(
+        update({
+          sessionUpdate: "tool_call_update",
+          toolCallId: "mcp_1",
+          rawInput: { server: "workspace", tool: "lookup" },
+          status: "completed",
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "mcp_tool.completed",
+        payload: {
+          toolName: "mcp__workspace__lookup",
+          server: "workspace",
+          tool: "lookup",
+        },
+      },
+    ]);
+  });
+
   it("carries MCP tool arguments and result through the completed event", () => {
     const normalizer = createAcpEventNormalizer();
     normalizer.beginRun("session_1");

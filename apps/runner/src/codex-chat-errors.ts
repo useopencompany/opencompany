@@ -21,11 +21,13 @@ export class TaskTurnTerminalError extends Error {
 // failed assistant message.
 export class CodexChatRetryableInfrastructureError extends Error {
   override readonly cause: unknown;
+  readonly diagnosticMessage: string | null;
 
-  constructor(message: string, cause: unknown) {
+  constructor(message: string, cause: unknown, diagnosticMessage?: string) {
     super(message);
     this.name = "CodexChatRetryableInfrastructureError";
     this.cause = cause;
+    this.diagnosticMessage = diagnosticMessage?.trim() || null;
   }
 }
 
