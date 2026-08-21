@@ -64,6 +64,7 @@ const sandboxMocks = vi.hoisted(() => ({
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
   isRetryableCommandStreamError: vi.fn(),
+  isRetryableSandboxAcquisitionError: vi.fn(),
 }));
 
 const skillMocks = vi.hoisted(() => ({
@@ -201,6 +202,7 @@ vi.mock("./sandbox", () => ({
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
   isRetryableCommandStreamError: sandboxMocks.isRetryableCommandStreamError,
+  isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
 }));
 
 vi.mock("./codex-managed-skills", () => ({
@@ -316,6 +318,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
+    sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
     harnessMocks.getWorkflowHarnessSkillSnapshots.mockReturnValue([]);
     skillMocks.materializeClaudeSkillSnapshotsForSession.mockResolvedValue(undefined);
     taskMocks.buildTaskTerminalProjection.mockReturnValue({ taskId: "goat_task_1" });
@@ -571,6 +574,84 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       expect(result.value.finalize).not.toHaveBeenCalled();
     }
     expect(taskMocks.buildTaskTerminalProjection).not.toHaveBeenCalled();
+  });
+
+  it("fences a reused sandbox before recovery preflight can fail", async () => {
+    const preflightError = new Error("Repository bootstrap failed.");
+    repoMocks.loadRepositoryBootstrap.mockRejectedValueOnce(preflightError);
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn({ attempts: 2, codexTurnId: "claude_turn_1" }),
+        session: claudeSession(),
+        recovery: { reason: "lease_reclaimed" },
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results[0]?.value;
+    expect(cliMocks.killLeftoverClaudeTurnProcesses).toHaveBeenCalledOnce();
+    expect(chatMocks.claimCodexChatRecovery).toHaveBeenCalledOnce();
+    expect(cliMocks.killLeftoverClaudeTurnProcesses.mock.invocationCallOrder[0]).toBeLessThan(
+      chatMocks.claimCodexChatRecovery.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(projector.fail).toHaveBeenCalledWith("Repository bootstrap failed.", {
+      failureDiagnostic: "[load_repository_bootstrap] Error: Repository bootstrap failed.",
+    });
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("retries when an existing sandbox cannot be reconnected for fencing", async () => {
+    const connectError = new Error("Sandbox control plane request failed.");
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(connectError);
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn({ attempts: 2, codexTurnId: "claude_turn_1" }),
+        session: claudeSession(),
+        recovery: { reason: "lease_reclaimed" },
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: connectError,
+      message: "Claude Code could not reconnect to the existing sandbox before recovery.",
+      diagnosticMessage: "[connect_sandbox] Error: Sandbox control plane request failed.",
+    });
+
+    expect(cliMocks.killLeftoverClaudeTurnProcesses).not.toHaveBeenCalled();
+    expect(chatMocks.claimCodexChatRecovery).not.toHaveBeenCalled();
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
+  });
+
+  it("retries instead of settling when the previous sandbox process cannot be fenced", async () => {
+    const fenceError = new Error("Sandbox command stream is unavailable.");
+    cliMocks.killLeftoverClaudeTurnProcesses.mockRejectedValueOnce(fenceError);
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn({ attempts: 2, codexTurnId: "claude_turn_1" }),
+        session: claudeSession(),
+        recovery: { reason: "lease_reclaimed" },
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: fenceError,
+      message: "Claude Code could not fence the previous sandbox process before recovery.",
+      diagnosticMessage: "[fence_previous_turn] Error: Sandbox command stream is unavailable.",
+    });
+
+    expect(chatMocks.claimCodexChatRecovery).not.toHaveBeenCalled();
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
+    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledOnce();
   });
 
   it("bootstraps durable history after a stale Claude session cannot resume", async () => {

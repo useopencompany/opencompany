@@ -31,6 +31,7 @@ type AcpToolKind = "command" | "file_change" | "web_search" | "subagent" | "tool
 
 type AcpToolCall = {
   kind: AcpToolKind;
+  acpKind?: string;
   name: string;
   title: string;
   command?: string;
@@ -234,12 +235,14 @@ function normalizeToolCall(
   const title = readString(update.title) ?? name;
   const rawInput = readRecord(update.rawInput) ?? undefined;
   const kind = classifyTool(update, name);
-  const command = commandFromTool(rawInput, title);
-  const query = queryFromTool(rawInput, title);
+  const acpKind = readString(update.kind) ?? undefined;
+  const command = commandFromTool(rawInput, title) ?? title;
+  const query = queryFromTool(rawInput) ?? title;
   const changes = fileChangesFromTool(update, rawInput);
   const mcp = mcpToolInfo(name);
   const toolCall: AcpToolCall = {
     kind,
+    ...(acpKind ? { acpKind } : {}),
     name,
     title,
     ...(command ? { command } : {}),
@@ -270,20 +273,26 @@ function normalizeToolCallUpdate(
   if (!itemId) return [normalized("unknown", raw, { updateType: "tool_call_update" })];
   const existing = toolCalls.get(itemId);
   const name = acpToolName(update, existing?.name);
-  const rawInput = readRecord(update.rawInput) ?? existing?.rawInput;
+  const updatedRawInput = readRecord(update.rawInput) ?? undefined;
+  const rawInput = updatedRawInput
+    ? { ...existing?.rawInput, ...updatedRawInput }
+    : existing?.rawInput;
   const kind = existing?.kind ?? classifyTool(update, name);
+  const acpKind = readString(update.kind) ?? existing?.acpKind;
+  const title = readString(update.title) ?? existing?.title ?? name;
   const mcp = mcpToolInfo(name);
   const updatedChanges = fileChangesFromTool(update, rawInput);
-  const command = existing?.command ?? commandFromTool(rawInput, readString(update.title) ?? name);
-  const query = existing?.query ?? queryFromTool(rawInput, readString(update.title) ?? name);
-  const server = existing?.server ?? mcp.server;
-  const tool = existing?.tool ?? mcp.tool;
+  const command = commandFromTool(rawInput, title) ?? existing?.command ?? title;
+  const query = queryFromTool(rawInput) ?? existing?.query ?? title;
+  const server = mcp.server ?? existing?.server;
+  const tool = mcp.tool ?? existing?.tool;
   const changes = updatedChanges.length > 0 ? updatedChanges : existing?.changes;
   const resolvedParentToolCallId = parentToolCallId ?? existing?.parentToolCallId;
   const next: AcpToolCall = {
     kind,
+    ...(acpKind ? { acpKind } : {}),
     name,
-    title: readString(update.title) ?? existing?.title ?? name,
+    title,
     ...(command ? { command } : {}),
     ...(query ? { query } : {}),
     ...(server ? { server } : {}),
@@ -326,11 +335,17 @@ function toolStartedEvent(
   toolCall: AcpToolCall,
 ): HarnessNormalizedEvent {
   const common = { itemId, parentToolCallId: toolCall.parentToolCallId };
+  const toolSemantics = {
+    toolName: toolCall.name,
+    kind: toolCall.acpKind,
+    title: toolCall.title,
+  };
   switch (toolCall.kind) {
     case "command":
       return normalized("command.started", raw, {
         ...common,
         command: toolCall.command ?? toolCall.title,
+        description: readString(toolCall.rawInput?.description),
       });
     case "file_change":
       return normalized("file_change.started", raw, {
@@ -338,7 +353,11 @@ function toolStartedEvent(
         changes: toolCall.changes ?? [],
       });
     case "web_search":
-      return normalized("web_search.started", raw, { ...common, query: toolCall.query });
+      return normalized("web_search.started", raw, {
+        ...common,
+        ...toolSemantics,
+        query: toolCall.query,
+      });
     case "subagent":
       return normalized("subagent.started", raw, {
         ...common,
@@ -349,6 +368,7 @@ function toolStartedEvent(
     case "tool":
       return normalized("mcp_tool.started", raw, {
         ...common,
+        ...toolSemantics,
         server: toolCall.server,
         tool: toolCall.tool ?? toolCall.name,
         rawInput: toolCall.rawInput,
@@ -365,17 +385,24 @@ function toolCompletedEvent(
 ): HarnessNormalizedEvent {
   const outputText = toolOutputText(update) || toolCall.outputText;
   const common = { itemId, parentToolCallId: toolCall.parentToolCallId };
+  const toolSemantics = {
+    toolName: toolCall.name,
+    kind: toolCall.acpKind,
+    title: toolCall.title,
+  };
   switch (toolCall.kind) {
     case "command":
       return status === "failed"
         ? normalized("command.failed", raw, {
             ...common,
             command: toolCall.command ?? toolCall.title,
+            description: readString(toolCall.rawInput?.description),
             error: truncate(outputText, 600) ?? `${toolCall.title} failed.`,
           })
         : normalized("command.completed", raw, {
             ...common,
             command: toolCall.command ?? toolCall.title,
+            description: readString(toolCall.rawInput?.description),
             output: { status, exitCode: commandExitCode(update) },
           });
     case "file_change":
@@ -387,6 +414,7 @@ function toolCompletedEvent(
     case "web_search":
       return normalized("web_search.completed", raw, {
         ...common,
+        ...toolSemantics,
         query: toolCall.query,
         status,
       });
@@ -404,6 +432,7 @@ function toolCompletedEvent(
           : null;
       return normalized("mcp_tool.completed", raw, {
         ...common,
+        ...toolSemantics,
         server: toolCall.server,
         tool: toolCall.tool ?? toolCall.name,
         status,
@@ -439,7 +468,7 @@ function classifyTool(update: Record<string, unknown>, name: string): AcpToolKin
   return "tool";
 }
 
-function acpToolName(update: Record<string, unknown>, fallback = "tool") {
+function acpToolName(update: Record<string, unknown>, fallback?: string) {
   const rawInput = readRecord(update.rawInput);
   const mcpName =
     readString(rawInput?.server) && readString(rawInput?.tool)
@@ -449,8 +478,9 @@ function acpToolName(update: Record<string, unknown>, fallback = "tool") {
     claudeMetaString(update, "toolName") ??
     mcpName ??
     readString(update.name) ??
+    fallback ??
     readString(update.title) ??
-    fallback
+    "tool"
   );
 }
 
@@ -460,11 +490,11 @@ function commandFromTool(rawInput: Record<string, unknown> | undefined, title: s
   const args = Array.isArray(rawInput?.args)
     ? rawInput.args.filter((value): value is string => typeof value === "string")
     : [];
-  return args.length ? [title, ...args].join(" ") : title;
+  return args.length ? [title, ...args].join(" ") : null;
 }
 
-function queryFromTool(rawInput: Record<string, unknown> | undefined, title: string) {
-  return readString(rawInput?.query) ?? readString(rawInput?.url) ?? title;
+function queryFromTool(rawInput: Record<string, unknown> | undefined) {
+  return readString(rawInput?.query) ?? readString(rawInput?.url);
 }
 
 function fileChangesFromTool(

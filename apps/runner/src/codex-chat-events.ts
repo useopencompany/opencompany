@@ -372,6 +372,7 @@ export function createExternalEngineProjector(input: {
     completedAt?: Date;
     taskCompletion?: TaskTurnCompletion | null | undefined;
     content: string;
+    failureDiagnostic?: string;
   }) => {
     const now = options.completedAt ?? new Date();
     await settleDurableTurn({
@@ -387,6 +388,9 @@ export function createExternalEngineProjector(input: {
               attemptId: target.canonicalAttemptId,
               assistantMessageId: target.assistantMessageId,
               content: options.content,
+              ...(options.failureDiagnostic
+                ? { failureDiagnostic: redact(options.failureDiagnostic) }
+                : {}),
             },
           }
         : {}),
@@ -738,6 +742,7 @@ export function createExternalEngineProjector(input: {
       options: {
         sessionStatus?: CodexChatSessionStatus;
         taskCompletion?: TaskTurnCompletion | null;
+        failureDiagnostic?: string;
       } = {},
     ) {
       return serializeProjection(async () => {
@@ -756,6 +761,7 @@ export function createExternalEngineProjector(input: {
           completedAt,
           taskCompletion: options.taskCompletion,
           content,
+          ...(options.failureDiagnostic ? { failureDiagnostic: options.failureDiagnostic } : {}),
         });
       });
     },
