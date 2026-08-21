@@ -15,13 +15,12 @@ export function scrubSentryEvent(event: SentryEvent): SentryEvent {
     };
   }
 
-  if (event.user) {
-    if (event.user.id) {
-      event.user = { id: event.user.id };
-    } else {
-      delete event.user;
-    }
-  }
+  const userId = event.user?.id;
+  event.user = {
+    ...(userId ? { id: userId } : {}),
+    // The SDK adds {{auto}} after beforeSend unless null explicitly disables IP inference.
+    ip_address: null,
+  };
 
   return event;
 }
