@@ -1,5 +1,6 @@
 import type { IdentityDto } from "@opencompany/protocol";
 import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -16,6 +17,8 @@ vi.mock("@workos-inc/authkit-nextjs", () => ({
   saveSession: vi.fn(),
   withAuth: vi.fn(),
 }));
+
+vi.mock("next/headers", () => ({ cookies: vi.fn() }));
 
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 
@@ -105,10 +108,13 @@ function apiClient(data: IdentityDto = identity) {
 describe("completeAuthentication", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(cookies).mockResolvedValue({
+      get: vi.fn(() => ({ name: "wos-session", value: "freshly-sealed-session" })),
+    } as never);
     serverApiClientMock.mockResolvedValue(apiClient());
   });
 
-  it("seals the web session, synchronizes through /v1, and activates returned browser state", async () => {
+  it("synchronizes with the newly sealed browser session and activates returned browser state", async () => {
     const authResponse = {
       user: authUser,
       organizationId: "org_company",
@@ -121,7 +127,10 @@ describe("completeAuthentication", () => {
 
     expect(saveSession).toHaveBeenCalledWith(authResponse, "https://my.opencompany.chat");
     expect(recordLastAuthMethod).toHaveBeenCalledWith("MagicAuth");
-    expect(serverApiClientMock).toHaveBeenCalledWith({ authorization: "Bearer access_token" });
+    expect(serverApiClientMock).toHaveBeenCalledWith({
+      sessionCookie: { name: "wos-session", value: "freshly-sealed-session" },
+      origin: "https://my.opencompany.chat",
+    });
     expect(rememberActiveWorkspace).toHaveBeenCalledWith({
       workspaceId: "goat_ws_company",
       brainId: "brain_company",
@@ -148,6 +157,23 @@ describe("completeAuthentication", () => {
       "https://my.opencompany.chat",
     );
     expect(rememberActiveWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of falling back to the incompatible access token", async () => {
+    vi.mocked(cookies).mockResolvedValue({ get: vi.fn(() => undefined) } as never);
+
+    await expect(
+      completeAuthentication(
+        {
+          user: authUser,
+          accessToken: "access_token",
+          refreshToken: "refresh_token",
+          authenticationMethod: "GoogleOAuth",
+        } as never,
+        "https://my.opencompany.chat/auth/callback",
+      ),
+    ).rejects.toThrow("Could not read the newly saved authentication session.");
+    expect(serverApiClientMock).not.toHaveBeenCalled();
   });
 });
 
