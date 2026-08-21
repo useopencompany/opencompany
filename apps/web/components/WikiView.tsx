@@ -77,14 +77,14 @@ export function loadWikiTreeExpandedFolderIds(
   userWorkosId: string,
   workspaceId: string,
 ) {
-  const stored = storage.getItem(wikiTreeExpansionStorageKey(userWorkosId, workspaceId));
-  if (!stored) return new Set<string>();
-
   try {
+    const stored = storage.getItem(wikiTreeExpansionStorageKey(userWorkosId, workspaceId));
+    if (!stored) return new Set<string>();
     const value: unknown = JSON.parse(stored);
     if (!Array.isArray(value)) return new Set<string>();
     return new Set(value.filter((entry): entry is string => typeof entry === "string"));
-  } catch {
+  } catch (error) {
+    console.warn("[opencompany] Could not read the wiki tree expansion preference", error);
     return new Set<string>();
   }
 }
@@ -95,10 +95,14 @@ export function persistWikiTreeExpandedFolderIds(
   workspaceId: string,
   expandedFolderIds: ReadonlySet<string>,
 ) {
-  storage.setItem(
-    wikiTreeExpansionStorageKey(userWorkosId, workspaceId),
-    JSON.stringify([...expandedFolderIds].toSorted()),
-  );
+  try {
+    storage.setItem(
+      wikiTreeExpansionStorageKey(userWorkosId, workspaceId),
+      JSON.stringify([...expandedFolderIds].toSorted()),
+    );
+  } catch (error) {
+    console.warn("[opencompany] Could not save the wiki tree expansion preference", error);
+  }
 }
 
 const subscribeToHydration = () => () => undefined;

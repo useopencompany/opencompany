@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   availableWikiSlug,
   buildTree,
@@ -69,8 +69,37 @@ describe("Wiki tree helpers", () => {
   it("ignores an invalid stored expansion preference", () => {
     const storage = memoryStorage();
     storage.setItem("opencompany-wiki-tree-expanded:v1:user-1:workspace-1", "not-json");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     expect(loadWikiTreeExpandedFolderIds(storage, "user-1", "workspace-1")).toEqual(new Set());
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+
+  it("keeps the tree usable when browser storage is unavailable", () => {
+    const unavailableStorage = {
+      getItem: () => {
+        throw new Error("storage unavailable");
+      },
+      setItem: () => {
+        throw new Error("storage unavailable");
+      },
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(loadWikiTreeExpandedFolderIds(unavailableStorage, "user-1", "workspace-1")).toEqual(
+      new Set(),
+    );
+    expect(() =>
+      persistWikiTreeExpandedFolderIds(
+        unavailableStorage,
+        "user-1",
+        "workspace-1",
+        new Set(["folder-a"]),
+      ),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 });
 
