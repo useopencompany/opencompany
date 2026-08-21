@@ -23,6 +23,7 @@ describe("managed capability catalog", () => {
       "x.search_profiles": "tikhub:/api/v1/twitter/web/fetch_search_timeline",
       "x.list_followers": "tikhub:/api/v1/twitter/web/fetch_user_followers",
       "linkedin.get_person_profile": "tikhub:/api/v1/linkedin/web_v2/get_user_profile",
+      "linkedin.list_comments": "tikhub:/api/v1/linkedin/web_v2/get_post_comments",
       "youtube.get_transcript": "apify:/starvibe/youtube-video-transcript",
       "youtube.find_in_transcript": "apify:/starvibe/youtube-video-transcript",
       "instagram.search_reels": "tikhub:/api/v1/instagram/v2/search_reels",
@@ -190,7 +191,43 @@ describe("managed capability catalog", () => {
       action("linkedin.list_comments").mapInput({
         url: "https://www.linkedin.com/feed/update/urn:li:activity:7244804629786419202",
       }).providerInput,
-    ).toEqual({ post_id: "7244804629786419202" });
+    ).toEqual({ urn: "7244804629786419202" });
+    expect(
+      action("linkedin.list_comments").mapInput({
+        url: "https://www.linkedin.com/posts/openai_example-activity-7244804629786419202-AbCd",
+        limit: 20,
+      }),
+    ).toMatchObject({
+      providerInput: { urn: "7244804629786419202" },
+      resultLimit: 20,
+    });
+    expect(
+      action("linkedin.list_comments").mapInput({
+        url: "https://www.linkedin.com/posts/openai_example-share-7244804629786419202-AbCd",
+      }).providerInput,
+    ).toEqual({ urn: "7244804629786419202" });
+    expect(
+      (
+        action("linkedin.list_comments").params.properties as Record<
+          string,
+          { maximum?: number; description?: string }
+        >
+      ).limit,
+    ).toMatchObject({ maximum: 20 });
+    expect(
+      (
+        action("linkedin.list_comments").params.properties as Record<
+          string,
+          { maximum?: number; description?: string }
+        >
+      ).url?.description,
+    ).toMatch(/returned by linkedin\.get_post/i);
+    expect(() =>
+      action("linkedin.list_comments").mapInput({
+        url: "https://www.linkedin.com/feed/update/urn:li:activity:7244804629786419202",
+        limit: 21,
+      }),
+    ).toThrow(/1 to 20/i);
     expect(
       action("tiktok.get_video").mapInput({
         url: "https://www.tiktok.com/@openai/video/7331234567890123456",

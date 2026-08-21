@@ -193,6 +193,10 @@ jobs:
         if: ${{ needs.plan.outputs.runner == 'true' }}
         run: bun run release:preflight -- --runner
 
+      - name: Verify managed capability contracts
+        if: ${{ needs.plan.outputs.api == 'true' || needs.plan.outputs.runner == 'true' }}
+        run: bun run web:capabilities:contract
+
       - name: Map production database and web env
         run: |
           if [[ "${{ needs.plan.outputs.database }}" == "true" ]]; then
