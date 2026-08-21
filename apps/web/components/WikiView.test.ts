@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { availableWikiSlug, buildTree, type WikiPageData } from "./WikiView";
+import {
+  availableWikiSlug,
+  buildTree,
+  loadWikiTreeExpandedFolderIds,
+  persistWikiTreeExpandedFolderIds,
+  type WikiPageData,
+} from "./WikiView";
 
 function node(overrides: Partial<WikiPageData>): WikiPageData {
   return {
@@ -38,4 +44,40 @@ describe("Wiki tree helpers", () => {
     ]);
     expect(tree.map((entry) => entry.id)).toEqual(["folder-b", "folder-z", "page-a", "page-c"]);
   });
+
+  it("starts with every folder collapsed when no expansion preference exists", () => {
+    const storage = memoryStorage();
+    expect(loadWikiTreeExpandedFolderIds(storage, "user-1", "workspace-1")).toEqual(new Set());
+  });
+
+  it("remembers expanded folders per user and workspace", () => {
+    const storage = memoryStorage();
+    persistWikiTreeExpandedFolderIds(
+      storage,
+      "user-1",
+      "workspace-1",
+      new Set(["folder-b", "folder-a"]),
+    );
+
+    expect(loadWikiTreeExpandedFolderIds(storage, "user-1", "workspace-1")).toEqual(
+      new Set(["folder-a", "folder-b"]),
+    );
+    expect(loadWikiTreeExpandedFolderIds(storage, "user-2", "workspace-1")).toEqual(new Set());
+    expect(loadWikiTreeExpandedFolderIds(storage, "user-1", "workspace-2")).toEqual(new Set());
+  });
+
+  it("ignores an invalid stored expansion preference", () => {
+    const storage = memoryStorage();
+    storage.setItem("opencompany-wiki-tree-expanded:v1:user-1:workspace-1", "not-json");
+
+    expect(loadWikiTreeExpandedFolderIds(storage, "user-1", "workspace-1")).toEqual(new Set());
+  });
 });
+
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  };
+}

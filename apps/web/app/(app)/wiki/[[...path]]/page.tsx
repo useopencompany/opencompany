@@ -21,6 +21,7 @@ export default async function WikiPage({ params }: PageProps) {
 
   return (
     <WikiView
+      userWorkosId={user.workosUserId}
       workspaceId={workspace.id}
       pages={pages.map((page) => ({
         id: page.id,
