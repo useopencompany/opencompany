@@ -1,4 +1,5 @@
 import { Sandbox, type SandboxNetworkOpts } from "e2b";
+import { ACTIVE_CODING_SANDBOX_TIMEOUT_MS } from "./coding-sandbox-lifecycle";
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
 export type SandboxTextFile = {
@@ -36,10 +37,9 @@ export function managedSandboxMetadata(input: {
   };
 }
 
-// Must stay >= the longest agent turn cap (RUNNER_CODEX_TIMEOUT_MS defaults to the same 1h):
-// this timeout is armed once at create/connect and e2b pauses the sandbox when it elapses, so a
-// turn outliving it would be frozen mid-command until autoResume wakes the sandbox.
-const ACTIVE_SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
+// This timeout is armed once at create/connect and E2B pauses the sandbox when it elapses, so it
+// stays aligned with the default agent turn cap to avoid freezing a turn mid-command.
+const ACTIVE_SANDBOX_TIMEOUT_MS = ACTIVE_CODING_SANDBOX_TIMEOUT_MS;
 const SANDBOX_REQUEST_TIMEOUT_MS = 30_000;
 // Resuming a paused sandbox can take longer than an ordinary control-plane request. Keep the
 // larger deadline scoped to connect so transient E2B cold starts do not make a durable session

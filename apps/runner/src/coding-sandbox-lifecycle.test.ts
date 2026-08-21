@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  ACTIVE_CODING_SANDBOX_TIMEOUT_MS,
+  DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS,
   FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS,
   settledCodingSandboxIdleTimeoutMs,
 } from "./coding-sandbox-lifecycle";
+
+describe("coding sandbox active timeout", () => {
+  it("allows Codex and Claude Code turns to run for three hours", () => {
+    expect(DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS).toBe(3 * 60 * 60 * 1000);
+    expect(ACTIVE_CODING_SANDBOX_TIMEOUT_MS).toBe(DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS);
+  });
+});
 
 describe("settledCodingSandboxIdleTimeoutMs", () => {
   it("keeps the configured timeout for interactive coding chats", () => {
