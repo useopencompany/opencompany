@@ -1,4 +1,10 @@
-import { createAcpEventNormalizer } from "@opencompany/agent-runtime";
+import {
+  CODEX_COMMAND_TOOL_PART_TYPE,
+  CODEX_MCP_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_PART_TYPE,
+  type CodexUiMessagePart,
+  createAcpEventNormalizer,
+} from "@opencompany/agent-runtime";
 import type { RunExecutionRepository } from "@opencompany/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CodexChatLeaseLostError } from "./codex-chat-errors";
@@ -413,6 +419,101 @@ describe("createExternalEngineProjector", () => {
     expect(sqlText(query)).toContain("UPDATE goat.chat_messages AS message");
     expect(queryValues(query)).toContainEqual(
       expect.stringContaining("Persist this before interrupt."),
+    );
+  });
+
+  it("emits redacted tool metadata and parent linkage for the live transcript", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const appendEvents = vi.fn(
+      async (input: Parameters<RunExecutionRepository["appendEvents"]>[0]) =>
+        input.events.map((event, index) => ({ ...event, sequence: index + 1 })),
+    );
+    const command = `secret-token ${"x".repeat(4_100)}`;
+    const initialParts: CodexUiMessagePart[] = [
+      {
+        type: CODEX_SUBAGENT_TOOL_PART_TYPE,
+        toolCallId: "subagent_1",
+        state: "input-available",
+        input: {
+          label: "Subagent",
+          description: "Inspect the repository",
+          subagentType: "Explore",
+        },
+        children: [
+          {
+            type: CODEX_COMMAND_TOOL_PART_TYPE,
+            toolCallId: "command_1",
+            state: "output-available",
+            input: { command },
+            output: { status: "completed", exitCode: 0 },
+          },
+          {
+            type: "dynamic-tool",
+            toolName: CODEX_MCP_TOOL_NAME,
+            toolCallId: "mcp_1",
+            state: "output-available",
+            input: { label: "MCP tool", server: "github", tool: "search" },
+            output: { status: "completed" },
+          },
+        ],
+      },
+    ];
+    const projector = createExternalEngineProjector({
+      target: projectorTarget({ canonicalAttemptId: "attempt_1" }),
+      redact: (value) => value.replaceAll("secret-token", "[redacted]"),
+      initialParts,
+      normalizeEvent: () => [
+        {
+          type: "assistant.delta",
+          payload: { itemId: "assistant_1", delta: "Working" },
+          rawEvent: {},
+        },
+      ],
+      execution: { appendEvents } as unknown as RunExecutionRepository,
+    });
+
+    await projector.push([{}]);
+
+    const emitted = appendEvents.mock.calls.flatMap(([input]) => input.events);
+    const started = emitted.filter((event) => event.type === "tool.started");
+    expect(started).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            toolCallId: "subagent_1",
+            name: "codex_subagent",
+            label: "Subagent",
+            detail: "Inspect the repository",
+            kind: "Explore",
+          }),
+        }),
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            toolCallId: "mcp_1",
+            name: "codex_mcp_tool",
+            label: "MCP tool",
+            detail: "github.search",
+            kind: "mcp",
+            parentToolCallId: "subagent_1",
+          }),
+        }),
+      ]),
+    );
+    const commandStarted = started.find((event) => event.payload.toolCallId === "command_1");
+    expect(commandStarted?.payload).toMatchObject({
+      name: "codex_command",
+      label: "Command",
+      kind: "execute",
+      parentToolCallId: "subagent_1",
+    });
+    expect(commandStarted?.payload.detail).toHaveLength(4_000);
+    expect(commandStarted?.payload.detail).toContain("[redacted]");
+    expect(commandStarted?.payload.detail).not.toContain("secret-token");
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        type: "tool.completed",
+        payload: { toolCallId: "command_1", summary: "completed" },
+      }),
     );
   });
 
