@@ -215,7 +215,9 @@ jobs:
         run: |
           scope_args=()
           if [[ "$RESOLVED_SCOPE" == "affected" ]]; then scope_args+=(--affected); fi
-          bun --bun turbo run test --concurrency=2 "${scope_args[@]}" -- --maxWorkers=2
+          # Vitest's PGlite suite uses WASM that intermittently traps in Bun-backed fork workers.
+          # Keep Bun as the package manager, but let Vitest workers inherit the supported Node runtime.
+          bun turbo run test --concurrency=2 "${scope_args[@]}" -- --maxWorkers=2
 
       - name: Save trusted test caches
         if: ${{ success() && inputs.cache_write && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
