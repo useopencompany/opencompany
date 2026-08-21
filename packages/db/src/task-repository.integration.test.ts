@@ -23,6 +23,9 @@ const migrationPaths = [
   "0202_goat_headless_task_foundation.sql",
   "0204_goat_task_conversation_history_projection.sql",
   "0205_goat_task_history_projection_repair.sql",
+  "0215_goat_chat_sidebar_state.sql",
+  "0216_goat_conversation_runtime_summary.sql",
+  "0223_goat_task_projection_preservation.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -41,6 +44,7 @@ describe("Postgres Task repository", () => {
     normalChatTaskCardUntouched: boolean;
     crossWorkspaceLinkRejected: boolean;
     crossWorkspaceRunRejected: boolean;
+    projectionWipedBeforeRepair: boolean;
   };
 
   beforeEach(async () => {
@@ -138,6 +142,7 @@ describe("Postgres Task repository", () => {
           'completed', 'Must stay isolated'
         );
     `);
+    let projectionWipedBeforeRepair = false;
     for (const migrationPath of migrationPaths) {
       if (migrationPath.endsWith("0205_goat_task_history_projection_repair.sql")) {
         // Reproduce the production gap: valid physical Task history whose projection row is absent.
@@ -145,6 +150,20 @@ describe("Postgres Task repository", () => {
           DELETE FROM goat.message_read_model_v1 WHERE id = 'migration_prior_task_message';
           DELETE FROM goat.run_read_model_v1 WHERE id = 'migration_prior_task_run';
         `);
+      }
+      if (migrationPath.endsWith("0223_goat_task_projection_preservation.sql")) {
+        // Reproduce the production wipe: under the 0216 refresh function, any Conversation-row
+        // touch (planner model bump, settlement, rename) deleted every canonical Task projection.
+        await database.exec(`
+          UPDATE goat.chat_sessions SET updated_at = now()
+          WHERE id = 'migration_task_conversation';
+        `);
+        const wiped = await database.query<{ remaining: number }>(`
+          SELECT COUNT(*)::int AS remaining
+          FROM goat.message_read_model_v1
+          WHERE conversation_id = 'migration_task_conversation'
+        `);
+        projectionWipedBeforeRepair = wiped.rows[0]?.remaining === 0;
       }
       const migration = await readFile(migrationPath, "utf8");
       const statements = migration.split("--> statement-breakpoint");
@@ -237,6 +256,7 @@ describe("Postgres Task repository", () => {
       normalChatTaskCardUntouched: migrationRow?.normal_chat_task_card_untouched ?? false,
       crossWorkspaceLinkRejected: migrationRow?.cross_workspace_link_rejected ?? false,
       crossWorkspaceRunRejected: migrationRow?.cross_workspace_run_rejected ?? false,
+      projectionWipedBeforeRepair,
     };
 
     await database.exec(`
@@ -307,7 +327,58 @@ describe("Postgres Task repository", () => {
       normalChatTaskCardUntouched: true,
       crossWorkspaceLinkRejected: true,
       crossWorkspaceRunRejected: true,
+      projectionWipedBeforeRepair: true,
     });
+  });
+
+  it("keeps canonical Task projections when the Conversation row is touched after the repair", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "task-projection-preservation",
+      goal: "Keep the transcript",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "manual",
+    });
+    const conversationId = created.task.conversationId;
+    const projectedMessages = async () =>
+      (
+        await database.query<{ count: number }>(
+          `SELECT COUNT(*)::int AS count FROM goat.message_read_model_v1
+           WHERE conversation_id = $1`,
+          [conversationId],
+        )
+      ).rows[0]?.count;
+    expect(await projectedMessages()).toBe(2);
+
+    // The codex Task planner bumps model/updated_at at turn start; settlement and renames touch
+    // the same row. None of these may drop the projected transcript.
+    await database.exec(`
+      UPDATE goat.chat_sessions SET model = 'moonshotai/kimi-k3-planned', updated_at = now()
+      WHERE id = '${conversationId}';
+    `);
+    expect(await projectedMessages()).toBe(2);
+
+    await service.updateTask(actor(), created.task.id, { name: "Renamed task" });
+    expect(await projectedMessages()).toBe(2);
+    await expect(
+      database.query<{ count: number }>(
+        `SELECT COUNT(*)::int AS count FROM goat.run_read_model_v1 WHERE conversation_id = $1`,
+        [conversationId],
+      ),
+    ).resolves.toMatchObject({ rows: [{ count: 1 }] });
+
+    // Deleting the Conversation still cleans up every projection.
+    await database.exec(`
+      DELETE FROM goat.run_events WHERE run_id IN (
+        SELECT id FROM goat.codex_chat_turns WHERE chat_session_id = '${conversationId}'
+      );
+      DELETE FROM goat.codex_chat_turns WHERE chat_session_id = '${conversationId}';
+      DELETE FROM goat.codex_chat_sessions WHERE chat_session_id = '${conversationId}';
+      DELETE FROM goat.chat_messages WHERE session_id = '${conversationId}';
+      DELETE FROM goat.tasks WHERE session_id = '${conversationId}';
+      DELETE FROM goat.chat_sessions WHERE id = '${conversationId}';
+    `);
+    expect(await projectedMessages()).toBe(0);
   });
 
   it("serves preserved legacy history only through the authorized compatibility boundary", async () => {

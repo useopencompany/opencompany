@@ -2820,7 +2820,7 @@ export function Surface({
             </div>
           )}
 
-          {mode === "chat" && chatSessionId && !activeTaskConversation ? (
+          {mode === "chat" && chatSessionId ? (
             <ConversationRuntimeSync
               conversationId={chatSessionId}
               setSandboxStatus={setCodingSandboxStatus}

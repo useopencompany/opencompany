@@ -501,6 +501,34 @@ describe("Electric read models", () => {
     ]);
   });
 
+  it("scopes an engine session shape to one Conversation without widening ownership", async () => {
+    let upstreamUrl = "";
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        upstreamUrl = String(input);
+        return Response.json([]);
+      }) as typeof fetch,
+    });
+
+    await proxy.stream({
+      actor,
+      readModel: "engine-sessions-v1",
+      conversationId: "conversation_1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/engine-sessions-v1?conversationId=conversation_1",
+      ),
+    });
+
+    const requestedUrl = new URL(upstreamUrl);
+    expect(requestedUrl.searchParams.get("where")).toContain('"chat_session_id" = $1');
+    expect(requestedUrl.searchParams.get("where")).toContain('"user_workos_id" = $2');
+    expect(requestedUrl.searchParams.get("where")).toContain('"workspace_id" = $3');
+    expect(requestedUrl.searchParams.get("params[1]")).toBe("conversation_1");
+    expect(requestedUrl.searchParams.get("params[2]")).toBe("user_1");
+    expect(requestedUrl.searchParams.get("params[3]")).toBe("workspace_1");
+  });
+
   it("bounds a legacy session error without dropping valid active session state", async () => {
     const historicalError = `${"x".repeat(2_000)}private-tail`;
     const proxy = new ElectricReadModelProxy({

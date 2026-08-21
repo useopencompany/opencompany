@@ -30,6 +30,7 @@ const migrationPaths = [
   "0215_goat_chat_sidebar_state.sql",
   "0216_goat_conversation_runtime_summary.sql",
   "0219_goat_run_attempt_deploy_version.sql",
+  "0223_goat_task_projection_preservation.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 

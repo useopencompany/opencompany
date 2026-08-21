@@ -238,23 +238,35 @@ function readModelShape(input: {
         "created_at",
         "updated_at",
       ]);
-    case "engine-sessions-v1":
+    case "engine-sessions-v1": {
+      // Electric requires every physical primary-key column even when the public projection
+      // deliberately omits that implementation id.
+      const columns = [
+        "id",
+        "chat_session_id",
+        "engine",
+        "status",
+        "active_turn_id",
+        "error",
+        "updated_at",
+      ];
+      if (input.conversationId) {
+        return {
+          table: "goat.codex_chat_sessions",
+          columns,
+          where:
+            `"chat_session_id" = $1 AND "user_workos_id" = $2 ` +
+            `AND ("workspace_id" = $3 OR "workspace_id" IS NULL)`,
+          params: [input.conversationId, input.actor.userId, input.actor.workspaceId],
+        };
+      }
       return {
         table: "goat.codex_chat_sessions",
-        // Electric requires every physical primary-key column even when the public projection
-        // deliberately omits that implementation id.
-        columns: [
-          "id",
-          "chat_session_id",
-          "engine",
-          "status",
-          "active_turn_id",
-          "error",
-          "updated_at",
-        ],
+        columns,
         where: `"user_workos_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
         params: [input.actor.userId, input.actor.workspaceId],
       };
+    }
     case "tasks-v1":
       return {
         table: "goat.task_read_model_v1",
