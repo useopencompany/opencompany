@@ -6,7 +6,9 @@ import { Markdown } from "@/components/Markdown";
 
 export function ReasoningItem({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
-  const preview = text.replace(/\s+/g, " ").trim();
+  const compactText = text.replace(/\s+/g, " ").trim();
+  const preview =
+    compactText.length > 160 ? `${compactText.slice(0, 157).trimEnd()}...` : compactText;
   return (
     <div
       data-testid="chat-reasoning-item"

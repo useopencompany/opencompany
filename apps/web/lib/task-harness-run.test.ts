@@ -161,6 +161,27 @@ describe("buildHarnessRun", () => {
     ]);
   });
 
+  it("does not reinterpret ordinary tool arguments as coding-tool metadata", () => {
+    const run = buildHarnessRun({
+      task: task(),
+      messages: [],
+      events: [
+        event(1, "tool.completed", {
+          toolCallId: "call_linear",
+          toolName: "linear_use_tool",
+          input: {
+            tool: "searchIssues",
+            title: "Argument title",
+            kind: "read",
+          },
+          output: { issues: [] },
+        }),
+      ],
+    });
+
+    expect(run.toolCalls[0]).toMatchObject({ label: "Linear", kind: "linear" });
+  });
+
   it("labels X tools in the Results timeline", () => {
     const run = buildHarnessRun({
       task: task(),

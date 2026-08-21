@@ -31,7 +31,7 @@ describe("coding transcript tool presentations", () => {
       type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
       toolCallId: "command_legacy",
       state: "input-available",
-      input: {},
+      input: { command: CODEX_COMMAND_TOOL_NAME },
     });
     const mcp = toolCallViewFromPart({
       type: "dynamic-tool",
@@ -40,9 +40,17 @@ describe("coding transcript tool presentations", () => {
       state: "input-available",
       input: { label: "MCP tool" },
     });
+    const internalMcpIdentity = toolCallViewFromPart({
+      type: "dynamic-tool",
+      toolName: CODEX_MCP_TOOL_NAME,
+      toolCallId: "mcp_internal",
+      state: "input-available",
+      input: { label: "MCP tool", tool: CODEX_COMMAND_TOOL_NAME },
+    });
 
     expect(command).toMatchObject({ label: "Command", detail: null, detailChips: [] });
     expect(mcp).toMatchObject({ label: "Tool", detail: null, detailChips: [] });
+    expect(internalMcpIdentity).toMatchObject({ label: "Tool", detail: null, detailChips: [] });
   });
 
   it("renders Read, Write, Search, and TodoWrite with semantic labels", () => {
@@ -126,7 +134,13 @@ describe("coding transcript tool presentations", () => {
         title: "List available actions",
         server: "opencompany",
         tool: "list_actions",
-        arguments: {},
+        arguments: {
+          server: "spoofed-server",
+          tool: "spoofed-tool",
+          toolName: "Read",
+          kind: "read",
+          title: "Spoofed title",
+        },
       },
       output: { status: "completed", result: "[]" },
     });

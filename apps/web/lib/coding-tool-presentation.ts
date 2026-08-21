@@ -68,7 +68,11 @@ export function codingToolPresentation({
   const inputRecord = asRecord(input);
   const outputRecord = asRecord(output);
   const metadataRecord = asRecord(metadata);
-  const records = compactRecords([
+  // Invocation identity belongs to the part/event envelope. Tool arguments are external input and
+  // may legitimately contain keys such as `server`, `tool`, or `title`; never let those fields
+  // impersonate the tool that is being rendered.
+  const semanticRecords = compactRecords([inputRecord, metadataRecord]);
+  const valueRecords = compactRecords([
     nestedRecord(inputRecord, "arguments"),
     nestedRecord(inputRecord, "rawInput"),
     inputRecord,
@@ -77,25 +81,25 @@ export function codingToolPresentation({
     metadataRecord,
     outputRecord,
   ]);
-  const server = firstString(records, ["server"]);
-  const toolNameField = firstString(records, ["toolName"]);
+  const server = firstString(semanticRecords, ["server"]);
+  const toolNameField = firstString(semanticRecords, ["toolName"]);
   const explicitToolName = toolNameField === name ? null : toolNameField;
-  const tool = firstString(records, ["tool"]);
+  const tool = firstString(semanticRecords, ["tool"]);
   const hasExplicitIdentity = Boolean(explicitToolName || (!server && tool));
   const identity = explicitToolName ?? (!server ? tool : null) ?? name;
   const normalizedIdentity = normalizeToolIdentity(identity);
-  const kind = firstString(records, ["kind"])?.toLowerCase() ?? null;
-  const title = firstString(records, ["title"]);
-  const labelHint = firstString(records, ["label"]);
-  const detailHint = firstString(records, ["detail"]);
+  const kind = firstString(semanticRecords, ["kind"])?.toLowerCase() ?? null;
+  const title = firstString(semanticRecords, ["title"]);
+  const labelHint = firstString(semanticRecords, ["label"]);
+  const detailHint = firstString(semanticRecords, ["detail"]);
   const error = outputRecord ? firstString([outputRecord], ["error"]) : null;
   const isCodingBucket = CODING_TOOL_BUCKETS.has(name);
   const mcpTarget = parseMcpTarget(explicitToolName ?? identity, server, tool);
 
   if (name === CODEX_COMMAND_TOOL_NAME) {
-    const description = firstString(records, ["description"]);
-    const command = firstString(records, ["command"]) ?? detailHint;
-    const detailChips = command ? [displayShellCommand(command)] : [];
+    const description = firstString(semanticRecords, ["description"]);
+    const command = firstString(semanticRecords, ["command"]) ?? detailHint;
+    const detailChips = command && !isInternalLabel(command) ? [displayShellCommand(command)] : [];
     return presentation(
       safeHumanLabel(description, identity) ??
         safeHumanLabel(labelHint, identity) ??
@@ -108,7 +112,7 @@ export function codingToolPresentation({
   const fixedLabel = FIXED_CODING_TOOL_LABELS[name];
   if (fixedLabel) return presentation(fixedLabel, []);
 
-  if (!isCodingBucket && !hasExplicitIdentity && !mcpTarget) return null;
+  if (!isCodingBucket) return null;
 
   if (mcpTarget) {
     const detailChips = [`${mcpTarget.server} · ${mcpTarget.tool}`, ...(error ? [error] : [])];
@@ -119,7 +123,7 @@ export function codingToolPresentation({
   }
 
   if (isReadTool(normalizedIdentity, kind)) {
-    const path = firstPath(records);
+    const path = firstPath(valueRecords);
     const lines = lineCountFromToolOutput(output);
     return presentation(
       lines === null ? "Read" : `Read ${formatLineCount(lines)}`,
@@ -128,8 +132,8 @@ export function codingToolPresentation({
   }
 
   if (isWriteTool(normalizedIdentity, kind)) {
-    const paths = filePaths(records);
-    const lines = lineCountFromText(firstString(records, ["content", "text"]));
+    const paths = filePaths(valueRecords);
+    const lines = lineCountFromText(firstString(valueRecords, ["content", "text"]));
     return presentation(
       lines === null ? "Write" : `Write ${formatLineCount(lines)}`,
       compactFileChips(paths),
@@ -137,9 +141,9 @@ export function codingToolPresentation({
   }
 
   if (isEditTool(normalizedIdentity, kind, name)) {
-    const paths = filePaths(records);
-    const lines = lineCountFromText(firstString(records, ["new_string", "newString"]));
-    const action = fileChangeAction(normalizedIdentity, kind, records);
+    const paths = filePaths(valueRecords);
+    const lines = lineCountFromText(firstString(valueRecords, ["new_string", "newString"]));
+    const action = fileChangeAction(normalizedIdentity, kind, valueRecords);
     return presentation(
       lines === null ? action : `${action} ${formatLineCount(lines)}`,
       compactFileChips(paths),
@@ -147,40 +151,40 @@ export function codingToolPresentation({
   }
 
   if (isSearchTool(normalizedIdentity, kind, hasExplicitIdentity)) {
-    const pattern = firstString(records, ["pattern", "query", "glob"]);
+    const pattern = firstString(valueRecords, ["pattern", "query", "glob"]);
     return presentation("Search", pattern ? [pattern] : [], "search");
   }
 
   if (isTodoTool(normalizedIdentity)) {
-    const todos = firstArray(records, "todos");
+    const todos = firstArray(valueRecords, "todos");
     const detailChips = todos ? [`${todos.length} ${todos.length === 1 ? "item" : "items"}`] : [];
     return presentation("Plan", detailChips);
   }
 
   if (isFetchTool(normalizedIdentity, kind, hasExplicitIdentity)) {
-    const target = firstString(records, ["url", "query"]);
+    const target = firstString(valueRecords, ["url", "query"]);
     return presentation("Fetch", target ? [target] : [], "search");
   }
 
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) {
-    const query = firstString(records, ["pattern", "query", "glob"]);
+    const query = firstString(valueRecords, ["pattern", "query", "glob"]);
     return presentation("Web search", query ? [query] : [], "search");
   }
 
   if (name === CODEX_FILE_CHANGE_TOOL_NAME) {
-    return presentation("File change", compactFileChips(filePaths(records)));
+    return presentation("File change", compactFileChips(filePaths(valueRecords)));
   }
 
   const fallbackLabel =
     safeHumanLabel(title, identity) ??
     safeHumanLabel(labelHint, identity) ??
-    (hasExplicitIdentity ? humanizeToolIdentity(identity) : null) ??
+    (hasExplicitIdentity ? safeHumanLabel(humanizeToolIdentity(identity), "") : null) ??
     "Tool";
   const fallbackDetail = detailHint ? [detailHint] : error ? [error] : [];
   return presentation(fallbackLabel, fallbackDetail);
 }
 
-export function displayShellCommand(value: string) {
+function displayShellCommand(value: string) {
   let command = value.trim();
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const match = /^(?:(?:\/usr)?\/bin\/)?(?:ba|z|)sh\s+-(?:lc|cl|c)\s+([\s\S]+)$/i.exec(command);
@@ -190,7 +194,7 @@ export function displayShellCommand(value: string) {
   return command;
 }
 
-export function repoRelativeSandboxPath(value: string) {
+function repoRelativeSandboxPath(value: string) {
   const normalized = value.replace(/\\/g, "/");
   for (const marker of [
     "/opencompany-goat/codex-chat/",
@@ -380,12 +384,14 @@ function formatLineCount(count: number) {
 function safeHumanLabel(value: string | null, identity: string) {
   if (!value) return null;
   const trimmed = value.trim();
-  const normalized = trimmed.toLowerCase().replace(/[_-]+/g, " ");
-  if (!trimmed || INTERNAL_LABELS.has(trimmed.toLowerCase()) || INTERNAL_LABELS.has(normalized)) {
-    return null;
-  }
+  if (!trimmed || isInternalLabel(trimmed)) return null;
   if (normalizeToolIdentity(trimmed) === normalizeToolIdentity(identity)) return null;
   return trimmed;
+}
+
+function isInternalLabel(value: string) {
+  const normalized = value.toLowerCase().replace(/[_-]+/g, " ");
+  return INTERNAL_LABELS.has(value.toLowerCase()) || INTERNAL_LABELS.has(normalized);
 }
 
 function humanizeToolIdentity(value: string) {

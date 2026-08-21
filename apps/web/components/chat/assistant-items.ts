@@ -250,6 +250,12 @@ export function toolCallViewFromPart(
     output: part.output,
     metadata: part,
   });
+  const presentationOwnsDetail =
+    name === CODEX_COMMAND_TOOL_NAME ||
+    name === CODEX_DYNAMIC_TOOL_NAME ||
+    name === CODEX_FILE_CHANGE_TOOL_NAME ||
+    name === CODEX_MCP_TOOL_NAME ||
+    name === CODEX_WEB_SEARCH_TOOL_NAME;
   const state = typeof part.state === "string" ? part.state : "";
   const output = part.output;
   const failedBrain =
@@ -331,7 +337,9 @@ export function toolCallViewFromPart(
             : awaitingCapabilityApproval
               ? "Approval needed"
               : toolStatusText(status, state),
-    detail: presentation?.detail ?? toolDetail(name, part, status),
+    detail: presentationOwnsDetail
+      ? (presentation?.detail ?? null)
+      : (presentation?.detail ?? toolDetail(name, part, status)),
     detailChips: presentation?.detailChips ?? [],
     input: part.input,
     output: part.output,
