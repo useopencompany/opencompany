@@ -120,6 +120,68 @@ describe("buildHarnessRun", () => {
     });
   });
 
+  it("uses semantic coding-tool labels without exposing internal constants", () => {
+    const run = buildHarnessRun({
+      task: task(),
+      messages: [],
+      events: [
+        event(1, "tool.completed", {
+          toolCallId: "call_command",
+          toolName: "codex_command",
+          input: {},
+          output: { status: "completed" },
+        }),
+        event(2, "tool.completed", {
+          toolCallId: "call_read",
+          toolName: "codex_mcp_tool",
+          input: {
+            toolName: "Read",
+            kind: "read",
+            arguments: { file_path: "/workspace/repo/apps/web/lib/task-harness-run.ts" },
+          },
+          output: { status: "completed", result: "  1→one\n  2→two" },
+        }),
+        event(3, "tool.completed", {
+          toolCallId: "call_grep",
+          toolName: "codex_web_search",
+          input: {
+            toolName: "Grep",
+            kind: "search",
+            arguments: { pattern: "codex_command" },
+          },
+          output: { status: "completed" },
+        }),
+      ],
+    });
+
+    expect(run.toolCalls.map((tool) => [tool.label, tool.kind])).toEqual([
+      ["Command", "tool"],
+      ["Read 2 lines", "tool"],
+      ["Search", "search"],
+    ]);
+  });
+
+  it("does not reinterpret ordinary tool arguments as coding-tool metadata", () => {
+    const run = buildHarnessRun({
+      task: task(),
+      messages: [],
+      events: [
+        event(1, "tool.completed", {
+          toolCallId: "call_linear",
+          toolName: "linear_use_tool",
+          input: {
+            tool: "searchIssues",
+            title: "Argument title",
+            kind: "read",
+          },
+          output: { issues: [] },
+        }),
+      ],
+    });
+
+    expect(run.toolCalls[0]).toMatchObject({ label: "Linear", kind: "linear" });
+  });
+
   it("labels X tools in the Results timeline", () => {
     const run = buildHarnessRun({
       task: task(),
