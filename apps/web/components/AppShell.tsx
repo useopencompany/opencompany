@@ -1,6 +1,7 @@
 import { ProductAnalyticsProvider } from "@opencompany/analytics/product/client";
 import type { ReactNode } from "react";
 import { AppDataProvider, type AppInitialData } from "@/components/AppDataProvider";
+import { loadOptionalAppShellData } from "@/lib/app-shell-loader";
 import { currentUser } from "@/lib/auth";
 import { listCurrentUserRecentChats } from "@/lib/chat";
 import { loadCurrentClaudeCodeAuthSettings } from "@/lib/claude-code-auth";
@@ -13,6 +14,7 @@ import {
   type CodexProviderState,
   type InfisicalProviderState,
   type IntegrationState,
+  integrationStateFromRows,
 } from "@/lib/integration-state";
 import { getAttioIntegrationState } from "@/lib/integrations/attio";
 import { getFathomIntegrationState } from "@/lib/integrations/fathom";
@@ -32,6 +34,7 @@ import { getWorkspaceSettingsAction } from "@/lib/workspace-actions";
 export async function AppShell({ children }: { children: ReactNode }) {
   const { authUser, user, workspace, role, workspaces, brains, activeBrain } = await currentUser();
   const featureFlags = featureFlagsFromUser(user);
+  const emptyIntegrations = integrationStateFromRows([]);
   const [
     schedules,
     recentChats,
@@ -53,25 +56,95 @@ export async function AppShell({ children }: { children: ReactNode }) {
     workspaceSettings,
     personalAccounts,
   ] = await Promise.all([
-    featureFlags.taskSpawning ? listHeadlessTaskSchedules() : Promise.resolve([]),
-    listCurrentUserRecentChats(),
-    getGoogleIntegrationState(user.workosUserId),
-    getLinearIntegrationState(user.workosUserId),
-    getPostHogIntegrationState(user.workosUserId),
-    getGitHubIntegrationState(workspace.id),
-    getJamieIntegrationState(workspace.id),
-    getSlackIntegrationState(user.workosUserId),
-    getGranolaIntegrationState(user.workosUserId),
-    getFathomIntegrationState(user.workosUserId),
-    getAttioIntegrationState(user.workosUserId),
-    getStripeIntegrationState(workspace.id),
-    getXAccountIntegrationState(user.workosUserId),
-    getImessageIntegrationState(user.workosUserId),
-    loadCurrentCodexAuthSettings(),
-    loadCurrentClaudeCodeAuthSettings(),
-    loadCurrentInfisicalAuthSettings(),
+    featureFlags.taskSpawning
+      ? loadOptionalAppShellData("schedules", listHeadlessTaskSchedules, [])
+      : Promise.resolve([]),
+    loadOptionalAppShellData("recent_chats", listCurrentUserRecentChats, []),
+    loadOptionalAppShellData(
+      "google_integrations",
+      () => getGoogleIntegrationState(user.workosUserId),
+      emptyIntegrations,
+    ),
+    loadOptionalAppShellData(
+      "linear_integration",
+      () => getLinearIntegrationState(user.workosUserId),
+      emptyIntegrations.linear,
+    ),
+    loadOptionalAppShellData(
+      "posthog_integration",
+      () => getPostHogIntegrationState(user.workosUserId),
+      emptyIntegrations.posthog,
+    ),
+    loadOptionalAppShellData(
+      "github_integration",
+      () => getGitHubIntegrationState(workspace.id),
+      emptyIntegrations.github,
+    ),
+    loadOptionalAppShellData(
+      "jamie_integration",
+      () => getJamieIntegrationState(workspace.id),
+      emptyIntegrations.jamie,
+    ),
+    loadOptionalAppShellData(
+      "slack_integration",
+      () => getSlackIntegrationState(user.workosUserId),
+      emptyIntegrations.slack,
+    ),
+    loadOptionalAppShellData(
+      "granola_integration",
+      () => getGranolaIntegrationState(user.workosUserId),
+      emptyIntegrations.granola,
+    ),
+    loadOptionalAppShellData(
+      "fathom_integration",
+      () => getFathomIntegrationState(user.workosUserId),
+      emptyIntegrations.fathom,
+    ),
+    loadOptionalAppShellData(
+      "attio_integration",
+      () => getAttioIntegrationState(user.workosUserId),
+      emptyIntegrations.attio,
+    ),
+    loadOptionalAppShellData(
+      "stripe_integration",
+      () => getStripeIntegrationState(workspace.id),
+      emptyIntegrations.stripe,
+    ),
+    loadOptionalAppShellData(
+      "x_account_integration",
+      () => getXAccountIntegrationState(user.workosUserId),
+      emptyIntegrations.x_account,
+    ),
+    loadOptionalAppShellData(
+      "imessage_integration",
+      () => getImessageIntegrationState(user.workosUserId),
+      emptyIntegrations.imessage,
+    ),
+    loadOptionalAppShellData("codex_auth", loadCurrentCodexAuthSettings, {
+      status: null,
+      statusReason: null,
+      lastValidatedAt: null,
+      lastRotatedAt: null,
+    }),
+    loadOptionalAppShellData("claude_code_auth", loadCurrentClaudeCodeAuthSettings, {
+      status: null,
+      statusReason: null,
+      lastValidatedAt: null,
+      lastRotatedAt: null,
+    }),
+    loadOptionalAppShellData("infisical_auth", loadCurrentInfisicalAuthSettings, {
+      status: null,
+      statusReason: null,
+      accountEmail: null,
+      host: null,
+      lastValidatedAt: null,
+    }),
     getWorkspaceSettingsAction(),
-    getPersonalAccounts(),
+    loadOptionalAppShellData(
+      "personal_accounts",
+      getPersonalAccounts,
+      emptyIntegrations.personalAccounts,
+    ),
   ]);
 
   const initialData: AppInitialData = {

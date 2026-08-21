@@ -2207,6 +2207,10 @@ export function createApiApp(input: CreateApiAppInput) {
                 });
               }
               c.res = apiErrorResponse(c, error);
+              span.setAttributes({ "goat.http_status_code": c.res.status });
+              if (c.res.status >= 500) {
+                span.fail(error, { "goat.http_status_code": c.res.status });
+              }
               return c.res;
             } finally {
               logger.info("API request completed", {
