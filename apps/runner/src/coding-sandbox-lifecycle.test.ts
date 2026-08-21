@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ACTIVE_CODING_SANDBOX_TIMEOUT_MS,
+  CODING_SANDBOX_TURN_GRACE_MS,
   DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS,
   FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS,
   settledCodingSandboxIdleTimeoutMs,
@@ -9,7 +10,9 @@ import {
 describe("coding sandbox active timeout", () => {
   it("allows Codex and Claude Code turns to run for three hours", () => {
     expect(DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS).toBe(3 * 60 * 60 * 1000);
-    expect(ACTIVE_CODING_SANDBOX_TIMEOUT_MS).toBe(DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS);
+    expect(ACTIVE_CODING_SANDBOX_TIMEOUT_MS).toBe(
+      DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS + CODING_SANDBOX_TURN_GRACE_MS,
+    );
   });
 });
 

@@ -37,8 +37,8 @@ export function managedSandboxMetadata(input: {
   };
 }
 
-// This timeout is armed once at create/connect and E2B pauses the sandbox when it elapses, so it
-// stays aligned with the default agent turn cap to avoid freezing a turn mid-command.
+// This timeout is armed once at create/connect and E2B pauses the sandbox when it elapses. It
+// includes grace beyond the agent turn cap for bootstrap and finalization work outside that timer.
 const ACTIVE_SANDBOX_TIMEOUT_MS = ACTIVE_CODING_SANDBOX_TIMEOUT_MS;
 const SANDBOX_REQUEST_TIMEOUT_MS = 30_000;
 // Resuming a paused sandbox can take longer than an ordinary control-plane request. Keep the
