@@ -7,6 +7,9 @@ current architecture documentation, or an ADR.
 
 ## Current research
 
+- [Agent Skills and Agent Plugins 1.0.0](./agent-skills-plugins.md) — strict portable artifacts,
+  immutable runtime snapshots, approved stdio MCP, durable plugin data, and the clean replacement
+  of opencompany's legacy skill model.
 - [Open-source readiness](./oss-readiness.md) — decisions for the public naming boundary, repository
   layout, license and open scope, history safety, contributor model, and independently landable
   release sequence.
