@@ -35,6 +35,9 @@ export async function executeAction(input: {
   workspaceId?: string;
   chatSessionId?: string;
   toolCallId?: string;
+  sourceTurnId?: string;
+  sourceMessageId?: string;
+  sourceEngine?: import("@opencompany/db/product-schema").CodexChatEngine;
   capabilityTurnState?: CapabilityTurnState;
   signal: AbortSignal;
   currentDate: Date;
@@ -62,6 +65,9 @@ export async function executeAction(input: {
       ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
       ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
       ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
+      ...(input.sourceTurnId ? { sourceTurnId: input.sourceTurnId } : {}),
+      ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
+      ...(input.sourceEngine ? { sourceEngine: input.sourceEngine } : {}),
       capabilityTurnState: input.capabilityTurnState ?? {
         quotedTotalUsdMicros: 0,
         admittedToolCallIds: [],

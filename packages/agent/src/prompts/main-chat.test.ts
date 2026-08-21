@@ -119,8 +119,9 @@ describe("createProductChatSystemPrompt integrations", () => {
     expect(prompt).toContain("Action sources usable in chat");
     expect(prompt).toContain("Call list_actions with the exact source id");
     expect(prompt).toContain("call list_actions with the relevant source id");
-    expect(prompt).toContain("Managed capabilities are read-only");
-    expect(prompt).toContain("cannot post, edit, create, delete");
+    expect(prompt).toContain("Managed capabilities are metered third-party services");
+    expect(prompt).toContain("cannot mutate a user's third-party account");
+    expect(prompt).toContain("image managed capability may create a durable image artifact");
     expect(prompt).toContain("not access to the user's LinkedIn account or connection graph");
     expect(prompt).toContain("write action only when the user explicitly asked");
     expect(prompt).toContain("Never claim a write happened unless the action returned ok=true");

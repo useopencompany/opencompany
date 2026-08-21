@@ -19,6 +19,7 @@ const PLATFORM_HOSTS: Record<ManagedCapabilitySource, readonly string[]> = {
   tiktok: ["tiktok.com"],
   lead: ["linkedin.com"],
   seo: [],
+  image: [],
 };
 
 export type SanitizedCapabilityResult = {

@@ -2454,6 +2454,7 @@ export const ManagedCapabilitySourceSchema = z.enum([
   "tiktok",
   "lead",
   "seo",
+  "image",
 ]);
 
 export const WorkspaceCapabilitySchema = z
