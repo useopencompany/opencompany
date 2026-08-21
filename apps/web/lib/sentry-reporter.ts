@@ -1,6 +1,35 @@
 import { type LogFields, setExceptionReporter } from "@opencompany/observability";
 import * as Sentry from "@sentry/nextjs";
 
+type SentryEvent = Parameters<NonNullable<Parameters<typeof Sentry.init>[0]["beforeSend"]>>[0];
+type SentryBreadcrumb = Parameters<
+  NonNullable<Parameters<typeof Sentry.init>[0]["beforeBreadcrumb"]>
+>[0];
+
+export function scrubSentryEvent(event: SentryEvent): SentryEvent {
+  if (event.request) {
+    const { method, url } = event.request;
+    event.request = {
+      ...(method ? { method } : {}),
+      ...(url ? { url: url.split(/[?#]/, 1)[0] } : {}),
+    };
+  }
+
+  if (event.user) {
+    if (event.user.id) {
+      event.user = { id: event.user.id };
+    } else {
+      delete event.user;
+    }
+  }
+
+  return event;
+}
+
+export function scrubSentryBreadcrumb(breadcrumb: SentryBreadcrumb): SentryBreadcrumb | null {
+  return breadcrumb.category === "console" ? null : breadcrumb;
+}
+
 export function installSentryExceptionReporter() {
   setExceptionReporter({
     captureException(error, fields) {

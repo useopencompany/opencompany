@@ -19,7 +19,10 @@ Task, and Brain-ingestion spans identify durable work.
 Better Stack/Sentry-compatible DSNs are required for the production web release so uncaught server
 renders and browser error-boundary failures reach the error tracker. They remain optional for local
 development and runtimes whose release preflight does not require them; missing values disable remote
-error reporting there.
+error reporting there. Web error events retain the route, method, release, digest, stack, safe tags,
+and explicit internal user ID. Before export they remove request headers, cookies, bodies, query
+strings, anonymous user details, and console breadcrumbs so authentication material does not enter
+the error tracker.
 SigNoz export requires `OPENCOMPANY_OBSERVABILITY_ENABLED` plus an OTLP endpoint and any required headers.
 Latitude full-content LLM tracing requires `LATITUDE_API_KEY` and `LATITUDE_PROJECT_SLUG` and can be
 disabled with `LATITUDE_TELEMETRY_DISABLED`.
