@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { availableWikiSlug, buildTree, type WikiPageData } from "./WikiView";
+import { describe, expect, it, vi } from "vitest";
+import {
+  availableWikiSlug,
+  buildTree,
+  loadWikiTreeExpandedFolderIds,
+  persistWikiTreeExpandedFolderIds,
+  type WikiPageData,
+} from "./WikiView";
 
 function node(overrides: Partial<WikiPageData>): WikiPageData {
   return {
@@ -38,4 +44,69 @@ describe("Wiki tree helpers", () => {
     ]);
     expect(tree.map((entry) => entry.id)).toEqual(["folder-b", "folder-z", "page-a", "page-c"]);
   });
+
+  it("starts with every folder collapsed when no expansion preference exists", () => {
+    const storage = memoryStorage();
+    expect(loadWikiTreeExpandedFolderIds(storage, "user-1", "workspace-1")).toEqual(new Set());
+  });
+
+  it("remembers expanded folders per user and workspace", () => {
+    const storage = memoryStorage();
+    persistWikiTreeExpandedFolderIds(
+      storage,
+      "user-1",
+      "workspace-1",
+      new Set(["folder-b", "folder-a"]),
+    );
+
+    expect(loadWikiTreeExpandedFolderIds(storage, "user-1", "workspace-1")).toEqual(
+      new Set(["folder-a", "folder-b"]),
+    );
+    expect(loadWikiTreeExpandedFolderIds(storage, "user-2", "workspace-1")).toEqual(new Set());
+    expect(loadWikiTreeExpandedFolderIds(storage, "user-1", "workspace-2")).toEqual(new Set());
+  });
+
+  it("ignores an invalid stored expansion preference", () => {
+    const storage = memoryStorage();
+    storage.setItem("opencompany-wiki-tree-expanded:v1:user-1:workspace-1", "not-json");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(loadWikiTreeExpandedFolderIds(storage, "user-1", "workspace-1")).toEqual(new Set());
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+
+  it("keeps the tree usable when browser storage is unavailable", () => {
+    const unavailableStorage = {
+      getItem: () => {
+        throw new Error("storage unavailable");
+      },
+      setItem: () => {
+        throw new Error("storage unavailable");
+      },
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(loadWikiTreeExpandedFolderIds(unavailableStorage, "user-1", "workspace-1")).toEqual(
+      new Set(),
+    );
+    expect(() =>
+      persistWikiTreeExpandedFolderIds(
+        unavailableStorage,
+        "user-1",
+        "workspace-1",
+        new Set(["folder-a"]),
+      ),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
 });
+
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  };
+}

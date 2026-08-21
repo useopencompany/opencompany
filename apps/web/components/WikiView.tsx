@@ -64,6 +64,46 @@ export type WikiPageData = {
 export type TreeNode = WikiPageData & { children: TreeNode[] };
 
 const SAVE_DEBOUNCE_MS = 500;
+const WIKI_TREE_EXPANSION_STORAGE_PREFIX = "opencompany-wiki-tree-expanded:v1";
+
+type WikiTreeExpansionStorage = Pick<Storage, "getItem" | "setItem">;
+
+function wikiTreeExpansionStorageKey(userWorkosId: string, workspaceId: string) {
+  return `${WIKI_TREE_EXPANSION_STORAGE_PREFIX}:${userWorkosId}:${workspaceId}`;
+}
+
+export function loadWikiTreeExpandedFolderIds(
+  storage: WikiTreeExpansionStorage,
+  userWorkosId: string,
+  workspaceId: string,
+) {
+  try {
+    const stored = storage.getItem(wikiTreeExpansionStorageKey(userWorkosId, workspaceId));
+    if (!stored) return new Set<string>();
+    const value: unknown = JSON.parse(stored);
+    if (!Array.isArray(value)) return new Set<string>();
+    return new Set(value.filter((entry): entry is string => typeof entry === "string"));
+  } catch (error) {
+    console.warn("[opencompany] Could not read the wiki tree expansion preference", error);
+    return new Set<string>();
+  }
+}
+
+export function persistWikiTreeExpandedFolderIds(
+  storage: WikiTreeExpansionStorage,
+  userWorkosId: string,
+  workspaceId: string,
+  expandedFolderIds: ReadonlySet<string>,
+) {
+  try {
+    storage.setItem(
+      wikiTreeExpansionStorageKey(userWorkosId, workspaceId),
+      JSON.stringify([...expandedFolderIds].toSorted()),
+    );
+  } catch (error) {
+    console.warn("[opencompany] Could not save the wiki tree expansion preference", error);
+  }
+}
 
 const subscribeToHydration = () => () => undefined;
 const getClientHydrationSnapshot = () => true;
@@ -73,6 +113,7 @@ const getServerHydrationSnapshot = () => false;
 // must never sync server-side, so the live view mounts post-hydration; the
 // server payload paints a read-only frame for the first client render.
 export function WikiView(props: {
+  userWorkosId: string;
   workspaceId: string;
   pages: WikiPageData[];
   initialPath: string | null;
@@ -133,10 +174,12 @@ function WikiStaticFrame({
 }
 
 function WikiLiveView({
+  userWorkosId,
   workspaceId,
   pages: initialPages,
   initialPath,
 }: {
+  userWorkosId: string;
   workspaceId: string;
   pages: WikiPageData[];
   initialPath: string | null;
@@ -359,7 +402,9 @@ function WikiLiveView({
   return (
     <div className="flex h-full min-h-0 w-full">
       <WikiTreeSidebar
+        key={`${userWorkosId}:${workspaceId}`}
         nodes={nodes}
+        expansionStorageScope={{ userWorkosId, workspaceId }}
         selectedPath={selectedPath}
         onSelect={navigate}
         onCreate={(parentPath, nodeType) =>
@@ -412,8 +457,9 @@ type WikiContextMenuState = {
   node: TreeNode | null;
 };
 
-function WikiTreeSidebar({
+export function WikiTreeSidebar({
   nodes,
+  expansionStorageScope,
   selectedPath,
   onSelect,
   onCreate,
@@ -421,25 +467,45 @@ function WikiTreeSidebar({
   onDelete,
 }: {
   nodes: TreeNode[];
+  expansionStorageScope?: { userWorkosId: string; workspaceId: string };
   selectedPath: string | null;
   onSelect: (path: string) => void;
   onCreate: (parentPath: string | null, nodeType: "page" | "folder") => { id: string } | null;
   onRename: (node: TreeNode, title: string) => void;
   onDelete: (node: TreeNode) => void;
 }) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const expansionUserWorkosId = expansionStorageScope?.userWorkosId;
+  const expansionWorkspaceId = expansionStorageScope?.workspaceId;
+  const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(() => {
+    if (!expansionUserWorkosId || !expansionWorkspaceId) return new Set();
+    return loadWikiTreeExpandedFolderIds(
+      window.localStorage,
+      expansionUserWorkosId,
+      expansionWorkspaceId,
+    );
+  });
   const [contextMenu, setContextMenu] = useState<WikiContextMenuState | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
-  const toggle = (path: string) => {
-    setCollapsed((current) => {
+  const toggle = (folderId: string) => {
+    setExpandedFolderIds((current) => {
       const next = new Set(current);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
+      if (next.has(folderId)) next.delete(folderId);
+      else next.add(folderId);
       return next;
     });
   };
+
+  useEffect(() => {
+    if (!expansionUserWorkosId || !expansionWorkspaceId) return;
+    persistWikiTreeExpandedFolderIds(
+      window.localStorage,
+      expansionUserWorkosId,
+      expansionWorkspaceId,
+      expandedFolderIds,
+    );
+  }, [expandedFolderIds, expansionUserWorkosId, expansionWorkspaceId]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -497,7 +563,7 @@ function WikiTreeSidebar({
             node={node}
             depth={0}
             selectedPath={selectedPath}
-            collapsed={collapsed}
+            expandedFolderIds={expandedFolderIds}
             onToggle={toggle}
             onSelect={onSelect}
             onContextMenu={openContextMenu}
@@ -610,7 +676,7 @@ function WikiTreeRow({
   node,
   depth,
   selectedPath,
-  collapsed,
+  expandedFolderIds,
   onToggle,
   onSelect,
   onContextMenu,
@@ -621,15 +687,15 @@ function WikiTreeRow({
   node: TreeNode;
   depth: number;
   selectedPath: string | null;
-  collapsed: Set<string>;
-  onToggle: (path: string) => void;
+  expandedFolderIds: Set<string>;
+  onToggle: (folderId: string) => void;
   onSelect: (path: string) => void;
   onContextMenu: (event: React.MouseEvent, node: TreeNode) => void;
   editingNodeId: string | null;
   onFinishEditing: (node: TreeNode, title: string) => void;
   onCancelEditing: () => void;
 }) {
-  const isCollapsed = collapsed.has(node.path);
+  const isExpanded = node.nodeType === "folder" && expandedFolderIds.has(node.id);
   const isSelected = node.nodeType === "page" && selectedPath === node.path;
   const isEditing = editingNodeId === node.id;
   const [titleDraft, setTitleDraft] = useState(node.title);
@@ -646,7 +712,7 @@ function WikiTreeRow({
         style={{ paddingLeft: `${depth * 24 + 4}px` }}
         onContextMenu={(event) => onContextMenu(event, node)}
         onClick={() => {
-          if (node.nodeType === "folder" && !isEditing) onToggle(node.path);
+          if (node.nodeType === "folder" && !isEditing) onToggle(node.id);
         }}
       >
         {Array.from({ length: depth }, (_, index) => (
@@ -662,15 +728,15 @@ function WikiTreeRow({
             type="button"
             onClick={(event) => {
               event.stopPropagation();
-              onToggle(node.path);
+              onToggle(node.id);
             }}
             className="rounded p-0.5 text-ink-subtle hover:text-ink"
-            aria-label={isCollapsed ? "Expand" : "Collapse"}
+            aria-label={isExpanded ? "Collapse" : "Expand"}
           >
-            {isCollapsed ? (
-              <ChevronRight className="h-3 w-3" />
-            ) : (
+            {isExpanded ? (
               <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
             )}
           </button>
         ) : null}
@@ -693,7 +759,7 @@ function WikiTreeRow({
             type="button"
             onClick={(event) => {
               event.stopPropagation();
-              onToggle(node.path);
+              onToggle(node.id);
             }}
             className="min-w-0 flex-1 truncate text-left"
             title={node.path}
@@ -714,14 +780,14 @@ function WikiTreeRow({
           </button>
         )}
       </div>
-      {!isCollapsed
+      {isExpanded
         ? node.children.map((child) => (
             <WikiTreeRow
               key={`${child.id}:${editingNodeId === child.id ? "editing" : "view"}`}
               node={child}
               depth={depth + 1}
               selectedPath={selectedPath}
-              collapsed={collapsed}
+              expandedFolderIds={expandedFolderIds}
               onToggle={onToggle}
               onSelect={onSelect}
               onContextMenu={onContextMenu}
