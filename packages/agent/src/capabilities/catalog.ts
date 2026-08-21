@@ -159,6 +159,19 @@ const URL_LIMIT_PARAMS = {
   },
   required: ["url"],
 } as const satisfies JSONSchema7;
+const LINKEDIN_COMMENT_LIMIT = 20;
+const LINKEDIN_COMMENT_PARAMS = {
+  ...URL_LIMIT_PARAMS,
+  properties: {
+    ...URL_LIMIT_PARAMS.properties,
+    url: {
+      ...URL_LIMIT_PARAMS.properties.url,
+      description:
+        "A public LinkedIn post URL. Share URLs and canonical activity URLs returned by linkedin.get_post are accepted.",
+    },
+    limit: { ...LIMIT_SCHEMA, maximum: LINKEDIN_COMMENT_LIMIT },
+  },
+} as const satisfies JSONSchema7;
 const VIDEO_PARAMS = {
   type: "object",
   additionalProperties: false,
@@ -476,17 +489,17 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     id: "linkedin.list_comments",
     source: "linkedin",
     description: "List public comments on a LinkedIn post.",
-    params: URL_LIMIT_PARAMS,
+    params: LINKEDIN_COMMENT_PARAMS,
     provider: TIKHUB,
-    endpoint: "/api/v1/linkedin/web/get_post_comments",
+    endpoint: "/api/v1/linkedin/web_v2/get_post_comments",
     priceType: "PER_CALL",
     executionMode: "sync",
     mapInput: (raw) => {
       const params = checkedParams(raw, ["url", "limit"]);
       const url = linkedinUrl(requiredText(params, "url", 1_000), "post");
       return {
-        providerInput: { post_id: linkedInPostId(url) },
-        resultLimit: limitParam(params, 20, 20),
+        providerInput: { urn: linkedInPostId(url) },
+        resultLimit: limitParam(params, LINKEDIN_COMMENT_LIMIT, LINKEDIN_COMMENT_LIMIT),
         canonicalLinks: [url],
       };
     },
@@ -2314,7 +2327,8 @@ function linkedInPostId(value: string) {
   const decodedPath = decodeURIComponent(url.pathname);
   const id =
     decodedPath.match(/urn:li:(?:activity|ugcPost|share):(\d+)/)?.[1] ??
-    decodedPath.match(/-(\d{5,30})(?:\/)?$/)?.[1];
+    decodedPath.match(/-(?:activity|ugcPost|share)-(\d{5,30})(?:-[A-Za-z0-9]+)?\/?$/i)?.[1] ??
+    decodedPath.match(/-(\d{5,30})(?:-[A-Za-z0-9]+)?\/?$/)?.[1];
   if (!id) {
     throw new ActionInvalidParamsError(
       "The LinkedIn post URL must contain its numeric activity or post ID.",
