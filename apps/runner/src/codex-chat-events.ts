@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
   applyCodexEventToUiMessageParts,
+  CODEX_COMMAND_TOOL_NAME,
+  CODEX_FILE_CHANGE_TOOL_NAME,
+  CODEX_MCP_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_NAME,
+  CODEX_WEB_SEARCH_TOOL_NAME,
   type CodexUiMessagePart,
   createCodexCommandOutputAccumulator,
   finalizeCodexUiMessageParts,
@@ -848,7 +853,7 @@ function semanticEventsFromCodexParts(
   redact: (value: string) => string,
 ) {
   const events: RunEventDraft[] = [];
-  const visit = (values: readonly CodexUiMessagePart[]) => {
+  const visit = (values: readonly CodexUiMessagePart[], parentToolCallId?: string) => {
     for (const part of values) {
       const record = part as unknown as Record<string, unknown>;
       const type = typeof record.type === "string" ? record.type : "";
@@ -861,10 +866,7 @@ function semanticEventsFromCodexParts(
             type: "tool.started",
             payload: {
               toolCallId,
-              name:
-                typeof record.toolName === "string"
-                  ? record.toolName
-                  : type.slice("tool-".length) || "tool",
+              ...semanticToolStartedPayload(record, type, parentToolCallId, redact),
             },
           });
           toolStates.set(toolCallId, "started");
@@ -876,7 +878,10 @@ function semanticEventsFromCodexParts(
           events.push({
             id: `run_event_${randomUUID()}`,
             type: "tool.completed",
-            payload: { toolCallId },
+            payload: {
+              toolCallId,
+              summary: semanticToolOutcome(record, redact),
+            },
           });
           toolStates.set(toolCallId, "completed");
         } else if (
@@ -925,11 +930,118 @@ function semanticEventsFromCodexParts(
           artifactIds.add(artifactId);
         }
       }
-      if (Array.isArray(record.children)) visit(record.children as CodexUiMessagePart[]);
+      if (Array.isArray(record.children)) {
+        visit(record.children as CodexUiMessagePart[], toolCallId ?? parentToolCallId);
+      }
     }
   };
   visit(parts);
   return events;
+}
+
+const SEMANTIC_TOOL_LABEL_LIMIT = 500;
+const SEMANTIC_TOOL_DETAIL_LIMIT = 4_000;
+const SEMANTIC_TOOL_KIND_LIMIT = 100;
+
+function semanticToolStartedPayload(
+  part: Record<string, unknown>,
+  type: string,
+  parentToolCallId: string | undefined,
+  redact: (value: string) => string,
+) {
+  const name =
+    typeof part.toolName === "string" ? part.toolName : type.slice("tool-".length) || "tool";
+  const input = isRecord(part.input) ? part.input : {};
+  const fallback = semanticToolFallback(name);
+  const label = semanticToolText(
+    name === CODEX_COMMAND_TOOL_NAME
+      ? (input.description ?? input.label ?? fallback.label)
+      : (input.label ?? input.title ?? fallback.label),
+    SEMANTIC_TOOL_LABEL_LIMIT,
+    redact,
+  );
+  const detail = semanticToolText(
+    semanticToolDetail(name, input),
+    SEMANTIC_TOOL_DETAIL_LIMIT,
+    redact,
+  );
+  const kind = semanticToolText(
+    input.kind ??
+      (name === CODEX_SUBAGENT_TOOL_NAME ? input.subagentType : undefined) ??
+      fallback.kind,
+    SEMANTIC_TOOL_KIND_LIMIT,
+    redact,
+  );
+  return {
+    name,
+    ...(label ? { label } : {}),
+    ...(detail ? { detail } : {}),
+    ...(kind ? { kind } : {}),
+    ...(parentToolCallId ? { parentToolCallId } : {}),
+  };
+}
+
+function semanticToolDetail(name: string, input: Record<string, unknown>) {
+  if (name === CODEX_COMMAND_TOOL_NAME) return input.command;
+  if (name === CODEX_MCP_TOOL_NAME) {
+    const target = [input.server, input.tool ?? input.toolName]
+      .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+      .join(".");
+    return target || input.title;
+  }
+  if (name === CODEX_WEB_SEARCH_TOOL_NAME) return input.query ?? input.title ?? input.toolName;
+  if (name === CODEX_SUBAGENT_TOOL_NAME) return input.description ?? input.prompt ?? input.title;
+  if (name === CODEX_FILE_CHANGE_TOOL_NAME) {
+    const paths = Array.isArray(input.changes)
+      ? input.changes
+          .map((change) =>
+            isRecord(change) && typeof change.path === "string" ? change.path : null,
+          )
+          .filter((path): path is string => Boolean(path))
+      : [];
+    return paths.length > 0 ? paths.join(", ") : input.title;
+  }
+  return (
+    input.detail ??
+    input.description ??
+    input.command ??
+    input.query ??
+    input.action ??
+    input.question ??
+    input.title
+  );
+}
+
+function semanticToolFallback(name: string) {
+  if (name === CODEX_COMMAND_TOOL_NAME) return { label: "Command", kind: "execute" };
+  if (name === CODEX_MCP_TOOL_NAME) return { label: "MCP tool", kind: "mcp" };
+  if (name === CODEX_WEB_SEARCH_TOOL_NAME) return { label: "Web search", kind: "search" };
+  if (name === CODEX_FILE_CHANGE_TOOL_NAME) return { label: "File change", kind: "edit" };
+  if (name === CODEX_SUBAGENT_TOOL_NAME) return { label: "Subagent", kind: "subagent" };
+  return { label: humanizeToolName(name), kind: "tool" };
+}
+
+function semanticToolOutcome(part: Record<string, unknown>, redact: (value: string) => string) {
+  const output = isRecord(part.output) ? part.output : {};
+  return (
+    semanticToolText(output.status ?? output.summary, SEMANTIC_TOOL_LABEL_LIMIT, redact) ??
+    "completed"
+  );
+}
+
+function semanticToolText(value: unknown, limit: number, redact: (value: string) => string) {
+  if (typeof value !== "string") return undefined;
+  const redacted = redact(value).trim();
+  return redacted ? redacted.slice(0, limit) : undefined;
+}
+
+function humanizeToolName(name: string) {
+  const label = name
+    .split(/[._-]+/u)
+    .filter(Boolean)
+    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
+    .join(" ");
+  return label || "Tool";
 }
 
 function collectProjectedArtifactVersionIds(parts: readonly CodexUiMessagePart[]) {

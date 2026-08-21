@@ -1,6 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 import {
   CODEX_APPROVAL_TOOL_NAME,
+  CODEX_COMMAND_TOOL_NAME,
+  CODEX_MCP_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
 } from "@opencompany/agent-runtime";
@@ -710,6 +712,101 @@ describe("MessageBubble assistant errors", () => {
 });
 
 describe("MessageBubble Codex interactions", () => {
+  it("renders described commands without shell wrappers or internal tool constants", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_command",
+      role: "assistant",
+      parts: [
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_1",
+          state: "output-available",
+          input: {
+            description: "Check local copy of spec and git status",
+            command: "/bin/bash -lc 'git status --short'",
+          },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    const row = screen.getByTestId(`chat-tool-call-${CODEX_COMMAND_TOOL_NAME}`);
+    expect(row).toHaveTextContent("Check local copy of spec and git status");
+    expect(row).toHaveTextContent("git status --short");
+    expect(row).not.toHaveTextContent("/bin/bash -lc");
+    expect(row).not.toHaveTextContent(CODEX_COMMAND_TOOL_NAME);
+  });
+
+  it("renders semantic Read and MCP rows with file and tool chips", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_tools",
+      role: "assistant",
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_MCP_TOOL_NAME,
+          toolCallId: "read_1",
+          state: "output-available",
+          input: {
+            toolName: "Read",
+            kind: "read",
+            arguments: { file_path: "/workspace/repo/apps/web/lib/chat-ui.ts" },
+          },
+          output: { status: "completed", result: "  1→one\n  2→two" },
+        },
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_MCP_TOOL_NAME,
+          toolCallId: "mcp_1",
+          state: "output-available",
+          input: {
+            title: "List available actions",
+            server: "opencompany",
+            tool: "list_actions",
+          },
+          output: { status: "completed", result: "[]" },
+        },
+      ] as ChatUiMessage["parts"],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByText("Read 2 lines")).toBeVisible();
+    expect(screen.getByText("chat-ui.ts")).toBeVisible();
+    expect(screen.getByText("List available actions")).toBeVisible();
+    expect(screen.getByText("opencompany · list_actions")).toBeVisible();
+    expect(screen.queryByText(CODEX_MCP_TOOL_NAME)).not.toBeInTheDocument();
+  });
+
+  it("shows a one-line Thinking preview and keeps the full reasoning expandable", async () => {
+    const message: ChatUiMessage = {
+      id: "assistant_reasoning",
+      role: "assistant",
+      parts: [
+        {
+          type: "reasoning",
+          text: "Inspecting **the adapter**\nfor stale labels.",
+          state: "done",
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    const row = screen.getByTestId("chat-reasoning-item");
+    const disclosure = within(row).getByRole("button");
+    expect(within(row).getByText("Thinking")).toBeVisible();
+    expect(within(row).getByTitle("Inspecting **the adapter** for stale labels.")).toBeVisible();
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.click(disclosure);
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(within(row).getByText("the adapter")).toBeVisible();
+  });
+
   it("renders the terminal Plan-mode implementation choice", async () => {
     const onCodexAction = vi.fn(async () => undefined);
     const message: ChatUiMessage = {

@@ -102,6 +102,42 @@ describe("composeChatTranscript", () => {
     ).toEqual([persisted, optimisticUser, optimisticAssistant]);
   });
 
+  it("composes parent-linked transient tools as nested subagent children", () => {
+    const transient = assistant("assistant_1", [
+      {
+        type: "tool-codex_subagent",
+        toolCallId: "subagent_1",
+        state: "input-available",
+        input: { label: "Subagent", description: "Inspect the repository" },
+      },
+      {
+        type: "tool-codex_command",
+        toolCallId: "command_1",
+        state: "output-available",
+        input: { command: "rg TODO", parentToolCallId: "subagent_1" },
+        output: { status: "completed", exitCode: 0 },
+      },
+    ] as unknown as ChatUiMessage["parts"]);
+
+    const [result] = composeChatTranscript({
+      persistedMessages: [],
+      transientMessages: [transient],
+      streaming: true,
+    });
+
+    expect(result?.parts).toEqual([
+      expect.objectContaining({
+        toolCallId: "subagent_1",
+        children: [
+          expect.objectContaining({
+            toolCallId: "command_1",
+            input: { command: "rg TODO" },
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it("never augments history while the active assistant is still transient-only", () => {
     const persisted = assistant("assistant_1", [
       { type: "reasoning", text: "Durable reasoning", state: "done" },

@@ -1,5 +1,17 @@
+import {
+  CODEX_APPROVAL_TOOL_NAME,
+  CODEX_COMMAND_TOOL_NAME,
+  CODEX_DYNAMIC_TOOL_NAME,
+  CODEX_FILE_CHANGE_TOOL_NAME,
+  CODEX_GOAL_TOOL_NAME,
+  CODEX_MCP_TOOL_NAME,
+  CODEX_PLAN_TOOL_NAME,
+  CODEX_QUESTION_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_NAME,
+  CODEX_WEB_SEARCH_TOOL_NAME,
+} from "@opencompany/agent-runtime";
 import type { RunStreamEventDto } from "@opencompany/protocol";
-import type { UIMessageChunk } from "ai";
+import type { UIMessage, UIMessageChunk } from "ai";
 
 export type HeadlessToolCallCheckpoint = {
   toolCallId: string;
@@ -49,6 +61,7 @@ export class HeadlessChatUiProjector {
       toolCallId: call.toolCallId,
       toolName: call.toolName,
       input: call.input,
+      ...(isDynamicCodexTool(call.toolName) ? { dynamic: true } : {}),
     }));
   }
 
@@ -74,7 +87,7 @@ export class HeadlessChatUiProjector {
       const toolCall = {
         toolCallId: event.payload.toolCallId,
         toolName: event.payload.name,
-        input: {},
+        input: transientToolInput(event.payload),
       };
       this.activeToolCalls.set(toolCall.toolCallId, toolCall);
       return [
@@ -82,18 +95,20 @@ export class HeadlessChatUiProjector {
         {
           type: "tool-input-available",
           ...toolCall,
+          ...(isDynamicCodexTool(toolCall.toolName) ? { dynamic: true } : {}),
         },
       ];
     }
 
     if (event.type === "tool.completed") {
       this.requireActiveToolCall(event.payload.toolCallId, event.type);
+      const toolName = this.activeToolCalls.get(event.payload.toolCallId)?.toolName;
       this.activeToolCalls.delete(event.payload.toolCallId);
       return [
         {
           type: "tool-output-available",
           toolCallId: event.payload.toolCallId,
-          output: { ok: true },
+          output: transientToolOutput(toolName, event.payload.summary),
         },
       ];
     }
@@ -172,4 +187,152 @@ export class HeadlessChatUiProjector {
     this.activeTextId = null;
     return [{ type: "text-end", id }];
   }
+}
+
+type ToolStartedPayload = Extract<RunStreamEventDto, { type: "tool.started" }>["payload"];
+
+function transientToolInput(payload: ToolStartedPayload): Record<string, unknown> {
+  const common = {
+    ...(payload.label ? { label: payload.label } : {}),
+    ...(payload.detail ? { detail: payload.detail } : {}),
+    ...(payload.kind ? { kind: payload.kind } : {}),
+    ...(payload.parentToolCallId ? { parentToolCallId: payload.parentToolCallId } : {}),
+  };
+  if (payload.name === CODEX_COMMAND_TOOL_NAME) {
+    return {
+      ...common,
+      command: payload.detail ?? payload.label ?? "Command",
+      ...(payload.label && payload.label !== "Command" ? { description: payload.label } : {}),
+    };
+  }
+  if (payload.name === CODEX_MCP_TOOL_NAME) {
+    return {
+      label: payload.label ?? "MCP tool",
+      ...common,
+      ...(payload.detail ? { tool: payload.detail } : {}),
+    };
+  }
+  if (payload.name === CODEX_WEB_SEARCH_TOOL_NAME) {
+    return {
+      label: payload.label ?? "Web search",
+      ...common,
+      ...(payload.detail ? { query: payload.detail } : {}),
+    };
+  }
+  if (payload.name === CODEX_SUBAGENT_TOOL_NAME) {
+    return {
+      label: payload.label ?? "Subagent",
+      ...common,
+      ...(payload.detail ? { description: payload.detail } : {}),
+      ...(payload.kind && payload.kind !== "subagent" ? { subagentType: payload.kind } : {}),
+    };
+  }
+  if (payload.name === CODEX_FILE_CHANGE_TOOL_NAME) {
+    return {
+      label: payload.label ?? "File change",
+      ...common,
+    };
+  }
+  return common;
+}
+
+function transientToolOutput(toolName: string | undefined, summary: string | undefined) {
+  if (toolName === CODEX_COMMAND_TOOL_NAME) {
+    return {
+      status: summary === "failed" || summary === "interrupted" ? summary : "completed",
+      exitCode: null,
+    };
+  }
+  if (toolName === CODEX_SUBAGENT_TOOL_NAME || (toolName && isDynamicCodexTool(toolName))) {
+    return { status: summary ?? "completed" };
+  }
+  return { ok: true, ...(summary ? { summary } : {}) };
+}
+
+function isDynamicCodexTool(toolName: string) {
+  return (
+    toolName === CODEX_PLAN_TOOL_NAME ||
+    toolName === CODEX_GOAL_TOOL_NAME ||
+    toolName === CODEX_QUESTION_TOOL_NAME ||
+    toolName === CODEX_APPROVAL_TOOL_NAME ||
+    toolName === CODEX_FILE_CHANGE_TOOL_NAME ||
+    toolName === CODEX_MCP_TOOL_NAME ||
+    toolName === CODEX_DYNAMIC_TOOL_NAME ||
+    toolName === CODEX_WEB_SEARCH_TOOL_NAME
+  );
+}
+
+type MessagePart = UIMessage["parts"][number];
+
+/** Rebuilds the transient flat AI SDK tool list into the persisted subagent shape. */
+export function nestHeadlessToolParts<UI_MESSAGE extends UIMessage>(
+  message: UI_MESSAGE,
+): UI_MESSAGE {
+  if (message.role !== "assistant") return message;
+  const parts = message.parts as readonly MessagePart[];
+  const parentIds = new Set(
+    parts.map(toolCallIdFromPart).filter((toolCallId): toolCallId is string => Boolean(toolCallId)),
+  );
+  const childrenByParent = new Map<string, MessagePart[]>();
+  for (const part of parts) {
+    const parentToolCallId = parentToolCallIdFromPart(part);
+    if (!parentToolCallId || !parentIds.has(parentToolCallId)) continue;
+    const children = childrenByParent.get(parentToolCallId) ?? [];
+    children.push(withoutParentToolCallId(part));
+    childrenByParent.set(parentToolCallId, children);
+  }
+  if (childrenByParent.size === 0) return message;
+
+  const nested = parts.flatMap((part) => {
+    const parentToolCallId = parentToolCallIdFromPart(part);
+    if (parentToolCallId && parentIds.has(parentToolCallId)) return [];
+    const toolCallId = toolCallIdFromPart(part);
+    const children = toolCallId ? childrenByParent.get(toolCallId) : undefined;
+    if (!children?.length) return [part];
+    const record = part as unknown as Record<string, unknown>;
+    const existingChildren = Array.isArray(record.children)
+      ? (record.children as MessagePart[])
+      : [];
+    const existingIds = new Set(
+      existingChildren
+        .map(toolCallIdFromPart)
+        .filter((childToolCallId): childToolCallId is string => Boolean(childToolCallId)),
+    );
+    return [
+      {
+        ...record,
+        children: [
+          ...existingChildren,
+          ...children.filter((child) => {
+            const childToolCallId = toolCallIdFromPart(child);
+            return !childToolCallId || !existingIds.has(childToolCallId);
+          }),
+        ],
+      } as unknown as MessagePart,
+    ];
+  });
+  return { ...message, parts: nested } as UI_MESSAGE;
+}
+
+function toolCallIdFromPart(part: MessagePart) {
+  const record = part as unknown as Record<string, unknown>;
+  return typeof record.toolCallId === "string" ? record.toolCallId : null;
+}
+
+function parentToolCallIdFromPart(part: MessagePart) {
+  const record = part as unknown as Record<string, unknown>;
+  if (!isRecord(record.input)) return null;
+  return typeof record.input.parentToolCallId === "string" ? record.input.parentToolCallId : null;
+}
+
+function withoutParentToolCallId(part: MessagePart): MessagePart {
+  const record = part as unknown as Record<string, unknown>;
+  if (!isRecord(record.input)) return part;
+  const input = { ...record.input };
+  delete input.parentToolCallId;
+  return { ...record, input } as unknown as MessagePart;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
