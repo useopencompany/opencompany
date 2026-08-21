@@ -16,7 +16,10 @@ Task, and Brain-ingestion spans identify durable work.
 
 ## Configuration
 
-Better Stack/Sentry-compatible DSNs are optional; missing values disable remote error reporting.
+Better Stack/Sentry-compatible DSNs are required for the production web release so uncaught server
+renders and browser error-boundary failures reach the error tracker. They remain optional for local
+development and runtimes whose release preflight does not require them; missing values disable remote
+error reporting there.
 SigNoz export requires `OPENCOMPANY_OBSERVABILITY_ENABLED` plus an OTLP endpoint and any required headers.
 Latitude full-content LLM tracing requires `LATITUDE_API_KEY` and `LATITUDE_PROJECT_SLUG` and can be
 disabled with `LATITUDE_TELEMETRY_DISABLED`.
@@ -64,6 +67,13 @@ presented as a public protocol.
    paste raw production rows or provider payloads into an issue.
 5. If transient delivery failed but the Run is durable, reconnect from the last semantic Event ID;
    do not redispatch the command.
+
+After changing web error capture, invoke the cron-secret-protected
+`/internal/observability/server-error` page with a unique
+`x-opencompany-observability-probe-id` header and confirm that probe ID appears in Better Stack. The
+page must render the not-found boundary without the production cron bearer and must emit no probe
+error. With the bearer it fails the React Server Component render; the document request can still be
+HTTP 200 after streaming begins, so the Better Stack event is the authoritative result.
 
 Configure the SigNoz MCP connection with [Agent MCP](./agent-mcp.md). Dashboard IDs and observed
 tenant state belong in the monitoring system itself rather than this repository because they change
