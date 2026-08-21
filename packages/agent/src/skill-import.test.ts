@@ -16,23 +16,27 @@ vi.mock("@opencompany/agent-runtime", async () => {
 
 describe("resolveSkillImport", () => {
   it("strips SKILL.md frontmatter and reports ignored bundled files", async () => {
+    const encode = (text: string) => new TextEncoder().encode(text);
     resolveSkillMock.mockResolvedValueOnce({
       status: "resolved",
       skill: {
-        skillId: "ignored-mount-id",
-        name: "My Skill",
+        name: "my-skill",
         description: "Does things.",
+        body: "Do the thing.",
         source: { type: "github", url: "https://github.com/o/r", ref: "main", path: "" },
         resolvedCommit: "a".repeat(40),
         integrity: `sha256:${"b".repeat(64)}`,
         files: [
           {
             path: "SKILL.md",
-            content: "---\nname: My Skill\ndescription: Does things.\n---\nDo the thing.",
+            content: encode("---\nname: my-skill\ndescription: Does things.\n---\nDo the thing."),
+            executable: false,
           },
-          { path: "references/notes.md", content: "extra" },
-          { path: "scripts/run.sh", content: "#!/bin/sh" },
+          { path: "references/notes.md", content: encode("extra"), executable: false },
+          { path: "scripts/run.sh", content: encode("#!/bin/sh"), executable: true },
         ],
+        fileCount: 3,
+        totalBytes: 0,
       },
     });
 
@@ -41,7 +45,7 @@ describe("resolveSkillImport", () => {
     expect(preview).toMatchObject({
       status: "resolved",
       proposedSlug: "my-skill",
-      name: "My Skill",
+      name: "my-skill",
       instructions: "Do the thing.",
       extraFiles: ["references/notes.md", "scripts/run.sh"],
       source: { type: "github", url: "https://github.com/o/r", ref: "main", path: "" },

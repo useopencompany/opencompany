@@ -2,7 +2,6 @@ import {
   createGitHubSkillFetcher,
   resolveSkill,
   SkillResolverError,
-  slugifySkillName,
 } from "@opencompany/agent-runtime";
 import {
   BRAIN_SKILL_DESCRIPTION_MAX_LENGTH,
@@ -49,17 +48,15 @@ export async function resolveSkillImport(input: {
     };
   }
   const skill = result.skill;
-  const skillMarkdown = skill.files.find((file) => file.path === "SKILL.md");
-  if (!skillMarkdown) {
-    throw new CoreError("invalid_argument", "Resolved skill is missing its SKILL.md content.");
-  }
-  const instructions = extractSkillMarkdownBody(skillMarkdown.content);
+  // The strict Agent Skills parser already isolated the SKILL.md body and guarantees `name` is a
+  // valid lowercase-hyphen slug, so the mount directory is simply the declared name.
+  const instructions = skill.body.trim();
   validateSkill(skill.name, skill.description, instructions);
   validateResolvedSource(skill.source, skill.resolvedCommit, skill.integrity);
 
   return {
     status: "resolved",
-    proposedSlug: slugifySkillName(skill.name) || "skill",
+    proposedSlug: skill.name,
     name: skill.name,
     description: skill.description,
     instructions,
@@ -123,13 +120,4 @@ async function resolveSkillOrThrow(input: { url: string; selectedPath?: string }
       "Couldn't read that skill right now. Check the URL and try again.",
     );
   }
-}
-
-function extractSkillMarkdownBody(content: string): string {
-  const normalized = content.replace(/\r\n/gu, "\n");
-  if (!normalized.startsWith("---\n")) return normalized.trim();
-  const end = normalized.indexOf("\n---", 4);
-  if (end === -1) return normalized.trim();
-  const afterClose = normalized.indexOf("\n", end + 1);
-  return (afterClose === -1 ? "" : normalized.slice(afterClose + 1)).trim();
 }
