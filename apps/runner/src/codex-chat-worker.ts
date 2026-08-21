@@ -438,7 +438,7 @@ export async function runClaimedTurn(
       leaseId,
       status: "failed",
       errorCode: "retryable_infrastructure",
-      errorMessage: retryableError.message,
+      errorMessage: retryableError.diagnosticMessage ?? retryableError.message,
     });
     if (!failedAttempt) throw new CodexChatLeaseLostError();
     const retryAt = codexChatRetryAt(new Date(), turn.attempts);

@@ -476,15 +476,29 @@ export async function settleDurableTurn(input: {
     attemptId: string;
     assistantMessageId: string;
     content: string;
+    failureDiagnostic?: string;
   };
 }) {
   const { target } = input;
   const normalizedError = input.error?.slice(0, CODING_ERROR_MAX_LENGTH) ?? null;
+  const normalizedFailureDiagnostic =
+    input.canonicalRun?.failureDiagnostic?.slice(0, CODING_ERROR_MAX_LENGTH) ?? null;
   if (input.error && input.error.length > CODING_ERROR_MAX_LENGTH) {
     logger.warn("Normalized overlong coding error before durable settlement", {
       event: "opencompany.runner_coding_error_normalized",
       field: "error",
       original_length: input.error.length,
+      max_length: CODING_ERROR_MAX_LENGTH,
+    });
+  }
+  if (
+    input.canonicalRun?.failureDiagnostic &&
+    input.canonicalRun.failureDiagnostic.length > CODING_ERROR_MAX_LENGTH
+  ) {
+    logger.warn("Normalized overlong coding error before durable settlement", {
+      event: "opencompany.runner_coding_error_normalized",
+      field: "failure_diagnostic",
+      original_length: input.canonicalRun.failureDiagnostic.length,
       max_length: CODING_ERROR_MAX_LENGTH,
     });
   }
@@ -583,7 +597,9 @@ export async function settleDurableTurn(input: {
       UPDATE goat.run_attempts AS attempt
       SET status = ${canonicalAttemptStatus},
           error_code = ${input.turnStatus === "failed" ? "execution_failed" : null},
-          error_message = ${input.turnStatus === "failed" ? normalizedError : null},
+          error_message = ${
+            input.turnStatus === "failed" ? (normalizedFailureDiagnostic ?? normalizedError) : null
+          },
           completed_at = ${input.completedAt}
       FROM settled_turn AS run
       WHERE attempt.id = ${input.canonicalRun?.attemptId ?? null}
