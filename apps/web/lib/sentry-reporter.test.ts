@@ -26,7 +26,7 @@ describe("scrubSentryEvent", () => {
       url: "https://my.opencompany.chat/app",
       method: "GET",
     });
-    expect(scrubbed.user).toBeUndefined();
+    expect(scrubbed.user).toEqual({ ip_address: null });
   });
 
   it("keeps an explicit internal user id but removes all other user fields", () => {
@@ -39,7 +39,11 @@ describe("scrubSentryEvent", () => {
       },
     };
 
-    expect(scrubSentryEvent(event).user).toEqual({ id: "user_123" });
+    expect(scrubSentryEvent(event).user).toEqual({ id: "user_123", ip_address: null });
+  });
+
+  it("explicitly disables transport IP inference when an event has no user", () => {
+    expect(scrubSentryEvent({ type: undefined }).user).toEqual({ ip_address: null });
   });
 
   it("drops console breadcrumbs that could contain application secrets", () => {
