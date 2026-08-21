@@ -1,13 +1,15 @@
 {
   "cli": {
-    "version": ">= 21.7.0",
+    "version": "21.x.x",
     "appVersionSource": "remote"
   },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "ios": { "buildConfiguration": "Debug" }
     },
+    "development-simulator": { "extends": "development", "ios": { "simulator": true } },
     "preview": {
       "distribution": "internal"
     },

@@ -6,7 +6,7 @@ export default {
   version: "1.0.0",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
-  scheme: "opencompany",
+  scheme: IS_DEV ? "opencompany-dev" : "opencompany",
   userInterfaceStyle: "automatic",
   platforms: ["ios"],
   ios: {
@@ -17,6 +17,9 @@ export default {
       CADisableMinimumFrameDurationOnPhone: true,
       NSPhotoLibraryAddUsageDescription:
         "OpenCompany needs permission to save images from chat messages to your photo library.",
+    },
+    config: {
+      usesNonExemptEncryption: false,
     },
   },
   plugins: [
@@ -48,6 +51,9 @@ export default {
         addGeneratedScheme: IS_DEV,
       },
     ],
+    "expo-web-browser",
+    "expo-secure-store",
+    "react-native-quick-crypto",
   ],
   experiments: {
     typedRoutes: true,

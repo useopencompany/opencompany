@@ -27,6 +27,7 @@ export default function StackLayout() {
         ],
       }}
     >
+      <Stack.Screen name="index" />
       <Stack.Screen
         name="attachment-sheet"
         options={{

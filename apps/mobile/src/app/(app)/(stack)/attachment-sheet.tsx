@@ -1,17 +1,17 @@
 import { router } from "expo-router";
 import type { SFSymbol } from "expo-symbols";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 
-type AttachmentAction = {
+interface AttachmentAction {
   label: string;
   icon: SFSymbol;
-};
+}
 
-type ToolAction = AttachmentAction & {
+interface ToolAction extends AttachmentAction {
   description?: string;
-};
+}
 
 const attachmentActions: AttachmentAction[] = [
   { label: "Camera", icon: "camera" },
@@ -77,10 +77,7 @@ export default function AttachmentSheet() {
         ))}
       </View>
 
-      <View
-        className="mt-[25px] mb-[22px] bg-border-subtle"
-        style={{ height: StyleSheet.hairlineWidth }}
-      />
+      <View className="mt-[25px] mb-[22px] h-px bg-border-subtle" />
 
       <View>
         {toolActions.map((action) => (

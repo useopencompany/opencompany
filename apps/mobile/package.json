@@ -5,18 +5,19 @@
   "dependencies": {
     "@expo/ui": "~57.0.9",
     "@legendapp/list": "3.3.3",
+    "@workos-inc/node": "^10.10.0",
     "expo": "~57.0.11",
-    "expo-auth-session": "~57.0.6",
+    "expo-auth-session": "~57.0.7",
     "expo-build-properties": "~57.0.9",
     "expo-constants": "~57.0.9",
-    "expo-crypto": "~57.0.1",
     "expo-dev-client": "~57.0.10",
     "expo-device": "~57.0.1",
     "expo-font": "~57.0.1",
     "expo-image": "~57.0.2",
     "expo-linear-gradient": "~57.0.1",
-    "expo-linking": "~57.0.5",
+    "expo-linking": "~57.0.6",
     "expo-router": "~57.0.11",
+    "expo-secure-store": "~57.0.1",
     "expo-splash-screen": "~57.0.5",
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.2",
@@ -27,6 +28,7 @@
     "react-native-enriched-markdown": "0.7.4",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-keyboard-controller": "1.22.3",
+    "react-native-quick-crypto": "^1.1.7",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screen-corner-radius": "^0.2.3",
@@ -51,7 +53,8 @@
     "prebuild:ios": "expo prebuild -p ios",
     "typecheck": "tsc --noEmit",
     "expo:doctor": "bunx expo-doctor@latest",
-    "env:pull:development": "infisical export --output-file=./.env --env=development"
+    "env:pull:development": "infisical export --output-file=./.env --env=development",
+    "build:ios:simulator": "infisical run --env=development -- eas build --local -p ios --profile development-simulator --output ./build/sim.tar.gz"
   },
   "private": true
 }
