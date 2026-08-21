@@ -38,7 +38,16 @@ export const RunEventSchema = z
     ),
     event(
       "tool.started",
-      z.object({ toolCallId: ResourceIdSchema, name: z.string().min(1) }).strict(),
+      z
+        .object({
+          toolCallId: ResourceIdSchema,
+          name: z.string().min(1),
+          label: z.string().min(1).max(500).optional(),
+          detail: z.string().min(1).max(4_000).optional(),
+          kind: z.string().min(1).max(100).optional(),
+          parentToolCallId: ResourceIdSchema.optional(),
+        })
+        .strict(),
     ),
     event(
       "tool.completed",

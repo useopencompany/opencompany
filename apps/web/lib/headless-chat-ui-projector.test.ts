@@ -1,7 +1,7 @@
 import { parseRunStreamEvent } from "@opencompany/protocol";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { describe, expect, it } from "vitest";
-import { HeadlessChatUiProjector } from "./headless-chat-ui-projector";
+import { HeadlessChatUiProjector, nestHeadlessToolParts } from "./headless-chat-ui-projector";
 
 const occurredAt = "2026-08-11T15:18:56.000Z";
 
@@ -43,6 +43,147 @@ describe("HeadlessChatUiProjector", () => {
       { type: "text-delta", id: "text_message_assistant_1_2", delta: " after" },
       { type: "text-end", id: "text_message_assistant_1_2" },
     ]);
+  });
+
+  it("projects enriched command and MCP payloads through their persisted input shapes", () => {
+    const projector = new HeadlessChatUiProjector("message_assistant_1");
+    const chunks = project(projector, [
+      event(1, "tool.started", {
+        toolCallId: "command_1",
+        name: "codex_command",
+        label: "Run the focused tests",
+        detail: "bun test projector",
+        kind: "execute",
+      }),
+      event(2, "tool.completed", { toolCallId: "command_1", summary: "completed" }),
+      event(3, "tool.started", {
+        toolCallId: "mcp_1",
+        name: "codex_mcp_tool",
+        label: "MCP tool",
+        detail: "github.search",
+        kind: "mcp",
+      }),
+      event(4, "tool.completed", { toolCallId: "mcp_1", summary: "completed" }),
+    ]);
+
+    expect(chunks).toEqual([
+      {
+        type: "tool-input-available",
+        toolCallId: "command_1",
+        toolName: "codex_command",
+        input: {
+          label: "Run the focused tests",
+          detail: "bun test projector",
+          kind: "execute",
+          command: "bun test projector",
+          description: "Run the focused tests",
+        },
+      },
+      {
+        type: "tool-output-available",
+        toolCallId: "command_1",
+        output: { status: "completed", exitCode: null },
+      },
+      {
+        type: "tool-input-available",
+        toolCallId: "mcp_1",
+        toolName: "codex_mcp_tool",
+        dynamic: true,
+        input: {
+          label: "MCP tool",
+          detail: "github.search",
+          kind: "mcp",
+          tool: "github.search",
+        },
+      },
+      {
+        type: "tool-output-available",
+        toolCallId: "mcp_1",
+        output: { status: "completed" },
+      },
+    ]);
+  });
+
+  it("nests parent-linked transient tools under their subagent part", async () => {
+    const projector = new HeadlessChatUiProjector("message_assistant_1");
+    const chunks: UIMessageChunk[] = [
+      { type: "start", messageId: "message_assistant_1" },
+      ...projector.project(
+        event(1, "tool.started", {
+          toolCallId: "subagent_1",
+          name: "codex_subagent",
+          label: "Subagent",
+          detail: "Inspect the repository",
+          kind: "Explore",
+        }),
+      ),
+      ...projector.project(
+        event(2, "tool.started", {
+          toolCallId: "command_1",
+          name: "codex_command",
+          label: "Command",
+          detail: "rg TODO",
+          kind: "execute",
+          parentToolCallId: "subagent_1",
+        }),
+      ),
+      ...projector.project(
+        event(3, "tool.completed", { toolCallId: "command_1", summary: "completed" }),
+      ),
+      { type: "finish", finishReason: "stop" },
+    ];
+
+    const { message, errors } = await consumeUiMessage(chunks);
+    const nested = nestHeadlessToolParts(message as UIMessage);
+
+    expect(errors).toEqual([]);
+    expect(nested.parts).toHaveLength(1);
+    expect(nested.parts[0]).toMatchObject({
+      type: "tool-codex_subagent",
+      toolCallId: "subagent_1",
+      input: {
+        label: "Subagent",
+        detail: "Inspect the repository",
+        kind: "Explore",
+        description: "Inspect the repository",
+        subagentType: "Explore",
+      },
+      children: [
+        {
+          type: "tool-codex_command",
+          toolCallId: "command_1",
+          state: "output-available",
+          input: {
+            label: "Command",
+            detail: "rg TODO",
+            kind: "execute",
+            command: "rg TODO",
+          },
+          output: { status: "completed", exitCode: null },
+        },
+      ],
+    });
+  });
+
+  it("keeps legacy bare command events renderable without exposing an internal fallback", async () => {
+    const projector = new HeadlessChatUiProjector("message_assistant_1");
+    const chunks: UIMessageChunk[] = [
+      { type: "start", messageId: "message_assistant_1" },
+      ...projector.project(
+        event(1, "tool.started", { toolCallId: "command_1", name: "codex_command" }),
+      ),
+      ...projector.project(event(2, "tool.completed", { toolCallId: "command_1" })),
+      { type: "finish", finishReason: "stop" },
+    ];
+
+    const { message, errors } = await consumeUiMessage(chunks);
+
+    expect(errors).toEqual([]);
+    expect(message?.parts[0]).toMatchObject({
+      type: "tool-codex_command",
+      input: { command: "Command" },
+      output: { status: "completed", exitCode: null },
+    });
   });
 
   it("creates a tool boundary for approvals whose historical tool start is unavailable", () => {
