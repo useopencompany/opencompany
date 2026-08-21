@@ -58,6 +58,9 @@ export type RunnerEnv = {
   codexChatLeaseTtlMs?: number | undefined;
   // Explicit opt-in for opencompany's durable task worker and runner-hosted tools.
   taskWorkerEnabled: boolean;
+  // Kill switch for the codex-chat self-heal sweeper (resets runtime state of sessions stuck in a
+  // fast-fail loop). Defaults on; only set false to disable the automatic remediation in an incident.
+  codexChatSelfHealEnabled: boolean;
   workerConcurrency: number;
   port: number;
   allowedOrigins: string[];
@@ -103,6 +106,7 @@ export function loadEnv(): RunnerEnv {
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
     codexChatLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_CODEX_CHAT_LEASE_TTL_MS", 90_000),
     taskWorkerEnabled: optionalBooleanEnv("RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED", false),
+    codexChatSelfHealEnabled: optionalBooleanEnv("RUNNER_CODEX_CHAT_SELF_HEAL_ENABLED", true),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
     // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not

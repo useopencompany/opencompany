@@ -80,6 +80,20 @@ export function buildCodexAcpCommand(workdir: string) {
   ].join(" && ");
 }
 
+// A hard runner death (crash, OOM kill, SIGKILL at the end of a deploy grace period) never reaches
+// the ACP adapter's handle.kill(), so a detached codex-acp adapter — and the codex CLI child that
+// holds CODEX_HOME's rollout — survives in the sandbox. Reclaiming the turn into the same sandbox
+// would then run two engines over one checkout: they race each other and the leftover process can
+// keep the thread locked so session/load fails. Every run against a reused sandbox must fence
+// leftover turn processes first. The bracketed `[c]odex` matches running codex/codex-acp processes
+// but never this cleanup shell's own command line (which literally contains `[c]odex`, not `codex`).
+// pkill exits 1 when nothing matched, so the command ends with true.
+export const KILL_LEFTOVER_CODEX_TURN_COMMAND = "pkill -9 -f '[c]odex' || true";
+
+export async function killLeftoverCodexTurnProcesses(sandbox: SandboxHandle) {
+  await sandbox.commands.run(KILL_LEFTOVER_CODEX_TURN_COMMAND, { timeoutMs: 30_000 });
+}
+
 export function buildCodexAcpCommandEnv(input: {
   auth: CodexCliAuth;
   codexHome: string;
