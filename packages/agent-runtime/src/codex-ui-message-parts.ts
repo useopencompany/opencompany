@@ -25,7 +25,7 @@ export const CODEX_WEB_SEARCH_TOOL_NAME = "codex_web_search";
 export const CODEX_SUBAGENT_TOOL_NAME = "codex_subagent";
 export const CODEX_SUBAGENT_TOOL_PART_TYPE = `tool-${CODEX_SUBAGENT_TOOL_NAME}` as const;
 
-export type CodexCommandToolInput = { command: string };
+export type CodexCommandToolInput = { command: string; description?: string };
 export type CodexCommandToolOutput = {
   status: "completed" | "failed" | "interrupted";
   exitCode: number | null;
@@ -183,7 +183,7 @@ export function applyCodexEventToUiMessageParts(
           type: CODEX_COMMAND_TOOL_PART_TYPE,
           toolCallId,
           state: "input-available",
-          input: { command: commandFromPayload(event) },
+          input: commandInputFromPayload(event),
         },
       ]);
     }
@@ -460,8 +460,12 @@ export function parseCodexUiMessageParts(value: unknown): CodexUiMessagePart[] {
       continue;
     }
     if (part.type === CODEX_COMMAND_TOOL_PART_TYPE && typeof part.toolCallId === "string") {
-      const command = readString((part.input as Record<string, unknown> | undefined)?.command);
-      const input: CodexCommandToolInput = { command: command ?? "command" };
+      const rawInput = isRecord(part.input) ? part.input : {};
+      const description = readString(rawInput.description);
+      const input: CodexCommandToolInput = {
+        command: readString(rawInput.command) ?? "command",
+        ...(description ? { description } : {}),
+      };
       if (part.state === "input-available") {
         parts.push({
           type: CODEX_COMMAND_TOOL_PART_TYPE,
@@ -664,7 +668,7 @@ function replaceCommandPart(
       type: CODEX_COMMAND_TOOL_PART_TYPE,
       toolCallId: itemId ?? `codex-cmd-${parts.length}`,
       state: "input-available",
-      input: { command: commandFromPayload(event) },
+      input: commandInputFromPayload(event),
     });
     return [...parts, synthesized];
   }
@@ -674,7 +678,7 @@ function replaceCommandPart(
     type: CODEX_COMMAND_TOOL_PART_TYPE,
     toolCallId: existing.toolCallId,
     state: "input-available",
-    input: existing.input,
+    input: commandInputFromPayload(event, existing.input),
   });
   return next;
 }
@@ -774,6 +778,7 @@ function mcpToolStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayl
       : null;
   const input = {
     label: "MCP tool",
+    ...toolSemanticsFromPayload(event),
     ...(readString(event.payload.server) ? { server: event.payload.server } : {}),
     ...(readString(event.payload.tool) ? { tool: event.payload.tool } : {}),
     ...(args ? { arguments: args } : {}),
@@ -908,6 +913,7 @@ function dynamicToolStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPart
 function webSearchStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayload {
   const input = {
     label: "Web search",
+    ...toolSemanticsFromPayload(event),
     ...(readString(event.payload.query) ? { query: event.payload.query } : {}),
   };
   if (event.type === "web_search.started") return { state: "input-available", input };
@@ -1018,8 +1024,26 @@ function commandToolCallId(event: HarnessNormalizedEvent, parts: readonly CodexU
   return readString(event.payload.itemId) ?? `codex-cmd-${parts.length}`;
 }
 
-function commandFromPayload(event: HarnessNormalizedEvent) {
-  return readString(event.payload.command) ?? "command";
+function commandInputFromPayload(
+  event: HarnessNormalizedEvent,
+  fallback?: CodexCommandToolInput,
+): CodexCommandToolInput {
+  const description = readString(event.payload.description) ?? fallback?.description;
+  return {
+    command: readString(event.payload.command) ?? fallback?.command ?? "command",
+    ...(description ? { description } : {}),
+  };
+}
+
+function toolSemanticsFromPayload(event: HarnessNormalizedEvent) {
+  const toolName = readString(event.payload.toolName);
+  const kind = readString(event.payload.kind);
+  const title = readString(event.payload.title);
+  return {
+    ...(toolName ? { toolName } : {}),
+    ...(kind ? { kind } : {}),
+    ...(title ? { title } : {}),
+  };
 }
 
 function commandOutputStatus(event: HarnessNormalizedEvent): CodexCommandToolOutput["status"] {
