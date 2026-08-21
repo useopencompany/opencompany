@@ -51,6 +51,7 @@ const env = {
   codexChatIdleTimeoutMs: 1_800_000,
   jobLeaseTtlMs: 300_000,
   taskWorkerEnabled: false,
+  codexChatSelfHealEnabled: true,
   workerConcurrency: 2,
   port: 3040,
   allowedOrigins: ["https://app.example.com"],

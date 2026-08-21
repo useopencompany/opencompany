@@ -17,7 +17,7 @@ import {
   runCodexChatTurn,
   summarizeCodexChatRecoveryProgress,
 } from "./codex-chat";
-import { CodexChatHandoffError } from "./codex-chat-errors";
+import { CodexChatHandoffError, CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
 import type { RunnerEnv } from "./env";
 
 const acpMocks = vi.hoisted(() => ({ runTurn: vi.fn() }));
@@ -29,6 +29,7 @@ const authMocks = vi.hoisted(() => ({
 const cliMocks = vi.hoisted(() => ({
   buildCodexAcpCommandEnv: vi.fn(),
   ensureCodexAcpAdapterInstalled: vi.fn(),
+  killLeftoverCodexTurnProcesses: vi.fn(),
 }));
 const dbMocks = vi.hoisted(() => ({
   selectRows: [] as unknown[][],
@@ -47,6 +48,7 @@ const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
+  isRetryableCommandStreamError: vi.fn(),
   isRetryableSandboxAcquisitionError: vi.fn(),
   writeSandboxTextFiles: vi.fn(),
 }));
@@ -73,6 +75,7 @@ vi.mock("./codex-cli", () => ({
   buildCodexAcpCommand: () => "exec codex-acp",
   buildCodexAcpCommandEnv: cliMocks.buildCodexAcpCommandEnv,
   ensureCodexAcpAdapterInstalled: cliMocks.ensureCodexAcpAdapterInstalled,
+  killLeftoverCodexTurnProcesses: cliMocks.killLeftoverCodexTurnProcesses,
 }));
 
 vi.mock("./coding-agent-shared", () => ({
@@ -132,6 +135,7 @@ vi.mock("./sandbox", () => ({
   armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
+  isRetryableCommandStreamError: sandboxMocks.isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
   writeSandboxTextFiles: sandboxMocks.writeSandboxTextFiles,
 }));
@@ -376,6 +380,7 @@ describe("runCodexChatTurn over ACP", () => {
       CODEX_API_KEY: "codex_secret",
     });
     cliMocks.ensureCodexAcpAdapterInstalled.mockResolvedValue(undefined);
+    cliMocks.killLeftoverCodexTurnProcesses.mockResolvedValue(undefined);
     historyMocks.loadCodingChatHistory.mockResolvedValue(emptyHistory());
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
     eventMocks.createExternalEngineProjector.mockImplementation(
@@ -402,6 +407,7 @@ describe("runCodexChatTurn over ACP", () => {
     sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
+    sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
     sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
     sandboxMocks.writeSandboxTextFiles.mockResolvedValue(undefined);
     skillMocks.materializeCodexSkillSnapshotsForSession.mockResolvedValue(undefined);
@@ -534,6 +540,59 @@ describe("runCodexChatTurn over ACP", () => {
     const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
     expect(projector.cancelPendingInteractions).toHaveBeenCalledOnce();
     expect(sqlText(dbMocks.execute.mock.calls[0]?.[0])).toContain("recovery_attempts");
+  });
+
+  it("fences a reused sandbox before starting the turn", async () => {
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+
+    await expect(
+      runCodexChatTurn({ turn: codexTurn(), session: codexSession(), env: env() }),
+    ).resolves.toBe("settled");
+
+    expect(cliMocks.killLeftoverCodexTurnProcesses).toHaveBeenCalledOnce();
+    expect(cliMocks.killLeftoverCodexTurnProcesses).toHaveBeenCalledWith(
+      expect.objectContaining({ sandboxId: "sbx_existing" }),
+    );
+    expect(cliMocks.killLeftoverCodexTurnProcesses.mock.invocationCallOrder[0]).toBeLessThan(
+      acpMocks.runTurn.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("skips the fence and invalidates the thread when a fresh sandbox replaced the previous one", async () => {
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(fakeSandbox("sbx_fresh"));
+
+    // A replaced sandbox forces the bootstrap path (extra DB reads this fixture does not seed); we
+    // only assert the pre-bootstrap behavior: the fence never runs on a fresh sandbox, and the stale
+    // thread id is invalidated alongside the new sandbox id.
+    await runCodexChatTurn({ turn: codexTurn(), session: codexSession(), env: env() }).catch(
+      () => undefined,
+    );
+
+    expect(cliMocks.killLeftoverCodexTurnProcesses).not.toHaveBeenCalled();
+    expect(
+      dbMocks.execute.mock.calls.some(([query]) => {
+        const text = sqlText(query);
+        return text.includes("sandbox_id =") && text.includes("codex_thread_id = NULL");
+      }),
+    ).toBe(true);
+  });
+
+  it("retries instead of settling when the previous sandbox process cannot be fenced", async () => {
+    const fenceError = new Error("Sandbox command stream is unavailable.");
+    cliMocks.killLeftoverCodexTurnProcesses.mockRejectedValueOnce(fenceError);
+
+    await expect(
+      runCodexChatTurn({ turn: codexTurn(), session: codexSession(), env: env() }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: fenceError,
+      diagnosticMessage: "[fence_previous_turn] Error: Sandbox command stream is unavailable.",
+    });
+
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector?.fail).not.toHaveBeenCalled();
   });
 
   it("hands a turn off without finalizing when ACP is interrupted by shutdown", async () => {
@@ -804,6 +863,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     codexChatIdleTimeoutMs: 300_000,
     jobLeaseTtlMs: 300_000,
     taskWorkerEnabled: false,
+    codexChatSelfHealEnabled: true,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

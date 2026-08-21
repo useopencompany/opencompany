@@ -187,7 +187,14 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
           );
           loadedSession = true;
         } catch (error) {
-          if (!isMissingAcpSession(error)) throw error;
+          // A transport-level failure (adapter process died, RPC timeout, adapter not running)
+          // means the connection itself is unusable — session/new cannot succeed on it either — so
+          // abort the turn and let the worker settle or retry. Any application-level JSON-RPC error
+          // (AcpRpcError: -32603 "Internal error", -32002 missing session, "no rollout found for
+          // thread id …", …) means the saved thread cannot be resumed on this (freshly-fenced)
+          // process; invalidate it and fall through to session/new so this turn proceeds and the
+          // next turn is never poisoned by the same thread id.
+          if (!(error instanceof AcpRpcError)) throw error;
           await input.onExistingSessionInvalidated();
           sessionId = null;
           task = await input.prepareFreshTask();
@@ -618,15 +625,6 @@ class AcpRpcError extends Error {
     super(message);
     this.name = "AcpRpcError";
   }
-}
-
-function isMissingAcpSession(error: unknown) {
-  return (
-    (error instanceof AcpRpcError && error.code === -32002) ||
-    /no conversation found|session.*not found|could not resume|resource.*not found/i.test(
-      asError(error).message,
-    )
-  );
 }
 
 function commandHandlePid(handle: unknown) {
