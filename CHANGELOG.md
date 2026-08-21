@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-08-21
+
+### Added
+- opencompany can now trigger a workflow automatically when a Linear issue enters triage, so the right task kicks off the moment something needs attention (#1347) — @opencompany-bot.
+- Coding sandboxes now include Docker, so tasks that need to build or run containers can do that directly inside a coding session (#1336) — @opencompany-bot.
+
+### Changed
+- Live coding chat now shows clear, labeled actions — reads, writes, edits, searches, commands, and plans — with file names and a preview of the assistant's thinking, instead of raw tool output (#1359, #1361) — @opencompany-bot.
+- Coding sessions can now run for up to three hours before timing out, up from one hour, giving longer tasks room to finish (#1363) — @opencompany-bot.
+- Wiki folders now remember which ones you had open the last time you visited (#1356) — @opencompany-bot.
+
+### Fixed
+- Opening an active task no longer hides your earlier messages, and its status no longer gets stuck on "Connecting" while work is still happening (#1358) — @opencompany-bot.
+- A coding session that loses its connection now recovers reliably instead of getting marked as failed while it's still working in the background (#1360) — @opencompany-bot.
+- Listing comments on a LinkedIn post works again (#1350) — @opencompany-bot.
+
 ## [1.16.0] - 2026-08-20
 
 ### Added
