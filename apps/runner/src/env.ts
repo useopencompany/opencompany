@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { loadEncryptionKey } from "@opencompany/crypto";
-
-const DEFAULT_CODEX_TIMEOUT_MS = 60 * 60 * 1000;
+import { DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS } from "./coding-sandbox-lifecycle";
 
 export type RunnerEnv = {
   internalToken: string;
@@ -43,8 +42,8 @@ export type RunnerEnv = {
   hubspotOAuthClientSecret?: string | undefined;
   codexE2bTemplate: string | undefined;
   blobReadWriteToken?: string | undefined;
-  // Wall-clock ceiling for a single Codex engine turn: timeouts surface partial output but
-  // never publish a pull request.
+  // Wall-clock ceiling shared by Codex and Claude Code engine turns. Timeouts surface partial
+  // output but never publish a pull request.
   codexTimeoutMs: number;
   codexModel: string;
   // Idle timeout for persistent opencompany codex-chat sandboxes. Unlike per-task sandboxes (killed after
@@ -92,7 +91,10 @@ export function loadEnv(): RunnerEnv {
     hubspotOAuthClientSecret: optionalEnv("OPENCOMPANY_HUBSPOT_CLIENT_SECRET"),
     codexE2bTemplate: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE"),
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
-    codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", DEFAULT_CODEX_TIMEOUT_MS),
+    codexTimeoutMs: optionalPositiveIntegerEnv(
+      "RUNNER_CODEX_TIMEOUT_MS",
+      DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS,
+    ),
     codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.6-sol",
     codexChatIdleTimeoutMs: optionalPositiveIntegerEnv(
       "RUNNER_OPENCOMPANY_CODEX_CHAT_IDLE_TIMEOUT_MS",
