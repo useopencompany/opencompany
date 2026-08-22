@@ -7,7 +7,7 @@
  * - getUser() returns current user (with auto-refresh)
  * - clearSession() clears stored credentials
  *
- * Note: Requires react-native-quick-crypto polyfill (see src/polyfills.ts)
+ * Note: Requires react-native-quick-crypto polyfill (see the root layout).
  */
 import { WorkOS } from "@workos-inc/node";
 import * as Linking from "expo-linking";
@@ -19,6 +19,7 @@ const PKCE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 // Resolve the callback from the scheme compiled into the current Expo app.
 export const REDIRECT_URI = Linking.createURL("callback");
+export const SIGN_OUT_REDIRECT_URI = Linking.createURL("signout-callback");
 
 // Initialize WorkOS in public client mode (no API key needed for PKCE)
 const workos = new WorkOS({ clientId: WORKOS_CLIENT_ID });
@@ -85,9 +86,7 @@ export async function getSignInUrl(): Promise<string> {
   return url;
 }
 
-/**
- * Exchange authorization code for tokens using stored code verifier.
- */
+/** Exchange authorization code for tokens using stored code verifier. */
 export async function handleCallback(code: string): Promise<User> {
   const pkceData = await SecureStore.getItemAsync(KEYS.PKCE);
   if (!pkceData) {
@@ -120,9 +119,7 @@ export async function handleCallback(code: string): Promise<User> {
   return session.user;
 }
 
-/**
- * Parse JWT payload without verification (for reading claims only).
- */
+/** Parse JWT payload without verification (for reading claims only). */
 function parseJwtPayload(token: string): Record<string, unknown> {
   const base64 = token.split(".")[1];
   // Handle URL-safe base64
@@ -130,15 +127,12 @@ function parseJwtPayload(token: string): Record<string, unknown> {
   return JSON.parse(atob(normalized));
 }
 
-/**
- * Get current user, refreshing token if expired.
- */
+/** Get current user, refreshing token if expired. */
 export async function getUser(): Promise<User | null> {
   const sessionData = await SecureStore.getItemAsync(KEYS.SESSION);
   if (!sessionData) return null;
 
   const session: StoredSession = JSON.parse(sessionData);
-
   // Check if token is expired (with 10 second buffer)
   const payload = parseJwtPayload(session.accessToken);
   const exp = payload.exp as number;
@@ -167,9 +161,7 @@ export async function getUser(): Promise<User | null> {
   return session.user;
 }
 
-/**
- * Get session ID from stored access token (needed for logout).
- */
+/** Get session ID from stored access token (needed for logout). */
 export async function getSessionId(): Promise<string | null> {
   const sessionData = await SecureStore.getItemAsync(KEYS.SESSION);
   if (!sessionData) return null;
@@ -183,16 +175,15 @@ export async function getSessionId(): Promise<string | null> {
   }
 }
 
-/**
- * Get WorkOS logout URL for the current session.
- */
+/** Get WorkOS logout URL for the current session. */
 export function getLogoutUrl(sessionId: string): string {
-  return `https://api.workos.com/user_management/sessions/logout?session_id=${sessionId}`;
+  return workos.userManagement.getLogoutUrl({
+    sessionId,
+    returnTo: SIGN_OUT_REDIRECT_URI,
+  });
 }
 
-/**
- * Clear stored session and PKCE state.
- */
+/** Clear stored session and PKCE state. */
 export async function clearSession(): Promise<void> {
   await SecureStore.deleteItemAsync(KEYS.SESSION);
   await SecureStore.deleteItemAsync(KEYS.PKCE);

@@ -1,7 +1,7 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router";
 import Stack from "expo-router/stack";
 import { useCSSVariable, useUniwind } from "uniwind";
-import { useAuth } from "@/features/auth-provider";
+import { useAuth } from "@/features/auth";
 
 export function RootNavigator() {
   const { user } = useAuth();

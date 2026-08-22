@@ -42,6 +42,7 @@ React Compiler is enabled is the mobile app. Don't use `useMemo`, `useCallback`,
 
 ## Coding Style
 
+- Use `until-async` for async error handling
 - Prefer `interface` over `type`
 - Do not create separate interfaces for props, just inline the type definition in the function component
 - Do not use nested function declarations, only use arrow functions inside other functions

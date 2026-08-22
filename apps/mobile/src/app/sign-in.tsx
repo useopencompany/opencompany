@@ -1,25 +1,35 @@
 import { Button, Host, ProgressView } from "@expo/ui/swift-ui";
 import { buttonStyle, controlSize } from "@expo/ui/swift-ui/modifiers";
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 import { View } from "react-native";
 import wordmark from "@/assets/images/wordmark.png";
 import wordmarkDark from "@/assets/images/wordmark-dark.png";
-import { useAuth } from "@/features/auth-provider";
+import { useAuth } from "@/features/auth";
 import { StyledImage } from "@/shared/ui/styled-image";
+import { useToast } from "@/shared/ui/toast";
 
 export default function SignInScreen() {
-  const { initializationError, loading, signIn } = useAuth();
-  const [error, setError] = useState<string | null>(null);
-  const visibleError = error ?? initializationError;
+  const { initializationError, isLoading, signIn } = useAuth();
+  const { showToast } = useToast();
+  const shownInitializationErrorRef = useRef<string | null>(null);
 
-  async function handleSignIn() {
-    setError(null);
-    const result = await signIn();
-    if (!result.success && result.error) {
-      setError(result.error);
-      console.error(result.error);
+  useEffect(() => {
+    if (!initializationError || shownInitializationErrorRef.current === initializationError) {
+      return;
     }
-  }
+
+    shownInitializationErrorRef.current = initializationError;
+    showToast(initializationError);
+  }, [initializationError, showToast]);
+
+  const handleSignIn = async () => {
+    const result = await signIn();
+    const error = result.error;
+    if (!result.success && error) {
+      console.error(error);
+      showToast(error);
+    }
+  };
 
   return (
     <View className="flex-1 items-center justify-center bg-background px-6">
@@ -41,7 +51,7 @@ export default function SignInScreen() {
 
         <View className="mt-10">
           <Host matchContents={{ horizontal: true, vertical: false }} style={{ height: 48 }}>
-            {loading ? (
+            {isLoading ? (
               <ProgressView />
             ) : (
               <Button
