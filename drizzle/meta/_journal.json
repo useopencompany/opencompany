@@ -1555,6 +1555,13 @@
       "when": 1787298242217,
       "tag": "0221_drop_dormant_workspace_skill_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 222,
+      "version": "7",
+      "when": 1787376229000,
+      "tag": "0222_goat_immutable_skill_bundles",
+      "breakpoints": true
     }
   ]
 }

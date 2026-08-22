@@ -53,6 +53,22 @@ const vector = customType<{ data: string }>({
   },
 });
 
+// Immutable skill bundles retain every source file byte-for-byte. Normalize both pooled Postgres
+// Buffers and Neon HTTP hex strings at the schema boundary so repositories always receive bytes.
+const bytea = customType<{ data: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+  fromDriver(value: unknown): Buffer {
+    if (Buffer.isBuffer(value)) return value;
+    if (value instanceof Uint8Array) return Buffer.from(value);
+    if (typeof value === "string") {
+      return Buffer.from(value.startsWith("\\x") ? value.slice(2) : value, "hex");
+    }
+    throw new Error(`Unexpected bytea value from driver (${typeof value}).`);
+  },
+});
+
 export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
 // Workflows and skills share a simple draft/active lifecycle: `draft` is
@@ -2964,6 +2980,110 @@ export const skills = productSchema.table(
   }),
 );
 
+// A validated Agent Skill version. Rows and files are immutable after insertion; the installation
+// table below is the only mutable pointer. Raw file bytes, rather than reconstructed Markdown, are
+// the storage authority.
+export const skillBundles = productSchema.table(
+  "skill_bundles",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    integrity: text("integrity").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    license: text("license"),
+    compatibility: text("compatibility"),
+    metadata: jsonb("metadata").$type<Record<string, string> | null>(),
+    allowedTools: text("allowed_tools"),
+    body: text("body").notNull(),
+    sourceType: text("source_type").$type<SkillSourceType>().notNull(),
+    sourceUrl: text("source_url").notNull(),
+    sourcePath: text("source_path").notNull(),
+    sourceRef: text("source_ref").notNull(),
+    resolvedCommit: text("resolved_commit").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIntegrityIdx: uniqueIndex("skill_bundles_workspace_integrity_idx").on(
+      table.workspaceId,
+      table.integrity,
+    ),
+    workspaceIdIdx: uniqueIndex("skill_bundles_workspace_id_idx").on(table.workspaceId, table.id),
+    workspaceNameIdx: index("skill_bundles_workspace_name_idx").on(
+      table.workspaceId,
+      table.name,
+      table.createdAt,
+    ),
+    sourceTypeCheck: check(
+      "skill_bundles_source_type_check",
+      sql`${table.sourceType} IN ('github', 'skills.sh')`,
+    ),
+    integrityCheck: check(
+      "skill_bundles_integrity_check",
+      sql`${table.integrity} ~ '^sha256:[0-9a-f]{64}$'`,
+    ),
+    commitCheck: check(
+      "skill_bundles_commit_check",
+      sql`${table.resolvedCommit} ~ '^[0-9a-f]{40}$'`,
+    ),
+  }),
+);
+
+export const skillBundleFiles = productSchema.table(
+  "skill_bundle_files",
+  {
+    bundleId: text("bundle_id")
+      .notNull()
+      .references(() => skillBundles.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    content: bytea("content").notNull(),
+    executable: boolean("executable").notNull().default(false),
+    sizeBytes: integer("size_bytes").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.bundleId, table.path] }),
+    sizeCheck: check("skill_bundle_files_size_check", sql`${table.sizeBytes} >= 0`),
+    contentSizeCheck: check(
+      "skill_bundle_files_content_size_check",
+      sql`octet_length(${table.content}) = ${table.sizeBytes}`,
+    ),
+  }),
+);
+
+export const skillInstallations = productSchema.table(
+  "skill_installations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    bundleId: text("bundle_id").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => ({
+    workspaceLiveNameIdx: uniqueIndex("skill_installations_workspace_live_name_idx")
+      .on(table.workspaceId, table.name)
+      .where(sql`${table.archivedAt} IS NULL`),
+    workspaceUpdatedIdx: index("skill_installations_workspace_updated_idx").on(
+      table.workspaceId,
+      table.archivedAt,
+      table.updatedAt,
+    ),
+    bundleIdx: index("skill_installations_bundle_idx").on(table.bundleId),
+    workspaceBundleFk: foreignKey({
+      columns: [table.workspaceId, table.bundleId],
+      foreignColumns: [skillBundles.workspaceId, skillBundles.id],
+      name: "skill_installations_workspace_bundle_fk",
+    }).onDelete("restrict"),
+  }),
+);
+
 // Workspace-shared bootstrap material for repositories used by the repo-agnostic
 // Codex and Claude Code chat sandboxes. Environment contents are encrypted at
 // rest; envKeys is intentionally limited to plaintext key names for settings UI.
@@ -5094,6 +5214,8 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   ingestionReservations: many(workspaceIngestionReservations),
   brains: many(brains),
   repoConfigs: many(repoConfigs),
+  skillBundles: many(skillBundles),
+  skillInstallations: many(skillInstallations),
 }));
 
 export const workspaceBillingRelations = relations(workspaceBilling, ({ one }) => ({
@@ -5772,6 +5894,33 @@ export const chatSessionSkillsRelations = relations(chatSessionSkills, ({ one })
   }),
 }));
 
+export const skillBundlesRelations = relations(skillBundles, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [skillBundles.workspaceId],
+    references: [workspaces.id],
+  }),
+  files: many(skillBundleFiles),
+  installations: many(skillInstallations),
+}));
+
+export const skillBundleFilesRelations = relations(skillBundleFiles, ({ one }) => ({
+  bundle: one(skillBundles, {
+    fields: [skillBundleFiles.bundleId],
+    references: [skillBundles.id],
+  }),
+}));
+
+export const skillInstallationsRelations = relations(skillInstallations, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [skillInstallations.workspaceId],
+    references: [workspaces.id],
+  }),
+  bundle: one(skillBundles, {
+    fields: [skillInstallations.bundleId],
+    references: [skillBundles.id],
+  }),
+}));
+
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type Onboarding = typeof onboarding.$inferSelect;
@@ -5834,4 +5983,7 @@ export type BrowserProfileSession = typeof browserProfileSessions.$inferSelect;
 export type ChatSessionSkill = typeof chatSessionSkills.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;
 export type Skill = typeof skills.$inferSelect;
+export type SkillBundle = typeof skillBundles.$inferSelect;
+export type SkillBundleFile = typeof skillBundleFiles.$inferSelect;
+export type SkillInstallation = typeof skillInstallations.$inferSelect;
 export type RepoConfig = typeof repoConfigs.$inferSelect;

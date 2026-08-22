@@ -1269,10 +1269,10 @@ export const WikiTimelineReadModelSchema =
 export const SkillSourceSchema = z
   .object({
     type: z.enum(["github", "skills.sh"]),
-    url: z.url(),
-    ref: z.string(),
-    path: z.string(),
-    resolvedCommit: z.string(),
+    url: z.url().max(2_048),
+    ref: z.string().max(256),
+    path: z.string().max(512),
+    resolvedCommit: z.string().regex(/^[0-9a-f]{40}$/u),
   })
   .strict()
   .openapi("SkillSource");
@@ -1292,10 +1292,72 @@ export const SkillSchema = z
   .strict()
   .openapi("Skill");
 
-export const SkillListItemSchema = SkillSchema.omit({
-  instructions: true,
-  createdAt: true,
-}).openapi("SkillListItem");
+export const SkillBundleFileMetadataSchema = z
+  .object({
+    path: z.string().min(1).max(1_024),
+    executable: z.boolean(),
+    sizeBytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(512 * 1_024),
+  })
+  .strict()
+  .openapi("SkillBundleFileMetadata");
+
+export const SkillImportFileMetadataSchema = z
+  .object({
+    path: z.string().min(1).max(1_024),
+    sizeBytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(512 * 1_024),
+  })
+  .strict()
+  .openapi("SkillImportFileMetadata");
+
+export const SkillBundleSummarySchema = z
+  .object({
+    id: ResourceIdSchema,
+    integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+    name: z.string().min(1).max(64),
+    description: z.string().min(1).max(1_024),
+    license: z.string().nullable(),
+    compatibility: z.string().max(500).nullable(),
+    metadata: z.record(z.string(), z.string()).nullable(),
+    allowedTools: z.string().nullable(),
+    source: SkillSourceSchema,
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("SkillBundleSummary");
+
+export const SkillBundleSchema = SkillBundleSummarySchema.extend({
+  body: z.string(),
+  files: z.array(SkillBundleFileMetadataSchema).max(64),
+})
+  .strict()
+  .openapi("SkillBundle");
+
+export const SkillListItemSchema = z
+  .object({
+    id: ResourceIdSchema,
+    name: z.string().min(1).max(64),
+    enabled: z.boolean(),
+    archivedAt: TimestampSchema.nullable(),
+    updatedAt: TimestampSchema,
+    bundle: SkillBundleSummarySchema,
+  })
+  .strict()
+  .openapi("SkillInstallationListItem");
+
+export const SkillInstallationSchema = SkillListItemSchema.extend({
+  createdAt: TimestampSchema,
+  bundle: SkillBundleSchema,
+})
+  .strict()
+  .openapi("SkillInstallation");
 export const SkillCatalogItemSchema = z
   .object({
     id: z.string().min(1).max(64),
@@ -1319,19 +1381,28 @@ export const SkillImportPreviewSchema = z
     z
       .object({
         status: z.literal("resolved"),
-        proposedSlug: z.string().min(1).max(64),
         name: z.string().min(1).max(64),
-        description: z.string().max(1_024),
-        instructions: z.string().max(256 * 1_024),
-        extraFiles: z.array(z.string().max(512)).max(31),
-        resolvedCommit: z.string().regex(/^[0-9a-f]{40}$/iu),
+        description: z.string().min(1).max(1_024),
+        license: z.string().optional(),
+        compatibility: z.string().max(500).optional(),
+        metadata: z.record(z.string(), z.string()).optional(),
+        allowedTools: z.string().optional(),
+        source: SkillSourceSchema,
         integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
+        files: z.array(SkillImportFileMetadataSchema).min(1).max(64),
+        fileCount: z.number().int().min(1).max(64),
+        totalBytes: z
+          .number()
+          .int()
+          .min(0)
+          .max(1024 * 1024),
       })
       .strict(),
     z
       .object({
         status: z.literal("ambiguous"),
         candidates: z.array(SkillImportCandidateSchema).min(1).max(25),
+        source: SkillSourceSchema.omit({ path: true }),
       })
       .strict(),
   ])
@@ -1596,11 +1667,32 @@ export const ImportSkillBodySchema = SkillImportPreviewBodySchema.extend({
   .openapi("ImportSkillBody");
 export const SkillImportEnvelopeSchema = z
   .object({
-    data: z.object({ skill: SkillSchema, replayed: z.boolean() }).strict(),
+    data: z.object({ installation: SkillInstallationSchema, replayed: z.boolean() }).strict(),
     meta: ProtocolMetadataSchema,
   })
   .strict()
   .openapi("SkillImportEnvelope");
+export const SkillInstallationEnvelopeSchema = z
+  .object({ data: SkillInstallationSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("SkillInstallationEnvelope");
+export const SkillFileChunkSchema = z
+  .object({
+    path: z.string().min(1).max(1_024),
+    executable: z.boolean(),
+    sizeBytes: z.number().int().min(0),
+    offset: z.number().int().min(0),
+    nextOffset: z.number().int().min(0),
+    eof: z.boolean(),
+    encoding: z.enum(["utf8", "base64"]),
+    content: z.string(),
+  })
+  .strict()
+  .openapi("SkillFileChunk");
+export const SkillFileChunkEnvelopeSchema = z
+  .object({ data: SkillFileChunkSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("SkillFileChunkEnvelope");
 export const CreateSkillBodySchema = z
   .object({ name: z.string().min(1).max(64), description: z.string().max(1_024).optional() })
   .strict()
@@ -1616,7 +1708,7 @@ export const UpdateSkillBodySchema = z
   .openapi("UpdateSkillBody");
 export const SkillArchiveEnvelopeSchema = z
   .object({
-    data: z.object({ slug: z.string().min(1).max(64) }).strict(),
+    data: z.object({ name: z.string().min(1).max(64) }).strict(),
     meta: ProtocolMetadataSchema,
   })
   .strict()
@@ -3529,7 +3621,13 @@ export type UpdateWikiPageBody = z.infer<typeof UpdateWikiPageBodySchema>;
 export type DeleteWikiPageBody = z.infer<typeof DeleteWikiPageBodySchema>;
 export type AddWikiTimelineEntryBody = z.infer<typeof AddWikiTimelineEntryBodySchema>;
 export type SkillDto = z.infer<typeof SkillSchema>;
+export type SkillSourceDto = z.infer<typeof SkillSourceSchema>;
 export type SkillListItemDto = z.infer<typeof SkillListItemSchema>;
+export type SkillInstallationDto = z.infer<typeof SkillInstallationSchema>;
+export type SkillBundleDto = z.infer<typeof SkillBundleSchema>;
+export type SkillBundleFileMetadataDto = z.infer<typeof SkillBundleFileMetadataSchema>;
+export type SkillImportFileMetadataDto = z.infer<typeof SkillImportFileMetadataSchema>;
+export type SkillFileChunkDto = z.infer<typeof SkillFileChunkSchema>;
 export type SkillCatalogItemDto = z.infer<typeof SkillCatalogItemSchema>;
 export type CreateSkillBody = z.infer<typeof CreateSkillBodySchema>;
 export type UpdateSkillBody = z.infer<typeof UpdateSkillBodySchema>;

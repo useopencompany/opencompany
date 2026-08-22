@@ -1,4 +1,4 @@
-import { SkillEditorRoute } from "@/components/Routes";
+import { SkillBundleRoute } from "@/components/Routes";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { currentUser } from "@/lib/auth";
 import { getHeadlessSkill } from "@/lib/headless-knowledge-server";
@@ -24,12 +24,5 @@ export default async function SkillEditorPage({ params }: SkillEditorPageProps) 
     );
   }
 
-  return (
-    <SkillEditorRoute
-      skill={skill}
-      initialStatus={skill.status}
-      canEdit={context.role === "admin"}
-      source={skill.source}
-    />
-  );
+  return <SkillBundleRoute installation={skill} canEdit={context.role === "admin"} />;
 }

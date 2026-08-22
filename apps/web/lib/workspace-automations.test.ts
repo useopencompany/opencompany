@@ -72,13 +72,13 @@ describe("workspace automation lifecycle", () => {
     ).rejects.toBeInstanceOf(WorkflowMentionError);
   });
 
-  it("only lists and resolves active skills", async () => {
+  it("only lists and resolves enabled Skill installations", async () => {
     const catalogBuilder = createSelectBuilder([
-      { slug: "legal-review", name: "Legal review", description: "Check legal language" },
+      { id: "legal-review", name: "Legal review", description: "Check legal language" },
     ]);
     const resolveBuilder = createSelectBuilder([
       {
-        slug: "legal-review",
+        id: "legal-review",
         name: "Legal review",
         description: "Check legal language",
         instructions: "Flag claims that need counsel.",
@@ -106,8 +106,8 @@ describe("workspace automation lifecycle", () => {
       },
     ]);
 
-    expect(renderQuery(catalogBuilder.whereValue).params).toContain("active");
-    expect(renderQuery(resolveBuilder.whereValue).params).toContain("active");
+    expect(renderQuery(catalogBuilder.whereValue).params).toContain(true);
+    expect(renderQuery(resolveBuilder.whereValue).params).toContain(true);
   });
 });
 
@@ -115,6 +115,7 @@ function createSelectBuilder(rows: unknown[]) {
   const builder = {
     whereValue: undefined as SQL | undefined,
     from: vi.fn(() => builder),
+    innerJoin: vi.fn(() => builder),
     where: vi.fn((value: SQL) => {
       builder.whereValue = value;
       return builder;

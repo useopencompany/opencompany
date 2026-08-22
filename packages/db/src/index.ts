@@ -16,6 +16,7 @@ export * from "./legacy-billing-schema";
 export * from "./llm-broker-schema";
 export * from "./product-schema";
 export * from "./repo-configs";
+export * from "./skill-bundle-repository";
 export * from "./task-repository";
 export * from "./worker-admission";
 export * from "./workflow-repository";

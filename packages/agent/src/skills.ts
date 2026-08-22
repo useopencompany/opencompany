@@ -1,58 +1,31 @@
-import { type BrainSkill, isValidBrainId, serializeBrainSkillMarkdown } from "@opencompany/brain";
+import { assertSafeRelativePath } from "@opencompany/agent-runtime";
+import { isValidBrainId } from "@opencompany/brain";
+import { createSkillFileChunk, type SkillFileChunk } from "@opencompany/core";
 import { getDb } from "@opencompany/db/client";
 import {
   type ChatSessionSkill,
   chatSessionSkills,
-  type SkillSourceType,
-  type SkillStatus,
-  skills,
+  skillBundleFiles,
+  skillBundles,
+  skillInstallations,
 } from "@opencompany/db/product-schema";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
-
-// Skills are workspace-scoped, reusable agent capabilities. They used to live as
-// markdown documents in a reserved `skills/` Brain folder; they now have their
-// own `goat.skills` table so "what the agent can do" is a first-class primitive
-// rather than Brain (knowledge) content. The `@skill/<slug>` composer mention
-// attaches a skill to a chat message, which snapshots its content immutably into
-// `chatSessionSkills`.
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 
 export const MAX_CHAT_SKILLS = 16;
-export const MAX_CHAT_SKILL_BYTES = 256 * 1024;
+export const MAX_CHAT_SKILL_BYTES = 1024 * 1024;
 
 type Db = ReturnType<typeof getDb>;
 
-// The content shape carried through mentions, session snapshots, and prompt
-// injection. `id` holds the workspace-unique slug (the `@skill/<id>` handle) —
-// kept named `id` so snapshot/prompt consumers stay drop-in with the former
-// Brain-doc shape (`BrainSkill`).
-export type WorkspaceSkill = BrainSkill;
-
-// Provenance for a skill imported from an external SKILL.md. `null` on a skill means
-// hand-authored in opencompany, still fully editable.
-export type SkillSource = {
-  type: SkillSourceType;
-  url: string;
-  ref: string;
-  path: string;
-  resolvedCommit: string;
-};
-
-export type SkillListItem = {
-  slug: string;
+// The installation name is the public @skill handle. Chat activation retains the existing
+// instruction snapshot; exact bundle snapshots are introduced in the next delivery phase.
+export type WorkspaceSkill = {
+  id: string;
   name: string;
   description: string;
-  status: SkillStatus;
-  updatedAt: Date;
-  source: SkillSource | null;
+  instructions: string;
 };
 
 export type SkillCatalogItem = Pick<WorkspaceSkill, "id" | "name" | "description">;
-
-export type SkillDetail = WorkspaceSkill & {
-  status: SkillStatus;
-  source: SkillSource | null;
-};
-
 export type SkillMentionRef = { id: string };
 
 export type ChatSessionSkillSnapshot = Pick<
@@ -99,99 +72,28 @@ export async function listSkillCatalog(
 ): Promise<SkillCatalogItem[]> {
   const rows = await db
     .select({
-      slug: skills.slug,
-      name: skills.name,
-      description: skills.description,
+      id: skillInstallations.name,
+      name: skillBundles.name,
+      description: skillBundles.description,
     })
-    .from(skills)
-    .where(
+    .from(skillInstallations)
+    .innerJoin(
+      skillBundles,
       and(
-        eq(skills.workspaceId, workspaceId),
-        eq(skills.status, "active"),
-        isNull(skills.archivedAt),
+        eq(skillBundles.id, skillInstallations.bundleId),
+        eq(skillBundles.workspaceId, skillInstallations.workspaceId),
       ),
     )
-    .orderBy(asc(skills.name));
-
-  return rows.map((row) => ({ id: row.slug, name: row.name, description: row.description }));
-}
-
-export async function listSkills(workspaceId: string, db: Db = getDb()): Promise<SkillListItem[]> {
-  const rows = await db
-    .select({
-      slug: skills.slug,
-      name: skills.name,
-      description: skills.description,
-      status: skills.status,
-      updatedAt: skills.updatedAt,
-      sourceType: skills.sourceType,
-      sourceUrl: skills.sourceUrl,
-      sourceRef: skills.sourceRef,
-      sourcePath: skills.sourcePath,
-      resolvedCommit: skills.resolvedCommit,
-    })
-    .from(skills)
-    .where(and(eq(skills.workspaceId, workspaceId), isNull(skills.archivedAt)))
-    .orderBy(desc(skills.updatedAt));
-  return rows.map((row) => ({
-    slug: row.slug,
-    name: row.name,
-    description: row.description,
-    status: row.status,
-    updatedAt: row.updatedAt,
-    source: toSkillSource(row),
-  }));
-}
-
-export async function getSkill(
-  workspaceId: string,
-  slug: string,
-  db: Db = getDb(),
-): Promise<SkillDetail | null> {
-  const [row] = await db
-    .select({
-      slug: skills.slug,
-      name: skills.name,
-      description: skills.description,
-      instructions: skills.instructions,
-      status: skills.status,
-      sourceType: skills.sourceType,
-      sourceUrl: skills.sourceUrl,
-      sourceRef: skills.sourceRef,
-      sourcePath: skills.sourcePath,
-      resolvedCommit: skills.resolvedCommit,
-    })
-    .from(skills)
     .where(
-      and(eq(skills.workspaceId, workspaceId), eq(skills.slug, slug), isNull(skills.archivedAt)),
+      and(
+        eq(skillInstallations.workspaceId, workspaceId),
+        eq(skillBundles.workspaceId, workspaceId),
+        eq(skillInstallations.enabled, true),
+        isNull(skillInstallations.archivedAt),
+      ),
     )
-    .limit(1);
-  if (!row) return null;
-  return {
-    id: row.slug,
-    name: row.name,
-    description: row.description,
-    instructions: row.instructions,
-    status: row.status,
-    source: toSkillSource(row),
-  };
-}
-
-function toSkillSource(row: {
-  sourceType: SkillSourceType | null;
-  sourceUrl: string | null;
-  sourceRef: string | null;
-  sourcePath: string | null;
-  resolvedCommit: string | null;
-}): SkillSource | null {
-  if (!row.sourceType || !row.sourceUrl) return null;
-  return {
-    type: row.sourceType,
-    url: row.sourceUrl,
-    ref: row.sourceRef ?? "",
-    path: row.sourcePath ?? "",
-    resolvedCommit: row.resolvedCommit ?? "",
-  };
+    .orderBy(asc(skillBundles.name));
+  return rows;
 }
 
 export async function resolveSkillMentions(input: {
@@ -204,69 +106,60 @@ export async function resolveSkillMentions(input: {
     throw new SkillMentionError("No active workspace is available for skill mentions.");
   }
 
-  const unique = [...new Map(input.mentions.map((m) => [m.id, m])).values()];
+  const unique = [...new Map(input.mentions.map((mention) => [mention.id, mention])).values()];
   if (unique.length > MAX_CHAT_SKILLS) {
     throw new SkillMentionError(`Attach at most ${MAX_CHAT_SKILLS} skills to one message.`);
   }
 
   const rows = await (input.db ?? getDb())
     .select({
-      slug: skills.slug,
-      name: skills.name,
-      description: skills.description,
-      instructions: skills.instructions,
+      id: skillInstallations.name,
+      name: skillBundles.name,
+      description: skillBundles.description,
+      instructions: skillBundles.body,
     })
-    .from(skills)
+    .from(skillInstallations)
+    .innerJoin(
+      skillBundles,
+      and(
+        eq(skillBundles.id, skillInstallations.bundleId),
+        eq(skillBundles.workspaceId, skillInstallations.workspaceId),
+      ),
+    )
     .where(
       and(
-        eq(skills.workspaceId, input.workspaceId),
-        eq(skills.status, "active"),
+        eq(skillInstallations.workspaceId, input.workspaceId),
+        eq(skillBundles.workspaceId, input.workspaceId),
+        eq(skillInstallations.enabled, true),
         inArray(
-          skills.slug,
+          skillInstallations.name,
           unique.map((mention) => mention.id),
         ),
-        isNull(skills.archivedAt),
+        isNull(skillInstallations.archivedAt),
       ),
     );
-  const byId = new Map(
-    rows.map((row) => [
-      row.slug,
-      {
-        id: row.slug,
-        name: row.name,
-        description: row.description,
-        instructions: row.instructions,
-      } satisfies WorkspaceSkill,
-    ]),
-  );
+  const byId = new Map(rows.map((row) => [row.id, row]));
   const resolvedSkills = unique.map((mention) => {
     const skill = byId.get(mention.id);
-    if (!skill || !skill.instructions.trim()) {
-      throw new SkillMentionError(`Skill "@skill/${mention.id}" is unavailable or incomplete.`);
+    if (!skill) {
+      throw new SkillMentionError(`Skill "@skill/${mention.id}" is unavailable.`);
     }
     return skill;
   });
 
-  const totalBytes = skillsByteLength(resolvedSkills);
-  if (totalBytes > MAX_CHAT_SKILL_BYTES) {
+  if (skillsByteLength(resolvedSkills) > MAX_CHAT_SKILL_BYTES) {
     throw new SkillMentionError("The selected skills are too large to attach together.");
   }
   return resolvedSkills;
 }
 
 export function skillsByteLength(skills: readonly WorkspaceSkill[]): number {
-  return skills.reduce(
-    (total, skill) => total + Buffer.byteLength(serializeBrainSkillMarkdown(skill), "utf8"),
-    0,
-  );
+  return skills.reduce((total, skill) => total + Buffer.byteLength(skill.instructions, "utf8"), 0);
 }
 
 export async function activateAndListChatSessionSkills(input: {
   chatSessionId: string;
   activatedMessageId: string;
-  // Provenance for the immutable snapshot (stored in the `brain_ref` column,
-  // which predates the Brain extraction). Skills are now workspace-scoped, so
-  // this is the workspace id.
   workspaceRef: string;
   skills: WorkspaceSkill[];
   db?: Db;
@@ -286,8 +179,6 @@ export async function activateAndListChatSessionSkills(input: {
           instructions: skill.instructions,
         })),
       )
-      // A skill is an immutable session snapshot. Re-mentioning it keeps the version and original
-      // activation point already in this chat; start a new chat to pick up a newer revision.
       .onConflictDoNothing({
         target: [chatSessionSkills.chatSessionId, chatSessionSkills.skillId],
       });
@@ -307,6 +198,78 @@ export async function activateAndListChatSessionSkills(input: {
     .from(chatSessionSkills)
     .where(eq(chatSessionSkills.chatSessionId, input.chatSessionId))
     .orderBy(asc(chatSessionSkills.createdAt), asc(chatSessionSkills.skillId));
+}
+
+export async function readChatSkillFile(input: {
+  workspaceId: string;
+  chatSessionId: string;
+  skill: string;
+  path: string;
+  offset?: number;
+  maxBytes?: number;
+  db?: Db;
+}): Promise<SkillFileChunk> {
+  try {
+    assertSafeRelativePath(input.path);
+  } catch (error) {
+    throw new SkillMentionError(
+      error instanceof Error ? error.message : "The Skill file path is invalid.",
+    );
+  }
+  const [row] = await (input.db ?? getDb())
+    .select({
+      path: skillBundleFiles.path,
+      content: skillBundleFiles.content,
+      executable: skillBundleFiles.executable,
+      sizeBytes: skillBundleFiles.sizeBytes,
+    })
+    .from(chatSessionSkills)
+    .innerJoin(
+      skillInstallations,
+      and(
+        eq(skillInstallations.workspaceId, input.workspaceId),
+        eq(skillInstallations.name, chatSessionSkills.skillId),
+        eq(skillInstallations.enabled, true),
+        isNull(skillInstallations.archivedAt),
+      ),
+    )
+    .innerJoin(
+      skillBundles,
+      and(
+        eq(skillBundles.id, skillInstallations.bundleId),
+        eq(skillBundles.workspaceId, skillInstallations.workspaceId),
+      ),
+    )
+    .innerJoin(
+      skillBundleFiles,
+      and(eq(skillBundleFiles.bundleId, skillBundles.id), eq(skillBundleFiles.path, input.path)),
+    )
+    .where(
+      and(
+        eq(chatSessionSkills.chatSessionId, input.chatSessionId),
+        eq(chatSessionSkills.skillId, input.skill),
+        eq(chatSessionSkills.brainRef, input.workspaceId),
+        eq(skillBundles.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!row) {
+    throw new SkillMentionError(
+      `Skill file ${JSON.stringify(input.path)} is unavailable. Activate the skill first.`,
+    );
+  }
+  return createSkillFileChunk(
+    {
+      path: row.path,
+      content: new Uint8Array(row.content),
+      executable: row.executable,
+      sizeBytes: row.sizeBytes,
+    },
+    {
+      ...(input.offset !== undefined ? { offset: input.offset } : {}),
+      ...(input.maxBytes !== undefined ? { maxBytes: input.maxBytes } : {}),
+    },
+  );
 }
 
 export function attachSkillsToPrompt(prompt: string, skills: WorkspaceSkill[]): string {

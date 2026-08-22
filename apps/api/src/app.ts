@@ -34,7 +34,8 @@ import {
   type RunEvent,
   type Skill,
   type SkillImportApplicationService,
-  type SkillListItem,
+  type SkillInstallation,
+  type SkillInstallationListItem,
   type Task,
   type TaskApplicationService,
   type TaskSchedule,
@@ -1115,8 +1116,8 @@ export function createApiApp(input: CreateApiAppInput) {
     listSkills: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const skills = await input.knowledge.listSkills(actor);
-      return c.json({ data: skills.map(skillListItemDto), meta }, 200);
+      const installations = await input.skillImports.list(actor);
+      return c.json({ data: installations.map(skillInstallationListItemDto), meta }, 200);
     },
     createSkill: async (c) => {
       const actor = actorFrom(c);
@@ -1131,39 +1132,21 @@ export function createApiApp(input: CreateApiAppInput) {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);
       const preview = await input.skillImports.preview(actor, c.req.valid("json"));
-      return c.json(
-        {
-          data:
-            preview.status === "resolved"
-              ? {
-                  status: preview.status,
-                  proposedSlug: preview.proposedSlug,
-                  name: preview.name,
-                  description: preview.description,
-                  instructions: preview.instructions,
-                  extraFiles: preview.extraFiles,
-                  resolvedCommit: preview.resolvedCommit,
-                  integrity: preview.integrity,
-                }
-              : {
-                  status: preview.status,
-                  candidates: preview.candidates,
-                },
-          meta,
-        },
-        200,
-      );
+      return c.json({ data: preview, meta }, 200);
     },
     importSkill: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);
-      const result = await input.skillImports.import(actor, {
+      const result = await input.skillImports.install(actor, {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         ...c.req.valid("json"),
       });
       return c.json(
         {
-          data: { skill: skillDto(result.skill), replayed: result.idempotentReplay },
+          data: {
+            installation: skillInstallationDto(result.installation),
+            replayed: result.idempotentReplay,
+          },
           meta,
         },
         201,
@@ -1172,13 +1155,13 @@ export function createApiApp(input: CreateApiAppInput) {
     listSkillCatalog: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
-      return c.json({ data: await input.knowledge.listSkillCatalog(actor), meta }, 200);
+      return c.json({ data: await input.skillImports.listCatalog(actor), meta }, 200);
     },
     getSkill: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const skill = await input.knowledge.getSkill(actor, c.req.valid("param").slug);
-      return c.json({ data: skillDto(skill), meta }, 200);
+      const installation = await input.skillImports.inspect(actor, c.req.valid("param").slug);
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
     },
     updateSkill: async (c) => {
       const actor = actorFrom(c);
@@ -1193,9 +1176,50 @@ export function createApiApp(input: CreateApiAppInput) {
     archiveSkill: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const slug = c.req.valid("param").slug;
-      await input.knowledge.archiveSkill(actor, slug);
-      return c.json({ data: { slug }, meta }, 200);
+      const name = c.req.valid("param").slug;
+      await input.skillImports.archive(actor, name);
+      return c.json({ data: { name }, meta }, 200);
+    },
+    enableSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const installation = await input.skillImports.setEnabled(
+        actor,
+        c.req.valid("param").slug,
+        true,
+      );
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
+    },
+    disableSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const installation = await input.skillImports.setEnabled(
+        actor,
+        c.req.valid("param").slug,
+        false,
+      );
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
+    },
+    replaceSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const installation = await input.skillImports.replace(
+        actor,
+        c.req.valid("param").slug,
+        c.req.valid("json"),
+      );
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
+    },
+    readSkillFile: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const query = c.req.valid("query");
+      const chunk = await input.skillImports.readFile(actor, c.req.valid("param").slug, {
+        path: query.path,
+        ...(query.offset !== undefined ? { offset: query.offset } : {}),
+        ...(query.maxBytes !== undefined ? { maxBytes: query.maxBytes } : {}),
+      });
+      return c.json({ data: chunk, meta }, 200);
     },
     listConversations: async (c) => {
       const actor = actorFrom(c);
@@ -2890,8 +2914,29 @@ function skillDto(skill: Skill) {
   };
 }
 
-function skillListItemDto(skill: SkillListItem) {
-  return { ...skill, updatedAt: skill.updatedAt.toISOString() };
+function skillInstallationListItemDto(installation: SkillInstallationListItem) {
+  return {
+    ...installation,
+    archivedAt: installation.archivedAt?.toISOString() ?? null,
+    updatedAt: installation.updatedAt.toISOString(),
+    bundle: {
+      ...installation.bundle,
+      createdAt: installation.bundle.createdAt.toISOString(),
+    },
+  };
+}
+
+function skillInstallationDto(installation: SkillInstallation) {
+  return {
+    ...installation,
+    archivedAt: installation.archivedAt?.toISOString() ?? null,
+    createdAt: installation.createdAt.toISOString(),
+    updatedAt: installation.updatedAt.toISOString(),
+    bundle: {
+      ...installation.bundle,
+      createdAt: installation.bundle.createdAt.toISOString(),
+    },
+  };
 }
 
 function legacyTaskDto(task: LegacyTask) {

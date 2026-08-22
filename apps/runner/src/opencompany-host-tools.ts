@@ -19,6 +19,7 @@ import type {
   ChatHostToolGatewayRequest,
   ChatHostToolGatewayResponse,
 } from "@opencompany/agent-runtime";
+import { assertSafeRelativePath } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { HarnessEngine } from "@opencompany/db/product-schema";
 import { executeApiWikiCommand } from "./api-wiki-client";
@@ -150,6 +151,12 @@ export async function loadHostTools(
                   },
                 };
               }
+            },
+            readFile: (input) => {
+              assertSafeRelativePath(input.path);
+              return call("read_skill_file", input) as Promise<
+                Awaited<ReturnType<NonNullable<SkillDispatcher["readFile"]>>>
+              >;
             },
           },
         }
