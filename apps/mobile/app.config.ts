@@ -25,6 +25,23 @@ export default {
   plugins: [
     "expo-router",
     [
+      "expo-image-picker",
+      {
+        photosPermission: "Allow OpenCompany to access photos you choose to attach to messages.",
+        cameraPermission: false,
+        microphonePermission: false,
+      },
+    ],
+    [
+      "expo-camera",
+      {
+        cameraPermission: "Allow OpenCompany to use your camera to attach photos to messages.",
+        microphonePermission: false,
+        recordAudioAndroid: false,
+        barcodeScannerEnabled: false,
+      },
+    ],
+    [
       "expo-build-properties",
       {
         ios: {

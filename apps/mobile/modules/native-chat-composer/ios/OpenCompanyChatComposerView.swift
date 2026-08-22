@@ -26,6 +26,7 @@ final class OpenCompanyChatComposerViewProps: ExpoSwiftUI.ViewProps {
   @Field var bottomInset: Double = 0
   @Field var accentColor: Color = .blue
   @Field var accentForegroundColor: Color = .white
+  @Field var hasAttachments = false
 
   let onSend = EventDispatcher()
   let onAttachmentPress = EventDispatcher()
@@ -56,6 +57,7 @@ struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
   @State private var singleLineHeight: CGFloat?
   @State private var measuredCollapsedContentHeight: CGFloat?
   @State private var measuredExpandedContentHeight: CGFloat?
+  @State private var attachmentContentHeight: CGFloat = 0
 
   var body: some View {
     composer
@@ -85,29 +87,25 @@ struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
   }
 
   private var composer: some View {
-    ZStack(alignment: .bottom) {
-      actionRow
-        .zIndex(2)
+    VStack(spacing: 0) {
+      Children()
+        .frame(maxWidth: .infinity)
+        .onGeometryChange(
+          for: CGFloat.self,
+          of: { geometry in
+            geometry.size.height
+          },
+          action: { height in
+            attachmentContentHeight = height
+          }
+        )
 
-      TextField("Ask opencompany", text: textBinding, axis: .vertical)
-        .textFieldStyle(.plain)
-        .font(.system(size: ComposerMetrics.fontSize))
-        .lineLimit(1...5)
-        .fixedSize(horizontal: false, vertical: true)
-        .focused($isInputFocused)
-        .tint(props.accentColor)
-        .accessibilityLabel("Message")
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: displayedInputHeight, alignment: .top)
-        .clipped()
-        .padding(.horizontal, isExpanded ? 0 : ComposerMetrics.textControlInset)
-        .padding(.bottom, textBottomInset)
-        .zIndex(1)
+      inputArea
     }
     .padding(.horizontal, ComposerMetrics.contentHorizontalPadding)
     .padding(
       .vertical,
-      isExpanded
+      isComposerExpanded
         ? ComposerMetrics.expandedVerticalPadding
         : ComposerMetrics.collapsedVerticalPadding
     )
@@ -115,7 +113,7 @@ struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
     .glassEffect(
       .regular.interactive(),
       in: RoundedRectangle(
-        cornerRadius: isExpanded
+        cornerRadius: isComposerExpanded
           ? ComposerMetrics.expandedCornerRadius
           : ComposerMetrics.minimumHeight / 2,
         style: .continuous
@@ -163,6 +161,30 @@ struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
     )
     .animation(.smooth(duration: 0.18), value: isExpanded)
     .animation(.smooth(duration: 0.18), value: displayedInputHeight)
+    .animation(.smooth(duration: 0.22), value: props.hasAttachments)
+    .animation(.smooth(duration: 0.22), value: attachmentContentHeight)
+  }
+
+  private var inputArea: some View {
+    ZStack(alignment: .bottom) {
+      actionRow
+        .zIndex(2)
+
+      TextField("Ask opencompany", text: textBinding, axis: .vertical)
+        .textFieldStyle(.plain)
+        .font(.system(size: ComposerMetrics.fontSize))
+        .lineLimit(1...5)
+        .fixedSize(horizontal: false, vertical: true)
+        .focused($isInputFocused)
+        .tint(props.accentColor)
+        .accessibilityLabel("Message")
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: displayedInputHeight, alignment: .top)
+        .clipped()
+        .padding(.horizontal, isExpanded ? 0 : ComposerMetrics.textControlInset)
+        .padding(.bottom, textBottomInset)
+        .zIndex(1)
+    }
   }
 
   private var actionRow: some View {
@@ -215,13 +237,17 @@ struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
   }
 
   private var horizontalInset: CGFloat {
-    if isExpanded {
+    if isComposerExpanded {
       return ComposerMetrics.openHorizontalInset
     }
 
     return isKeyboardVisible
       ? ComposerMetrics.openHorizontalInset
       : ComposerMetrics.closedHorizontalInset
+  }
+
+  private var isComposerExpanded: Bool {
+    isExpanded || props.hasAttachments
   }
 
   private var displayedInputHeight: CGFloat {

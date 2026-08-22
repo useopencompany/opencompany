@@ -1,3 +1,4 @@
+import type { ReactElement } from "react";
 import type { NativeSyntheticEvent, ViewProps } from "react-native";
 
 interface ValueEvent {
@@ -17,6 +18,8 @@ export interface NativeChatComposerViewProps extends ViewProps {
   accentForegroundColor: string;
   bottomInset: number;
   disabled: boolean;
+  hasAttachments: boolean;
+  children?: ReactElement;
   onAttachmentPress?: () => void;
   onComposerHeightChange?: (event: NativeSyntheticEvent<HeightEvent>) => void;
   onFocusChange?: (event: NativeSyntheticEvent<FocusEvent>) => void;
