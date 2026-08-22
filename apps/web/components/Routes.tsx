@@ -4,18 +4,20 @@ import type {
   LegacyTaskHistoryDto,
   LegacyTaskHistoryEventDto,
   LegacyTaskHistoryMessageDto,
-  SkillDto,
+  SkillBundleFileMetadataDto,
   SkillImportCandidateDto,
+  SkillImportFileMetadataDto,
+  SkillInstallationDto,
+  SkillListItemDto,
+  SkillSourceDto,
 } from "@opencompany/protocol";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
-  AlertTriangle,
   Archive,
   ArrowLeft,
   BookOpen,
   CalendarClock,
-  Check,
   CircleUserRound,
   ExternalLink,
   Link2,
@@ -49,7 +51,6 @@ import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { IMessageIntegrationSetup } from "@/components/IMessageIntegrationSetup";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
-import { MarkdownBrainEditor } from "@/components/MarkdownBrainEditor";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsContent } from "@/components/SettingsChrome";
@@ -65,10 +66,11 @@ import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
 import type { WorkflowListItem } from "@/lib/headless-automation-types";
 import {
   archiveHeadlessSkill,
-  createHeadlessSkill,
+  disableHeadlessSkill,
+  enableHeadlessSkill,
   importHeadlessSkill,
   previewHeadlessSkillImport,
-  updateHeadlessSkill,
+  replaceHeadlessSkill,
 } from "@/lib/headless-knowledge-commands";
 import type { BrainOverviewStats, BrainSnapshot } from "@/lib/headless-knowledge-types";
 import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-collections";
@@ -76,7 +78,6 @@ import { getHeadlessTask, getLegacyTaskCompatibilityHistory } from "@/lib/headle
 import type { IntegrationState } from "@/lib/integration-state";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
-import type { SkillListItem, SkillSource } from "@/lib/skills";
 import { buildHarnessRun, type HarnessRunViewModel } from "@/lib/task-harness-run";
 import {
   updateAutoModelRoutingAction,
@@ -974,35 +975,26 @@ export function SkillsSettingsRoute({
   skills,
   canEdit,
 }: {
-  skills: SkillListItem[];
+  skills: SkillListItemDto[];
   canEdit: boolean;
 }) {
   const router = useRouter();
-  const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
 
   return (
     <SettingsContent
       title="Skills"
-      description="Reusable capabilities the agent applies when you attach them with @skill in chat."
+      description="Immutable Agent Skill bundles installed from GitHub or skills.sh."
     >
       {canEdit ? (
         <div className="-mt-2 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <Plus size={14} strokeWidth={2} />
-            New skill
-          </button>
           <button
             type="button"
             onClick={() => setImporting(true)}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             <Link2 size={14} strokeWidth={2} />
-            Import from a link
+            Import skill
           </button>
         </div>
       ) : null}
@@ -1013,60 +1005,48 @@ export function SkillsSettingsRoute({
           title="No skills yet"
           description={
             canEdit
-              ? "Create a skill to give the agent a reusable capability. Attach it with @skill in chat."
-              : "Skills are reusable capabilities your workspace admins set up. Attach one with @skill in chat."
+              ? "Import a standard Agent Skill from a public GitHub or skills.sh source."
+              : "Workspace admins can install standard Agent Skills from public sources."
           }
         />
       ) : (
         <ul className="flex flex-col gap-2">
           {skills.map((skill) => (
-            <li key={skill.slug}>
+            <li key={skill.id}>
               <SkillListRow skill={skill} />
             </li>
           ))}
         </ul>
       )}
 
-      {creating ? (
-        <NewItemDialog
-          title="New skill"
-          namePlaceholder="Draft a customer reply"
-          descriptionPlaceholder="What this skill does"
-          submitLabel="Create skill"
-          create={createSkill}
-          onClose={() => setCreating(false)}
-          onCreated={(slug) => router.push(`/settings/skills/${encodeURIComponent(slug)}`)}
-        />
-      ) : null}
-
       {importing ? (
         <ImportSkillDialog
           onClose={() => setImporting(false)}
-          onImported={(slug) => router.push(`/settings/skills/${encodeURIComponent(slug)}`)}
+          onInstalled={(name) => router.push(`/settings/skills/${encodeURIComponent(name)}`)}
         />
       ) : null}
     </SettingsContent>
   );
 }
 
-function SkillListRow({ skill }: { skill: SkillListItem }) {
+function SkillListRow({ skill }: { skill: SkillListItemDto }) {
   return (
     <Link
-      href={`/settings/skills/${encodeURIComponent(skill.slug)}`}
+      href={`/settings/skills/${encodeURIComponent(skill.name)}`}
       prefetch
       className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
           <span className="truncate text-[14px] font-medium leading-tight text-ink">
-            {skill.name}
+            {skill.bundle.name}
           </span>
-          <ItemStatusBadge status={skill.status} />
-          {skill.source ? <ImportedBadge /> : null}
+          <InstallationStatusBadge enabled={skill.enabled} />
+          <ImportedBadge />
         </span>
-        {skill.description.trim() ? (
+        {skill.bundle.description.trim() ? (
           <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
-            {skill.description}
+            {skill.bundle.description}
           </span>
         ) : null}
       </span>
@@ -1077,42 +1057,25 @@ function SkillListRow({ skill }: { skill: SkillListItem }) {
   );
 }
 
-export function SkillEditorRoute({
-  skill,
-  initialStatus,
+export function SkillBundleRoute({
+  installation,
   canEdit,
-  source,
 }: {
-  skill: Pick<SkillDto, "slug" | "name" | "description" | "instructions">;
-  initialStatus: "draft" | "active";
+  installation: SkillInstallationDto;
   canEdit: boolean;
-  source: SkillSource | null;
 }) {
   const router = useRouter();
-  const [name, setName] = useState(skill.name);
-  const [description, setDescription] = useState(skill.description);
-  const [instructions, setInstructions] = useState(skill.instructions);
-  const [status, setStatus] = useState<"draft" | "active">(initialStatus);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [isSaving, startSaving] = useTransition();
-  const [isArchiving, startArchiving] = useTransition();
-  // Imported skills are read-only regardless of admin status — the content lives at the
-  // source; edit there and re-import. Only Archive stays available.
-  const isReadOnly = source !== null;
-  const canEditFields = canEdit && !isReadOnly;
+  const [replacing, setReplacing] = useState(false);
+  const [isMutating, startMutation] = useTransition();
+  const bundle = installation.bundle;
 
-  const markDirty = () => {
-    if (saved) setSaved(false);
-    if (error) setError(null);
-  };
-
-  const save = () => {
+  const setEnabled = (enabled: boolean) => {
     setError(null);
-    startSaving(async () => {
+    startMutation(async () => {
       try {
-        await updateHeadlessSkill(skill.slug, { name, description, instructions, status });
-        setSaved(true);
+        if (enabled) await enableHeadlessSkill(installation.name);
+        else await disableHeadlessSkill(installation.name);
         router.refresh();
       } catch (cause) {
         setError(errorMessage(cause));
@@ -1122,9 +1085,9 @@ export function SkillEditorRoute({
 
   const archive = () => {
     setError(null);
-    startArchiving(async () => {
+    startMutation(async () => {
       try {
-        await archiveHeadlessSkill(skill.slug);
+        await archiveHeadlessSkill(installation.name);
         router.push("/settings/skills");
       } catch (cause) {
         setError(errorMessage(cause));
@@ -1134,90 +1097,108 @@ export function SkillEditorRoute({
 
   return (
     <SettingsContent
-      title={name.trim() || "Untitled skill"}
-      description={`Attach this skill with @skill/${skill.slug} in chat.`}
+      title={bundle.name}
+      description={`Attach this immutable bundle with @skill/${installation.name} in chat.`}
       backLink={{ href: "/settings/skills", label: "Skills" }}
     >
-      {isReadOnly ? (
-        <SkillSourceNotice source={source} />
-      ) : canEdit ? null : (
+      <SkillSourceNotice source={bundle.source} />
+      {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
-          Only workspace admins can edit skills.
+          Only workspace admins can manage skill installations.
         </p>
-      )}
+      ) : null}
 
       <div className="flex flex-col gap-5">
-        <EditorField label="Name">
-          <input
-            value={name}
-            disabled={!canEditFields}
-            onChange={(event) => {
-              setName(event.target.value);
-              markDirty();
-            }}
-            className={EDITOR_INPUT_CLASS}
-          />
+        <EditorField label="Status">
+          <div className="flex items-center gap-2">
+            <InstallationStatusBadge enabled={installation.enabled} />
+            <span className="font-mono text-[11.5px] text-ink-subtle">{bundle.integrity}</span>
+          </div>
         </EditorField>
 
         <EditorField label="Description">
-          <input
-            value={description}
-            disabled={!canEditFields}
-            onChange={(event) => {
-              setDescription(event.target.value);
-              markDirty();
-            }}
-            placeholder="What this skill does"
-            className={EDITOR_INPUT_CLASS}
-          />
-        </EditorField>
-
-        <EditorField label="Status">
-          <WorkflowSkillStatusToggle
-            value={status}
-            disabled={!canEditFields}
-            onChange={(next) => {
-              setStatus(next);
-              markDirty();
-            }}
-          />
+          <div className="rounded-lg border border-border bg-surface px-3 py-2.5 text-[13px] leading-5 text-ink">
+            {bundle.description}
+          </div>
         </EditorField>
 
         <EditorField label="Instructions">
-          <div
-            className={`rounded-lg border border-border bg-surface px-3 py-2.5 transition-colors focus-within:ring-1 focus-within:ring-ink/20 ${!canEditFields ? "opacity-70" : ""}`}
-          >
-            <MarkdownBrainEditor
-              content={instructions}
-              onChange={(value) => {
-                setInstructions(value);
-                markDirty();
-              }}
-              readOnly={!canEditFields}
-              compact
-              placeholder="Describe the capability this skill gives the agent."
-            />
+          <div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-canvas px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink">
+            {bundle.body || <span className="text-ink-subtle">No Markdown body.</span>}
           </div>
+        </EditorField>
+
+        <EditorField label={`Bundle files (${bundle.files.length})`}>
+          <ul className="overflow-hidden rounded-lg border border-border bg-surface">
+            {bundle.files.map((file: SkillBundleFileMetadataDto) => (
+              <li
+                key={file.path}
+                className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
+              >
+                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">
+                  {file.path}
+                </span>
+                {file.executable ? (
+                  <span className="text-[11px] text-ink-subtle">executable</span>
+                ) : null}
+                <span className="shrink-0 text-[11.5px] text-ink-subtle">
+                  {formatBytes(file.sizeBytes)}
+                </span>
+              </li>
+            ))}
+          </ul>
         </EditorField>
       </div>
 
       {error ? <div className="text-[12.5px] leading-5 text-warning">{error}</div> : null}
 
       {canEdit ? (
-        <EditorActions
-          onSave={save}
-          onArchive={archive}
-          isSaving={isSaving}
-          isArchiving={isArchiving}
-          saved={saved}
-          showSave={!isReadOnly}
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
+          <button
+            type="button"
+            disabled={isMutating}
+            onClick={() => setEnabled(!installation.enabled)}
+            className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-60"
+          >
+            {installation.enabled ? "Disable" : "Enable"}
+          </button>
+          <button
+            type="button"
+            disabled={isMutating}
+            onClick={() => setReplacing(true)}
+            className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-60"
+          >
+            Replace bundle
+          </button>
+          <button
+            type="button"
+            disabled={isMutating}
+            onClick={archive}
+            className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+          >
+            {isMutating ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+            Archive
+          </button>
+        </div>
+      ) : null}
+
+      {replacing ? (
+        <ImportSkillDialog
+          replaceName={installation.name}
+          initialUrl={skillSourceInput(bundle.source, bundle.name)}
+          initialSelectedPath={bundle.source.path}
+          onClose={() => setReplacing(false)}
+          onInstalled={() => {
+            setReplacing(false);
+            router.refresh();
+          }}
         />
       ) : null}
     </SettingsContent>
   );
 }
 
-function SkillSourceNotice({ source }: { source: SkillSource }) {
+function SkillSourceNotice({ source }: { source: SkillSourceDto }) {
   const shortCommit = source.resolvedCommit ? source.resolvedCommit.slice(0, 7) : null;
   return (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
@@ -1233,10 +1214,29 @@ function SkillSourceNotice({ source }: { source: SkillSource }) {
           {source.url.replace(/^https:\/\//, "")}
           <ExternalLink size={11} strokeWidth={2} />
         </a>
-        {shortCommit ? ` · ${shortCommit}` : ""}. Remove and re-import if the source changed.
+        {shortCommit ? ` · ${shortCommit}` : ""}. Bundles are immutable; replace the installation to
+        pick up source changes.
       </span>
     </div>
   );
+}
+
+function InstallationStatusBadge({ enabled }: { enabled: boolean }) {
+  return enabled ? (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/10 px-1.5 py-px text-[10.5px] font-medium leading-4 text-success">
+      <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-success" />
+      Enabled
+    </span>
+  ) : (
+    <span className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
+      Disabled
+    </span>
+  );
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
 }
 
 // --- Shared authoring UI -----------------------------------------------------
@@ -1251,100 +1251,6 @@ function EditorField({ label, children }: { label: string; children: ReactNode }
         {label}
       </span>
       {children}
-    </div>
-  );
-}
-
-function EditorActions({
-  onSave,
-  onArchive,
-  isSaving,
-  isArchiving,
-  saved,
-  showSave = true,
-}: {
-  onSave: () => void;
-  onArchive: () => void;
-  isSaving: boolean;
-  isArchiving: boolean;
-  saved: boolean;
-  showSave?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      {showSave ? (
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={isSaving}
-          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-ink bg-ink px-4 text-[13px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isSaving ? <Loader2 size={14} strokeWidth={2} className="animate-spin" /> : null}
-          Save
-        </button>
-      ) : null}
-      {showSave && saved && !isSaving ? (
-        <span className="inline-flex items-center gap-1 text-[12.5px] font-medium text-success">
-          <Check size={13} strokeWidth={2} />
-          Saved
-        </span>
-      ) : null}
-      <button
-        type="button"
-        onClick={onArchive}
-        disabled={isArchiving}
-        className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {isArchiving ? (
-          <Loader2 size={14} strokeWidth={2} className="animate-spin" />
-        ) : (
-          <Archive size={14} strokeWidth={1.9} />
-        )}
-        Archive
-      </button>
-    </div>
-  );
-}
-
-function WorkflowSkillStatusToggle({
-  value,
-  onChange,
-  disabled = false,
-}: {
-  value: "draft" | "active";
-  onChange: (next: "draft" | "active") => void;
-  disabled?: boolean;
-}) {
-  const options: Array<{ value: "draft" | "active"; label: string }> = [
-    { value: "draft", label: "Draft" },
-    { value: "active", label: "Active" },
-  ];
-  return (
-    <div
-      className="inline-flex w-fit rounded-lg border border-border bg-surface p-1"
-      role="radiogroup"
-      aria-label="Status"
-    >
-      {options.map((option) => {
-        const selected = value === option.value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            disabled={disabled}
-            onClick={() => onChange(option.value)}
-            className={`inline-flex h-7 items-center rounded-md px-3 text-[12.5px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-70 ${
-              selected
-                ? "bg-surface-active text-ink shadow-[0_1px_1px_rgba(15,15,15,0.05)]"
-                : "text-ink-muted hover:bg-surface-hover hover:text-ink"
-            }`}
-          >
-            {option.label}
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -1533,15 +1439,6 @@ function NewItemDialog({
   );
 }
 
-async function createSkill(input: { name: string; description?: string }) {
-  try {
-    const skill = await createHeadlessSkill(input);
-    return { ok: true as const, slug: skill.slug };
-  } catch (cause) {
-    return { ok: false as const, message: errorMessage(cause) };
-  }
-}
-
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Something went wrong.";
 }
@@ -1549,21 +1446,27 @@ function errorMessage(error: unknown) {
 type ImportPreviewState = {
   name: string;
   description: string;
-  instructions: string;
-  extraFiles: string[];
+  files: SkillImportFileMetadataDto[];
+  totalBytes: number;
   resolvedCommit: string;
   integrity: string;
 };
 
 function ImportSkillDialog({
   onClose,
-  onImported,
+  onInstalled,
+  replaceName,
+  initialUrl = "",
+  initialSelectedPath,
 }: {
   onClose: () => void;
-  onImported: (slug: string) => void;
+  onInstalled: (name: string) => void;
+  replaceName?: string;
+  initialUrl?: string;
+  initialSelectedPath?: string;
 }) {
-  const [url, setUrl] = useState("");
-  const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined);
+  const [url, setUrl] = useState(initialUrl);
+  const [selectedPath, setSelectedPath] = useState<string | undefined>(initialSelectedPath);
   const [candidates, setCandidates] = useState<SkillImportCandidateDto[] | null>(null);
   const [preview, setPreview] = useState<ImportPreviewState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1596,13 +1499,21 @@ function ImportSkillDialog({
           setPreview(null);
           return;
         }
+        if (replaceName && result.name !== replaceName) {
+          setError(
+            `Replacement skill name must remain ${replaceName}. Artifacts are never renamed.`,
+          );
+          setCandidates(null);
+          setPreview(null);
+          return;
+        }
         setCandidates(null);
         setPreview({
           name: result.name,
           description: result.description,
-          instructions: result.instructions,
-          extraFiles: result.extraFiles,
-          resolvedCommit: result.resolvedCommit,
+          files: result.files,
+          totalBytes: result.totalBytes,
+          resolvedCommit: result.source.resolvedCommit,
           integrity: result.integrity,
         });
       } catch (cause) {
@@ -1613,20 +1524,26 @@ function ImportSkillDialog({
     });
   };
 
-  const confirmImport = () => {
+  const confirmInstall = () => {
     const trimmed = url.trim();
     if (!trimmed || !preview) return;
     const confirmedPreview = preview;
     setError(null);
     startImporting(async () => {
       try {
-        const result = await importHeadlessSkill({
+        const command = {
           url: trimmed,
           ...(selectedPath !== undefined ? { selectedPath } : {}),
           expectedResolvedCommit: confirmedPreview.resolvedCommit,
           expectedIntegrity: confirmedPreview.integrity,
-        });
-        onImported(result.skill.slug);
+        };
+        if (replaceName) {
+          const result = await replaceHeadlessSkill(replaceName, command);
+          onInstalled(result.name);
+        } else {
+          const result = await importHeadlessSkill(command);
+          onInstalled(result.installation.name);
+        }
       } catch (cause) {
         setError(errorMessage(cause));
       }
@@ -1646,13 +1563,15 @@ function ImportSkillDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Import a skill"
+        aria-label={replaceName ? "Replace a skill" : "Import a skill"}
         className="shadow-ring-xl relative flex max-h-[85vh] w-full max-w-[560px] flex-col overflow-hidden rounded-xl bg-surface p-5"
       >
-        <h2 className="text-[15px] font-semibold leading-tight text-ink">Import a skill</h2>
+        <h2 className="text-[15px] font-semibold leading-tight text-ink">
+          {replaceName ? "Replace skill bundle" : "Import a skill"}
+        </h2>
         <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
-          Paste a public GitHub or skills.sh URL pointing at a SKILL.md. It&apos;s imported
-          read-only — remove and re-import if the source changes.
+          Preview a public GitHub or skills.sh source, then install the exact resolved commit and
+          integrity. Preview never returns file contents.
         </p>
 
         <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
@@ -1674,7 +1593,7 @@ function ImportSkillDialog({
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     event.preventDefault();
-                    resolve();
+                    resolve(selectedPath);
                   }
                 }}
                 placeholder="github.com/owner/repo"
@@ -1682,7 +1601,7 @@ function ImportSkillDialog({
               />
               <button
                 type="button"
-                onClick={() => resolve()}
+                onClick={() => resolve(selectedPath)}
                 disabled={pending}
                 className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -1742,21 +1661,26 @@ function ImportSkillDialog({
                   </div>
                 </EditorField>
               ) : null}
-              <EditorField label="Instructions">
-                <div className="max-h-[220px] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-canvas px-3 py-2.5 text-[13px] leading-5 text-ink opacity-70">
-                  {preview.instructions}
-                </div>
+              <EditorField label={`Bundle files (${preview.files.length})`}>
+                <ul className="max-h-[220px] overflow-y-auto rounded-lg border border-border bg-canvas">
+                  {preview.files.map((file) => (
+                    <li
+                      key={file.path}
+                      className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-b-0"
+                    >
+                      <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">
+                        {file.path}
+                      </span>
+                      <span className="text-[11.5px] text-ink-subtle">
+                        {formatBytes(file.sizeBytes)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </EditorField>
-              {preview.extraFiles.length > 0 ? (
-                <div className="flex items-start gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
-                  <AlertTriangle size={14} strokeWidth={2} className="mt-0.5 shrink-0" />
-                  <span>
-                    This skill also includes {preview.extraFiles.length} supporting file
-                    {preview.extraFiles.length === 1 ? "" : "s"} ({preview.extraFiles.join(", ")})
-                    that won&apos;t be imported — opencompany skills are instructions-only for now.
-                  </span>
-                </div>
-              ) : null}
+              <p className="text-[11.5px] text-ink-subtle">
+                {formatBytes(preview.totalBytes)} total · {preview.integrity}
+              </p>
             </div>
           ) : null}
         </div>
@@ -1772,18 +1696,27 @@ function ImportSkillDialog({
           {preview ? (
             <button
               type="button"
-              onClick={confirmImport}
+              onClick={confirmInstall}
               disabled={pending}
               className="inline-flex h-8 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-[13px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isImporting ? <Loader2 size={13} strokeWidth={2} className="animate-spin" /> : null}
-              Import skill
+              {replaceName ? "Replace bundle" : "Install skill"}
             </button>
           ) : null}
         </div>
       </div>
     </div>
   );
+}
+
+function skillSourceInput(source: SkillSourceDto, name: string) {
+  const refSuffix = source.ref ? `#${source.ref}` : "";
+  if (source.type === "skills.sh") {
+    const repository = source.url.replace(/^https:\/\/github\.com\//u, "");
+    return `https://skills.sh/${repository}/${name}${refSuffix}`;
+  }
+  return `${source.url}${refSuffix}`;
 }
 
 export function formatRelativeTime(value: Date | string) {

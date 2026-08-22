@@ -12,9 +12,11 @@ import {
   KnowledgeApplicationService,
   type KnowledgeRepository,
   type Skill,
+  type SkillBundleRepository,
   SkillImportApplicationService,
-  type SkillImportRepository,
   type SkillImportResolver,
+  type SkillInstallation,
+  type SkillInstallationListItem,
   type Task,
   TaskApplicationService,
   type TaskRepository,
@@ -353,7 +355,10 @@ describe("canonical Hono API", () => {
       listSkillCatalog,
       listBrainSourceItems,
     });
-    const app = testApp(fakeRepository(), { knowledge });
+    const app = testApp(fakeRepository(), {
+      knowledge,
+      skillImports: fakeSkillImportService({ listCatalog: listSkillCatalog }),
+    });
 
     const brain = await app.request("/v1/brains/brain_1");
     expect(brain.status).toBe(200);
@@ -453,40 +458,37 @@ describe("canonical Hono API", () => {
     expect(listSkillCatalog).toHaveBeenCalledWith({ actor });
   });
 
-  it("previews and idempotently imports an external Skill through the API boundary", async () => {
+  it("previews metadata only and installs an immutable Skill through the API boundary", async () => {
     const resolvedCommit = "a".repeat(40);
     const integrity = `sha256:${"b".repeat(64)}`;
     const source = {
       type: "github" as const,
       url: "https://github.com/o/r",
       ref: "main",
-      path: "",
+      path: "imported-skill",
+      resolvedCommit,
+    };
+    const fileContent = new TextEncoder().encode("private bundle bytes");
+    const bundle = {
+      name: "imported-skill",
+      description: "Imported instructions.",
+      body: "Use this when imported.",
+      source,
+      integrity,
+      files: [{ path: "SKILL.md", content: fileContent, executable: false }],
+      fileCount: 1,
+      totalBytes: fileContent.length,
     };
     const resolve = vi.fn(async () => ({
       status: "resolved" as const,
-      proposedSlug: "imported-skill",
-      name: "Imported skill",
-      description: "Imported instructions.",
-      instructions: "Use this when imported.",
-      source,
-      resolvedCommit,
-      integrity,
-      extraFiles: ["references/notes.md"],
+      bundle,
     }));
-    const importSkill = vi.fn(async () => ({
-      skill: fakeSkill({
-        id: "skill_imported",
-        slug: "imported-skill",
-        name: "Imported skill",
-        description: "Imported instructions.",
-        instructions: "Use this when imported.",
-        status: "active" as const,
-        source: { ...source, resolvedCommit },
-      }),
+    const install = vi.fn(async () => ({
+      installation: fakeSkillInstallation(),
       idempotentReplay: false,
     }));
     const app = testApp(fakeRepository(), {
-      skillImports: fakeSkillImportService({ importSkill }, { resolve }),
+      skillImports: fakeSkillImportService({ install }, { resolve }),
     });
 
     const preview = await app.request("/v1/skills/imports/preview", {
@@ -495,16 +497,20 @@ describe("canonical Hono API", () => {
       body: JSON.stringify({ url: "github.com/o/r" }),
     });
     expect(preview.status).toBe(200);
-    await expect(preview.json()).resolves.toMatchObject({
+    const previewBody = await preview.json();
+    expect(previewBody).toMatchObject({
       data: {
         status: "resolved",
-        proposedSlug: "imported-skill",
-        instructions: "Use this when imported.",
-        resolvedCommit,
+        name: "imported-skill",
+        files: [{ path: "SKILL.md", sizeBytes: fileContent.length }],
+        source: { resolvedCommit },
         integrity,
       },
       meta: { apiVersion: "v1" },
     });
+    expect(JSON.stringify(previewBody)).not.toContain("private bundle bytes");
+    expect(previewBody.data).not.toHaveProperty("body");
+    expect(Object.keys(previewBody.data.files[0]).sort()).toEqual(["path", "sizeBytes"]);
 
     const imported = await app.request("/v1/skills/imports", {
       method: "POST",
@@ -520,17 +526,103 @@ describe("canonical Hono API", () => {
     });
     expect(imported.status).toBe(201);
     await expect(imported.json()).resolves.toMatchObject({
-      data: { skill: { slug: "imported-skill" }, replayed: false },
+      data: { installation: { name: "imported-skill" }, replayed: false },
     });
-    expect(importSkill).toHaveBeenCalledWith(
+    expect(install).toHaveBeenCalledWith(
       expect.objectContaining({
         actor,
         idempotencyKey: "skill-import-1",
-        source,
-        resolvedCommit,
-        integrity,
+        bundle,
       }),
     );
+  });
+
+  it("lists, inspects, reads, replaces, disables, and archives Skill installations", async () => {
+    const installation = fakeSkillInstallation();
+    const { createdAt: _createdAt, bundle, ...installationFields } = installation;
+    const { body: _body, files: _files, ...bundleSummary } = bundle;
+    const listItem: SkillInstallationListItem = {
+      ...installationFields,
+      bundle: bundleSummary,
+    };
+    const list = vi.fn(async () => [listItem]);
+    const get = vi.fn(async () => installation);
+    const readFile = vi.fn(async () => ({
+      path: "references/data.bin",
+      content: Uint8Array.of(0, 255, 1, 2),
+      executable: false,
+      sizeBytes: 4,
+    }));
+    const setEnabled = vi.fn(async () => ({ ...installation, enabled: false }));
+    const replace = vi.fn(async () => installation);
+    const archive = vi.fn(async () => undefined);
+    const resolvedBundle = {
+      name: installation.name,
+      description: bundle.description,
+      body: bundle.body,
+      source: bundle.source,
+      integrity: bundle.integrity,
+      files: [
+        {
+          path: "SKILL.md",
+          content: new TextEncoder().encode("private bytes"),
+          executable: false,
+        },
+      ],
+      fileCount: 1,
+      totalBytes: 13,
+    };
+    const app = testApp(fakeRepository(), {
+      skillImports: fakeSkillImportService(
+        { list, get, readFile, setEnabled, replace, archive },
+        { resolve: vi.fn(async () => ({ status: "resolved" as const, bundle: resolvedBundle })) },
+      ),
+    });
+
+    const listResponse = await app.request("/v1/skills");
+    await expect(listResponse.json()).resolves.toMatchObject({
+      data: [{ name: "imported-skill", bundle: { integrity: bundle.integrity } }],
+    });
+    const inspectResponse = await app.request("/v1/skills/imported-skill");
+    await expect(inspectResponse.json()).resolves.toMatchObject({
+      data: { bundle: { body: bundle.body, files: bundle.files } },
+    });
+    const readResponse = await app.request(
+      "/v1/skills/imported-skill/files/read?path=references%2Fdata.bin&maxBytes=4",
+    );
+    await expect(readResponse.json()).resolves.toMatchObject({
+      data: { encoding: "base64", content: Buffer.from([0, 255, 1, 2]).toString("base64") },
+    });
+    await expect(
+      app.request("/v1/skills/imported-skill/disable", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/skills/imported-skill/replace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: bundle.source.url,
+          expectedResolvedCommit: bundle.source.resolvedCommit,
+          expectedIntegrity: bundle.integrity,
+        }),
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/skills/imported-skill/archive", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+
+    expect(readFile).toHaveBeenCalledWith({
+      actor,
+      name: "imported-skill",
+      path: "references/data.bin",
+    });
+    expect(setEnabled).toHaveBeenCalledWith({ actor, name: "imported-skill", enabled: false });
+    expect(replace).toHaveBeenCalledWith({
+      actor,
+      name: "imported-skill",
+      bundle: resolvedBundle,
+    });
+    expect(archive).toHaveBeenCalledWith({ actor, name: "imported-skill" });
   });
 
   it("serves and mutates Brain sources through the authenticated provider boundary", async () => {
@@ -4224,13 +4316,21 @@ function fakeWikiCommandsService(overrides: Partial<WikiCommandRepository> = {})
 }
 
 function fakeSkillImportService(
-  repositoryOverrides: Partial<SkillImportRepository> = {},
+  repositoryOverrides: Partial<SkillBundleRepository> = {},
   resolverOverrides: Partial<SkillImportResolver> = {},
 ) {
-  const repository: SkillImportRepository = {
-    importSkill: async () => {
-      throw new Error("Unexpected Skill import.");
-    },
+  const unexpected = async (): Promise<never> => {
+    throw new Error("Unexpected Skill installation operation.");
+  };
+  const repository: SkillBundleRepository = {
+    install: unexpected,
+    replace: unexpected,
+    list: unexpected,
+    listCatalog: unexpected,
+    get: unexpected,
+    readFile: unexpected,
+    setEnabled: unexpected,
+    archive: unexpected,
     ...repositoryOverrides,
   };
   const resolver: SkillImportResolver = {
@@ -4322,6 +4422,37 @@ function baseSkill(): Skill {
     source: null,
     createdAt,
     updatedAt: createdAt,
+  };
+}
+
+function fakeSkillInstallation(): SkillInstallation {
+  return {
+    id: "skill_installation_1",
+    name: "imported-skill",
+    enabled: true,
+    archivedAt: null,
+    createdAt,
+    updatedAt: createdAt,
+    bundle: {
+      id: "skill_bundle_1",
+      integrity: `sha256:${"b".repeat(64)}`,
+      name: "imported-skill",
+      description: "Imported instructions.",
+      license: null,
+      compatibility: null,
+      metadata: null,
+      allowedTools: null,
+      body: "Use this when imported.",
+      source: {
+        type: "github",
+        url: "https://github.com/o/r",
+        ref: "main",
+        path: "imported-skill",
+        resolvedCommit: "a".repeat(40),
+      },
+      files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
+      createdAt,
+    },
   };
 }
 

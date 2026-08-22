@@ -6143,7 +6143,7 @@
           "data": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SkillListItem"
+              "$ref": "#/components/schemas/SkillInstallationListItem"
             }
           },
           "meta": {
@@ -6156,7 +6156,7 @@
         ],
         "additionalProperties": false
       },
-      "SkillListItem": {
+      "SkillInstallationListItem": {
         "type": "object",
         "properties": {
           "id": {
@@ -6165,10 +6165,49 @@
             "maxLength": 256,
             "example": "run_019fed53"
           },
-          "slug": {
+          "name": {
             "type": "string",
             "minLength": 1,
             "maxLength": 64
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bundle": {
+            "$ref": "#/components/schemas/SkillBundleSummary"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "archivedAt",
+          "updatedAt",
+          "bundle"
+        ],
+        "additionalProperties": false
+      },
+      "SkillBundleSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/u"
           },
           "name": {
             "type": "string",
@@ -6177,37 +6216,53 @@
           },
           "description": {
             "type": "string",
+            "minLength": 1,
             "maxLength": 1024
           },
-          "status": {
+          "license": {
             "type": "string",
-            "enum": [
-              "draft",
-              "active"
-            ]
+            "nullable": true
+          },
+          "compatibility": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 500
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "allowedTools": {
+            "type": "string",
+            "nullable": true
           },
           "source": {
             "$ref": "#/components/schemas/SkillSource"
           },
-          "updatedAt": {
+          "createdAt": {
             "type": "string",
             "format": "date-time"
           }
         },
         "required": [
           "id",
-          "slug",
+          "integrity",
           "name",
           "description",
-          "status",
+          "license",
+          "compatibility",
+          "metadata",
+          "allowedTools",
           "source",
-          "updatedAt"
+          "createdAt"
         ],
         "additionalProperties": false
       },
       "SkillSource": {
         "type": "object",
-        "nullable": true,
         "properties": {
           "type": {
             "type": "string",
@@ -6218,16 +6273,20 @@
           },
           "url": {
             "type": "string",
+            "maxLength": 2048,
             "format": "uri"
           },
           "ref": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 256
           },
           "path": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 512
           },
           "resolvedCommit": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$/u"
           }
         },
         "required": [
@@ -6290,7 +6349,14 @@
             ]
           },
           "source": {
-            "$ref": "#/components/schemas/SkillSource"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SkillSource"
+              },
+              {
+                "nullable": true
+              }
+            ]
           },
           "createdAt": {
             "type": "string",
@@ -6359,11 +6425,6 @@
                   "resolved"
                 ]
               },
-              "proposedSlug": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
               "name": {
                 "type": "string",
                 "minLength": 1,
@@ -6371,38 +6432,60 @@
               },
               "description": {
                 "type": "string",
+                "minLength": 1,
                 "maxLength": 1024
               },
-              "instructions": {
-                "type": "string",
-                "maxLength": 262144
+              "license": {
+                "type": "string"
               },
-              "extraFiles": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "maxLength": 512
-                },
-                "maxItems": 31
-              },
-              "resolvedCommit": {
+              "compatibility": {
                 "type": "string",
-                "pattern": "^[0-9a-f]{40}$/iu"
+                "maxLength": 500
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "allowedTools": {
+                "type": "string"
+              },
+              "source": {
+                "$ref": "#/components/schemas/SkillSource"
               },
               "integrity": {
                 "type": "string",
                 "pattern": "^sha256:[0-9a-f]{64}$/iu"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SkillImportFileMetadata"
+                },
+                "minItems": 1,
+                "maxItems": 64
+              },
+              "fileCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64
+              },
+              "totalBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048576
               }
             },
             "required": [
               "status",
-              "proposedSlug",
               "name",
               "description",
-              "instructions",
-              "extraFiles",
-              "resolvedCommit",
-              "integrity"
+              "source",
+              "integrity",
+              "files",
+              "fileCount",
+              "totalBytes"
             ],
             "additionalProperties": false
           },
@@ -6422,15 +6505,68 @@
                 },
                 "minItems": 1,
                 "maxItems": 25
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "github",
+                      "skills.sh"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  },
+                  "ref": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "resolvedCommit": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$/u"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url",
+                  "ref",
+                  "resolvedCommit"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
               "status",
-              "candidates"
+              "candidates",
+              "source"
             ],
             "additionalProperties": false
           }
         ]
+      },
+      "SkillImportFileMetadata": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 524288
+          }
+        },
+        "required": [
+          "path",
+          "sizeBytes"
+        ],
+        "additionalProperties": false
       },
       "SkillImportCandidate": {
         "type": "object",
@@ -6480,15 +6616,15 @@
           "data": {
             "type": "object",
             "properties": {
-              "skill": {
-                "$ref": "#/components/schemas/Skill"
+              "installation": {
+                "$ref": "#/components/schemas/SkillInstallation"
               },
               "replayed": {
                 "type": "boolean"
               }
             },
             "required": [
-              "skill",
+              "installation",
               "replayed"
             ],
             "additionalProperties": false
@@ -6500,6 +6636,152 @@
         "required": [
           "data",
           "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SkillInstallation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bundle": {
+            "$ref": "#/components/schemas/SkillBundle"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "archivedAt",
+          "updatedAt",
+          "bundle",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "SkillBundle": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/u"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "license": {
+            "type": "string",
+            "nullable": true
+          },
+          "compatibility": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 500
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "allowedTools": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": {
+            "$ref": "#/components/schemas/SkillSource"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "body": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillBundleFileMetadata"
+            },
+            "maxItems": 64
+          }
+        },
+        "required": [
+          "id",
+          "integrity",
+          "name",
+          "description",
+          "license",
+          "compatibility",
+          "metadata",
+          "allowedTools",
+          "source",
+          "createdAt",
+          "body",
+          "files"
+        ],
+        "additionalProperties": false
+      },
+      "SkillBundleFileMetadata": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "executable": {
+            "type": "boolean"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 524288
+          }
+        },
+        "required": [
+          "path",
+          "executable",
+          "sizeBytes"
         ],
         "additionalProperties": false
       },
@@ -6575,6 +6857,22 @@
         ],
         "additionalProperties": false
       },
+      "SkillInstallationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillInstallation"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
       "UpdateSkillBody": {
         "type": "object",
         "properties": {
@@ -6613,14 +6911,14 @@
           "data": {
             "type": "object",
             "properties": {
-              "slug": {
+              "name": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 64
               }
             },
             "required": [
-              "slug"
+              "name"
             ],
             "additionalProperties": false
           },
@@ -6631,6 +6929,71 @@
         "required": [
           "data",
           "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SkillFileChunkEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillFileChunk"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SkillFileChunk": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "executable": {
+            "type": "boolean"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextOffset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "eof": {
+            "type": "boolean"
+          },
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "utf8",
+              "base64"
+            ]
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "executable",
+          "sizeBytes",
+          "offset",
+          "nextOffset",
+          "eof",
+          "encoding",
+          "content"
         ],
         "additionalProperties": false
       },
@@ -15974,7 +16337,7 @@
         },
         "responses": {
           "200": {
-            "description": "External Skill metadata and instructions resolved for confirmation.",
+            "description": "External Skill metadata and file sizes resolved for confirmation.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16033,7 +16396,7 @@
         },
         "responses": {
           "201": {
-            "description": "External Skill imported or replayed after confirmation.",
+            "description": "Immutable Skill bundle installed or replayed after confirmation.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16124,7 +16487,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillEnvelope"
+                  "$ref": "#/components/schemas/SkillInstallationEnvelope"
                 }
               }
             }
@@ -16233,6 +16596,246 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SkillArchiveEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/{slug}/enable": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill installation enabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/{slug}/disable": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill installation disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/{slug}/replace": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSkillBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Skill installation moved to a newly verified immutable bundle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/{slug}/files/read": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "required": true,
+            "name": "path",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true,
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 4,
+              "maximum": 65536
+            },
+            "required": false,
+            "name": "maxBytes",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One bounded chunk of an authorized Skill bundle file.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillFileChunkEnvelope"
                 }
               }
             }

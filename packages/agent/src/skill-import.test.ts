@@ -15,7 +15,7 @@ vi.mock("@opencompany/agent-runtime", async () => {
 });
 
 describe("resolveSkillImport", () => {
-  it("strips SKILL.md frontmatter and reports ignored bundled files", async () => {
+  it("retains the complete resolved bundle without legacy Brain validation", async () => {
     const encode = (text: string) => new TextEncoder().encode(text);
     resolveSkillMock.mockResolvedValueOnce({
       status: "resolved",
@@ -44,11 +44,22 @@ describe("resolveSkillImport", () => {
 
     expect(preview).toMatchObject({
       status: "resolved",
-      proposedSlug: "my-skill",
-      name: "my-skill",
-      instructions: "Do the thing.",
-      extraFiles: ["references/notes.md", "scripts/run.sh"],
-      source: { type: "github", url: "https://github.com/o/r", ref: "main", path: "" },
+      bundle: {
+        name: "my-skill",
+        body: "Do the thing.",
+        source: {
+          type: "github",
+          url: "https://github.com/o/r",
+          ref: "main",
+          path: "",
+          resolvedCommit: "a".repeat(40),
+        },
+        files: [
+          { path: "SKILL.md", executable: false },
+          { path: "references/notes.md", executable: false },
+          { path: "scripts/run.sh", executable: true },
+        ],
+      },
     });
   });
 
@@ -59,7 +70,12 @@ describe("resolveSkillImport", () => {
         { path: "skills/a", name: "A", description: "a." },
         { path: "skills/b", name: "B", description: "b." },
       ],
-      source: { type: "github", url: "https://github.com/o/r", ref: "main" },
+      source: {
+        type: "github",
+        url: "https://github.com/o/r",
+        ref: "main",
+        resolvedCommit: "a".repeat(40),
+      },
       resolvedCommit: "a".repeat(40),
     });
 
@@ -69,7 +85,12 @@ describe("resolveSkillImport", () => {
         { path: "skills/a", name: "A", description: "a." },
         { path: "skills/b", name: "B", description: "b." },
       ],
-      source: { type: "github", url: "https://github.com/o/r", ref: "main" },
+      source: {
+        type: "github",
+        url: "https://github.com/o/r",
+        ref: "main",
+        resolvedCommit: "a".repeat(40),
+      },
     });
   });
 

@@ -4,9 +4,13 @@ import {
   addHeadlessWikiTimelineEntry,
   createHeadlessBrainDocument,
   createHeadlessSkill,
+  disableHeadlessSkill,
+  enableHeadlessSkill,
   importHeadlessSkill,
   listHeadlessBrainSourceItems,
   previewHeadlessSkillImport,
+  readHeadlessSkillFile,
+  replaceHeadlessSkill,
   updateHeadlessSkill,
 } from "./headless-knowledge-commands";
 
@@ -153,17 +157,26 @@ describe("headless knowledge commands", () => {
         ? Response.json({
             data: {
               status: "resolved",
-              proposedSlug: skill.slug,
-              name: skill.name,
+              name: "visual-review",
               description: skill.description,
-              instructions: skill.instructions,
-              extraFiles: [],
-              resolvedCommit,
+              source: {
+                type: "github",
+                url: "https://github.com/o/r",
+                ref: "main",
+                path: "",
+                resolvedCommit,
+              },
               integrity,
+              files: [{ path: "SKILL.md", sizeBytes: 128 }],
+              fileCount: 1,
+              totalBytes: 128,
             },
             meta,
           })
-        : Response.json({ data: { skill, replayed: false }, meta }, { status: 201 });
+        : Response.json(
+            { data: { installation: { name: "visual-review" }, replayed: false }, meta },
+            { status: 201 },
+          );
     });
     const options = { baseUrl: "https://api.example.test", fetch: fetchMock as typeof fetch };
 
@@ -181,6 +194,43 @@ describe("headless knowledge commands", () => {
       ["POST /v1/skills/imports/preview", "POST /v1/skills/imports"],
     );
     expect(requests[1]?.headers.get("idempotency-key")).toMatch(/^web-skill-import:/u);
+  });
+
+  it("uses installation actions and bounded file reads", async () => {
+    const requests: Request[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return Response.json({ data: {}, meta });
+    });
+    const options = { baseUrl: "https://api.example.test", fetch: fetchMock as typeof fetch };
+    const command = {
+      url: "github.com/o/r",
+      expectedResolvedCommit: "a".repeat(40),
+      expectedIntegrity: `sha256:${"b".repeat(64)}`,
+    };
+
+    await enableHeadlessSkill("visual-review", options);
+    await disableHeadlessSkill("visual-review", options);
+    await replaceHeadlessSkill("visual-review", command, options);
+    await readHeadlessSkillFile(
+      "visual-review",
+      { path: "references/guide.md", offset: 12, maxBytes: 64 },
+      options,
+    );
+
+    expect(requests.map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual(
+      [
+        "POST /v1/skills/visual-review/enable",
+        "POST /v1/skills/visual-review/disable",
+        "POST /v1/skills/visual-review/replace",
+        "GET /v1/skills/visual-review/files/read",
+      ],
+    );
+    const fileUrl = new URL(requests[3]!.url);
+    expect(fileUrl.searchParams.get("path")).toBe("references/guide.md");
+    expect(fileUrl.searchParams.get("offset")).toBe("12");
+    expect(fileUrl.searchParams.get("maxBytes")).toBe("64");
   });
 
   it("surfaces canonical errors with the request id", async () => {

@@ -220,6 +220,48 @@ export async function archiveHeadlessSkill(slug: string, options: ClientOptions 
   return responseData(response, "Skill archive failed");
 }
 
+export async function enableHeadlessSkill(slug: string, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.skills[":slug"].enable.$post({
+    param: { slug },
+  });
+  return responseData(response, "Skill enable failed");
+}
+
+export async function disableHeadlessSkill(slug: string, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.skills[":slug"].disable.$post({
+    param: { slug },
+  });
+  return responseData(response, "Skill disable failed");
+}
+
+export async function replaceHeadlessSkill(
+  slug: string,
+  command: ImportSkillBody,
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.skills[":slug"].replace.$post({
+    param: { slug },
+    json: command,
+  });
+  return responseData(response, "Skill replacement failed");
+}
+
+export async function readHeadlessSkillFile(
+  slug: string,
+  query: { path: string; offset?: number; maxBytes?: number },
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.skills[":slug"].files.read.$get({
+    param: { slug },
+    query: {
+      path: query.path,
+      ...(query.offset !== undefined ? { offset: String(query.offset) } : {}),
+      ...(query.maxBytes !== undefined ? { maxBytes: String(query.maxBytes) } : {}),
+    },
+  });
+  return responseData(response, "Skill file loading failed");
+}
+
 export async function listHeadlessSkillCatalog(options: ClientOptions = {}) {
   const response = await knowledgeClient(options).v1.skills.catalog.$get();
   return responseData(response, "Skill catalog loading failed");

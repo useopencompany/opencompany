@@ -24,6 +24,7 @@ import {
 } from "@opencompany/db/chat-repository";
 import { PostgresKnowledgeRepository } from "@opencompany/db/knowledge-repository";
 import { createPooledDb } from "@opencompany/db/pool";
+import { PostgresSkillBundleRepository } from "@opencompany/db/skill-bundle-repository";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { getWikiAccessForUser } from "@opencompany/db/wiki";
 import { PostgresWikiCommandRepository } from "@opencompany/db/wiki-command-repository";
@@ -117,7 +118,7 @@ const brainSources = new BrainSourceApplicationService(database.db);
 const brainImports = new BrainImportApplicationService(database.db, brainSources);
 const browserProfiles = new BrowserProfileApplicationService(database.db);
 const skillImports = new SkillImportApplicationService(
-  knowledgeRepository,
+  new PostgresSkillBundleRepository(database.db),
   createSkillImportResolver(),
 );
 const notifier = new PostgresRunEventNotifier(database.pool);

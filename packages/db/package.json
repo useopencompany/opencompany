@@ -28,6 +28,10 @@
       "types": "./src/knowledge-repository.ts",
       "default": "./src/knowledge-repository.ts"
     },
+    "./skill-bundle-repository": {
+      "types": "./src/skill-bundle-repository.ts",
+      "default": "./src/skill-bundle-repository.ts"
+    },
     "./wiki-command-repository": {
       "types": "./src/wiki-command-repository.ts",
       "default": "./src/wiki-command-repository.ts"

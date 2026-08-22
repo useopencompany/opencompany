@@ -5,7 +5,7 @@ import {
   type BrainSnapshotDto,
   createApiClient,
   type SkillCatalogItemDto,
-  type SkillDto,
+  type SkillInstallationDto,
   type SkillListItemDto,
   type WikiPageDto,
 } from "@opencompany/protocol";
@@ -45,7 +45,7 @@ export async function listHeadlessSkillCatalog(): Promise<SkillCatalogItemDto[]>
   return (await response.json()).data;
 }
 
-export async function getHeadlessSkill(slug: string): Promise<SkillDto | null> {
+export async function getHeadlessSkill(slug: string): Promise<SkillInstallationDto | null> {
   const response = await (await serverKnowledgeClient()).v1.skills[":slug"].$get({
     param: { slug },
   });

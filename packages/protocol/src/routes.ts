@@ -137,9 +137,11 @@ import {
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
   SkillEnvelopeSchema,
+  SkillFileChunkEnvelopeSchema,
   SkillImportEnvelopeSchema,
   SkillImportPreviewBodySchema,
   SkillImportPreviewEnvelopeSchema,
+  SkillInstallationEnvelopeSchema,
   SkillListEnvelopeSchema,
   SlackBotChannelListEnvelopeSchema,
   SlackBotDestinationEnvelopeSchema,
@@ -1106,7 +1108,7 @@ export const previewSkillImportRoute = createRoute({
   },
   responses: {
     200: {
-      description: "External Skill metadata and instructions resolved for confirmation.",
+      description: "External Skill metadata and file sizes resolved for confirmation.",
       content: { "application/json": { schema: SkillImportPreviewEnvelopeSchema } },
     },
     default: errorResponse,
@@ -1124,7 +1126,7 @@ export const importSkillRoute = createRoute({
   },
   responses: {
     201: {
-      description: "External Skill imported or replayed after confirmation.",
+      description: "Immutable Skill bundle installed or replayed after confirmation.",
       content: { "application/json": { schema: SkillImportEnvelopeSchema } },
     },
     default: errorResponse,
@@ -1154,7 +1156,7 @@ export const getSkillRoute = createRoute({
   responses: {
     200: {
       description: "Skill detail.",
-      content: { "application/json": { schema: SkillEnvelopeSchema } },
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -1188,6 +1190,81 @@ export const archiveSkillRoute = createRoute({
     200: {
       description: "Skill archived.",
       content: { "application/json": { schema: SkillArchiveEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const enableSkillRoute = createRoute({
+  method: "post",
+  path: "/v1/skills/{slug}/enable",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: { params: z.object({ slug: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Skill installation enabled.",
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const disableSkillRoute = createRoute({
+  method: "post",
+  path: "/v1/skills/{slug}/disable",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: { params: z.object({ slug: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Skill installation disabled.",
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const replaceSkillRoute = createRoute({
+  method: "post",
+  path: "/v1/skills/{slug}/replace",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: ImportSkillBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Skill installation moved to a newly verified immutable bundle.",
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const readSkillFileRoute = createRoute({
+  method: "get",
+  path: "/v1/skills/{slug}/files/read",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: ResourceIdSchema }),
+    query: z.object({
+      path: z.string().min(1).max(1_024),
+      offset: z.coerce.number().int().min(0).optional(),
+      maxBytes: z.coerce
+        .number()
+        .int()
+        .min(4)
+        .max(64 * 1_024)
+        .optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "One bounded chunk of an authorized Skill bundle file.",
+      content: { "application/json": { schema: SkillFileChunkEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3091,6 +3168,10 @@ export type V1RouteHandlers = {
   getSkill: RouteHandler<typeof getSkillRoute>;
   updateSkill: RouteHandler<typeof updateSkillRoute>;
   archiveSkill: RouteHandler<typeof archiveSkillRoute>;
+  enableSkill: RouteHandler<typeof enableSkillRoute>;
+  disableSkill: RouteHandler<typeof disableSkillRoute>;
+  replaceSkill: RouteHandler<typeof replaceSkillRoute>;
+  readSkillFile: RouteHandler<typeof readSkillFileRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -3264,6 +3345,10 @@ export function createV1Router(
       .openapi(getSkillRoute, handlers.getSkill)
       .openapi(updateSkillRoute, handlers.updateSkill)
       .openapi(archiveSkillRoute, handlers.archiveSkill)
+      .openapi(enableSkillRoute, handlers.enableSkill)
+      .openapi(disableSkillRoute, handlers.disableSkill)
+      .openapi(replaceSkillRoute, handlers.replaceSkill)
+      .openapi(readSkillFileRoute, handlers.readSkillFile)
       .openapi(listConversationsRoute, handlers.listConversations)
       .openapi(getConversationRoute, handlers.getConversation)
       .openapi(updateConversationRoute, handlers.updateConversation)
@@ -3512,6 +3597,36 @@ const placeholderSkill = {
   source: null,
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
+};
+const placeholderSkillSource = {
+  type: "github" as const,
+  url: "https://github.com/example/skills",
+  ref: "main",
+  path: "contract-skill",
+  resolvedCommit: "a".repeat(40),
+};
+const placeholderSkillBundle = {
+  id: "skill_bundle_contract",
+  integrity: `sha256:${"b".repeat(64)}`,
+  name: "contract-skill",
+  description: placeholderSkill.description,
+  license: null,
+  compatibility: null,
+  metadata: null,
+  allowedTools: null,
+  body: placeholderSkill.instructions,
+  source: placeholderSkillSource,
+  files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
+  createdAt: placeholderTime,
+};
+const placeholderSkillInstallation = {
+  id: "skill_installation_contract",
+  name: "contract-skill",
+  enabled: true,
+  archivedAt: null,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+  bundle: placeholderSkillBundle,
 };
 
 function placeholderAutomationTaskEnvelope() {
@@ -4049,13 +4164,12 @@ const contractDocumentHandlers: V1RouteHandlers = {
       {
         data: [
           {
-            id: placeholderSkill.id,
-            slug: placeholderSkill.slug,
-            name: placeholderSkill.name,
-            description: placeholderSkill.description,
-            status: placeholderSkill.status,
-            source: placeholderSkill.source,
-            updatedAt: placeholderSkill.updatedAt,
+            ...placeholderSkillInstallation,
+            bundle: {
+              ...placeholderSkillBundle,
+              body: undefined,
+              files: undefined,
+            },
           },
         ],
         meta,
@@ -4068,19 +4182,20 @@ const contractDocumentHandlers: V1RouteHandlers = {
       {
         data: {
           status: "resolved",
-          proposedSlug: placeholderSkill.slug,
-          name: placeholderSkill.name,
+          name: placeholderSkillBundle.name,
           description: placeholderSkill.description,
-          instructions: placeholderSkill.instructions,
-          extraFiles: [],
-          resolvedCommit: "a".repeat(40),
-          integrity: `sha256:${"b".repeat(64)}`,
+          source: placeholderSkillSource,
+          integrity: placeholderSkillBundle.integrity,
+          files: placeholderSkillBundle.files,
+          fileCount: 1,
+          totalBytes: 128,
         },
         meta,
       },
       200,
     ),
-  importSkill: (c) => c.json({ data: { skill: placeholderSkill, replayed: false }, meta }, 201),
+  importSkill: (c) =>
+    c.json({ data: { installation: placeholderSkillInstallation, replayed: false }, meta }, 201),
   listSkillCatalog: (c) =>
     c.json(
       {
@@ -4095,9 +4210,30 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
-  getSkill: (c) => c.json({ data: placeholderSkill, meta }, 200),
+  getSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   updateSkill: (c) => c.json({ data: placeholderSkill, meta }, 200),
-  archiveSkill: (c) => c.json({ data: { slug: placeholderSkill.slug }, meta }, 200),
+  archiveSkill: (c) => c.json({ data: { name: placeholderSkillInstallation.name }, meta }, 200),
+  enableSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
+  disableSkill: (c) =>
+    c.json({ data: { ...placeholderSkillInstallation, enabled: false }, meta }, 200),
+  replaceSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
+  readSkillFile: (c) =>
+    c.json(
+      {
+        data: {
+          path: "SKILL.md",
+          executable: false,
+          sizeBytes: 128,
+          offset: 0,
+          nextOffset: 128,
+          eof: true,
+          encoding: "utf8" as const,
+          content: placeholderSkill.instructions,
+        },
+        meta,
+      },
+      200,
+    ),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>
