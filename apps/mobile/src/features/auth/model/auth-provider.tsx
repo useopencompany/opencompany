@@ -1,6 +1,12 @@
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import { until } from "until-async";
 import {
   clearSession,
@@ -51,7 +57,9 @@ const matchesRedirectUri = (url: string, redirectUri: string): boolean => {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [initializationError, setInitializationError] = useState<string | null>(null);
+  const [initializationError, setInitializationError] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     getUser()
@@ -70,7 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const [clearSessionError] = await until(clearSession);
 
         if (clearSessionError) {
-          console.error("Failed to clear session after sign out:", clearSessionError);
+          console.error(
+            "Failed to clear session after sign out:",
+            clearSessionError,
+          );
         } else {
           setUser(null);
         }
@@ -84,7 +95,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const error = parsed.queryParams?.error as string | undefined;
       if (error) {
-        console.error("OAuth error:", error, parsed.queryParams?.error_description);
+        console.error(
+          "OAuth error:",
+          error,
+          parsed.queryParams?.error_description,
+        );
         return;
       }
 
@@ -114,7 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.remove();
   }, []);
 
-  const signIn = useCallback(async (): Promise<AuthActionResult> => {
+  const signIn = async (): Promise<AuthActionResult> => {
     try {
       setIsLoading(true);
       setInitializationError(null);
@@ -130,7 +145,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const error = parsed.queryParams?.error as string | undefined;
       if (error) {
-        const errorDescription = parsed.queryParams?.error_description as string;
+        const errorDescription = parsed.queryParams
+          ?.error_description as string;
         return { success: false, error: errorDescription || error };
       }
 
@@ -148,9 +164,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  };
 
-  const signOut = useCallback(async (): Promise<AuthActionResult> => {
+  const signOut = async (): Promise<AuthActionResult> => {
     const [sessionIdError, sessionId] = await until(getSessionId);
     if (sessionIdError) {
       return { success: false, error: formatAuthError(sessionIdError) };
@@ -168,10 +184,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     return { success: true };
-  }, []);
+  };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, initializationError, signIn, signOut }}>
+    <AuthContext.Provider
+      value={{ user, isLoading, initializationError, signIn, signOut }}
+    >
       {children}
     </AuthContext.Provider>
   );
