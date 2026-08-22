@@ -26,7 +26,6 @@ export default function SignInScreen() {
     const result = await signIn();
     const error = result.error;
     if (!result.success && error) {
-      console.error(error);
       showToast(error);
     }
   };
