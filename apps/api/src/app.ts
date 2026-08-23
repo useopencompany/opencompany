@@ -796,10 +796,10 @@ export function createApiApp(input: CreateApiAppInput) {
       return c.json({ data: activation, meta }, 201);
     },
     switchWorkspace: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "workspace-switch", 60);
       const activation = await input.workspaceControl.switch(
-        actor,
+        identity,
         c.req.valid("param").workspaceId,
       );
       return c.json({ data: activation, meta }, 200);
@@ -2587,7 +2587,8 @@ function isIdentityTierPath(path: string) {
     path === IDENTITY_PATH ||
     path.startsWith(`${IDENTITY_PATH}/`) ||
     path === ONBOARDING_IDENTITY_PATH ||
-    path.startsWith(`${ONBOARDING_IDENTITY_PATH}/`)
+    path.startsWith(`${ONBOARDING_IDENTITY_PATH}/`) ||
+    /^\/v1\/workspaces\/[^/]+\/switch$/u.test(path)
   );
 }
 

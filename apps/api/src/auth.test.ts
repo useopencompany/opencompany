@@ -80,12 +80,12 @@ describe("API authentication", () => {
     });
   });
 
-  it("accepts a verified pre-organization bearer identity for onboarding and identity sync", async () => {
+  it("accepts a verified org-less mobile AuthKit identity and ignores browser preferences", async () => {
+    const token = testToken({ client_id: "client_mobile" });
     const identify = createWorkOsApiIdentityVerifier({
-      audience: "api_resource",
-      authKitDomain: "https://example.authkit.app",
+      mobileClientId: "client_mobile",
       verifyJwt: vi.fn(async () => ({
-        payload: { sub: "user_1", sid: "session_1" },
+        payload: { sub: "user_1", sid: "session_1", client_id: "client_mobile" },
         protectedHeader: { alg: "RS256" },
       })) as never,
     });
@@ -94,7 +94,7 @@ describe("API authentication", () => {
       identify(
         new Request("https://api.example.test/v1/identity/sync", {
           headers: {
-            Authorization: "Bearer token",
+            Authorization: `Bearer ${token}`,
             Cookie: "goat-active-workspace=workspace_1; goat-active-brain=brain_1",
           },
         }),
@@ -102,12 +102,13 @@ describe("API authentication", () => {
     ).resolves.toMatchObject({
       userId: "user_1",
       organizationId: null,
-      activeWorkspaceId: "workspace_1",
-      activeBrainId: "brain_1",
+      activeWorkspaceId: null,
+      activeBrainId: null,
+      credentialKind: "authkit_bearer",
     });
   });
 
-  it("verifies bearer claims and resolves the local actor by WorkOS organization", async () => {
+  it("preserves Connect issuer and audience validation and resolves its organization Actor", async () => {
     const execute = vi.fn(async (_query: SQL) => ({
       rows: [
         {
@@ -121,16 +122,22 @@ describe("API authentication", () => {
     const authenticate = createWorkOsApiAuthenticator(execute, {
       audience: "api_resource",
       authKitDomain: "https://example.authkit.app",
-      verifyJwt: vi.fn(async () => ({
-        payload: { sub: "user_1", org_id: "org_1", sid: "session_1" },
-        protectedHeader: { alg: "RS256" },
-      })) as never,
+      verifyJwt: vi.fn(async (_token, _key, options) => {
+        expect(options).toMatchObject({
+          issuer: "https://example.authkit.app",
+          audience: "api_resource",
+        });
+        return {
+          payload: { sub: "user_1", org_id: "org_1", sid: "session_1" },
+          protectedHeader: { alg: "RS256" },
+        };
+      }) as never,
     });
 
     await expect(
       authenticate(
         new Request("https://api.example.test/v1/conversations", {
-          headers: { Authorization: "Bearer token" },
+          headers: { Authorization: `Bearer ${testToken({ client_id: "client_connect" })}` },
         }),
       ),
     ).resolves.toMatchObject({
@@ -175,7 +182,7 @@ describe("API authentication", () => {
     await expect(
       authenticate(
         new Request("https://api.example.test/v1/conversations", {
-          headers: { Authorization: "Bearer token" },
+          headers: { Authorization: `Bearer ${testToken({ client_id: "client_connect" })}` },
         }),
       ),
     ).rejects.toMatchObject({
@@ -208,7 +215,7 @@ describe("API authentication", () => {
 
     const result = await authenticate(
       new Request("https://api.example.test/v1/workflows", {
-        headers: { Authorization: "Bearer token" },
+        headers: { Authorization: `Bearer ${testToken({ client_id: "client_connect" })}` },
       }),
     );
 
@@ -220,6 +227,155 @@ describe("API authentication", () => {
       "brain:read",
       "skill:read",
     ]);
+  });
+
+  it("resolves an org-bound mobile AuthKit bearer as a normal session Actor", async () => {
+    const execute = vi.fn(async () => ({
+      rows: [
+        {
+          workspaceId: "workspace_mobile",
+          role: "member",
+          taskSpawningEnabled: false,
+          wikiEnabled: false,
+        },
+      ],
+    }));
+    const verifyJwt = vi.fn(async (_token, _key, options) => {
+      expect(options).toBeUndefined();
+      return {
+        payload: {
+          sub: "user_mobile",
+          sid: "session_mobile",
+          client_id: "client_mobile",
+          org_id: "org_mobile",
+        },
+        protectedHeader: { alg: "RS256" },
+      };
+    });
+    const authenticate = createWorkOsApiAuthenticator(execute, {
+      mobileClientId: "client_mobile",
+      verifyJwt: verifyJwt as never,
+    });
+
+    await expect(
+      authenticate(
+        new Request("https://api.example.test/v1/conversations", {
+          headers: {
+            Authorization: `Bearer ${testToken({ client_id: "client_mobile" })}`,
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      actor: {
+        userId: "user_mobile",
+        workspaceId: "workspace_mobile",
+        authenticationMethod: "session",
+        sessionId: "session_mobile",
+      },
+    });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an org-less mobile AuthKit bearer before Actor resolution", async () => {
+    const execute = vi.fn();
+    const authenticate = createWorkOsApiAuthenticator(execute, {
+      mobileClientId: "client_mobile",
+      verifyJwt: vi.fn(async () => ({
+        payload: {
+          sub: "user_mobile",
+          sid: "session_mobile",
+          client_id: "client_mobile",
+        },
+        protectedHeader: { alg: "RS256" },
+      })) as never,
+    });
+
+    await expect(
+      authenticate(
+        new Request("https://api.example.test/v1/conversations", {
+          headers: {
+            Authorization: `Bearer ${testToken({ client_id: "client_mobile" })}`,
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      code: "authentication_required",
+      message: "Invalid bearer token claims.",
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["wrong signature", new Error("signature verification failed")],
+    ["expired token", new Error("exp claim timestamp check failed")],
+    ["JWKS failure", new Error("JWKS fetch failed")],
+  ])("returns a generic 401 for a mobile token with %s", async (_case, error) => {
+    const identify = createWorkOsApiIdentityVerifier({
+      mobileClientId: "client_mobile",
+      verifyJwt: vi.fn(async () => {
+        throw error;
+      }) as never,
+    });
+
+    await expect(
+      identify(
+        new Request("https://api.example.test/v1/identity", {
+          headers: {
+            Authorization: `Bearer ${testToken({ client_id: "client_mobile" })}`,
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      code: "authentication_required",
+      message: "Invalid bearer token.",
+    });
+  });
+
+  it.each([
+    ["missing sub", { sid: "session_1", client_id: "client_mobile" }],
+    ["missing sid", { sub: "user_1", client_id: "client_mobile" }],
+    ["wrong signed client", { sub: "user_1", sid: "session_1", client_id: "client_other" }],
+  ])("rejects a mobile token with %s", async (_case, payload) => {
+    const identify = createWorkOsApiIdentityVerifier({
+      mobileClientId: "client_mobile",
+      verifyJwt: vi.fn(async () => ({
+        payload,
+        protectedHeader: { alg: "RS256" },
+      })) as never,
+    });
+
+    await expect(
+      identify(
+        new Request("https://api.example.test/v1/identity", {
+          headers: {
+            Authorization: `Bearer ${testToken({ client_id: "client_mobile" })}`,
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 401, message: "Invalid bearer token." });
+  });
+
+  it("rejects malformed bearer tokens without falling back to a valid browser cookie", async () => {
+    const loadSealedSession = vi.fn();
+    const identify = createWorkOsApiIdentityVerifier({
+      mobileClientId: "client_mobile",
+      cookiePassword: "a-secure-cookie-password-with-32-chars",
+      workos: { userManagement: { loadSealedSession } } as never,
+    });
+
+    await expect(
+      identify(
+        new Request("https://api.example.test/v1/identity", {
+          headers: {
+            Authorization: "Bearer not-a-jwt",
+            Cookie: "wos-session=valid-session",
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 401, message: "Invalid bearer token." });
+    expect(loadSealedSession).not.toHaveBeenCalled();
   });
 
   it("refreshes an expired sealed browser session and returns the rotated cookie", async () => {
@@ -270,3 +426,8 @@ describe("API authentication", () => {
     expect(result.refreshedSessionCookie).not.toContain("Domain=");
   });
 });
+
+function testToken(payload: Record<string, unknown>) {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "RS256", typ: "JWT" })}.${encode(payload)}.signature`;
+}

@@ -196,6 +196,7 @@ const addedEnvKeys = [
   "API_INTERNAL_TOKEN",
   "OPENCOMPANY_DESKTOP_AUTH_SECRET",
   "RUNNER_CODEX_CHAT_SELF_HEAL_ENABLED",
+  "WORKOS_MOBILE_CLIENT_ID",
 ];
 const retiredEnvKeys = new Set([["RUNNER", "CLAUDE", "CODE", "ACP", "ENABLED"].join("_")]);
 const expectedEnvKeys = [

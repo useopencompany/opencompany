@@ -64,6 +64,7 @@ const groups = {
     required: [
       "API_DATABASE_URL",
       "WORKOS_CLIENT_ID",
+      "WORKOS_MOBILE_CLIENT_ID",
       "WORKOS_API_KEY",
       "WORKOS_COOKIE_PASSWORD",
       "WORKOS_COOKIE_DOMAIN",

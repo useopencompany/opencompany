@@ -58,6 +58,7 @@ const identity = {
   activeWorkspaceId: null,
   activeBrainId: null,
   method: "session" as const,
+  credentialKind: "browser_cookie" as const,
 };
 
 function dbWith(input: { selected?: unknown[]; inserted?: unknown[]; updated?: unknown[] }) {
@@ -161,5 +162,37 @@ describe("identity service", () => {
       brains: [],
     });
     expect(syncStripeSeatQuantityForWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("auto-creates an org-less mobile user and returns workspaces without an active selection", async () => {
+    const pendingUser = { ...localUser, onboardedAt: null };
+    const db = dbWith({ inserted: [pendingUser] });
+    const service = createIdentityService({
+      db,
+      workos: {
+        userManagement: {
+          getUser: vi.fn(async () => authUser),
+          listOrganizationMemberships: vi.fn(),
+        },
+      } as never,
+    });
+
+    await expect(
+      service.get({
+        ...identity,
+        organizationId: null,
+        credentialKind: "authkit_bearer",
+        activeWorkspaceId: null,
+        activeBrainId: null,
+      }),
+    ).resolves.toMatchObject({
+      user: { id: "user_1", onboardedAt: null },
+      workspaces: [{ name: "Company" }],
+      activeWorkspaceId: null,
+      brains: [],
+      activeBrainId: null,
+    });
+    expect(listAccessibleBrains).not.toHaveBeenCalled();
+    expect(recordSignup).toHaveBeenCalledWith({ source: "user_sync" });
   });
 });
