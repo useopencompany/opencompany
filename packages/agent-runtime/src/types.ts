@@ -58,7 +58,8 @@ export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 export type AgentSkillFile = {
   path: string;
-  content: string;
+  content: Uint8Array;
+  executable: boolean;
 };
 
 export type AgentRemoteSkillSource = {

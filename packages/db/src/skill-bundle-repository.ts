@@ -16,10 +16,36 @@ import {
   type SkillInstallation,
   type SkillInstallationListItem,
 } from "@opencompany/core";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
-import { skillBundleFiles, skillBundles, skillInstallations } from "./product-schema";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import {
+  type ChatSessionSkillBundleSourceKind,
+  chatMessages,
+  chatSessionSkillBundles,
+  chatSessions,
+  skillBundleFiles,
+  skillBundles,
+  skillInstallations,
+} from "./product-schema";
 
 type DbClient = any;
+
+export type ImmutableSkillBundle = {
+  id: string;
+  name: string;
+  description: string;
+  body: string;
+  files: SkillBundleFile[];
+};
+
+export type ChatSkillBundleActivation = {
+  bundleId: string;
+  name: string;
+  description: string;
+  body: string;
+  chatSessionId: string;
+  activatedMessageId: string;
+  sourceKind: ChatSessionSkillBundleSourceKind;
+};
 
 type InstallationRow = {
   installationId: string;
@@ -305,6 +331,208 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
       .returning({ id: skillInstallations.id });
     if (rows.length === 0) throw new CoreError("not_found", "Skill not found.");
   }
+}
+
+export async function activateAndListChatSkillBundles(
+  db: DbClient,
+  input: {
+    workspaceId: string;
+    chatSessionId: string;
+    activatedMessageId: string;
+    bundles: Array<{ bundleId: string; sourceKind: ChatSessionSkillBundleSourceKind }>;
+  },
+): Promise<ChatSkillBundleActivation[]> {
+  return db.transaction(async (tx: DbClient) => {
+    // Host-tool activation can race replacement or another model call, so serialize it per Chat
+    // before applying the name-based first-writer rule.
+    const [activationTarget] = await tx
+      .select({ id: chatSessions.id })
+      .from(chatSessions)
+      .innerJoin(
+        chatMessages,
+        and(
+          eq(chatMessages.id, input.activatedMessageId),
+          eq(chatMessages.sessionId, chatSessions.id),
+        ),
+      )
+      .where(eq(chatSessions.id, input.chatSessionId))
+      .limit(1)
+      .for("update");
+    if (!activationTarget) {
+      throw new CoreError("not_found", "The Chat skill activation target was not found.");
+    }
+
+    const requestedById = new Map(input.bundles.map((bundle) => [bundle.bundleId, bundle]));
+    const requestedIds = [...requestedById.keys()];
+    if (requestedIds.length > 0) {
+      const candidates = await tx
+        .select({ id: skillBundles.id, name: skillBundles.name })
+        .from(skillBundles)
+        .where(
+          and(
+            eq(skillBundles.workspaceId, input.workspaceId),
+            inArray(skillBundles.id, requestedIds),
+          ),
+        );
+      if (candidates.length !== requestedIds.length) {
+        throw new CoreError("not_found", "A Skill bundle is unavailable in this workspace.");
+      }
+
+      const existing = await tx
+        .select({ name: skillBundles.name })
+        .from(chatSessionSkillBundles)
+        .innerJoin(skillBundles, eq(skillBundles.id, chatSessionSkillBundles.bundleId))
+        .where(
+          and(
+            eq(chatSessionSkillBundles.chatSessionId, input.chatSessionId),
+            eq(skillBundles.workspaceId, input.workspaceId),
+          ),
+        );
+      const fixedNames = new Set(existing.map((row: { name: string }) => row.name));
+      const newNames = new Set<string>();
+      const values = candidates.flatMap((candidate: { id: string; name: string }) => {
+        if (fixedNames.has(candidate.name) || newNames.has(candidate.name)) return [];
+        newNames.add(candidate.name);
+        const requested = requestedById.get(candidate.id)!;
+        return [
+          {
+            chatSessionId: input.chatSessionId,
+            bundleId: candidate.id,
+            activatedMessageId: input.activatedMessageId,
+            sourceKind: requested.sourceKind,
+          },
+        ];
+      });
+      if (values.length > 0) {
+        await tx.insert(chatSessionSkillBundles).values(values).onConflictDoNothing();
+      }
+    }
+
+    return listChatSkillBundleActivations(tx, {
+      workspaceId: input.workspaceId,
+      chatSessionId: input.chatSessionId,
+    });
+  });
+}
+
+export async function listChatSkillBundleActivations(
+  db: DbClient,
+  input: { workspaceId: string; chatSessionId: string },
+): Promise<ChatSkillBundleActivation[]> {
+  return db
+    .select({
+      bundleId: chatSessionSkillBundles.bundleId,
+      chatSessionId: chatSessionSkillBundles.chatSessionId,
+      activatedMessageId: chatSessionSkillBundles.activatedMessageId,
+      sourceKind: chatSessionSkillBundles.sourceKind,
+      name: skillBundles.name,
+      description: skillBundles.description,
+      body: skillBundles.body,
+    })
+    .from(chatSessionSkillBundles)
+    .innerJoin(skillBundles, eq(skillBundles.id, chatSessionSkillBundles.bundleId))
+    .where(
+      and(
+        eq(chatSessionSkillBundles.chatSessionId, input.chatSessionId),
+        eq(skillBundles.workspaceId, input.workspaceId),
+      ),
+    )
+    .orderBy(asc(skillBundles.name));
+}
+
+export async function loadImmutableSkillBundles(
+  db: DbClient,
+  input: { workspaceId: string; bundleIds: readonly string[] },
+): Promise<ImmutableSkillBundle[]> {
+  const bundleIds = [...new Set(input.bundleIds)];
+  if (bundleIds.length === 0) return [];
+  const rows = await db
+    .select({
+      id: skillBundles.id,
+      name: skillBundles.name,
+      description: skillBundles.description,
+      body: skillBundles.body,
+      path: skillBundleFiles.path,
+      content: skillBundleFiles.content,
+      executable: skillBundleFiles.executable,
+      sizeBytes: skillBundleFiles.sizeBytes,
+    })
+    .from(skillBundles)
+    .innerJoin(skillBundleFiles, eq(skillBundleFiles.bundleId, skillBundles.id))
+    .where(
+      and(eq(skillBundles.workspaceId, input.workspaceId), inArray(skillBundles.id, bundleIds)),
+    )
+    .orderBy(asc(skillBundles.name), asc(skillBundleFiles.path));
+
+  const bundles = new Map<string, ImmutableSkillBundle>();
+  for (const row of rows as Array<{
+    id: string;
+    name: string;
+    description: string;
+    body: string;
+    path: string;
+    content: Uint8Array;
+    executable: boolean;
+    sizeBytes: number;
+  }>) {
+    const bundle = bundles.get(row.id) ?? {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      body: row.body,
+      files: [],
+    };
+    bundle.files.push({
+      path: row.path,
+      content: new Uint8Array(row.content),
+      executable: row.executable,
+      sizeBytes: row.sizeBytes,
+    });
+    bundles.set(row.id, bundle);
+  }
+  if (bundles.size !== bundleIds.length) {
+    throw new CoreError("not_found", "A Skill bundle snapshot is unavailable.");
+  }
+  return bundleIds.map((id) => bundles.get(id)!);
+}
+
+export async function readChatSkillBundleFile(
+  db: DbClient,
+  input: { workspaceId: string; chatSessionId: string; skillName: string; path: string },
+): Promise<SkillBundleFile | null> {
+  assertSafeStoredPath(input.path);
+  const [row] = await db
+    .select({
+      path: skillBundleFiles.path,
+      content: skillBundleFiles.content,
+      executable: skillBundleFiles.executable,
+      sizeBytes: skillBundleFiles.sizeBytes,
+    })
+    .from(chatSessionSkillBundles)
+    .innerJoin(skillBundles, eq(skillBundles.id, chatSessionSkillBundles.bundleId))
+    .innerJoin(
+      skillBundleFiles,
+      and(
+        eq(skillBundleFiles.bundleId, chatSessionSkillBundles.bundleId),
+        eq(skillBundleFiles.path, input.path),
+      ),
+    )
+    .where(
+      and(
+        eq(chatSessionSkillBundles.chatSessionId, input.chatSessionId),
+        eq(skillBundles.workspaceId, input.workspaceId),
+        eq(skillBundles.name, input.skillName),
+      ),
+    )
+    .limit(1);
+  return row
+    ? {
+        path: row.path,
+        content: new Uint8Array(row.content),
+        executable: row.executable,
+        sizeBytes: row.sizeBytes,
+      }
+    : null;
 }
 
 async function ensureBundle(db: DbClient, workspaceId: string, bundle: ResolvedSkillBundle) {

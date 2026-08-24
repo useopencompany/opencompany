@@ -5,7 +5,12 @@ import { computeArtifactIntegrity } from "@opencompany/agent-runtime";
 import type { Actor, ResolvedSkillBundle } from "@opencompany/core";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { PostgresSkillBundleRepository } from "./skill-bundle-repository";
+import {
+  activateAndListChatSkillBundles,
+  loadImmutableSkillBundles,
+  PostgresSkillBundleRepository,
+  readChatSkillBundleFile,
+} from "./skill-bundle-repository";
 
 describe("Postgres immutable Skill bundle repository", () => {
   let database: PGlite;
@@ -16,6 +21,11 @@ describe("Postgres immutable Skill bundle repository", () => {
     await database.exec(`
       CREATE SCHEMA goat;
       CREATE TABLE goat.workspaces (id text PRIMARY KEY);
+      CREATE TABLE goat.chat_sessions (id text PRIMARY KEY);
+      CREATE TABLE goat.chat_messages (
+        id text PRIMARY KEY,
+        session_id text NOT NULL REFERENCES goat.chat_sessions(id)
+      );
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
     `);
     const migration = await readFile(
@@ -29,11 +39,25 @@ describe("Postgres immutable Skill bundle repository", () => {
     for (const statement of migration.split("--> statement-breakpoint")) {
       if (statement.trim()) await database.exec(statement);
     }
+    const snapshotMigration = await readFile(
+      path.resolve(
+        import.meta.dirname,
+        "../../..",
+        "drizzle/0223_goat_chat_skill_bundle_snapshots.sql",
+      ),
+      "utf8",
+    );
+    for (const statement of snapshotMigration.split("--> statement-breakpoint")) {
+      if (statement.trim()) await database.exec(statement);
+    }
     repository = new PostgresSkillBundleRepository(drizzle(database));
   });
 
   beforeEach(async () => {
     await database.exec(`
+      DELETE FROM goat.chat_session_skill_bundles;
+      DELETE FROM goat.chat_messages;
+      DELETE FROM goat.chat_sessions;
       DELETE FROM goat.skill_installations;
       DELETE FROM goat.skill_bundles;
     `);
@@ -125,6 +149,70 @@ describe("Postgres immutable Skill bundle repository", () => {
     await expect(
       database.query<{ count: number }>("SELECT COUNT(*)::int AS count FROM goat.skill_bundles"),
     ).resolves.toMatchObject({ rows: [{ count: 2 }] });
+  });
+
+  it("keeps Chat and Task bundle IDs immutable after replacement and archive", async () => {
+    const first = await repository.install({
+      actor: actor(),
+      idempotencyKey: "install-a",
+      bundle: await resolvedBundle("my-skill", "First version."),
+    });
+    await database.exec(`
+      INSERT INTO goat.chat_sessions (id) VALUES ('chat_1');
+      INSERT INTO goat.chat_messages (id, session_id)
+      VALUES ('message_1', 'chat_1'), ('message_2', 'chat_1');
+    `);
+    const db = drizzle(database);
+    const firstActivation = await activateAndListChatSkillBundles(db, {
+      workspaceId: "workspace_1",
+      chatSessionId: "chat_1",
+      activatedMessageId: "message_1",
+      bundles: [{ bundleId: first.installation.bundle.id, sourceKind: "standalone" }],
+    });
+    const taskBundleIds = [first.installation.bundle.id];
+
+    const replacement = await repository.replace({
+      actor: actor(),
+      name: "my-skill",
+      bundle: await resolvedBundle("my-skill", "Second version."),
+    });
+    await repository.archive({ actor: actor(), name: "my-skill" });
+    const afterReplacement = await activateAndListChatSkillBundles(db, {
+      workspaceId: "workspace_1",
+      chatSessionId: "chat_1",
+      activatedMessageId: "message_2",
+      bundles: [{ bundleId: replacement.bundle.id, sourceKind: "standalone" }],
+    });
+    const taskBundles = await loadImmutableSkillBundles(db, {
+      workspaceId: "workspace_1",
+      bundleIds: taskBundleIds,
+    });
+    const snapshottedBinary = await readChatSkillBundleFile(db, {
+      workspaceId: "workspace_1",
+      chatSessionId: "chat_1",
+      skillName: "my-skill",
+      path: "references/data.bin",
+    });
+
+    expect(firstActivation).toMatchObject([
+      {
+        bundleId: first.installation.bundle.id,
+        activatedMessageId: "message_1",
+        body: "First version.",
+      },
+    ]);
+    expect(afterReplacement).toMatchObject([
+      {
+        bundleId: first.installation.bundle.id,
+        activatedMessageId: "message_1",
+        body: "First version.",
+      },
+    ]);
+    expect(taskBundles).toMatchObject([
+      { id: first.installation.bundle.id, body: "First version." },
+    ]);
+    expect(snapshottedBinary).toMatchObject({ executable: true, sizeBytes: 4 });
+    expect([...snapshottedBinary!.content]).toEqual([0, 255, 1, 2]);
   });
 
   it("validates workspace ownership on installation and file reads", async () => {

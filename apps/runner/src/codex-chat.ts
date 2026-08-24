@@ -11,23 +11,23 @@ import {
   shellQuote,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
-import {
-  type BrainSkill,
-  CODEX_BRAIN_TOOL_CONTRACT_VERSION,
-  serializeBrainSkillMarkdown,
-} from "@opencompany/brain";
-import { getWorkflowHarnessSkillSnapshots } from "@opencompany/db/harness";
+import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 import {
   type ChatMessageAttachment,
   type CodexChatSession,
   type CodexChatTurn,
   chatMessages,
-  chatSessionSkills,
+  chatSessionSkillBundles,
   codexChatInteractions,
   codexChatTurns,
   type HarnessSpec,
   integrations,
+  skillBundles,
 } from "@opencompany/db/product-schema";
+import {
+  type ImmutableSkillBundle,
+  loadImmutableSkillBundles,
+} from "@opencompany/db/skill-bundle-repository";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, desc, eq, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
@@ -82,6 +82,7 @@ import {
   prepareCodexTaskTurn,
   type TaskTurnContext,
 } from "./task-turn";
+import { loadWorkflowTaskSkillBundles } from "./workflow-skill-bundles";
 
 export const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
 const CODEX_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.codex.workDirectory;
@@ -363,24 +364,26 @@ export async function runCodexChatTurn(input: {
     checkExternalAbort();
     executionStage = "load_skills";
     const sessionSkills = await loadCodexChatSessionSkills(turn);
+    const workflowSkills = taskContext
+      ? await loadWorkflowTaskSkillBundles(taskContext.harnessSpec)
+      : [];
     const turnSkills = resolveCodexTurnSkills({
       sessionSkills,
       userMessageId: turn.userMessageId,
-      ...(taskContext ? { harnessSpec: taskContext.harnessSpec } : {}),
+      workflowSkills,
     });
     checkExternalAbort();
     executionStage = "materialize_skills";
     const codexSkills = await materializeCodexSkillSnapshotsForSession({
       sandbox,
       codexWorkRoot: CODEX_CHAT_WORKDIR,
-      skills: turnSkills.snapshots.map((skill) => ({
-        id: skill.id,
-        files: [
-          {
-            path: "SKILL.md",
-            content: serializeBrainSkillMarkdown(skill),
-          },
-        ],
+      skills: turnSkills.bundles.map((bundle) => ({
+        name: bundle.name,
+        files: bundle.files.map((file) => ({
+          path: file.path,
+          content: file.content,
+          executable: file.executable,
+        })),
       })),
     });
     checkExternalAbort();
@@ -895,20 +898,19 @@ function currentInteractionLeaseSql() {
 }
 
 export async function loadCodexChatSessionSkills(turn: CodexChatTurn) {
-  return getDb()
+  const activations = await getDb()
     .select({
-      skillId: chatSessionSkills.skillId,
-      activatedMessageId: chatSessionSkills.activatedMessageId,
-      name: chatSessionSkills.name,
-      description: chatSessionSkills.description,
-      instructions: chatSessionSkills.instructions,
+      bundleId: chatSessionSkillBundles.bundleId,
+      activatedMessageId: chatSessionSkillBundles.activatedMessageId,
+      workspaceId: skillBundles.workspaceId,
       activatedAt: codexChatTurns.createdAt,
     })
-    .from(chatSessionSkills)
+    .from(chatSessionSkillBundles)
+    .innerJoin(skillBundles, eq(skillBundles.id, chatSessionSkillBundles.bundleId))
     .innerJoin(
       chatMessages,
       and(
-        eq(chatMessages.id, chatSessionSkills.activatedMessageId),
+        eq(chatMessages.id, chatSessionSkillBundles.activatedMessageId),
         eq(chatMessages.sessionId, turn.chatSessionId),
       ),
     )
@@ -921,56 +923,59 @@ export async function loadCodexChatSessionSkills(turn: CodexChatTurn) {
     )
     .where(
       and(
-        eq(chatSessionSkills.chatSessionId, turn.chatSessionId),
+        eq(chatSessionSkillBundles.chatSessionId, turn.chatSessionId),
         or(
           lt(codexChatTurns.createdAt, turn.createdAt),
           and(eq(codexChatTurns.createdAt, turn.createdAt), lte(codexChatTurns.id, turn.id)),
         ),
       ),
     )
-    .orderBy(asc(codexChatTurns.createdAt), asc(codexChatTurns.id), asc(chatSessionSkills.skillId));
+    .orderBy(asc(codexChatTurns.createdAt), asc(codexChatTurns.id), asc(skillBundles.name));
+  if (activations.length === 0) return [];
+  const workspaceIds = new Set(activations.map((activation) => activation.workspaceId));
+  if (workspaceIds.size !== 1) {
+    throw new Error(`Chat ${turn.chatSessionId} has Skill bundles from multiple workspaces.`);
+  }
+  const bundles = await loadImmutableSkillBundles(getDb(), {
+    workspaceId: activations[0]!.workspaceId,
+    bundleIds: activations.map((activation) => activation.bundleId),
+  });
+  const bundleById = new Map(bundles.map((bundle) => [bundle.id, bundle]));
+  return activations.map((activation) => ({
+    ...bundleById.get(activation.bundleId)!,
+    activatedMessageId: activation.activatedMessageId,
+    activatedAt: activation.activatedAt,
+  }));
 }
 
-type CodexTurnSessionSkill = {
-  skillId: string;
+type CodexTurnSessionSkill = ImmutableSkillBundle & {
   activatedMessageId: string;
-  name: string;
-  description: string;
-  instructions: string;
 };
 
 function resolveCodexTurnSkills(input: {
   sessionSkills: readonly CodexTurnSessionSkill[];
   userMessageId: string;
-  harnessSpec?: HarnessSpec | undefined;
+  workflowSkills: readonly ImmutableSkillBundle[];
 }) {
-  const snapshotsById = new Map<string, BrainSkill>();
+  const bundlesByName = new Map<string, ImmutableSkillBundle>();
   const invokedSkillIds = new Set<string>();
 
   for (const skill of input.sessionSkills) {
-    snapshotsById.set(skill.skillId, {
-      id: skill.skillId,
-      name: skill.name,
-      description: skill.description,
-      instructions: skill.instructions,
-    });
+    bundlesByName.set(skill.name, skill);
     if (skill.activatedMessageId === input.userMessageId) {
-      invokedSkillIds.add(skill.skillId);
+      invokedSkillIds.add(skill.name);
     }
   }
 
-  const workflowSkills = input.harnessSpec
-    ? (getWorkflowHarnessSkillSnapshots(input.harnessSpec) ?? [])
-    : [];
-  for (const skill of workflowSkills) {
-    // The task-creation snapshot is the workflow's immutable contract. Prefer it when an
-    // interactive session snapshot happens to use the same id.
-    snapshotsById.set(skill.id, skill);
-    invokedSkillIds.add(skill.id);
+  for (const skill of input.workflowSkills) {
+    // The task-creation bundle ID is the workflow's immutable contract. Prefer it when an
+    // interactive session snapshot happens to use the same declared name.
+    bundlesByName.set(skill.name, skill);
+    invokedSkillIds.add(skill.name);
   }
 
   return {
-    snapshots: [...snapshotsById.values()],
+    bundles: [...bundlesByName.values()],
     invokedSkillIds: [...invokedSkillIds],
   };
 }

@@ -79,6 +79,7 @@ describe("workspace automation lifecycle", () => {
     const resolveBuilder = createSelectBuilder([
       {
         id: "legal-review",
+        bundleId: "skill_bundle_legal_v1",
         name: "Legal review",
         description: "Check legal language",
         instructions: "Flag claims that need counsel.",
@@ -100,6 +101,7 @@ describe("workspace automation lifecycle", () => {
     ).resolves.toEqual([
       {
         id: "legal-review",
+        bundleId: "skill_bundle_legal_v1",
         name: "Legal review",
         description: "Check legal language",
         instructions: "Flag claims that need counsel.",

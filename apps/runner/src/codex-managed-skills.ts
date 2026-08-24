@@ -1,17 +1,22 @@
 import { createHash } from "node:crypto";
-import { type AgentSkillFile, shellQuote } from "@opencompany/agent-runtime";
+import path from "node:path";
+import {
+  type AgentSkillFile,
+  assertSafeRelativePath,
+  shellQuote,
+} from "@opencompany/agent-runtime";
 import { type SandboxHandle, writeSandboxTextFiles } from "./sandbox";
 
 const SANDBOX_ROOT_USER = "root";
-const SANDBOX_USER = "user";
 const MANAGED_SKILLS_MANIFEST = ".opencompany-managed-skills.json";
 
-export type NativeSkillSnapshot = { id: string; files: AgentSkillFile[] };
+export type NativeSkillSnapshot = { name: string; files: AgentSkillFile[] };
 
 // Materialize skill snapshots into the Codex-managed `.agents/skills` tree inside the sandbox.
 // A root-owned manifest records which skill directories are opencompany-managed so the next
 // reconcile can remove stale managed skills without touching user-authored ones. The tree is
-// locked read-only (dirs 555, files 444) so the sandboxed agent can read but never edit skills.
+// locked read-only (dirs 555, executable files 555, other files 444) so the sandboxed agent can
+// read and execute bundle files but never edit them.
 export async function materializeCodexSkillSnapshotsForSession(input: {
   sandbox: SandboxHandle;
   codexWorkRoot: string;
@@ -43,20 +48,34 @@ async function materializeManagedNativeSkillTree(input: {
 }) {
   const manifestPath = `${input.root}/${MANAGED_SKILLS_MANIFEST}`;
   const skills = input.skills;
-  for (const skill of skills) assertSafeSkillId(skill.id);
-  const skillFiles = skills.flatMap((skill) =>
-    skill.files.map((file) => ({
-      path: `${input.root}/${skill.id}/${file.path}`,
-      content: file.content,
-    })),
-  );
-  const currentSkillIds = [...new Set(skills.map((skill) => skill.id))];
+  const skillNames = new Set<string>();
+  const skillFiles = skills.flatMap((skill) => {
+    assertSafeSkillName(skill.name);
+    if (skillNames.has(skill.name)) {
+      throw new Error(`Cannot materialize duplicate Skill name: ${skill.name}`);
+    }
+    skillNames.add(skill.name);
+    const filePaths = new Set<string>();
+    return skill.files.map((file) => {
+      const targetPath = containedSkillFilePath(input.root, skill.name, file.path);
+      if (filePaths.has(file.path)) {
+        throw new Error(`Cannot materialize duplicate Skill file path: ${file.path}`);
+      }
+      filePaths.add(file.path);
+      return {
+        path: targetPath,
+        content: file.content,
+        executable: file.executable,
+      };
+    });
+  });
+  const currentSkillNames = [...skillNames];
 
   await reconcileCodexManagedSkillTree({
     sandbox: input.sandbox,
     root: input.root,
     manifestPath,
-    skillIds: currentSkillIds,
+    skillIds: currentSkillNames,
     files: skillFiles,
   });
 
@@ -71,17 +90,20 @@ async function reconcileCodexManagedSkillTree(input: {
   root: string;
   manifestPath: string;
   skillIds: string[];
-  files: Array<{ path: string; content: string }>;
+  files: Array<{ path: string; content: Uint8Array; executable: boolean }>;
 }) {
   const previousSkillIds = await readCodexManagedSkillIds(input.sandbox, input.manifestPath);
   const resetSkillIds = [...new Set([...previousSkillIds, ...input.skillIds])];
   const resetCommands = [
-    `chown ${SANDBOX_USER}:${SANDBOX_USER} ${shellQuote(input.root)}`,
+    `chown ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${shellQuote(input.root)}`,
     `chmod 755 ${shellQuote(input.root)}`,
     ...resetSkillIds.map((id) => `rm -rf ${shellQuote(`${input.root}/${id}`)}`),
   ];
 
-  await input.sandbox.commands.run(`mkdir -p ${shellQuote(input.root)}`, { timeoutMs: 30_000 });
+  await input.sandbox.commands.run(`mkdir -p ${shellQuote(input.root)}`, {
+    user: SANDBOX_ROOT_USER,
+    timeoutMs: 30_000,
+  });
   await input.sandbox.commands.run(resetCommands.join(" && "), {
     user: SANDBOX_ROOT_USER,
     timeoutMs: 30_000,
@@ -90,7 +112,7 @@ async function reconcileCodexManagedSkillTree(input: {
   await writeSandboxTextFiles({
     sandbox: input.sandbox,
     files: [
-      ...input.files,
+      ...input.files.map(({ path: filePath, content }) => ({ path: filePath, content })),
       {
         path: input.manifestPath,
         content: JSON.stringify({ version: 1, skillIds: input.skillIds }, null, 2),
@@ -100,6 +122,9 @@ async function reconcileCodexManagedSkillTree(input: {
   });
 
   const managedPaths = input.skillIds.map((id) => shellQuote(`${input.root}/${id}`));
+  const executablePaths = input.files
+    .filter((file) => file.executable)
+    .map((file) => shellQuote(file.path));
   const lockCommands = [
     `chown ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${shellQuote(input.manifestPath)}`,
     `chmod 444 ${shellQuote(input.manifestPath)}`,
@@ -115,6 +140,19 @@ async function reconcileCodexManagedSkillTree(input: {
     user: SANDBOX_ROOT_USER,
     timeoutMs: 30_000,
   });
+  for (const executableChunk of chunkShellArguments(executablePaths)) {
+    await input.sandbox.commands.run(`chmod 555 ${executableChunk.join(" ")}`, {
+      user: SANDBOX_ROOT_USER,
+      timeoutMs: 30_000,
+    });
+  }
+  await input.sandbox.commands.run(
+    [
+      `chown ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${shellQuote(input.root)}`,
+      `chmod 555 ${shellQuote(input.root)}`,
+    ].join(" && "),
+    { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
+  );
 }
 
 async function readCodexManagedSkillIds(sandbox: SandboxHandle, manifestPath: string) {
@@ -137,30 +175,78 @@ async function readCodexManagedSkillIds(sandbox: SandboxHandle, manifestPath: st
   }
 }
 
-function assertSafeSkillId(id: string) {
-  if (isSafeSkillId(id)) return;
-  throw new Error(`Cannot materialize Codex skill with unsafe id: ${id}`);
+function assertSafeSkillName(name: string) {
+  try {
+    assertSafeRelativePath(name);
+  } catch {
+    throw new Error(`Cannot materialize Skill with unsafe name: ${name}`);
+  }
+  if (!name.includes("/")) return;
+  throw new Error(`Cannot materialize Skill with unsafe name: ${name}`);
 }
 
 function isSafeSkillId(id: string) {
-  return id.length > 0 && id !== "." && id !== ".." && !id.includes("/") && !id.includes("\0");
+  try {
+    assertSafeSkillName(id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function containedSkillFilePath(root: string, skillName: string, relativePath: string) {
+  try {
+    assertSafeRelativePath(relativePath);
+  } catch (error) {
+    throw new Error(
+      `Cannot materialize Skill file with unsafe path ${JSON.stringify(relativePath)}: ${error instanceof Error ? error.message : "invalid path"}`,
+    );
+  }
+  const skillRoot = path.posix.resolve(root, skillName);
+  const targetPath = path.posix.resolve(skillRoot, relativePath);
+  if (!targetPath.startsWith(`${skillRoot}/`)) {
+    throw new Error(`Cannot materialize Skill file outside its root: ${relativePath}`);
+  }
+  return targetPath;
 }
 
 function skillTreeFingerprint(skills: NativeSkillSnapshot[]) {
   const hash = createHash("sha256");
-  for (const skill of [...skills].sort((left, right) => left.id.localeCompare(right.id))) {
-    hash.update("skill\0");
-    hash.update(skill.id);
-    hash.update("\0");
+  for (const skill of [...skills].sort((left, right) => left.name.localeCompare(right.name))) {
+    hashField(hash, Buffer.from("skill", "utf8"));
+    hashField(hash, Buffer.from(skill.name, "utf8"));
     for (const file of [...skill.files].sort((left, right) =>
       left.path.localeCompare(right.path),
     )) {
-      hash.update("file\0");
-      hash.update(file.path);
-      hash.update("\0");
-      hash.update(file.content);
-      hash.update("\0");
+      hashField(hash, Buffer.from("file", "utf8"));
+      hashField(hash, Buffer.from(file.path, "utf8"));
+      hashField(hash, Uint8Array.of(file.executable ? 1 : 0));
+      hashField(hash, file.content);
     }
   }
   return hash.digest("hex");
+}
+
+function hashField(hash: ReturnType<typeof createHash>, bytes: Uint8Array) {
+  const length = Buffer.allocUnsafe(8);
+  length.writeBigUInt64BE(BigInt(bytes.byteLength));
+  hash.update(length);
+  hash.update(bytes);
+}
+
+function chunkShellArguments(args: string[], maxCharacters = 24_000) {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let characters = 0;
+  for (const argument of args) {
+    if (current.length > 0 && characters + argument.length + 1 > maxCharacters) {
+      chunks.push(current);
+      current = [];
+      characters = 0;
+    }
+    current.push(argument);
+    characters += argument.length + 1;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
 }

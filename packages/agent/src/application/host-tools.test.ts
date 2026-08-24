@@ -25,6 +25,7 @@ describe("opencompany Chat Task host tools", () => {
     const resolveSkillMentions = vi.fn(async () => [
       {
         id: "research",
+        bundleId: "skill_bundle_research_v1",
         name: "research",
         description: "Research carefully.",
         instructions: "Current instructions.",

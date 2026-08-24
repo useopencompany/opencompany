@@ -9,14 +9,13 @@ import {
   isCodexReasoningEffort,
   shellQuote,
 } from "@opencompany/agent-runtime";
-import { type BrainSkill, serializeBrainSkillMarkdown } from "@opencompany/brain";
 import {
   loadClaudeCodeCredential,
   markClaudeCodeCredentialNeedsReauth,
   markClaudeCodeCredentialValidated,
 } from "@opencompany/db/claude-code-auth";
-import { getWorkflowHarnessSkillSnapshots } from "@opencompany/db/harness";
 import { type CodexChatSession, type CodexChatTurn } from "@opencompany/db/product-schema";
+import type { ImmutableSkillBundle } from "@opencompany/db/skill-bundle-repository";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import {
@@ -95,6 +94,7 @@ import {
   markTaskTurnRunning,
   type TaskTurnContext,
 } from "./task-turn";
+import { loadWorkflowTaskSkillBundles } from "./workflow-skill-bundles";
 
 const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory;
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
@@ -412,24 +412,26 @@ export async function runClaudeCodeChatTurn(input: {
     await checkAbort();
     executionStage = "load_skills";
     const sessionSkills = await loadCodexChatSessionSkills(turn);
+    const workflowSkills = taskContext
+      ? await loadWorkflowTaskSkillBundles(taskContext.harnessSpec)
+      : [];
     const turnSkills = resolveClaudeTurnSkills({
       sessionSkills,
       userMessageId: turn.userMessageId,
-      ...(taskContext ? { taskContext } : {}),
+      workflowSkills,
     });
     await checkAbort();
     executionStage = "materialize_skills";
     await materializeClaudeSkillSnapshotsForSession({
       sandbox,
       claudeWorkRoot: CLAUDE_CHAT_WORKDIR,
-      skills: turnSkills.snapshots.map((skill) => ({
-        id: skill.id,
-        files: [
-          {
-            path: "SKILL.md",
-            content: serializeBrainSkillMarkdown(skill),
-          },
-        ],
+      skills: turnSkills.bundles.map((bundle) => ({
+        name: bundle.name,
+        files: bundle.files.map((file) => ({
+          path: file.path,
+          content: file.content,
+          executable: file.executable,
+        })),
       })),
     });
     await checkAbort();
@@ -998,30 +1000,22 @@ type CodexChatSessionSkill = Awaited<ReturnType<typeof loadCodexChatSessionSkill
 function resolveClaudeTurnSkills(input: {
   sessionSkills: readonly CodexChatSessionSkill[];
   userMessageId: string;
-  taskContext?: TaskTurnContext | undefined;
-}): { snapshots: BrainSkill[]; invokedSkillIds: string[] } {
-  const snapshots = new Map<string, BrainSkill>();
+  workflowSkills: readonly ImmutableSkillBundle[];
+}): { bundles: ImmutableSkillBundle[]; invokedSkillIds: string[] } {
+  const bundles = new Map<string, ImmutableSkillBundle>();
   const invokedSkillIds = new Set<string>();
   for (const skill of input.sessionSkills) {
-    snapshots.set(skill.skillId, {
-      id: skill.skillId,
-      name: skill.name,
-      description: skill.description,
-      instructions: skill.instructions,
-    });
+    bundles.set(skill.name, skill);
     if (skill.activatedMessageId === input.userMessageId) {
-      invokedSkillIds.add(skill.skillId);
+      invokedSkillIds.add(skill.name);
     }
   }
 
-  const workflowSkills = input.taskContext
-    ? (getWorkflowHarnessSkillSnapshots(input.taskContext.harnessSpec) ?? [])
-    : [];
-  for (const skill of workflowSkills) {
-    snapshots.set(skill.id, skill);
-    invokedSkillIds.add(skill.id);
+  for (const skill of input.workflowSkills) {
+    bundles.set(skill.name, skill);
+    invokedSkillIds.add(skill.name);
   }
-  return { snapshots: [...snapshots.values()], invokedSkillIds: [...invokedSkillIds] };
+  return { bundles: [...bundles.values()], invokedSkillIds: [...invokedSkillIds] };
 }
 
 function claudeBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {

@@ -102,6 +102,7 @@ export type WorkflowStep = {
   instructions: string;
 };
 export type SkillStatus = "draft" | "active";
+export type ChatSessionSkillBundleSourceKind = "standalone" | "plugin";
 // A skill imported from an external SKILL.md source. `null` on the row itself means
 // hand-authored in opencompany. Matches `AgentRemoteSkillSource["type"]`
 // (packages/agent-runtime/src/skill-resolver.ts) exactly — no translation layer needed.
@@ -357,6 +358,7 @@ export type HarnessWorkflowStep = {
   systemPrompt: string;
   systemBlocks: string[];
   skillIds: string[];
+  skillBundleIds: string[];
 };
 
 export type HarnessSpec = {
@@ -378,6 +380,7 @@ export type HarnessSpec = {
     id: string;
     workspaceId: string;
     skillIds: string[];
+    skillBundleIds: string[];
     steps?: HarnessWorkflowStep[];
     currentStepIndex?: number;
     completedStepCount?: number;
@@ -2922,10 +2925,8 @@ export const workflows = productSchema.table(
   }),
 );
 
-// Workspace-scoped, reusable agent capabilities. Formerly stored in a reserved
-// `skills/` Brain folder; extracted alongside workflows. `slug` is the handle
-// used by the `@skill/<slug>` composer mention. Attaching a skill to a chat
-// still snapshots its content immutably into `chatSessionSkills`.
+// Legacy workspace-authored skills retained until the Phase 6 schema removal. The current Agent
+// Skills catalog and runtime do not read this table.
 export const skills = productSchema.table(
   "skills",
   {
@@ -4002,9 +4003,8 @@ export const browserProfileSessions = productSchema.table(
   }),
 );
 
-// Immutable skill snapshots activated by an explicit @skill mention in a chat. Keeping the
-// activation message lets non-Codex chat replay the skill as part of conversation history, while
-// Codex can materialize every active snapshot and invoke only the skills selected on the turn.
+// Legacy content-copying Chat snapshots retained until the Phase 6 schema removal. Current Chat
+// activation and every runner read `chatSessionSkillBundles` exclusively.
 export const chatSessionSkills = productSchema.table(
   "chat_session_skills",
   {
@@ -4028,6 +4028,36 @@ export const chatSessionSkills = productSchema.table(
       table.activatedMessageId,
     ),
     brainIdx: index("goat_chat_session_skills_brain_idx").on(table.brainRef),
+  }),
+);
+
+// Immutable Agent Skill bundle versions activated in a Chat. The application serializes
+// activation per Chat so the first bundle with a given declared name remains fixed even if its
+// workspace installation is later replaced, disabled, or archived.
+export const chatSessionSkillBundles = productSchema.table(
+  "chat_session_skill_bundles",
+  {
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    bundleId: text("bundle_id")
+      .notNull()
+      .references(() => skillBundles.id, { onDelete: "restrict" }),
+    activatedMessageId: text("activated_message_id")
+      .notNull()
+      .references(() => chatMessages.id, { onDelete: "cascade" }),
+    sourceKind: text("source_kind").$type<ChatSessionSkillBundleSourceKind>().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.chatSessionId, table.bundleId] }),
+    bundleIdx: index("goat_chat_session_skill_bundles_bundle_idx").on(table.bundleId),
+    activatedMessageIdx: index("goat_chat_session_skill_bundles_activated_message_idx").on(
+      table.activatedMessageId,
+    ),
+    sourceKindCheck: check(
+      "chat_session_skill_bundles_source_kind_check",
+      sql`${table.sourceKind} IN ('standalone', 'plugin')`,
+    ),
   }),
 );
 
@@ -5777,6 +5807,7 @@ export const chatSessionsRelations = relations(chatSessions, ({ one, many }) => 
   sandboxUsage: many(chatSandboxUsage),
   browserProfileSessions: many(browserProfileSessions),
   skills: many(chatSessionSkills),
+  skillBundles: many(chatSessionSkillBundles),
   brainToolRuns: many(brainToolRuns),
   capabilityRuns: many(capabilityRuns),
   artifacts: many(chatArtifacts),
@@ -5814,6 +5845,7 @@ export const chatMessagesRelations = relations(chatMessages, ({ one, many }) => 
     references: [tasks.id],
   }),
   activatedSkills: many(chatSessionSkills),
+  activatedSkillBundles: many(chatSessionSkillBundles),
   sandboxUsage: many(chatSandboxUsage),
   modelRoutingAttempts: many(chatModelRoutingAttempts),
 }));
@@ -5894,6 +5926,21 @@ export const chatSessionSkillsRelations = relations(chatSessionSkills, ({ one })
   }),
 }));
 
+export const chatSessionSkillBundlesRelations = relations(chatSessionSkillBundles, ({ one }) => ({
+  session: one(chatSessions, {
+    fields: [chatSessionSkillBundles.chatSessionId],
+    references: [chatSessions.id],
+  }),
+  bundle: one(skillBundles, {
+    fields: [chatSessionSkillBundles.bundleId],
+    references: [skillBundles.id],
+  }),
+  activatedMessage: one(chatMessages, {
+    fields: [chatSessionSkillBundles.activatedMessageId],
+    references: [chatMessages.id],
+  }),
+}));
+
 export const skillBundlesRelations = relations(skillBundles, ({ one, many }) => ({
   workspace: one(workspaces, {
     fields: [skillBundles.workspaceId],
@@ -5901,6 +5948,7 @@ export const skillBundlesRelations = relations(skillBundles, ({ one, many }) => 
   }),
   files: many(skillBundleFiles),
   installations: many(skillInstallations),
+  chatSnapshots: many(chatSessionSkillBundles),
 }));
 
 export const skillBundleFilesRelations = relations(skillBundleFiles, ({ one }) => ({
@@ -5981,6 +6029,7 @@ export type ChatSandboxUsage = typeof chatSandboxUsage.$inferSelect;
 export type BrowserProfile = typeof browserProfiles.$inferSelect;
 export type BrowserProfileSession = typeof browserProfileSessions.$inferSelect;
 export type ChatSessionSkill = typeof chatSessionSkills.$inferSelect;
+export type ChatSessionSkillBundle = typeof chatSessionSkillBundles.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;
 export type Skill = typeof skills.$inferSelect;
 export type SkillBundle = typeof skillBundles.$inferSelect;

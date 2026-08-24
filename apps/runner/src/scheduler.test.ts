@@ -310,6 +310,7 @@ describe("sweepDueTaskSchedules", () => {
         id: "weekly-update",
         workspaceId: "workspace_1",
         skillIds: [],
+        skillBundleIds: [],
         steps: [],
         currentStepIndex: 0,
         completedStepCount: 0,

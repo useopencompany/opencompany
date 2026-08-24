@@ -500,6 +500,7 @@ function workflowSpec(): HarnessSpec {
       id: "workflow_1",
       workspaceId: "workspace_1",
       skillIds: [],
+      skillBundleIds: [],
       currentStepIndex: 0,
       completedStepCount: 0,
       steps: [
@@ -511,6 +512,7 @@ function workflowSpec(): HarnessSpec {
           systemPrompt: "Audit the repository.",
           systemBlocks: ["Audit the repository."],
           skillIds: [],
+          skillBundleIds: [],
         },
         {
           index: 1,
@@ -520,6 +522,7 @@ function workflowSpec(): HarnessSpec {
           systemPrompt: "Implement and verify the change.",
           systemBlocks: ["Implement and verify the change."],
           skillIds: [],
+          skillBundleIds: [],
         },
       ],
     },

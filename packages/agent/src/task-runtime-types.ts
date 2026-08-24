@@ -83,6 +83,7 @@ export type HarnessWorkflowStep = {
   systemPrompt: string;
   systemBlocks: string[];
   skillIds: string[];
+  skillBundleIds: string[];
 };
 
 export type HarnessSpec = {
@@ -100,6 +101,7 @@ export type HarnessSpec = {
     id: string;
     workspaceId: string;
     skillIds: string[];
+    skillBundleIds: string[];
     steps?: HarnessWorkflowStep[];
     currentStepIndex?: number;
     completedStepCount?: number;

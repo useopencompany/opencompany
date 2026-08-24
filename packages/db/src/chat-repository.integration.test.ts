@@ -30,6 +30,8 @@ const migrationPaths = [
   "0215_goat_chat_sidebar_state.sql",
   "0216_goat_conversation_runtime_summary.sql",
   "0219_goat_run_attempt_deploy_version.sql",
+  "0222_goat_immutable_skill_bundles.sql",
+  "0223_goat_chat_skill_bundle_snapshots.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -1222,13 +1224,13 @@ describe("Postgres Chat repositories", () => {
       },
     ]);
     expect(
-      await database.query<{ skill_id: string; activated_message_id: string }>(`
-        SELECT skill_id, activated_message_id
-        FROM goat.chat_session_skills
+      await database.query<{ bundle_id: string; activated_message_id: string }>(`
+        SELECT bundle_id, activated_message_id
+        FROM goat.chat_session_skill_bundles
         WHERE chat_session_id = 'task_conversation_1'
       `),
     ).toMatchObject({
-      rows: [{ skill_id: "review", activated_message_id: created.messageId }],
+      rows: [{ bundle_id: "skill_bundle_review", activated_message_id: created.messageId }],
     });
 
     await database.query("UPDATE goat.codex_chat_turns SET status = 'paused' WHERE id = $1", [
@@ -1289,6 +1291,81 @@ describe("Postgres Chat repositories", () => {
     ).toMatchObject({ rows: [{ status: "canceled", error: "Stopped by user." }] });
   });
 
+  it("keeps the first Chat bundle fixed after its installation is replaced and archived", async () => {
+    await seedStandaloneReviewSkill(database);
+    const first = await service.createMessage(actor(), {
+      idempotencyKey: "skill-snapshot-v1",
+      content: "Review this.",
+      engine: "codex",
+      model: "provider/model",
+      mentions: [{ kind: "skill", id: "review" }],
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'completed', completed_at = now()
+       WHERE id = $1`,
+      [first.runId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_sessions
+       SET status = 'idle', active_turn_id = NULL
+       WHERE chat_session_id = $1`,
+      [first.conversationId],
+    );
+    await database.exec(`
+      INSERT INTO goat.skill_bundles (
+        id, workspace_id, integrity, name, description, body,
+        source_type, source_url, source_path, source_ref, resolved_commit
+      ) VALUES (
+        'skill_bundle_review_v2', 'workspace_1',
+        'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        'review', 'Review carefully.', 'Replacement body.', 'github',
+        'https://github.com/example/review', 'review', 'main',
+        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+      );
+      INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
+      VALUES ('skill_bundle_review_v2', 'SKILL.md', ''::bytea, false, 0);
+      UPDATE goat.skill_installations
+      SET bundle_id = 'skill_bundle_review_v2'
+      WHERE id = 'skill_review';
+    `);
+
+    await service.createMessage(actor(), {
+      idempotencyKey: "skill-snapshot-v2",
+      conversationId: first.conversationId,
+      content: "Review this again.",
+      engine: "codex",
+      model: "provider/model",
+      mentions: [{ kind: "skill", id: "review" }],
+    });
+    await database.exec(`
+      UPDATE goat.skill_installations
+      SET enabled = false, archived_at = now()
+      WHERE id = 'skill_review';
+    `);
+
+    await expect(
+      database.query<{
+        bundle_id: string;
+        activated_message_id: string;
+        source_kind: string;
+      }>(
+        `SELECT bundle_id, activated_message_id, source_kind
+         FROM goat.chat_session_skill_bundles
+         WHERE chat_session_id = $1`,
+        [first.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          bundle_id: "skill_bundle_review",
+          activated_message_id: first.messageId,
+          source_kind: "standalone",
+        },
+      ],
+    });
+  });
+
   it("does not let a malformed Task link broaden access to a normal Chat Run", async () => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "private-chat-run",
@@ -1343,8 +1420,26 @@ async function seedTerminalTask(database: PGlite) {
       'task_run_1', 'user_1', 'task_runtime_1', 'task_conversation_1',
       'task_message_1', 'task_assistant_1', 'completed', 'Review the repository.', now()
     );
-    INSERT INTO goat.skills (id, workspace_id, slug, name, description, instructions)
-    VALUES ('skill_review', 'workspace_1', 'review', 'Review', 'Review carefully.', 'Be thorough.');
+  `);
+  await seedStandaloneReviewSkill(database);
+}
+
+async function seedStandaloneReviewSkill(database: PGlite) {
+  await database.exec(`
+    INSERT INTO goat.skill_bundles (
+      id, workspace_id, integrity, name, description, body,
+      source_type, source_url, source_path, source_ref, resolved_commit
+    ) VALUES (
+      'skill_bundle_review', 'workspace_1',
+      'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'review', 'Review carefully.', 'Be thorough.', 'github',
+      'https://github.com/example/review', 'review', 'main',
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    );
+    INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
+    VALUES ('skill_bundle_review', 'SKILL.md', ''::bytea, false, 0);
+    INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id)
+    VALUES ('skill_review', 'workspace_1', 'review', 'skill_bundle_review');
   `);
 }
 

@@ -92,6 +92,7 @@ import {
   markTaskTurnRunning,
   type TaskTurnContext,
 } from "./task-turn";
+import { loadWorkflowTaskSkillBundles } from "./workflow-skill-bundles";
 
 const ASSISTANT_PARTS_FLUSH_INTERVAL_MS = 500;
 const PRESENTATION_DELTA_FLUSH_INTERVAL_MS = 50;
@@ -1132,6 +1133,9 @@ async function resolveProductChatRuntime(input: {
         }
       : {}),
   });
+  const taskSkillBundles = taskContext
+    ? await loadWorkflowTaskSkillBundles(taskContext.harnessSpec)
+    : [];
   const taskSystemBlocks = taskContext
     ? [
         TASK_SYSTEM_BLOCK,
@@ -1141,6 +1145,10 @@ async function resolveProductChatRuntime(input: {
           : taskContext.harnessSpec.systemPrompt.trim()
             ? [taskContext.harnessSpec.systemPrompt]
             : []),
+        ...taskSkillBundles.map(
+          (bundle) =>
+            `<workflow_skill name=${JSON.stringify(bundle.name)}>\n${bundle.body}\n</workflow_skill>`,
+        ),
       ]
     : [];
   return {
