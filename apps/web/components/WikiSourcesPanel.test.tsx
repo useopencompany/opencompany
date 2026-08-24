@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   listWikiSources: vi.fn(),
   setWikiSourceEnabled: vi.fn(),
   upsertWikiSource: vi.fn(),
+  listGitHubRepositories: vi.fn(),
+  listLinearTeams: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
 }));
@@ -36,6 +38,11 @@ vi.mock("@/lib/wiki-source-api", () => ({
   upsertWikiSource: mocks.upsertWikiSource,
 }));
 
+vi.mock("@/lib/brain-source-actions", () => ({
+  listGitHubRepositoriesAction: mocks.listGitHubRepositories,
+  listLinearTeamsAction: mocks.listLinearTeams,
+}));
+
 vi.mock("@opencompany/ui/components/sonner", () => ({
   toast: { error: mocks.toastError, success: mocks.toastSuccess },
 }));
@@ -54,6 +61,8 @@ describe("WikiSourcesPanel", () => {
     mocks.listWikiSources.mockResolvedValue([]);
     mocks.setWikiSourceEnabled.mockReset();
     mocks.upsertWikiSource.mockReset();
+    mocks.listGitHubRepositories.mockReset();
+    mocks.listLinearTeams.mockReset();
     mocks.toastError.mockReset();
     mocks.toastSuccess.mockReset();
   });
@@ -96,6 +105,97 @@ describe("WikiSourcesPanel", () => {
       }),
     );
     expect(await screen.findByText("Feeding")).toBeInTheDocument();
+  });
+
+  it("configures selected Linear teams and events through the Wiki sources API", async () => {
+    mocks.integrations = [integration({ provider: "linear", accountName: "Acme" })];
+    mocks.listLinearTeams.mockResolvedValue({
+      ok: true,
+      teams: [{ id: "team_1", name: "Core", key: "ENG" }],
+      partial: false,
+    });
+    mocks.upsertWikiSource.mockResolvedValue(
+      source({
+        provider: "linear",
+        accountName: "Acme",
+        config: {
+          teams: [{ id: "team_1", name: "Core", key: "ENG" }],
+          events: [
+            { id: "issue_created" },
+            { id: "issue_updated" },
+            { id: "issue_status_changed" },
+            { id: "issue_removed" },
+            { id: "comment_created" },
+            { id: "comment_updated" },
+          ],
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    await user.click(await screen.findByRole("button", { name: "Choose teams and events" }));
+    await user.click(await screen.findByRole("checkbox", { name: /Core/u }));
+    await user.click(screen.getByRole("button", { name: "Save Linear source" }));
+
+    await waitFor(() =>
+      expect(mocks.upsertWikiSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          integrationId: "integration_1",
+          provider: "linear",
+          enabled: true,
+          config: expect.objectContaining({
+            teams: [{ id: "team_1", name: "Core", key: "ENG" }],
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("configures selected GitHub repositories through the Wiki sources API", async () => {
+    mocks.integrations = [
+      integration({ provider: "github", workspaceId: "workspace_1", accountName: "Acme" }),
+    ];
+    mocks.listGitHubRepositories.mockResolvedValue({
+      ok: true,
+      repos: [{ id: "4242", fullName: "acme/api", private: true }],
+    });
+    mocks.upsertWikiSource.mockResolvedValue(
+      source({
+        provider: "github",
+        accountName: "Acme",
+        ownerKind: "workspace",
+        config: {
+          repos: [{ id: "4242", fullName: "acme/api" }],
+          events: [
+            "pull_request_opened",
+            "pull_request_merged",
+            "pull_request_commented",
+            "issue_opened",
+            "issue_commented",
+          ],
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    await user.click(await screen.findByRole("button", { name: "Configure" }));
+    await user.click(await screen.findByRole("checkbox", { name: /acme\/api/u }));
+    await user.click(screen.getByRole("button", { name: "Save GitHub source" }));
+
+    await waitFor(() =>
+      expect(mocks.upsertWikiSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          integrationId: "integration_1",
+          provider: "github",
+          enabled: true,
+          config: expect.objectContaining({
+            repos: [{ id: "4242", fullName: "acme/api" }],
+          }),
+        }),
+      ),
+    );
   });
 
   it("uses the server integration snapshot while the live read model loads", async () => {

@@ -219,7 +219,16 @@ const app = createApiApp({
   identify: identityVerifier,
   ...(process.env.CRON_SECRET ? { emailLifecycleInternalSecret: process.env.CRON_SECRET } : {}),
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
-  githubIngress: createGitHubIngress({ db: database.db, identify: identityVerifier }),
+  githubIngress: createGitHubIngress({
+    db: database.db,
+    identify: identityVerifier,
+    wakeWikiIngest: () =>
+      runnerClient.postJson(
+        "/internal/goat/wiki-ingest/wake",
+        {},
+        { errorFormat: "error-message" },
+      ),
+  }),
   googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
   slackIngress: createSlackIngress({ db: database.db, identify: identityVerifier }),
   linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
