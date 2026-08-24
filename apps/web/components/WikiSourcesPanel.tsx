@@ -26,6 +26,7 @@ import { ArrowLeft, CircleAlert, Loader2, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
+import { useHydrated } from "@/components/useHydrated";
 import {
   getHeadlessIntegrationAccounts,
   type HeadlessIntegrationAccountReadModel,
@@ -55,13 +56,39 @@ export function WikiSourcesPanel({
   workspaceId: string;
   isAdmin: boolean;
 }) {
+  const hydrated = useHydrated();
+  const initialIntegrations = useAppDataOptional()?.integrations;
+  if (!hydrated) {
+    return (
+      <WikiSourcesLayout>
+        <WikiSourceCardSkeletons />
+      </WikiSourcesLayout>
+    );
+  }
+  return (
+    <WikiSourcesLivePanel
+      workspaceId={workspaceId}
+      isAdmin={isAdmin}
+      initialIntegrations={initialIntegrations}
+    />
+  );
+}
+
+function WikiSourcesLivePanel({
+  workspaceId,
+  isAdmin,
+  initialIntegrations,
+}: {
+  workspaceId: string;
+  isAdmin: boolean;
+  initialIntegrations: IntegrationState | undefined;
+}) {
   const [sources, setSources] = useState<WikiSourceDto[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [, startTransition] = useTransition();
   const autoEnableAttempted = useRef(new Set<string>());
-  const initialIntegrations = useAppDataOptional()?.integrations;
 
   const integrationCollection = useMemo(
     () => getHeadlessIntegrationAccounts(workspaceId),
@@ -199,6 +226,62 @@ export function WikiSourcesPanel({
     .filter((entry) => entry.source?.enabled && entry.status === "connected").length;
 
   return (
+    <WikiSourcesLayout>
+      {loadError ? (
+        <Alert variant="destructive">
+          <CircleAlert />
+          <AlertTitle>Sources didn&apos;t load</AlertTitle>
+          <AlertDescription>
+            <p>{loadError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setLoadError(null);
+                setSources(null);
+                void loadSources();
+              }}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              Try again
+            </button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {!loading && feedingCount === 0 ? (
+        <Alert variant="info">
+          <Settings2 />
+          <AlertTitle>No sources are feeding yet</AlertTitle>
+          <AlertDescription>
+            Connect an account below or turn on a connected source. Meeting sources start feeding
+            automatically after connection.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {loading ? (
+        <WikiSourceCardSkeletons />
+      ) : (
+        <section aria-label="Wiki source providers" className="grid gap-4 md:grid-cols-2">
+          {WIKI_SOURCE_PROVIDERS.map((provider) => (
+            <WikiSourceCard
+              key={provider.id}
+              provider={provider}
+              entries={entriesByProvider.get(provider.id) ?? []}
+              pendingIds={pendingIds}
+              rowErrors={rowErrors}
+              onEnabledChange={updateEnabled}
+              {...(provider.scopeRequired ? { scopeSlot: defaultScopeSlot } : {})}
+            />
+          ))}
+        </section>
+      )}
+    </WikiSourcesLayout>
+  );
+}
+
+function WikiSourcesLayout({ children }: { children: ReactNode }) {
+  return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-8 sm:px-8 sm:py-10">
         <header className="flex flex-col gap-3">
@@ -217,56 +300,7 @@ export function WikiSourcesPanel({
             </p>
           </div>
         </header>
-
-        {loadError ? (
-          <Alert variant="destructive">
-            <CircleAlert />
-            <AlertTitle>Sources didn&apos;t load</AlertTitle>
-            <AlertDescription>
-              <p>{loadError}</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setLoadError(null);
-                  setSources(null);
-                  void loadSources();
-                }}
-                className={buttonVariants({ variant: "outline", size: "sm" })}
-              >
-                Try again
-              </button>
-            </AlertDescription>
-          </Alert>
-        ) : null}
-
-        {!loading && feedingCount === 0 ? (
-          <Alert variant="info">
-            <Settings2 />
-            <AlertTitle>No sources are feeding yet</AlertTitle>
-            <AlertDescription>
-              Connect an account below or turn on a connected source. Meeting sources start feeding
-              automatically after connection.
-            </AlertDescription>
-          </Alert>
-        ) : null}
-
-        {loading ? (
-          <WikiSourceCardSkeletons />
-        ) : (
-          <section aria-label="Wiki source providers" className="grid gap-4 md:grid-cols-2">
-            {WIKI_SOURCE_PROVIDERS.map((provider) => (
-              <WikiSourceCard
-                key={provider.id}
-                provider={provider}
-                entries={entriesByProvider.get(provider.id) ?? []}
-                pendingIds={pendingIds}
-                rowErrors={rowErrors}
-                onEnabledChange={updateEnabled}
-                {...(provider.scopeRequired ? { scopeSlot: defaultScopeSlot } : {})}
-              />
-            ))}
-          </section>
-        )}
+        {children}
       </main>
     </div>
   );

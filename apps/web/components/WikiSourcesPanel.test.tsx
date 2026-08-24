@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WikiSourcesPanel } from "./WikiSourcesPanel";
 
@@ -8,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   integrations: [] as Array<Record<string, unknown>>,
   integrationsLoading: false,
   initialIntegrations: null as Record<string, unknown> | null,
+  useLiveQuery: vi.fn(),
   listWikiSources: vi.fn(),
   setWikiSourceEnabled: vi.fn(),
   upsertWikiSource: vi.fn(),
@@ -16,7 +18,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-db", () => ({
-  useLiveQuery: () => ({ data: mocks.integrations, isLoading: mocks.integrationsLoading }),
+  useLiveQuery: mocks.useLiveQuery,
 }));
 
 vi.mock("@/components/AppDataProvider", () => ({
@@ -43,6 +45,11 @@ describe("WikiSourcesPanel", () => {
     mocks.integrations = [];
     mocks.integrationsLoading = false;
     mocks.initialIntegrations = null;
+    mocks.useLiveQuery.mockReset();
+    mocks.useLiveQuery.mockImplementation(() => ({
+      data: mocks.integrations,
+      isLoading: mocks.integrationsLoading,
+    }));
     mocks.listWikiSources.mockReset();
     mocks.listWikiSources.mockResolvedValue([]);
     mocks.setWikiSourceEnabled.mockReset();
@@ -58,6 +65,13 @@ describe("WikiSourcesPanel", () => {
     expect(connect).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/wiki/sources");
     expect(screen.getByText("No sources are feeding yet")).toBeInTheDocument();
     expect(screen.getAllByText("Not connected")).toHaveLength(6);
+  });
+
+  it("does not start the live integration collection during server rendering", () => {
+    const html = renderToString(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    expect(html).toContain("Loading Wiki sources");
+    expect(mocks.useLiveQuery).not.toHaveBeenCalled();
   });
 
   it("turns a connected scoped provider into a Wiki source through the direct API", async () => {
