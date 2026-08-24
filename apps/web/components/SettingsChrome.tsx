@@ -149,9 +149,11 @@ function SettingsNavRow({ item, active }: { item: SettingsNavItem; active: boole
 export function SettingsSidebar({
   collapsed,
   onToggleCollapsed,
+  showCollapseButton = true,
 }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  showCollapseButton?: boolean;
 }) {
   const pathname = usePathname();
   const isAdmin = useAppDataOptional()?.workspace.role === "admin";
@@ -166,15 +168,17 @@ export function SettingsSidebar({
       <div className="flex h-full w-[256px] flex-col">
         {/* Header: collapse control + return to the app */}
         <div className="flex items-center gap-1 px-2 pb-2 pt-3">
-          <button
-            type="button"
-            aria-label="Collapse sidebar"
-            aria-expanded={!collapsed}
-            onClick={onToggleCollapsed}
-            className="rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <PanelLeft size={15} strokeWidth={1.75} />
-          </button>
+          {showCollapseButton ? (
+            <button
+              type="button"
+              aria-label="Collapse sidebar"
+              aria-expanded={!collapsed}
+              onClick={onToggleCollapsed}
+              className="rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            >
+              <PanelLeft size={15} strokeWidth={1.75} />
+            </button>
+          ) : null}
           <Link
             href="/"
             prefetch

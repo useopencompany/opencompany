@@ -917,7 +917,7 @@ function parseDebugTraceUiMessageParts(value: unknown): ChatUiMessage["parts"] |
       continue;
     }
     if (isPersistedToolPart(part)) {
-      parts.push(part as ChatUiMessage["parts"][number]);
+      parts.push(normalizePersistedToolPart(part));
     }
   }
 
@@ -929,6 +929,23 @@ function isPersistedToolPart(value: Record<string, unknown>) {
     typeof value.type === "string" &&
     (value.type === "dynamic-tool" || value.type.startsWith("tool-"))
   );
+}
+
+function normalizePersistedToolPart(
+  value: Record<string, unknown>,
+): ChatUiMessage["parts"][number] {
+  const approval = value.approval;
+  if (!isRecord(approval) || approval.reason !== null) {
+    return value as ChatUiMessage["parts"][number];
+  }
+
+  // Older approval writes persisted an optional SDK field as JSON null. The AI SDK accepts a
+  // string or an absent field, so normalize legacy rows at the durable replay boundary.
+  const { reason: _reason, ...normalizedApproval } = approval;
+  return {
+    ...value,
+    approval: normalizedApproval,
+  } as ChatUiMessage["parts"][number];
 }
 
 // ---------------------------------------------------------------------------

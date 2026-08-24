@@ -278,108 +278,36 @@ export async function runCodexChatTurn(input: {
   }
 
   const sandboxReplaced = sandbox.sandboxId !== session.sandboxId;
-  if (sandboxReplaced) {
-    await updateCodexChatSessionIfLeaseHeld({
-      turn,
-      leaseId,
-      leaseOwner,
-      // Codex thread state lives in the sandbox's CODEX_HOME. A replacement sandbox cannot
-      // resume an id from the old home, so persist the new sandbox and invalidate its checkpoint
-      // together before starting a bootstrapped thread.
-      setSql: sql`sandbox_id = ${sandbox.sandboxId}, codex_thread_id = NULL, updated_at = ${new Date()}`,
-    });
-  }
-
-  const [repositoryBootstrap, conversationHistory] = await Promise.all([
-    repositoryBootstrapPromise,
-    conversationHistoryPromise,
-  ]);
-  const infisicalAuth = await reconcileInfisicalSandboxAuth({
-    sandbox,
-    workspaceId: session.workspaceId,
-    userWorkosId: turn.userWorkosId,
-  });
-  const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
-  const github = await loadGitHubAuthForUser(turn.userWorkosId);
-  const canonicalAttemptId = input.canonicalAttemptId;
-  const actionHostEnabled = isActionHostToolContractVersion(session.hostToolContractVersion);
-  const brainReadHostEnabled =
-    actionHostEnabled || session.hostToolContractVersion === CODEX_BRAIN_TOOL_CONTRACT_VERSION;
-  const hostGatewayEnabled =
-    brainReadHostEnabled &&
-    Boolean(session.workspaceId) &&
-    Boolean(env.runnerPublicUrl) &&
-    Boolean(canonicalAttemptId);
-  const brainToolEnabled = hostGatewayEnabled && brainReadHostEnabled && Boolean(session.brainRef);
-  const brainCaptureEnabled = hostGatewayEnabled && actionHostEnabled && Boolean(session.brainRef);
-  const actionToolsEnabled = hostGatewayEnabled && actionHostEnabled;
-  const artifactToolsEnabled = hostGatewayEnabled && actionHostEnabled;
-  const toolGatewayTicket =
-    hostGatewayEnabled && canonicalAttemptId
-      ? createExternalEngineGatewayTicket({
-          codexChatSessionId: session.id,
-          codexChatTurnId: turn.id,
-          attemptId: canonicalAttemptId,
-          leaseId,
-          secret: env.internalToken,
-          ttlMs: env.codexTimeoutMs + 10 * 60_000,
-        }).ticket
-      : null;
-  const redact = createKnownSecretRedactor([
-    serializedAuthJson,
-    auth.kind === "api" ? auth.apiKeyValue : null,
-    github?.githubToken ?? null,
-    github?.githubAuthHeader ?? null,
-    env.internalToken,
-    toolGatewayTicket,
-    ...repositoryBootstrap.secretValues,
-    ...infisicalAuth.redactionValues,
-  ]);
-  const acpNormalizer = createAcpEventNormalizer({ engineName: "Codex" });
-  const projector = createExternalEngineProjector({
-    target: {
-      userWorkosId: turn.userWorkosId,
-      workspaceId: session.workspaceId,
-      codexChatSessionId: session.id,
-      chatSessionId: session.chatSessionId,
-      turnId: turn.id,
-      userMessageId: turn.userMessageId,
-      assistantMessageId: turn.assistantMessageId,
-      model: session.model,
-      engine: session.engine,
-      leaseId,
-      leaseOwner,
-      ...(input.canonicalAttemptId ? { canonicalAttemptId: input.canonicalAttemptId } : {}),
-      planMode,
-      turnCreatedAt:
-        turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt,
-    },
-    redact,
-    // Resumes the parts already persisted for this message (normally empty; non-empty only if a
-    // previous write landed before a transient failure of the same turn).
-    initialParts,
-    normalizeEvent: acpNormalizer.normalize,
-  });
-
   const checkExternalAbort = () => {
     const abort = shouldAbort?.();
     if (abort) throw abort;
   };
-
-  if (input.recovery) {
-    // A client request belongs to the dead ACP connection and cannot be resumed. Settle it
-    // before starting the recovery turn so a stale card cannot accept an unusable answer.
-    await projector.cancelPendingInteractions();
-  }
-
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
   let authCacheStaged = false;
-  let executionStage = "fence_previous_turn";
+  let executionStage = "persist_sandbox_replacement";
+  let redact = (value: string) => value;
+  let projector: ReturnType<typeof createExternalEngineProjector> | null = null;
+  const activeProjector = async () => {
+    projector ??= await bareProjector();
+    return projector;
+  };
   try {
-    // Fence any leftover codex process before the first fallible preflight await. A replaced
-    // sandbox is fresh (its thread id was already nulled above), so only a reused sandbox can hold
-    // a detached engine from a hard-killed previous attempt.
+    if (sandboxReplaced) {
+      await updateCodexChatSessionIfLeaseHeld({
+        turn,
+        leaseId,
+        leaseOwner,
+        // Codex thread state lives in the sandbox's CODEX_HOME. A replacement sandbox cannot
+        // resume an id from the old home, so persist the new sandbox and invalidate its checkpoint
+        // together before starting a bootstrapped thread.
+        setSql: sql`sandbox_id = ${sandbox.sandboxId}, codex_thread_id = NULL, updated_at = ${new Date()}`,
+      });
+    }
+    checkExternalAbort();
+    executionStage = "fence_previous_turn";
+    // A replaced sandbox is fresh (its thread id was already nulled above), so only a reused
+    // sandbox can hold a detached engine from a hard-killed previous attempt.
     if (!sandboxReplaced) {
       try {
         await killLeftoverCodexTurnProcesses(sandbox);
@@ -392,6 +320,93 @@ export async function runCodexChatTurn(input: {
       }
     }
     checkExternalAbort();
+    executionStage = "load_repository_context";
+    const [repositoryBootstrap, conversationHistory] = await Promise.all([
+      repositoryBootstrapPromise,
+      conversationHistoryPromise,
+    ]);
+    checkExternalAbort();
+    executionStage = "reconcile_infisical_auth";
+    const infisicalAuth = await reconcileInfisicalSandboxAuth({
+      sandbox,
+      workspaceId: session.workspaceId,
+      userWorkosId: turn.userWorkosId,
+    });
+    checkExternalAbort();
+    executionStage = "load_github_auth";
+    const github = await loadGitHubAuthForUser(turn.userWorkosId);
+    checkExternalAbort();
+    const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
+    const canonicalAttemptId = input.canonicalAttemptId;
+    const actionHostEnabled = isActionHostToolContractVersion(session.hostToolContractVersion);
+    const brainReadHostEnabled =
+      actionHostEnabled || session.hostToolContractVersion === CODEX_BRAIN_TOOL_CONTRACT_VERSION;
+    const hostGatewayEnabled =
+      brainReadHostEnabled &&
+      Boolean(session.workspaceId) &&
+      Boolean(env.runnerPublicUrl) &&
+      Boolean(canonicalAttemptId);
+    const brainToolEnabled =
+      hostGatewayEnabled && brainReadHostEnabled && Boolean(session.brainRef);
+    const brainCaptureEnabled =
+      hostGatewayEnabled && actionHostEnabled && Boolean(session.brainRef);
+    const actionToolsEnabled = hostGatewayEnabled && actionHostEnabled;
+    const artifactToolsEnabled = hostGatewayEnabled && actionHostEnabled;
+    const toolGatewayTicket =
+      hostGatewayEnabled && canonicalAttemptId
+        ? createExternalEngineGatewayTicket({
+            codexChatSessionId: session.id,
+            codexChatTurnId: turn.id,
+            attemptId: canonicalAttemptId,
+            leaseId,
+            secret: env.internalToken,
+            ttlMs: env.codexTimeoutMs + 10 * 60_000,
+          }).ticket
+        : null;
+    redact = createKnownSecretRedactor([
+      serializedAuthJson,
+      auth.kind === "api" ? auth.apiKeyValue : null,
+      github?.githubToken ?? null,
+      github?.githubAuthHeader ?? null,
+      env.internalToken,
+      toolGatewayTicket,
+      ...repositoryBootstrap.secretValues,
+      ...infisicalAuth.redactionValues,
+    ]);
+    const acpNormalizer = createAcpEventNormalizer({ engineName: "Codex" });
+    const turnProjector = createExternalEngineProjector({
+      target: {
+        userWorkosId: turn.userWorkosId,
+        workspaceId: session.workspaceId,
+        codexChatSessionId: session.id,
+        chatSessionId: session.chatSessionId,
+        turnId: turn.id,
+        userMessageId: turn.userMessageId,
+        assistantMessageId: turn.assistantMessageId,
+        model: session.model,
+        engine: session.engine,
+        leaseId,
+        leaseOwner,
+        ...(input.canonicalAttemptId ? { canonicalAttemptId: input.canonicalAttemptId } : {}),
+        planMode,
+        turnCreatedAt:
+          turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt,
+      },
+      redact,
+      // Resumes the parts already persisted for this message (normally empty; non-empty only if a
+      // previous write landed before a transient failure of the same turn).
+      initialParts,
+      normalizeEvent: acpNormalizer.normalize,
+    });
+    projector = turnProjector;
+
+    if (input.recovery) {
+      // A client request belongs to the dead ACP connection and cannot be resumed. Settle it
+      // before starting the recovery turn so a stale card cannot accept an unusable answer.
+      executionStage = "cancel_stale_interactions";
+      await turnProjector.cancelPendingInteractions();
+      checkExternalAbort();
+    }
     executionStage = "load_attachments";
     const attachments = await loadCodexChatAttachments(turn);
     checkExternalAbort();
@@ -571,7 +586,7 @@ export async function runCodexChatTurn(input: {
       timeoutMs: env.codexTimeoutMs,
       redact,
       checkAbort,
-      onRuntimeEvents: (events) => projector.push(events),
+      onRuntimeEvents: (events) => turnProjector.push(events),
       onEngineSessionId: async (codexThreadId) => {
         acpNormalizer.beginRun(codexThreadId);
         if (codexThreadId === session.codexThreadId) return;
@@ -592,7 +607,7 @@ export async function runCodexChatTurn(input: {
       onPermissionRequest: (request) =>
         handleAcpPermissionRequest({
           request,
-          projector,
+          projector: turnProjector,
           turnId: turn.id,
           leaseId,
           timeoutMs: env.codexTimeoutMs,
@@ -601,7 +616,7 @@ export async function runCodexChatTurn(input: {
       onElicitationRequest: (request) =>
         handleAcpElicitationRequest({
           request,
-          projector,
+          projector: turnProjector,
           engineSessionId: acpNormalizer.sessionId(),
           turnId: turn.id,
           leaseId,
@@ -674,7 +689,7 @@ export async function runCodexChatTurn(input: {
         assistantContent: rawResult,
         turnId: turn.id,
       });
-      await projector.finalize(
+      await turnProjector.finalize(
         { ...summary, result: finalResult },
         {
           replacementContent: finalResult,
@@ -688,11 +703,11 @@ export async function runCodexChatTurn(input: {
       );
     } else {
       if (taskContext) {
-        await projector.finalize(summary, {
+        await turnProjector.finalize(summary, {
           taskCompletion: buildTaskTerminalProjection(taskContext),
         });
       } else {
-        await projector.finalize(summary);
+        await turnProjector.finalize(summary);
       }
     }
   } catch (error) {
@@ -706,12 +721,13 @@ export async function runCodexChatTurn(input: {
         : (shouldAbort?.() ?? error);
     if (effectiveError instanceof CodexChatHandoffError) {
       outcome = "handed_off";
-      await projector.cancelPendingInteractions();
+      await (await activeProjector()).cancelPendingInteractions();
     } else if (effectiveError instanceof CodexChatInterruptedError) {
+      const currentProjector = await activeProjector();
       if (taskContext) {
-        await projector.interrupted(buildTaskTerminalProjection(taskContext));
+        await currentProjector.interrupted(buildTaskTerminalProjection(taskContext));
       } else {
-        await projector.interrupted();
+        await currentProjector.interrupted();
       }
     } else if (effectiveError instanceof CodexChatLeaseLostError) {
       // Another worker owns the turn now; leave all rows to it.
@@ -742,13 +758,14 @@ export async function runCodexChatTurn(input: {
       // The user-facing message stays the clean upstream string; the stage-prefixed diagnostic is
       // persisted to the durable attempt (run_attempts.error_message) for forensics.
       const diagnostic = failureDiagnostic(executionStage, effectiveError, redact);
+      const currentProjector = await activeProjector();
       if (taskContext) {
-        await projector.fail(message, {
+        await currentProjector.fail(message, {
           taskCompletion: buildTaskTerminalProjection(taskContext),
           failureDiagnostic: diagnostic,
         });
       } else {
-        await projector.fail(message, { failureDiagnostic: diagnostic });
+        await currentProjector.fail(message, { failureDiagnostic: diagnostic });
       }
     }
   } finally {

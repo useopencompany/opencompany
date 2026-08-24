@@ -3,6 +3,7 @@
 import { PanelLeft } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
+import { DesktopTitleBar } from "@/components/DesktopTitleBar";
 import { NavInsetProvider } from "@/components/NavInset";
 import { SettingsSidebar } from "@/components/SettingsChrome";
 import { Sidebar } from "@/components/Sidebar";
@@ -56,7 +57,13 @@ function getIsMobileServerSnapshot() {
 
 // The persistent opencompany chrome: the sidebar plus the rounded main-panel wrapper. Lives in the
 // (app) layout so it stays mounted across navigations (the route page renders into {children}).
-export function Shell({ children }: { children: ReactNode }) {
+export function Shell({
+  children,
+  desktopApp = false,
+}: {
+  children: ReactNode;
+  desktopApp?: boolean;
+}) {
   const collapsed = useSyncExternalStore(
     subscribeSidebarCollapsed,
     getSidebarCollapsedSnapshot,
@@ -67,7 +74,6 @@ export function Shell({ children }: { children: ReactNode }) {
     getIsMobileSnapshot,
     getIsMobileServerSnapshot,
   );
-
   // On mobile the sidebar's desktop width-collapse is replaced by an off-canvas drawer.
   const pathname = usePathname();
   const inSettings = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -96,69 +102,80 @@ export function Shell({ children }: { children: ReactNode }) {
     };
   }, [isMobile, drawerOpen]);
 
-  const floatingButtonVisible = isMobile ? !drawerOpen : collapsed;
+  const floatingButtonVisible = desktopApp ? false : isMobile ? !drawerOpen : collapsed;
 
   return (
     // Root backdrop: on mobile the surface is full-bleed canvas (the sidebar is an off-canvas
     // drawer); on desktop the root stays `bg-sidebar` so the expanded main panel can float as a
     // rounded card with the sidebar canvas peeking around it.
-    <div className="relative flex h-dvh w-full overflow-hidden overflow-x-hidden bg-canvas md:bg-sidebar">
-      <div
-        className={
-          isMobile
-            ? `fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out ${
-                drawerOpen ? "translate-x-0" : "-translate-x-full"
-              }`
-            : "shrink-0"
-        }
-      >
-        {inSettings ? (
-          <SettingsSidebar
-            collapsed={isMobile ? false : collapsed}
-            onToggleCollapsed={
-              isMobile ? () => setDrawerOpen(false) : () => persistSidebarCollapsed(!collapsed)
-            }
-          />
-        ) : (
-          <Sidebar
-            collapsed={isMobile ? false : collapsed}
-            onToggleCollapsed={
-              isMobile ? () => setDrawerOpen(false) : () => persistSidebarCollapsed(!collapsed)
-            }
-          />
-        )}
-      </div>
-
-      {isMobile && drawerOpen ? (
-        <button
-          type="button"
-          aria-label="Close menu"
-          onClick={() => setDrawerOpen(false)}
-          className="fixed inset-0 z-30 bg-black/40"
+    <div className="relative flex h-dvh w-full flex-col overflow-hidden overflow-x-hidden bg-canvas md:bg-sidebar">
+      {desktopApp ? (
+        <DesktopTitleBar
+          collapsed={collapsed}
+          onToggleSidebar={() => persistSidebarCollapsed(!collapsed)}
         />
       ) : null}
 
-      {/* When the sidebar is expanded the main view floats as a rounded panel so the sidebar
-          canvas peeks around its edges; collapsed (or on mobile), it bleeds to full screen. */}
-      <div
-        className={`relative flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas transition-[margin,border-radius] duration-200 ease-out ${
-          isMobile || collapsed
-            ? "m-0 rounded-none border-0"
-            : "my-2 mr-2 rounded-xl border border-border shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
-        }`}
-      >
-        {floatingButtonVisible && (
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <div
+          className={
+            isMobile
+              ? `fixed inset-y-0 left-0 z-40 transition-transform duration-200 ease-out ${
+                  drawerOpen ? "translate-x-0" : "-translate-x-full"
+                }`
+              : "shrink-0"
+          }
+        >
+          {inSettings ? (
+            <SettingsSidebar
+              collapsed={isMobile ? false : collapsed}
+              onToggleCollapsed={
+                isMobile ? () => setDrawerOpen(false) : () => persistSidebarCollapsed(!collapsed)
+              }
+              showCollapseButton={!desktopApp}
+            />
+          ) : (
+            <Sidebar
+              collapsed={isMobile ? false : collapsed}
+              onToggleCollapsed={
+                isMobile ? () => setDrawerOpen(false) : () => persistSidebarCollapsed(!collapsed)
+              }
+              showCollapseButton={!desktopApp}
+            />
+          )}
+        </div>
+
+        {isMobile && drawerOpen ? (
           <button
             type="button"
-            aria-label={isMobile ? "Open menu" : "Expand sidebar"}
-            aria-expanded={false}
-            onClick={isMobile ? () => setDrawerOpen(true) : () => persistSidebarCollapsed(false)}
-            className="fixed left-2 top-2 z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <PanelLeft size={15} strokeWidth={1.75} />
-          </button>
-        )}
-        <NavInsetProvider value={floatingButtonVisible}>{children}</NavInsetProvider>
+            aria-label="Close menu"
+            onClick={() => setDrawerOpen(false)}
+            className="fixed inset-0 z-30 bg-black/40"
+          />
+        ) : null}
+
+        {/* When the sidebar is expanded the main view floats as a rounded panel so the sidebar
+            canvas peeks around its edges; collapsed (or on mobile), it bleeds to full screen. */}
+        <div
+          className={`relative flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas transition-[margin,border-radius] duration-200 ease-out ${
+            isMobile || collapsed
+              ? "m-0 rounded-none border-0"
+              : `${desktopApp ? "mb-2" : "my-2"} mr-2 rounded-xl border border-border shadow-[0_1px_3px_rgba(0,0,0,0.04)]`
+          }`}
+        >
+          {floatingButtonVisible && (
+            <button
+              type="button"
+              aria-label={isMobile ? "Open menu" : "Expand sidebar"}
+              aria-expanded={false}
+              onClick={isMobile ? () => setDrawerOpen(true) : () => persistSidebarCollapsed(false)}
+              className="fixed left-2 top-2 z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            >
+              <PanelLeft size={15} strokeWidth={1.75} />
+            </button>
+          )}
+          <NavInsetProvider value={floatingButtonVisible}>{children}</NavInsetProvider>
+        </div>
       </div>
     </div>
   );

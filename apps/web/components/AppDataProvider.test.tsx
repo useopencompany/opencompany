@@ -314,6 +314,43 @@ describe("AppDataProvider", () => {
     );
   });
 
+  it("keeps idle chats in the sidebar for seven days", () => {
+    const now = Date.now();
+    const chatRow = (id: string, ageInDays: number) => ({
+      id,
+      title: id,
+      model: "anthropic/claude-sonnet-5",
+      engine: "opencompany" as const,
+      archivedAt: null,
+      pinnedAt: null,
+      lastSeenAt: null,
+      activityState: "idle" as const,
+      hasUnseen: false,
+      createdAt: new Date(now - ageInDays * 24 * 60 * 60 * 1_000).toISOString(),
+      updatedAt: new Date(now - ageInDays * 24 * 60 * 60 * 1_000).toISOString(),
+    });
+    const perCollection = [
+      { data: [], isLoading: false },
+      { data: [], isLoading: false },
+      { data: [chatRow("six-days-old", 6), chatRow("eight-days-old", 8)], isLoading: false },
+      { data: [], isLoading: true },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(() => {
+      const result = perCollection[call % perCollection.length] ?? { data: [], isLoading: false };
+      call += 1;
+      return result;
+    });
+
+    render(
+      <AppDataProvider initialData={initialData()}>
+        <RecentChatStateProbe />
+      </AppDataProvider>,
+    );
+
+    expect(screen.getByTestId("recent").getAttribute("data-chat-ids")).toBe("six-days-old");
+  });
+
   it("keeps same-workspace live data during a server data refresh", () => {
     const now = new Date().toISOString();
     const chatRow = {

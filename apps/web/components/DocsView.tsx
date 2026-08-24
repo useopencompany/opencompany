@@ -94,7 +94,7 @@ function DocsSidebar({ tree, activeUrl }: { tree: Root; activeUrl: string }) {
 
 function TopBar({ title }: { title: string }) {
   return (
-    <div className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-border-subtle bg-canvas/85 px-5 backdrop-blur-md">
+    <div className="desktop-standalone-title-bar sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-border-subtle bg-canvas/85 px-5 backdrop-blur-md">
       <Link
         href="/"
         prefetch={false}
