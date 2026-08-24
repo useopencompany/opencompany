@@ -80,6 +80,8 @@ describe("wiki source lifecycle", () => {
     expect(compiled.sql).toContain("UPDATE goat.wiki_ingest_jobs AS job");
     expect(compiled.sql).toContain("job.status IN ('queued', 'running')");
     expect(compiled.sql).toContain("UPDATE goat.wiki_source_items AS source");
+    expect(compiled.sql).toContain("'reason', $2::text");
+    expect(compiled.sql).toContain("'summary', $3::text");
     expect(compiled.params).toEqual(
       expect.arrayContaining(["workspace_1", "integration_1", WIKI_SOURCE_DISABLED_INGEST_REASON]),
     );

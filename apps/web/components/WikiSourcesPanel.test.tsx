@@ -7,6 +7,7 @@ import { WikiSourcesPanel } from "./WikiSourcesPanel";
 const mocks = vi.hoisted(() => ({
   integrations: [] as Array<Record<string, unknown>>,
   integrationsLoading: false,
+  initialIntegrations: null as Record<string, unknown> | null,
   listWikiSources: vi.fn(),
   setWikiSourceEnabled: vi.fn(),
   upsertWikiSource: vi.fn(),
@@ -16,6 +17,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-db", () => ({
   useLiveQuery: () => ({ data: mocks.integrations, isLoading: mocks.integrationsLoading }),
+}));
+
+vi.mock("@/components/AppDataProvider", () => ({
+  useAppDataOptional: () =>
+    mocks.initialIntegrations ? { integrations: mocks.initialIntegrations } : null,
 }));
 
 vi.mock("@/lib/headless-integration-collections", () => ({
@@ -36,6 +42,7 @@ describe("WikiSourcesPanel", () => {
   beforeEach(() => {
     mocks.integrations = [];
     mocks.integrationsLoading = false;
+    mocks.initialIntegrations = null;
     mocks.listWikiSources.mockReset();
     mocks.listWikiSources.mockResolvedValue([]);
     mocks.setWikiSourceEnabled.mockReset();
@@ -75,6 +82,20 @@ describe("WikiSourcesPanel", () => {
       }),
     );
     expect(await screen.findByText("Feeding")).toBeInTheDocument();
+  });
+
+  it("uses the server integration snapshot while the live read model loads", async () => {
+    mocks.integrationsLoading = true;
+    mocks.initialIntegrations = initialIntegrationState([
+      integrationAccount({ provider: "gmail", accountEmail: "ada@example.com" }),
+    ]);
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    expect(await screen.findByText("ada@example.com")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Loading Wiki sources")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: "Enable Gmail source ada@example.com" }),
+    ).toBeEnabled();
   });
 
   it("auto-enables a newly connected meeting source", async () => {
@@ -170,6 +191,44 @@ function integration(overrides: Record<string, unknown> = {}) {
     scopes: [],
     capabilityModes: {},
     ...overrides,
+  };
+}
+
+function integrationAccount(overrides: Record<string, unknown> = {}) {
+  return {
+    integrationId: "integration_1",
+    provider: "gmail",
+    status: "connected",
+    connected: true,
+    accountEmail: null,
+    accountName: null,
+    connectionLabel: null,
+    statusReason: null,
+    scopes: [],
+    capabilityModes: {},
+    ...overrides,
+  };
+}
+
+function initialIntegrationState(gmail: Array<Record<string, unknown>>) {
+  return {
+    personalAccounts: { gmail, slack: [], linear: [], granola: [] },
+    github: {
+      provider: "github",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      statusReason: null,
+    },
+    jamie: {
+      provider: "jamie",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      statusReason: null,
+    },
   };
 }
 

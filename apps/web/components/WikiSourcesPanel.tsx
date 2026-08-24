@@ -25,10 +25,12 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { ArrowLeft, CircleAlert, Loader2, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useAppDataOptional } from "@/components/AppDataProvider";
 import {
   getHeadlessIntegrationAccounts,
   type HeadlessIntegrationAccountReadModel,
 } from "@/lib/headless-integration-collections";
+import type { IntegrationState } from "@/lib/integration-state";
 import { listWikiSources, setWikiSourceEnabled, upsertWikiSource } from "@/lib/wiki-source-api";
 import { WIKI_SOURCE_PROVIDERS, type WikiSourceProviderDef } from "@/lib/wiki-sources/registry";
 
@@ -59,6 +61,7 @@ export function WikiSourcesPanel({
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [, startTransition] = useTransition();
   const autoEnableAttempted = useRef(new Set<string>());
+  const initialIntegrations = useAppDataOptional()?.integrations;
 
   const integrationCollection = useMemo(
     () => getHeadlessIntegrationAccounts(workspaceId),
@@ -68,12 +71,22 @@ export function WikiSourcesPanel({
     (q) => q.from({ integration: integrationCollection }),
     [integrationCollection],
   );
+  const initialIntegrationRows = useMemo(
+    () => wikiSourceIntegrationRowsFromState(initialIntegrations, workspaceId),
+    [initialIntegrations, workspaceId],
+  );
+  const displayedIntegrationRows = useMemo(() => {
+    if (integrationsLoading && !integrationRows?.length) return initialIntegrationRows;
+    return (integrationRows ?? []) as HeadlessIntegrationAccountReadModel[];
+  }, [initialIntegrationRows, integrationRows, integrationsLoading]);
+  const integrationsReady =
+    !integrationsLoading || Boolean(integrationRows?.length) || Boolean(initialIntegrations);
   const eligibleIntegrations = useMemo(
     () =>
-      ((integrationRows ?? []) as HeadlessIntegrationAccountReadModel[]).filter((integration) =>
+      displayedIntegrationRows.filter((integration) =>
         isEligibleWikiSourceIntegration(integration, workspaceId),
       ),
-    [integrationRows, workspaceId],
+    [displayedIntegrationRows, workspaceId],
   );
 
   const loadSources = async () => {
@@ -110,7 +123,7 @@ export function WikiSourcesPanel({
   // connection appears in the live integration shape, attach it to the Wiki
   // immediately. Existing disabled rows stay disabled so pausing is durable.
   useEffect(() => {
-    if (!sources || integrationsLoading) return;
+    if (!sources || !integrationsReady) return;
     const candidates = ["jamie", "granola"].flatMap((provider) =>
       (entriesByProvider.get(provider as WikiSourceProvider) ?? []).filter(
         (entry) =>
@@ -146,7 +159,7 @@ export function WikiSourcesPanel({
           });
         });
     }
-  }, [entriesByProvider, integrationsLoading, sources]);
+  }, [entriesByProvider, integrationsReady, sources]);
 
   const updateEnabled = (entry: WikiSourceEntry, enabled: boolean) => {
     setRowErrors((current) => omitKey(current, entry.integrationId));
@@ -180,8 +193,7 @@ export function WikiSourcesPanel({
     });
   };
 
-  const loading =
-    !loadError && (sources === null || (integrationsLoading && !integrationRows?.length));
+  const loading = !loadError && (sources === null || !integrationsReady);
   const feedingCount = [...entriesByProvider.values()]
     .flat()
     .filter((entry) => entry.source?.enabled && entry.status === "connected").length;
@@ -479,6 +491,58 @@ function isEligibleWikiSourceIntegration(
     return integration.workspaceId === workspaceId;
   }
   return integration.workspaceId === null;
+}
+
+function wikiSourceIntegrationRowsFromState(
+  integrations: IntegrationState | undefined,
+  workspaceId: string,
+): HeadlessIntegrationAccountReadModel[] {
+  if (!integrations) return [];
+
+  const rows: HeadlessIntegrationAccountReadModel[] = [];
+  for (const provider of ["gmail", "slack", "linear", "granola"] as const) {
+    for (const account of integrations.personalAccounts[provider]) {
+      rows.push({
+        id: account.integrationId,
+        provider,
+        workspaceId: null,
+        externalId: "server-snapshot",
+        connectionLabel: account.connectionLabel,
+        accountName: account.accountName,
+        accountEmail: account.accountEmail,
+        accountType: null,
+        status: account.status,
+        statusReason: account.statusReason,
+        scopes: account.scopes,
+        capabilityModes: account.capabilityModes,
+      });
+    }
+  }
+
+  // The server integration snapshot includes the workspace-owned connection
+  // ids even though the legacy aggregate type does not expose GitHub's id.
+  const github = integrations.github as IntegrationState["github"] & {
+    integrationId?: string | null;
+  };
+  for (const connection of [github, integrations.jamie] as const) {
+    if (!connection.integrationId || connection.status === "not_connected") continue;
+    rows.push({
+      id: connection.integrationId,
+      provider: connection.provider,
+      workspaceId,
+      externalId: "server-snapshot",
+      connectionLabel: null,
+      accountName: connection.accountName,
+      accountEmail: null,
+      accountType: null,
+      status: connection.status,
+      statusReason: connection.statusReason,
+      scopes: [],
+      capabilityModes: {},
+    });
+  }
+
+  return rows;
 }
 
 function connectionLabel(entry: WikiSourceEntry) {
