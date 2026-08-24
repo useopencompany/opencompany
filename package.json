@@ -95,7 +95,7 @@
     "@vitejs/plugin-react": "^6.1.0",
     "drizzle-kit": "^0.31.10",
     "jsdom": "^29.1.1",
-    "neonctl": "^2.22.0",
+    "neonctl": "^3.6.0",
     "postcss": "8.5.26",
     "turbo": "^2.10.11",
     "typescript": "^6.0.3",
