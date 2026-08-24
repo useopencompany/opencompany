@@ -49,6 +49,7 @@ const skillBundleMocks = vi.hoisted(() => ({
 const pluginRuntimeMocks = vi.hoisted(() => ({
   loadChatSessionPluginRuntime: vi.fn(),
   loadEnabledPluginRuntime: vi.fn(),
+  loadEnabledPluginSkillBundleIds: vi.fn(),
 }));
 
 const managedPluginMocks = vi.hoisted(() => ({
@@ -108,6 +109,7 @@ vi.mock("@opencompany/db/skill-bundle-repository", () => ({
 vi.mock("@opencompany/db/plugin-runtime-repository", () => ({
   loadChatSessionPluginRuntime: pluginRuntimeMocks.loadChatSessionPluginRuntime,
   loadEnabledPluginRuntime: pluginRuntimeMocks.loadEnabledPluginRuntime,
+  loadEnabledPluginSkillBundleIds: pluginRuntimeMocks.loadEnabledPluginSkillBundleIds,
 }));
 
 vi.mock("./managed-plugins", () => ({
@@ -246,6 +248,7 @@ describe("runCodexChatTurn", () => {
     pluginRuntimeMocks.loadEnabledPluginRuntime
       .mockReset()
       .mockResolvedValue({ plugins: [], skills: [] });
+    pluginRuntimeMocks.loadEnabledPluginSkillBundleIds.mockReset().mockResolvedValue(new Set());
     managedPluginMocks.materializePluginPackagesForSession.mockReset().mockResolvedValue({
       fingerprint: "plugins",
       count: 0,
@@ -658,6 +661,7 @@ describe("runCodexChatTurn", () => {
     dbMocks.selectRows.push(
       [],
       [],
+      [],
       [
         {
           bundleId: "skill_bundle_plugin_review_v1",
@@ -698,6 +702,83 @@ describe("runCodexChatTurn", () => {
     expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
       expect.objectContaining({ skills: [] }),
     );
+    expect(pluginRuntimeMocks.loadEnabledPluginSkillBundleIds).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        workspaceId: "workspace_1",
+        bundleIds: ["skill_bundle_plugin_review_v1"],
+      },
+    );
+  });
+
+  it("keeps a pinned Plugin Skill when its enabled owner no longer wins the catalog", async () => {
+    dbMocks.selectRows.push(
+      [],
+      [],
+      [],
+      [
+        {
+          bundleId: "skill_bundle_plugin_review_v1",
+          sourceKind: "plugin",
+          activatedMessageId: "goat_msg_user_1",
+          workspaceId: "workspace_1",
+          activatedAt: new Date("2026-07-10T12:00:00Z"),
+        },
+      ],
+    );
+    const pinnedSkill = immutableSkillBundle(
+      "skill_bundle_plugin_review_v1",
+      "plugin-review",
+      "pinned plugin document",
+    );
+    const pluginPackage = {
+      id: "plugin_review_v1",
+      name: "review-tools",
+      files: [
+        {
+          path: "plugin.json",
+          content: new TextEncoder().encode('{"name":"review-tools"}'),
+          executable: false,
+          sizeBytes: 23,
+        },
+      ],
+    };
+    skillBundleMocks.loadImmutableSkillBundles.mockResolvedValueOnce([pinnedSkill]);
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+    });
+    pluginRuntimeMocks.loadEnabledPluginSkillBundleIds.mockResolvedValueOnce(
+      new Set([pinnedSkill.id]),
+    );
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+
+    await runCodexChatTurn({
+      turn: codexTurn(),
+      session: { ...codexSession(), workspaceId: "workspace_1" },
+      env: env(),
+    });
+
+    expect(pluginRuntimeMocks.loadEnabledPluginSkillBundleIds).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        workspaceId: "workspace_1",
+        bundleIds: [pinnedSkill.id],
+      },
+    );
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/plugin-review/SKILL.md",
+        }),
+      ]),
+    );
+    expect(managedPluginMocks.materializePluginPackagesForSession).toHaveBeenCalledWith({
+      sandbox,
+      workRoot: "/home/user/opencompany-goat/codex-chat",
+      plugins: [pluginPackage],
+    });
   });
 
   it("auto-mounts winning Plugin Skills and materializes the snapshotted package", async () => {

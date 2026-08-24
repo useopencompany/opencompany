@@ -15,7 +15,10 @@ import {
   markClaudeCodeCredentialValidated,
 } from "@opencompany/db/claude-code-auth";
 import { getWorkflowHarnessPluginSkillBundleIds } from "@opencompany/db/harness";
-import { loadChatSessionPluginRuntime } from "@opencompany/db/plugin-runtime-repository";
+import {
+  loadChatSessionPluginRuntime,
+  loadEnabledPluginSkillBundleIds,
+} from "@opencompany/db/plugin-runtime-repository";
 import { type CodexChatSession, type CodexChatTurn } from "@opencompany/db/product-schema";
 import type { ImmutableSkillBundle } from "@opencompany/db/skill-bundle-repository";
 import { captureException, createLogger } from "@opencompany/observability";
@@ -429,14 +432,30 @@ export async function runClaudeCodeChatTurn(input: {
             })
           : Promise.resolve({ plugins: [], skills: [] }),
     ]);
+    const workflowPluginSkillBundleIds = taskContext
+      ? getWorkflowHarnessPluginSkillBundleIds(taskContext.harnessSpec)
+      : [];
+    const activatedPluginBundleIds = [
+      ...sessionSkills.flatMap((skill) => (skill.sourceKind === "plugin" ? [skill.id] : [])),
+      ...workflowPluginSkillBundleIds,
+    ];
+    const skillWorkspaceId = taskContext?.harnessSpec.workflow?.workspaceId ?? session.workspaceId;
+    if (activatedPluginBundleIds.length > 0 && !skillWorkspaceId) {
+      throw new Error("Activated Plugin Skills require a workspace ID.");
+    }
+    const enabledPluginSkillBundleIds = skillWorkspaceId
+      ? await loadEnabledPluginSkillBundleIds(getDb(), {
+          workspaceId: skillWorkspaceId,
+          bundleIds: activatedPluginBundleIds,
+        })
+      : new Set<string>();
     const turnSkills = resolveClaudeTurnSkills({
       sessionSkills,
       userMessageId: turn.userMessageId,
       workflowSkills,
-      workflowPluginSkillBundleIds: taskContext
-        ? getWorkflowHarnessPluginSkillBundleIds(taskContext.harnessSpec)
-        : [],
+      workflowPluginSkillBundleIds,
       pluginSkills: pluginRuntime.skills,
+      enabledPluginSkillBundleIds,
     });
     await checkAbort();
     executionStage = "materialize_plugins";
@@ -1028,14 +1047,14 @@ function resolveClaudeTurnSkills(input: {
   workflowSkills: readonly ImmutableSkillBundle[];
   workflowPluginSkillBundleIds: readonly string[];
   pluginSkills: readonly ImmutableSkillBundle[];
+  enabledPluginSkillBundleIds: ReadonlySet<string>;
 }): { bundles: ImmutableSkillBundle[]; invokedSkillIds: string[] } {
   const bundles = new Map<string, ImmutableSkillBundle>();
   const invokedSkillIds = new Set<string>();
-  const enabledPluginBundleIds = new Set(input.pluginSkills.map((skill) => skill.id));
   const workflowPluginBundleIds = new Set(input.workflowPluginSkillBundleIds);
   for (const skill of input.pluginSkills) bundles.set(skill.name, skill);
   for (const skill of input.sessionSkills) {
-    if (skill.sourceKind === "plugin" && !enabledPluginBundleIds.has(skill.id)) continue;
+    if (skill.sourceKind === "plugin" && !input.enabledPluginSkillBundleIds.has(skill.id)) continue;
     bundles.set(skill.name, skill);
     if (skill.activatedMessageId === input.userMessageId) {
       invokedSkillIds.add(skill.name);
@@ -1043,7 +1062,9 @@ function resolveClaudeTurnSkills(input: {
   }
 
   for (const skill of input.workflowSkills) {
-    if (workflowPluginBundleIds.has(skill.id) && !enabledPluginBundleIds.has(skill.id)) continue;
+    if (workflowPluginBundleIds.has(skill.id) && !input.enabledPluginSkillBundleIds.has(skill.id)) {
+      continue;
+    }
     bundles.set(skill.name, skill);
     invokedSkillIds.add(skill.name);
   }

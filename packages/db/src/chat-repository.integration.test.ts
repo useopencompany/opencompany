@@ -20,6 +20,7 @@ import {
   PostgresChatRepository,
   PostgresRunExecutionRepository,
 } from "./chat-repository";
+import { loadChatSessionPluginRuntime } from "./plugin-runtime-repository";
 import { listChatSkillBundleActivations, readChatSkillBundleFile } from "./skill-bundle-repository";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -895,7 +896,7 @@ describe("Postgres Chat repositories", () => {
     });
   });
 
-  it("captures enabled Plugin IDs exactly once on a Chat's first coding turn", async () => {
+  it("keeps first-turn Plugin snapshots fixed unless an explicit Skill activation extends them", async () => {
     await database.exec(`
       INSERT INTO goat.plugins (
         id, workspace_id, name, status, manifest, source_type, source_url, source_path,
@@ -912,7 +913,9 @@ describe("Postgres Chat repositories", () => {
           '{"name":"disabled-plugin"}'::jsonb, 'github', 'https://github.com/example/plugins',
           'disabled-plugin', 'main', '${"a".repeat(40)}', 'sha256:${"c".repeat(64)}',
           '{"ignoredManifestFields":[],"skills":[],"mcp":{"status":"absent"},"collisions":[]}'::jsonb
-        )
+        );
+      INSERT INTO goat.plugin_files (plugin_id, path, content, executable, size_bytes)
+      VALUES ('plugin_first', 'plugin.json', convert_to('{}', 'UTF8'), false, 2);
     `);
     const first = await service.createMessage(actor(), {
       idempotencyKey: "plugin-snapshot-first",
@@ -938,6 +941,25 @@ describe("Postgres Chat repositories", () => {
         'late-plugin', 'main', '${"a".repeat(40)}', 'sha256:${"d".repeat(64)}',
         '{"ignoredManifestFields":[],"skills":[],"mcp":{"status":"absent"},"collisions":[]}'::jsonb
       );
+      INSERT INTO goat.skill_bundles (
+        id, workspace_id, integrity, name, description, body,
+        source_type, source_url, source_path, source_ref, resolved_commit
+      ) VALUES (
+        'skill_bundle_plugin_late', 'workspace_1',
+        'sha256:${"1".repeat(64)}', 'late-review', 'Late Plugin Skill.', 'Use late review.',
+        'github', 'https://github.com/example/plugins', 'late-plugin/skills/late-review',
+        'main', '${"a".repeat(40)}'
+      );
+      INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
+      VALUES ('skill_bundle_plugin_late', 'SKILL.md', ''::bytea, false, 0);
+      INSERT INTO goat.plugin_skills (
+        workspace_id, plugin_id, skill_name, skill_path, skill_bundle_id
+      ) VALUES (
+        'workspace_1', 'plugin_late', 'late-review',
+        'skills/late-review', 'skill_bundle_plugin_late'
+      );
+      INSERT INTO goat.plugin_files (plugin_id, path, content, executable, size_bytes)
+      VALUES ('plugin_late', 'plugin.json', convert_to('{}', 'UTF8'), false, 2);
       UPDATE goat.codex_chat_turns
       SET status = 'completed', completed_at = now()
       WHERE id = '${first.runId}';
@@ -945,7 +967,7 @@ describe("Postgres Chat repositories", () => {
       SET status = 'idle', active_turn_id = NULL
       WHERE chat_session_id = '${first.conversationId}';
     `);
-    await service.createMessage(actor(), {
+    const second = await service.createMessage(actor(), {
       idempotencyKey: "plugin-snapshot-second",
       conversationId: first.conversationId,
       content: "Continue coding.",
@@ -959,6 +981,41 @@ describe("Postgres Chat repositories", () => {
         [first.conversationId],
       ),
     ).resolves.toMatchObject({ rows: [{ plugin_id: "plugin_first" }] });
+
+    await database.exec(`
+      UPDATE goat.codex_chat_turns
+      SET status = 'completed', completed_at = now()
+      WHERE id = '${second.runId}';
+      UPDATE goat.codex_chat_sessions
+      SET status = 'idle', active_turn_id = NULL
+      WHERE chat_session_id = '${first.conversationId}';
+    `);
+    await service.createMessage(actor(), {
+      idempotencyKey: "plugin-snapshot-explicit-late-skill",
+      conversationId: first.conversationId,
+      content: "Use the late review skill.",
+      engine: "codex",
+      model: "provider/model",
+      mentions: [{ kind: "skill", id: "late-review" }],
+    });
+
+    await expect(
+      database.query<{ plugin_id: string }>(
+        "SELECT plugin_id FROM goat.chat_session_plugins WHERE chat_session_id = $1 ORDER BY plugin_id",
+        [first.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ plugin_id: "plugin_first" }, { plugin_id: "plugin_late" }],
+    });
+    await expect(
+      loadChatSessionPluginRuntime(drizzle(database), {
+        workspaceId: "workspace_1",
+        chatSessionId: first.conversationId,
+      }),
+    ).resolves.toMatchObject({
+      plugins: [{ id: "plugin_first" }, { id: "plugin_late" }],
+      skills: [{ id: "skill_bundle_plugin_late", name: "late-review" }],
+    });
   });
 
   it("activates a winning Plugin Skill with its immutable source kind", async () => {
@@ -1018,6 +1075,40 @@ describe("Postgres Chat repositories", () => {
     ).resolves.toEqual([
       expect.objectContaining({ bundleId: "skill_bundle_plugin_review", sourceKind: "plugin" }),
     ]);
+    await database.exec(`
+      INSERT INTO goat.skill_bundles (
+        id, workspace_id, integrity, name, description, body,
+        source_type, source_url, source_path, source_ref, resolved_commit
+      ) VALUES (
+        'skill_bundle_standalone_review', 'workspace_1',
+        'sha256:${"2".repeat(64)}', 'review', 'Standalone Review.', 'Use standalone review.',
+        'github', 'https://github.com/example/skills', 'review',
+        'main', '${"a".repeat(40)}'
+      );
+      INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
+      VALUES ('skill_bundle_standalone_review', 'SKILL.md', ''::bytea, false, 0);
+      INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id)
+      VALUES (
+        'skill_installation_standalone_review', 'workspace_1',
+        'review', 'skill_bundle_standalone_review'
+      );
+    `);
+    await expect(
+      listChatSkillBundleActivations(db, {
+        workspaceId: "workspace_1",
+        chatSessionId: created.conversationId,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ bundleId: "skill_bundle_plugin_review", sourceKind: "plugin" }),
+    ]);
+    await expect(
+      readChatSkillBundleFile(db, {
+        workspaceId: "workspace_1",
+        chatSessionId: created.conversationId,
+        skillName: "review",
+        path: "SKILL.md",
+      }),
+    ).resolves.toMatchObject({ path: "SKILL.md" });
     await database.exec("UPDATE goat.plugins SET status = 'disabled' WHERE id = 'plugin_review'");
     await expect(
       listChatSkillBundleActivations(db, {

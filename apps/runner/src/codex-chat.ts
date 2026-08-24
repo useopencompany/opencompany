@@ -13,7 +13,10 @@ import {
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 import { getWorkflowHarnessPluginSkillBundleIds } from "@opencompany/db/harness";
-import { loadChatSessionPluginRuntime } from "@opencompany/db/plugin-runtime-repository";
+import {
+  loadChatSessionPluginRuntime,
+  loadEnabledPluginSkillBundleIds,
+} from "@opencompany/db/plugin-runtime-repository";
 import {
   type ChatMessageAttachment,
   type CodexChatSession,
@@ -384,14 +387,30 @@ export async function runCodexChatTurn(input: {
             })
           : Promise.resolve({ plugins: [], skills: [] }),
     ]);
+    const workflowPluginSkillBundleIds = taskContext
+      ? getWorkflowHarnessPluginSkillBundleIds(taskContext.harnessSpec)
+      : [];
+    const activatedPluginBundleIds = [
+      ...sessionSkills.flatMap((skill) => (skill.sourceKind === "plugin" ? [skill.id] : [])),
+      ...workflowPluginSkillBundleIds,
+    ];
+    const skillWorkspaceId = taskContext?.harnessSpec.workflow?.workspaceId ?? session.workspaceId;
+    if (activatedPluginBundleIds.length > 0 && !skillWorkspaceId) {
+      throw new Error("Activated Plugin Skills require a workspace ID.");
+    }
+    const enabledPluginSkillBundleIds = skillWorkspaceId
+      ? await loadEnabledPluginSkillBundleIds(getDb(), {
+          workspaceId: skillWorkspaceId,
+          bundleIds: activatedPluginBundleIds,
+        })
+      : new Set<string>();
     const turnSkills = resolveCodexTurnSkills({
       sessionSkills,
       userMessageId: turn.userMessageId,
       workflowSkills,
-      workflowPluginSkillBundleIds: taskContext
-        ? getWorkflowHarnessPluginSkillBundleIds(taskContext.harnessSpec)
-        : [],
+      workflowPluginSkillBundleIds,
       pluginSkills: pluginRuntime.skills,
+      enabledPluginSkillBundleIds,
     });
     checkExternalAbort();
     executionStage = "materialize_plugins";
@@ -992,16 +1011,16 @@ function resolveCodexTurnSkills(input: {
   workflowSkills: readonly ImmutableSkillBundle[];
   workflowPluginSkillBundleIds: readonly string[];
   pluginSkills: readonly ImmutableSkillBundle[];
+  enabledPluginSkillBundleIds: ReadonlySet<string>;
 }) {
   const bundlesByName = new Map<string, ImmutableSkillBundle>();
   const invokedSkillIds = new Set<string>();
-  const enabledPluginBundleIds = new Set(input.pluginSkills.map((skill) => skill.id));
   const workflowPluginBundleIds = new Set(input.workflowPluginSkillBundleIds);
 
   for (const skill of input.pluginSkills) bundlesByName.set(skill.name, skill);
 
   for (const skill of input.sessionSkills) {
-    if (skill.sourceKind === "plugin" && !enabledPluginBundleIds.has(skill.id)) continue;
+    if (skill.sourceKind === "plugin" && !input.enabledPluginSkillBundleIds.has(skill.id)) continue;
     bundlesByName.set(skill.name, skill);
     if (skill.activatedMessageId === input.userMessageId) {
       invokedSkillIds.add(skill.name);
@@ -1009,7 +1028,9 @@ function resolveCodexTurnSkills(input: {
   }
 
   for (const skill of input.workflowSkills) {
-    if (workflowPluginBundleIds.has(skill.id) && !enabledPluginBundleIds.has(skill.id)) continue;
+    if (workflowPluginBundleIds.has(skill.id) && !input.enabledPluginSkillBundleIds.has(skill.id)) {
+      continue;
+    }
     // The task-creation bundle ID is the workflow's immutable contract. Prefer it when an
     // interactive session snapshot happens to use the same declared name.
     bundlesByName.set(skill.name, skill);
