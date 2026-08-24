@@ -29,6 +29,7 @@ const {
   completeWikiIngestJob,
   failWikiIngestJobWithBackoff,
   heartbeatWikiIngestJob,
+  releaseWikiIngestJob,
   skipWikiIngestJob,
   upsertWikiSourceItemAndEnqueue,
   wikiIngestRetryAt,
@@ -262,12 +263,20 @@ describe("claimNextWikiIngestJob", () => {
   });
 
   it("reclaims a running job after its lease expires", async () => {
+    const occurredAt = "2026-08-24T08:00:00.000Z";
     const reclaimed = {
       id: "gwjob_expired",
       workspaceId: "workspace_1",
       sourceItemId: "gwsrc_1",
       status: "running",
       attempts: 2,
+      nextRetryAt: new Date("2026-08-24T08:30:00.000Z"),
+      leaseExpiresAt: new Date("2026-08-24T08:59:00.000Z"),
+      heartbeatAt: new Date("2026-08-24T08:54:00.000Z"),
+      completedAt: null,
+      createdAt: new Date("2026-08-24T08:00:00.000Z"),
+      updatedAt: new Date("2026-08-24T08:54:00.000Z"),
+      occurredAt,
     };
     const execute = vi.fn(async (_query: SQL) => ({ rows: [reclaimed] }));
 
@@ -279,7 +288,7 @@ describe("claimNextWikiIngestJob", () => {
         leaseTtlMs: 60_000,
         db: { execute },
       }),
-    ).resolves.toEqual(reclaimed);
+    ).resolves.toEqual({ ...reclaimed, occurredAt: new Date(occurredAt) });
 
     const compiled = dialect.sqlToQuery(execute.mock.calls[0]![0] as SQL);
     expect(normalizeSql(compiled.sql)).toContain(
@@ -324,6 +333,29 @@ describe("wiki ingest job lifecycle", () => {
     expect(query).toContain("lease_id =");
     expect(query).toContain("lease_owner =");
     expect(query).toContain("status = 'running'");
+  });
+
+  it("requeues a shutdown-interrupted lease without consuming the attempt", async () => {
+    const execute = vi.fn(async (_query: SQL) => ({ rows: [{ id: "gwjob_1" }] }));
+    const now = new Date("2026-08-24T09:00:00.000Z");
+
+    await expect(
+      releaseWikiIngestJob({
+        id: "gwjob_1",
+        sourceItemId: "gwsrc_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        now,
+        db: { execute },
+      }),
+    ).resolves.toBe(true);
+
+    const compiled = dialect.sqlToQuery(execute.mock.calls[0]![0] as SQL);
+    expect(normalizeSql(compiled.sql)).toContain("set status = 'queued'");
+    expect(normalizeSql(compiled.sql)).toContain("attempts = greatest(attempts - 1, 0)");
+    expect(compiled.params).toEqual(
+      expect.arrayContaining([now, "gwjob_1", "gwsrc_1", "lease_1", "runner_1"]),
+    );
   });
 
   it("completes and skips through lease-guarded terminal updates", async () => {
