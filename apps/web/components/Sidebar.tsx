@@ -112,9 +112,11 @@ function SidebarNavRow({
 export function Sidebar({
   collapsed,
   onToggleCollapsed,
+  showCollapseButton = true,
 }: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  showCollapseButton?: boolean;
 }) {
   const { featureFlags, mcpSetup } = useAppData();
   const pathname = usePathname();
@@ -134,15 +136,17 @@ export function Sidebar({
       <div className="flex h-full w-[256px] flex-col">
         {/* Header controls */}
         <div className="flex items-center gap-1 px-2 pb-2 pt-3">
-          <button
-            type="button"
-            aria-label="Collapse sidebar"
-            aria-expanded={!collapsed}
-            onClick={onToggleCollapsed}
-            className="shrink-0 rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <PanelLeft size={15} strokeWidth={1.75} />
-          </button>
+          {showCollapseButton ? (
+            <button
+              type="button"
+              aria-label="Collapse sidebar"
+              aria-expanded={!collapsed}
+              onClick={onToggleCollapsed}
+              className="shrink-0 rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            >
+              <PanelLeft size={15} strokeWidth={1.75} />
+            </button>
+          ) : null}
           <div className="min-w-0 flex-1">
             <WorkspaceSwitcher />
           </div>

@@ -12,11 +12,11 @@ package.
 ## Layout
 
 - `src/main.ts` — app lifecycle, protocol registration, deep-link + update wiring.
-- `src/window.ts` — the `BrowserWindow` (sandboxed, context-isolated) + persisted bounds.
+- `src/window.ts` — the inset-title-bar `BrowserWindow` (sandboxed, context-isolated) + persisted bounds.
 - `src/navigation.ts` — origin allowlist, external-link routing, offline fallback.
 - `src/auth.ts` — PKCE verifier + the Google system-browser sign-in handoff.
 - `src/menu.ts` — application menu (incl. Check for Updates and a dev-only paste-callback item).
-- `src/preload.ts` — the `window.opencompanyDesktop` contextBridge global.
+- `src/preload.ts` — the `window.opencompanyDesktop` contextBridge global + desktop document marker.
 - `src/urls.ts` — the wrapped app URL (`OPENCOMPANY_DESKTOP_APP_URL` override).
 - `assets/offline.html` — shown when the app URL can't load.
 - `assets/icon.png` — 1024×1024 macOS app icon, generated from `icon-source.svg`.

@@ -77,6 +77,24 @@ body {
   overscroll-behavior: none;
 }
 
+.desktop-drag-region {
+  -webkit-app-region: drag;
+}
+
+.desktop-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+html[data-opencompany-desktop="true"] .desktop-standalone-title-bar {
+  padding-left: 5rem;
+  -webkit-app-region: drag;
+}
+
+html[data-opencompany-desktop="true"] .desktop-standalone-title-bar a,
+html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
+  -webkit-app-region: no-drag;
+}
+
 @keyframes goat-thinking-shimmer {
   0% {
     background-position: 160% 0;

@@ -59,6 +59,8 @@ export function createMainWindow(): BrowserWindow {
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     backgroundColor: "#0b0b0c",
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 18, y: 17 },
     show: true,
     webPreferences: {
       contextIsolation: true,
