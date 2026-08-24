@@ -128,6 +128,14 @@ describe("calculateModelUsageCost", () => {
   });
 
   it("applies xAI long-context tiers when input reaches the threshold", () => {
+    const shortContextCost = calculateModelUsageCost({
+      modelName: "xai/grok-4.6",
+      inputTokens: 199_999,
+      inputNoCacheTokens: 1_000,
+      inputCacheReadTokens: 1_000,
+      inputCacheWriteTokens: 0,
+      outputTokens: 1_000,
+    });
     const cost = calculateModelUsageCost({
       modelName: "xai/grok-4.6",
       inputTokens: 200_000,
@@ -137,6 +145,8 @@ describe("calculateModelUsageCost", () => {
       outputTokens: 1_000,
     });
 
+    expect(shortContextCost.providerCostUsdMicros).toBe(8_500);
+    expect(shortContextCost.costBasis.longContextApplied).toBe(false);
     expect(cost.providerCostUsdMicros).toBe(17_000);
     expect(cost.costBasis.longContextApplied).toBe(true);
   });

@@ -375,6 +375,7 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
       outputMultiplier: 2,
     },
   },
+  // verified 2026-08-24 against SpaceXAI's published API pricing
   "xai/grok-4.3": {
     model: "xai/grok-4.3",
     provider: "xai",
@@ -388,6 +389,7 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
       outputMultiplier: 2,
     },
   },
+  // verified 2026-08-24 against SpaceXAI's published API pricing
   "xai/grok-4.20-reasoning": {
     model: "xai/grok-4.20-reasoning",
     provider: "xai",
@@ -401,6 +403,7 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
       outputMultiplier: 2,
     },
   },
+  // verified 2026-08-24 against SpaceXAI's published API pricing
   "xai/grok-4.20-non-reasoning": {
     model: "xai/grok-4.20-non-reasoning",
     provider: "xai",
@@ -430,6 +433,7 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 200_000,
     outputUsdMicrosPerMillion: 500_000,
   },
+  // verified 2026-08-24 against SpaceXAI's published API pricing
   "xai/grok-build-0.1": {
     model: "xai/grok-build-0.1",
     provider: "xai",
