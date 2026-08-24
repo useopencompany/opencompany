@@ -101,6 +101,7 @@ import type { SlackBotSettingsService } from "./slack-bot-settings";
 import type { SlackIngressService } from "./slack-ingress";
 import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
+import type { WikiSourceService } from "./wiki-sources";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { WorkspaceControlService } from "./workspace-control";
 import type { XAccountIngressService } from "./x-account-ingress";
@@ -152,6 +153,7 @@ export type CreateApiAppInput = {
   // Bearer secret for POST /internal/wiki/commands (runner→API). Distinct from
   // the runner's own internal token so the two directions rotate independently.
   wikiCommandsInternalSecret?: string;
+  wikiSources: WikiSourceService;
   brainSources: Pick<BrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
   brainImports: Pick<BrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
   browserProfiles: Pick<
@@ -1111,6 +1113,35 @@ export function createApiApp(input: CreateApiAppInput) {
         },
         201,
       );
+    },
+    listWikiSources: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const sources = await input.wikiSources.list(actor);
+      return c.json({ data: sources, meta }, 200);
+    },
+    upsertWikiSource: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const source = await input.wikiSources.upsert(actor, c.req.valid("json"));
+      return c.json({ data: source, meta }, 200);
+    },
+    setWikiSourceEnabled: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const source = await input.wikiSources.setEnabled(
+        actor,
+        c.req.valid("param").sourceId,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: source, meta }, 200);
+    },
+    deleteWikiSource: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { sourceId } = c.req.valid("param");
+      await input.wikiSources.remove(actor, sourceId);
+      return c.json({ data: { sourceId, deleted: true }, meta }, 200);
     },
     listSkills: async (c) => {
       const actor = actorFrom(c);
