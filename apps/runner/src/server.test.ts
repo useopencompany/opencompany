@@ -320,6 +320,25 @@ describe("opencompany coding workspace access", () => {
       env,
     });
   });
+
+  it("keeps forwarding legacy session ids during rolling deployments", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+      payload: { userWorkosId: "user_1" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mintCodingWorkspaceAccess).toHaveBeenCalledWith({
+      codingSessionId: "goat_codex_chat_1",
+      userWorkosId: "user_1",
+      env,
+    });
+  });
 });
 
 describe("opencompany dictation access", () => {
