@@ -34,6 +34,8 @@ export const WIKI_READ_COMMANDS: readonly WikiToolCommand[] = [
 
 export type WikiToolInput = {
   command: WikiToolCommand;
+  /** tree: maximum descendant depth to return; 0 returns root entries only. */
+  depth?: number | undefined;
   /** read: page paths or basenames (one or many). timeline/move/delete/timeline-add: one path. */
   pages?: string | string[] | undefined;
   /** mkdir/write: full path of the folder or page ("projects/website-redesign"). */
@@ -66,7 +68,7 @@ export type WikiToolOutput = { ok: true; result: unknown } | { ok: false; error:
 
 export const WIKI_TOOL_DESCRIPTION = [
   "Workspace wiki: folders and markdown pages in a tree, like a filesystem. Folders are containers and pages are leaf documents. A node's full `path` is its identity; start with `tree`, `read` promising pages, and use `grep` when hunting for a phrase.",
-  'Commands: tree (folders end in `/`) · read {pages: path|basename|[...]} (page bodies + backlinks; a folder returns its children) · grep {query: regex} · search {query} · recent {since: "2d"} · timeline {pages: path, since?} · mkdir {path, title?} (create a folder and missing ancestor folders) · write {path, body, kind?, title?} (create or overwrite a page; missing ancestor folders are auto-created) · move {pages: path, to: folder-path|"/"} (move a page or folder subtree and update links) · delete {pages: path, recursive?} (recursive is required for a non-empty folder) · timeline-add {pages: path, text, at?}.',
+  'Commands: tree {depth?: 0-10} (folders end in `/`; depth 0 shows root entries; wikis over 40 entries default to depth 0) · read {pages: path|basename|[...]} (page bodies + backlinks; a folder returns its children) · grep {query: regex} · search {query} · recent {since: "2d"} · timeline {pages: path, since?} · mkdir {path, title?} (create a folder and missing ancestor folders) · write {path, body, kind?, title?} (create or overwrite a page; missing ancestor folders are auto-created) · move {pages: path, to: folder-path|"/"} (move a page or folder subtree and update links) · delete {pages: path, recursive?} (recursive is required for a non-empty folder) · timeline-add {pages: path, text, at?}.',
   "Pages link inline with [[path/to/page]] or [[path/to/page|Label]], and to artifacts in other tools with [[source:provider:id]] (e.g. [[source:linear:issue:ENG-123]]) — keep those links when rewriting. Bare basenames resolve only when unique. `kind` is one of project, person, company, research, meeting, other. Writes overwrite the whole page body: read before you rewrite.",
 ].join(" ");
 
@@ -80,6 +82,13 @@ export const WIKI_TOOL_INPUT_JSON_SCHEMA = {
       type: "string",
       enum: [...WIKI_TOOL_COMMANDS],
       description: "What to do. Read commands: tree, read, grep, search, recent, timeline.",
+    },
+    depth: {
+      type: "integer",
+      minimum: 0,
+      maximum: 10,
+      description:
+        "tree: maximum depth to return. 0 shows root entries only, 1 includes their children. If omitted, wikis with at most 40 entries return the full tree; larger wikis default to 0.",
     },
     pages: {
       anyOf: [{ type: "string" }, { type: "array", items: { type: "string" }, maxItems: 20 }],
