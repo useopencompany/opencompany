@@ -97,11 +97,11 @@ export type WikiIngestStore = {
     traceRef?: string | null;
     now: Date;
   }): Promise<boolean>;
-  resolveActor(input: {
+  resolveSource(input: {
     integrationId: string;
     workspaceId: string;
     sourceProvider: ClaimedWikiIngestJob["sourceProvider"];
-  }): Promise<string>;
+  }): Promise<{ actorUserWorkosId: string; config: Record<string, unknown> }>;
 };
 
 export function createDbWikiIngestStore(): WikiIngestStore {
@@ -118,7 +118,7 @@ export function createDbWikiIngestStore(): WikiIngestStore {
     complete: completeWikiIngestJob,
     fail: failWikiIngestJobWithBackoff,
     skip: skipWikiIngestJob,
-    async resolveActor(input) {
+    async resolveSource(input) {
       const sources = await listEnabledWikiSourcesForIntegration(input.integrationId);
       const source = sources.find(
         (candidate) =>
@@ -130,7 +130,7 @@ export function createDbWikiIngestStore(): WikiIngestStore {
           `No enabled wiki source owns integration ${input.integrationId} in workspace ${input.workspaceId}.`,
         );
       }
-      return source.userWorkosId;
+      return { actorUserWorkosId: source.userWorkosId, config: source.config };
     },
   };
 }
@@ -315,11 +315,12 @@ export async function runClaimedWikiIngestJob(input: {
       });
       return;
     }
-    const resolvedActorUserWorkosId = await store.resolveActor({
+    const resolvedSource = await store.resolveSource({
       integrationId: input.job.integrationId,
       workspaceId: input.job.workspaceId,
       sourceProvider: input.job.sourceProvider,
     });
+    const resolvedActorUserWorkosId = resolvedSource.actorUserWorkosId;
     actorUserWorkosId = resolvedActorUserWorkosId;
     const userIdHash = hashUserId(resolvedActorUserWorkosId);
     const result = await runSpan.runInContext(() =>
@@ -351,6 +352,7 @@ export async function runClaimedWikiIngestJob(input: {
             occurredAt: input.job.occurredAt,
             contentHash: input.job.contentHash,
             normalizedPayload: input.job.normalizedPayload,
+            sourceConfig: resolvedSource.config,
             env: input.env,
             signal: runAbort.signal,
           });
@@ -576,6 +578,30 @@ function retryTrace(result: Record<string, unknown>) {
     model: value.model,
     modelCostUsdMicros,
     usage: usage as Record<string, unknown>,
+    triage: wikiIngestTriageTrace(value.triage),
+  };
+}
+
+function wikiIngestTriageTrace(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const trace = value as Record<string, unknown>;
+  const usage = trace.usage;
+  if (
+    typeof trace.model !== "string" ||
+    (trace.decision !== "skip" && trace.decision !== "ingest") ||
+    !usage ||
+    typeof usage !== "object" ||
+    Array.isArray(usage)
+  ) {
+    return null;
+  }
+  const modelCostUsdMicros = finiteNumber(trace.modelCostUsdMicros);
+  if (modelCostUsdMicros === undefined) return null;
+  return {
+    model: trace.model,
+    decision: trace.decision,
+    modelCostUsdMicros,
+    usage: usage as Record<string, unknown>,
   };
 }
 
@@ -603,6 +629,16 @@ async function debitWikiIngestModelCost(
         attempt: job.attempts,
         modelCostUsdMicros: trace.modelCostUsdMicros,
         usage: trace.usage,
+        ...(trace.triage
+          ? {
+              triage: {
+                model: trace.triage.model,
+                decision: trace.triage.decision,
+                modelCostUsdMicros: trace.triage.modelCostUsdMicros,
+                usage: trace.triage.usage,
+              },
+            }
+          : {}),
       },
       metadata: { wikiIngestJobId: job.id },
     });
@@ -619,12 +655,21 @@ async function debitWikiIngestModelCost(
 function recordWikiIngestModelCost(result: Record<string, unknown>) {
   const trace = retryTrace(result);
   if (!trace) return;
-  const usage = trace.usage;
+  if (trace.triage) {
+    recordWikiIngestModelUsageCost(trace.triage.model, trace.triage.usage);
+  }
+  // A triage skip mirrors the triage model and usage at the top level because
+  // there was no full librarian call. Do not record that same call twice.
+  if (trace.triage?.decision === "skip") return;
+  recordWikiIngestModelUsageCost(trace.model, trace.usage);
+}
+
+function recordWikiIngestModelUsageCost(model: string, usage: Record<string, unknown>) {
   const inputTokens = finiteNumber(usage.inputTokens) ?? 0;
   const inputCacheReadTokens = finiteNumber(usage.cacheReadInputTokens) ?? 0;
   const inputCacheWriteTokens = finiteNumber(usage.cacheWriteInputTokens) ?? 0;
   const cost = calculateModelUsageCost({
-    modelName: trace.model,
+    modelName: model,
     inputTokens,
     inputNoCacheTokens: Math.max(inputTokens - inputCacheReadTokens - inputCacheWriteTokens, 0),
     inputCacheReadTokens,
@@ -634,18 +679,20 @@ function recordWikiIngestModelCost(result: Record<string, unknown>) {
   recordModelCost({
     costUsdMicros: cost.totalCostUsdMicros,
     attributes: {
-      "goat.model": trace.model,
+      "goat.model": model,
       "goat.surface": "wiki_ingest",
     },
   });
 }
 
 function resolveActorForDebit(store: WikiIngestStore, job: ClaimedWikiIngestJob) {
-  return store.resolveActor({
-    integrationId: job.integrationId,
-    workspaceId: job.workspaceId,
-    sourceProvider: job.sourceProvider,
-  });
+  return store
+    .resolveSource({
+      integrationId: job.integrationId,
+      workspaceId: job.workspaceId,
+      sourceProvider: job.sourceProvider,
+    })
+    .then((source) => source.actorUserWorkosId);
 }
 
 function requireJobLease(job: ClaimedWikiIngestJob, field: "leaseId" | "leaseOwner") {

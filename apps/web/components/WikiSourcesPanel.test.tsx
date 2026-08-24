@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   listWikiSources: vi.fn(),
   setWikiSourceEnabled: vi.fn(),
   upsertWikiSource: vi.fn(),
+  listSlackConversations: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
 }));
@@ -36,6 +37,10 @@ vi.mock("@/lib/wiki-source-api", () => ({
   upsertWikiSource: mocks.upsertWikiSource,
 }));
 
+vi.mock("@/lib/brain-source-actions", () => ({
+  listSlackConversationsAction: mocks.listSlackConversations,
+}));
+
 vi.mock("@opencompany/ui/components/sonner", () => ({
   toast: { error: mocks.toastError, success: mocks.toastSuccess },
 }));
@@ -54,6 +59,13 @@ describe("WikiSourcesPanel", () => {
     mocks.listWikiSources.mockResolvedValue([]);
     mocks.setWikiSourceEnabled.mockReset();
     mocks.upsertWikiSource.mockReset();
+    mocks.listSlackConversations.mockReset();
+    mocks.listSlackConversations.mockResolvedValue({
+      ok: true,
+      channels: [],
+      dms: [],
+      partial: false,
+    });
     mocks.toastError.mockReset();
     mocks.toastSuccess.mockReset();
   });
@@ -84,7 +96,9 @@ describe("WikiSourcesPanel", () => {
       name: "Enable Gmail source ada@example.com",
     });
     expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByText("Scope configuration coming soon")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Choose events and instructions" }),
+    ).toBeInTheDocument();
 
     await user.click(toggle);
 
@@ -96,6 +110,86 @@ describe("WikiSourcesPanel", () => {
       }),
     );
     expect(await screen.findByText("Feeding")).toBeInTheDocument();
+  });
+
+  it("saves Gmail event scope and instructions through the Wiki sources API", async () => {
+    mocks.integrations = [integration({ provider: "gmail", accountEmail: "ada@example.com" })];
+    mocks.listWikiSources.mockResolvedValue([
+      source({
+        config: {
+          events: [{ id: "email_received" }],
+          instructions: "Only customer mail.",
+        },
+      }),
+    ]);
+    mocks.upsertWikiSource.mockResolvedValue(
+      source({
+        config: {
+          events: [{ id: "email_received" }, { id: "email_sent" }],
+          instructions: "Only customer commitments.",
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    await user.click(await screen.findByRole("button", { name: "Choose events and instructions" }));
+    await user.click(screen.getByRole("checkbox", { name: "Email sent" }));
+    const instructions = screen.getByLabelText("Ingestion instructions (optional)");
+    await user.clear(instructions);
+    await user.type(instructions, "Only customer commitments.");
+    await user.click(screen.getByRole("button", { name: "Save Gmail source" }));
+
+    await waitFor(() =>
+      expect(mocks.upsertWikiSource).toHaveBeenCalledWith({
+        integrationId: "integration_1",
+        provider: "gmail",
+        enabled: true,
+        config: {
+          events: [{ id: "email_received" }, { id: "email_sent" }],
+          instructions: "Only customer commitments.",
+        },
+      }),
+    );
+  });
+
+  it("loads Slack conversations and saves selected channels through the Wiki sources API", async () => {
+    mocks.integrations = [
+      integration({ provider: "slack", accountName: "Acme", accountEmail: null }),
+    ];
+    mocks.listWikiSources.mockResolvedValue([
+      source({ provider: "slack", accountEmail: null, accountName: "Acme", config: {} }),
+    ]);
+    mocks.listSlackConversations.mockResolvedValue({
+      ok: true,
+      channels: [{ id: "C123", name: "product", isPrivate: false, isSlackConnect: false }],
+      dms: [],
+      partial: false,
+    });
+    mocks.upsertWikiSource.mockResolvedValue(
+      source({
+        provider: "slack",
+        accountEmail: null,
+        accountName: "Acme",
+        config: { channels: [{ id: "C123", name: "product" }], dms: [] },
+      }),
+    );
+    const user = userEvent.setup();
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    await user.click(await screen.findByRole("button", { name: "Choose conversations" }));
+    await user.click(await screen.findByRole("checkbox", { name: "#product" }));
+    await user.click(screen.getByRole("button", { name: "Save conversations" }));
+
+    await waitFor(() =>
+      expect(mocks.upsertWikiSource).toHaveBeenCalledWith({
+        integrationId: "integration_1",
+        provider: "slack",
+        enabled: true,
+        config: { channels: [{ id: "C123", name: "product" }], dms: [] },
+      }),
+    );
+    expect(mocks.listSlackConversations).toHaveBeenCalledWith("integration_1");
   });
 
   it("uses the server integration snapshot while the live read model loads", async () => {
