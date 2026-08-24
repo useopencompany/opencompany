@@ -31,6 +31,8 @@ import {
   type KnowledgeApplicationService,
   type LegacyTask,
   type LegacyTaskHistory,
+  type PluginImportApplicationService,
+  publicPluginInstallation,
   type RunEvent,
   type Skill,
   type SkillImportApplicationService,
@@ -165,6 +167,7 @@ export type CreateApiAppInput = {
     | "resolveLiveViewUrl"
   >;
   skillImports: SkillImportApplicationService;
+  pluginImports: PluginImportApplicationService;
   brainAssets: BrainAssetService;
   chatResources?: ChatResourceService;
   chatTitles?: ChatTitleService;
@@ -1220,6 +1223,67 @@ export function createApiApp(input: CreateApiAppInput) {
         ...(query.maxBytes !== undefined ? { maxBytes: query.maxBytes } : {}),
       });
       return c.json({ data: chunk, meta }, 200);
+    },
+    listPlugins: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.pluginImports.list(actor), meta }, 200);
+    },
+    previewPluginImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const preview = await input.pluginImports.preview(actor, c.req.valid("json"));
+      return c.json({ data: preview, meta }, 200);
+    },
+    importPlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.pluginImports.install(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: {
+            plugin: publicPluginInstallation(result.plugin),
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    getPlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const plugin = await input.pluginImports.inspect(actor, c.req.valid("param").name);
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
+    archivePlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const name = c.req.valid("param").name;
+      await input.pluginImports.archive(actor, name);
+      return c.json({ data: { name }, meta }, 200);
+    },
+    enablePlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const plugin = await input.pluginImports.setEnabled(actor, c.req.valid("param").name, true);
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
+    disablePlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const plugin = await input.pluginImports.setEnabled(actor, c.req.valid("param").name, false);
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
+    deletePluginData: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const name = c.req.valid("param").name;
+      const result = await input.pluginImports.deleteData(actor, name);
+      return c.json({ data: { name, deleted: result.deleted }, meta }, 200);
     },
     listConversations: async (c) => {
       const actor = actorFrom(c);

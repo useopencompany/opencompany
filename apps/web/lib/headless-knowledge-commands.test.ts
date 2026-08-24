@@ -2,12 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { awaitHeadlessWikiTransactions } from "./headless-knowledge-collections";
 import {
   addHeadlessWikiTimelineEntry,
+  archiveHeadlessPlugin,
   createHeadlessBrainDocument,
   createHeadlessSkill,
+  deleteHeadlessPluginData,
+  disableHeadlessPlugin,
   disableHeadlessSkill,
+  enableHeadlessPlugin,
   enableHeadlessSkill,
+  importHeadlessPlugin,
   importHeadlessSkill,
   listHeadlessBrainSourceItems,
+  previewHeadlessPluginImport,
   previewHeadlessSkillImport,
   readHeadlessSkillFile,
   replaceHeadlessSkill,
@@ -231,6 +237,40 @@ describe("headless knowledge commands", () => {
     expect(fileUrl.searchParams.get("path")).toBe("references/guide.md");
     expect(fileUrl.searchParams.get("offset")).toBe("12");
     expect(fileUrl.searchParams.get("maxBytes")).toBe("64");
+  });
+
+  it("uses the typed Plugin preview, install, lifecycle, and data deletion resources", async () => {
+    const requests: Request[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return Response.json({ data: {}, meta }, { status: request.method === "POST" ? 201 : 200 });
+    });
+    const options = { baseUrl: "https://api.example.test", fetch: fetchMock as typeof fetch };
+    const command = {
+      url: "github.com/example/plugins",
+      expectedResolvedCommit: "a".repeat(40),
+      expectedIntegrity: `sha256:${"b".repeat(64)}`,
+    };
+
+    await previewHeadlessPluginImport({ url: command.url }, options);
+    await importHeadlessPlugin(command, options);
+    await enableHeadlessPlugin("quality-tools", options);
+    await disableHeadlessPlugin("quality-tools", options);
+    await deleteHeadlessPluginData("quality-tools", options);
+    await archiveHeadlessPlugin("quality-tools", options);
+
+    expect(requests.map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual(
+      [
+        "POST /v1/plugins/imports/preview",
+        "POST /v1/plugins/imports",
+        "POST /v1/plugins/quality-tools/enable",
+        "POST /v1/plugins/quality-tools/disable",
+        "POST /v1/plugins/quality-tools/data/delete",
+        "POST /v1/plugins/quality-tools/archive",
+      ],
+    );
+    expect(requests[1]?.headers.get("idempotency-key")).toMatch(/^web-plugin-import:/u);
   });
 
   it("surfaces canonical errors with the request id", async () => {

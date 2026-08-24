@@ -11,6 +11,12 @@ import {
   type CreateTaskCommand,
   KnowledgeApplicationService,
   type KnowledgeRepository,
+  PluginImportApplicationService,
+  type PluginImportResolver,
+  type PluginInstallation,
+  type PluginInstallationListItem,
+  type PluginRepository,
+  type ResolvedPluginPackage,
   type Skill,
   type SkillBundleRepository,
   SkillImportApplicationService,
@@ -112,6 +118,7 @@ describe("canonical Hono API", () => {
       brainImports: fakeBrainImports(),
       browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
+      pluginImports: fakePluginImportService(),
       brainAssets: fakeBrainAssets(),
       brainControl: fakeBrainControl(),
       attachments: fakeAttachments(),
@@ -623,6 +630,99 @@ describe("canonical Hono API", () => {
       bundle: resolvedBundle,
     });
     expect(archive).toHaveBeenCalledWith({ actor, name: "imported-skill" });
+  });
+
+  it("previews and manages Plugins without exposing package bytes or MCP environment values", async () => {
+    const installation = fakePluginInstallation();
+    const packageBytes = new TextEncoder().encode("private plugin package");
+    const resolved: ResolvedPluginPackage = {
+      manifest: installation.manifest,
+      source: installation.source,
+      integrity: installation.integrity,
+      files: [{ path: "plugin.json", content: packageBytes, executable: false }],
+      fileCount: 1,
+      totalBytes: packageBytes.length,
+      skills: [],
+      stdioServers: installation.stdioServers,
+      report: {
+        ignoredManifestFields: [],
+        skills: [],
+        mcp: installation.installReport.mcp,
+      },
+    };
+    const install = vi.fn(async () => ({ plugin: installation, idempotentReplay: false }));
+    const {
+      stdioServers: _stdioServers,
+      files: _pluginFiles,
+      skills: _pluginSkills,
+      ...pluginListFields
+    } = installation;
+    const listItem: PluginInstallationListItem = {
+      ...pluginListFields,
+      fileCount: 1,
+      skillCount: 0,
+      stdioServerCount: 1,
+    };
+    const list = vi.fn(async () => [listItem]);
+    const get = vi.fn(async () => installation);
+    const setStatus = vi.fn(async () => ({ ...installation, status: "disabled" as const }));
+    const archive = vi.fn(async () => undefined);
+    const deleteData = vi.fn(async () => ({ deleted: true }));
+    const app = testApp(fakeRepository(), {
+      pluginImports: fakePluginImportService(
+        { install, list, get, setStatus, archive, deleteData },
+        { resolve: vi.fn(async () => resolved) },
+      ),
+    });
+
+    const preview = await app.request("/v1/plugins/imports/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "github.com/example/plugins" }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json();
+    expect(previewBody).toMatchObject({
+      data: {
+        manifest: { name: "quality-tools" },
+        files: [{ path: "plugin.json", sizeBytes: packageBytes.length }],
+        stdioServers: [{ name: "local", envKeys: ["PRIVATE_TOKEN"] }],
+      },
+    });
+    expect(JSON.stringify(previewBody)).not.toContain("private plugin package");
+    expect(JSON.stringify(previewBody)).not.toContain("secret-value");
+
+    const imported = await app.request("/v1/plugins/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "plugin-import-1" },
+      body: JSON.stringify({
+        url: "github.com/example/plugins",
+        expectedResolvedCommit: installation.source.resolvedCommit,
+        expectedIntegrity: installation.integrity,
+      }),
+    });
+    expect(imported.status).toBe(201);
+    const importedBody = await imported.json();
+    expect(importedBody).toMatchObject({
+      data: { plugin: { name: "quality-tools", stdioServers: [{ envKeys: ["PRIVATE_TOKEN"] }] } },
+    });
+    expect(JSON.stringify(importedBody)).not.toContain("secret-value");
+
+    await expect(app.request("/v1/plugins")).resolves.toMatchObject({ status: 200 });
+    await expect(app.request("/v1/plugins/quality-tools")).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/data/delete", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/archive", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+
+    expect(setStatus).toHaveBeenCalledWith({ actor, name: "quality-tools", status: "disabled" });
+    expect(deleteData).toHaveBeenCalledWith({ actor, name: "quality-tools" });
+    expect(archive).toHaveBeenCalledWith({ actor, name: "quality-tools" });
   });
 
   it("serves and mutates Brain sources through the authenticated provider boundary", async () => {
@@ -3663,6 +3763,7 @@ function testApp(
     brainImports: fakeBrainImports(),
     browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
+    pluginImports: fakePluginImportService(),
     brainAssets: fakeBrainAssets(),
     brainControl: fakeBrainControl(),
     attachments: fakeAttachments(),
@@ -4342,6 +4443,31 @@ function fakeSkillImportService(
   return new SkillImportApplicationService(repository, resolver);
 }
 
+function fakePluginImportService(
+  repositoryOverrides: Partial<PluginRepository> = {},
+  resolverOverrides: Partial<PluginImportResolver> = {},
+) {
+  const unexpected = async (): Promise<never> => {
+    throw new Error("Unexpected Plugin installation operation.");
+  };
+  const repository: PluginRepository = {
+    install: unexpected,
+    list: unexpected,
+    get: unexpected,
+    setStatus: unexpected,
+    archive: unexpected,
+    deleteData: unexpected,
+    ...repositoryOverrides,
+  };
+  const resolver: PluginImportResolver = {
+    resolve: async () => {
+      throw new Error("Unexpected Plugin import preview.");
+    },
+    ...resolverOverrides,
+  };
+  return new PluginImportApplicationService(repository, resolver);
+}
+
 function knowledgeService(overrides: Partial<KnowledgeRepository>) {
   const repository = new Proxy(overrides, {
     get(target, operation) {
@@ -4453,6 +4579,48 @@ function fakeSkillInstallation(): SkillInstallation {
       files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
       createdAt,
     },
+  };
+}
+
+function fakePluginInstallation(): PluginInstallation {
+  return {
+    id: "plugin_1",
+    name: "quality-tools",
+    status: "enabled",
+    manifest: { name: "quality-tools", description: "Quality helpers." },
+    source: {
+      type: "github",
+      url: "https://github.com/example/plugins",
+      ref: "main",
+      path: "",
+      resolvedCommit: "a".repeat(40),
+    },
+    integrity: `sha256:${"c".repeat(64)}`,
+    files: [{ path: "plugin.json", executable: false, sizeBytes: 128 }],
+    skills: [],
+    stdioServers: [
+      {
+        name: "local",
+        type: "stdio",
+        command: "./server",
+        args: [],
+        env: { PRIVATE_TOKEN: "secret-value" },
+      },
+    ],
+    installReport: {
+      ignoredManifestFields: [],
+      skills: [],
+      mcp: {
+        present: true,
+        status: "parsed",
+        reports: [{ name: "local", status: "selected", transport: "stdio" }],
+      },
+      collisions: [],
+    },
+    mcpApprovedIntegrity: null,
+    createdAt,
+    updatedAt: createdAt,
+    archivedAt: null,
   };
 }
 

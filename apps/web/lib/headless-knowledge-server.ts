@@ -4,6 +4,8 @@ import {
   type BrainOverviewDto,
   type BrainSnapshotDto,
   createApiClient,
+  type PluginInstallationDto,
+  type PluginListItemDto,
   type SkillCatalogItemDto,
   type SkillInstallationDto,
   type SkillListItemDto,
@@ -51,6 +53,21 @@ export async function getHeadlessSkill(slug: string): Promise<SkillInstallationD
   });
   if (response.status === 404) return null;
   if (!response.ok) throw await serverResponseError(response, "Skill loading failed");
+  return (await response.json()).data;
+}
+
+export async function listHeadlessPlugins(): Promise<PluginListItemDto[]> {
+  const response = await (await serverKnowledgeClient()).v1.plugins.$get();
+  if (!response.ok) throw await serverResponseError(response, "Plugin loading failed");
+  return (await response.json()).data;
+}
+
+export async function getHeadlessPlugin(name: string): Promise<PluginInstallationDto | null> {
+  const response = await (await serverKnowledgeClient()).v1.plugins[":name"].$get({
+    param: { name },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await serverResponseError(response, "Plugin loading failed");
   return (await response.json()).data;
 }
 

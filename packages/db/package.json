@@ -32,6 +32,10 @@
       "types": "./src/skill-bundle-repository.ts",
       "default": "./src/skill-bundle-repository.ts"
     },
+    "./plugin-repository": {
+      "types": "./src/plugin-repository.ts",
+      "default": "./src/plugin-repository.ts"
+    },
     "./wiki-command-repository": {
       "types": "./src/wiki-command-repository.ts",
       "default": "./src/wiki-command-repository.ts"
