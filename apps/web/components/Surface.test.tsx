@@ -3683,20 +3683,20 @@ describe("Surface chat streaming UI", () => {
               id: "old_running",
               title: "Old but working",
               status: "running",
-              updatedAt: "2026-07-01T17:00:00.000Z",
+              updatedAt: "2026-06-26T17:00:00.000Z",
             }),
             codexChatSummary({
               id: "old_pinned",
               title: "Pinned ready",
               status: "idle",
-              updatedAt: "2026-07-01T17:00:00.000Z",
+              updatedAt: "2026-06-26T17:00:00.000Z",
               pinnedAt: "2026-07-04T12:00:00.000Z",
             }),
             codexChatSummary({
               id: "old_hidden",
               title: "Old hidden",
               status: "idle",
-              updatedAt: "2026-07-01T17:00:00.000Z",
+              updatedAt: "2026-06-26T17:00:00.000Z",
             }),
           ]}
         />,
@@ -3794,7 +3794,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByRole("button", { name: "Archive Legacy result" })).not.toBeInTheDocument();
   });
 
-  it("hides home chats and results older than one day", () => {
+  it("hides home chats older than seven days and results older than one day", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
     try {
@@ -3832,7 +3832,7 @@ describe("Surface chat streaming UI", () => {
               title: "Old chat",
               model: DEFAULT_MODEL,
               preview: "Hidden",
-              updatedAt: "2026-07-02T10:00:00.000Z",
+              updatedAt: "2026-06-26T10:00:00.000Z",
             },
           ]}
         />,

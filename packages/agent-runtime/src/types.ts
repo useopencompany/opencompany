@@ -42,6 +42,7 @@ export type AgentModelId =
   | "moonshotai/kimi-k2-thinking-turbo"
   | "moonshotai/kimi-k2-turbo"
   | "moonshotai/kimi-k2"
+  | "xai/grok-4.6"
   | "xai/grok-4.3"
   | "xai/grok-4.20-reasoning"
   | "xai/grok-4.20-non-reasoning"

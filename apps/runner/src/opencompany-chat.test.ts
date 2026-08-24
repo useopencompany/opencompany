@@ -3,7 +3,13 @@ import { ensureMonthlyIncludedUsage } from "@opencompany/db/billing";
 import { hasPositiveCreditBalance } from "@opencompany/db/credits";
 import type { ChatMessage, ChatMessageAttachment } from "@opencompany/db/product-schema";
 import { createGatewayAttribution } from "@opencompany/telemetry";
-import type { LanguageModelUsage, ToolApprovalRequestOutput, ToolSet } from "ai";
+import {
+  generateText,
+  type LanguageModelUsage,
+  type ToolApprovalRequestOutput,
+  type ToolSet,
+} from "ai";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import {
@@ -600,7 +606,7 @@ describe("opencompanyModelMessagesFromStored", () => {
     expect(JSON.stringify(modelMessages)).toContain("Revenue was up 18% in Q2.");
   });
 
-  it("replays the trusted approval response when a paused Run continues", async () => {
+  it("normalizes a legacy null approval reason before a paused Run continues", async () => {
     const messages = [
       storedMessage({
         id: "user_approval",
@@ -620,7 +626,7 @@ describe("opencompanyModelMessagesFromStored", () => {
               toolCallId: "tool_call_approval",
               state: "approval-responded",
               input: { action: "crm.lookup", params: { customer: "Acme" } },
-              approval: { id: "approval_1", approved: true },
+              approval: { id: "approval_1", approved: true, reason: null },
             },
           ],
         },
@@ -639,7 +645,25 @@ describe("opencompanyModelMessagesFromStored", () => {
 
     expect(serialized).toContain("crm.lookup");
     expect(serialized).toContain('"approved":true');
+    expect(serialized).not.toContain('"reason":null');
     expect(serialized).not.toContain("Do not include this queued turn.");
+
+    await expect(
+      generateText({
+        model: new MockLanguageModelV3({
+          doGenerate: async () => ({
+            content: [{ type: "text", text: "The approved action can continue." }],
+            finishReason: { unified: "stop", raw: "stop" },
+            usage: {
+              inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 1, text: 1, reasoning: 0 },
+            },
+            warnings: [],
+          }),
+        }),
+        messages: modelMessages,
+      }),
+    ).resolves.toMatchObject({ text: "The approved action can continue." });
   });
 
   it("replays a trusted denial response when a paused Run continues", async () => {

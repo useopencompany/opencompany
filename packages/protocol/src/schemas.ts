@@ -1559,6 +1559,7 @@ export const AddWikiTimelineEntryBodySchema = z
 export const WikiCommandSchema = z
   .object({
     command: z.enum([...WIKI_TOOL_COMMANDS]),
+    depth: z.number().int().min(0).max(10).optional(),
     pages: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(20)]).optional(),
     path: z.string().min(1).max(512).optional(),
     body: z.string().max(1_000_000).optional(),
