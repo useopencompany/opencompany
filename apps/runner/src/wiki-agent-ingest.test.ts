@@ -21,7 +21,9 @@ vi.mock("@opencompany/observability/braintrust", () => ({
 }));
 
 import {
+  buildMeetingSourceContextHeader,
   buildWikiIngestUserMessage,
+  buildWikiSourceContextHeader,
   placeMovingAnthropicCacheBreakpoint,
   runWikiAgentIngest,
   WIKI_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
@@ -196,9 +198,14 @@ describe("opencompany wiki librarian agent", () => {
     expect(WIKI_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS).toBe(900_000);
   });
 
-  it("builds the generic provider/type source header and five-section prompt", () => {
+  it("builds the registered Jamie meeting header and five-section prompt", () => {
     const message = buildWikiIngestUserMessage(input(vi.fn()));
     expect(message).toContain("# Source context: jamie/meeting");
+    expect(message).toContain("title, date and time, attendees, provider summary, and transcript");
+    expect(message).toContain("decisions, project state, commitments, and people or company facts");
+    expect(message).toContain("at most a timeline-add");
+    expect(message).toContain("do NOT copy the full transcript");
+    expect(message).toContain("[[source:jamie:meeting:meeting_123]]");
     expect(message).toContain("<normalized-source-payload>");
     expect(message).toContain('"contentHash": "hash_123"');
     for (const section of [
@@ -212,6 +219,28 @@ describe("opencompany wiki librarian agent", () => {
     }
     expect(WIKI_AGENT_INGEST_SYSTEM_PROMPT).toContain("timeline-add");
     expect(WIKI_AGENT_INGEST_SYSTEM_PROMPT).toContain("[[source:provider:id]]");
+  });
+
+  it("routes both meeting providers through the meeting header registry", () => {
+    const granolaHeader = buildWikiSourceContextHeader({
+      sourceProvider: "granola",
+      sourceType: "meeting",
+      sourceRef: "granola:note:note_123",
+      title: "Roadmap review",
+      occurredAt,
+    });
+    const directHeader = buildMeetingSourceContextHeader({
+      sourceProvider: "granola",
+      sourceType: "meeting",
+      sourceRef: "granola:note:note_123",
+      title: "Roadmap review",
+      occurredAt,
+    });
+
+    expect(granolaHeader).toBe(directHeader);
+    expect(granolaHeader).toContain("# Source context: granola/meeting");
+    expect(granolaHeader).toContain("[[source:granola:note:note_123]]");
+    expect(granolaHeader).toContain("not a standalone transcript archive");
   });
 
   it("moves the Anthropic cache breakpoint to the newest non-static message", () => {
