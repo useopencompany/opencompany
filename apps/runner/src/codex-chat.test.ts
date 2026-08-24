@@ -42,6 +42,10 @@ const dbMocks = vi.hoisted(() => ({
   execute: vi.fn(),
 }));
 
+const skillBundleMocks = vi.hoisted(() => ({
+  loadImmutableSkillBundles: vi.fn(),
+}));
+
 const eventMocks = vi.hoisted(() => ({
   createCodexChatProjector: vi.fn(),
   loadCodexChatAssistantMessageParts: vi.fn(),
@@ -86,6 +90,10 @@ vi.mock("./coding-chat-history", async (importOriginal) => {
 
 vi.mock("./db", () => ({
   getDb: () => queryBuilder(dbMocks.selectRows, dbMocks.execute),
+}));
+
+vi.mock("@opencompany/db/skill-bundle-repository", () => ({
+  loadImmutableSkillBundles: skillBundleMocks.loadImmutableSkillBundles,
 }));
 
 vi.mock("./github", () => ({
@@ -212,6 +220,7 @@ describe("runCodexChatTurn", () => {
     vi.clearAllMocks();
     dbMocks.selectRows.length = 0;
     dbMocks.execute.mockReset().mockResolvedValue({ rows: [{ id: "updated" }] });
+    skillBundleMocks.loadImmutableSkillBundles.mockResolvedValue([]);
     codexAuthMocks.loadCodexCliAuth.mockResolvedValue({
       kind: "api",
       baseUrl: "https://api.openai.test/v1",
@@ -563,23 +572,23 @@ describe("runCodexChatTurn", () => {
       [],
       [
         {
-          skillId: "review-work",
+          bundleId: "skill_bundle_review_v1",
           activatedMessageId: "goat_msg_user_previous",
-          name: "Review work",
-          description: "How reviews should happen.",
-          instructions: "Review the existing implementation.",
+          workspaceId: "workspace_1",
           activatedAt: new Date("2026-07-10T11:00:00Z"),
         },
         {
-          skillId: "coding-work",
+          bundleId: "skill_bundle_coding_v1",
           activatedMessageId: "goat_msg_user_1",
-          name: "Coding work",
-          description: "How coding work should happen.",
-          instructions: "Inspect, implement, and verify.",
+          workspaceId: "workspace_1",
           activatedAt: new Date("2026-07-10T12:00:00Z"),
         },
       ],
     );
+    skillBundleMocks.loadImmutableSkillBundles.mockResolvedValueOnce([
+      immutableSkillBundle("skill_bundle_review_v1", "review-work", "exact review document"),
+      immutableSkillBundle("skill_bundle_coding_v1", "coding-work", "exact coding document"),
+    ]);
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
 
@@ -593,11 +602,11 @@ describe("runCodexChatTurn", () => {
       expect.arrayContaining([
         {
           path: "/home/user/opencompany-goat/codex-chat/.agents/skills/review-work/SKILL.md",
-          data: expect.stringContaining('name: "review-work"'),
+          data: new TextEncoder().encode("exact review document"),
         },
         {
           path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
-          data: expect.stringContaining('name: "coding-work"'),
+          data: new TextEncoder().encode("exact coding document"),
         },
       ]),
     );
@@ -622,23 +631,35 @@ describe("runCodexChatTurn", () => {
       [],
       [
         {
-          skillId: "coding-work",
+          bundleId: "skill_bundle_coding_chat_v1",
           activatedMessageId: "goat_msg_user_previous",
-          name: "Coding work",
-          description: "An older interactive snapshot.",
-          instructions: "Use the older interactive instructions.",
+          workspaceId: "workspace_1",
           activatedAt: new Date("2026-07-10T11:00:00Z"),
         },
         {
-          skillId: "chat-skill",
+          bundleId: "skill_bundle_chat_v1",
           activatedMessageId: "goat_msg_user_1",
-          name: "Chat skill",
-          description: "A skill activated on this message.",
-          instructions: "Apply the current chat instructions.",
+          workspaceId: "workspace_1",
           activatedAt: new Date("2026-07-10T12:00:00Z"),
         },
       ],
     );
+    skillBundleMocks.loadImmutableSkillBundles
+      .mockResolvedValueOnce([
+        immutableSkillBundle(
+          "skill_bundle_coding_chat_v1",
+          "coding-work",
+          "exact older chat document",
+        ),
+        immutableSkillBundle("skill_bundle_chat_v1", "chat-skill", "exact chat document"),
+      ])
+      .mockResolvedValueOnce([
+        immutableSkillBundle(
+          "skill_bundle_coding_task_v1",
+          "coding-work",
+          "exact immutable workflow document",
+        ),
+      ]);
     appServerMocks.runCodexAppServerTurn.mockResolvedValueOnce({
       sessionId: "thread_existing",
       status: "failed",
@@ -665,11 +686,11 @@ describe("runCodexChatTurn", () => {
       expect.arrayContaining([
         {
           path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
-          data: expect.stringContaining("Use the immutable workflow instructions."),
+          data: new TextEncoder().encode("exact immutable workflow document"),
         },
         {
           path: "/home/user/opencompany-goat/codex-chat/.agents/skills/chat-skill/SKILL.md",
-          data: expect.stringContaining("Apply the current chat instructions."),
+          data: new TextEncoder().encode("exact chat document"),
         },
       ]),
     );
@@ -1391,6 +1412,7 @@ function workflowTaskHarnessSpec(): WorkflowHarnessSpec {
       id: "workflow_1",
       workspaceId: "workspace_1",
       skillIds: ["research-work", "coding-work"],
+      skillBundleIds: ["skill_bundle_research_v1", "skill_bundle_coding_task_v1"],
       currentStepIndex: 1,
       completedStepCount: 1,
       steps: [
@@ -1402,6 +1424,7 @@ function workflowTaskHarnessSpec(): WorkflowHarnessSpec {
           systemPrompt: "Research the change.",
           systemBlocks: ["Research the change."],
           skillIds: ["research-work"],
+          skillBundleIds: ["skill_bundle_research_v1"],
         },
         {
           index: 1,
@@ -1411,23 +1434,21 @@ function workflowTaskHarnessSpec(): WorkflowHarnessSpec {
           systemPrompt: "Implement and verify the change.",
           systemBlocks: ["Implement and verify the change."],
           skillIds: ["coding-work"],
-        },
-      ],
-      skillSnapshots: [
-        {
-          id: "research-work",
-          name: "Research work",
-          description: "How to research.",
-          instructions: "Use the research instructions.",
-        },
-        {
-          id: "coding-work",
-          name: "Coding work",
-          description: "How to implement.",
-          instructions: "Use the immutable workflow instructions.",
+          skillBundleIds: ["skill_bundle_coding_task_v1"],
         },
       ],
     },
+  };
+}
+
+function immutableSkillBundle(id: string, name: string, skillDocument: string) {
+  const content = new TextEncoder().encode(skillDocument);
+  return {
+    id,
+    name,
+    description: `${name} description`,
+    body: `${name} body`,
+    files: [{ path: "SKILL.md", content, executable: false, sizeBytes: content.length }],
   };
 }
 

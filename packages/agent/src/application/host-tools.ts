@@ -52,6 +52,7 @@ type BrowserProfileSession = {
 
 type MentionedSkill = {
   id: string;
+  bundleId: string;
   name: string;
   description: string;
   instructions: string;

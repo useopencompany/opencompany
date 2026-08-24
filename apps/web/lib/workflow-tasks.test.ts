@@ -211,12 +211,14 @@ describe("compileWorkflowHarnessSpec", () => {
       skills: [
         {
           id: "research",
+          bundleId: "skill_bundle_research_v1",
           name: "Research",
           description: "How to research",
           instructions: "Search broadly.",
         },
         {
           id: "coding-work",
+          bundleId: "skill_bundle_coding_v1",
           name: "Coding work",
           description: "How to implement",
           instructions: "Inspect, implement, and verify.",
@@ -235,6 +237,7 @@ describe("compileWorkflowHarnessSpec", () => {
         id: "weekly-report",
         workspaceId: "ws_1",
         skillIds: ["research", "coding-work"],
+        skillBundleIds: ["skill_bundle_research_v1", "skill_bundle_coding_v1"],
         currentStepIndex: 0,
         completedStepCount: 0,
       },
@@ -248,8 +251,9 @@ describe("compileWorkflowHarnessSpec", () => {
       engine: "opencompany",
       model: "moonshotai/kimi-k2.6",
       skillIds: ["research"],
+      skillBundleIds: ["skill_bundle_research_v1"],
     });
-    expect(spec.workflow?.steps?.[0]?.systemPrompt).toContain('name: "research"');
+    expect(spec.workflow?.steps?.[0]?.systemPrompt).not.toContain("<workflow_skills>");
     expect(spec.workflow?.steps?.[0]?.systemPrompt).not.toContain('name: "coding-work"');
     expect(spec.workflow?.steps?.[1]).toMatchObject({
       index: 1,
@@ -258,21 +262,12 @@ describe("compileWorkflowHarnessSpec", () => {
       model: "anthropic/claude-opus-4.8",
       reasoningEffort: "xhigh",
       skillIds: ["coding-work"],
+      skillBundleIds: ["skill_bundle_coding_v1"],
     });
     expect(spec.workflow?.steps?.[1]?.systemPrompt).not.toContain("<workflow_skills>");
-    expect(spec.workflow?.skillSnapshots).toEqual([
-      {
-        id: "research",
-        name: "Research",
-        description: "How to research",
-        instructions: "Search broadly.",
-      },
-      {
-        id: "coding-work",
-        name: "Coding work",
-        description: "How to implement",
-        instructions: "Inspect, implement, and verify.",
-      },
+    expect(spec.workflow?.skillBundleIds).toEqual([
+      "skill_bundle_research_v1",
+      "skill_bundle_coding_v1",
     ]);
   });
 
@@ -301,12 +296,14 @@ describe("compileWorkflowHarnessSpec", () => {
       skills: [
         {
           id: "product-work",
+          bundleId: "skill_bundle_product_v1",
           name: "Product work",
           description: "Ship product changes",
           instructions: "Implement and verify the feature.",
         },
         {
           id: "smooth-shadow-ring",
+          bundleId: "skill_bundle_shadow_v1",
           name: "Smooth shadow ring",
           description: "Polish elevation styles",
           instructions: "Use layered shadows and a crisp ring.",
@@ -318,11 +315,12 @@ describe("compileWorkflowHarnessSpec", () => {
     });
 
     expect(spec.workflow?.steps?.[0]?.skillIds).toEqual(["product-work", "smooth-shadow-ring"]);
-    expect(spec.workflow?.steps?.[1]?.skillIds).toEqual([]);
-    expect(spec.workflow?.skillSnapshots).toEqual([
-      expect.objectContaining({ id: "product-work" }),
-      expect.objectContaining({ id: "smooth-shadow-ring" }),
+    expect(spec.workflow?.steps?.[0]?.skillBundleIds).toEqual([
+      "skill_bundle_product_v1",
+      "skill_bundle_shadow_v1",
     ]);
+    expect(spec.workflow?.steps?.[1]?.skillIds).toEqual([]);
+    expect(spec.workflow?.steps?.[1]?.skillBundleIds).toEqual([]);
   });
 });
 
@@ -418,10 +416,23 @@ describe("createTaskFromWorkflow", () => {
       ],
     });
     mocks.resolveSkillMentions.mockResolvedValue([
-      { id: "research", name: "Research", description: "", instructions: "Research well." },
-      { id: "writing", name: "Writing", description: "", instructions: "Write clearly." },
+      {
+        id: "research",
+        bundleId: "skill_bundle_research_v1",
+        name: "Research",
+        description: "",
+        instructions: "Research well.",
+      },
+      {
+        id: "writing",
+        bundleId: "skill_bundle_writing_v1",
+        name: "Writing",
+        description: "",
+        instructions: "Write clearly.",
+      },
       {
         id: "smooth-shadow-ring",
+        bundleId: "skill_bundle_shadow_v1",
         name: "Smooth shadow ring",
         description: "",
         instructions: "Polish elevation styles.",
@@ -450,9 +461,20 @@ describe("createTaskFromWorkflow", () => {
         harnessSpec: expect.objectContaining({
           workflow: expect.objectContaining({
             skillIds: ["research", "writing", "smooth-shadow-ring"],
+            skillBundleIds: [
+              "skill_bundle_research_v1",
+              "skill_bundle_writing_v1",
+              "skill_bundle_shadow_v1",
+            ],
             steps: [
-              expect.objectContaining({ skillIds: ["research", "smooth-shadow-ring"] }),
-              expect.objectContaining({ skillIds: ["writing", "research"] }),
+              expect.objectContaining({
+                skillIds: ["research", "smooth-shadow-ring"],
+                skillBundleIds: ["skill_bundle_research_v1", "skill_bundle_shadow_v1"],
+              }),
+              expect.objectContaining({
+                skillIds: ["writing", "research"],
+                skillBundleIds: ["skill_bundle_writing_v1", "skill_bundle_research_v1"],
+              }),
             ],
           }),
         }),

@@ -1564,6 +1564,13 @@
       "breakpoints": true
     },
     {
+      "idx": 223,
+      "version": "7",
+      "when": 1787550000000,
+      "tag": "0223_goat_chat_skill_bundle_snapshots",
+      "breakpoints": true
+    },
+    {
       "idx": 224,
       "version": "7",
       "when": 1787555186000,

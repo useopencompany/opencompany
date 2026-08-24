@@ -933,26 +933,35 @@ export class PostgresChatRepository implements ChatRepository {
         WHERE (SELECT COUNT(*) FROM claimed_attachments) = ${attachmentIds.length}
         RETURNING id
       ),
-      activated_skills AS MATERIALIZED (
-        INSERT INTO goat.chat_session_skills (
-          chat_session_id, skill_id, brain_ref, activated_message_id,
-          name, description, instructions, created_at
+      activated_skill_bundles AS MATERIALIZED (
+        INSERT INTO goat.chat_session_skill_bundles (
+          chat_session_id, bundle_id, activated_message_id, source_kind
         )
         SELECT
-          target_chat.id, skill.slug, skill.workspace_id, inserted_user_message.id,
-          skill.name, skill.description, skill.instructions, ${now}
+          target_chat.id, bundle.id, inserted_user_message.id, 'standalone'
         FROM inserted_user_message
         JOIN target_chat ON true
         CROSS JOIN jsonb_to_recordset(
           COALESCE(${settingsJson}::jsonb -> 'mentions', '[]'::jsonb)
         ) AS mention(kind text, id text)
-        JOIN goat.skills AS skill
+        JOIN goat.skill_installations AS installation
           ON mention.kind = 'skill'
-         AND skill.slug = mention.id
-         AND skill.workspace_id = ${input.actor.workspaceId}
-         AND skill.archived_at IS NULL
-        ON CONFLICT (chat_session_id, skill_id) DO NOTHING
-        RETURNING skill_id
+         AND installation.name = mention.id
+         AND installation.workspace_id = ${input.actor.workspaceId}
+         AND installation.enabled
+         AND installation.archived_at IS NULL
+        JOIN goat.skill_bundles AS bundle
+          ON bundle.id = installation.bundle_id
+         AND bundle.workspace_id = installation.workspace_id
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM goat.chat_session_skill_bundles AS fixed
+            JOIN goat.skill_bundles AS fixed_bundle ON fixed_bundle.id = fixed.bundle_id
+            WHERE fixed.chat_session_id = target_chat.id
+              AND fixed_bundle.name = bundle.name
+        )
+        ON CONFLICT (chat_session_id, bundle_id) DO NOTHING
+        RETURNING bundle_id
       ),
       inserted_assistant_message AS (
         INSERT INTO goat.chat_messages (

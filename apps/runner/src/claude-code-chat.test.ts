@@ -70,8 +70,8 @@ const skillMocks = vi.hoisted(() => ({
   materializeClaudeSkillSnapshotsForSession: vi.fn(),
 }));
 
-const harnessMocks = vi.hoisted(() => ({
-  getWorkflowHarnessSkillSnapshots: vi.fn(),
+const workflowSkillMocks = vi.hoisted(() => ({
+  loadWorkflowTaskSkillBundles: vi.fn(),
 }));
 
 const taskMocks = vi.hoisted(() => ({
@@ -91,10 +91,6 @@ vi.mock("@opencompany/db/claude-code-auth", () => ({
   loadClaudeCodeCredential: authMocks.loadClaudeCodeCredential,
   markClaudeCodeCredentialNeedsReauth: authMocks.markClaudeCodeCredentialNeedsReauth,
   markClaudeCodeCredentialValidated: authMocks.markClaudeCodeCredentialValidated,
-}));
-
-vi.mock("@opencompany/db/harness", () => ({
-  getWorkflowHarnessSkillSnapshots: harnessMocks.getWorkflowHarnessSkillSnapshots,
 }));
 
 vi.mock("./claude-code-cli", () => ({
@@ -206,6 +202,10 @@ vi.mock("./codex-managed-skills", () => ({
   materializeClaudeSkillSnapshotsForSession: skillMocks.materializeClaudeSkillSnapshotsForSession,
 }));
 
+vi.mock("./workflow-skill-bundles", () => ({
+  loadWorkflowTaskSkillBundles: workflowSkillMocks.loadWorkflowTaskSkillBundles,
+}));
+
 describe("isClaudeCodeAuthenticationFailure", () => {
   it.each([
     "Failed to authenticate. API Error: 401",
@@ -293,6 +293,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     chatMocks.codexChatTurnLeaseIsHeld.mockResolvedValue(true);
     chatMocks.loadCodexChatAttachments.mockResolvedValue([]);
     chatMocks.loadCodexChatSessionSkills.mockResolvedValue([]);
+    workflowSkillMocks.loadWorkflowTaskSkillBundles.mockResolvedValue([]);
     chatMocks.loadGitHubAuthForUser.mockResolvedValue(null);
     chatMocks.markCodexChatSandboxTimeoutArmed.mockResolvedValue(undefined);
     chatMocks.materializeCodexChatAttachments.mockResolvedValue({
@@ -352,7 +353,6 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
-    harnessMocks.getWorkflowHarnessSkillSnapshots.mockReturnValue([]);
     skillMocks.materializeClaudeSkillSnapshotsForSession.mockResolvedValue(undefined);
     taskMocks.buildTaskTerminalProjection.mockReturnValue({ taskId: "goat_task_1" });
     taskMocks.markTaskTurnRunning.mockResolvedValue(undefined);
@@ -518,15 +518,23 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     expect(sandboxMocks.armSandboxActiveTimeoutById).not.toHaveBeenCalled();
   });
 
-  it("materializes and invokes workflow skill snapshots for durable tasks", async () => {
+  it("materializes and invokes immutable workflow Skill bundles for durable tasks", async () => {
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-    harnessMocks.getWorkflowHarnessSkillSnapshots.mockReturnValueOnce([
+    workflowSkillMocks.loadWorkflowTaskSkillBundles.mockResolvedValueOnce([
       {
-        id: "smooth-shadow-ring",
-        name: "Smooth shadow ring",
+        id: "skill_bundle_shadow_v1",
+        name: "smooth-shadow-ring",
         description: "Polish elevation styles.",
-        instructions: "Use layered shadows and a crisp ring.",
+        body: "Use layered shadows and a crisp ring.",
+        files: [
+          {
+            path: "SKILL.md",
+            content: new TextEncoder().encode("exact Skill document"),
+            executable: false,
+            sizeBytes: 20,
+          },
+        ],
       },
     ]);
     const harnessSpec = harnessSpecForClaudeTask();
@@ -546,11 +554,12 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       claudeWorkRoot: "/home/user/opencompany-goat/claude-chat",
       skills: [
         {
-          id: "smooth-shadow-ring",
+          name: "smooth-shadow-ring",
           files: [
             {
               path: "SKILL.md",
-              content: expect.stringContaining('name: "smooth-shadow-ring"'),
+              content: new TextEncoder().encode("exact Skill document"),
+              executable: false,
             },
           ],
         },
@@ -788,6 +797,26 @@ function harnessSpecForClaudeTask(): HarnessSpec {
     skills: [],
     maxModelSteps: 16,
     resultMode: "assistant_final",
+    workflow: {
+      id: "workflow_1",
+      workspaceId: "workspace_1",
+      skillIds: ["smooth-shadow-ring"],
+      skillBundleIds: ["skill_bundle_shadow_v1"],
+      currentStepIndex: 0,
+      completedStepCount: 0,
+      steps: [
+        {
+          index: 0,
+          title: "Implement",
+          engine: "claude_code",
+          model: "anthropic/claude-sonnet-5",
+          systemPrompt: "Implement and verify the change.",
+          systemBlocks: ["Implement and verify the change."],
+          skillIds: ["smooth-shadow-ring"],
+          skillBundleIds: ["skill_bundle_shadow_v1"],
+        },
+      ],
+    },
   };
 }
 

@@ -2,24 +2,24 @@ import { assertSafeRelativePath } from "@opencompany/agent-runtime";
 import { isValidBrainId } from "@opencompany/brain";
 import { createSkillFileChunk, type SkillFileChunk } from "@opencompany/core";
 import { getDb } from "@opencompany/db/client";
+import type { PooledDb } from "@opencompany/db/pool";
+import { skillBundles, skillInstallations } from "@opencompany/db/product-schema";
 import {
-  type ChatSessionSkill,
-  chatSessionSkills,
-  skillBundleFiles,
-  skillBundles,
-  skillInstallations,
-} from "@opencompany/db/product-schema";
+  activateAndListChatSkillBundles,
+  readChatSkillBundleFile,
+} from "@opencompany/db/skill-bundle-repository";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 
 export const MAX_CHAT_SKILLS = 16;
 export const MAX_CHAT_SKILL_BYTES = 1024 * 1024;
 
-type Db = ReturnType<typeof getDb>;
+type Db = ReturnType<typeof getDb> | PooledDb;
 
-// The installation name is the public @skill handle. Chat activation retains the existing
-// instruction snapshot; exact bundle snapshots are introduced in the next delivery phase.
+// The installation name is the public @skill handle. The bundle ID is the immutable version used
+// by Chat and Workflow Task snapshots.
 export type WorkspaceSkill = {
   id: string;
+  bundleId: string;
   name: string;
   description: string;
   instructions: string;
@@ -28,17 +28,16 @@ export type WorkspaceSkill = {
 export type SkillCatalogItem = Pick<WorkspaceSkill, "id" | "name" | "description">;
 export type SkillMentionRef = { id: string };
 
-export type ChatSessionSkillSnapshot = Pick<
-  ChatSessionSkill,
-  | "chatSessionId"
-  | "skillId"
-  | "brainRef"
-  | "activatedMessageId"
-  | "name"
-  | "description"
-  | "instructions"
-  | "createdAt"
->;
+export type ChatSessionSkillSnapshot = {
+  chatSessionId: string;
+  bundleId: string;
+  skillId: string;
+  activatedMessageId: string;
+  sourceKind: "standalone" | "plugin";
+  name: string;
+  description: string;
+  instructions: string;
+};
 
 export class SkillMentionError extends Error {
   constructor(message: string) {
@@ -114,6 +113,7 @@ export async function resolveSkillMentions(input: {
   const rows = await (input.db ?? getDb())
     .select({
       id: skillInstallations.name,
+      bundleId: skillBundles.id,
       name: skillBundles.name,
       description: skillBundles.description,
       instructions: skillBundles.body,
@@ -160,44 +160,30 @@ export function skillsByteLength(skills: readonly WorkspaceSkill[]): number {
 export async function activateAndListChatSessionSkills(input: {
   chatSessionId: string;
   activatedMessageId: string;
-  workspaceRef: string;
+  workspaceId: string;
   skills: WorkspaceSkill[];
   db?: Db;
 }): Promise<ChatSessionSkillSnapshot[]> {
   const db = input.db ?? getDb();
-  if (input.skills.length > 0) {
-    await db
-      .insert(chatSessionSkills)
-      .values(
-        input.skills.map((skill) => ({
-          chatSessionId: input.chatSessionId,
-          skillId: skill.id,
-          brainRef: input.workspaceRef,
-          activatedMessageId: input.activatedMessageId,
-          name: skill.name,
-          description: skill.description,
-          instructions: skill.instructions,
-        })),
-      )
-      .onConflictDoNothing({
-        target: [chatSessionSkills.chatSessionId, chatSessionSkills.skillId],
-      });
-  }
-
-  return db
-    .select({
-      chatSessionId: chatSessionSkills.chatSessionId,
-      skillId: chatSessionSkills.skillId,
-      brainRef: chatSessionSkills.brainRef,
-      activatedMessageId: chatSessionSkills.activatedMessageId,
-      name: chatSessionSkills.name,
-      description: chatSessionSkills.description,
-      instructions: chatSessionSkills.instructions,
-      createdAt: chatSessionSkills.createdAt,
-    })
-    .from(chatSessionSkills)
-    .where(eq(chatSessionSkills.chatSessionId, input.chatSessionId))
-    .orderBy(asc(chatSessionSkills.createdAt), asc(chatSessionSkills.skillId));
+  const activations = await activateAndListChatSkillBundles(db, {
+    workspaceId: input.workspaceId,
+    chatSessionId: input.chatSessionId,
+    activatedMessageId: input.activatedMessageId,
+    bundles: input.skills.map((skill) => ({
+      bundleId: skill.bundleId,
+      sourceKind: "standalone",
+    })),
+  });
+  return activations.map((activation) => ({
+    chatSessionId: activation.chatSessionId,
+    bundleId: activation.bundleId,
+    skillId: activation.name,
+    activatedMessageId: activation.activatedMessageId,
+    sourceKind: activation.sourceKind,
+    name: activation.name,
+    description: activation.description,
+    instructions: activation.body,
+  }));
 }
 
 export async function readChatSkillFile(input: {
@@ -216,43 +202,12 @@ export async function readChatSkillFile(input: {
       error instanceof Error ? error.message : "The Skill file path is invalid.",
     );
   }
-  const [row] = await (input.db ?? getDb())
-    .select({
-      path: skillBundleFiles.path,
-      content: skillBundleFiles.content,
-      executable: skillBundleFiles.executable,
-      sizeBytes: skillBundleFiles.sizeBytes,
-    })
-    .from(chatSessionSkills)
-    .innerJoin(
-      skillInstallations,
-      and(
-        eq(skillInstallations.workspaceId, input.workspaceId),
-        eq(skillInstallations.name, chatSessionSkills.skillId),
-        eq(skillInstallations.enabled, true),
-        isNull(skillInstallations.archivedAt),
-      ),
-    )
-    .innerJoin(
-      skillBundles,
-      and(
-        eq(skillBundles.id, skillInstallations.bundleId),
-        eq(skillBundles.workspaceId, skillInstallations.workspaceId),
-      ),
-    )
-    .innerJoin(
-      skillBundleFiles,
-      and(eq(skillBundleFiles.bundleId, skillBundles.id), eq(skillBundleFiles.path, input.path)),
-    )
-    .where(
-      and(
-        eq(chatSessionSkills.chatSessionId, input.chatSessionId),
-        eq(chatSessionSkills.skillId, input.skill),
-        eq(chatSessionSkills.brainRef, input.workspaceId),
-        eq(skillBundles.workspaceId, input.workspaceId),
-      ),
-    )
-    .limit(1);
+  const row = await readChatSkillBundleFile(input.db ?? getDb(), {
+    workspaceId: input.workspaceId,
+    chatSessionId: input.chatSessionId,
+    skillName: input.skill,
+    path: input.path,
+  });
   if (!row) {
     throw new SkillMentionError(
       `Skill file ${JSON.stringify(input.path)} is unavailable. Activate the skill first.`,
