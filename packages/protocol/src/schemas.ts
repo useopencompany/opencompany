@@ -1277,21 +1277,6 @@ export const SkillSourceSchema = z
   .strict()
   .openapi("SkillSource");
 
-export const SkillSchema = z
-  .object({
-    id: ResourceIdSchema,
-    slug: z.string().min(1).max(64),
-    name: z.string().min(1).max(64),
-    description: z.string().max(1_024),
-    instructions: z.string().max(256 * 1_024),
-    status: z.enum(["draft", "active"]),
-    source: SkillSourceSchema.nullable(),
-    createdAt: TimestampSchema,
-    updatedAt: TimestampSchema,
-  })
-  .strict()
-  .openapi("Skill");
-
 export const SkillBundleFileMetadataSchema = z
   .object({
     path: z.string().min(1).max(1_024),
@@ -1851,10 +1836,6 @@ export const SkillCatalogEnvelopeSchema = z
   .object({ data: z.array(SkillCatalogItemSchema), meta: ProtocolMetadataSchema })
   .strict()
   .openapi("SkillCatalogEnvelope");
-export const SkillEnvelopeSchema = z
-  .object({ data: SkillSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("SkillEnvelope");
 export const SkillImportPreviewBodySchema = z
   .object({
     url: z.string().min(1).max(2_048),
@@ -1900,19 +1881,6 @@ export const SkillFileChunkEnvelopeSchema = z
   .object({ data: SkillFileChunkSchema, meta: ProtocolMetadataSchema })
   .strict()
   .openapi("SkillFileChunkEnvelope");
-export const CreateSkillBodySchema = z
-  .object({ name: z.string().min(1).max(64), description: z.string().max(1_024).optional() })
-  .strict()
-  .openapi("CreateSkillBody");
-export const UpdateSkillBodySchema = z
-  .object({
-    name: z.string().min(1).max(64),
-    description: z.string().max(1_024),
-    instructions: z.string().max(256 * 1_024),
-    status: z.enum(["draft", "active"]),
-  })
-  .strict()
-  .openapi("UpdateSkillBody");
 export const SkillArchiveEnvelopeSchema = z
   .object({
     data: z.object({ name: z.string().min(1).max(64) }).strict(),
@@ -3878,7 +3846,6 @@ export type CreateWikiPageBody = z.infer<typeof CreateWikiPageBodySchema>;
 export type UpdateWikiPageBody = z.infer<typeof UpdateWikiPageBodySchema>;
 export type DeleteWikiPageBody = z.infer<typeof DeleteWikiPageBodySchema>;
 export type AddWikiTimelineEntryBody = z.infer<typeof AddWikiTimelineEntryBodySchema>;
-export type SkillDto = z.infer<typeof SkillSchema>;
 export type SkillSourceDto = z.infer<typeof SkillSourceSchema>;
 export type SkillListItemDto = z.infer<typeof SkillListItemSchema>;
 export type SkillInstallationDto = z.infer<typeof SkillInstallationSchema>;
@@ -3887,8 +3854,6 @@ export type SkillBundleFileMetadataDto = z.infer<typeof SkillBundleFileMetadataS
 export type SkillImportFileMetadataDto = z.infer<typeof SkillImportFileMetadataSchema>;
 export type SkillFileChunkDto = z.infer<typeof SkillFileChunkSchema>;
 export type SkillCatalogItemDto = z.infer<typeof SkillCatalogItemSchema>;
-export type CreateSkillBody = z.infer<typeof CreateSkillBodySchema>;
-export type UpdateSkillBody = z.infer<typeof UpdateSkillBodySchema>;
 export type SkillImportCandidateDto = z.infer<typeof SkillImportCandidateSchema>;
 export type SkillImportPreviewDto = z.infer<typeof SkillImportPreviewSchema>;
 export type SkillImportPreviewBody = z.infer<typeof SkillImportPreviewBodySchema>;

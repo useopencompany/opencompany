@@ -62,7 +62,6 @@ import {
   CreateBrowserProfileBodySchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
-  CreateSkillBodySchema,
   CreateTaskBodySchema,
   CreateTaskEnvelopeSchema,
   CreateTaskScheduleBodySchema,
@@ -145,7 +144,6 @@ import {
   SetWorkspaceCapabilityBodySchema,
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
-  SkillEnvelopeSchema,
   SkillFileChunkEnvelopeSchema,
   SkillImportEnvelopeSchema,
   SkillImportPreviewBodySchema,
@@ -175,7 +173,6 @@ import {
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
   UpdateMcpSetupBodySchema,
-  UpdateSkillBodySchema,
   UpdateTaskBodySchema,
   UpdateTaskEnvelopeSchema,
   UpdateTaskScheduleCommandSchema,
@@ -1086,24 +1083,6 @@ export const listSkillsRoute = createRoute({
   },
 });
 
-export const createSkillRoute = createRoute({
-  method: "post",
-  path: "/v1/skills",
-  tags: ["Skills"],
-  security: actorSecurity,
-  request: {
-    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
-    body: { required: true, content: { "application/json": { schema: CreateSkillBodySchema } } },
-  },
-  responses: {
-    201: {
-      description: "Skill draft created or replayed.",
-      content: { "application/json": { schema: SkillEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
 export const previewSkillImportRoute = createRoute({
   method: "post",
   path: "/v1/skills/imports/preview",
@@ -1166,24 +1145,6 @@ export const getSkillRoute = createRoute({
     200: {
       description: "Skill detail.",
       content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const updateSkillRoute = createRoute({
-  method: "patch",
-  path: "/v1/skills/{slug}",
-  tags: ["Skills"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ slug: ResourceIdSchema }),
-    body: { required: true, content: { "application/json": { schema: UpdateSkillBodySchema } } },
-  },
-  responses: {
-    200: {
-      description: "Hand-authored skill updated.",
-      content: { "application/json": { schema: SkillEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3333,12 +3294,10 @@ export type V1RouteHandlers = {
   deleteWikiPage: RouteHandler<typeof deleteWikiPageRoute>;
   addWikiTimelineEntry: RouteHandler<typeof addWikiTimelineEntryRoute>;
   listSkills: RouteHandler<typeof listSkillsRoute>;
-  createSkill: RouteHandler<typeof createSkillRoute>;
   previewSkillImport: RouteHandler<typeof previewSkillImportRoute>;
   importSkill: RouteHandler<typeof importSkillRoute>;
   listSkillCatalog: RouteHandler<typeof listSkillCatalogRoute>;
   getSkill: RouteHandler<typeof getSkillRoute>;
-  updateSkill: RouteHandler<typeof updateSkillRoute>;
   archiveSkill: RouteHandler<typeof archiveSkillRoute>;
   enableSkill: RouteHandler<typeof enableSkillRoute>;
   disableSkill: RouteHandler<typeof disableSkillRoute>;
@@ -3520,12 +3479,10 @@ export function createV1Router(
       .openapi(deleteWikiPageRoute, handlers.deleteWikiPage)
       .openapi(addWikiTimelineEntryRoute, handlers.addWikiTimelineEntry)
       .openapi(listSkillsRoute, handlers.listSkills)
-      .openapi(createSkillRoute, handlers.createSkill)
       .openapi(previewSkillImportRoute, handlers.previewSkillImport)
       .openapi(importSkillRoute, handlers.importSkill)
       .openapi(listSkillCatalogRoute, handlers.listSkillCatalog)
       .openapi(getSkillRoute, handlers.getSkill)
-      .openapi(updateSkillRoute, handlers.updateSkill)
       .openapi(archiveSkillRoute, handlers.archiveSkill)
       .openapi(enableSkillRoute, handlers.enableSkill)
       .openapi(disableSkillRoute, handlers.disableSkill)
@@ -3779,17 +3736,6 @@ const placeholderWikiPage = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
 };
-const placeholderSkill = {
-  id: "skill_contract",
-  slug: "contract-skill",
-  name: "Contract skill",
-  description: "A contract placeholder.",
-  instructions: "Complete the contract placeholder.",
-  status: "active" as const,
-  source: null,
-  createdAt: placeholderTime,
-  updatedAt: placeholderTime,
-};
 const placeholderSkillSource = {
   type: "github" as const,
   url: "https://github.com/example/skills",
@@ -3801,12 +3747,12 @@ const placeholderSkillBundle = {
   id: "skill_bundle_contract",
   integrity: `sha256:${"b".repeat(64)}`,
   name: "contract-skill",
-  description: placeholderSkill.description,
+  description: "A contract placeholder.",
   license: null,
   compatibility: null,
   metadata: null,
   allowedTools: null,
-  body: placeholderSkill.instructions,
+  body: "Complete the contract placeholder.",
   source: placeholderSkillSource,
   files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
   createdAt: placeholderTime,
@@ -4426,14 +4372,13 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
-  createSkill: (c) => c.json({ data: placeholderSkill, meta }, 201),
   previewSkillImport: (c) =>
     c.json(
       {
         data: {
           status: "resolved",
           name: placeholderSkillBundle.name,
-          description: placeholderSkill.description,
+          description: placeholderSkillBundle.description,
           source: placeholderSkillSource,
           integrity: placeholderSkillBundle.integrity,
           files: placeholderSkillBundle.files,
@@ -4451,9 +4396,9 @@ const contractDocumentHandlers: V1RouteHandlers = {
       {
         data: [
           {
-            id: placeholderSkill.slug,
-            name: placeholderSkill.name,
-            description: placeholderSkill.description,
+            id: placeholderSkillInstallation.name,
+            name: placeholderSkillBundle.name,
+            description: placeholderSkillBundle.description,
           },
         ],
         meta,
@@ -4461,7 +4406,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   getSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
-  updateSkill: (c) => c.json({ data: placeholderSkill, meta }, 200),
   archiveSkill: (c) => c.json({ data: { name: placeholderSkillInstallation.name }, meta }, 200),
   enableSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   disableSkill: (c) =>
@@ -4478,7 +4422,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           nextOffset: 128,
           eof: true,
           encoding: "utf8" as const,
-          content: placeholderSkill.instructions,
+          content: placeholderSkillBundle.body,
         },
         meta,
       },

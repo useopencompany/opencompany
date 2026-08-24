@@ -112,16 +112,6 @@ describe("KnowledgeApplicationService", () => {
     });
   });
 
-  it("validates idempotency keys before create commands reach persistence", async () => {
-    const createSkill = vi.fn();
-    const service = new KnowledgeApplicationService(repository({ createSkill }));
-
-    expect(() =>
-      service.createSkill(actor, { idempotencyKey: "contains a space", name: "Research" }),
-    ).toThrow("A valid Idempotency-Key is required.");
-    expect(createSkill).not.toHaveBeenCalled();
-  });
-
   it("normalizes client-generated Wiki identities without accepting an empty timeline", async () => {
     const addWikiTimelineEntry = vi.fn(async () => {
       throw new Error("stop after capture");

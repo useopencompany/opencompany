@@ -1,6 +1,6 @@
 # Agent Skills and Agent Plugins 1.0.0 implementation plan
 
-- Status: Proposed
+- Status: Implemented
 - Date: 2026-08-21
 - Standards:
   [Agent Skills](https://github.com/agentskills/agentskills/blob/main/docs/specification.mdx) and

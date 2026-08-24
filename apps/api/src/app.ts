@@ -34,7 +34,6 @@ import {
   type PluginImportApplicationService,
   publicPluginInstallation,
   type RunEvent,
-  type Skill,
   type SkillImportApplicationService,
   type SkillInstallation,
   type SkillInstallationListItem,
@@ -1122,15 +1121,6 @@ export function createApiApp(input: CreateApiAppInput) {
       const installations = await input.skillImports.list(actor);
       return c.json({ data: installations.map(skillInstallationListItemDto), meta }, 200);
     },
-    createSkill: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const skill = await input.knowledge.createSkill(actor, {
-        idempotencyKey: c.req.valid("header")["idempotency-key"],
-        ...c.req.valid("json"),
-      });
-      return c.json({ data: skillDto(skill), meta }, 201);
-    },
     previewSkillImport: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);
@@ -1165,16 +1155,6 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "read", 300);
       const installation = await input.skillImports.inspect(actor, c.req.valid("param").slug);
       return c.json({ data: skillInstallationDto(installation), meta }, 200);
-    },
-    updateSkill: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const skill = await input.knowledge.updateSkill(
-        actor,
-        c.req.valid("param").slug,
-        c.req.valid("json"),
-      );
-      return c.json({ data: skillDto(skill), meta }, 200);
     },
     archiveSkill: async (c) => {
       const actor = actorFrom(c);
@@ -2983,14 +2963,6 @@ function wikiTimelineEntryDto(entry: WikiTimelineEntry) {
     ...entry,
     at: entry.at.toISOString(),
     createdAt: entry.createdAt.toISOString(),
-  };
-}
-
-function skillDto(skill: Skill) {
-  return {
-    ...skill,
-    createdAt: skill.createdAt.toISOString(),
-    updatedAt: skill.updatedAt.toISOString(),
   };
 }
 

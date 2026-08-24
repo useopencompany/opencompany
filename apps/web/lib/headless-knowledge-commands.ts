@@ -10,7 +10,6 @@ import {
   type BrainSourceItemDto,
   type CreateBrainDocumentBody,
   type CreateBrainFolderBody,
-  type CreateSkillBody,
   createApiClient,
   type DeleteBrainFolderBody,
   type ImportSkillBody,
@@ -20,7 +19,6 @@ import {
   type RenameBrainFolderBody,
   type SkillImportPreviewBody,
   type UpdateBrainDocumentBody,
-  type UpdateSkillBody,
 } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import { awaitHeadlessWikiTransactions } from "./headless-knowledge-collections";
@@ -177,14 +175,6 @@ export async function addHeadlessWikiTimelineEntry(
   return data.entry;
 }
 
-export async function createHeadlessSkill(command: CreateSkillBody, options: ClientOptions = {}) {
-  const response = await knowledgeClient(options).v1.skills.$post({
-    header: { "idempotency-key": `web-skill:${crypto.randomUUID()}` },
-    json: command,
-  });
-  return responseData(response, "Skill creation failed");
-}
-
 export async function previewHeadlessSkillImport(
   command: SkillImportPreviewBody,
   options: ClientOptions = {},
@@ -201,18 +191,6 @@ export async function importHeadlessSkill(command: ImportSkillBody, options: Cli
     json: command,
   });
   return responseData(response, "Skill import failed");
-}
-
-export async function updateHeadlessSkill(
-  slug: string,
-  command: UpdateSkillBody,
-  options: ClientOptions = {},
-) {
-  const response = await knowledgeClient(options).v1.skills[":slug"].$patch({
-    param: { slug },
-    json: command,
-  });
-  return responseData(response, "Skill update failed");
 }
 
 export async function archiveHeadlessSkill(slug: string, options: ClientOptions = {}) {

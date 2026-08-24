@@ -75,9 +75,7 @@ const bytea = customType<{ data: Buffer }>({
 
 export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
-// Workflows and skills share a simple draft/active lifecycle: `draft` is
-// editable-but-not-yet-usable, `active` is available to fire (workflows) or
-// attach (skills). Mirrors the frontmatter `status` the Brain docs carried.
+// Workflows retain the draft/active lifecycle from their original Brain documents.
 export type WorkflowStatus = "draft" | "active";
 export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule";
 export type AutomationCommandOperation = "workflow.create" | "task_schedule.create";
@@ -87,8 +85,6 @@ export type KnowledgeCommandOperation =
   | "brain_asset.replace"
   | "wiki_page.create"
   | "wiki_timeline.create"
-  | "skill.create"
-  | "skill.import"
   | "brain_import.start";
 export type BillingCommandOperation =
   | "credit_topup.create"
@@ -105,11 +101,8 @@ export type WorkflowStep = {
   reasoningEffort?: CodexReasoningEffort;
   instructions: string;
 };
-export type SkillStatus = "draft" | "active";
 export type ChatSessionSkillBundleSourceKind = "standalone" | "plugin";
-// A skill imported from an external SKILL.md source. `null` on the row itself means
-// hand-authored in opencompany. Matches `AgentRemoteSkillSource["type"]`
-// (packages/agent-runtime/src/skill-resolver.ts) exactly — no translation layer needed.
+// Remote source types shared by immutable Skill bundles and Plugins.
 export type SkillSourceType = "github" | "skills.sh";
 
 export type HarnessEngine = "opencompany" | "codex" | "claude_code";
@@ -2931,62 +2924,6 @@ export const workflows = productSchema.table(
   }),
 );
 
-// Legacy workspace-authored skills retained until the Phase 6 schema removal. The current Agent
-// Skills catalog and runtime do not read this table.
-export const skills = productSchema.table(
-  "skills",
-  {
-    id: text("id").primaryKey(),
-    workspaceId: text("workspace_id")
-      .notNull()
-      .references(() => workspaces.id, { onDelete: "cascade" }),
-    slug: text("slug").notNull(),
-    name: text("name").notNull(),
-    description: text("description").notNull().default(""),
-    instructions: text("instructions").notNull().default(""),
-    status: text("status").$type<SkillStatus>().notNull().default("draft"),
-    createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
-      onDelete: "set null",
-    }),
-    // Source provenance for imported skills. NULL sourceType = hand-authored in opencompany (the
-    // original, still-supported path). Non-NULL means the row was resolved from an external
-    // SKILL.md and is read-only — enforced by PostgresKnowledgeRepository.updateSkill.
-    sourceType: text("source_type").$type<SkillSourceType>(),
-    sourceUrl: text("source_url"),
-    sourceRef: text("source_ref"),
-    sourcePath: text("source_path"),
-    resolvedCommit: text("resolved_commit"),
-    integrity: text("integrity"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    archivedAt: timestamp("archived_at", { withTimezone: true }),
-  },
-  (table) => ({
-    workspaceSlugIdx: uniqueIndex("goat_skills_workspace_slug_idx")
-      .on(table.workspaceId, table.slug)
-      .where(sql`${table.archivedAt} IS NULL`),
-    workspaceUpdatedIdx: index("goat_skills_workspace_updated_idx").on(
-      table.workspaceId,
-      table.archivedAt,
-      table.updatedAt,
-    ),
-    // Prevents importing the same skill twice into one workspace. The canonical repository
-    // returns the existing row for a matching resolved source.
-    workspaceSourceIdx: uniqueIndex("goat_skills_workspace_source_idx")
-      .on(table.workspaceId, table.sourceUrl, table.sourceRef, table.sourcePath)
-      .where(sql`${table.sourceType} IS NOT NULL AND ${table.archivedAt} IS NULL`),
-    statusCheck: check("goat_skills_status_check", sql`${table.status} IN ('draft', 'active')`),
-    sourceTypeCheck: check(
-      "goat_skills_source_type_check",
-      sql`${table.sourceType} IS NULL OR ${table.sourceType} IN ('github', 'skills.sh')`,
-    ),
-    sourceUrlRequiredCheck: check(
-      "goat_skills_source_url_required_check",
-      sql`${table.sourceType} IS NULL OR ${table.sourceUrl} IS NOT NULL`,
-    ),
-  }),
-);
-
 // A validated Agent Skill version. Rows and files are immutable after insertion; the installation
 // table below is the only mutable pointer. Raw file bytes, rather than reconstructed Markdown, are
 // the storage authority.
@@ -4195,34 +4132,6 @@ export const browserProfileSessions = productSchema.table(
   }),
 );
 
-// Legacy content-copying Chat snapshots retained until the Phase 6 schema removal. Current Chat
-// activation and every runner read `chatSessionSkillBundles` exclusively.
-export const chatSessionSkills = productSchema.table(
-  "chat_session_skills",
-  {
-    chatSessionId: text("chat_session_id")
-      .notNull()
-      .references(() => chatSessions.id, { onDelete: "cascade" }),
-    skillId: text("skill_id").notNull(),
-    // Provenance only: the immutable snapshot must survive deletion of its source Brain.
-    brainRef: text("brain_ref").notNull(),
-    activatedMessageId: text("activated_message_id")
-      .notNull()
-      .references(() => chatMessages.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    description: text("description").notNull(),
-    instructions: text("instructions").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    pk: primaryKey({ columns: [table.chatSessionId, table.skillId] }),
-    activatedMessageIdx: index("goat_chat_session_skills_activated_message_idx").on(
-      table.activatedMessageId,
-    ),
-    brainIdx: index("goat_chat_session_skills_brain_idx").on(table.brainRef),
-  }),
-);
-
 // Immutable Agent Skill bundle versions activated in a Chat. The denormalized name and unique
 // index make the first bundle with a given declared name remain fixed even when activation paths
 // race or the workspace installation is later replaced, disabled, or archived.
@@ -4234,6 +4143,8 @@ export const chatSessionSkillBundles = productSchema.table(
       .references(() => chatSessions.id, { onDelete: "cascade" }),
     bundleId: text("bundle_id")
       .notNull()
+      // Migration 0226 orders workspace cascades in a BEFORE DELETE trigger while retaining
+      // RESTRICT here so an immutable bundle cannot be deleted out from under a Chat snapshot.
       .references(() => skillBundles.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
     activatedMessageId: text("activated_message_id")
@@ -4268,6 +4179,8 @@ export const chatSessionPlugins = productSchema.table(
       .references(() => chatSessions.id, { onDelete: "cascade" }),
     pluginId: text("plugin_id")
       .notNull()
+      // Migration 0226 orders workspace cascades in a BEFORE DELETE trigger while retaining
+      // RESTRICT here so an immutable Plugin cannot be deleted out from under a Chat snapshot.
       .references(() => plugins.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -4560,7 +4473,7 @@ export const knowledgeCommandIdempotency = productSchema.table(
     ),
     operationCheck: check(
       "goat_knowledge_command_idempotency_operation_check",
-      sql`${table.operation} IN ('brain_document.create', 'brain_asset.create', 'brain_asset.replace', 'wiki_page.create', 'wiki_timeline.create', 'skill.create', 'skill.import')`,
+      sql`${table.operation} IN ('brain_document.create', 'brain_asset.create', 'brain_asset.replace', 'wiki_page.create', 'wiki_timeline.create', 'brain_import.start')`,
     ),
   }),
 );
@@ -6024,7 +5937,6 @@ export const chatSessionsRelations = relations(chatSessions, ({ one, many }) => 
   modelRoutingAttempts: many(chatModelRoutingAttempts),
   sandboxUsage: many(chatSandboxUsage),
   browserProfileSessions: many(browserProfileSessions),
-  skills: many(chatSessionSkills),
   skillBundles: many(chatSessionSkillBundles),
   plugins: many(chatSessionPlugins),
   brainToolRuns: many(brainToolRuns),
@@ -6063,7 +5975,6 @@ export const chatMessagesRelations = relations(chatMessages, ({ one, many }) => 
     fields: [chatMessages.taskId],
     references: [tasks.id],
   }),
-  activatedSkills: many(chatSessionSkills),
   activatedSkillBundles: many(chatSessionSkillBundles),
   sandboxUsage: many(chatSandboxUsage),
   modelRoutingAttempts: many(chatModelRoutingAttempts),
@@ -6126,21 +6037,6 @@ export const browserProfileSessionsRelations = relations(browserProfileSessions,
   }),
   userMessage: one(chatMessages, {
     fields: [browserProfileSessions.userMessageId],
-    references: [chatMessages.id],
-  }),
-}));
-
-export const chatSessionSkillsRelations = relations(chatSessionSkills, ({ one }) => ({
-  session: one(chatSessions, {
-    fields: [chatSessionSkills.chatSessionId],
-    references: [chatSessions.id],
-  }),
-  brain: one(brains, {
-    fields: [chatSessionSkills.brainRef],
-    references: [brains.id],
-  }),
-  activatedMessage: one(chatMessages, {
-    fields: [chatSessionSkills.activatedMessageId],
     references: [chatMessages.id],
   }),
 }));
@@ -6294,11 +6190,9 @@ export type ChatModelRoutingAttempt = typeof chatModelRoutingAttempts.$inferSele
 export type ChatSandboxUsage = typeof chatSandboxUsage.$inferSelect;
 export type BrowserProfile = typeof browserProfiles.$inferSelect;
 export type BrowserProfileSession = typeof browserProfileSessions.$inferSelect;
-export type ChatSessionSkill = typeof chatSessionSkills.$inferSelect;
 export type ChatSessionSkillBundle = typeof chatSessionSkillBundles.$inferSelect;
 export type ChatSessionPlugin = typeof chatSessionPlugins.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;
-export type Skill = typeof skills.$inferSelect;
 export type SkillBundle = typeof skillBundles.$inferSelect;
 export type SkillBundleFile = typeof skillBundleFiles.$inferSelect;
 export type SkillInstallation = typeof skillInstallations.$inferSelect;

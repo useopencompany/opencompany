@@ -43,10 +43,17 @@ product flows do not call them.
 
 ## Sandboxes and broker
 
-E2B sandboxes receive task files, current managed skills, and scoped provider credentials. They do
-not receive application database credentials or raw platform secrets. The LLM broker validates
-short-lived tokens, applies provider/model scope, records usage, and forwards only to configured
-upstreams. See [LLM token broker](./llm-token-broker.md).
+E2B sandboxes receive task files, exact immutable Skill bundles and Plugin packages captured by the
+Chat or Workflow Task, and scoped provider credentials. Workflow steps without a `skillBundleIds`
+array fail closed instead of loading a pre-cutover snapshot. Approved stdio MCP servers are mounted
+only for the exact approved Plugin integrity in Codex and Claude coding sandboxes. Main Chat does
+not launch Plugin MCP.
+
+The runner restores and checkpoints bounded `PLUGIN_DATA` archives through Blob storage without
+putting `BLOB_READ_WRITE_TOKEN` or other platform secrets in a Plugin process environment.
+Sandboxes do not receive application database credentials or raw platform secrets. The LLM broker
+validates short-lived tokens, applies provider/model scope, records usage, and forwards only to
+configured upstreams. See [LLM token broker](./llm-token-broker.md).
 
 ## Verification
 
