@@ -225,7 +225,15 @@ const app = createApiApp({
   linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
   hubspotIngress: createHubspotIngress({ db: database.db, identify: identityVerifier }),
   attioIngress: createAttioIngress({ db: database.db }),
-  jamieIngress: createJamieIngress({ db: database.db }),
+  jamieIngress: createJamieIngress({
+    db: database.db,
+    wakeWikiIngest: () =>
+      runnerClient.postJson(
+        "/internal/goat/wiki-ingest/wake",
+        {},
+        { errorFormat: "error-message" },
+      ),
+  }),
   mcpOAuthIngress: createMcpOAuthIngress({ db: database.db, identify: identityVerifier }),
   xAccountIngress: createXAccountIngress({ db: database.db, identify: identityVerifier }),
   slackBotIngress: createSlackBotIngress({

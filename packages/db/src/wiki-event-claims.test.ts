@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { claimWikiSourceEvents } from "./wiki-event-claims";
+import {
+  attributeWikiSourceEventClaims,
+  claimWikiSourceEvents,
+  listWikiSourceEventClaimedWorkspaceIds,
+} from "./wiki-event-claims";
 
 describe("claimWikiSourceEvents", () => {
   it("returns only event keys inserted by the workspace-scoped unique claim", async () => {
@@ -47,5 +51,46 @@ describe("claimWikiSourceEvents", () => {
       }),
     ).resolves.toEqual({ claimedCount: 0, claimedEventKeys: [] });
     expect(db.insert).not.toHaveBeenCalled();
+  });
+});
+
+describe("wiki source event claim routing", () => {
+  it("returns the routed workspaces that already claimed an event", async () => {
+    const where = vi.fn(async () => [
+      { workspaceId: "workspace_1" },
+      { workspaceId: "workspace_2" },
+    ]);
+    const db = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({ where })),
+      })),
+    };
+
+    await expect(
+      listWikiSourceEventClaimedWorkspaceIds({
+        workspaceIds: ["workspace_1", "workspace_2", "workspace_3"],
+        sourceProvider: "granola",
+        eventKey: "note:note_1",
+        db,
+      }),
+    ).resolves.toEqual(new Set(["workspace_1", "workspace_2"]));
+    expect(where).toHaveBeenCalledOnce();
+  });
+
+  it("attributes a claimed event to the source item that honored it", async () => {
+    const where = vi.fn(async () => undefined);
+    const set = vi.fn(() => ({ where }));
+    const db = { update: vi.fn(() => ({ set })) };
+
+    await attributeWikiSourceEventClaims({
+      workspaceId: "workspace_1",
+      sourceProvider: "jamie",
+      eventKeys: ["meeting:meeting_1", "meeting:meeting_1"],
+      sourceItemId: "gwsrc_1",
+      db,
+    });
+
+    expect(set).toHaveBeenCalledWith({ sourceItemId: "gwsrc_1" });
+    expect(where).toHaveBeenCalledOnce();
   });
 });
