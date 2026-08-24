@@ -3,12 +3,11 @@ import { isValidBrainId } from "@opencompany/brain";
 import { createSkillFileChunk, type SkillFileChunk } from "@opencompany/core";
 import { getDb } from "@opencompany/db/client";
 import type { PooledDb } from "@opencompany/db/pool";
-import { skillBundles, skillInstallations } from "@opencompany/db/product-schema";
 import {
   activateAndListChatSkillBundles,
   readChatSkillBundleFile,
 } from "@opencompany/db/skill-bundle-repository";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { resolveWorkspaceSkillCatalog } from "@opencompany/db/skill-catalog";
 
 export const MAX_CHAT_SKILLS = 16;
 export const MAX_CHAT_SKILL_BYTES = 1024 * 1024;
@@ -23,6 +22,7 @@ export type WorkspaceSkill = {
   name: string;
   description: string;
   instructions: string;
+  sourceKind: "standalone" | "plugin";
 };
 
 export type SkillCatalogItem = Pick<WorkspaceSkill, "id" | "name" | "description">;
@@ -69,30 +69,8 @@ export async function listSkillCatalog(
   workspaceId: string,
   db: Db = getDb(),
 ): Promise<SkillCatalogItem[]> {
-  const rows = await db
-    .select({
-      id: skillInstallations.name,
-      name: skillBundles.name,
-      description: skillBundles.description,
-    })
-    .from(skillInstallations)
-    .innerJoin(
-      skillBundles,
-      and(
-        eq(skillBundles.id, skillInstallations.bundleId),
-        eq(skillBundles.workspaceId, skillInstallations.workspaceId),
-      ),
-    )
-    .where(
-      and(
-        eq(skillInstallations.workspaceId, workspaceId),
-        eq(skillBundles.workspaceId, workspaceId),
-        eq(skillInstallations.enabled, true),
-        isNull(skillInstallations.archivedAt),
-      ),
-    )
-    .orderBy(asc(skillBundles.name));
-  return rows;
+  const catalog = await resolveWorkspaceSkillCatalog(db, { workspaceId });
+  return catalog.skills.map(({ id, name, description }) => ({ id, name, description }));
 }
 
 export async function resolveSkillMentions(input: {
@@ -110,35 +88,22 @@ export async function resolveSkillMentions(input: {
     throw new SkillMentionError(`Attach at most ${MAX_CHAT_SKILLS} skills to one message.`);
   }
 
-  const rows = await (input.db ?? getDb())
-    .select({
-      id: skillInstallations.name,
-      bundleId: skillBundles.id,
-      name: skillBundles.name,
-      description: skillBundles.description,
-      instructions: skillBundles.body,
-    })
-    .from(skillInstallations)
-    .innerJoin(
-      skillBundles,
-      and(
-        eq(skillBundles.id, skillInstallations.bundleId),
-        eq(skillBundles.workspaceId, skillInstallations.workspaceId),
-      ),
-    )
-    .where(
-      and(
-        eq(skillInstallations.workspaceId, input.workspaceId),
-        eq(skillBundles.workspaceId, input.workspaceId),
-        eq(skillInstallations.enabled, true),
-        inArray(
-          skillInstallations.name,
-          unique.map((mention) => mention.id),
-        ),
-        isNull(skillInstallations.archivedAt),
-      ),
-    );
-  const byId = new Map(rows.map((row) => [row.id, row]));
+  const catalog = await resolveWorkspaceSkillCatalog(input.db ?? getDb(), {
+    workspaceId: input.workspaceId,
+  });
+  const byId = new Map(
+    catalog.skills.map((skill) => [
+      skill.id,
+      {
+        id: skill.id,
+        bundleId: skill.bundleId,
+        name: skill.name,
+        description: skill.description,
+        instructions: skill.body,
+        sourceKind: skill.sourceKind,
+      },
+    ]),
+  );
   const resolvedSkills = unique.map((mention) => {
     const skill = byId.get(mention.id);
     if (!skill) {
@@ -171,7 +136,7 @@ export async function activateAndListChatSessionSkills(input: {
     activatedMessageId: input.activatedMessageId,
     bundles: input.skills.map((skill) => ({
       bundleId: skill.bundleId,
-      sourceKind: "standalone",
+      sourceKind: skill.sourceKind,
     })),
   });
   return activations.map((activation) => ({

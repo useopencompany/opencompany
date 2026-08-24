@@ -50,6 +50,13 @@ describe("Postgres immutable Skill bundle repository", () => {
     for (const statement of snapshotMigration.split("--> statement-breakpoint")) {
       if (statement.trim()) await database.exec(statement);
     }
+    const pluginMigration = await readFile(
+      path.resolve(import.meta.dirname, "../../..", "drizzle/0224_goat_plugins.sql"),
+      "utf8",
+    );
+    for (const statement of pluginMigration.split("--> statement-breakpoint")) {
+      if (statement.trim()) await database.exec(statement);
+    }
     const nameMigration = await readFile(
       path.resolve(
         import.meta.dirname,

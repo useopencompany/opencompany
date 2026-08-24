@@ -71,7 +71,16 @@ const skillMocks = vi.hoisted(() => ({
 }));
 
 const workflowSkillMocks = vi.hoisted(() => ({
+  loadWorkflowTaskPluginRuntime: vi.fn(),
   loadWorkflowTaskSkillBundles: vi.fn(),
+}));
+
+const pluginRuntimeMocks = vi.hoisted(() => ({
+  loadChatSessionPluginRuntime: vi.fn(),
+}));
+
+const managedPluginMocks = vi.hoisted(() => ({
+  materializePluginPackagesForSession: vi.fn(),
 }));
 
 const taskMocks = vi.hoisted(() => ({
@@ -91,6 +100,10 @@ vi.mock("@opencompany/db/claude-code-auth", () => ({
   loadClaudeCodeCredential: authMocks.loadClaudeCodeCredential,
   markClaudeCodeCredentialNeedsReauth: authMocks.markClaudeCodeCredentialNeedsReauth,
   markClaudeCodeCredentialValidated: authMocks.markClaudeCodeCredentialValidated,
+}));
+
+vi.mock("@opencompany/db/plugin-runtime-repository", () => ({
+  loadChatSessionPluginRuntime: pluginRuntimeMocks.loadChatSessionPluginRuntime,
 }));
 
 vi.mock("./claude-code-cli", () => ({
@@ -202,7 +215,12 @@ vi.mock("./codex-managed-skills", () => ({
   materializeClaudeSkillSnapshotsForSession: skillMocks.materializeClaudeSkillSnapshotsForSession,
 }));
 
+vi.mock("./managed-plugins", () => ({
+  materializePluginPackagesForSession: managedPluginMocks.materializePluginPackagesForSession,
+}));
+
 vi.mock("./workflow-skill-bundles", () => ({
+  loadWorkflowTaskPluginRuntime: workflowSkillMocks.loadWorkflowTaskPluginRuntime,
   loadWorkflowTaskSkillBundles: workflowSkillMocks.loadWorkflowTaskSkillBundles,
 }));
 
@@ -293,7 +311,17 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     chatMocks.codexChatTurnLeaseIsHeld.mockResolvedValue(true);
     chatMocks.loadCodexChatAttachments.mockResolvedValue([]);
     chatMocks.loadCodexChatSessionSkills.mockResolvedValue([]);
+    pluginRuntimeMocks.loadChatSessionPluginRuntime
+      .mockReset()
+      .mockResolvedValue({ plugins: [], skills: [] });
+    workflowSkillMocks.loadWorkflowTaskPluginRuntime
+      .mockReset()
+      .mockResolvedValue({ plugins: [], skills: [] });
     workflowSkillMocks.loadWorkflowTaskSkillBundles.mockResolvedValue([]);
+    managedPluginMocks.materializePluginPackagesForSession.mockReset().mockResolvedValue({
+      fingerprint: "plugins",
+      count: 0,
+    });
     chatMocks.loadGitHubAuthForUser.mockResolvedValue(null);
     chatMocks.markCodexChatSandboxTimeoutArmed.mockResolvedValue(undefined);
     chatMocks.materializeCodexChatAttachments.mockResolvedValue({
@@ -574,6 +602,59 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     );
   });
 
+  it("auto-mounts winning Plugin Skills and materializes the snapshotted package", async () => {
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    const pluginPackage = {
+      id: "plugin_review_v1",
+      name: "review-tools",
+      files: [
+        {
+          path: "plugin.json",
+          content: new TextEncoder().encode('{"name":"review-tools"}'),
+          executable: false,
+          sizeBytes: 23,
+        },
+      ],
+    };
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [
+        {
+          id: "skill_bundle_plugin_review_v1",
+          name: "plugin-review",
+          description: "Review from the Plugin.",
+          body: "Review carefully.",
+          files: [
+            {
+              path: "SKILL.md",
+              content: new TextEncoder().encode("exact Plugin Skill document"),
+              executable: false,
+              sizeBytes: 27,
+            },
+          ],
+        },
+      ],
+    });
+
+    await runClaudeCodeChatTurn({
+      turn: claudeTurn(),
+      session: claudeSession({ workspaceId: "workspace_1" }),
+      env: env(),
+    });
+
+    expect(managedPluginMocks.materializePluginPackagesForSession).toHaveBeenCalledWith({
+      sandbox,
+      workRoot: "/home/user/opencompany-goat/claude-chat",
+      plugins: [pluginPackage],
+    });
+    expect(skillMocks.materializeClaudeSkillSnapshotsForSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skills: [expect.objectContaining({ name: "plugin-review" })],
+      }),
+    );
+  });
+
   it("defers an E2B command stream timeout instead of failing its durable task", async () => {
     const error = new Error("2: [unknown] The operation timed out.");
     error.name = "SandboxError";
@@ -802,6 +883,7 @@ function harnessSpecForClaudeTask(): HarnessSpec {
       workspaceId: "workspace_1",
       skillIds: ["smooth-shadow-ring"],
       skillBundleIds: ["skill_bundle_shadow_v1"],
+      pluginIds: [],
       currentStepIndex: 0,
       completedStepCount: 0,
       steps: [

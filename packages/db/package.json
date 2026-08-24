@@ -36,6 +36,14 @@
       "types": "./src/plugin-repository.ts",
       "default": "./src/plugin-repository.ts"
     },
+    "./plugin-runtime-repository": {
+      "types": "./src/plugin-runtime-repository.ts",
+      "default": "./src/plugin-runtime-repository.ts"
+    },
+    "./skill-catalog": {
+      "types": "./src/skill-catalog.ts",
+      "default": "./src/skill-catalog.ts"
+    },
     "./wiki-command-repository": {
       "types": "./src/wiki-command-repository.ts",
       "default": "./src/wiki-command-repository.ts"

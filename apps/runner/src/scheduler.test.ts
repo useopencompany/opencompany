@@ -311,6 +311,7 @@ describe("sweepDueTaskSchedules", () => {
         workspaceId: "workspace_1",
         skillIds: [],
         skillBundleIds: [],
+        pluginIds: [],
         steps: [],
         currentStepIndex: 0,
         completedStepCount: 0,

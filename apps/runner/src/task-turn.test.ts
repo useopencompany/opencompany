@@ -501,6 +501,7 @@ function workflowSpec(): HarnessSpec {
       workspaceId: "workspace_1",
       skillIds: [],
       skillBundleIds: [],
+      pluginIds: [],
       currentStepIndex: 0,
       completedStepCount: 0,
       steps: [

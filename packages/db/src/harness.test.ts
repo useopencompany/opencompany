@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getWorkflowHarnessSkillBundleIds } from "./harness";
+import {
+  getWorkflowHarnessPluginIds,
+  getWorkflowHarnessPluginSkillBundleIds,
+  getWorkflowHarnessSkillBundleIds,
+} from "./harness";
 import type { HarnessSpec } from "./product-schema";
 
 describe("getWorkflowHarnessSkillBundleIds", () => {
@@ -20,6 +24,20 @@ describe("getWorkflowHarnessSkillBundleIds", () => {
       "Workflow Task Harness is missing immutable Skill bundle IDs.",
     );
   });
+
+  it("reads Plugin snapshots without enabling Plugins for legacy Harnesses", () => {
+    const harness = workflowHarness();
+    harness.workflow!.steps![0]!.pluginSkillBundleIds = ["skill_bundle_research_v1"];
+
+    expect(getWorkflowHarnessPluginIds(harness)).toEqual(["plugin_quality_v1"]);
+    expect(getWorkflowHarnessPluginSkillBundleIds(harness)).toEqual(["skill_bundle_research_v1"]);
+
+    const legacyWorkflow = harness.workflow as { pluginIds?: string[] };
+    delete legacyWorkflow.pluginIds;
+    delete harness.workflow!.steps![0]!.pluginSkillBundleIds;
+    expect(getWorkflowHarnessPluginIds(harness)).toEqual([]);
+    expect(getWorkflowHarnessPluginSkillBundleIds(harness)).toEqual([]);
+  });
 });
 
 function workflowHarness(): HarnessSpec {
@@ -38,6 +56,7 @@ function workflowHarness(): HarnessSpec {
       workspaceId: "workspace_1",
       skillIds: ["research", "write"],
       skillBundleIds: ["skill_bundle_research_v1", "skill_bundle_write_v1"],
+      pluginIds: ["plugin_quality_v1"],
       currentStepIndex: 0,
       completedStepCount: 0,
       steps: [

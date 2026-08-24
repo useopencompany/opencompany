@@ -14,6 +14,8 @@ import {
   markClaudeCodeCredentialNeedsReauth,
   markClaudeCodeCredentialValidated,
 } from "@opencompany/db/claude-code-auth";
+import { getWorkflowHarnessPluginSkillBundleIds } from "@opencompany/db/harness";
+import { loadChatSessionPluginRuntime } from "@opencompany/db/plugin-runtime-repository";
 import { type CodexChatSession, type CodexChatTurn } from "@opencompany/db/product-schema";
 import type { ImmutableSkillBundle } from "@opencompany/db/skill-bundle-repository";
 import { captureException, createLogger } from "@opencompany/observability";
@@ -78,6 +80,7 @@ import {
   combineSandboxPromptFragments,
   reconcileInfisicalSandboxAuth,
 } from "./infisical-sandbox-auth";
+import { materializePluginPackagesForSession } from "./managed-plugins";
 import { loadRepositoryBootstrap, stageRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
@@ -94,7 +97,10 @@ import {
   markTaskTurnRunning,
   type TaskTurnContext,
 } from "./task-turn";
-import { loadWorkflowTaskSkillBundles } from "./workflow-skill-bundles";
+import {
+  loadWorkflowTaskPluginRuntime,
+  loadWorkflowTaskSkillBundles,
+} from "./workflow-skill-bundles";
 
 const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory;
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
@@ -411,14 +417,33 @@ export async function runClaudeCodeChatTurn(input: {
     await ensureClaudeAcpAdapterInstalled(sandbox);
     await checkAbort();
     executionStage = "load_skills";
-    const sessionSkills = await loadCodexChatSessionSkills(turn);
-    const workflowSkills = taskContext
-      ? await loadWorkflowTaskSkillBundles(taskContext.harnessSpec)
-      : [];
+    const [sessionSkills, workflowSkills, pluginRuntime] = await Promise.all([
+      loadCodexChatSessionSkills(turn),
+      taskContext ? loadWorkflowTaskSkillBundles(taskContext.harnessSpec) : Promise.resolve([]),
+      taskContext
+        ? loadWorkflowTaskPluginRuntime(taskContext.harnessSpec)
+        : session.workspaceId
+          ? loadChatSessionPluginRuntime(getDb(), {
+              workspaceId: session.workspaceId,
+              chatSessionId: session.chatSessionId,
+            })
+          : Promise.resolve({ plugins: [], skills: [] }),
+    ]);
     const turnSkills = resolveClaudeTurnSkills({
       sessionSkills,
       userMessageId: turn.userMessageId,
       workflowSkills,
+      workflowPluginSkillBundleIds: taskContext
+        ? getWorkflowHarnessPluginSkillBundleIds(taskContext.harnessSpec)
+        : [],
+      pluginSkills: pluginRuntime.skills,
+    });
+    await checkAbort();
+    executionStage = "materialize_plugins";
+    await materializePluginPackagesForSession({
+      sandbox,
+      workRoot: CLAUDE_CHAT_WORKDIR,
+      plugins: pluginRuntime.plugins,
     });
     await checkAbort();
     executionStage = "materialize_skills";
@@ -1001,10 +1026,16 @@ function resolveClaudeTurnSkills(input: {
   sessionSkills: readonly CodexChatSessionSkill[];
   userMessageId: string;
   workflowSkills: readonly ImmutableSkillBundle[];
+  workflowPluginSkillBundleIds: readonly string[];
+  pluginSkills: readonly ImmutableSkillBundle[];
 }): { bundles: ImmutableSkillBundle[]; invokedSkillIds: string[] } {
   const bundles = new Map<string, ImmutableSkillBundle>();
   const invokedSkillIds = new Set<string>();
+  const enabledPluginBundleIds = new Set(input.pluginSkills.map((skill) => skill.id));
+  const workflowPluginBundleIds = new Set(input.workflowPluginSkillBundleIds);
+  for (const skill of input.pluginSkills) bundles.set(skill.name, skill);
   for (const skill of input.sessionSkills) {
+    if (skill.sourceKind === "plugin" && !enabledPluginBundleIds.has(skill.id)) continue;
     bundles.set(skill.name, skill);
     if (skill.activatedMessageId === input.userMessageId) {
       invokedSkillIds.add(skill.name);
@@ -1012,6 +1043,7 @@ function resolveClaudeTurnSkills(input: {
   }
 
   for (const skill of input.workflowSkills) {
+    if (workflowPluginBundleIds.has(skill.id) && !enabledPluginBundleIds.has(skill.id)) continue;
     bundles.set(skill.name, skill);
     invokedSkillIds.add(skill.name);
   }

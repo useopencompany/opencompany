@@ -56,6 +56,7 @@ type MentionedSkill = {
   name: string;
   description: string;
   instructions: string;
+  sourceKind: "standalone" | "plugin";
 };
 
 type ActiveSkill = {

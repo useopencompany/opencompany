@@ -6,6 +6,7 @@ import type { Actor, ResolvedPluginPackage, ResolvedSkillBundle } from "@opencom
 import { drizzle } from "drizzle-orm/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PostgresPluginRepository } from "./plugin-repository";
+import { loadChatSessionPluginRuntime } from "./plugin-runtime-repository";
 import { PostgresSkillBundleRepository } from "./skill-bundle-repository";
 
 describe("Postgres immutable Plugin repository", () => {
@@ -122,29 +123,40 @@ describe("Postgres immutable Plugin repository", () => {
     await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
       { id: "review", name: "review", description: "Review from plugin." },
     ]);
+    await expect(skillRepository.get({ actor: actor(), name: "review" })).resolves.toMatchObject({
+      name: "review",
+      enabled: true,
+      bundle: { body: "Use review." },
+    });
+    const file = await skillRepository.readFile({
+      actor: actor(),
+      name: "review",
+      path: "SKILL.md",
+    });
+    expect(new TextDecoder().decode(file?.content)).toContain("Use review.");
   });
 
   it("resolves standalone and plugin collisions deterministically and reports every hidden plugin", async () => {
     await repository.install({
       actor: actor(),
-      idempotencyKey: "zeta",
-      plugin: await resolvedPlugin("zeta-tools", "shared", "From zeta."),
+      idempotencyKey: "dot",
+      plugin: await resolvedPlugin("a.tools", "shared", "From dot."),
     });
-    const alpha = await repository.install({
+    const dash = await repository.install({
       actor: actor(),
-      idempotencyKey: "alpha",
-      plugin: await resolvedPlugin("alpha-tools", "shared", "From alpha."),
+      idempotencyKey: "dash",
+      plugin: await resolvedPlugin("a-tools", "shared", "From dash."),
     });
 
-    expect(alpha.plugin.installReport.collisions).toEqual([
+    expect(dash.plugin.installReport.collisions).toEqual([
       {
         skillName: "shared",
-        winner: { source: "plugin", pluginName: "alpha-tools" },
-        hiddenPluginNames: ["zeta-tools"],
+        winner: { source: "plugin", pluginName: "a-tools" },
+        hiddenPluginNames: ["a.tools"],
       },
     ]);
     await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
-      { id: "shared", name: "shared", description: "From alpha." },
+      { id: "shared", name: "shared", description: "From dash." },
     ]);
 
     await skillRepository.install({
@@ -155,14 +167,51 @@ describe("Postgres immutable Plugin repository", () => {
     await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
       { id: "shared", name: "shared", description: "Standalone wins." },
     ]);
-    const inspected = await repository.get({ actor: actor(), name: "alpha-tools" });
+    const inspected = await repository.get({ actor: actor(), name: "a-tools" });
     expect(inspected?.installReport.collisions).toEqual([
       {
         skillName: "shared",
         winner: { source: "standalone" },
-        hiddenPluginNames: ["alpha-tools", "zeta-tools"],
+        hiddenPluginNames: ["a-tools", "a.tools"],
       },
     ]);
+  });
+
+  it("loads only snapshotted enabled Plugin IDs and applies the live kill switch", async () => {
+    const installed = await repository.install({
+      actor: actor(),
+      idempotencyKey: "runtime-plugin",
+      plugin: await resolvedPlugin("quality-tools", "review", "First runtime version."),
+    });
+    await database.query(
+      "INSERT INTO goat.chat_session_plugins (chat_session_id, plugin_id) VALUES ($1, $2)",
+      ["chat_1", installed.plugin.id],
+    );
+    const db = drizzle(database);
+
+    await expect(
+      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+    ).resolves.toMatchObject({
+      plugins: [{ id: installed.plugin.id, name: "quality-tools" }],
+      skills: [{ name: "review", body: "Use review." }],
+    });
+
+    await repository.setStatus({ actor: actor(), name: "quality-tools", status: "disabled" });
+    await expect(
+      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+    ).resolves.toEqual({ plugins: [], skills: [] });
+
+    await repository.setStatus({ actor: actor(), name: "quality-tools", status: "enabled" });
+    await repository.archive({ actor: actor(), name: "quality-tools" });
+    const replacement = await repository.install({
+      actor: actor(),
+      idempotencyKey: "runtime-plugin-replacement",
+      plugin: await resolvedPlugin("quality-tools", "review", "Replacement runtime version."),
+    });
+    expect(replacement.plugin.id).not.toBe(installed.plugin.id);
+    await expect(
+      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+    ).resolves.toEqual({ plugins: [], skills: [] });
   });
 
   it("archives without deleting immutable rows and makes the live name replaceable", async () => {

@@ -17,16 +17,16 @@ import {
   type SkillBundleFileMetadata,
 } from "@opencompany/core";
 import { del } from "@vercel/blob";
-import { and, asc, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 import {
   pluginFiles,
   pluginSkills,
   plugins,
   skillBundles,
-  skillInstallations,
   workspacePluginData,
 } from "./product-schema";
 import { storeSkillBundle } from "./skill-bundle-repository";
+import { resolveWorkspaceSkillCatalog } from "./skill-catalog";
 
 type DbClient = any;
 
@@ -383,58 +383,7 @@ export async function currentSkillCollisions(
   db: DbClient,
   workspaceId: string,
 ): Promise<PluginSkillCollision[]> {
-  const [standaloneRows, pluginRows] = await Promise.all([
-    db
-      .select({ name: skillInstallations.name })
-      .from(skillInstallations)
-      .where(
-        and(
-          eq(skillInstallations.workspaceId, workspaceId),
-          eq(skillInstallations.enabled, true),
-          isNull(skillInstallations.archivedAt),
-        ),
-      ),
-    db
-      .select({ skillName: pluginSkills.skillName, pluginName: plugins.name })
-      .from(pluginSkills)
-      .innerJoin(
-        plugins,
-        and(
-          eq(plugins.id, pluginSkills.pluginId),
-          eq(plugins.workspaceId, pluginSkills.workspaceId),
-        ),
-      )
-      .where(and(eq(pluginSkills.workspaceId, workspaceId), eq(plugins.status, "enabled")))
-      .orderBy(asc(pluginSkills.skillName), asc(plugins.name)),
-  ]);
-  const standaloneNames = new Set<string>(
-    (standaloneRows as Array<{ name: string }>).map((row) => row.name),
-  );
-  const pluginNamesBySkill = new Map<string, string[]>();
-  for (const row of pluginRows as Array<{ skillName: string; pluginName: string }>) {
-    const names = pluginNamesBySkill.get(row.skillName) ?? [];
-    names.push(row.pluginName);
-    pluginNamesBySkill.set(row.skillName, names);
-  }
-
-  const collisions: PluginSkillCollision[] = [];
-  for (const [skillName, pluginNames] of pluginNamesBySkill) {
-    const sortedNames = [...new Set(pluginNames)].sort();
-    if (standaloneNames.has(skillName)) {
-      collisions.push({
-        skillName,
-        winner: { source: "standalone" },
-        hiddenPluginNames: sortedNames,
-      });
-    } else if (sortedNames.length > 1) {
-      collisions.push({
-        skillName,
-        winner: { source: "plugin", pluginName: sortedNames[0]! },
-        hiddenPluginNames: sortedNames.slice(1),
-      });
-    }
-  }
-  return collisions.sort((left, right) => left.skillName.localeCompare(right.skillName));
+  return (await resolveWorkspaceSkillCatalog(db, { workspaceId })).collisions;
 }
 
 async function validateResolvedPlugin(plugin: ResolvedPluginPackage) {

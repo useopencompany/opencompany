@@ -215,6 +215,7 @@ describe("compileWorkflowHarnessSpec", () => {
           name: "Research",
           description: "How to research",
           instructions: "Search broadly.",
+          sourceKind: "standalone",
         },
         {
           id: "coding-work",
@@ -222,6 +223,7 @@ describe("compileWorkflowHarnessSpec", () => {
           name: "Coding work",
           description: "How to implement",
           instructions: "Inspect, implement, and verify.",
+          sourceKind: "plugin",
         },
       ],
       tools: ["exa_search"],
@@ -263,6 +265,7 @@ describe("compileWorkflowHarnessSpec", () => {
       reasoningEffort: "xhigh",
       skillIds: ["coding-work"],
       skillBundleIds: ["skill_bundle_coding_v1"],
+      pluginSkillBundleIds: ["skill_bundle_coding_v1"],
     });
     expect(spec.workflow?.steps?.[1]?.systemPrompt).not.toContain("<workflow_skills>");
     expect(spec.workflow?.skillBundleIds).toEqual([
@@ -300,6 +303,7 @@ describe("compileWorkflowHarnessSpec", () => {
           name: "Product work",
           description: "Ship product changes",
           instructions: "Implement and verify the feature.",
+          sourceKind: "standalone",
         },
         {
           id: "smooth-shadow-ring",
@@ -307,6 +311,7 @@ describe("compileWorkflowHarnessSpec", () => {
           name: "Smooth shadow ring",
           description: "Polish elevation styles",
           instructions: "Use layered shadows and a crisp ring.",
+          sourceKind: "standalone",
         },
       ],
       invokedSkillIds: ["smooth-shadow-ring"],
