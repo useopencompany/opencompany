@@ -96,11 +96,15 @@ describe("materializeCodexSkillSnapshotsForSession", () => {
       data: JSON.stringify({ version: 1, skillIds: ["byte-golden"] }, null, 2),
     });
     const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
+    expect(commands[0]).toContain(
+      "if [ -L '/home/user/workspace/codex/.agents/skills' ] || { [ -e '/home/user/workspace/codex/.agents/skills' ] && [ ! -d '/home/user/workspace/codex/.agents/skills' ]; }; then rm -f '/home/user/workspace/codex/.agents/skills'; fi",
+    );
+    expect(commands[0]!.indexOf("if [ -L")).toBeLessThan(commands[0]!.indexOf("mkdir -p"));
     expect(commands[0]).toContain("mkdir -p");
     expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills");
-    expect(commands[1]).toContain("rm -rf");
-    expect(commands[1]).toContain("/home/user/workspace/codex/.agents/skills/byte-golden");
-    expect(commands[2]).toContain("-type f -exec chmod 444");
+    expect(commands[0]).toContain("rm -rf");
+    expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills/byte-golden");
+    expect(commands[1]).toContain("-type f -exec chmod 444");
     expect(
       commands.some(
         (command) => command.includes("chmod 555") && command.includes("scripts/run.sh"),
@@ -127,7 +131,7 @@ describe("materializeCodexSkillSnapshotsForSession", () => {
     const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
     expect(commands.some((command) => command.includes("rm -rf"))).toBe(false);
     expect(commands.at(-1)).toContain("chmod 555 '/home/user/workspace/codex/.agents/skills'");
-    expect(commands).toHaveLength(4);
+    expect(commands).toHaveLength(3);
   });
 
   it("reconciles only opencompany-managed Skill names from the manifest", async () => {
@@ -148,12 +152,12 @@ describe("materializeCodexSkillSnapshotsForSession", () => {
     });
 
     const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
-    expect(commands[1]).toContain("/home/user/workspace/codex/.agents/skills/old-managed");
-    expect(commands[1]).toContain("/home/user/workspace/codex/.agents/skills/brand-voice");
-    expect(commands[1]).not.toContain(
+    expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills/old-managed");
+    expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills/brand-voice");
+    expect(commands[0]).not.toContain(
       "/home/user/workspace/codex/.agents/skills/native-user-skill",
     );
-    expect(commands[1]).not.toContain("rm -rf '/home/user/workspace/codex/.agents/skills' &&");
+    expect(commands[0]).not.toContain("rm -rf '/home/user/workspace/codex/.agents/skills' &&");
   });
 
   it("fingerprints raw contents and executable modes", async () => {

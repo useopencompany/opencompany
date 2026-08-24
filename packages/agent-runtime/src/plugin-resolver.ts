@@ -127,6 +127,7 @@ export async function resolvePlugin(input: {
   if ((pluginJsonEntry.size ?? 0) > PLUGIN_LIMITS.maxFileBytes) {
     throw new PluginResolverError("plugin.json is too large.");
   }
+  assertPluginTreeDeclaredSizes(tree.entries, root);
 
   const pluginJson = await input.fetcher.fetchBlob(
     parsed.owner,
@@ -260,6 +261,20 @@ function normalizeRoot(value: string) {
 function findRootFile(entries: SkillTreeEntry[], root: string, name: string) {
   const path = root ? `${root}/${name}` : name;
   return entries.find((entry) => entry.path === path && entry.type === "blob");
+}
+
+function assertPluginTreeDeclaredSizes(entries: SkillTreeEntry[], root: string) {
+  const prefix = root ? `${root}/` : "";
+  const blobs = entries.filter(
+    (entry) => entry.type === "blob" && (root === "" || entry.path.startsWith(prefix)),
+  );
+  if (blobs.some((entry) => (entry.size ?? 0) > PLUGIN_LIMITS.maxFileBytes)) {
+    throw new PluginResolverError("Plugin contains a file larger than the 2 MB limit.");
+  }
+  const declaredTotalBytes = blobs.reduce((sum, entry) => sum + (entry.size ?? 0), 0);
+  if (declaredTotalBytes > PLUGIN_LIMITS.maxTotalBytes) {
+    throw new PluginResolverError("Plugin is too large (max 16 MB).");
+  }
 }
 
 async function gatherPluginFiles(input: {
