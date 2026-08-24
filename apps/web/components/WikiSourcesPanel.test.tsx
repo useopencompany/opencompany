@@ -1,0 +1,197 @@
+import "@testing-library/jest-dom/vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { WikiSourcesPanel } from "./WikiSourcesPanel";
+
+const mocks = vi.hoisted(() => ({
+  integrations: [] as Array<Record<string, unknown>>,
+  integrationsLoading: false,
+  listWikiSources: vi.fn(),
+  setWikiSourceEnabled: vi.fn(),
+  upsertWikiSource: vi.fn(),
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-db", () => ({
+  useLiveQuery: () => ({ data: mocks.integrations, isLoading: mocks.integrationsLoading }),
+}));
+
+vi.mock("@/lib/headless-integration-collections", () => ({
+  getHeadlessIntegrationAccounts: () => ({ id: "integration-accounts" }),
+}));
+
+vi.mock("@/lib/wiki-source-api", () => ({
+  listWikiSources: mocks.listWikiSources,
+  setWikiSourceEnabled: mocks.setWikiSourceEnabled,
+  upsertWikiSource: mocks.upsertWikiSource,
+}));
+
+vi.mock("@opencompany/ui/components/sonner", () => ({
+  toast: { error: mocks.toastError, success: mocks.toastSuccess },
+}));
+
+describe("WikiSourcesPanel", () => {
+  beforeEach(() => {
+    mocks.integrations = [];
+    mocks.integrationsLoading = false;
+    mocks.listWikiSources.mockReset();
+    mocks.listWikiSources.mockResolvedValue([]);
+    mocks.setWikiSourceEnabled.mockReset();
+    mocks.upsertWikiSource.mockReset();
+    mocks.toastError.mockReset();
+    mocks.toastSuccess.mockReset();
+  });
+
+  it("renders a not-connected state with the existing provider connect flow", async () => {
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    const connect = await screen.findByRole("link", { name: "Connect Gmail" });
+    expect(connect).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/wiki/sources");
+    expect(screen.getByText("No sources are feeding yet")).toBeInTheDocument();
+    expect(screen.getAllByText("Not connected")).toHaveLength(6);
+  });
+
+  it("turns a connected scoped provider into a Wiki source through the direct API", async () => {
+    mocks.integrations = [integration({ provider: "gmail", accountEmail: "ada@example.com" })];
+    mocks.upsertWikiSource.mockResolvedValue(source());
+    const user = userEvent.setup();
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    const toggle = await screen.findByRole("switch", {
+      name: "Enable Gmail source ada@example.com",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Scope configuration coming soon")).toBeInTheDocument();
+
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(mocks.upsertWikiSource).toHaveBeenCalledWith({
+        integrationId: "integration_1",
+        provider: "gmail",
+        enabled: true,
+      }),
+    );
+    expect(await screen.findByText("Feeding")).toBeInTheDocument();
+  });
+
+  it("auto-enables a newly connected meeting source", async () => {
+    mocks.integrations = [integration({ provider: "granola", accountEmail: "ada@example.com" })];
+    mocks.upsertWikiSource.mockResolvedValue(
+      source({ provider: "granola", enabled: true, accountEmail: "ada@example.com" }),
+    );
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    await waitFor(() =>
+      expect(mocks.upsertWikiSource).toHaveBeenCalledWith({
+        integrationId: "integration_1",
+        provider: "granola",
+        enabled: true,
+      }),
+    );
+    expect(await screen.findByText("Feeding")).toBeInTheDocument();
+  });
+
+  it("keeps a deliberately paused meeting source disabled", async () => {
+    mocks.integrations = [integration({ provider: "granola", accountEmail: "ada@example.com" })];
+    mocks.listWikiSources.mockResolvedValue([
+      source({ provider: "granola", enabled: false, accountEmail: "ada@example.com" }),
+    ]);
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    const toggle = await screen.findByRole("switch", {
+      name: "Enable Granola source ada@example.com",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await waitFor(() => expect(mocks.upsertWikiSource).not.toHaveBeenCalled());
+  });
+
+  it("uses the live integration status for an already configured source", async () => {
+    mocks.integrations = [
+      integration({
+        provider: "gmail",
+        accountEmail: "current@example.com",
+        status: "needs_reauth",
+      }),
+    ];
+    mocks.listWikiSources.mockResolvedValue([
+      source({ enabled: true, accountEmail: "stale@example.com" }),
+    ]);
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    expect(await screen.findByText("Needs reconnect")).toBeInTheDocument();
+    expect(screen.getByText("current@example.com")).toBeInTheDocument();
+    expect(screen.queryByText("stale@example.com")).not.toBeInTheDocument();
+    expect(screen.getByText("No sources are feeding yet")).toBeInTheDocument();
+  });
+
+  it("offers reconnect instead of calling a disconnected source connected", async () => {
+    mocks.listWikiSources.mockResolvedValue([
+      source({ enabled: true, integrationStatus: "disconnected" }),
+    ]);
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    expect(await screen.findByText("Needs reconnect")).toBeInTheDocument();
+    expect(
+      screen.getByText("This connection was removed. Reconnect it before feeding can resume."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Reconnect" })).toHaveAttribute(
+      "href",
+      "/api/integrations/gmail/start?returnTo=/wiki/sources",
+    );
+    expect(screen.queryByText("Connected · off")).not.toBeInTheDocument();
+  });
+
+  it("shows a recoverable loading error", async () => {
+    mocks.listWikiSources.mockRejectedValue(new Error("API unavailable"));
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    expect(await screen.findByText("Sources didn't load")).toBeInTheDocument();
+    expect(screen.getByText("API unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Loading Wiki sources")).not.toBeInTheDocument();
+  });
+});
+
+function integration(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "integration_1",
+    provider: "gmail",
+    workspaceId: null,
+    externalId: "external_1",
+    connectionLabel: null,
+    accountName: null,
+    accountEmail: null,
+    accountType: null,
+    status: "connected",
+    statusReason: null,
+    scopes: [],
+    capabilityModes: {},
+    ...overrides,
+  };
+}
+
+function source(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "gwscfg_1",
+    provider: "gmail",
+    integrationId: "integration_1",
+    enabled: true,
+    config: {},
+    integrationStatus: "connected",
+    accountName: null,
+    accountEmail: "ada@example.com",
+    connectionLabel: null,
+    ownerName: "Ada Lovelace",
+    ownerEmail: "ada@example.com",
+    ownerAvatarUrl: null,
+    ownerKind: "user",
+    isOwn: true,
+    canConfigure: true,
+    canToggle: true,
+    canDelete: true,
+    ...overrides,
+  };
+}
