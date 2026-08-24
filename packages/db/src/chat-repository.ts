@@ -1302,6 +1302,16 @@ export class PostgresChatRepository implements ChatRepository {
     const now = this.options.now?.() ?? new Date();
     const eventId = (this.options.ids ?? defaultIds).event();
     const response = { resolution: input.command.resolution, answer: input.command.answer };
+    const approvalResponse = {
+      id: input.command.approvalId,
+      approved: input.command.resolution === "approved",
+      ...(input.command.resolution === "approved"
+        ? {}
+        : {
+            reason:
+              typeof input.command.answer === "string" ? input.command.answer : "Denied by user.",
+          }),
+    };
     const [row] = await this.rows<{
       runId: string;
       response: Record<string, unknown> | null;
@@ -1398,17 +1408,7 @@ export class PostgresChatRepository implements ChatRepository {
                         AND part.value -> 'approval' ->> 'id' = ${input.command.approvalId}
                       THEN part.value || jsonb_build_object(
                         'state', 'approval-responded',
-                        'approval', jsonb_build_object(
-                          'id', ${input.command.approvalId}::text,
-                          'approved', ${input.command.resolution === "approved"}::boolean,
-                          'reason', ${
-                            input.command.resolution === "approved"
-                              ? null
-                              : typeof input.command.answer === "string"
-                                ? input.command.answer
-                                : "Denied by user."
-                          }::text
-                        )
+                        'approval', ${JSON.stringify(approvalResponse)}::jsonb
                       )
                       ELSE part.value
                     END
