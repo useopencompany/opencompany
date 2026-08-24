@@ -37,7 +37,7 @@ import {
   taskReadModelToRow,
 } from "@/lib/headless-task-collections";
 import { listLegacyTaskCompatibility } from "@/lib/headless-task-commands";
-import { isRecentHomeActivity } from "@/lib/home-activity";
+import { isRecentChatActivity, isRecentHomeActivity } from "@/lib/home-activity";
 import { type IntegrationState, integrationStateFromRows } from "@/lib/integration-state";
 import type { McpClient } from "@/lib/mcp-setup";
 import {
@@ -320,7 +320,7 @@ function AppLiveDataSubscriptions({
     const recent = openRows
       .filter(
         (row) =>
-          !row.pinnedAt && !activeRuntimeChatIds.has(row.id) && isRecentHomeActivity(row.updatedAt),
+          !row.pinnedAt && !activeRuntimeChatIds.has(row.id) && isRecentChatActivity(row.updatedAt),
       )
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, 8)
