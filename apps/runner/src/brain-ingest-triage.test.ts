@@ -22,11 +22,47 @@ import {
   BRAIN_INGEST_TRIAGE_SOURCE_BYTES,
   BRAIN_INGEST_TRIAGE_SYSTEM_PROMPT,
   runBrainIngestTriage,
+  runWikiIngestTriage,
   truncateTriageSource,
+  WIKI_INGEST_TRIAGE_SYSTEM_PROMPT,
 } from "./brain-ingest-triage";
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("runWikiIngestTriage", () => {
+  it("attributes the same conservative triage rules to wiki ingestion", async () => {
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        decision: "skip",
+        reason: "Only a routine acknowledgement.",
+        entityHints: [],
+      },
+      usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+    });
+
+    await expect(
+      runWikiIngestTriage({
+        prompt: "Classify this GitHub comment.",
+        gatewayApiKey: "gw_test",
+        userWorkosId: "user_123",
+        workspaceId: "workspace_123",
+        ingestJobId: "gwjob_123",
+      }),
+    ).resolves.toMatchObject({ decision: "skip", entityHints: [] });
+
+    expect(aiMock.generateObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: WIKI_INGEST_TRIAGE_SYSTEM_PROMPT,
+        providerOptions: expect.objectContaining({
+          gateway: expect.objectContaining({
+            tags: expect.arrayContaining(["feature:wiki-ingest", "stage:triage"]),
+          }),
+        }),
+      }),
+    );
+  });
 });
 
 describe("runBrainIngestTriage", () => {

@@ -193,6 +193,56 @@ describe("opencompany wiki ingest worker", () => {
     expect(debitInput).not.toHaveProperty("ingestJobId");
   });
 
+  it("records wiki triage separately and includes it in the debit cost basis", async () => {
+    const ingestStore = store();
+    const triage = {
+      model: "openai/gpt-5.4-nano",
+      decision: "ingest" as const,
+      reason: "The comment records a durable project decision.",
+      entityHints: ["opencompany"],
+      usage: {
+        inputTokens: 300,
+        outputTokens: 30,
+        totalTokens: 330,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      modelCostUsdMicros: 500,
+    };
+    const agentResult = result();
+    agentResult.budget.modelCostUsdMicros = 2_500;
+    agentResult.budget.totalCostUsdMicros = 2_500;
+    agentResult.trace.budget = agentResult.budget;
+    agentResult.trace.triage = triage;
+
+    await runClaimedWikiIngestJob({
+      job: job({ sourceProvider: "github", sourceType: "activity" }),
+      env,
+      store: ingestStore,
+      agentRun: vi.fn(async () => agentResult),
+    });
+
+    expect(telemetry.recordModelCost).toHaveBeenCalledTimes(2);
+    expect(telemetry.recordModelCost).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({ "goat.model": triage.model }),
+      }),
+    );
+    expect(credits.recordCreditDebit.mock.calls[0]?.[0]).toMatchObject({
+      providerCostUsdMicros: 2_500,
+      costBasis: {
+        modelCostUsdMicros: 2_500,
+        triage: {
+          model: triage.model,
+          decision: "ingest",
+          modelCostUsdMicros: 500,
+          usage: triage.usage,
+        },
+      },
+    });
+  });
+
   it("persists explicit, inferred, and triage skip outcomes", async () => {
     for (const skipMode of ["explicit", "inferred_no_mutations", "triage"] as const) {
       const ingestStore = store();

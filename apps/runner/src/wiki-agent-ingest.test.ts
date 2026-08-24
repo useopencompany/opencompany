@@ -22,7 +22,9 @@ vi.mock("@opencompany/observability/braintrust", () => ({
 }));
 
 import {
+  buildGitHubSourceContextHeader,
   buildGmailSourceContextHeader,
+  buildLinearSourceContextHeader,
   buildMeetingSourceContextHeader,
   buildSlackSourceContextHeader,
   buildWikiIngestUserMessage,
@@ -101,6 +103,65 @@ function generate(input: {
       totalUsage: stepUsage,
     };
   });
+}
+
+function triageResult(
+  decision: "skip" | "ingest",
+  overrides: Partial<{
+    reason: string;
+    entityHints: string[];
+  }> = {},
+) {
+  return {
+    model: "openai/gpt-5.4-nano",
+    decision,
+    reason: overrides.reason ?? (decision === "skip" ? "obvious chatter" : "durable decision"),
+    entityHints: overrides.entityHints ?? (decision === "skip" ? [] : ["Acme API", "Billing"]),
+    usage: {
+      inputTokens: 40,
+      outputTokens: 10,
+      totalTokens: 50,
+      cacheReadInputTokens: 0,
+      cacheWriteInputTokens: 0,
+    },
+    modelCostUsdMicros: 25,
+  } as const;
+}
+
+function githubInput(
+  runTriage: NonNullable<Parameters<typeof runWikiAgentIngest>[0]["runTriage"]>,
+) {
+  return {
+    ...input(vi.fn()),
+    sourceProvider: "github" as const,
+    sourceType: "activity" as const,
+    sourceRef: "github:acme/api:issue:45:comment:99",
+    title: "Billing webhook drops retries",
+    contentHash: "hash_github",
+    normalizedPayload: {
+      sourceProvider: "github",
+      sourceType: "activity",
+      externalId: "comment_99",
+      sourceRef: "github:acme/api:issue:45:comment:99",
+      title: "Billing webhook drops retries",
+      occurredAt: occurredAt.toISOString(),
+      capturedAt: occurredAt.toISOString(),
+      contentHash: "hash_github",
+      content: {
+        activity: {
+          repository: { id: "4242", fullName: "acme/api", private: true },
+          kind: "issue",
+          number: 45,
+          state: "commented",
+          title: "Billing webhook drops retries",
+          labels: ["bug"],
+          author: "ada",
+          body: "We will retain failed deliveries for 24 hours.",
+        },
+      },
+    },
+    runTriage,
+  };
 }
 
 describe("opencompany wiki librarian agent", () => {
@@ -278,6 +339,36 @@ describe("opencompany wiki librarian agent", () => {
     expect(gmailHeader).toContain("[[source:gmail:thread:thread_123]]");
   });
 
+  it("registers Linear and GitHub headers with external-source pointer discipline", () => {
+    const linearInput = {
+      sourceProvider: "linear" as const,
+      sourceType: "issue" as const,
+      sourceRef: "linear:acme:ENG-42",
+      title: "Ship billing retries",
+      occurredAt,
+      sourceConfig: {},
+    };
+    const githubHeaderInput = {
+      sourceProvider: "github" as const,
+      sourceType: "activity" as const,
+      sourceRef: "github:acme/api:pull:123",
+      title: "Ship billing retries",
+      occurredAt,
+      sourceConfig: {},
+    };
+
+    const linearHeader = buildWikiSourceContextHeader(linearInput);
+    const githubHeader = buildWikiSourceContextHeader(githubHeaderInput);
+    expect(linearHeader).toBe(buildLinearSourceContextHeader(linearInput));
+    expect(linearHeader).toContain("timeline-add entries or brief page updates");
+    expect(linearHeader).toContain("[[source:linear:acme:ENG-42]]");
+    expect(linearHeader).toContain("never mirror an issue body");
+    expect(githubHeader).toBe(buildGitHubSourceContextHeader(githubHeaderInput));
+    expect(githubHeader).toContain("[[source:github:acme/api:pull:123]]");
+    expect(githubHeader).toContain("never mirror issue bodies, pull-request descriptions");
+    expect(githubHeader).toContain("finish with SKIP");
+  });
+
   it("short-circuits a Slack job when cheap triage returns skip", async () => {
     const runTriage = vi.fn(async () => triageResult("skip"));
 
@@ -291,6 +382,22 @@ describe("opencompany wiki librarian agent", () => {
       mutations: 0,
       trace: {
         triage: { decision: "skip" },
+      },
+    });
+    expect(aiMock.generateText).not.toHaveBeenCalled();
+  });
+
+  it("short-circuits a GitHub comment when cheap triage says skip", async () => {
+    const runTriage = vi.fn(async () => triageResult("skip"));
+
+    await expect(runWikiAgentIngest(githubInput(runTriage))).resolves.toMatchObject({
+      model: "openai/gpt-5.4-nano",
+      skipped: true,
+      skipMode: "triage",
+      toolCalls: 0,
+      trace: {
+        triage: { decision: "skip" },
+        budget: { modelCostUsdMicros: 25 },
       },
     });
     expect(aiMock.generateText).not.toHaveBeenCalled();
@@ -318,6 +425,36 @@ describe("opencompany wiki librarian agent", () => {
         }),
       }),
     ).resolves.toMatchObject({ skipped: true, skipMode: "explicit" });
+    expect(aiMock.generateText).toHaveBeenCalledOnce();
+  });
+
+  it("feeds GitHub triage hints into the full wiki librarian", async () => {
+    const runTriage = vi.fn(async () => triageResult("ingest"));
+    generate({ text: "SKIP: no wiki update was needed after lookup" });
+
+    const result = await runWikiAgentIngest(githubInput(runTriage));
+
+    expect(result.trace.triage).toMatchObject({
+      decision: "ingest",
+      entityHints: ["Acme API", "Billing"],
+    });
+    expect(result.budget.modelCostUsdMicros).toBeGreaterThan(25);
+    const generation = aiMock.generateText.mock.calls[0]?.[0] as any;
+    expect(generation.messages[1].content).toContain("## Cheap triage handoff");
+    expect(generation.messages[1].content).toContain("- Acme API");
+    expect(generation.messages[1].content).toContain("- Billing");
+  });
+
+  it("falls through to the GitHub wiki agent when triage fails", async () => {
+    const runTriage = vi.fn(async () => {
+      throw new Error("triage unavailable");
+    });
+    generate({ text: "SKIP: nothing durable" });
+
+    await expect(runWikiAgentIngest(githubInput(runTriage))).resolves.toMatchObject({
+      skipped: true,
+      skipMode: "explicit",
+    });
     expect(aiMock.generateText).toHaveBeenCalledOnce();
   });
 
@@ -367,28 +504,5 @@ function slackInput(
     title: item.title,
     contentHash: item.contentHash,
     normalizedPayload: item,
-  };
-}
-
-function triageResult(
-  decision: "skip" | "ingest",
-  overrides: Partial<{
-    reason: string;
-    entityHints: string[];
-  }> = {},
-) {
-  return {
-    model: "openai/gpt-5.4-nano",
-    decision,
-    reason: overrides.reason ?? (decision === "skip" ? "obvious chatter" : "durable decision"),
-    entityHints: overrides.entityHints ?? [],
-    usage: {
-      inputTokens: 100,
-      outputTokens: 20,
-      totalTokens: 120,
-      cacheReadInputTokens: 0,
-      cacheWriteInputTokens: 0,
-    },
-    modelCostUsdMicros: 50,
   };
 }

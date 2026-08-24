@@ -13,18 +13,27 @@ import {
   upsertBrainSourceItemAndEnqueue,
 } from "@opencompany/db/brain-ingest";
 import {
+  type GitHubBrainSourceRoute,
+  type GitHubWikiSourceRoute,
   gitHubEnabledEventTypes,
   gitHubSelectedRepoIds,
   listEnabledGitHubBrainSourceRoutes,
+  listEnabledGitHubWikiSourceRoutes,
   newGitHubPullRequestWindowId,
 } from "@opencompany/db/github";
 import type { GitHubPullRequestEventType, IntegrationStatus } from "@opencompany/db/product-schema";
+import {
+  attributeWikiSourceEventClaims,
+  claimWikiSourceEvents,
+} from "@opencompany/db/wiki-event-claims";
+import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { getDb } from "./db";
 import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
+import { wakeWikiIngestWorker } from "./wiki-ingest-worker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-github-flush" });
 
@@ -87,6 +96,8 @@ export async function flushGitHubPullRequestWindow(window: GitHubDueWindow): Pro
   const status = await loadGitHubIntegrationStatus(window.integrationId);
 
   const flushedAt = new Date();
+  let brainEnqueued = false;
+  let wikiEnqueued = false;
   const result = await db.transaction(async (tx) => {
     const claimed = rowsFromExecute<BufferedGitHubPullRequestEventRow>(
       await tx.execute(sql`
@@ -122,18 +133,21 @@ export async function flushGitHubPullRequestWindow(window: GitHubDueWindow): Pro
     // Re-resolve routing at flush time in case a repo/event selection changed
     // while the PR was buffered. Disconnected integrations still drain to a
     // persisted source item with no jobs so stale buffers cannot wedge.
-    const routes =
+    const brainRoutes =
       status === "connected"
         ? await listEnabledGitHubBrainSourceRoutes([window.integrationId], tx)
         : [];
+    const wikiRoutes =
+      status === "connected"
+        ? await listEnabledGitHubWikiSourceRoutes([window.integrationId], tx)
+        : [];
     const eventTypes = new Set(claimed.map((row) => row.eventType));
-    const candidateBrainRefs = routes
-      .filter((route) => {
-        if (!gitHubSelectedRepoIds(route.config).has(window.repositoryId)) return false;
-        const enabled = gitHubEnabledEventTypes(route.config);
-        return [...eventTypes].some((eventType) => enabled.has(eventType));
-      })
-      .map((route) => route.brainRef);
+    const resolvedRoutes = resolveGitHubPullRequestWindowRoutes({
+      brainRoutes,
+      wikiRoutes,
+      repositoryId: window.repositoryId,
+      eventTypes,
+    });
 
     // A GitHub App delivery fans out to every integration bound to its
     // installation. Claim the provider delivery per brain so overlapping
@@ -145,7 +159,7 @@ export async function flushGitHubPullRequestWindow(window: GitHubDueWindow): Pro
     const brainRefs: string[] = [];
     const claimedEventKeysByBrainRef = new Map<string, string[]>();
     const newlyClaimedEventKeys = new Set<string>();
-    for (const brainRef of new Set(candidateBrainRefs)) {
+    for (const brainRef of new Set(resolvedRoutes.brainRefs)) {
       const { claimedEventKeys } = await claimBrainSourceEvents({
         brainRef,
         sourceProvider: "github",
@@ -171,6 +185,36 @@ export async function flushGitHubPullRequestWindow(window: GitHubDueWindow): Pro
       now: flushedAt,
       db: tx,
     });
+    brainEnqueued = upserted.enqueued;
+
+    for (const workspaceId of new Set(resolvedRoutes.wikiWorkspaceIds)) {
+      const claim = await claimWikiSourceEvents({
+        workspaceId,
+        sourceProvider: "github",
+        eventKeys,
+        db: tx,
+      });
+      if (claim.claimedCount === 0) continue;
+
+      const wikiResult = await upsertWikiSourceItemAndEnqueue({
+        workspaceId,
+        sourceConnectionId: window.integrationId,
+        integrationId: window.integrationId,
+        item,
+        rawPayload: { eventIds: claimed.map((row) => row.id) },
+        rawEventCount: claim.claimedCount,
+        now: flushedAt,
+        db: tx,
+      });
+      await attributeWikiSourceEventClaims({
+        workspaceId,
+        sourceProvider: "github",
+        eventKeys: claim.claimedEventKeys,
+        sourceItemId: wikiResult.sourceItemId,
+        db: tx,
+      });
+      wikiEnqueued = wikiEnqueued || wikiResult.enqueued;
+    }
 
     await tx.execute(sql`
       UPDATE goat.github_pull_request_events
@@ -193,14 +237,32 @@ export async function flushGitHubPullRequestWindow(window: GitHubDueWindow): Pro
     return {
       sourceItemId: upserted.sourceItemId,
       eventCount: claimed.length,
-      enqueued: upserted.enqueued,
+      enqueued: upserted.enqueued || wikiEnqueued,
       ...(upserted.quotaUpdates ? { quotaUpdates: upserted.quotaUpdates } : {}),
     };
   });
 
   captureProductIngestionQuotaAnalytics(result?.quotaUpdates);
-  if (result?.enqueued) wakeBrainIngestWorker();
+  if (brainEnqueued) wakeBrainIngestWorker();
+  if (wikiEnqueued) wakeWikiIngestWorker();
   return result;
+}
+
+export function resolveGitHubPullRequestWindowRoutes(input: {
+  brainRoutes: readonly GitHubBrainSourceRoute[];
+  wikiRoutes: readonly GitHubWikiSourceRoute[];
+  repositoryId: string;
+  eventTypes: ReadonlySet<GitHubPullRequestEventType>;
+}) {
+  const matches = (route: GitHubBrainSourceRoute | GitHubWikiSourceRoute) => {
+    if (!gitHubSelectedRepoIds(route.config).has(input.repositoryId)) return false;
+    const enabled = gitHubEnabledEventTypes(route.config);
+    return [...input.eventTypes].some((eventType) => enabled.has(eventType));
+  };
+  return {
+    brainRefs: input.brainRoutes.filter(matches).map((route) => route.brainRef),
+    wikiWorkspaceIds: input.wikiRoutes.filter(matches).map((route) => route.workspaceId),
+  };
 }
 
 export function buildGitHubPullRequestWindowItem(input: {

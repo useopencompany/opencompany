@@ -574,34 +574,34 @@ function retryTrace(result: Record<string, unknown>) {
   }
   const modelCostUsdMicros = finiteNumber((budget as Record<string, unknown>).modelCostUsdMicros);
   if (modelCostUsdMicros === undefined) return null;
+  const triage = normalizeWikiIngestTriage(value.triage);
   return {
     model: value.model,
     modelCostUsdMicros,
     usage: usage as Record<string, unknown>,
-    triage: wikiIngestTriageTrace(value.triage),
+    ...(triage ? { triage } : {}),
   };
 }
 
-function wikiIngestTriageTrace(value: unknown) {
+function normalizeWikiIngestTriage(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const trace = value as Record<string, unknown>;
-  const usage = trace.usage;
+  const triage = value as Record<string, unknown>;
   if (
-    typeof trace.model !== "string" ||
-    (trace.decision !== "skip" && trace.decision !== "ingest") ||
-    !usage ||
-    typeof usage !== "object" ||
-    Array.isArray(usage)
+    typeof triage.model !== "string" ||
+    (triage.decision !== "skip" && triage.decision !== "ingest") ||
+    !triage.usage ||
+    typeof triage.usage !== "object" ||
+    Array.isArray(triage.usage)
   ) {
     return null;
   }
-  const modelCostUsdMicros = finiteNumber(trace.modelCostUsdMicros);
+  const modelCostUsdMicros = finiteNumber(triage.modelCostUsdMicros);
   if (modelCostUsdMicros === undefined) return null;
   return {
-    model: trace.model,
-    decision: trace.decision,
+    model: triage.model,
+    decision: triage.decision,
     modelCostUsdMicros,
-    usage: usage as Record<string, unknown>,
+    usage: triage.usage as Record<string, unknown>,
   };
 }
 

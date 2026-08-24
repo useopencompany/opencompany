@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { calculateModelUsageCost } from "@opencompany/billing";
+import type { NormalizedGitHubActivitySourceItem } from "@opencompany/brain";
+import type { BrainIngestTriageTrace } from "@opencompany/brain/ingest-trace";
 import { BASIC_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { parseGmailWikiSourceConfig } from "@opencompany/db/gmail";
 import type { WikiSourceProvider, WikiSourceType } from "@opencompany/db/product-schema";
@@ -16,10 +18,14 @@ import {
 } from "@opencompany/wiki/tool";
 import * as ai from "ai";
 import { executeApiWikiCommand, type WikiCommandOutput } from "./api-wiki-client";
+import {
+  buildGitHubCommentIngestTriagePrompt,
+  runWikiIngestTriage as runGitHubWikiIngestTriage,
+} from "./brain-ingest-triage";
 import type { RunnerEnv } from "./env";
 import {
   buildWikiIngestTriagePrompt,
-  runWikiIngestTriage,
+  runWikiIngestTriage as runSlackGmailWikiIngestTriage,
   type WikiIngestTriageInput,
   type WikiIngestTriageTrace,
 } from "./wiki-ingest-triage";
@@ -162,6 +168,7 @@ export type WikiAgentIngestInput = {
   env: Pick<RunnerEnv, "apiOrigin" | "apiInternalToken" | "vercelAiGatewayApiKey">;
   signal?: AbortSignal;
   executeCommand?: typeof executeApiWikiCommand;
+  runTriage?: typeof runGitHubWikiIngestTriage;
 };
 
 export type WikiSourceContextHeaderInput = Pick<
@@ -180,6 +187,8 @@ export const WIKI_SOURCE_CONTEXT_HEADER_BUILDERS: Partial<
   gmail: buildGmailSourceContextHeader,
   jamie: buildMeetingSourceContextHeader,
   granola: buildMeetingSourceContextHeader,
+  linear: buildLinearSourceContextHeader,
+  github: buildGitHubSourceContextHeader,
 };
 
 export function buildWikiSourceContextHeader(input: WikiSourceContextHeaderInput): string {
@@ -220,6 +229,26 @@ export function buildGmailSourceContextHeader(input: WikiSourceContextHeaderInpu
   ].join("\n");
 }
 
+export function buildLinearSourceContextHeader(input: WikiSourceContextHeaderInput): string {
+  return [
+    ...sourceMetadataHeader(input),
+    "Window contents: one Linear issue activity window with its current project, team, status, metadata, comments, and recent changes when available.",
+    "Worth writing: durable project or issue state changes, decisions, commitments, and facts that materially update the workspace's understanding.",
+    `Linear handling: the canonical issue lives in Linear. Add durable changes to relevant wiki pages as timeline-add entries or brief page updates that reference [[source:${input.sourceRef}]].`,
+    "Source handling: never mirror an issue body or comment thread into the wiki. If the issue changes nothing durable, finish with SKIP.",
+  ].join("\n");
+}
+
+export function buildGitHubSourceContextHeader(input: WikiSourceContextHeaderInput): string {
+  return [
+    ...sourceMetadataHeader(input),
+    "Window contents: one GitHub issue or pull-request activity item, possibly combining an opened, discussion, and merged window.",
+    "Worth writing: durable project state changes, decisions, commitments, and implementation outcomes that materially update the workspace's understanding.",
+    `GitHub handling: the canonical issue or pull request lives in GitHub. Add durable changes to relevant wiki pages as timeline-add entries or brief page updates that reference [[source:${input.sourceRef}]].`,
+    "Source handling: never mirror issue bodies, pull-request descriptions, comment threads, or diffs into the wiki. If the issue or pull request changes nothing durable, finish with SKIP.",
+  ].join("\n");
+}
+
 function buildGenericSourceContextHeader(input: WikiSourceContextHeaderInput): string {
   return [
     ...sourceMetadataHeader(input),
@@ -250,7 +279,7 @@ export function buildWikiIngestUserMessage(
     | "normalizedPayload"
     | "sourceConfig"
   >,
-  triage?: WikiIngestTriageTrace,
+  triage?: WikiIngestTriageTrace | null,
 ) {
   return [
     buildWikiSourceContextHeader(input),
@@ -268,13 +297,10 @@ export async function runWikiAgentIngest(
   deps: { runTriage?: (input: WikiIngestTriageInput) => Promise<WikiIngestTriageTrace> } = {},
 ): Promise<WikiAgentIngestResult> {
   validateNormalizedPayload(input);
-  const triagePrompt = buildWikiIngestTriagePrompt(input);
-  const triage = triagePrompt
-    ? await runPreparedWikiIngestTriage({ input, prompt: triagePrompt, deps })
-    : null;
+  const triage = await runPreparedWikiIngestTriage(input, deps);
   if (triage?.decision === "skip") return wikiTriageSkipResult(triage);
 
-  const loop = await runWikiIngestAgentLoop(input, triage ?? undefined);
+  const loop = await runWikiIngestAgentLoop(input, triage);
   const budgetErrorResult = {
     budget: loop.budget,
     trace: loop.trace,
@@ -343,44 +369,77 @@ export async function runWikiAgentIngest(
   };
 }
 
-async function runPreparedWikiIngestTriage(input: {
-  input: WikiAgentIngestInput;
-  prompt: string;
-  deps: { runTriage?: (input: WikiIngestTriageInput) => Promise<WikiIngestTriageTrace> };
-}) {
+async function runPreparedWikiIngestTriage(
+  input: WikiAgentIngestInput,
+  deps: { runTriage?: (input: WikiIngestTriageInput) => Promise<WikiIngestTriageTrace> },
+): Promise<WikiIngestTriageTrace | null> {
+  const slackOrGmailPrompt = buildWikiIngestTriagePrompt(input);
+  const githubItem = githubItemForTriage(input);
+  if (!slackOrGmailPrompt && !githubItem) return null;
+
   try {
-    const runner = input.deps.runTriage ?? runWikiIngestTriage;
-    const triage = await runner({
-      prompt: input.prompt,
-      gatewayApiKey: input.input.env.vercelAiGatewayApiKey,
-      actorUserWorkosId: input.input.actorUserWorkosId,
-      workspaceId: input.input.workspaceId,
-      ingestJobId: input.input.jobId,
-      ...(input.input.signal ? { signal: input.input.signal } : {}),
-    });
+    const triage = slackOrGmailPrompt
+      ? await (deps.runTriage ?? runSlackGmailWikiIngestTriage)({
+          prompt: slackOrGmailPrompt,
+          gatewayApiKey: input.env.vercelAiGatewayApiKey,
+          actorUserWorkosId: input.actorUserWorkosId,
+          workspaceId: input.workspaceId,
+          ingestJobId: input.jobId,
+          ...(input.signal ? { signal: input.signal } : {}),
+        })
+      : await (input.runTriage ?? runGitHubWikiIngestTriage)({
+          prompt: buildGitHubCommentIngestTriagePrompt(
+            githubItem as NormalizedGitHubActivitySourceItem,
+          ),
+          gatewayApiKey: input.env.vercelAiGatewayApiKey,
+          userWorkosId: input.actorUserWorkosId,
+          workspaceId: input.workspaceId,
+          ingestJobId: input.jobId,
+          ...(input.signal ? { signal: input.signal } : {}),
+        });
+    const normalizedTriage = normalizeWikiIngestTriage(triage);
     logger.info("opencompany wiki cheap triage finished", {
       event: "opencompany.goat_wiki_ingest_triage_finished",
-      workspace_id: input.input.workspaceId,
-      source_provider: input.input.sourceProvider,
-      decision: triage.decision,
-      model: triage.model,
-      input_tokens: triage.usage.inputTokens,
-      output_tokens: triage.usage.outputTokens,
-      model_cost_usd_micros: triage.modelCostUsdMicros,
+      workspace_id: input.workspaceId,
+      source_provider: input.sourceProvider,
+      decision: normalizedTriage.decision,
+      model: normalizedTriage.model,
+      input_tokens: normalizedTriage.usage.inputTokens,
+      output_tokens: normalizedTriage.usage.outputTokens,
+      model_cost_usd_micros: normalizedTriage.modelCostUsdMicros,
     });
-    return triage;
+    return normalizedTriage;
   } catch (error) {
-    input.input.signal?.throwIfAborted();
+    input.signal?.throwIfAborted();
     // Triage is only a cost optimization. A model, schema, or timeout failure
     // must always fall through to the full librarian so source data is kept.
     logger.warn("opencompany wiki cheap triage failed; falling back to full ingest", {
       event: "opencompany.goat_wiki_ingest_triage_failed",
-      workspace_id: input.input.workspaceId,
-      source_ref: input.input.sourceRef,
+      workspace_id: input.workspaceId,
+      source_ref: input.sourceRef,
       error,
     });
     return null;
   }
+}
+
+function normalizeWikiIngestTriage(
+  triage: WikiIngestTriageTrace | BrainIngestTriageTrace,
+): WikiIngestTriageTrace {
+  return {
+    model: triage.model,
+    decision: triage.decision,
+    reason: triage.reason,
+    entityHints: triage.entityHints,
+    usage: {
+      inputTokens: triage.usage.inputTokens,
+      outputTokens: triage.usage.outputTokens,
+      totalTokens: triage.usage.totalTokens,
+      cacheReadInputTokens: triage.usage.cacheReadInputTokens ?? null,
+      cacheWriteInputTokens: triage.usage.cacheWriteInputTokens ?? null,
+    },
+    modelCostUsdMicros: triage.modelCostUsdMicros,
+  };
 }
 
 function wikiTriageSkipResult(triage: WikiIngestTriageTrace): WikiAgentIngestResult {
@@ -482,6 +541,16 @@ export function explicitSkipFromFinalText(finalText: string): { reason?: string 
   return null;
 }
 
+function githubItemForTriage(
+  input: WikiAgentIngestInput,
+): NormalizedGitHubActivitySourceItem | null {
+  if (input.sourceProvider !== "github" || input.sourceType !== "activity") return null;
+  const item = input.normalizedPayload as Partial<NormalizedGitHubActivitySourceItem>;
+  return item.content?.activity?.state === "commented"
+    ? (item as NormalizedGitHubActivitySourceItem)
+    : null;
+}
+
 const ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS = {
   anthropic: { cacheControl: { type: "ephemeral" as const } },
 };
@@ -515,7 +584,7 @@ export function placeMovingAnthropicCacheBreakpoint(
 
 export async function runWikiIngestAgentLoop(
   input: WikiAgentIngestInput,
-  triage?: WikiIngestTriageTrace,
+  triage: WikiIngestTriageTrace | null = null,
 ) {
   const { generateText } = getBraintrustAISDK(ai);
   const gateway = ai.createGateway({ apiKey: input.env.vercelAiGatewayApiKey });

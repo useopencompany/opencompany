@@ -28,6 +28,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } f
 import { useAppDataOptional } from "@/components/AppDataProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { WikiGmailSourceEditor, WikiSlackChannelPicker } from "@/components/WikiSourceScopeEditors";
+import { WikiGitHubRepoPicker, WikiLinearTeamPicker } from "@/components/WikiSourceScopePickers";
 import {
   getHeadlessIntegrationAccounts,
   type HeadlessIntegrationAccountReadModel,
@@ -254,8 +255,8 @@ function WikiSourcesLivePanel({
   const renderScopeSlot = (entry: WikiSourceEntry) => {
     if (entry.status !== "connected") return null;
     const canConfigure = entry.source?.canConfigure ?? entry.canToggle;
-    if (!canConfigure) return null;
     if (entry.provider === "slack") {
+      if (!canConfigure) return null;
       return (
         <WikiSlackChannelPicker
           integrationId={entry.integrationId}
@@ -265,11 +266,32 @@ function WikiSourcesLivePanel({
       );
     }
     if (entry.provider === "gmail") {
+      if (!canConfigure) return null;
       return (
         <WikiGmailSourceEditor
           integrationId={entry.integrationId}
           source={entry.source}
           onSave={(config) => saveScopeConfig(entry, config)}
+        />
+      );
+    }
+    if (entry.provider === "linear") {
+      return (
+        <WikiLinearTeamPicker
+          integrationId={entry.integrationId}
+          source={entry.source}
+          canConfigure={canConfigure}
+          onSaved={(source) => setSources((current) => mergeSource(current, source))}
+        />
+      );
+    }
+    if (entry.provider === "github") {
+      return (
+        <WikiGitHubRepoPicker
+          integrationId={entry.integrationId}
+          source={entry.source}
+          canConfigure={canConfigure}
+          onSaved={(source) => setSources((current) => mergeSource(current, source))}
         />
       );
     }
