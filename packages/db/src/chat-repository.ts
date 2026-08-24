@@ -611,6 +611,7 @@ export class PostgresChatRepository implements ChatRepository {
       resolvedMentionSkills.map((skill) => ({
         bundle_id: skill.bundleId,
         source_kind: skill.sourceKind,
+        plugin_id: skill.pluginId,
       })),
     );
     const runtimeModel = input.command.runtimeModel ?? input.command.model;
@@ -988,6 +989,27 @@ export class PostgresChatRepository implements ChatRepository {
         )
         ON CONFLICT (chat_session_id, name) DO NOTHING
         RETURNING bundle_id
+      ),
+      captured_activated_skill_plugins AS MATERIALIZED (
+        INSERT INTO goat.chat_session_plugins (chat_session_id, plugin_id)
+        SELECT target_chat.id, plugin.id
+        FROM activated_skill_bundles AS activated
+        JOIN target_chat ON true
+        CROSS JOIN jsonb_to_recordset(
+          ${resolvedMentionSkillsJson}::jsonb
+        ) AS resolved_skill(bundle_id text, source_kind text, plugin_id text)
+        JOIN goat.plugin_skills AS plugin_skill
+          ON plugin_skill.workspace_id = ${input.actor.workspaceId}
+         AND plugin_skill.plugin_id = resolved_skill.plugin_id
+         AND plugin_skill.skill_bundle_id = activated.bundle_id
+        JOIN goat.plugins AS plugin
+          ON plugin.id = plugin_skill.plugin_id
+         AND plugin.workspace_id = plugin_skill.workspace_id
+         AND plugin.status = 'enabled'
+        WHERE resolved_skill.source_kind = 'plugin'
+          AND resolved_skill.bundle_id = activated.bundle_id
+        ON CONFLICT (chat_session_id, plugin_id) DO NOTHING
+        RETURNING plugin_id
       ),
       inserted_assistant_message AS (
         INSERT INTO goat.chat_messages (

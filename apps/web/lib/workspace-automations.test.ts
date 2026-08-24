@@ -82,11 +82,17 @@ describe("workspace automation lifecycle", () => {
         bundleId: "skill_bundle_legal_v1",
         name: "Legal review",
         description: "Check legal language",
-        instructions: "Flag claims that need counsel.",
+        body: "Flag claims that need counsel.",
       },
     ]);
+    const emptyPluginBuilder = createSelectBuilder([]);
     const db = {
-      select: vi.fn().mockReturnValueOnce(catalogBuilder).mockReturnValueOnce(resolveBuilder),
+      select: vi
+        .fn()
+        .mockReturnValueOnce(catalogBuilder)
+        .mockReturnValueOnce(emptyPluginBuilder)
+        .mockReturnValueOnce(resolveBuilder)
+        .mockReturnValueOnce(emptyPluginBuilder),
     };
 
     await expect(listSkillCatalog("workspace_1", db as never)).resolves.toEqual([
@@ -105,6 +111,7 @@ describe("workspace automation lifecycle", () => {
         name: "Legal review",
         description: "Check legal language",
         instructions: "Flag claims that need counsel.",
+        sourceKind: "standalone",
       },
     ]);
 

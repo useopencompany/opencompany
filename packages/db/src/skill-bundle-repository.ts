@@ -17,6 +17,7 @@ import {
   type SkillInstallationListItem,
 } from "@opencompany/core";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { loadEnabledPluginSkillBundleIds } from "./plugin-skill-runtime-status";
 import {
   type ChatSessionSkillBundleSourceKind,
   chatMessages,
@@ -222,19 +223,18 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
   }
 
   async get(input: { actor: Parameters<SkillBundleRepository["get"]>[0]["actor"]; name: string }) {
-    const resolved = await resolvedSkillByName(this.db, input.actor.workspaceId, input.name);
-    if (resolved?.sourceKind === "standalone" && resolved.installationId) {
-      const row = await installationById(this.db, input.actor.workspaceId, resolved.installationId);
-      return row ? hydrateInstallation(this.db, row) : null;
+    const standalone = await liveInstallation(this.db, input.actor.workspaceId, input.name);
+    if (standalone) {
+      // Disabled standalone installations remain inspectable in Settings even though they are not
+      // catalog candidates and therefore do not hide an enabled Plugin Skill.
+      return hydrateInstallation(this.db, standalone);
     }
+
+    const resolved = await resolvedSkillByName(this.db, input.actor.workspaceId, input.name);
     if (resolved?.sourceKind === "plugin") {
       return hydratePluginSkillInstallation(this.db, input.actor.workspaceId, resolved);
     }
-
-    // Disabled standalone installations remain inspectable in Settings even though they are not
-    // catalog candidates and therefore do not hide an enabled Plugin Skill.
-    const row = await liveInstallation(this.db, input.actor.workspaceId, input.name);
-    return row ? hydrateInstallation(this.db, row) : null;
+    return null;
   }
 
   async readFile(input: {
@@ -427,7 +427,12 @@ export async function listChatSkillBundleActivations(
   if (!activations.some((activation) => activation.sourceKind === "plugin")) {
     return activations;
   }
-  const enabledPluginBundleIds = await winningPluginBundleIds(db, input.workspaceId);
+  const enabledPluginBundleIds = await loadEnabledPluginSkillBundleIds(db, {
+    workspaceId: input.workspaceId,
+    bundleIds: activations.flatMap((activation) =>
+      activation.sourceKind === "plugin" ? [activation.bundleId] : [],
+    ),
+  });
   return activations.filter(
     (activation) =>
       activation.sourceKind === "standalone" || enabledPluginBundleIds.has(activation.bundleId),
@@ -522,7 +527,10 @@ export async function readChatSkillBundleFile(
     )
     .limit(1);
   if (row?.sourceKind === "plugin") {
-    const enabledPluginBundleIds = await winningPluginBundleIds(db, input.workspaceId);
+    const enabledPluginBundleIds = await loadEnabledPluginSkillBundleIds(db, {
+      workspaceId: input.workspaceId,
+      bundleIds: [row.bundleId],
+    });
     if (!enabledPluginBundleIds.has(row.bundleId)) return null;
   }
   return row
@@ -533,13 +541,6 @@ export async function readChatSkillBundleFile(
         sizeBytes: row.sizeBytes,
       }
     : null;
-}
-
-async function winningPluginBundleIds(db: DbClient, workspaceId: string) {
-  const catalog = await resolveWorkspaceSkillCatalog(db, { workspaceId });
-  return new Set(
-    catalog.skills.flatMap((skill) => (skill.sourceKind === "plugin" ? [skill.bundleId] : [])),
-  );
 }
 
 export async function storeSkillBundle(

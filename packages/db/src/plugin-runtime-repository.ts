@@ -5,6 +5,8 @@ import { chatSessionPlugins, pluginFiles, plugins } from "./product-schema";
 import { type ImmutableSkillBundle, loadImmutableSkillBundles } from "./skill-bundle-repository";
 import { resolveWorkspaceSkillCatalog } from "./skill-catalog";
 
+export { loadEnabledPluginSkillBundleIds } from "./plugin-skill-runtime-status";
+
 type DbClient = any;
 
 export type ImmutablePluginPackage = {

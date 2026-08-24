@@ -159,7 +159,7 @@ describe("Postgres immutable Plugin repository", () => {
       { id: "shared", name: "shared", description: "From dash." },
     ]);
 
-    await skillRepository.install({
+    const standalone = await skillRepository.install({
       actor: actor(),
       idempotencyKey: "standalone",
       bundle: await resolvedSkill("shared", "Standalone wins."),
@@ -175,6 +175,20 @@ describe("Postgres immutable Plugin repository", () => {
         hiddenPluginNames: ["a-tools", "a.tools"],
       },
     ]);
+    await skillRepository.setEnabled({
+      actor: actor(),
+      name: "shared",
+      enabled: false,
+    });
+    await expect(skillRepository.listCatalog({ actor: actor() })).resolves.toEqual([
+      { id: "shared", name: "shared", description: "From dash." },
+    ]);
+    await expect(skillRepository.get({ actor: actor(), name: "shared" })).resolves.toMatchObject({
+      id: standalone.installation.id,
+      name: "shared",
+      enabled: false,
+      bundle: { id: standalone.installation.bundle.id },
+    });
   });
 
   it("loads only snapshotted enabled Plugin IDs and applies the live kill switch", async () => {

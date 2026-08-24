@@ -77,6 +77,7 @@ const workflowSkillMocks = vi.hoisted(() => ({
 
 const pluginRuntimeMocks = vi.hoisted(() => ({
   loadChatSessionPluginRuntime: vi.fn(),
+  loadEnabledPluginSkillBundleIds: vi.fn(),
 }));
 
 const managedPluginMocks = vi.hoisted(() => ({
@@ -104,6 +105,7 @@ vi.mock("@opencompany/db/claude-code-auth", () => ({
 
 vi.mock("@opencompany/db/plugin-runtime-repository", () => ({
   loadChatSessionPluginRuntime: pluginRuntimeMocks.loadChatSessionPluginRuntime,
+  loadEnabledPluginSkillBundleIds: pluginRuntimeMocks.loadEnabledPluginSkillBundleIds,
 }));
 
 vi.mock("./claude-code-cli", () => ({
@@ -314,6 +316,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     pluginRuntimeMocks.loadChatSessionPluginRuntime
       .mockReset()
       .mockResolvedValue({ plugins: [], skills: [] });
+    pluginRuntimeMocks.loadEnabledPluginSkillBundleIds.mockReset().mockResolvedValue(new Set());
     workflowSkillMocks.loadWorkflowTaskPluginRuntime
       .mockReset()
       .mockResolvedValue({ plugins: [], skills: [] });
@@ -600,6 +603,76 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
         ),
       }),
     );
+  });
+
+  it("keeps a pinned workflow Plugin Skill while its owning Plugin remains enabled", async () => {
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    const pinnedSkill = {
+      id: "skill_bundle_shadow_v1",
+      name: "smooth-shadow-ring",
+      description: "Polish elevation styles.",
+      body: "Use layered shadows and a crisp ring.",
+      files: [
+        {
+          path: "SKILL.md",
+          content: new TextEncoder().encode("exact pinned Plugin Skill document"),
+          executable: false,
+          sizeBytes: 34,
+        },
+      ],
+    };
+    const pluginPackage = {
+      id: "plugin_shadow_v1",
+      name: "shadow-tools",
+      files: [
+        {
+          path: "plugin.json",
+          content: new TextEncoder().encode('{"name":"shadow-tools"}'),
+          executable: false,
+          sizeBytes: 23,
+        },
+      ],
+    };
+    workflowSkillMocks.loadWorkflowTaskSkillBundles.mockResolvedValueOnce([pinnedSkill]);
+    workflowSkillMocks.loadWorkflowTaskPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+    });
+    pluginRuntimeMocks.loadEnabledPluginSkillBundleIds.mockResolvedValueOnce(
+      new Set([pinnedSkill.id]),
+    );
+    const harnessSpec = harnessSpecForClaudeTask();
+    harnessSpec.workflow!.pluginIds = ["plugin_shadow_v1"];
+    harnessSpec.workflow!.steps![0]!.pluginSkillBundleIds = [pinnedSkill.id];
+
+    await runClaudeCodeChatTurn({
+      turn: claudeTurn(),
+      session: claudeSession(),
+      taskContext: {
+        task: taskForHarness(harnessSpec),
+        harnessSpec,
+      },
+      env: env(),
+    });
+
+    expect(pluginRuntimeMocks.loadEnabledPluginSkillBundleIds).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        workspaceId: "workspace_1",
+        bundleIds: [pinnedSkill.id],
+      },
+    );
+    expect(skillMocks.materializeClaudeSkillSnapshotsForSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skills: [expect.objectContaining({ name: "smooth-shadow-ring" })],
+      }),
+    );
+    expect(managedPluginMocks.materializePluginPackagesForSession).toHaveBeenCalledWith({
+      sandbox,
+      workRoot: "/home/user/opencompany-goat/claude-chat",
+      plugins: [pluginPackage],
+    });
   });
 
   it("auto-mounts winning Plugin Skills and materializes the snapshotted package", async () => {
