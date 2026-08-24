@@ -283,7 +283,7 @@ describe("opencompany coding workspace access", () => {
 
     const response = await server.inject({
       method: "POST",
-      url: "/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
+      url: "/internal/goat/coding-workspaces/sessions/runtime_1/runtime-access",
       headers: { authorization: `Bearer ${env.internalToken}` },
     });
 
@@ -297,14 +297,14 @@ describe("opencompany coding workspace access", () => {
 
     const unauthorized = await server.inject({
       method: "POST",
-      url: "/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
+      url: "/internal/goat/coding-workspaces/sessions/runtime_1/runtime-access",
       payload: { userWorkosId: "user_1" },
     });
     expect(unauthorized.statusCode).toBe(401);
 
     const response = await server.inject({
       method: "POST",
-      url: "/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
+      url: "/internal/goat/coding-workspaces/sessions/runtime_1/runtime-access",
       headers: { authorization: `Bearer ${env.internalToken}` },
       payload: { userWorkosId: "user_1" },
     });
@@ -315,7 +315,7 @@ describe("opencompany coding workspace access", () => {
       sandboxStatus: "sleeping",
     });
     expect(mintCodingWorkspaceAccess).toHaveBeenCalledWith({
-      codingSessionId: "goat_codex_chat_1",
+      codingSessionId: "runtime_1",
       userWorkosId: "user_1",
       env,
     });

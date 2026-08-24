@@ -155,7 +155,7 @@ describe("opencompany coding workspace access", () => {
     mocks.rows = [runtimeSession({ engine })];
 
     const access = await mintCodingWorkspaceAccess({
-      codingSessionId: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
+      codingSessionId: "runtime_123e4567-e89b-12d3-a456-426614174000",
       userWorkosId: "user_1",
       env: { streamTokenSecret: secret },
     });
@@ -167,7 +167,7 @@ describe("opencompany coding workspace access", () => {
         secret,
       }),
     ).toMatchObject({
-      codingSessionId: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
+      codingSessionId: "runtime_123e4567-e89b-12d3-a456-426614174000",
       userWorkosId: "user_1",
     });
   });
@@ -182,7 +182,7 @@ describe("opencompany coding workspace access", () => {
 
     await expect(
       mintCodingWorkspaceAccess({
-        codingSessionId: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
+        codingSessionId: "runtime_123e4567-e89b-12d3-a456-426614174000",
         userWorkosId: "user_1",
         env: { streamTokenSecret: secret },
       }),
@@ -195,7 +195,7 @@ describe("opencompany coding workspace access", () => {
 
     await expect(
       mintCodingWorkspaceAccess({
-        codingSessionId: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
+        codingSessionId: "runtime_123e4567-e89b-12d3-a456-426614174000",
         userWorkosId: "user_1",
         env: { streamTokenSecret: secret },
       }),
@@ -214,7 +214,7 @@ function runtimeSession(
   }> = {},
 ) {
   return {
-    id: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
+    id: "runtime_123e4567-e89b-12d3-a456-426614174000",
     chatSessionId: "goat_chat_1",
     userWorkosId: "user_1",
     sandboxId: "sandbox_1",

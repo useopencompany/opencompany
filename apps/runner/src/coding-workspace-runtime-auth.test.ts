@@ -7,7 +7,8 @@ import {
 } from "./coding-workspace-runtime-auth";
 
 const secret = "test-secret-at-least-long-enough";
-const codingSessionId = "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000";
+const codingSessionId = "runtime_123e4567-e89b-12d3-a456-426614174000";
+const legacyCodingSessionId = "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000";
 
 describe("opencompany coding workspace tickets", () => {
   it("round-trips an owner-bound short-lived ticket", () => {
@@ -38,6 +39,33 @@ describe("opencompany coding workspace tickets", () => {
     expect(
       verifyCodingWorkspaceTicket({ ticket: `${signed.ticket}x`, secret, now: 2_000 }),
     ).toBeNull();
+  });
+
+  it("accepts legacy session ids", () => {
+    const signed = createCodingWorkspaceTicket({
+      codingSessionId: legacyCodingSessionId,
+      userWorkosId: "user_123",
+      secret,
+      now: 1_000,
+    });
+
+    expect(verifyCodingWorkspaceTicket({ ticket: signed.ticket, secret, now: 2_000 })).toEqual({
+      v: 1,
+      codingSessionId: legacyCodingSessionId,
+      userWorkosId: "user_123",
+      expiresAt: 61_000,
+    });
+  });
+
+  it("rejects unsupported session id prefixes", () => {
+    const signed = createCodingWorkspaceTicket({
+      codingSessionId: "unknown_123e4567-e89b-12d3-a456-426614174000",
+      userWorkosId: "user_123",
+      secret,
+      now: 1_000,
+    });
+
+    expect(verifyCodingWorkspaceTicket({ ticket: signed.ticket, secret, now: 2_000 })).toBeNull();
   });
 });
 
@@ -94,5 +122,22 @@ describe("opencompany coding workspace preview capabilities", () => {
     expect(() =>
       createCodingWorkspacePreviewCapability({ codingSessionId, port: 0, secret }),
     ).toThrow(/Preview port/);
+  });
+
+  it("keeps legacy preview capabilities bound to legacy session ids", () => {
+    const signed = createCodingWorkspacePreviewCapability({
+      codingSessionId: legacyCodingSessionId,
+      port: 3_000,
+      secret,
+      now: 1_000,
+    });
+
+    expect(
+      verifyCodingWorkspacePreviewCapability({
+        capability: signed.capability,
+        secret,
+        now: 2_000,
+      }),
+    ).toEqual({ codingSessionId: legacyCodingSessionId, port: 3_000, expiresAt: 28_801_000 });
   });
 });
