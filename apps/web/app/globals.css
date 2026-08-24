@@ -425,6 +425,8 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
 .tiptap-brain .wiki-brain-chip {
   display: inline-flex;
   align-items: center;
+  max-width: calc(100% - 0.08em);
+  box-sizing: border-box;
   gap: 0.25em;
   padding: 0.06em 0.42em 0.06em 0.34em;
   margin: 0 0.04em;
@@ -461,9 +463,12 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
   opacity: 0.75;
 }
 .tiptap-brain .wiki-brain-chip-label {
+  display: block;
+  min-width: 0;
+  max-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 32ch;
+  white-space: nowrap;
 }
 .tiptap-brain .wiki-brain-chip-unresolved {
   color: var(--color-ink-muted);
