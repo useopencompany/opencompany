@@ -75,6 +75,7 @@ describe("calculateModelUsageCost", () => {
     ["moonshotai/kimi-k2-thinking-turbo", 10_450],
     ["moonshotai/kimi-k2-turbo", 10_450],
     ["moonshotai/kimi-k2", 3_440],
+    ["xai/grok-4.6", 10_500],
     ["xai/grok-4.3", 5_200],
     ["xai/grok-4.20-reasoning", 5_200],
     ["xai/grok-4.20-non-reasoning", 5_200],
@@ -126,17 +127,17 @@ describe("calculateModelUsageCost", () => {
     expect(cost.costBasis.longContextApplied).toBe(true);
   });
 
-  it("applies xAI long-context tiers when input exceeds the threshold", () => {
+  it("applies xAI long-context tiers when input reaches the threshold", () => {
     const cost = calculateModelUsageCost({
-      modelName: "xai/grok-4.3",
-      inputTokens: 200_002,
+      modelName: "xai/grok-4.6",
+      inputTokens: 200_000,
       inputNoCacheTokens: 1_000,
       inputCacheReadTokens: 1_000,
       inputCacheWriteTokens: 0,
       outputTokens: 1_000,
     });
 
-    expect(cost.providerCostUsdMicros).toBe(7_900);
+    expect(cost.providerCostUsdMicros).toBe(17_000);
     expect(cost.costBasis.longContextApplied).toBe(true);
   });
 
@@ -231,7 +232,7 @@ describe("fees and hosted tools", () => {
       providerCostUsdMicros: 11_565,
       costBasis: {
         costSource: "platform_model_pricing",
-        pricingVersion: "2026-07-29.standard.2",
+        pricingVersion: "2026-08-24.standard.1",
       },
     });
   });
@@ -252,7 +253,7 @@ describe("fees and hosted tools", () => {
       totalCostUsdMicros: 1_000_000,
       costBasis: {
         costSource: "broker_metered",
-        pricingVersion: "2026-07-29.standard.2",
+        pricingVersion: "2026-08-24.standard.1",
       },
     });
   });
