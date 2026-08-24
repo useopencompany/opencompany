@@ -6,6 +6,10 @@ import { contextBridge, ipcRenderer } from "electron";
 const versionArg = process.argv.find((arg) => arg.startsWith("--opencompany-desktop-version="));
 const version = versionArg?.split("=")[1] ?? "0.0.0";
 
+window.addEventListener("DOMContentLoaded", () => {
+  document.documentElement.dataset.opencompanyDesktop = "true";
+});
+
 // Contract consumed by the web app (apps/web): its presence marks a desktop
 // session and its signInWithGoogle() drives the system-browser OAuth handoff.
 contextBridge.exposeInMainWorld("opencompanyDesktop", {
