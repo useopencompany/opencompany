@@ -25,6 +25,7 @@
     "@opencompany/brain": "workspace:*",
     "@opencompany/telemetry": "workspace:*",
     "@opencompany/observability": "workspace:*",
+    "@opencompany/wiki": "workspace:*",
     "@sentry/bun": "^10.53.1",
     "@vercel/blob": "^2.4.0",
     "ai": "^6.0.189",

@@ -293,7 +293,8 @@ export async function claimNextWikiIngestJob(input: {
     if (isUniqueViolation(error)) return null;
     throw error;
   }
-  return rowsFromExecute<ClaimedWikiIngestJob>(result)[0] ?? null;
+  const claimed = rowsFromExecute<ClaimedWikiIngestJob>(result)[0];
+  return claimed ? normalizeClaimedWikiIngestJobDates(claimed) : null;
 }
 
 export async function heartbeatWikiIngestJob(input: {
@@ -319,6 +320,39 @@ export async function heartbeatWikiIngestJob(input: {
     RETURNING id
   `);
   return rowsFromExecute<{ id: string }>(result).length > 0;
+}
+
+// Hands an in-flight job back to the queue when a runner is shutting down.
+// The claim increment is rolled back because the attempt was interrupted by
+// infrastructure before it could produce an ingestion outcome.
+export async function releaseWikiIngestJob(input: {
+  id: string;
+  sourceItemId: string;
+  leaseId: string;
+  leaseOwner: string;
+  now?: Date;
+  db?: DbLike;
+}): Promise<boolean> {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const released = await db.execute(sql`
+    UPDATE goat.wiki_ingest_jobs
+    SET status = 'queued',
+        attempts = GREATEST(attempts - 1, 0),
+        lease_id = NULL,
+        lease_owner = NULL,
+        lease_expires_at = NULL,
+        heartbeat_at = NULL,
+        next_retry_at = ${now},
+        updated_at = ${now}
+    WHERE id = ${input.id}
+      AND source_item_id = ${input.sourceItemId}
+      AND lease_id = ${input.leaseId}
+      AND lease_owner = ${input.leaseOwner}
+      AND status = 'running'
+    RETURNING id
+  `);
+  return rowsFromExecute<{ id: string }>(released).length > 0;
 }
 
 export async function completeWikiIngestJob(input: {
@@ -566,6 +600,31 @@ function rowsFromExecute<T>(result: unknown): T[] {
     return (result as { rows: T[] }).rows;
   }
   return [];
+}
+
+function normalizeClaimedWikiIngestJobDates(job: ClaimedWikiIngestJob): ClaimedWikiIngestJob {
+  return {
+    ...job,
+    nextRetryAt: requiredDbDate(job.nextRetryAt, "nextRetryAt"),
+    leaseExpiresAt: optionalDbDate(job.leaseExpiresAt, "leaseExpiresAt"),
+    heartbeatAt: optionalDbDate(job.heartbeatAt, "heartbeatAt"),
+    completedAt: optionalDbDate(job.completedAt, "completedAt"),
+    createdAt: requiredDbDate(job.createdAt, "createdAt"),
+    updatedAt: requiredDbDate(job.updatedAt, "updatedAt"),
+    occurredAt: requiredDbDate(job.occurredAt, "occurredAt"),
+  };
+}
+
+function requiredDbDate(value: Date, field: string) {
+  const date = value instanceof Date ? value : new Date(value as unknown as string);
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error(`Claimed wiki ingest job has an invalid ${field} timestamp.`);
+  }
+  return date;
+}
+
+function optionalDbDate(value: Date | null, field: string) {
+  return value === null ? null : requiredDbDate(value, field);
 }
 
 function isUniqueViolation(error: unknown): boolean {
