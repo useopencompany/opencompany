@@ -27,6 +27,7 @@ import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
 import { useHydrated } from "@/components/useHydrated";
+import { WikiGmailSourceEditor, WikiSlackChannelPicker } from "@/components/WikiSourceScopeEditors";
 import { WikiGitHubRepoPicker, WikiLinearTeamPicker } from "@/components/WikiSourceScopePickers";
 import {
   getHeadlessIntegrationAccounts,
@@ -221,6 +222,82 @@ function WikiSourcesLivePanel({
     });
   };
 
+  const saveScopeConfig = async (
+    entry: WikiSourceEntry,
+    config: Record<string, unknown>,
+  ): Promise<boolean> => {
+    setRowErrors((current) => omitKey(current, entry.integrationId));
+    setPendingIds((current) => new Set(current).add(entry.integrationId));
+    try {
+      const source = await upsertWikiSource({
+        integrationId: entry.integrationId,
+        provider: entry.provider,
+        enabled: entry.source?.enabled ?? true,
+        config,
+      });
+      setSources((current) => mergeSource(current, source));
+      toast.success(`${providerName(entry.provider)} scope updated.`);
+      return true;
+    } catch (error) {
+      const message = errorMessage(error, "The Wiki source scope could not be saved. Try again.");
+      setRowErrors((current) => ({ ...current, [entry.integrationId]: message }));
+      toast.error(message);
+      return false;
+    } finally {
+      setPendingIds((current) => {
+        const next = new Set(current);
+        next.delete(entry.integrationId);
+        return next;
+      });
+    }
+  };
+
+  const renderScopeSlot = (entry: WikiSourceEntry) => {
+    if (entry.status !== "connected") return null;
+    const canConfigure = entry.source?.canConfigure ?? entry.canToggle;
+    if (entry.provider === "slack") {
+      if (!canConfigure) return null;
+      return (
+        <WikiSlackChannelPicker
+          integrationId={entry.integrationId}
+          source={entry.source}
+          onSave={(config) => saveScopeConfig(entry, config)}
+        />
+      );
+    }
+    if (entry.provider === "gmail") {
+      if (!canConfigure) return null;
+      return (
+        <WikiGmailSourceEditor
+          integrationId={entry.integrationId}
+          source={entry.source}
+          onSave={(config) => saveScopeConfig(entry, config)}
+        />
+      );
+    }
+    if (entry.provider === "linear") {
+      return (
+        <WikiLinearTeamPicker
+          integrationId={entry.integrationId}
+          source={entry.source}
+          canConfigure={canConfigure}
+          onSaved={(source) => setSources((current) => mergeSource(current, source))}
+        />
+      );
+    }
+    if (entry.provider === "github") {
+      return (
+        <WikiGitHubRepoPicker
+          integrationId={entry.integrationId}
+          source={entry.source}
+          canConfigure={canConfigure}
+          onSaved={(source) => setSources((current) => mergeSource(current, source))}
+        />
+      );
+    }
+    return defaultScopeSlot(entry);
+  };
+
   const loading = !loadError && (sources === null || !integrationsReady);
   const feedingCount = [...entriesByProvider.values()]
     .flat()
@@ -272,14 +349,7 @@ function WikiSourcesLivePanel({
               pendingIds={pendingIds}
               rowErrors={rowErrors}
               onEnabledChange={updateEnabled}
-              {...(provider.scopeRequired
-                ? {
-                    scopeSlot: (entry: WikiSourceEntry) =>
-                      wikiSourceScopeSlot(provider.id, entry, (source) =>
-                        setSources((current) => mergeSource(current, source)),
-                      ),
-                  }
-                : {})}
+              {...(provider.scopeRequired ? { scopeSlot: renderScopeSlot } : {})}
             />
           ))}
         </section>
@@ -447,36 +517,6 @@ function defaultScopeSlot(entry: WikiSourceEntry) {
       Scope configuration coming soon
     </div>
   );
-}
-
-function wikiSourceScopeSlot(
-  provider: WikiSourceProvider,
-  entry: WikiSourceEntry,
-  onSaved: (source: WikiSourceDto) => void,
-) {
-  if (entry.status !== "connected") return null;
-  const canConfigure = entry.source?.canConfigure ?? entry.canToggle;
-  if (provider === "linear") {
-    return (
-      <WikiLinearTeamPicker
-        integrationId={entry.integrationId}
-        source={entry.source}
-        canConfigure={canConfigure}
-        onSaved={onSaved}
-      />
-    );
-  }
-  if (provider === "github") {
-    return (
-      <WikiGitHubRepoPicker
-        integrationId={entry.integrationId}
-        source={entry.source}
-        canConfigure={canConfigure}
-        onSaved={onSaved}
-      />
-    );
-  }
-  return defaultScopeSlot(entry);
 }
 
 function WikiSourceCardSkeletons() {

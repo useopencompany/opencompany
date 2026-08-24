@@ -1,3 +1,4 @@
+import { normalizeSlackConversationWindow } from "@opencompany/brain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const aiMock = vi.hoisted(() => ({
@@ -22,8 +23,10 @@ vi.mock("@opencompany/observability/braintrust", () => ({
 
 import {
   buildGitHubSourceContextHeader,
+  buildGmailSourceContextHeader,
   buildLinearSourceContextHeader,
   buildMeetingSourceContextHeader,
+  buildSlackSourceContextHeader,
   buildWikiIngestUserMessage,
   buildWikiSourceContextHeader,
   placeMovingAnthropicCacheBreakpoint,
@@ -62,6 +65,7 @@ function input(
     occurredAt,
     contentHash: "hash_123",
     normalizedPayload,
+    sourceConfig: {},
     env: {
       apiOrigin: "http://api.local",
       apiInternalToken: "internal-token",
@@ -101,13 +105,18 @@ function generate(input: {
   });
 }
 
-function triageResult(decision: "skip" | "ingest") {
+function triageResult(
+  decision: "skip" | "ingest",
+  overrides: Partial<{
+    reason: string;
+    entityHints: string[];
+  }> = {},
+) {
   return {
     model: "openai/gpt-5.4-nano",
     decision,
-    reason:
-      decision === "skip" ? "Only a routine acknowledgement." : "A durable decision may exist.",
-    entityHints: decision === "skip" ? [] : ["Acme API", "Billing"],
+    reason: overrides.reason ?? (decision === "skip" ? "obvious chatter" : "durable decision"),
+    entityHints: overrides.entityHints ?? (decision === "skip" ? [] : ["Acme API", "Billing"]),
     usage: {
       inputTokens: 40,
       outputTokens: 10,
@@ -284,6 +293,7 @@ describe("opencompany wiki librarian agent", () => {
       sourceRef: "granola:note:note_123",
       title: "Roadmap review",
       occurredAt,
+      sourceConfig: {},
     });
     const directHeader = buildMeetingSourceContextHeader({
       sourceProvider: "granola",
@@ -291,12 +301,42 @@ describe("opencompany wiki librarian agent", () => {
       sourceRef: "granola:note:note_123",
       title: "Roadmap review",
       occurredAt,
+      sourceConfig: {},
     });
 
     expect(granolaHeader).toBe(directHeader);
     expect(granolaHeader).toContain("# Source context: granola/meeting");
     expect(granolaHeader).toContain("[[source:granola:note:note_123]]");
     expect(granolaHeader).toContain("not a standalone transcript archive");
+  });
+
+  it("builds Slack and Gmail guidance with job-scoped source references", () => {
+    const slackHeader = buildSlackSourceContextHeader({
+      sourceProvider: "slack",
+      sourceType: "conversation",
+      sourceRef: "slack:T123:C123:100.000:200.000",
+      title: "#product",
+      occurredAt,
+      sourceConfig: {},
+    });
+    const gmailHeader = buildGmailSourceContextHeader({
+      sourceProvider: "gmail",
+      sourceType: "thread",
+      sourceRef: "gmail:thread:thread_123",
+      title: "Acme renewal",
+      occurredAt,
+      sourceConfig: {
+        instructions: "Only capture customer commitments.",
+      },
+    });
+
+    expect(slackHeader).toContain("decisions, commitments, durable facts");
+    expect(slackHeader).toContain("transient chatter");
+    expect(slackHeader).toContain("[[source:slack:T123:C123:100.000:200.000]]");
+    expect(gmailHeader).toContain("sender and thread context");
+    expect(gmailHeader).toContain("facts about external contacts");
+    expect(gmailHeader).toContain("Trusted source guidance: Only capture customer commitments.");
+    expect(gmailHeader).toContain("[[source:gmail:thread:thread_123]]");
   });
 
   it("registers Linear and GitHub headers with external-source pointer discipline", () => {
@@ -306,25 +346,45 @@ describe("opencompany wiki librarian agent", () => {
       sourceRef: "linear:acme:ENG-42",
       title: "Ship billing retries",
       occurredAt,
+      sourceConfig: {},
     };
-    const githubInput = {
+    const githubHeaderInput = {
       sourceProvider: "github" as const,
       sourceType: "activity" as const,
       sourceRef: "github:acme/api:pull:123",
       title: "Ship billing retries",
       occurredAt,
+      sourceConfig: {},
     };
 
     const linearHeader = buildWikiSourceContextHeader(linearInput);
-    const githubHeader = buildWikiSourceContextHeader(githubInput);
+    const githubHeader = buildWikiSourceContextHeader(githubHeaderInput);
     expect(linearHeader).toBe(buildLinearSourceContextHeader(linearInput));
     expect(linearHeader).toContain("timeline-add entries or brief page updates");
     expect(linearHeader).toContain("[[source:linear:acme:ENG-42]]");
     expect(linearHeader).toContain("never mirror an issue body");
-    expect(githubHeader).toBe(buildGitHubSourceContextHeader(githubInput));
+    expect(githubHeader).toBe(buildGitHubSourceContextHeader(githubHeaderInput));
     expect(githubHeader).toContain("[[source:github:acme/api:pull:123]]");
     expect(githubHeader).toContain("never mirror issue bodies, pull-request descriptions");
     expect(githubHeader).toContain("finish with SKIP");
+  });
+
+  it("short-circuits a Slack job when cheap triage returns skip", async () => {
+    const runTriage = vi.fn(async () => triageResult("skip"));
+
+    await expect(runWikiAgentIngest(slackInput(vi.fn()), { runTriage })).resolves.toMatchObject({
+      model: "openai/gpt-5.4-nano",
+      skipped: true,
+      skipMode: "triage",
+      reason: "obvious chatter",
+      steps: 1,
+      toolCalls: 0,
+      mutations: 0,
+      trace: {
+        triage: { decision: "skip" },
+      },
+    });
+    expect(aiMock.generateText).not.toHaveBeenCalled();
   });
 
   it("short-circuits a GitHub comment when cheap triage says skip", async () => {
@@ -341,6 +401,31 @@ describe("opencompany wiki librarian agent", () => {
       },
     });
     expect(aiMock.generateText).not.toHaveBeenCalled();
+  });
+
+  it("passes triage entity hints into the full Slack librarian message", async () => {
+    generate({ text: "SKIP: already captured" });
+
+    await runWikiAgentIngest(slackInput(vi.fn()), {
+      runTriage: vi.fn(async () => triageResult("ingest", { entityHints: ["Acme", "Onboarding"] })),
+    });
+
+    const generation = aiMock.generateText.mock.calls[0]?.[0] as any;
+    expect(generation.messages[1].content).toContain("## Cheap triage handoff");
+    expect(generation.messages[1].content).toContain("- Acme\n- Onboarding");
+  });
+
+  it("falls through to full wiki ingest when cheap triage fails", async () => {
+    generate({ text: "SKIP: nothing durable" });
+
+    await expect(
+      runWikiAgentIngest(slackInput(vi.fn()), {
+        runTriage: vi.fn(async () => {
+          throw new Error("triage provider unavailable");
+        }),
+      }),
+    ).resolves.toMatchObject({ skipped: true, skipMode: "explicit" });
+    expect(aiMock.generateText).toHaveBeenCalledOnce();
   });
 
   it("feeds GitHub triage hints into the full wiki librarian", async () => {
@@ -391,3 +476,33 @@ describe("opencompany wiki librarian agent", () => {
     });
   });
 });
+
+function slackInput(
+  executeCommand: NonNullable<Parameters<typeof runWikiAgentIngest>[0]["executeCommand"]>,
+) {
+  const item = normalizeSlackConversationWindow({
+    windowId: "gslkwin_123",
+    teamId: "T123",
+    channelId: "C123",
+    channelName: "product",
+    channelType: "channel",
+    messages: [
+      {
+        ts: "1724493600.000100",
+        userId: "U123",
+        userName: "Ada",
+        text: "Acme approved the onboarding plan.",
+      },
+    ],
+    flushedAt: occurredAt.toISOString(),
+  });
+  return {
+    ...input(executeCommand),
+    sourceProvider: "slack" as const,
+    sourceType: "conversation" as const,
+    sourceRef: item.sourceRef,
+    title: item.title,
+    contentHash: item.contentHash,
+    normalizedPayload: item,
+  };
+}

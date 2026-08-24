@@ -15,9 +15,15 @@ import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import type { IntegrationStatus, SlackChannelType } from "@opencompany/db/product-schema";
 import {
   listEnabledSlackBrainSourceRoutes,
+  listEnabledSlackWikiSourceRoutes,
   newSlackConversationWindowId,
   slackSelectedConversationIds,
 } from "@opencompany/db/slack";
+import {
+  attributeWikiSourceEventClaims,
+  claimWikiSourceEvents,
+} from "@opencompany/db/wiki-event-claims";
+import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
@@ -29,6 +35,7 @@ import {
   resolveSlackUserNames,
 } from "./slack-api";
 import { rowsFromExecute } from "./sql-exec";
+import { wakeWikiIngestWorker } from "./wiki-ingest-worker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-slack-flush" });
 
@@ -109,6 +116,8 @@ export async function flushSlackConversationWindow(window: SlackDueWindow): Prom
     : undefined;
 
   const flushedAt = new Date();
+  let brainEnqueued = false;
+  let wikiEnqueued = false;
   const result = await db.transaction(async (tx) => {
     const claimed = rowsFromExecute<BufferedSlackMessageRow>(
       await tx.execute(sql`
@@ -151,13 +160,20 @@ export async function flushSlackConversationWindow(window: SlackDueWindow): Prom
     // channel or disabled the source since the messages were buffered. A
     // revoked integration still flushes (persisting the window) with no jobs,
     // so the buffer never wedges on a dead token.
-    const routes =
+    const brainRoutes =
       integration.status === "connected"
         ? await listEnabledSlackBrainSourceRoutes([window.integrationId], tx)
         : [];
-    const candidateBrainRefs = routes
+    const wikiRoutes =
+      integration.status === "connected"
+        ? await listEnabledSlackWikiSourceRoutes([window.integrationId], tx)
+        : [];
+    const candidateBrainRefs = brainRoutes
       .filter((route) => slackSelectedConversationIds(route.config).has(window.channelId))
       .map((route) => route.brainRef);
+    const candidateWikiWorkspaceIds = wikiRoutes
+      .filter((route) => slackSelectedConversationIds(route.config).has(window.channelId))
+      .map((route) => route.workspaceId);
 
     // Cross-member dedup: several members' integrations can watch the same
     // team channel for the same brain. Each message claims its provider-native
@@ -194,6 +210,36 @@ export async function flushSlackConversationWindow(window: SlackDueWindow): Prom
       db: tx,
     });
 
+    brainEnqueued = upserted.enqueued;
+    for (const workspaceId of new Set(candidateWikiWorkspaceIds)) {
+      const claim = await claimWikiSourceEvents({
+        workspaceId,
+        sourceProvider: "slack",
+        eventKeys,
+        db: tx,
+      });
+      if (claim.claimedCount === 0) continue;
+
+      const wikiUpserted = await upsertWikiSourceItemAndEnqueue({
+        workspaceId,
+        sourceConnectionId: window.integrationId,
+        integrationId: window.integrationId,
+        item,
+        rawPayload: { eventIds: claimed.map((row) => row.id) },
+        rawEventCount: claim.claimedCount,
+        now: flushedAt,
+        db: tx,
+      });
+      await attributeWikiSourceEventClaims({
+        workspaceId,
+        sourceProvider: "slack",
+        eventKeys: claim.claimedEventKeys,
+        sourceItemId: wikiUpserted.sourceItemId,
+        db: tx,
+      });
+      wikiEnqueued = wikiEnqueued || wikiUpserted.enqueued;
+    }
+
     await tx.execute(sql`
       UPDATE goat.slack_message_events
       SET source_item_id = ${upserted.sourceItemId}
@@ -215,13 +261,14 @@ export async function flushSlackConversationWindow(window: SlackDueWindow): Prom
     return {
       sourceItemId: upserted.sourceItemId,
       messageCount: claimed.length,
-      enqueued: upserted.enqueued,
+      enqueued: upserted.enqueued || wikiEnqueued,
       ...(upserted.quotaUpdates ? { quotaUpdates: upserted.quotaUpdates } : {}),
     };
   });
 
   captureProductIngestionQuotaAnalytics(result?.quotaUpdates);
-  if (result?.enqueued) wakeBrainIngestWorker();
+  if (result && brainEnqueued) wakeBrainIngestWorker();
+  if (result && wikiEnqueued) wakeWikiIngestWorker();
   return result;
 }
 

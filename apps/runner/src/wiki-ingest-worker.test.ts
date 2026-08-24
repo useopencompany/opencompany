@@ -146,7 +146,7 @@ function store(overrides: Partial<WikiIngestStore> = {}): WikiIngestStore {
     complete: vi.fn(async () => true),
     fail: vi.fn(async () => true),
     skip: vi.fn(async () => true),
-    resolveActor: vi.fn(async () => "owner_123"),
+    resolveSource: vi.fn(async () => ({ actorUserWorkosId: "owner_123", config: {} })),
     ...overrides,
   };
 }
@@ -173,6 +173,7 @@ describe("opencompany wiki ingest worker", () => {
         actorUserWorkosId: "owner_123",
         workspaceId: "workspace_123",
         sourceProvider: "jamie",
+        sourceConfig: {},
       }),
     );
     expect(ingestStore.complete).toHaveBeenCalledWith(
@@ -242,9 +243,15 @@ describe("opencompany wiki ingest worker", () => {
     });
   });
 
-  it("persists explicit and inferred skip outcomes", async () => {
-    for (const skipMode of ["explicit", "inferred_no_mutations"] as const) {
+  it("persists explicit, inferred, and triage skip outcomes", async () => {
+    for (const skipMode of ["explicit", "inferred_no_mutations", "triage"] as const) {
       const ingestStore = store();
+      const reason =
+        skipMode === "explicit"
+          ? "already known"
+          : skipMode === "triage"
+            ? "obvious inbox noise"
+            : "nothing durable";
       await runClaimedWikiIngestJob({
         job: job(),
         env,
@@ -252,7 +259,7 @@ describe("opencompany wiki ingest worker", () => {
         agentRun: vi.fn(async () =>
           result({
             skipped: true,
-            reason: skipMode === "explicit" ? "already known" : "nothing durable",
+            reason,
             skipMode,
             mutations: 0,
           }),
@@ -260,7 +267,7 @@ describe("opencompany wiki ingest worker", () => {
       });
       expect(ingestStore.skip).toHaveBeenCalledWith(
         expect.objectContaining({
-          reason: skipMode === "explicit" ? "already known" : "nothing durable",
+          reason,
         }),
       );
       expect(ingestStore.complete).not.toHaveBeenCalled();
