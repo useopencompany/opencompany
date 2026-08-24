@@ -209,14 +209,14 @@
     "@vercel/blob": "^2.4.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "pg": "^8.13.1"
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.11",
     "@types/node": "^25.9.1",
-    "@types/pg": "^8.11.10",
+    "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.10",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.11"
   }
 }
