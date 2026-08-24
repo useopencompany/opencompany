@@ -292,6 +292,26 @@ describe("Postgres immutable Plugin repository", () => {
       name: "quality-tools",
       integrity: installed.plugin.integrity,
     });
+    await repository.setStatus({
+      actor: actor(),
+      name: "quality-tools",
+      status: "disabled",
+    });
+    await expect(
+      repository.approveMcp({
+        actor: actor(),
+        name: "quality-tools",
+        integrity: installed.plugin.integrity,
+      }),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message: "The Plugin is disabled. Enable it before approving MCP.",
+    });
+    const disabledRevocation = await repository.revokeMcp({
+      actor: actor(),
+      name: "quality-tools",
+    });
+    expect(disabledRevocation.mcpApprovedIntegrity).toBeNull();
     await repository.archive({ actor: actor(), name: "quality-tools" });
     const replacement = await repository.install({
       actor: actor(),

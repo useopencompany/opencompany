@@ -100,19 +100,25 @@ export async function preparePluginDataRuntime(input: {
     throw error;
   }
 
+  const activeEntries = new Set(entries);
   let heartbeatError: Error | null = null;
-  let checkpointing = false;
+  let checkpointStarted = false;
+  let checkpointInProgress = false;
   const heartbeat = setInterval(() => {
-    if (checkpointing || heartbeatError) return;
-    void Promise.all(entries.map((entry) => renewLease(entry.lease)))
-      .then((renewed) => {
-        if (renewed.some((value) => !value)) {
-          heartbeatError = new Error("Plugin data lease was lost during the coding turn.");
-        }
-      })
-      .catch(() => {
-        heartbeatError = new Error("Plugin data lease renewal failed during the coding turn.");
-      });
+    if (heartbeatError) return;
+    for (const entry of activeEntries) {
+      void renewLease(entry.lease)
+        .then((renewed) => {
+          if (!renewed && activeEntries.has(entry) && !checkpointInProgress && !heartbeatError) {
+            heartbeatError = new Error("Plugin data lease was lost during the coding turn.");
+          }
+        })
+        .catch(() => {
+          if (activeEntries.has(entry) && !checkpointInProgress && !heartbeatError) {
+            heartbeatError = new Error("Plugin data lease renewal failed during the coding turn.");
+          }
+        });
+    }
   }, PLUGIN_DATA_LEASE_TTL_MS / 3);
   heartbeat.unref?.();
 
@@ -120,10 +126,21 @@ export async function preparePluginDataRuntime(input: {
     if (heartbeatError) throw heartbeatError;
   };
   const checkpoint = async ({ releaseLease: shouldRelease }: { releaseLease: boolean }) => {
-    checkpointing = true;
+    if (checkpointStarted) {
+      throw new Error("Plugin data runtime checkpoint has already started.");
+    }
+    checkpointStarted = true;
+    checkpointInProgress = true;
     try {
       assertHealthy();
       for (const entry of entries) {
+        const renewed = await renewLease(entry.lease);
+        if (!renewed) {
+          throw new Error(
+            `Plugin data lease for ${JSON.stringify(entry.lease.pluginName)} was lost before checkpointing.`,
+          );
+        }
+        assertHealthy();
         await checkpointPluginData({
           sandbox: input.sandbox,
           entry,
@@ -131,15 +148,20 @@ export async function preparePluginDataRuntime(input: {
           archiveScript,
           releaseLease: shouldRelease,
         });
+        if (shouldRelease) activeEntries.delete(entry);
       }
-      clearInterval(heartbeat);
+      if (shouldRelease) {
+        clearInterval(heartbeat);
+      }
     } finally {
-      checkpointing = false;
+      checkpointInProgress = false;
     }
   };
   const release = async () => {
     clearInterval(heartbeat);
-    await Promise.all(entries.map((entry) => releaseLease(entry.lease)));
+    const leasedEntries = [...activeEntries];
+    activeEntries.clear();
+    await Promise.all(leasedEntries.map((entry) => releaseLease(entry.lease)));
   };
   return {
     dataRoots: new Map(entries.map((entry) => [entry.lease.pluginName, entry.dataRoot])),

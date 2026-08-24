@@ -1289,6 +1289,12 @@ describe("runCodexChatTurn", () => {
 
   it("detaches without settling the turn and keeps the sandbox alive for handoff", async () => {
     dbMocks.selectRows.push([]);
+    const { pluginPackage, mcpPlugin } = approvedPluginRuntime();
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+      mcpPlugins: [mcpPlugin],
+    });
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
     appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new CodexChatHandoffError());
@@ -1296,7 +1302,7 @@ describe("runCodexChatTurn", () => {
     await expect(
       runCodexChatTurn({
         turn: codexTurn(),
-        session: codexSession(),
+        session: codexSession({ workspaceId: "workspace_1" }),
         env: env(),
       }),
     ).resolves.toBe("handed_off");
@@ -1306,6 +1312,10 @@ describe("runCodexChatTurn", () => {
     expect(projector.finalize).not.toHaveBeenCalled();
     expect(projector.fail).not.toHaveBeenCalled();
     expect(projector.interrupted).not.toHaveBeenCalled();
+    expect(appServerMocks.stopCodexAppServerForPluginCheckpoint).not.toHaveBeenCalled();
+    expect(pluginMcpMocks.stopPluginMcpProcesses).not.toHaveBeenCalled();
+    expect(pluginDataMocks.checkpoint).not.toHaveBeenCalled();
+    expect(pluginDataMocks.release).toHaveBeenCalledOnce();
     expect(sandboxMocks.armSandboxActiveTimeoutById).toHaveBeenCalledWith("sbx_existing");
     expect(sandboxMocks.armSandboxIdleTimeout).not.toHaveBeenCalled();
   });

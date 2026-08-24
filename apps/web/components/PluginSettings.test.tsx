@@ -162,4 +162,24 @@ describe("Plugin settings", () => {
       screen.queryByRole("button", { name: /approve exact package/i }),
     ).not.toBeInTheDocument();
   });
+
+  it("hides approval while disabled but keeps revocation available", () => {
+    const { rerender } = render(
+      <PluginDetail plugin={{ ...plugin, status: "disabled" }} canEdit />,
+    );
+
+    expect(screen.getByText(/enable it before approving/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /approve exact package/i }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <PluginDetail
+        plugin={{ ...plugin, status: "disabled", mcpApprovedIntegrity: plugin.integrity }}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /revoke MCP/i })).toBeInTheDocument();
+  });
 });

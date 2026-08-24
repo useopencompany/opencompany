@@ -233,13 +233,16 @@ export class PostgresPluginRepository implements PluginRepository {
           eq(plugins.workspaceId, input.actor.workspaceId),
           eq(plugins.name, input.name),
           eq(plugins.integrity, input.integrity),
-          inArray(plugins.status, ["enabled", "disabled"]),
+          eq(plugins.status, "enabled"),
         ),
       )
       .returning({ id: plugins.id });
     if (!updated) {
       const plugin = await livePlugin(this.db, input.actor.workspaceId, input.name);
       if (!plugin) throw new CoreError("not_found", "Plugin not found.");
+      if (plugin.status === "disabled") {
+        throw new CoreError("conflict", "The Plugin is disabled. Enable it before approving MCP.");
+      }
       throw new CoreError(
         "conflict",
         "The Plugin package changed before MCP approval. Review the installed package again.",

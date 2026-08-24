@@ -173,6 +173,44 @@ describe("parseMcpConfig", () => {
     });
   });
 
+  test("accepts only bare or plugin-relative stdio commands", () => {
+    const result = parseMcpConfig(
+      mcp({
+        bare: { type: "stdio", command: "node" },
+        pluginRelative: { type: "stdio", command: "./bin/server" },
+        absolute: { type: "stdio", command: "/usr/bin/node" },
+        bareRelative: { type: "stdio", command: "bin/server" },
+        parentRelative: { type: "stdio", command: "../bin/server" },
+      }),
+    );
+
+    expect(result.status).toBe("parsed");
+    if (result.status !== "parsed") return;
+    expect(result.servers.map((server) => server.name)).toEqual(["bare", "pluginRelative"]);
+    expect(result.reports).toEqual([
+      { name: "bare", status: "selected", transport: "stdio" },
+      { name: "pluginRelative", status: "selected", transport: "stdio" },
+      {
+        name: "absolute",
+        status: "invalid",
+        transport: "stdio",
+        reason: "`command` must be a bare executable name or a `./`-relative plugin path.",
+      },
+      {
+        name: "bareRelative",
+        status: "invalid",
+        transport: "stdio",
+        reason: "`command` must be a bare executable name or a `./`-relative plugin path.",
+      },
+      {
+        name: "parentRelative",
+        status: "invalid",
+        transport: "stdio",
+        reason: "`command` must be a bare executable name or a `./`-relative plugin path.",
+      },
+    ]);
+  });
+
   type Disabled = { label: string; json: string; match: RegExp };
   const disabledCases: Disabled[] = [
     { label: "invalid JSON", json: "{oops", match: /not valid JSON/ },

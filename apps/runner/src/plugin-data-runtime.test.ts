@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const repositoryMocks = vi.hoisted(() => ({
   acquire: vi.fn(),
@@ -25,6 +25,14 @@ import { validatePluginDataArchive } from "./plugin-data-archive";
 import { type PluginDataStorage, preparePluginDataRuntime } from "./plugin-data-runtime";
 
 describe("Plugin data runtime", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("restores data after both the sandbox and installed package are replaced", async () => {
     type StoredLease = {
       workspaceId: string;
@@ -160,18 +168,131 @@ describe("Plugin data runtime", () => {
     );
     await replacementRuntime.release();
   });
+
+  it("renews every lease during a checkpoint that exceeds the lease TTL", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-24T12:00:00.000Z"));
+    const initialChecksum = `sha256:${"a".repeat(64)}`;
+    const records = new Map<
+      string,
+      {
+        workspaceId: string;
+        pluginName: string;
+        blobPathname: string;
+        checksum: string;
+        sizeBytes: number;
+        generation: number;
+        leaseId: string;
+        leaseOwner: string;
+        leaseExpiresAt: Date;
+      }
+    >();
+    repositoryMocks.acquire.mockImplementation(async (_db, input) => {
+      const record = {
+        workspaceId: input.workspaceId,
+        pluginName: input.pluginName,
+        blobPathname: `initial/${input.pluginName}.tar`,
+        checksum: initialChecksum,
+        sizeBytes: 0,
+        generation: 0,
+        leaseId: input.leaseId,
+        leaseOwner: input.leaseOwner,
+        leaseExpiresAt: new Date(Date.now() + input.leaseTtlMs),
+      };
+      records.set(input.pluginName, record);
+      return { ...record };
+    });
+    repositoryMocks.renew.mockImplementation(async (_db, input) => {
+      const record = records.get(input.pluginName);
+      if (!record || record.leaseId !== input.leaseId || record.leaseOwner !== input.leaseOwner) {
+        return false;
+      }
+      record.leaseExpiresAt = new Date(Date.now() + input.leaseTtlMs);
+      return true;
+    });
+    repositoryMocks.checkpoint.mockImplementation(async (_db, input) => {
+      const record = records.get(input.pluginName);
+      if (
+        !record ||
+        record.leaseId !== input.leaseId ||
+        record.leaseOwner !== input.leaseOwner ||
+        record.generation !== input.expectedGeneration ||
+        record.leaseExpiresAt.getTime() < Date.now()
+      ) {
+        return null;
+      }
+      const checkpoint = {
+        ...record,
+        blobPathname: input.blobPathname,
+        checksum: input.checksum,
+        sizeBytes: input.sizeBytes,
+        generation: input.expectedGeneration + 1,
+        leaseExpiresAt: new Date(Date.now() + input.leaseTtlMs),
+      };
+      records.set(input.pluginName, checkpoint);
+      return { ...checkpoint };
+    });
+    repositoryMocks.release.mockResolvedValue(true);
+
+    const checkpointArchive = tarFile("state.txt", new TextEncoder().encode("checkpoint"));
+    const sandbox = fakeSandbox(checkpointArchive, {
+      generation: 0,
+      checksum: initialChecksum,
+    });
+    const storage: PluginDataStorage = {
+      upload: vi.fn(async (pathname) => {
+        await new Promise((resolve) => setTimeout(resolve, 70_000));
+        return { pathname };
+      }),
+      download: vi.fn(async () => {
+        throw new Error("matching sandbox state should not be restored");
+      }),
+      delete: vi.fn(async () => undefined),
+    };
+    const runtime = await preparePluginDataRuntime({
+      sandbox: sandbox.sandbox as never,
+      workRoot: "/workspace",
+      workspaceId: "workspace_1",
+      leaseOwner: "coding-session:slow-checkpoint",
+      mcpPlugins: [mcpPlugin("plugin_a", "a", "alpha"), mcpPlugin("plugin_b", "b", "beta")],
+      checkAbort: async () => undefined,
+      storage,
+    });
+
+    const startedAt = Date.now();
+    const checkpoint = runtime.checkpoint({ releaseLease: true });
+    await vi.advanceTimersByTimeAsync(140_000);
+    await expect(checkpoint).resolves.toBeUndefined();
+
+    expect(Date.now() - startedAt).toBeGreaterThan(60_000);
+    expect(repositoryMocks.checkpoint).toHaveBeenCalledTimes(2);
+    expect(repositoryMocks.renew).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ pluginName: "alpha" }),
+    );
+    expect(repositoryMocks.renew).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ pluginName: "beta" }),
+    );
+    await expect(runtime.checkpoint({ releaseLease: true })).rejects.toThrow(
+      "Plugin data runtime checkpoint has already started.",
+    );
+  });
 });
 
-function mcpPlugin(id: string, integrityCharacter: string) {
+function mcpPlugin(id: string, integrityCharacter: string, name = "quality-tools") {
   return {
     id,
-    name: "quality-tools",
+    name,
     integrity: `sha256:${integrityCharacter.repeat(64)}`,
     stdioServers: [{ name: "local", type: "stdio", command: "node", args: [], env: {} }],
   } satisfies EnabledPluginRuntime["mcpPlugins"][number];
 }
 
-function fakeSandbox(checkpointArchive: Uint8Array) {
+function fakeSandbox(
+  checkpointArchive: Uint8Array,
+  restoredState?: { generation: number; checksum: string },
+) {
   const files = new Map<string, string | ArrayBuffer>();
   const restoredArchives: Array<{ path: string; bytes: Uint8Array }> = [];
   return {
@@ -184,6 +305,9 @@ function fakeSandbox(checkpointArchive: Uint8Array) {
         read: vi.fn(async (path: string, options?: { format?: string }) => {
           if (path.includes("plugin-data-checkpoint-") && options?.format === "bytes") {
             return Uint8Array.from(checkpointArchive).buffer;
+          }
+          if (path.includes("/.state-") && restoredState) {
+            return JSON.stringify(restoredState);
           }
           const value = files.get(path);
           if (value === undefined) throw new Error("missing test sandbox file");
