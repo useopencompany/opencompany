@@ -1,10 +1,11 @@
 import type { Harness } from "@opencompany/agent-runtime";
-import type { SandboxHandle } from "./sandbox";
+import { isRetryableCommandStreamError, type SandboxHandle } from "./sandbox";
 
 const ACP_REQUEST_TIMEOUT_MS = 30_000;
 const ACP_ABORT_POLL_INTERVAL_MS = 500;
 const ACP_CANCEL_GRACE_MS = 5_000;
 const ACP_STDERR_TAIL_LIMIT = 4_000;
+const ACP_COMMAND_STREAM_RECONNECT_ATTEMPTS = 3;
 
 export type AcpMcpServer =
   | {
@@ -420,6 +421,7 @@ class AcpJsonRpcClient {
   private failure: Error | null = null;
   private lastStderr = "";
   private processing: Promise<void> = Promise.resolve();
+  private watchGeneration = 0;
   private readonly pending = new Map<
     number | string,
     {
@@ -454,19 +456,7 @@ class AcpJsonRpcClient {
         this.lastStderr = (this.lastStderr + this.input.redact(data)).slice(-ACP_STDERR_TAIL_LIMIT);
       },
     });
-    const handle = this.handle as { wait?: () => Promise<unknown> };
-    if (typeof handle.wait === "function") {
-      void handle.wait().then(
-        () => {
-          if (!this.stopping) {
-            this.fail(new Error(`${this.input.adapterName} ACP adapter exited unexpectedly.`));
-          }
-        },
-        (error) => {
-          if (!this.stopping) this.fail(asError(error));
-        },
-      );
-    }
+    this.watch(this.handle);
   }
 
   async stop() {
@@ -600,6 +590,64 @@ class AcpJsonRpcClient {
       return;
     }
     await this.input.sandbox.commands.sendStdin(pid, data);
+  }
+
+  private watch(handle: unknown) {
+    const wait = readRecord(handle)?.wait;
+    if (typeof wait !== "function") return;
+    const generation = ++this.watchGeneration;
+    void (wait as () => Promise<unknown>).call(handle).then(
+      () => {
+        if (!this.stopping && generation === this.watchGeneration) {
+          this.fail(new Error(`${this.input.adapterName} ACP adapter exited unexpectedly.`));
+        }
+      },
+      (error) => {
+        if (this.stopping || generation !== this.watchGeneration) return;
+        const transportError = asError(error);
+        if (!isRetryableCommandStreamError(transportError)) {
+          this.fail(transportError);
+          return;
+        }
+        void this.reconnect(handle, generation, transportError);
+      },
+    );
+  }
+
+  private async reconnect(handle: unknown, generation: number, streamError: Error) {
+    const pid = commandHandlePid(handle);
+    if (pid == null) {
+      this.fail(streamError);
+      return;
+    }
+
+    for (let attempt = 1; attempt <= ACP_COMMAND_STREAM_RECONNECT_ATTEMPTS; attempt += 1) {
+      if (this.stopping || generation !== this.watchGeneration) return;
+      try {
+        const connected = await this.input.sandbox.commands.connect(pid, {
+          timeoutMs: 0,
+          onStdout: (data: string) => {
+            this.consumeStdout(data);
+          },
+          onStderr: (data: string) => {
+            this.lastStderr = (this.lastStderr + this.input.redact(data)).slice(
+              -ACP_STDERR_TAIL_LIMIT,
+            );
+          },
+        });
+        if (this.stopping || generation !== this.watchGeneration) {
+          await connected.disconnect().catch(() => undefined);
+          return;
+        }
+        this.handle = connected;
+        this.watch(connected);
+        return;
+      } catch {
+        // The original stream error is the actionable failure: it preserves the durable-turn
+        // retry classification if the adapter process cannot be reattached.
+      }
+    }
+    if (!this.stopping && generation === this.watchGeneration) this.fail(streamError);
   }
 
   private fail(error: Error) {
