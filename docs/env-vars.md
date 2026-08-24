@@ -31,7 +31,11 @@ pure-client boundary and must be removed from code before the web database value
 ## Required groups
 
 `scripts/release-preflight.mjs` is the executable source of truth for required web, API, runner, and
-release variables. Important contracts include:
+release variables. When the release group is selected, it also reads the production database and
+reports row counts for the retired `goat.skills` and `goat.chat_session_skills` tables plus counts
+of queued/running Workflow Tasks that contain legacy `skillSnapshots` or lack per-step
+`skillBundleIds` arrays. Any such active Task, or an inspection error, fails preflight. Important
+contracts include:
 
 - Web: WorkOS/AuthKit, canonical URL, shared cookie domain, first-party API origins, the narrow
   runner relay token/URL, cron relay secret, opencompany PostHog, the cached-client Blob adapter, and the
@@ -59,6 +63,10 @@ fix-forward as documented in [Chat operations](./chat-operations.md).
 
 `CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
+
+`BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
+The runner uses it for bounded, durable `PLUGIN_DATA` archives and never injects it into Plugin
+processes.
 
 `OPENCOMPANY_DESKTOP_AUTH_SECRET` is a web-only base64 32-byte key (same convention as
 `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`) that seals the macOS desktop app's Google sign-in handoff

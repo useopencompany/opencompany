@@ -1,4 +1,4 @@
 {
   "title": "opencompany docs",
-  "pages": ["index", "architecture", "brain", "integrations", "docs-workflow"]
+  "pages": ["index", "architecture", "brain", "skills-and-plugins", "integrations", "docs-workflow"]
 }

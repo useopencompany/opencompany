@@ -1583,6 +1583,13 @@
       "when": 1787561374000,
       "tag": "0225_goat_chat_skill_bundle_names",
       "breakpoints": true
+    },
+    {
+      "idx": 226,
+      "version": "7",
+      "when": 1787586941000,
+      "tag": "0226_legacy_skill_cutover",
+      "breakpoints": true
     }
   ]
 }

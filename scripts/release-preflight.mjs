@@ -4,6 +4,7 @@
 // Purpose: validates required release, web, API, runner, and smoke-check environment variables.
 
 import "./load-env.mjs";
+import { inspectLegacySkillCutover } from "./lib/legacy-skill-cutover.mjs";
 
 const groups = {
   web: {
@@ -382,6 +383,44 @@ for (const name of selected) {
 
   if (optionalMissing.length > 0) {
     console.log(`  optional unset: ${optionalMissing.join(", ")}`);
+  }
+}
+
+if (
+  selected.includes("release") &&
+  !isUnset(process.env.PRODUCTION_DATABASE_URL) &&
+  !isPlaceholder(process.env.PRODUCTION_DATABASE_URL)
+) {
+  try {
+    const cutover = await inspectLegacySkillCutover(process.env.PRODUCTION_DATABASE_URL);
+    console.log("\nLegacy Agent Skills cutover");
+    console.log(
+      `  goat.skills rows: ${cutover.skillRows}${cutover.skillsTablePresent ? "" : " (table already dropped)"}`,
+    );
+    console.log(
+      `  goat.chat_session_skills rows: ${cutover.chatSessionSkillRows}${cutover.chatSessionSkillsTablePresent ? "" : " (table already dropped)"}`,
+    );
+    console.log(
+      `  queued/running Workflow Tasks containing skillSnapshots: ${cutover.legacySkillSnapshotTasks}`,
+    );
+    console.log(
+      `  queued/running Workflow Tasks missing step skillBundleIds arrays: ${cutover.missingSkillBundleIdTasks}`,
+    );
+    console.log(
+      `  queued/running legacy-dependent Workflow Tasks (deduplicated): ${cutover.legacyDependentTasks}`,
+    );
+    if (cutover.legacyDependentTasks > 0) {
+      failed = true;
+      console.log(
+        "  complete or cancel every legacy-dependent Workflow Task before deploying this cutover.",
+      );
+    }
+  } catch (error) {
+    failed = true;
+    console.log("\nLegacy Agent Skills cutover");
+    console.log(
+      `  inspection failed: ${error instanceof Error ? error.message : "unknown Postgres error"}`,
+    );
   }
 }
 

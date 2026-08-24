@@ -6298,106 +6298,6 @@
         ],
         "additionalProperties": false
       },
-      "SkillEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/Skill"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "Skill": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256,
-            "example": "run_019fed53"
-          },
-          "slug": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 1024
-          },
-          "instructions": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "draft",
-              "active"
-            ]
-          },
-          "source": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SkillSource"
-              },
-              {
-                "nullable": true
-              }
-            ]
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "slug",
-          "name",
-          "description",
-          "instructions",
-          "status",
-          "source",
-          "createdAt",
-          "updatedAt"
-        ],
-        "additionalProperties": false
-      },
-      "CreateSkillBody": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 1024
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "additionalProperties": false
-      },
       "SkillImportPreviewEnvelope": {
         "type": "object",
         "properties": {
@@ -6870,38 +6770,6 @@
         "required": [
           "data",
           "meta"
-        ],
-        "additionalProperties": false
-      },
-      "UpdateSkillBody": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 1024
-          },
-          "instructions": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "draft",
-              "active"
-            ]
-          }
-        },
-        "required": [
-          "name",
-          "description",
-          "instructions",
-          "status"
         ],
         "additionalProperties": false
       },
@@ -17242,63 +17110,6 @@
             }
           }
         }
-      },
-      "post": {
-        "tags": [
-          "Skills"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "required": true,
-            "name": "idempotency-key",
-            "in": "header"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSkillBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Skill draft created or replayed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
       }
     },
     "/v1/skills/imports/preview": {
@@ -17477,64 +17288,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SkillInstallationEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "Skills"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "slug",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateSkillBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Hand-authored skill updated.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillEnvelope"
                 }
               }
             }

@@ -17,7 +17,6 @@ import {
   type PluginInstallationListItem,
   type PluginRepository,
   type ResolvedPluginPackage,
-  type Skill,
   type SkillBundleRepository,
   SkillImportApplicationService,
   type SkillImportResolver,
@@ -322,13 +321,12 @@ describe("canonical Hono API", () => {
     expect(JSON.stringify(scheduleBody)).not.toMatch(/workos|workspace_id|harness|goat_/iu);
   });
 
-  it("serves Brain, Wiki, and Skill resources through the typed Knowledge boundary", async () => {
+  it("serves Brain and Wiki resources alongside the immutable Skill catalog", async () => {
     const assertBrainAccess = vi.fn(async () => undefined);
     const updateWikiPage = vi.fn(async ({ id }: { id: string }) => ({
       page: fakeWikiPage({ id }),
       transactionIds: [71],
     }));
-    const createSkill = vi.fn(async () => fakeSkill());
     const listSkillCatalog = vi.fn(async () => [
       { id: "research", name: "Research", description: "Find primary sources." },
     ]);
@@ -358,8 +356,6 @@ describe("canonical Hono API", () => {
         documents: [fakeBrainDocument()],
       }),
       updateWikiPage,
-      createSkill,
-      listSkillCatalog,
       listBrainSourceItems,
     });
     const app = testApp(fakeRepository(), {
@@ -437,23 +433,6 @@ describe("canonical Hono API", () => {
         id: "project-alpha",
         body: "# Updated",
         slug: "alpha",
-      }),
-    );
-
-    const skill = await app.request("/v1/skills", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "skill-create-1" },
-      body: JSON.stringify({ name: "Research", description: "Find primary sources." }),
-    });
-    expect(skill.status).toBe(201);
-    await expect(skill.json()).resolves.toMatchObject({
-      data: { slug: "research", status: "draft", source: null },
-    });
-    expect(createSkill).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actor,
-        idempotencyKey: "skill-create-1",
-        name: "Research",
       }),
     );
 
@@ -542,6 +521,29 @@ describe("canonical Hono API", () => {
         bundle,
       }),
     );
+  });
+
+  it("does not expose the retired hand-authored Skill create or edit routes", async () => {
+    const app = testApp(fakeRepository());
+
+    const create = await app.request("/v1/skills", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "legacy-create" },
+      body: JSON.stringify({ name: "Legacy Skill" }),
+    });
+    const update = await app.request("/v1/skills/imported-skill", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Legacy Skill",
+        description: "Retired.",
+        instructions: "Do the thing.",
+        status: "active",
+      }),
+    });
+
+    expect(create.status).toBe(404);
+    expect(update.status).toBe(404);
   });
 
   it("lists, inspects, reads, replaces, disables, and archives Skill installations", async () => {
@@ -4551,24 +4553,6 @@ function baseWikiPage() {
     mimeType: "text/markdown",
     originalFileName: null,
     assetSizeBytes: null,
-    createdAt,
-    updatedAt: createdAt,
-  };
-}
-
-function fakeSkill(overrides: Partial<Skill> = {}): Skill {
-  return { ...baseSkill(), ...overrides };
-}
-
-function baseSkill(): Skill {
-  return {
-    id: "skill_1",
-    slug: "research",
-    name: "Research",
-    description: "Find primary sources.",
-    instructions: "",
-    status: "draft" as const,
-    source: null,
     createdAt,
     updatedAt: createdAt,
   };

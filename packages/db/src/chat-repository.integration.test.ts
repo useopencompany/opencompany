@@ -1757,15 +1757,6 @@ const BASE_SCHEMA = `
     archived_at timestamptz,
     updated_at timestamptz NOT NULL DEFAULT now()
   );
-  CREATE TABLE goat.skills (
-    id text PRIMARY KEY,
-    workspace_id text NOT NULL,
-    slug text NOT NULL,
-    name text NOT NULL,
-    description text NOT NULL DEFAULT '',
-    instructions text NOT NULL DEFAULT '',
-    archived_at timestamptz
-  );
   CREATE TABLE goat.chat_messages (
     id text PRIMARY KEY,
     session_id text NOT NULL REFERENCES goat.chat_sessions(id),
@@ -1836,16 +1827,5 @@ const BASE_SCHEMA = `
     resolved_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
-  );
-  CREATE TABLE goat.chat_session_skills (
-    chat_session_id text NOT NULL REFERENCES goat.chat_sessions(id),
-    skill_id text NOT NULL,
-    brain_ref text NOT NULL,
-    activated_message_id text NOT NULL REFERENCES goat.chat_messages(id),
-    name text NOT NULL,
-    description text NOT NULL,
-    instructions text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (chat_session_id, skill_id)
   );
 `;

@@ -139,6 +139,12 @@ describe("parseSkillDocument: rejected documents", () => {
       match: /Unknown frontmatter field `author`/,
     },
     {
+      label: "legacy command extension",
+      content: "---\nname: foo\ndescription: bar\ncommand: run\n---\nbody",
+      expected: "foo",
+      match: /Unknown frontmatter field `command`/,
+    },
+    {
       label: "metadata with a non-string value",
       content: "---\nname: foo\ndescription: bar\nmetadata:\n  count: 3\n---\nbody",
       expected: "foo",
