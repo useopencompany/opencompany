@@ -154,6 +154,7 @@ describe("parseMcpConfig", () => {
         good: { type: "stdio", command: "server" },
         missingCommand: { type: "stdio" },
         reservedEnv: { type: "stdio", command: "server", env: { PLUGIN_ROOT: "/x" } },
+        runtimeEnv: { type: "stdio", command: "server", env: { PATH: "/untrusted" } },
         unknownTransport: { type: "carrier-pigeon" },
         badUrl: { type: "streamable-http", url: "not-a-url" },
       }),
@@ -166,6 +167,7 @@ describe("parseMcpConfig", () => {
       good: "selected",
       missingCommand: "invalid",
       reservedEnv: "invalid",
+      runtimeEnv: "invalid",
       unknownTransport: "invalid",
       badUrl: "invalid",
     });

@@ -14,6 +14,7 @@ import {
   PackageOpen,
   ServerCog,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -22,12 +23,14 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState, useTransition } from "react";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
+  approveHeadlessPluginMcp,
   archiveHeadlessPlugin,
   deleteHeadlessPluginData,
   disableHeadlessPlugin,
   enableHeadlessPlugin,
   importHeadlessPlugin,
   previewHeadlessPluginImport,
+  revokeHeadlessPluginMcp,
 } from "@/lib/headless-knowledge-commands";
 
 type PluginSkillView = {
@@ -188,7 +191,7 @@ export function PluginDetail({
   return (
     <SettingsContent
       title={plugin.manifest.name}
-      description="An immutable Agent Plugin package. Skills are passive; MCP servers are executable declarations only."
+      description="An immutable Agent Plugin package with passive Skills and separately approved MCP servers."
       backLink={{ href: "/settings/plugins", label: "Plugins" }}
     >
       <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
@@ -204,8 +207,8 @@ export function PluginDetail({
             {plugin.source.url.replace(/^https:\/\//u, "")}
             <ExternalLink size={11} />
           </a>{" "}
-          at {plugin.source.resolvedCommit.slice(0, 7)}. Replacing this package requires archiving
-          it and installing a new package.
+          at commit <span className="font-mono text-[11.5px]">{plugin.source.resolvedCommit}</span>.
+          Replacing this package requires archiving it and installing a new package.
         </span>
       </div>
 
@@ -251,9 +254,57 @@ export function PluginDetail({
 
       <section className="flex flex-col gap-2">
         <SectionLabel>Executable MCP servers ({plugin.stdioServers.length})</SectionLabel>
-        <div className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
-          Installation does not approve or start these processes. MCP execution and approval are not
-          part of this phase.
+        <div
+          className={`rounded-lg border px-3 py-2.5 text-[12.5px] leading-5 ${
+            plugin.mcpApprovedIntegrity === plugin.integrity
+              ? "border-success/30 bg-success/5 text-ink-subtle"
+              : "border-warning/30 bg-warning/5 text-ink-subtle"
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            {plugin.mcpApprovedIntegrity === plugin.integrity ? (
+              <ShieldCheck size={15} className="mt-0.5 shrink-0 text-success" />
+            ) : (
+              <ShieldAlert size={15} className="mt-0.5 shrink-0 text-warning" />
+            )}
+            <span className="min-w-0 flex-1">
+              {plugin.mcpApprovedIntegrity === plugin.integrity
+                ? "Approved for this exact package integrity. Its servers are available on the next coding turn while the plugin is enabled."
+                : "Installation alone never starts these processes. Review every declaration below before approving this exact package integrity."}
+            </span>
+            {canEdit && plugin.stdioServers.length > 0 ? (
+              <button
+                type="button"
+                disabled={isMutating}
+                onClick={() =>
+                  mutate(() =>
+                    plugin.mcpApprovedIntegrity === plugin.integrity
+                      ? revokeHeadlessPluginMcp(plugin.name)
+                      : approveHeadlessPluginMcp(plugin.name, plugin.integrity),
+                  )
+                }
+                className="h-8 shrink-0 rounded-md border border-border bg-surface px-2.5 text-[12px] font-medium text-ink hover:bg-surface-hover disabled:opacity-60"
+              >
+                {plugin.mcpApprovedIntegrity === plugin.integrity
+                  ? "Revoke MCP"
+                  : "Approve exact package"}
+              </button>
+            ) : null}
+          </div>
+          <dl className="mt-2 grid grid-cols-[76px_minmax(0,1fr)] gap-x-2 gap-y-1 border-t border-current/10 pt-2 text-[11.5px]">
+            <dt className="text-ink-faint">Source</dt>
+            <dd className="break-all font-mono text-ink">{plugin.source.url}</dd>
+            <dt className="text-ink-faint">Package path</dt>
+            <dd className="break-all font-mono text-ink">
+              {plugin.source.path || "Repository root"}
+            </dd>
+            <dt className="text-ink-faint">Requested ref</dt>
+            <dd className="break-all font-mono text-ink">{plugin.source.ref}</dd>
+            <dt className="text-ink-faint">Commit</dt>
+            <dd className="break-all font-mono text-ink">{plugin.source.resolvedCommit}</dd>
+            <dt className="text-ink-faint">Integrity</dt>
+            <dd className="break-all font-mono text-ink">{plugin.integrity}</dd>
+          </dl>
         </div>
         {plugin.stdioServers.length === 0 ? (
           <EmptyRow label="No valid stdio MCP servers were declared." />

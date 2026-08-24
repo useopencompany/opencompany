@@ -91,6 +91,51 @@ describe("buildCodexAppServerCommandPlan", () => {
 
     expect(first.fingerprint).not.toBe(second.fingerprint);
   });
+
+  it("includes namespaced Plugin MCP config in daemon reuse decisions", () => {
+    const withoutMcp = buildCodexAppServerCommandPlan({
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+    });
+    const withMcp = buildCodexAppServerCommandPlan({
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      mcpServers: [
+        {
+          name: "quality-tools.local",
+          command: "/usr/bin/sudo",
+          args: ["-n", "-u", "ocp_test", "--", "/launcher.py", "/config.json"],
+          env: [],
+        },
+      ],
+    });
+    const changedMcp = buildCodexAppServerCommandPlan({
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      mcpServers: [
+        {
+          name: "quality-tools.local",
+          command: "/usr/bin/sudo",
+          args: ["-n", "-u", "ocp_test", "--", "/launcher.py", "/changed.json"],
+          env: [],
+        },
+      ],
+    });
+
+    expect(withMcp.config).toContain('[mcp_servers."quality-tools.local"]');
+    expect(withMcp.config).toContain('command = "/usr/bin/sudo"');
+    expect(withoutMcp.fingerprint).not.toBe(withMcp.fingerprint);
+    expect(withMcp.fingerprint).not.toBe(changedMcp.fingerprint);
+  });
 });
 
 describe("createCodexAppServerAccumulator", () => {

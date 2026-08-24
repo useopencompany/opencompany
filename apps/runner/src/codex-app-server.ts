@@ -4,6 +4,7 @@ import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { createLogger } from "@opencompany/observability";
 import { buildCodexConfigForAuth, type CodexCliAuth } from "./codex-cli";
 import { buildGitHubCommandEnv, truncateText } from "./coding-agent-shared";
+import { codexPluginMcpConfig, type PreparedPluginMcpServer } from "./plugin-mcp-launcher";
 import { guardCommandStreamCallbacks, type SandboxHandle } from "./sandbox";
 
 const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
@@ -136,12 +137,13 @@ export function buildCodexAppServerCommandPlan(input: {
   skillFingerprint: string;
   auth: CodexCliAuth;
   githubAuth: CodexGitHubAuth;
+  mcpServers?: PreparedPluginMcpServer[];
 }) {
   const socketPath = `${input.codexHome}/${CODEX_APP_SERVER_SOCKET}`;
   const statePath = `${input.codexHome}/${CODEX_APP_SERVER_STATE}`;
   const proxyPath = `${input.codexHome}/${CODEX_APP_SERVER_PROXY}`;
   const proxyStatePath = `${input.codexHome}/${CODEX_APP_SERVER_PROXY_STATE}`;
-  const config = buildCodexConfigForAuth(input.auth);
+  const config = `${buildCodexConfigForAuth(input.auth)}${codexPluginMcpConfig(input.mcpServers ?? [])}`;
   const codexEnv = {
     CODEX_HOME: input.codexHome,
     ...(input.auth.kind === "api" ? { [input.auth.apiKeyEnvVar]: input.auth.apiKeyValue } : {}),
@@ -206,6 +208,7 @@ export async function runCodexAppServerTurn(input: {
   forceRestartForRecovery?: boolean;
   auth: CodexCliAuth;
   githubAuth: CodexGitHubAuth;
+  mcpServers?: PreparedPluginMcpServer[];
   timeoutMs: number;
   checkAbort: () => Promise<void>;
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
@@ -223,6 +226,7 @@ export async function runCodexAppServerTurn(input: {
     skillFingerprint: input.skillFingerprint,
     auth: input.auth,
     githubAuth: input.githubAuth,
+    ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
   });
   const plan = input.forceRestartForRecovery ? { ...basePlan, forceRestart: true } : basePlan;
 
@@ -238,6 +242,19 @@ export async function runCodexAppServerTurn(input: {
     });
     return await runTurnThroughProxy({ ...input, plan });
   }
+}
+
+export async function stopCodexAppServerForPluginCheckpoint(input: {
+  sandbox: SandboxHandle;
+  codexWorkRoot: string;
+  codexHome: string;
+  skillFingerprint: string;
+  auth: CodexCliAuth;
+  githubAuth: CodexGitHubAuth;
+  mcpServers: PreparedPluginMcpServer[];
+}) {
+  const plan = buildCodexAppServerCommandPlan(input);
+  await stopCodexAppServerDaemon(input.sandbox, plan);
 }
 
 async function ensureCodexAppServerDaemon(input: {

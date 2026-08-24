@@ -1,4 +1,4 @@
-import type { SkillBundleFile } from "@opencompany/core";
+import type { PluginStdioServer, SkillBundleFile } from "@opencompany/core";
 import { CoreError } from "@opencompany/core";
 import { and, eq, inArray } from "drizzle-orm";
 import { chatSessionPlugins, pluginFiles, plugins } from "./product-schema";
@@ -18,6 +18,12 @@ export type ImmutablePluginPackage = {
 export type EnabledPluginRuntime = {
   plugins: ImmutablePluginPackage[];
   skills: ImmutableSkillBundle[];
+  mcpPlugins: Array<{
+    id: string;
+    name: string;
+    integrity: string;
+    stdioServers: PluginStdioServer[];
+  }>;
 };
 
 export async function loadChatSessionPluginRuntime(
@@ -39,11 +45,17 @@ export async function loadEnabledPluginRuntime(
   input: { workspaceId: string; pluginIds: readonly string[] },
 ): Promise<EnabledPluginRuntime> {
   const pluginIds = [...new Set(input.pluginIds)];
-  if (pluginIds.length === 0) return { plugins: [], skills: [] };
+  if (pluginIds.length === 0) return { plugins: [], skills: [], mcpPlugins: [] };
 
   const [pluginRows, fileRows, catalog] = await Promise.all([
     db
-      .select({ id: plugins.id, name: plugins.name })
+      .select({
+        id: plugins.id,
+        name: plugins.name,
+        integrity: plugins.integrity,
+        stdioMcpServers: plugins.stdioMcpServers,
+        mcpApprovedIntegrity: plugins.mcpApprovedIntegrity,
+      })
       .from(plugins)
       .where(
         and(
@@ -90,7 +102,14 @@ export async function loadEnabledPluginRuntime(
     filesByPlugin.set(row.pluginId, files);
   }
 
-  const packages = (pluginRows as Array<{ id: string; name: string }>).map((plugin) => {
+  const typedPluginRows = pluginRows as Array<{
+    id: string;
+    name: string;
+    integrity: string;
+    stdioMcpServers: PluginStdioServer[];
+    mcpApprovedIntegrity: string | null;
+  }>;
+  const packages = typedPluginRows.map((plugin) => {
     const files = filesByPlugin.get(plugin.id);
     if (!files?.length) {
       throw new CoreError(
@@ -99,7 +118,7 @@ export async function loadEnabledPluginRuntime(
       );
     }
     files.sort((left, right) => compareText(left.path, right.path));
-    return { ...plugin, files };
+    return { id: plugin.id, name: plugin.name, files };
   });
   packages.sort((left, right) => compareText(left.name, right.name));
 
@@ -110,7 +129,27 @@ export async function loadEnabledPluginRuntime(
     workspaceId: input.workspaceId,
     bundleIds: winningPluginBundleIds,
   });
-  return { plugins: packages, skills };
+  const mcpPlugins = typedPluginRows.flatMap((plugin) => {
+    if (plugin.mcpApprovedIntegrity === null) return [];
+    if (plugin.mcpApprovedIntegrity !== plugin.integrity) {
+      throw new CoreError(
+        "conflict",
+        `Plugin ${JSON.stringify(plugin.name)} MCP approval does not match its installed package integrity.`,
+      );
+    }
+    return plugin.stdioMcpServers.length > 0
+      ? [
+          {
+            id: plugin.id,
+            name: plugin.name,
+            integrity: plugin.integrity,
+            stdioServers: plugin.stdioMcpServers,
+          },
+        ]
+      : [];
+  });
+  mcpPlugins.sort((left, right) => compareText(left.name, right.name));
+  return { plugins: packages, skills, mcpPlugins };
 }
 
 function compareText(left: string, right: string) {

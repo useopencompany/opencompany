@@ -311,6 +311,25 @@ export async function disableHeadlessPlugin(name: string, options: ClientOptions
   return responseData(response, "Plugin disable failed");
 }
 
+export async function approveHeadlessPluginMcp(
+  name: string,
+  integrity: string,
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.plugins[":name"].mcp.approve.$post({
+    param: { name },
+    json: { integrity },
+  });
+  return responseData(response, "Plugin MCP approval failed");
+}
+
+export async function revokeHeadlessPluginMcp(name: string, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.plugins[":name"].mcp.revoke.$post({
+    param: { name },
+  });
+  return responseData(response, "Plugin MCP revocation failed");
+}
+
 export async function deleteHeadlessPluginData(name: string, options: ClientOptions = {}) {
   const response = await knowledgeClient(options).v1.plugins[":name"].data.delete.$post({
     param: { name },

@@ -1278,6 +1278,22 @@ export function createApiApp(input: CreateApiAppInput) {
       const plugin = await input.pluginImports.setEnabled(actor, c.req.valid("param").name, false);
       return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
     },
+    approvePluginMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const plugin = await input.pluginImports.approveMcp(
+        actor,
+        c.req.valid("param").name,
+        c.req.valid("json").integrity,
+      );
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
+    revokePluginMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const plugin = await input.pluginImports.revokeMcp(actor, c.req.valid("param").name);
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
     deletePluginData: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);

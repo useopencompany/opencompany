@@ -29,7 +29,7 @@ export async function loadWorkflowTaskPluginRuntime(
   harnessSpec: HarnessSpec,
 ): Promise<EnabledPluginRuntime> {
   const workflow = harnessSpec.workflow;
-  if (!workflow) return { plugins: [], skills: [] };
+  if (!workflow) return { plugins: [], skills: [], mcpPlugins: [] };
   const workspaceId = workflow.workspaceId;
   if (!workspaceId) throw new Error("Workflow Task Plugins require a workspace ID.");
   return loadEnabledPluginRuntime(getDb(), {

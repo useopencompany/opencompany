@@ -12758,6 +12758,19 @@
         ],
         "additionalProperties": false
       },
+      "ApprovePluginMcpBody": {
+        "type": "object",
+        "properties": {
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/iu"
+          }
+        },
+        "required": [
+          "integrity"
+        ],
+        "additionalProperties": false
+      },
       "PluginDataDeleteEnvelope": {
         "type": "object",
         "properties": {
@@ -21803,6 +21816,116 @@
         "responses": {
           "200": {
             "description": "Plugin disabled for Skill resolution.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/mcp/approve": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovePluginMcpBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plugin MCP approved for the exact installed package integrity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/mcp/revoke": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin MCP approval revoked.",
             "content": {
               "application/json": {
                 "schema": {

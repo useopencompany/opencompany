@@ -3,6 +3,7 @@ import { RunStreamEventSchema } from "./events";
 import {
   ActionPermissionEnvelopeSchema,
   AddWikiTimelineEntryBodySchema,
+  ApprovePluginMcpBodySchema,
   ArchiveVersionBodySchema,
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
@@ -1384,6 +1385,42 @@ export const disablePluginRoute = createRoute({
   responses: {
     200: {
       description: "Plugin disabled for Skill resolution.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const approvePluginMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/mcp/approve",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ name: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: ApprovePluginMcpBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Plugin MCP approved for the exact installed package integrity.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const revokePluginMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/mcp/revoke",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin MCP approval revoked.",
       content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
     },
     default: errorResponse,
@@ -3314,6 +3351,8 @@ export type V1RouteHandlers = {
   archivePlugin: RouteHandler<typeof archivePluginRoute>;
   enablePlugin: RouteHandler<typeof enablePluginRoute>;
   disablePlugin: RouteHandler<typeof disablePluginRoute>;
+  approvePluginMcp: RouteHandler<typeof approvePluginMcpRoute>;
+  revokePluginMcp: RouteHandler<typeof revokePluginMcpRoute>;
   deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
@@ -3575,6 +3614,8 @@ export function createV1Router(
       .openapi(archivePluginRoute, handlers.archivePlugin)
       .openapi(enablePluginRoute, handlers.enablePlugin)
       .openapi(disablePluginRoute, handlers.disablePlugin)
+      .openapi(approvePluginMcpRoute, handlers.approvePluginMcp)
+      .openapi(revokePluginMcpRoute, handlers.revokePluginMcp)
       .openapi(deletePluginDataRoute, handlers.deletePluginData)
   );
 }
@@ -4498,6 +4539,15 @@ const contractDocumentHandlers: V1RouteHandlers = {
   enablePlugin: (c) => c.json({ data: placeholderPlugin, meta }, 200),
   disablePlugin: (c) =>
     c.json({ data: { ...placeholderPlugin, status: "disabled" as const }, meta }, 200),
+  approvePluginMcp: (c) =>
+    c.json(
+      {
+        data: { ...placeholderPlugin, mcpApprovedIntegrity: placeholderPlugin.integrity },
+        meta,
+      },
+      200,
+    ),
+  revokePluginMcp: (c) => c.json({ data: placeholderPlugin, meta }, 200),
   deletePluginData: (c) =>
     c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),

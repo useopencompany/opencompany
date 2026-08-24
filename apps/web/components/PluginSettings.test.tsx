@@ -7,12 +7,14 @@ const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 vi.mock("@/lib/headless-knowledge-commands", () => ({
+  approveHeadlessPluginMcp: vi.fn(),
   archiveHeadlessPlugin: vi.fn(),
   deleteHeadlessPluginData: vi.fn(),
   disableHeadlessPlugin: vi.fn(),
   enableHeadlessPlugin: vi.fn(),
   importHeadlessPlugin: vi.fn(),
   previewHeadlessPluginImport: vi.fn(),
+  revokeHeadlessPluginMcp: vi.fn(),
 }));
 
 const plugin = {
@@ -24,7 +26,7 @@ const plugin = {
     type: "github" as const,
     url: "https://github.com/example/plugins",
     ref: "main",
-    path: "",
+    path: "plugins/quality-tools",
     resolvedCommit: "a".repeat(40),
   },
   integrity: `sha256:${"b".repeat(64)}`,
@@ -44,6 +46,7 @@ const plugin = {
       type: "stdio" as const,
       command: "./server",
       args: ["--safe"],
+      cwd: "${PLUGIN_DATA}",
       envKeys: ["PRIVATE_TOKEN"],
     },
   ],
@@ -128,15 +131,35 @@ describe("Plugin settings", () => {
     expect(screen.getByText(/1 skill · 1 stdio server/i)).toBeInTheDocument();
   });
 
-  it("separates passive skills, executable declarations, validation, collisions, and data deletion", () => {
+  it("shows the exact MCP approval boundary without exposing environment values", () => {
     render(<PluginDetail plugin={plugin} canEdit />);
 
     expect(screen.getByRole("heading", { name: "Passive skills (1)" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Executable MCP servers (1)" })).toBeInTheDocument();
-    expect(screen.getByText(/does not approve or start/i)).toBeInTheDocument();
+    expect(screen.getByText("https://github.com/example/plugins")).toBeInTheDocument();
+    expect(screen.getByText("plugins/quality-tools")).toBeInTheDocument();
+    expect(screen.getByText("main")).toBeInTheDocument();
+    expect(screen.getAllByText("a".repeat(40))).toHaveLength(2);
+    expect(screen.getAllByText(`sha256:${"b".repeat(64)}`).length).toBeGreaterThan(0);
+    expect(screen.getByText("local")).toBeInTheDocument();
+    expect(screen.getByText("./server")).toBeInTheDocument();
+    expect(screen.getByText("--safe")).toBeInTheDocument();
+    expect(screen.getByText("${PLUGIN_DATA}")).toBeInTheDocument();
+    expect(screen.getByText("PRIVATE_TOKEN")).toBeInTheDocument();
+    expect(screen.queryByText("do-not-expose-env-value")).not.toBeInTheDocument();
     expect(screen.getByText(/Skipped skills\/broken: Name mismatch/i)).toBeInTheDocument();
     expect(screen.getByText(/resolves to the standalone skill/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete data" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /approve exact package/i })).toBeInTheDocument();
+  });
+
+  it("offers revocation only for the currently approved integrity", () => {
+    render(<PluginDetail plugin={{ ...plugin, mcpApprovedIntegrity: plugin.integrity }} canEdit />);
+
+    expect(screen.getByText(/approved for this exact package/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /revoke MCP/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /approve exact package/i }),
+    ).not.toBeInTheDocument();
   });
 });

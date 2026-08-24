@@ -219,7 +219,7 @@ export type McpConfigResult =
   // declared server (selected, unsupported, or skipped-invalid).
   | { status: "parsed"; servers: StdioMcpServer[]; reports: McpServerReport[] };
 
-const RESERVED_ENV_KEYS = new Set(["PLUGIN_ROOT", "PLUGIN_DATA"]);
+const RESERVED_ENV_KEYS = new Set(["PATH", "HOME", "LANG", "PLUGIN_ROOT", "PLUGIN_DATA"]);
 
 function parseStringMap(value: unknown): Record<string, string> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -288,7 +288,7 @@ function validateServer(name: string, value: unknown): McpServerReport {
           name,
           status: "invalid",
           transport: "stdio",
-          reason: "`env` must not declare PLUGIN_ROOT or PLUGIN_DATA.",
+          reason: "`env` must not override the runtime environment.",
         };
       }
       env = parsedEnv;
