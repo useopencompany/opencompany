@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-08-24
+
+### Added
+- AI image generation is now available as a chat capability, so you can create or restyle images from a prompt and an optional reference image, right from chat (#1375) — @opencompany-bot.
+- Grok 4.6 is now available as a chat model (#1392) — @opencompany-bot.
+
+### Changed
+- The macOS desktop app has a redesigned title bar that shows what you're looking at and gives quick access to a new chat, the sidebar, and settings (#1384) — @louis.
+- Recent chats on Home now stay visible for seven days instead of just one (#1383) — @opencompany-bot.
+
+### Fixed
+- Coding sessions now recover automatically from interrupted deploys and dropped command streams instead of getting stuck, and long coding chats load faster (#1370, #1371, #1372, #1373, #1390) — @louis and @opencompany-bot.
+- Terminal and Preview access in coding sandboxes works again for sessions started before a recent update (#1388) — @opencompany-bot.
+- Approving a tool action in an older chat no longer breaks the conversation view (#1386) — @opencompany-bot.
+- Long wiki page link titles are now truncated instead of overflowing (#1389) — @opencompany-bot.
+- Signing in now reliably syncs your account instead of occasionally failing right after login (#1374) — @louis.
+
 ## [1.17.0] - 2026-08-21
 
 ### Added
