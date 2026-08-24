@@ -27,6 +27,7 @@ import {
 } from "@opencompany/core";
 import { type SQL, sql } from "drizzle-orm";
 import type { ChatMessageAttachment } from "./product-schema";
+import { type ResolvedWorkspaceSkill, resolveSkillCandidates } from "./skill-catalog";
 
 export const RUN_EVENT_NOTIFY_CHANNEL = "goat_run_events_v1";
 
@@ -600,6 +601,18 @@ export class PostgresChatRepository implements ChatRepository {
       ...(input.command.settings ?? {}),
       ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
     });
+    const resolvedMentionSkills = await this.resolveMentionedSkills(
+      input.actor.workspaceId,
+      input.command.mentions?.flatMap((mention) =>
+        mention.kind === "skill" ? [mention.id] : [],
+      ) ?? [],
+    );
+    const resolvedMentionSkillsJson = JSON.stringify(
+      resolvedMentionSkills.map((skill) => ({
+        bundle_id: skill.bundleId,
+        source_kind: skill.sourceKind,
+      })),
+    );
     const runtimeModel = input.command.runtimeModel ?? input.command.model;
     const assistantDebugTrace =
       input.command.engine === "opencompany"
@@ -933,26 +946,39 @@ export class PostgresChatRepository implements ChatRepository {
         WHERE (SELECT COUNT(*) FROM claimed_attachments) = ${attachmentIds.length}
         RETURNING id
       ),
+      captured_chat_plugins AS MATERIALIZED (
+        INSERT INTO goat.chat_session_plugins (chat_session_id, plugin_id)
+        SELECT target_chat.id, plugin.id
+        FROM inserted_user_message
+        JOIN target_chat ON true
+        JOIN upserted_runtime ON upserted_runtime.chat_session_id = target_chat.id
+        JOIN goat.plugins AS plugin
+          ON plugin.workspace_id = ${input.actor.workspaceId}
+         AND plugin.status = 'enabled'
+        WHERE ${input.command.engine !== "opencompany"}::boolean
+          AND NOT EXISTS (
+            SELECT 1
+            FROM goat.codex_chat_turns AS prior_coding_turn
+            WHERE prior_coding_turn.chat_session_id = target_chat.id
+          )
+        ON CONFLICT (chat_session_id, plugin_id) DO NOTHING
+        RETURNING plugin_id
+      ),
       activated_skill_bundles AS MATERIALIZED (
         INSERT INTO goat.chat_session_skill_bundles (
           chat_session_id, bundle_id, name, activated_message_id, source_kind
         )
         SELECT
-          target_chat.id, bundle.id, bundle.name, inserted_user_message.id, 'standalone'
+          target_chat.id, bundle.id, bundle.name, inserted_user_message.id,
+          resolved_skill.source_kind
         FROM inserted_user_message
         JOIN target_chat ON true
         CROSS JOIN jsonb_to_recordset(
-          COALESCE(${settingsJson}::jsonb -> 'mentions', '[]'::jsonb)
-        ) AS mention(kind text, id text)
-        JOIN goat.skill_installations AS installation
-          ON mention.kind = 'skill'
-         AND installation.name = mention.id
-         AND installation.workspace_id = ${input.actor.workspaceId}
-         AND installation.enabled
-         AND installation.archived_at IS NULL
+          ${resolvedMentionSkillsJson}::jsonb
+        ) AS resolved_skill(bundle_id text, source_kind text)
         JOIN goat.skill_bundles AS bundle
-          ON bundle.id = installation.bundle_id
-         AND bundle.workspace_id = installation.workspace_id
+          ON bundle.id = resolved_skill.bundle_id
+         AND bundle.workspace_id = ${input.actor.workspaceId}
         WHERE NOT EXISTS (
             SELECT 1
             FROM goat.chat_session_skill_bundles AS fixed
@@ -1634,6 +1660,63 @@ export class PostgresChatRepository implements ChatRepository {
       throw new CoreError("invalid_argument", "Attachment references are not available.");
     }
     return this.options.resolveAttachments({ actor, attachmentIds });
+  }
+
+  private async resolveMentionedSkills(
+    workspaceId: string,
+    mentionedSkillIds: readonly string[],
+  ): Promise<ResolvedWorkspaceSkill[]> {
+    const skillIds = [...new Set(mentionedSkillIds)];
+    if (skillIds.length === 0) return [];
+    const skillIdList = sql.join(
+      skillIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    const candidates = await this.rows<ResolvedWorkspaceSkill>(sql`
+      SELECT
+        installation.name AS id,
+        bundle.id AS "bundleId",
+        bundle.name,
+        bundle.description,
+        bundle.body,
+        'standalone'::text AS "sourceKind",
+        installation.id AS "installationId",
+        NULL::text AS "pluginId",
+        NULL::text AS "pluginName"
+      FROM goat.skill_installations AS installation
+      JOIN goat.skill_bundles AS bundle
+        ON bundle.id = installation.bundle_id
+       AND bundle.workspace_id = installation.workspace_id
+      WHERE installation.workspace_id = ${workspaceId}
+        AND installation.enabled
+        AND installation.archived_at IS NULL
+        AND installation.name IN (${skillIdList})
+      UNION ALL
+      SELECT
+        plugin_skill.skill_name AS id,
+        bundle.id AS "bundleId",
+        bundle.name,
+        bundle.description,
+        bundle.body,
+        'plugin'::text AS "sourceKind",
+        NULL::text AS "installationId",
+        plugin.id AS "pluginId",
+        plugin.name AS "pluginName"
+      FROM goat.plugin_skills AS plugin_skill
+      JOIN goat.plugins AS plugin
+        ON plugin.id = plugin_skill.plugin_id
+       AND plugin.workspace_id = plugin_skill.workspace_id
+      JOIN goat.skill_bundles AS bundle
+        ON bundle.id = plugin_skill.skill_bundle_id
+       AND bundle.workspace_id = plugin_skill.workspace_id
+      WHERE plugin_skill.workspace_id = ${workspaceId}
+        AND plugin.status = 'enabled'
+        AND plugin_skill.skill_name IN (${skillIdList})
+    `);
+    return resolveSkillCandidates(
+      candidates.filter((candidate) => candidate.sourceKind === "standalone"),
+      candidates.filter((candidate) => candidate.sourceKind === "plugin"),
+    ).skills;
   }
 
   private async rows<Row>(query: SQL): Promise<Row[]> {

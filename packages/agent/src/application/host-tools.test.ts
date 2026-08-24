@@ -29,6 +29,7 @@ describe("opencompany Chat Task host tools", () => {
         name: "research",
         description: "Research carefully.",
         instructions: "Current instructions.",
+        sourceKind: "standalone" as const,
       },
     ]);
     const activateAndListSkills = vi.fn(async () => [

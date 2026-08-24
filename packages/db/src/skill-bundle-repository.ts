@@ -28,6 +28,7 @@ import {
   skillBundles,
   skillInstallations,
 } from "./product-schema";
+import { type ResolvedWorkspaceSkill, resolveWorkspaceSkillCatalog } from "./skill-catalog";
 
 type DbClient = any;
 
@@ -214,86 +215,24 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
   async listCatalog(input: {
     actor: Parameters<SkillBundleRepository["listCatalog"]>[0]["actor"];
   }): Promise<InstalledSkillCatalogItem[]> {
-    const [standaloneRows, pluginRows] = await Promise.all([
-      this.db
-        .select({
-          name: skillInstallations.name,
-          bundleName: skillBundles.name,
-          description: skillBundles.description,
-        })
-        .from(skillInstallations)
-        .innerJoin(
-          skillBundles,
-          and(
-            eq(skillBundles.id, skillInstallations.bundleId),
-            eq(skillBundles.workspaceId, skillInstallations.workspaceId),
-          ),
-        )
-        .where(
-          and(
-            eq(skillInstallations.workspaceId, input.actor.workspaceId),
-            eq(skillBundles.workspaceId, input.actor.workspaceId),
-            eq(skillInstallations.enabled, true),
-            isNull(skillInstallations.archivedAt),
-          ),
-        ),
-      this.db
-        .select({
-          name: pluginSkills.skillName,
-          bundleName: skillBundles.name,
-          description: skillBundles.description,
-          pluginName: plugins.name,
-        })
-        .from(pluginSkills)
-        .innerJoin(
-          plugins,
-          and(
-            eq(plugins.id, pluginSkills.pluginId),
-            eq(plugins.workspaceId, pluginSkills.workspaceId),
-          ),
-        )
-        .innerJoin(
-          skillBundles,
-          and(
-            eq(skillBundles.id, pluginSkills.skillBundleId),
-            eq(skillBundles.workspaceId, pluginSkills.workspaceId),
-          ),
-        )
-        .where(
-          and(
-            eq(pluginSkills.workspaceId, input.actor.workspaceId),
-            eq(plugins.workspaceId, input.actor.workspaceId),
-            eq(plugins.status, "enabled"),
-          ),
-        )
-        .orderBy(asc(pluginSkills.skillName), asc(plugins.name)),
-    ]);
-    const winners = new Map<string, InstalledSkillCatalogItem>();
-    for (const row of standaloneRows as Array<{
-      name: string;
-      bundleName: string;
-      description: string;
-    }>) {
-      winners.set(row.name, { id: row.name, name: row.bundleName, description: row.description });
-    }
-    for (const row of pluginRows as Array<{
-      name: string;
-      bundleName: string;
-      description: string;
-      pluginName: string;
-    }>) {
-      if (!winners.has(row.name)) {
-        winners.set(row.name, {
-          id: row.name,
-          name: row.bundleName,
-          description: row.description,
-        });
-      }
-    }
-    return [...winners.values()].sort((left, right) => left.name.localeCompare(right.name));
+    const catalog = await resolveWorkspaceSkillCatalog(this.db, {
+      workspaceId: input.actor.workspaceId,
+    });
+    return catalog.skills.map(({ id, name, description }) => ({ id, name, description }));
   }
 
   async get(input: { actor: Parameters<SkillBundleRepository["get"]>[0]["actor"]; name: string }) {
+    const resolved = await resolvedSkillByName(this.db, input.actor.workspaceId, input.name);
+    if (resolved?.sourceKind === "standalone" && resolved.installationId) {
+      const row = await installationById(this.db, input.actor.workspaceId, resolved.installationId);
+      return row ? hydrateInstallation(this.db, row) : null;
+    }
+    if (resolved?.sourceKind === "plugin") {
+      return hydratePluginSkillInstallation(this.db, input.actor.workspaceId, resolved);
+    }
+
+    // Disabled standalone installations remain inspectable in Settings even though they are not
+    // catalog candidates and therefore do not hide an enabled Plugin Skill.
     const row = await liveInstallation(this.db, input.actor.workspaceId, input.name);
     return row ? hydrateInstallation(this.db, row) : null;
   }
@@ -304,6 +243,12 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
     path: string;
   }): Promise<SkillBundleFile | null> {
     assertSafeStoredPath(input.path);
+    const resolved = await resolvedSkillByName(this.db, input.actor.workspaceId, input.name);
+    const fallbackInstallation = resolved
+      ? null
+      : await liveInstallation(this.db, input.actor.workspaceId, input.name);
+    const bundleId = resolved?.bundleId ?? fallbackInstallation?.bundleId;
+    if (!bundleId) return null;
     const [row] = await this.db
       .select({
         path: skillBundleFiles.path,
@@ -311,25 +256,13 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
         executable: skillBundleFiles.executable,
         sizeBytes: skillBundleFiles.sizeBytes,
       })
-      .from(skillInstallations)
-      .innerJoin(
-        skillBundles,
-        and(
-          eq(skillBundles.id, skillInstallations.bundleId),
-          eq(skillBundles.workspaceId, skillInstallations.workspaceId),
-        ),
-      )
+      .from(skillBundles)
       .innerJoin(
         skillBundleFiles,
-        and(eq(skillBundleFiles.bundleId, skillBundles.id), eq(skillBundleFiles.path, input.path)),
+        and(eq(skillBundleFiles.bundleId, bundleId), eq(skillBundleFiles.path, input.path)),
       )
       .where(
-        and(
-          eq(skillInstallations.workspaceId, input.actor.workspaceId),
-          eq(skillBundles.workspaceId, input.actor.workspaceId),
-          eq(skillInstallations.name, input.name),
-          isNull(skillInstallations.archivedAt),
-        ),
+        and(eq(skillBundles.workspaceId, input.actor.workspaceId), eq(skillBundles.id, bundleId)),
       )
       .limit(1);
     return row
@@ -472,7 +405,7 @@ export async function listChatSkillBundleActivations(
   db: DbClient,
   input: { workspaceId: string; chatSessionId: string },
 ): Promise<ChatSkillBundleActivation[]> {
-  return db
+  const activations = (await db
     .select({
       bundleId: chatSessionSkillBundles.bundleId,
       chatSessionId: chatSessionSkillBundles.chatSessionId,
@@ -490,7 +423,15 @@ export async function listChatSkillBundleActivations(
         eq(skillBundles.workspaceId, input.workspaceId),
       ),
     )
-    .orderBy(asc(skillBundles.name));
+    .orderBy(asc(skillBundles.name))) as ChatSkillBundleActivation[];
+  if (!activations.some((activation) => activation.sourceKind === "plugin")) {
+    return activations;
+  }
+  const enabledPluginBundleIds = await winningPluginBundleIds(db, input.workspaceId);
+  return activations.filter(
+    (activation) =>
+      activation.sourceKind === "standalone" || enabledPluginBundleIds.has(activation.bundleId),
+  );
 }
 
 export async function loadImmutableSkillBundles(
@@ -556,6 +497,8 @@ export async function readChatSkillBundleFile(
   assertSafeStoredPath(input.path);
   const [row] = await db
     .select({
+      bundleId: chatSessionSkillBundles.bundleId,
+      sourceKind: chatSessionSkillBundles.sourceKind,
       path: skillBundleFiles.path,
       content: skillBundleFiles.content,
       executable: skillBundleFiles.executable,
@@ -578,6 +521,10 @@ export async function readChatSkillBundleFile(
       ),
     )
     .limit(1);
+  if (row?.sourceKind === "plugin") {
+    const enabledPluginBundleIds = await winningPluginBundleIds(db, input.workspaceId);
+    if (!enabledPluginBundleIds.has(row.bundleId)) return null;
+  }
   return row
     ? {
         path: row.path,
@@ -586,6 +533,13 @@ export async function readChatSkillBundleFile(
         sizeBytes: row.sizeBytes,
       }
     : null;
+}
+
+async function winningPluginBundleIds(db: DbClient, workspaceId: string) {
+  const catalog = await resolveWorkspaceSkillCatalog(db, { workspaceId });
+  return new Set(
+    catalog.skills.flatMap((skill) => (skill.sourceKind === "plugin" ? [skill.bundleId] : [])),
+  );
 }
 
 export async function storeSkillBundle(
@@ -685,6 +639,72 @@ async function liveInstallation(db: DbClient, workspaceId: string, name: string)
     )
     .limit(1)) as InstallationRow[];
   return row ?? null;
+}
+
+async function resolvedSkillByName(db: DbClient, workspaceId: string, name: string) {
+  const catalog = await resolveWorkspaceSkillCatalog(db, { workspaceId });
+  return catalog.skills.find((skill) => skill.id === name) ?? null;
+}
+
+async function hydratePluginSkillInstallation(
+  db: DbClient,
+  workspaceId: string,
+  skill: ResolvedWorkspaceSkill,
+): Promise<SkillInstallation | null> {
+  if (!skill.pluginId || !skill.pluginName) return null;
+  const [row] = (await db
+    .select({
+      installationWorkspaceId: pluginSkills.workspaceId,
+      installationCreatedAt: plugins.createdAt,
+      installationUpdatedAt: plugins.updatedAt,
+      bundleId: skillBundles.id,
+      integrity: skillBundles.integrity,
+      bundleName: skillBundles.name,
+      description: skillBundles.description,
+      license: skillBundles.license,
+      compatibility: skillBundles.compatibility,
+      metadata: skillBundles.metadata,
+      allowedTools: skillBundles.allowedTools,
+      body: skillBundles.body,
+      sourceType: skillBundles.sourceType,
+      sourceUrl: skillBundles.sourceUrl,
+      sourcePath: skillBundles.sourcePath,
+      sourceRef: skillBundles.sourceRef,
+      resolvedCommit: skillBundles.resolvedCommit,
+      bundleCreatedAt: skillBundles.createdAt,
+    })
+    .from(pluginSkills)
+    .innerJoin(
+      plugins,
+      and(eq(plugins.id, pluginSkills.pluginId), eq(plugins.workspaceId, pluginSkills.workspaceId)),
+    )
+    .innerJoin(
+      skillBundles,
+      and(
+        eq(skillBundles.id, pluginSkills.skillBundleId),
+        eq(skillBundles.workspaceId, pluginSkills.workspaceId),
+      ),
+    )
+    .where(
+      and(
+        eq(pluginSkills.workspaceId, workspaceId),
+        eq(pluginSkills.pluginId, skill.pluginId),
+        eq(pluginSkills.skillName, skill.name),
+        eq(pluginSkills.skillBundleId, skill.bundleId),
+        eq(plugins.status, "enabled"),
+      ),
+    )
+    .limit(1)) as Array<
+    Omit<InstallationRow, "installationId" | "installationName" | "enabled" | "archivedAt">
+  >;
+  if (!row) return null;
+  return hydrateInstallation(db, {
+    ...row,
+    installationId: `plugin_skill:${skill.pluginId}:${skill.name}`,
+    installationName: skill.name,
+    enabled: true,
+    archivedAt: null,
+  });
 }
 
 async function bundleByIntegrity(db: DbClient, workspaceId: string, integrity: string) {

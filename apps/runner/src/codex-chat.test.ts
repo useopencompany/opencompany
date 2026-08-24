@@ -46,6 +46,15 @@ const skillBundleMocks = vi.hoisted(() => ({
   loadImmutableSkillBundles: vi.fn(),
 }));
 
+const pluginRuntimeMocks = vi.hoisted(() => ({
+  loadChatSessionPluginRuntime: vi.fn(),
+  loadEnabledPluginRuntime: vi.fn(),
+}));
+
+const managedPluginMocks = vi.hoisted(() => ({
+  materializePluginPackagesForSession: vi.fn(),
+}));
+
 const eventMocks = vi.hoisted(() => ({
   createCodexChatProjector: vi.fn(),
   loadCodexChatAssistantMessageParts: vi.fn(),
@@ -94,6 +103,16 @@ vi.mock("./db", () => ({
 
 vi.mock("@opencompany/db/skill-bundle-repository", () => ({
   loadImmutableSkillBundles: skillBundleMocks.loadImmutableSkillBundles,
+}));
+
+vi.mock("@opencompany/db/plugin-runtime-repository", () => ({
+  loadChatSessionPluginRuntime: pluginRuntimeMocks.loadChatSessionPluginRuntime,
+  loadEnabledPluginRuntime: pluginRuntimeMocks.loadEnabledPluginRuntime,
+}));
+
+vi.mock("./managed-plugins", () => ({
+  combineManagedArtifactFingerprints: (...fingerprints: string[]) => fingerprints.join(":"),
+  materializePluginPackagesForSession: managedPluginMocks.materializePluginPackagesForSession,
 }));
 
 vi.mock("./github", () => ({
@@ -220,7 +239,17 @@ describe("runCodexChatTurn", () => {
     vi.clearAllMocks();
     dbMocks.selectRows.length = 0;
     dbMocks.execute.mockReset().mockResolvedValue({ rows: [{ id: "updated" }] });
-    skillBundleMocks.loadImmutableSkillBundles.mockResolvedValue([]);
+    skillBundleMocks.loadImmutableSkillBundles.mockReset().mockResolvedValue([]);
+    pluginRuntimeMocks.loadChatSessionPluginRuntime
+      .mockReset()
+      .mockResolvedValue({ plugins: [], skills: [] });
+    pluginRuntimeMocks.loadEnabledPluginRuntime
+      .mockReset()
+      .mockResolvedValue({ plugins: [], skills: [] });
+    managedPluginMocks.materializePluginPackagesForSession.mockReset().mockResolvedValue({
+      fingerprint: "plugins",
+      count: 0,
+    });
     codexAuthMocks.loadCodexCliAuth.mockResolvedValue({
       kind: "api",
       baseUrl: "https://api.openai.test/v1",
@@ -573,12 +602,14 @@ describe("runCodexChatTurn", () => {
       [
         {
           bundleId: "skill_bundle_review_v1",
+          sourceKind: "standalone",
           activatedMessageId: "goat_msg_user_previous",
           workspaceId: "workspace_1",
           activatedAt: new Date("2026-07-10T11:00:00Z"),
         },
         {
           bundleId: "skill_bundle_coding_v1",
+          sourceKind: "standalone",
           activatedMessageId: "goat_msg_user_1",
           workspaceId: "workspace_1",
           activatedAt: new Date("2026-07-10T12:00:00Z"),
@@ -612,7 +643,7 @@ describe("runCodexChatTurn", () => {
     );
     expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
       expect.objectContaining({
-        skillFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+        skillFingerprint: expect.stringMatching(/^[a-f0-9]{64}:plugins$/),
         skills: [
           {
             name: "coding-work",
@@ -620,6 +651,101 @@ describe("runCodexChatTurn", () => {
           },
         ],
       }),
+    );
+  });
+
+  it("drops a snapshotted Plugin Skill when the live Plugin runtime is disabled", async () => {
+    dbMocks.selectRows.push(
+      [],
+      [],
+      [
+        {
+          bundleId: "skill_bundle_plugin_review_v1",
+          sourceKind: "plugin",
+          activatedMessageId: "message_user_1",
+          workspaceId: "workspace_1",
+          activatedAt: new Date("2026-07-10T12:00:00Z"),
+        },
+      ],
+    );
+    skillBundleMocks.loadImmutableSkillBundles.mockResolvedValueOnce([
+      immutableSkillBundle(
+        "skill_bundle_plugin_review_v1",
+        "plugin-review",
+        "disabled plugin document",
+      ),
+    ]);
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [],
+      skills: [],
+    });
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+
+    await runCodexChatTurn({
+      turn: codexTurn(),
+      session: { ...codexSession(), workspaceId: "workspace_1" },
+      env: env(),
+    });
+
+    expect(sandbox.files.write).not.toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/plugin-review/SKILL.md",
+        }),
+      ]),
+    );
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ skills: [] }),
+    );
+  });
+
+  it("auto-mounts winning Plugin Skills and materializes the snapshotted package", async () => {
+    dbMocks.selectRows.push([], [], []);
+    const pluginSkill = immutableSkillBundle(
+      "skill_bundle_plugin_review_v1",
+      "plugin-review",
+      "auto-mounted plugin document",
+    );
+    const pluginPackage = {
+      id: "plugin_review_v1",
+      name: "review-tools",
+      files: [
+        {
+          path: "plugin.json",
+          content: new TextEncoder().encode('{"name":"review-tools"}'),
+          executable: false,
+          sizeBytes: 23,
+        },
+      ],
+    };
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [pluginSkill],
+    });
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+
+    await runCodexChatTurn({
+      turn: codexTurn(),
+      session: { ...codexSession(), workspaceId: "workspace_1" },
+      env: env(),
+    });
+
+    expect(managedPluginMocks.materializePluginPackagesForSession).toHaveBeenCalledWith({
+      sandbox,
+      workRoot: "/home/user/opencompany-goat/codex-chat",
+      plugins: [pluginPackage],
+    });
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/plugin-review/SKILL.md",
+        }),
+      ]),
+    );
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ skills: [] }),
     );
   });
 
@@ -632,12 +758,14 @@ describe("runCodexChatTurn", () => {
       [
         {
           bundleId: "skill_bundle_coding_chat_v1",
+          sourceKind: "standalone",
           activatedMessageId: "goat_msg_user_previous",
           workspaceId: "workspace_1",
           activatedAt: new Date("2026-07-10T11:00:00Z"),
         },
         {
           bundleId: "skill_bundle_chat_v1",
+          sourceKind: "standalone",
           activatedMessageId: "goat_msg_user_1",
           workspaceId: "workspace_1",
           activatedAt: new Date("2026-07-10T12:00:00Z"),
@@ -647,18 +775,18 @@ describe("runCodexChatTurn", () => {
     skillBundleMocks.loadImmutableSkillBundles
       .mockResolvedValueOnce([
         immutableSkillBundle(
+          "skill_bundle_coding_task_v1",
+          "coding-work",
+          "exact immutable workflow document",
+        ),
+      ])
+      .mockResolvedValueOnce([
+        immutableSkillBundle(
           "skill_bundle_coding_chat_v1",
           "coding-work",
           "exact older chat document",
         ),
         immutableSkillBundle("skill_bundle_chat_v1", "chat-skill", "exact chat document"),
-      ])
-      .mockResolvedValueOnce([
-        immutableSkillBundle(
-          "skill_bundle_coding_task_v1",
-          "coding-work",
-          "exact immutable workflow document",
-        ),
       ]);
     appServerMocks.runCodexAppServerTurn.mockResolvedValueOnce({
       sessionId: "thread_existing",
@@ -1413,6 +1541,7 @@ function workflowTaskHarnessSpec(): WorkflowHarnessSpec {
       workspaceId: "workspace_1",
       skillIds: ["research-work", "coding-work"],
       skillBundleIds: ["skill_bundle_research_v1", "skill_bundle_coding_task_v1"],
+      pluginIds: [],
       currentStepIndex: 1,
       completedStepCount: 1,
       steps: [

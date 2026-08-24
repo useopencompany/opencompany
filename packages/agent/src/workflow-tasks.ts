@@ -158,6 +158,9 @@ export function compileWorkflowHarnessSpec(input: {
       systemBlocks: [systemPrompt],
       skillIds: stepSkills.map((skill) => skill.id),
       skillBundleIds: stepSkills.map((skill) => skill.bundleId),
+      pluginSkillBundleIds: stepSkills.flatMap((skill) =>
+        skill.sourceKind === "plugin" ? [skill.bundleId] : [],
+      ),
     };
   });
   const firstStep = steps[0];
@@ -182,6 +185,8 @@ export function compileWorkflowHarnessSpec(input: {
       workspaceId: input.workspaceId,
       skillIds: input.skills.map((skill) => skill.id),
       skillBundleIds: input.skills.map((skill) => skill.bundleId),
+      // Task creation replaces this placeholder with the currently enabled immutable Plugin IDs.
+      pluginIds: [],
       steps,
       currentStepIndex: 0,
       completedStepCount: 0,
