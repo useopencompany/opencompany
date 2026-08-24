@@ -27,6 +27,7 @@ import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
 import { useHydrated } from "@/components/useHydrated";
+import { WikiGitHubRepoPicker, WikiLinearTeamPicker } from "@/components/WikiSourceScopePickers";
 import {
   getHeadlessIntegrationAccounts,
   type HeadlessIntegrationAccountReadModel,
@@ -271,7 +272,14 @@ function WikiSourcesLivePanel({
               pendingIds={pendingIds}
               rowErrors={rowErrors}
               onEnabledChange={updateEnabled}
-              {...(provider.scopeRequired ? { scopeSlot: defaultScopeSlot } : {})}
+              {...(provider.scopeRequired
+                ? {
+                    scopeSlot: (entry: WikiSourceEntry) =>
+                      wikiSourceScopeSlot(provider.id, entry, (source) =>
+                        setSources((current) => mergeSource(current, source)),
+                      ),
+                  }
+                : {})}
             />
           ))}
         </section>
@@ -439,6 +447,36 @@ function defaultScopeSlot(entry: WikiSourceEntry) {
       Scope configuration coming soon
     </div>
   );
+}
+
+function wikiSourceScopeSlot(
+  provider: WikiSourceProvider,
+  entry: WikiSourceEntry,
+  onSaved: (source: WikiSourceDto) => void,
+) {
+  if (entry.status !== "connected") return null;
+  const canConfigure = entry.source?.canConfigure ?? entry.canToggle;
+  if (provider === "linear") {
+    return (
+      <WikiLinearTeamPicker
+        integrationId={entry.integrationId}
+        source={entry.source}
+        canConfigure={canConfigure}
+        onSaved={onSaved}
+      />
+    );
+  }
+  if (provider === "github") {
+    return (
+      <WikiGitHubRepoPicker
+        integrationId={entry.integrationId}
+        source={entry.source}
+        canConfigure={canConfigure}
+        onSaved={onSaved}
+      />
+    );
+  }
+  return defaultScopeSlot(entry);
 }
 
 function WikiSourceCardSkeletons() {

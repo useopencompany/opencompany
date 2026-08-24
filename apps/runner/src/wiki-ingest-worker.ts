@@ -572,10 +572,34 @@ function retryTrace(result: Record<string, unknown>) {
   }
   const modelCostUsdMicros = finiteNumber((budget as Record<string, unknown>).modelCostUsdMicros);
   if (modelCostUsdMicros === undefined) return null;
+  const triage = normalizeWikiIngestTriage(value.triage);
   return {
     model: value.model,
     modelCostUsdMicros,
     usage: usage as Record<string, unknown>,
+    ...(triage ? { triage } : {}),
+  };
+}
+
+function normalizeWikiIngestTriage(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const triage = value as Record<string, unknown>;
+  if (
+    typeof triage.model !== "string" ||
+    (triage.decision !== "skip" && triage.decision !== "ingest") ||
+    !triage.usage ||
+    typeof triage.usage !== "object" ||
+    Array.isArray(triage.usage)
+  ) {
+    return null;
+  }
+  const modelCostUsdMicros = finiteNumber(triage.modelCostUsdMicros);
+  if (modelCostUsdMicros === undefined) return null;
+  return {
+    model: triage.model,
+    decision: triage.decision,
+    modelCostUsdMicros,
+    usage: triage.usage as Record<string, unknown>,
   };
 }
 
@@ -603,6 +627,16 @@ async function debitWikiIngestModelCost(
         attempt: job.attempts,
         modelCostUsdMicros: trace.modelCostUsdMicros,
         usage: trace.usage,
+        ...(trace.triage
+          ? {
+              triage: {
+                model: trace.triage.model,
+                decision: trace.triage.decision,
+                modelCostUsdMicros: trace.triage.modelCostUsdMicros,
+                usage: trace.triage.usage,
+              },
+            }
+          : {}),
       },
       metadata: { wikiIngestJobId: job.id },
     });
@@ -619,12 +653,20 @@ async function debitWikiIngestModelCost(
 function recordWikiIngestModelCost(result: Record<string, unknown>) {
   const trace = retryTrace(result);
   if (!trace) return;
-  const usage = trace.usage;
+  if (trace.triage) {
+    recordWikiIngestModelUsageCost(trace.triage.model, trace.triage.usage);
+  }
+  // A triage skip mirrors its only model call in the top-level trace fields.
+  if (trace.triage?.decision === "skip") return;
+  recordWikiIngestModelUsageCost(trace.model, trace.usage);
+}
+
+function recordWikiIngestModelUsageCost(model: string, usage: Record<string, unknown>) {
   const inputTokens = finiteNumber(usage.inputTokens) ?? 0;
   const inputCacheReadTokens = finiteNumber(usage.cacheReadInputTokens) ?? 0;
   const inputCacheWriteTokens = finiteNumber(usage.cacheWriteInputTokens) ?? 0;
   const cost = calculateModelUsageCost({
-    modelName: trace.model,
+    modelName: model,
     inputTokens,
     inputNoCacheTokens: Math.max(inputTokens - inputCacheReadTokens - inputCacheWriteTokens, 0),
     inputCacheReadTokens,
@@ -634,7 +676,7 @@ function recordWikiIngestModelCost(result: Record<string, unknown>) {
   recordModelCost({
     costUsdMicros: cost.totalCostUsdMicros,
     attributes: {
-      "goat.model": trace.model,
+      "goat.model": model,
       "goat.surface": "wiki_ingest",
     },
   });
