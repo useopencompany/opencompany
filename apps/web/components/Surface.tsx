@@ -34,7 +34,13 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
-import { AnthropicIcon, DeepSeekIcon, MoonshotIcon, OpenAIIcon } from "@opencompany/ui/icons";
+import {
+  AnthropicIcon,
+  DeepSeekIcon,
+  MoonshotIcon,
+  OpenAIIcon,
+  XaiIcon,
+} from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
@@ -6319,6 +6325,9 @@ function ModelProviderIcon({
   if (provider === "openai") {
     return <OpenAIIcon size={size} strokeWidth={strokeWidth} className={className} />;
   }
+  if (provider === "xai") {
+    return <XaiIcon size={size} strokeWidth={strokeWidth} className={className} />;
+  }
   return <Sparkles size={size} strokeWidth={strokeWidth} className={className} />;
 }
 
@@ -6329,6 +6338,7 @@ function modelProviderLabel(id: string) {
   if (provider === "deepseek") return "DeepSeek";
   if (provider === "moonshotai") return "Moonshot";
   if (provider === "openai") return "OpenAI";
+  if (provider === "xai") return "SpaceXAI";
   return provider;
 }
 

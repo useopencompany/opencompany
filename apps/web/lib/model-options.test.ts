@@ -36,6 +36,19 @@ describe("opencompany model options", () => {
     expect(modelContextWindowTokens("alibaba/qwen3.8-max")).toBe(1_000_000);
   });
 
+  it("offers Grok 4.6 in main chat with vision and its full context window", () => {
+    expect(MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "xai/grok-4.6",
+        label: "Grok 4.6",
+        supportsImages: true,
+        supportsReasoning: true,
+      }),
+    );
+    expect(normalizeModel("xai/grok-4.6")).toBe("xai/grok-4.6");
+    expect(modelContextWindowTokens("xai/grok-4.6")).toBe(500_000);
+  });
+
   it("preserves the GLM model used by workflow tasks", () => {
     expect(MODELS).toContainEqual(
       expect.objectContaining({
