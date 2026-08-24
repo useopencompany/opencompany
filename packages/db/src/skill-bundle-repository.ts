@@ -17,7 +17,13 @@ import {
   type SkillInstallationListItem,
 } from "@opencompany/core";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
-import { skillBundleFiles, skillBundles, skillInstallations } from "./product-schema";
+import {
+  pluginSkills,
+  plugins,
+  skillBundleFiles,
+  skillBundles,
+  skillInstallations,
+} from "./product-schema";
 
 type DbClient = any;
 
@@ -87,7 +93,7 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
     );
     try {
       return await this.db.transaction(async (tx: DbClient) => {
-        const bundleId = await ensureBundle(tx, input.actor.workspaceId, input.bundle);
+        const bundleId = await storeSkillBundle(tx, input.actor.workspaceId, input.bundle);
         const replay = await installationById(tx, input.actor.workspaceId, installationId);
         if (replay) {
           if (replay.installationName !== input.bundle.name || replay.bundleId !== bundleId) {
@@ -148,7 +154,7 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
       return await this.db.transaction(async (tx: DbClient) => {
         const current = await liveInstallation(tx, input.actor.workspaceId, input.name);
         if (!current) throw new CoreError("not_found", "Skill not found.");
-        const bundleId = await ensureBundle(tx, input.actor.workspaceId, input.bundle);
+        const bundleId = await storeSkillBundle(tx, input.actor.workspaceId, input.bundle);
         const [updated] = await tx
           .update(skillInstallations)
           .set({ bundleId, updatedAt: new Date() })
@@ -186,34 +192,83 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
   async listCatalog(input: {
     actor: Parameters<SkillBundleRepository["listCatalog"]>[0]["actor"];
   }): Promise<InstalledSkillCatalogItem[]> {
-    const rows = await this.db
-      .select({
-        name: skillInstallations.name,
-        bundleName: skillBundles.name,
-        description: skillBundles.description,
-      })
-      .from(skillInstallations)
-      .innerJoin(
-        skillBundles,
-        and(
-          eq(skillBundles.id, skillInstallations.bundleId),
-          eq(skillBundles.workspaceId, skillInstallations.workspaceId),
+    const [standaloneRows, pluginRows] = await Promise.all([
+      this.db
+        .select({
+          name: skillInstallations.name,
+          bundleName: skillBundles.name,
+          description: skillBundles.description,
+        })
+        .from(skillInstallations)
+        .innerJoin(
+          skillBundles,
+          and(
+            eq(skillBundles.id, skillInstallations.bundleId),
+            eq(skillBundles.workspaceId, skillInstallations.workspaceId),
+          ),
+        )
+        .where(
+          and(
+            eq(skillInstallations.workspaceId, input.actor.workspaceId),
+            eq(skillBundles.workspaceId, input.actor.workspaceId),
+            eq(skillInstallations.enabled, true),
+            isNull(skillInstallations.archivedAt),
+          ),
         ),
-      )
-      .where(
-        and(
-          eq(skillInstallations.workspaceId, input.actor.workspaceId),
-          eq(skillBundles.workspaceId, input.actor.workspaceId),
-          eq(skillInstallations.enabled, true),
-          isNull(skillInstallations.archivedAt),
-        ),
-      )
-      .orderBy(asc(skillInstallations.name));
-    return rows.map((row: { name: string; bundleName: string; description: string }) => ({
-      id: row.name,
-      name: row.bundleName,
-      description: row.description,
-    }));
+      this.db
+        .select({
+          name: pluginSkills.skillName,
+          bundleName: skillBundles.name,
+          description: skillBundles.description,
+          pluginName: plugins.name,
+        })
+        .from(pluginSkills)
+        .innerJoin(
+          plugins,
+          and(
+            eq(plugins.id, pluginSkills.pluginId),
+            eq(plugins.workspaceId, pluginSkills.workspaceId),
+          ),
+        )
+        .innerJoin(
+          skillBundles,
+          and(
+            eq(skillBundles.id, pluginSkills.skillBundleId),
+            eq(skillBundles.workspaceId, pluginSkills.workspaceId),
+          ),
+        )
+        .where(
+          and(
+            eq(pluginSkills.workspaceId, input.actor.workspaceId),
+            eq(plugins.workspaceId, input.actor.workspaceId),
+            eq(plugins.status, "enabled"),
+          ),
+        )
+        .orderBy(asc(pluginSkills.skillName), asc(plugins.name)),
+    ]);
+    const winners = new Map<string, InstalledSkillCatalogItem>();
+    for (const row of standaloneRows as Array<{
+      name: string;
+      bundleName: string;
+      description: string;
+    }>) {
+      winners.set(row.name, { id: row.name, name: row.bundleName, description: row.description });
+    }
+    for (const row of pluginRows as Array<{
+      name: string;
+      bundleName: string;
+      description: string;
+      pluginName: string;
+    }>) {
+      if (!winners.has(row.name)) {
+        winners.set(row.name, {
+          id: row.name,
+          name: row.bundleName,
+          description: row.description,
+        });
+      }
+    }
+    return [...winners.values()].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   async get(input: { actor: Parameters<SkillBundleRepository["get"]>[0]["actor"]; name: string }) {
@@ -307,7 +362,11 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
   }
 }
 
-async function ensureBundle(db: DbClient, workspaceId: string, bundle: ResolvedSkillBundle) {
+export async function storeSkillBundle(
+  db: DbClient,
+  workspaceId: string,
+  bundle: ResolvedSkillBundle,
+) {
   validateResolvedBundle(bundle);
   const recomputed = await computeArtifactIntegrity(bundle.files);
   if (recomputed !== bundle.integrity) {

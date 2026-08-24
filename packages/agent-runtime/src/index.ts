@@ -16,6 +16,7 @@ export * from "./harness-events";
 export * from "./models";
 export * from "./path-safety";
 export * from "./paths";
+export * from "./plugin-resolver";
 export * from "./plugin-spec";
 export * from "./schedules";
 export * from "./skill-resolver";

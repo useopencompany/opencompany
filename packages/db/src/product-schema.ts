@@ -5,6 +5,10 @@ import {
   CHAT_ATTACHMENT_FORMATS,
   type ChatAttachmentFormat,
   type ConversationRuntimeStatus,
+  type PluginInstallReport,
+  type PluginManifest,
+  type PluginStatus,
+  type PluginStdioServer,
   RUN_APPROVAL_STATUSES,
   RUN_ATTEMPT_STATUSES,
   RUN_EVENT_TYPES,
@@ -3084,6 +3088,192 @@ export const skillInstallations = productSchema.table(
   }),
 );
 
+// One immutable Agent Plugin package. Only administrative status and the future integrity-bound
+// MCP approval can change after installation; replacing a package archives this row and inserts a
+// new one. Package bytes and parsed components remain attached to this exact ID.
+export const plugins = productSchema.table(
+  "plugins",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    status: text("status").$type<PluginStatus>().notNull().default("enabled"),
+    manifest: jsonb("manifest").$type<PluginManifest>().notNull(),
+    sourceType: text("source_type").$type<SkillSourceType>().notNull(),
+    sourceUrl: text("source_url").notNull(),
+    sourcePath: text("source_path").notNull(),
+    sourceRef: text("source_ref").notNull(),
+    resolvedCommit: text("resolved_commit").notNull(),
+    integrity: text("integrity").notNull(),
+    stdioMcpServers: jsonb("stdio_mcp_servers")
+      .$type<PluginStdioServer[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    installReport: jsonb("install_report").$type<PluginInstallReport>().notNull(),
+    mcpApprovedIntegrity: text("mcp_approved_integrity"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => ({
+    workspaceIdIdx: uniqueIndex("plugins_workspace_id_idx").on(table.workspaceId, table.id),
+    workspaceLiveNameIdx: uniqueIndex("plugins_workspace_live_name_idx")
+      .on(table.workspaceId, table.name)
+      .where(sql`${table.status} <> 'archived'`),
+    workspaceStatusUpdatedIdx: index("plugins_workspace_status_updated_idx").on(
+      table.workspaceId,
+      table.status,
+      table.updatedAt,
+    ),
+    workspaceIntegrityIdx: index("plugins_workspace_integrity_idx").on(
+      table.workspaceId,
+      table.integrity,
+    ),
+    nameCheck: check(
+      "plugins_name_check",
+      sql`${table.name} ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$' AND char_length(${table.name}) <= 64 AND ${table.name} NOT LIKE '%--%' AND ${table.name} NOT LIKE '%..%'`,
+    ),
+    statusCheck: check(
+      "plugins_status_check",
+      sql`${table.status} IN ('enabled', 'disabled', 'archived')`,
+    ),
+    archiveStatusCheck: check(
+      "plugins_archive_status_check",
+      sql`(${table.status} = 'archived') = (${table.archivedAt} IS NOT NULL)`,
+    ),
+    manifestCheck: check("plugins_manifest_check", sql`jsonb_typeof(${table.manifest}) = 'object'`),
+    sourceTypeCheck: check(
+      "plugins_source_type_check",
+      sql`${table.sourceType} IN ('github', 'skills.sh')`,
+    ),
+    commitCheck: check("plugins_commit_check", sql`${table.resolvedCommit} ~ '^[0-9a-f]{40}$'`),
+    integrityCheck: check(
+      "plugins_integrity_check",
+      sql`${table.integrity} ~ '^sha256:[0-9a-f]{64}$'`,
+    ),
+    stdioMcpServersCheck: check(
+      "plugins_stdio_mcp_servers_check",
+      sql`jsonb_typeof(${table.stdioMcpServers}) = 'array'`,
+    ),
+    installReportCheck: check(
+      "plugins_install_report_check",
+      sql`jsonb_typeof(${table.installReport}) = 'object'`,
+    ),
+    mcpApprovalCheck: check(
+      "plugins_mcp_approval_check",
+      sql`${table.mcpApprovedIntegrity} IS NULL OR ${table.mcpApprovedIntegrity} = ${table.integrity}`,
+    ),
+  }),
+);
+
+export const pluginFiles = productSchema.table(
+  "plugin_files",
+  {
+    pluginId: text("plugin_id")
+      .notNull()
+      .references(() => plugins.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    content: bytea("content").notNull(),
+    executable: boolean("executable").notNull().default(false),
+    sizeBytes: integer("size_bytes").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.pluginId, table.path] }),
+    sizeCheck: check(
+      "plugin_files_size_check",
+      sql`${table.sizeBytes} >= 0 AND ${table.sizeBytes} <= 2097152`,
+    ),
+    contentSizeCheck: check(
+      "plugin_files_content_size_check",
+      sql`octet_length(${table.content}) = ${table.sizeBytes}`,
+    ),
+  }),
+);
+
+export const pluginSkills = productSchema.table(
+  "plugin_skills",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    pluginId: text("plugin_id").notNull(),
+    skillName: text("skill_name").notNull(),
+    skillPath: text("skill_path").notNull(),
+    skillBundleId: text("skill_bundle_id").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.pluginId, table.skillName] }),
+    workspaceNameIdx: index("plugin_skills_workspace_name_idx").on(
+      table.workspaceId,
+      table.skillName,
+      table.pluginId,
+    ),
+    bundleIdx: index("plugin_skills_bundle_idx").on(table.skillBundleId),
+    nameCheck: check(
+      "plugin_skills_name_check",
+      sql`${table.skillName} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND char_length(${table.skillName}) <= 64`,
+    ),
+    pathCheck: check("plugin_skills_path_check", sql`char_length(${table.skillPath}) > 0`),
+    workspacePluginFk: foreignKey({
+      columns: [table.workspaceId, table.pluginId],
+      foreignColumns: [plugins.workspaceId, plugins.id],
+      name: "plugin_skills_workspace_plugin_fk",
+    }).onDelete("cascade"),
+    workspaceBundleFk: foreignKey({
+      columns: [table.workspaceId, table.skillBundleId],
+      foreignColumns: [skillBundles.workspaceId, skillBundles.id],
+      name: "plugin_skills_workspace_bundle_fk",
+    }).onDelete("restrict"),
+  }),
+);
+
+export const workspacePluginData = productSchema.table(
+  "workspace_plugin_data",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    pluginName: text("plugin_name").notNull(),
+    blobPathname: text("blob_pathname").notNull(),
+    checksum: text("checksum").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    generation: bigint("generation", { mode: "number" }).notNull().default(0),
+    leaseId: text("lease_id"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.pluginName] }),
+    blobPathnameIdx: uniqueIndex("workspace_plugin_data_blob_pathname_idx").on(table.blobPathname),
+    leaseExpiryIdx: index("workspace_plugin_data_lease_expiry_idx")
+      .on(table.leaseExpiresAt)
+      .where(sql`${table.leaseExpiresAt} IS NOT NULL`),
+    nameCheck: check(
+      "workspace_plugin_data_name_check",
+      sql`${table.pluginName} ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$' AND char_length(${table.pluginName}) <= 64 AND ${table.pluginName} NOT LIKE '%--%' AND ${table.pluginName} NOT LIKE '%..%'`,
+    ),
+    pathnameCheck: check(
+      "workspace_plugin_data_pathname_check",
+      sql`char_length(${table.blobPathname}) > 0`,
+    ),
+    checksumCheck: check(
+      "workspace_plugin_data_checksum_check",
+      sql`${table.checksum} ~ '^sha256:[0-9a-f]{64}$'`,
+    ),
+    sizeCheck: check(
+      "workspace_plugin_data_size_check",
+      sql`${table.sizeBytes} >= 0 AND ${table.sizeBytes} <= 33554432`,
+    ),
+    generationCheck: check("workspace_plugin_data_generation_check", sql`${table.generation} >= 0`),
+    leaseCheck: check(
+      "workspace_plugin_data_lease_check",
+      sql`(${table.leaseId} IS NULL AND ${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseId} IS NOT NULL AND ${table.leaseOwner} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
+    ),
+  }),
+);
+
 // Workspace-shared bootstrap material for repositories used by the repo-agnostic
 // Codex and Claude Code chat sandboxes. Environment contents are encrypted at
 // rest; envKeys is intentionally limited to plaintext key names for settings UI.
@@ -4028,6 +4218,25 @@ export const chatSessionSkills = productSchema.table(
       table.activatedMessageId,
     ),
     brainIdx: index("goat_chat_session_skills_brain_idx").on(table.brainRef),
+  }),
+);
+
+// Immutable plugin package IDs captured by later runner work. Phase 4 introduces the durable
+// boundary but deliberately leaves snapshot orchestration to its separately owned runner slice.
+export const chatSessionPlugins = productSchema.table(
+  "chat_session_plugins",
+  {
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    pluginId: text("plugin_id")
+      .notNull()
+      .references(() => plugins.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.chatSessionId, table.pluginId] }),
+    pluginIdx: index("chat_session_plugins_plugin_idx").on(table.pluginId),
   }),
 );
 
@@ -5216,6 +5425,8 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   repoConfigs: many(repoConfigs),
   skillBundles: many(skillBundles),
   skillInstallations: many(skillInstallations),
+  plugins: many(plugins),
+  pluginData: many(workspacePluginData),
 }));
 
 export const workspaceBillingRelations = relations(workspaceBilling, ({ one }) => ({
@@ -5777,6 +5988,7 @@ export const chatSessionsRelations = relations(chatSessions, ({ one, many }) => 
   sandboxUsage: many(chatSandboxUsage),
   browserProfileSessions: many(browserProfileSessions),
   skills: many(chatSessionSkills),
+  plugins: many(chatSessionPlugins),
   brainToolRuns: many(brainToolRuns),
   capabilityRuns: many(capabilityRuns),
   artifacts: many(chatArtifacts),
@@ -5894,6 +6106,17 @@ export const chatSessionSkillsRelations = relations(chatSessionSkills, ({ one })
   }),
 }));
 
+export const chatSessionPluginsRelations = relations(chatSessionPlugins, ({ one }) => ({
+  session: one(chatSessions, {
+    fields: [chatSessionPlugins.chatSessionId],
+    references: [chatSessions.id],
+  }),
+  plugin: one(plugins, {
+    fields: [chatSessionPlugins.pluginId],
+    references: [plugins.id],
+  }),
+}));
+
 export const skillBundlesRelations = relations(skillBundles, ({ one, many }) => ({
   workspace: one(workspaces, {
     fields: [skillBundles.workspaceId],
@@ -5901,6 +6124,7 @@ export const skillBundlesRelations = relations(skillBundles, ({ one, many }) => 
   }),
   files: many(skillBundleFiles),
   installations: many(skillInstallations),
+  pluginSkills: many(pluginSkills),
 }));
 
 export const skillBundleFilesRelations = relations(skillBundleFiles, ({ one }) => ({
@@ -5918,6 +6142,41 @@ export const skillInstallationsRelations = relations(skillInstallations, ({ one 
   bundle: one(skillBundles, {
     fields: [skillInstallations.bundleId],
     references: [skillBundles.id],
+  }),
+}));
+
+export const pluginsRelations = relations(plugins, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [plugins.workspaceId],
+    references: [workspaces.id],
+  }),
+  files: many(pluginFiles),
+  skills: many(pluginSkills),
+  chatSessions: many(chatSessionPlugins),
+}));
+
+export const pluginFilesRelations = relations(pluginFiles, ({ one }) => ({
+  plugin: one(plugins, {
+    fields: [pluginFiles.pluginId],
+    references: [plugins.id],
+  }),
+}));
+
+export const pluginSkillsRelations = relations(pluginSkills, ({ one }) => ({
+  plugin: one(plugins, {
+    fields: [pluginSkills.pluginId],
+    references: [plugins.id],
+  }),
+  bundle: one(skillBundles, {
+    fields: [pluginSkills.skillBundleId],
+    references: [skillBundles.id],
+  }),
+}));
+
+export const workspacePluginDataRelations = relations(workspacePluginData, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [workspacePluginData.workspaceId],
+    references: [workspaces.id],
   }),
 }));
 
@@ -5981,9 +6240,14 @@ export type ChatSandboxUsage = typeof chatSandboxUsage.$inferSelect;
 export type BrowserProfile = typeof browserProfiles.$inferSelect;
 export type BrowserProfileSession = typeof browserProfileSessions.$inferSelect;
 export type ChatSessionSkill = typeof chatSessionSkills.$inferSelect;
+export type ChatSessionPlugin = typeof chatSessionPlugins.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;
 export type Skill = typeof skills.$inferSelect;
 export type SkillBundle = typeof skillBundles.$inferSelect;
 export type SkillBundleFile = typeof skillBundleFiles.$inferSelect;
 export type SkillInstallation = typeof skillInstallations.$inferSelect;
+export type Plugin = typeof plugins.$inferSelect;
+export type PluginFile = typeof pluginFiles.$inferSelect;
+export type PluginSkill = typeof pluginSkills.$inferSelect;
+export type WorkspacePluginData = typeof workspacePluginData.$inferSelect;
 export type RepoConfig = typeof repoConfigs.$inferSelect;

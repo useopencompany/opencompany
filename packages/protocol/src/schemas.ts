@@ -1408,6 +1408,213 @@ export const SkillImportPreviewSchema = z
   ])
   .openapi("SkillImportPreview");
 
+export const PluginManifestSchema = z
+  .object({
+    name: z.string().min(1).max(64),
+    version: z.string().optional(),
+    description: z.string().optional(),
+    author: z
+      .object({
+        name: z.string().optional(),
+        email: z.string().optional(),
+        url: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    homepage: z.string().optional(),
+    repository: z.string().optional(),
+    license: z.string().optional(),
+    keywords: z.array(z.string()).optional(),
+    extensions: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict()
+  .openapi("PluginManifest");
+
+export const PluginSourceSchema = SkillSourceSchema.openapi("PluginSource");
+
+export const PluginFileMetadataSchema = z
+  .object({
+    path: z.string().min(1).max(1_024),
+    executable: z.boolean(),
+    sizeBytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(2 * 1024 * 1024),
+  })
+  .strict()
+  .openapi("PluginFileMetadata");
+
+export const PluginImportFileMetadataSchema = PluginFileMetadataSchema.omit({
+  executable: true,
+}).openapi("PluginImportFileMetadata");
+
+export const PluginStdioServerSchema = z
+  .object({
+    name: z.string().min(1),
+    type: z.literal("stdio"),
+    command: z.string().min(1),
+    args: z.array(z.string()),
+    envKeys: z.array(z.string()),
+    cwd: z.string().optional(),
+  })
+  .strict()
+  .openapi("PluginStdioServer");
+
+export const PluginMcpServerReportSchema = z
+  .object({
+    name: z.string(),
+    status: z.enum(["selected", "unsupported", "invalid"]),
+    transport: z.enum(["stdio", "streamable-http", "sse"]).optional(),
+    reason: z.string().optional(),
+  })
+  .strict()
+  .openapi("PluginMcpServerReport");
+
+export const PluginSkillReportSchema = z
+  .discriminatedUnion("status", [
+    z
+      .object({
+        path: z.string().min(1).max(1_024),
+        name: z.string().min(1).max(64),
+        status: z.literal("valid"),
+        integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+      })
+      .strict(),
+    z
+      .object({
+        path: z.string().min(1).max(1_024),
+        name: z.string().min(1).max(64),
+        status: z.literal("skipped"),
+        reason: z.string().min(1),
+      })
+      .strict(),
+  ])
+  .openapi("PluginSkillReport");
+
+export const PluginMcpReportSchema = z
+  .discriminatedUnion("status", [
+    z.object({ status: z.literal("absent") }).strict(),
+    z
+      .object({ present: z.literal(true), status: z.literal("disabled"), reason: z.string() })
+      .strict(),
+    z
+      .object({
+        present: z.literal(true),
+        status: z.literal("parsed"),
+        reports: z.array(PluginMcpServerReportSchema),
+      })
+      .strict(),
+  ])
+  .openapi("PluginMcpReport");
+
+export const PluginSkillCollisionSchema = z
+  .object({
+    skillName: z.string().min(1).max(64),
+    winner: z.discriminatedUnion("source", [
+      z.object({ source: z.literal("standalone") }).strict(),
+      z.object({ source: z.literal("plugin"), pluginName: z.string().min(1).max(64) }).strict(),
+    ]),
+    hiddenPluginNames: z.array(z.string().min(1).max(64)).min(1),
+  })
+  .strict()
+  .openapi("PluginSkillCollision");
+
+export const PluginValidationReportSchema = z
+  .object({
+    ignoredManifestFields: z.array(z.string()),
+    skills: z.array(PluginSkillReportSchema),
+    mcp: PluginMcpReportSchema,
+  })
+  .strict()
+  .openapi("PluginValidationReport");
+
+export const PluginInstallReportSchema = PluginValidationReportSchema.extend({
+  collisions: z.array(PluginSkillCollisionSchema),
+})
+  .strict()
+  .openapi("PluginInstallReport");
+
+export const PluginSkillSummarySchema = z
+  .object({
+    name: z.string().min(1).max(64),
+    path: z.string().min(1).max(1_024),
+    bundleId: ResourceIdSchema,
+    integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+    description: z.string().min(1).max(1_024),
+  })
+  .strict()
+  .openapi("PluginSkillSummary");
+
+const PluginBaseSchema = z
+  .object({
+    id: ResourceIdSchema,
+    name: z.string().min(1).max(64),
+    status: z.enum(["enabled", "disabled", "archived"]),
+    manifest: PluginManifestSchema,
+    source: PluginSourceSchema,
+    integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+    installReport: PluginInstallReportSchema,
+    mcpApprovedIntegrity: z
+      .string()
+      .regex(/^sha256:[0-9a-f]{64}$/u)
+      .nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+    archivedAt: TimestampSchema.nullable(),
+  })
+  .strict();
+
+export const PluginListItemSchema = PluginBaseSchema.extend({
+  fileCount: z.number().int().min(1).max(512),
+  skillCount: z.number().int().min(0),
+  stdioServerCount: z.number().int().min(0),
+})
+  .strict()
+  .openapi("PluginListItem");
+
+export const PluginInstallationSchema = PluginBaseSchema.extend({
+  files: z.array(PluginFileMetadataSchema).min(1).max(512),
+  skills: z.array(PluginSkillSummarySchema),
+  stdioServers: z.array(PluginStdioServerSchema),
+})
+  .strict()
+  .openapi("PluginInstallation");
+
+export const PluginImportPreviewSchema = z
+  .object({
+    manifest: PluginManifestSchema,
+    source: PluginSourceSchema,
+    integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+    files: z.array(PluginImportFileMetadataSchema).min(1).max(512),
+    fileCount: z.number().int().min(1).max(512),
+    totalBytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(16 * 1024 * 1024),
+    skills: z.array(
+      z
+        .object({
+          path: z.string().min(1).max(1_024),
+          name: z.string().min(1).max(64),
+          description: z.string().min(1).max(1_024),
+          integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+          fileCount: z.number().int().min(1).max(64),
+          totalBytes: z
+            .number()
+            .int()
+            .min(0)
+            .max(1024 * 1024),
+        })
+        .strict(),
+    ),
+    stdioServers: z.array(PluginStdioServerSchema),
+    report: PluginValidationReportSchema,
+  })
+  .strict()
+  .openapi("PluginImportPreview");
+
 export const BrainSnapshotEnvelopeSchema = z
   .object({ data: BrainSnapshotSchema, meta: ProtocolMetadataSchema })
   .strict()
@@ -1713,6 +1920,53 @@ export const SkillArchiveEnvelopeSchema = z
   })
   .strict()
   .openapi("SkillArchiveEnvelope");
+
+export const PluginImportPreviewBodySchema = z
+  .object({
+    url: z.string().min(1).max(2_048),
+    selectedPath: z.string().max(512).optional(),
+  })
+  .strict()
+  .openapi("PluginImportPreviewBody");
+export const InstallPluginBodySchema = PluginImportPreviewBodySchema.extend({
+  expectedResolvedCommit: z.string().regex(/^[0-9a-f]{40}$/iu),
+  expectedIntegrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
+})
+  .strict()
+  .openapi("InstallPluginBody");
+export const PluginListEnvelopeSchema = z
+  .object({ data: z.array(PluginListItemSchema), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("PluginListEnvelope");
+export const PluginInstallationEnvelopeSchema = z
+  .object({ data: PluginInstallationSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("PluginInstallationEnvelope");
+export const PluginImportPreviewEnvelopeSchema = z
+  .object({ data: PluginImportPreviewSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("PluginImportPreviewEnvelope");
+export const PluginImportEnvelopeSchema = z
+  .object({
+    data: z.object({ plugin: PluginInstallationSchema, replayed: z.boolean() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PluginImportEnvelope");
+export const PluginArchiveEnvelopeSchema = z
+  .object({
+    data: z.object({ name: z.string().min(1).max(64) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PluginArchiveEnvelope");
+export const PluginDataDeleteEnvelopeSchema = z
+  .object({
+    data: z.object({ name: z.string().min(1).max(64), deleted: z.boolean() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PluginDataDeleteEnvelope");
 
 export const ErrorCodeSchema = z.enum([
   "authentication_required",
@@ -3635,6 +3889,13 @@ export type SkillImportCandidateDto = z.infer<typeof SkillImportCandidateSchema>
 export type SkillImportPreviewDto = z.infer<typeof SkillImportPreviewSchema>;
 export type SkillImportPreviewBody = z.infer<typeof SkillImportPreviewBodySchema>;
 export type ImportSkillBody = z.infer<typeof ImportSkillBodySchema>;
+export type PluginManifestDto = z.infer<typeof PluginManifestSchema>;
+export type PluginSourceDto = z.infer<typeof PluginSourceSchema>;
+export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;
+export type PluginInstallationDto = z.infer<typeof PluginInstallationSchema>;
+export type PluginImportPreviewDto = z.infer<typeof PluginImportPreviewSchema>;
+export type PluginImportPreviewBody = z.infer<typeof PluginImportPreviewBodySchema>;
+export type InstallPluginBody = z.infer<typeof InstallPluginBodySchema>;
 export type CreateWorkflowBody = z.infer<typeof CreateWorkflowBodySchema>;
 export type UpdateWorkflowBody = z.infer<typeof UpdateWorkflowBodySchema>;
 export type ArchiveVersionBody = z.infer<typeof ArchiveVersionBodySchema>;

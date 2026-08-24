@@ -88,6 +88,7 @@ import {
   ImportSkillBodySchema,
   InfisicalAuthFlowEnvelopeSchema,
   InfisicalAuthStatusEnvelopeSchema,
+  InstallPluginBodySchema,
   IntegrationAccountDeleteEnvelopeSchema,
   IntegrationAccountIdSchema,
   IntegrationAccountListEnvelopeSchema,
@@ -106,6 +107,13 @@ import {
   OnboardingStateEnvelopeSchema,
   OnboardingWorkspaceEnvelopeSchema,
   OnboardingWorkspaceSlugEnvelopeSchema,
+  PluginArchiveEnvelopeSchema,
+  PluginDataDeleteEnvelopeSchema,
+  PluginImportEnvelopeSchema,
+  PluginImportPreviewBodySchema,
+  PluginImportPreviewEnvelopeSchema,
+  PluginInstallationEnvelopeSchema,
+  PluginListEnvelopeSchema,
   PresentationCursorSchema,
   PublicChatShareEnvelopeSchema,
   PublicChatShareMetadataEnvelopeSchema,
@@ -1265,6 +1273,133 @@ export const readSkillFileRoute = createRoute({
     200: {
       description: "One bounded chunk of an authorized Skill bundle file.",
       content: { "application/json": { schema: SkillFileChunkEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listPluginsRoute = createRoute({
+  method: "get",
+  path: "/v1/plugins",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Live immutable Plugin packages in the active workspace.",
+      content: { "application/json": { schema: PluginListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const previewPluginImportRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/imports/preview",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: PluginImportPreviewBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Plugin metadata, components, validation report, and file sizes.",
+      content: { "application/json": { schema: PluginImportPreviewEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const importPluginRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/imports",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: { required: true, content: { "application/json": { schema: InstallPluginBodySchema } } },
+  },
+  responses: {
+    201: {
+      description: "Immutable Plugin package installed or replayed after confirmation.",
+      content: { "application/json": { schema: PluginImportEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getPluginRoute = createRoute({
+  method: "get",
+  path: "/v1/plugins/{name}",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin package detail with passive Skills and executable MCP declarations.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const archivePluginRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/archive",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin archived without deleting its immutable package.",
+      content: { "application/json": { schema: PluginArchiveEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const enablePluginRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/enable",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin enabled for Skill resolution.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const disablePluginRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/disable",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin disabled for Skill resolution.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deletePluginDataRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/data/delete",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Persistent data metadata deleted as an explicit destructive action.",
+      content: { "application/json": { schema: PluginDataDeleteEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3172,6 +3307,14 @@ export type V1RouteHandlers = {
   disableSkill: RouteHandler<typeof disableSkillRoute>;
   replaceSkill: RouteHandler<typeof replaceSkillRoute>;
   readSkillFile: RouteHandler<typeof readSkillFileRoute>;
+  listPlugins: RouteHandler<typeof listPluginsRoute>;
+  previewPluginImport: RouteHandler<typeof previewPluginImportRoute>;
+  importPlugin: RouteHandler<typeof importPluginRoute>;
+  getPlugin: RouteHandler<typeof getPluginRoute>;
+  archivePlugin: RouteHandler<typeof archivePluginRoute>;
+  enablePlugin: RouteHandler<typeof enablePluginRoute>;
+  disablePlugin: RouteHandler<typeof disablePluginRoute>;
+  deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -3425,6 +3568,14 @@ export function createV1Router(
       .openapi(createBillingSubscriptionCheckoutRoute, handlers.createBillingSubscriptionCheckout)
       .openapi(createBillingPortalSessionRoute, handlers.createBillingPortalSession)
       .openapi(updateBillingAutoRefillRoute, handlers.updateBillingAutoRefill)
+      .openapi(listPluginsRoute, handlers.listPlugins)
+      .openapi(previewPluginImportRoute, handlers.previewPluginImport)
+      .openapi(importPluginRoute, handlers.importPlugin)
+      .openapi(getPluginRoute, handlers.getPlugin)
+      .openapi(archivePluginRoute, handlers.archivePlugin)
+      .openapi(enablePluginRoute, handlers.enablePlugin)
+      .openapi(disablePluginRoute, handlers.disablePlugin)
+      .openapi(deletePluginDataRoute, handlers.deletePluginData)
   );
 }
 
@@ -3627,6 +3778,64 @@ const placeholderSkillInstallation = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
   bundle: placeholderSkillBundle,
+};
+const placeholderPlugin = {
+  id: "plugin_contract",
+  name: "contract-plugin",
+  status: "enabled" as const,
+  manifest: {
+    name: "contract-plugin",
+    version: "1.0.0",
+    description: "A contract Plugin.",
+  },
+  source: { ...placeholderSkillSource, path: "contract-plugin" },
+  integrity: `sha256:${"c".repeat(64)}`,
+  files: [{ path: "plugin.json", executable: false, sizeBytes: 128 }],
+  skills: [
+    {
+      name: placeholderSkillBundle.name,
+      path: "skills/contract-skill",
+      bundleId: placeholderSkillBundle.id,
+      integrity: placeholderSkillBundle.integrity,
+      description: placeholderSkillBundle.description,
+    },
+  ],
+  stdioServers: [
+    {
+      name: "contract-server",
+      type: "stdio" as const,
+      command: "./server",
+      args: [],
+      envKeys: ["CONTRACT_TOKEN"],
+    },
+  ],
+  installReport: {
+    ignoredManifestFields: [],
+    skills: [
+      {
+        path: "skills/contract-skill",
+        name: "contract-skill",
+        status: "valid" as const,
+        integrity: placeholderSkillBundle.integrity,
+      },
+    ],
+    mcp: {
+      present: true as const,
+      status: "parsed" as const,
+      reports: [
+        {
+          name: "contract-server",
+          status: "selected" as const,
+          transport: "stdio" as const,
+        },
+      ],
+    },
+    collisions: [],
+  },
+  mcpApprovedIntegrity: null,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+  archivedAt: null,
 };
 
 function placeholderAutomationTaskEnvelope() {
@@ -4234,6 +4443,63 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  listPlugins: (c) =>
+    c.json(
+      {
+        data: [
+          {
+            ...placeholderPlugin,
+            files: undefined,
+            skills: undefined,
+            stdioServers: undefined,
+            fileCount: 1,
+            skillCount: 1,
+            stdioServerCount: 1,
+          },
+        ],
+        meta,
+      },
+      200,
+    ),
+  previewPluginImport: (c) =>
+    c.json(
+      {
+        data: {
+          manifest: placeholderPlugin.manifest,
+          source: placeholderPlugin.source,
+          integrity: placeholderPlugin.integrity,
+          files: [{ path: "plugin.json", sizeBytes: 128 }],
+          fileCount: 1,
+          totalBytes: 128,
+          skills: [
+            {
+              path: "skills/contract-skill",
+              name: "contract-skill",
+              description: placeholderSkillBundle.description,
+              integrity: placeholderSkillBundle.integrity,
+              fileCount: 1,
+              totalBytes: 128,
+            },
+          ],
+          stdioServers: placeholderPlugin.stdioServers,
+          report: {
+            ignoredManifestFields: [],
+            skills: placeholderPlugin.installReport.skills,
+            mcp: placeholderPlugin.installReport.mcp,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  importPlugin: (c) => c.json({ data: { plugin: placeholderPlugin, replayed: false }, meta }, 201),
+  getPlugin: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  archivePlugin: (c) => c.json({ data: { name: placeholderPlugin.name }, meta }, 200),
+  enablePlugin: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  disablePlugin: (c) =>
+    c.json({ data: { ...placeholderPlugin, status: "disabled" as const }, meta }, 200),
+  deletePluginData: (c) =>
+    c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>
