@@ -97,14 +97,15 @@ describe("materializeCodexSkillSnapshotsForSession", () => {
     });
     const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
     expect(commands[0]).toContain(
-      "if [ -L '/home/user/workspace/codex/.agents/skills' ] || { [ -e '/home/user/workspace/codex/.agents/skills' ] && [ ! -d '/home/user/workspace/codex/.agents/skills' ]; }; then rm -f '/home/user/workspace/codex/.agents/skills'; fi",
+      "test \"$(realpath -m -- '/home/user/workspace/codex/.agents')\" = '/home/user/workspace/codex/.agents'",
     );
-    expect(commands[0]!.indexOf("if [ -L")).toBeLessThan(commands[0]!.indexOf("mkdir -p"));
+    expect(commands[0]).toContain("test ! -L '/home/user/workspace/codex/.agents'");
+    expect(commands[0]!.indexOf("realpath -m")).toBeLessThan(commands[0]!.indexOf("mkdir -p"));
     expect(commands[0]).toContain("mkdir -p");
     expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills");
     expect(commands[0]).toContain("rm -rf");
     expect(commands[0]).toContain("/home/user/workspace/codex/.agents/skills/byte-golden");
-    expect(commands[1]).toContain("-type f -exec chmod 444");
+    expect(commands.some((command) => command.includes("-type f -exec chmod 444"))).toBe(true);
     expect(
       commands.some(
         (command) => command.includes("chmod 555") && command.includes("scripts/run.sh"),
@@ -131,7 +132,7 @@ describe("materializeCodexSkillSnapshotsForSession", () => {
     const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
     expect(commands.some((command) => command.includes("rm -rf"))).toBe(false);
     expect(commands.at(-1)).toContain("chmod 555 '/home/user/workspace/codex/.agents/skills'");
-    expect(commands).toHaveLength(3);
+    expect(commands).toHaveLength(4);
   });
 
   it("reconciles only opencompany-managed Skill names from the manifest", async () => {

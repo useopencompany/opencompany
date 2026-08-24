@@ -160,6 +160,8 @@ describe("headless protocol", () => {
       "/v1/plugins/{name}/archive",
       "/v1/plugins/{name}/enable",
       "/v1/plugins/{name}/disable",
+      "/v1/plugins/{name}/mcp/approve",
+      "/v1/plugins/{name}/mcp/revoke",
       "/v1/plugins/{name}/data/delete",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");

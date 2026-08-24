@@ -1934,6 +1934,10 @@ export const InstallPluginBodySchema = PluginImportPreviewBodySchema.extend({
 })
   .strict()
   .openapi("InstallPluginBody");
+export const ApprovePluginMcpBodySchema = z
+  .object({ integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu) })
+  .strict()
+  .openapi("ApprovePluginMcpBody");
 export const PluginListEnvelopeSchema = z
   .object({ data: z.array(PluginListItemSchema), meta: ProtocolMetadataSchema })
   .strict()
@@ -3896,6 +3900,7 @@ export type PluginInstallationDto = z.infer<typeof PluginInstallationSchema>;
 export type PluginImportPreviewDto = z.infer<typeof PluginImportPreviewSchema>;
 export type PluginImportPreviewBody = z.infer<typeof PluginImportPreviewBodySchema>;
 export type InstallPluginBody = z.infer<typeof InstallPluginBodySchema>;
+export type ApprovePluginMcpBody = z.infer<typeof ApprovePluginMcpBodySchema>;
 export type CreateWorkflowBody = z.infer<typeof CreateWorkflowBodySchema>;
 export type UpdateWorkflowBody = z.infer<typeof UpdateWorkflowBodySchema>;
 export type ArchiveVersionBody = z.infer<typeof ArchiveVersionBodySchema>;

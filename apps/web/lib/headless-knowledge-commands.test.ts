@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { awaitHeadlessWikiTransactions } from "./headless-knowledge-collections";
 import {
   addHeadlessWikiTimelineEntry,
+  approveHeadlessPluginMcp,
   archiveHeadlessPlugin,
   createHeadlessBrainDocument,
   createHeadlessSkill,
@@ -17,6 +18,7 @@ import {
   previewHeadlessSkillImport,
   readHeadlessSkillFile,
   replaceHeadlessSkill,
+  revokeHeadlessPluginMcp,
   updateHeadlessSkill,
 } from "./headless-knowledge-commands";
 
@@ -257,6 +259,8 @@ describe("headless knowledge commands", () => {
     await importHeadlessPlugin(command, options);
     await enableHeadlessPlugin("quality-tools", options);
     await disableHeadlessPlugin("quality-tools", options);
+    await approveHeadlessPluginMcp("quality-tools", command.expectedIntegrity, options);
+    await revokeHeadlessPluginMcp("quality-tools", options);
     await deleteHeadlessPluginData("quality-tools", options);
     await archiveHeadlessPlugin("quality-tools", options);
 
@@ -266,6 +270,8 @@ describe("headless knowledge commands", () => {
         "POST /v1/plugins/imports",
         "POST /v1/plugins/quality-tools/enable",
         "POST /v1/plugins/quality-tools/disable",
+        "POST /v1/plugins/quality-tools/mcp/approve",
+        "POST /v1/plugins/quality-tools/mcp/revoke",
         "POST /v1/plugins/quality-tools/data/delete",
         "POST /v1/plugins/quality-tools/archive",
       ],

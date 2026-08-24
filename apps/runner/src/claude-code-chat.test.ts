@@ -84,6 +84,18 @@ const managedPluginMocks = vi.hoisted(() => ({
   materializePluginPackagesForSession: vi.fn(),
 }));
 
+const pluginDataMocks = vi.hoisted(() => ({
+  preparePluginDataRuntime: vi.fn(),
+  checkpoint: vi.fn(),
+  release: vi.fn(),
+  assertHealthy: vi.fn(),
+}));
+
+const pluginMcpMocks = vi.hoisted(() => ({
+  materializeTrustedPluginMcpLaunchers: vi.fn(),
+  stopPluginMcpProcesses: vi.fn(),
+}));
+
 const taskMocks = vi.hoisted(() => ({
   buildTaskTerminalProjection: vi.fn(),
   buildTaskTurnCompletion: vi.fn(),
@@ -221,6 +233,15 @@ vi.mock("./managed-plugins", () => ({
   materializePluginPackagesForSession: managedPluginMocks.materializePluginPackagesForSession,
 }));
 
+vi.mock("./plugin-data-runtime", () => ({
+  preparePluginDataRuntime: pluginDataMocks.preparePluginDataRuntime,
+}));
+
+vi.mock("./plugin-mcp-launcher", () => ({
+  materializeTrustedPluginMcpLaunchers: pluginMcpMocks.materializeTrustedPluginMcpLaunchers,
+  stopPluginMcpProcesses: pluginMcpMocks.stopPluginMcpProcesses,
+}));
+
 vi.mock("./workflow-skill-bundles", () => ({
   loadWorkflowTaskPluginRuntime: workflowSkillMocks.loadWorkflowTaskPluginRuntime,
   loadWorkflowTaskSkillBundles: workflowSkillMocks.loadWorkflowTaskSkillBundles,
@@ -315,16 +336,45 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     chatMocks.loadCodexChatSessionSkills.mockResolvedValue([]);
     pluginRuntimeMocks.loadChatSessionPluginRuntime
       .mockReset()
-      .mockResolvedValue({ plugins: [], skills: [] });
+      .mockResolvedValue({ plugins: [], skills: [], mcpPlugins: [] });
     pluginRuntimeMocks.loadEnabledPluginSkillBundleIds.mockReset().mockResolvedValue(new Set());
     workflowSkillMocks.loadWorkflowTaskPluginRuntime
       .mockReset()
-      .mockResolvedValue({ plugins: [], skills: [] });
+      .mockResolvedValue({ plugins: [], skills: [], mcpPlugins: [] });
     workflowSkillMocks.loadWorkflowTaskSkillBundles.mockResolvedValue([]);
     managedPluginMocks.materializePluginPackagesForSession.mockReset().mockResolvedValue({
       fingerprint: "plugins",
       count: 0,
     });
+    pluginDataMocks.preparePluginDataRuntime.mockReset().mockResolvedValue({
+      dataRoots: new Map([["quality-tools", "/plugin-data/quality-tools"]]),
+      checkpoint: pluginDataMocks.checkpoint,
+      release: pluginDataMocks.release,
+      assertHealthy: pluginDataMocks.assertHealthy,
+    });
+    pluginDataMocks.checkpoint.mockReset().mockResolvedValue(undefined);
+    pluginDataMocks.release.mockReset().mockResolvedValue(undefined);
+    pluginDataMocks.assertHealthy.mockReset();
+    pluginMcpMocks.materializeTrustedPluginMcpLaunchers
+      .mockReset()
+      .mockImplementation(async (input: { mcpPlugins: unknown[] }) => {
+        if (input.mcpPlugins.length === 0) {
+          return { servers: [], fingerprint: "no-plugin-mcp", pluginUsers: [] };
+        }
+        return {
+          servers: [
+            {
+              name: "quality-tools.local",
+              command: "/usr/bin/sudo",
+              args: ["-n", "-u", "ocp_test", "--", "/launcher.py", "/config.json"],
+              env: [],
+            },
+          ],
+          fingerprint: "plugin-mcp",
+          pluginUsers: [{ pluginName: "quality-tools", user: "ocp_test" }],
+        };
+      });
+    pluginMcpMocks.stopPluginMcpProcesses.mockReset().mockResolvedValue(undefined);
     chatMocks.loadGitHubAuthForUser.mockResolvedValue(null);
     chatMocks.markCodexChatSandboxTimeoutArmed.mockResolvedValue(undefined);
     chatMocks.materializeCodexChatAttachments.mockResolvedValue({
@@ -428,6 +478,73 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       attemptId: "attempt_1",
       leaseId: "lease_1",
     });
+  });
+
+  it("never prepares or starts MCP for an installed but unapproved Plugin", async () => {
+    await runClaudeCodeChatTurn({
+      turn: claudeTurn(),
+      session: claudeSession(),
+      env: env(),
+    });
+
+    expect(pluginDataMocks.preparePluginDataRuntime).not.toHaveBeenCalled();
+    expect(pluginMcpMocks.materializeTrustedPluginMcpLaunchers).toHaveBeenCalledWith(
+      expect.objectContaining({ mcpPlugins: [], dataRoots: new Map() }),
+    );
+    expect(acpMocks.runTurn).toHaveBeenCalledWith(expect.objectContaining({ mcpServers: [] }));
+  });
+
+  it("threads approved namespaced Plugin MCP servers through ACP and checkpoints data", async () => {
+    const pluginPackage = {
+      id: "plugin_quality_v1",
+      name: "quality-tools",
+      files: [
+        {
+          path: "plugin.json",
+          content: new TextEncoder().encode('{"name":"quality-tools"}'),
+          executable: false,
+          sizeBytes: 24,
+        },
+      ],
+    };
+    const mcpPlugin = {
+      id: pluginPackage.id,
+      name: pluginPackage.name,
+      integrity: `sha256:${"a".repeat(64)}`,
+      stdioServers: [
+        {
+          name: "local",
+          type: "stdio" as const,
+          command: "node",
+          args: ["${PLUGIN_ROOT}/server.mjs"],
+          env: {},
+        },
+      ],
+    };
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+      mcpPlugins: [mcpPlugin],
+    });
+
+    await runClaudeCodeChatTurn({
+      turn: claudeTurn(),
+      session: claudeSession({ workspaceId: "workspace_1" }),
+      env: env(),
+    });
+
+    expect(pluginDataMocks.preparePluginDataRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "workspace_1", mcpPlugins: [mcpPlugin] }),
+    );
+    expect(acpMocks.runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcpServers: [expect.objectContaining({ name: "quality-tools.local", env: [] })],
+      }),
+    );
+    expect(pluginMcpMocks.stopPluginMcpProcesses).toHaveBeenCalledWith(expect.anything(), [
+      { pluginName: "quality-tools", user: "ocp_test" },
+    ]);
+    expect(pluginDataMocks.checkpoint).toHaveBeenCalledWith({ releaseLease: true });
   });
 
   it("always runs Claude through the ACP harness", async () => {
@@ -638,6 +755,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     workflowSkillMocks.loadWorkflowTaskPluginRuntime.mockResolvedValueOnce({
       plugins: [pluginPackage],
       skills: [],
+      mcpPlugins: [],
     });
     pluginRuntimeMocks.loadEnabledPluginSkillBundleIds.mockResolvedValueOnce(
       new Set([pinnedSkill.id]),
@@ -708,6 +826,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
           ],
         },
       ],
+      mcpPlugins: [],
     });
 
     await runClaudeCodeChatTurn({

@@ -220,6 +220,57 @@ export class PostgresPluginRepository implements PluginRepository {
     return hydratePlugin(this.db, row);
   }
 
+  async approveMcp(input: {
+    actor: Parameters<PluginRepository["approveMcp"]>[0]["actor"];
+    name: string;
+    integrity: string;
+  }) {
+    const [updated] = await this.db
+      .update(plugins)
+      .set({ mcpApprovedIntegrity: input.integrity, updatedAt: new Date() })
+      .where(
+        and(
+          eq(plugins.workspaceId, input.actor.workspaceId),
+          eq(plugins.name, input.name),
+          eq(plugins.integrity, input.integrity),
+          inArray(plugins.status, ["enabled", "disabled"]),
+        ),
+      )
+      .returning({ id: plugins.id });
+    if (!updated) {
+      const plugin = await livePlugin(this.db, input.actor.workspaceId, input.name);
+      if (!plugin) throw new CoreError("not_found", "Plugin not found.");
+      throw new CoreError(
+        "conflict",
+        "The Plugin package changed before MCP approval. Review the installed package again.",
+      );
+    }
+    const row = await pluginById(this.db, input.actor.workspaceId, updated.id);
+    if (!row) throw new CoreError("not_found", "Plugin not found.");
+    return hydratePlugin(this.db, row);
+  }
+
+  async revokeMcp(input: {
+    actor: Parameters<PluginRepository["revokeMcp"]>[0]["actor"];
+    name: string;
+  }) {
+    const [updated] = await this.db
+      .update(plugins)
+      .set({ mcpApprovedIntegrity: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(plugins.workspaceId, input.actor.workspaceId),
+          eq(plugins.name, input.name),
+          inArray(plugins.status, ["enabled", "disabled"]),
+        ),
+      )
+      .returning({ id: plugins.id });
+    if (!updated) throw new CoreError("not_found", "Plugin not found.");
+    const row = await pluginById(this.db, input.actor.workspaceId, updated.id);
+    if (!row) throw new CoreError("not_found", "Plugin not found.");
+    return hydratePlugin(this.db, row);
+  }
+
   async archive(input: {
     actor: Parameters<PluginRepository["archive"]>[0]["actor"];
     name: string;
@@ -248,7 +299,7 @@ export class PostgresPluginRepository implements PluginRepository {
     actor: Parameters<PluginRepository["deleteData"]>[0]["actor"];
     name: string;
   }) {
-    const plugin = await livePlugin(this.db, input.actor.workspaceId, input.name);
+    const plugin = await pluginByName(this.db, input.actor.workspaceId, input.name);
     if (!plugin) throw new CoreError("not_found", "Plugin not found.");
     const [data] = await this.db
       .select({
@@ -266,7 +317,6 @@ export class PostgresPluginRepository implements PluginRepository {
       .limit(1);
     if (!data) return { deleted: false };
 
-    await this.pluginDataStorage.delete(data.blobPathname);
     const rows = await this.db
       .delete(workspacePluginData)
       .where(
@@ -279,7 +329,9 @@ export class PostgresPluginRepository implements PluginRepository {
         ),
       )
       .returning({ pluginName: workspacePluginData.pluginName });
-    return { deleted: rows.length > 0 };
+    if (rows.length === 0) return { deleted: false };
+    await this.pluginDataStorage.delete(data.blobPathname);
+    return { deleted: true };
   }
 }
 
@@ -307,6 +359,14 @@ async function livePlugin(db: DbClient, workspaceId: string, name: string) {
         inArray(plugins.status, ["enabled", "disabled"]),
       ),
     )
+    .limit(1)) as PluginRow[];
+  return row ?? null;
+}
+
+async function pluginByName(db: DbClient, workspaceId: string, name: string) {
+  const [row] = (await pluginQuery(db)
+    .where(and(eq(plugins.workspaceId, workspaceId), eq(plugins.name, name)))
+    .orderBy(desc(plugins.updatedAt))
     .limit(1)) as PluginRow[];
   return row ?? null;
 }

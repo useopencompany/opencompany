@@ -39,7 +39,7 @@ import { downloadBlobBytes } from "./attachment-hydration";
 import { createPublishArtifactDynamicTool } from "./chat-artifacts";
 import { loadCodexCliAuth, persistRefreshedCodexAuth } from "./codex";
 import { createCodexActionDynamicTools } from "./codex-action-tools";
-import { runCodexAppServerTurn } from "./codex-app-server";
+import { runCodexAppServerTurn, stopCodexAppServerForPluginCheckpoint } from "./codex-app-server";
 import { createCodexBrainCaptureDynamicTool } from "./codex-brain-capture-tool";
 import { createCodexBrainDynamicTool } from "./codex-brain-tool";
 import {
@@ -72,6 +72,12 @@ import {
   combineManagedArtifactFingerprints,
   materializePluginPackagesForSession,
 } from "./managed-plugins";
+import { type PluginDataRuntime, preparePluginDataRuntime } from "./plugin-data-runtime";
+import {
+  materializeTrustedPluginMcpLaunchers,
+  type PluginMcpLauncherRuntime,
+  stopPluginMcpProcesses,
+} from "./plugin-mcp-launcher";
 import { loadRepositoryBootstrap, stageRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
@@ -331,6 +337,12 @@ export async function runCodexChatTurn(input: {
     const abort = shouldAbort?.();
     if (abort) throw abort;
   };
+  const checkAbort = createTurnAbortCheck({
+    turnId: turn.id,
+    leaseId,
+    leaseOwner,
+    ...(shouldAbort ? { shouldAbort } : {}),
+  });
 
   let recoveryHadPendingInteraction = false;
   const recoveryHadPendingDynamicTool = Boolean(
@@ -351,6 +363,9 @@ export async function runCodexChatTurn(input: {
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
   let authCacheStaged = false;
+  let pluginDataRuntime: PluginDataRuntime | null = null;
+  let pluginMcpRuntime: PluginMcpLauncherRuntime | null = null;
+  let managedRuntimeFingerprint = "";
   let executionStage = "load_attachments";
   try {
     checkExternalAbort();
@@ -385,7 +400,7 @@ export async function runCodexChatTurn(input: {
               workspaceId: session.workspaceId,
               chatSessionId: session.chatSessionId,
             })
-          : Promise.resolve({ plugins: [], skills: [] }),
+          : Promise.resolve({ plugins: [], skills: [], mcpPlugins: [] }),
     ]);
     const workflowPluginSkillBundleIds = taskContext
       ? getWorkflowHarnessPluginSkillBundleIds(taskContext.harnessSpec)
@@ -434,6 +449,32 @@ export async function runCodexChatTurn(input: {
       })),
     });
     checkExternalAbort();
+    if (pluginRuntime.mcpPlugins.length > 0) {
+      if (!skillWorkspaceId) throw new Error("Approved Plugin MCP requires a workspace ID.");
+      executionStage = "restore_plugin_data";
+      pluginDataRuntime = await preparePluginDataRuntime({
+        sandbox,
+        workRoot: CODEX_CHAT_WORKDIR,
+        workspaceId: skillWorkspaceId,
+        leaseOwner: `coding-session:${session.id}`,
+        mcpPlugins: pluginRuntime.mcpPlugins,
+        blobToken: env.blobReadWriteToken,
+        checkAbort,
+      });
+    }
+    executionStage = "configure_plugin_mcp";
+    pluginMcpRuntime = await materializeTrustedPluginMcpLaunchers({
+      sandbox,
+      workRoot: CODEX_CHAT_WORKDIR,
+      mcpPlugins: pluginRuntime.mcpPlugins,
+      dataRoots: pluginDataRuntime?.dataRoots ?? new Map(),
+    });
+    managedRuntimeFingerprint = combineManagedArtifactFingerprints(
+      codexSkills.fingerprint,
+      codexPlugins.fingerprint,
+      pluginMcpRuntime.fingerprint,
+    );
+    checkExternalAbort();
     const invokedSkills = turnSkills.invokedSkillIds.map((skillId) => ({
       name: skillId,
       path: `${CODEX_CHAT_WORKDIR}/.agents/skills/${skillId}/SKILL.md`,
@@ -447,12 +488,10 @@ export async function runCodexChatTurn(input: {
     });
     checkExternalAbort();
 
-    const checkAbort = createTurnAbortCheck({
-      turnId: turn.id,
-      leaseId,
-      leaseOwner,
-      ...(shouldAbort ? { shouldAbort } : {}),
-    });
+    const checkRuntimeAbort = async () => {
+      pluginDataRuntime?.assertHealthy();
+      await checkAbort();
+    };
     const actionHostToolsEnabled = isActionHostToolContractVersion(session.hostToolContractVersion);
     const brainToolEnabled =
       Boolean(session.brainRef) &&
@@ -555,10 +594,8 @@ export async function runCodexChatTurn(input: {
       sandbox,
       codexWorkRoot: CODEX_CHAT_WORKDIR,
       codexHome: CODEX_CHAT_HOME,
-      skillFingerprint: combineManagedArtifactFingerprints(
-        codexSkills.fingerprint,
-        codexPlugins.fingerprint,
-      ),
+      skillFingerprint: managedRuntimeFingerprint,
+      mcpServers: pluginMcpRuntime.servers,
       skills: invokedSkills,
       task: buildTask(emptyCodingChatHistory()),
       prepareBootstrapTurn: async () => {
@@ -591,7 +628,7 @@ export async function runCodexChatTurn(input: {
         githubAuthHeader: github?.githubAuthHeader ?? null,
       },
       timeoutMs: env.codexTimeoutMs,
-      checkAbort,
+      checkAbort: checkRuntimeAbort,
       detachOnAbort: (error) => error instanceof CodexChatHandoffError,
       onRuntimeEvents: (events) => projector.push(events),
       onEngineSessionId: (codexThreadId) =>
@@ -638,6 +675,25 @@ export async function runCodexChatTurn(input: {
       },
       onActivity: async () => undefined,
     });
+
+    if (pluginDataRuntime && pluginMcpRuntime) {
+      executionStage = "checkpoint_plugin_data";
+      await stopCodexAppServerForPluginCheckpoint({
+        sandbox,
+        codexWorkRoot: CODEX_CHAT_WORKDIR,
+        codexHome: CODEX_CHAT_HOME,
+        skillFingerprint: managedRuntimeFingerprint,
+        auth,
+        githubAuth: {
+          githubToken: github?.githubToken ?? null,
+          githubAuthHeader: github?.githubAuthHeader ?? null,
+        },
+        mcpServers: pluginMcpRuntime.servers,
+      });
+      await stopPluginMcpProcesses(sandbox, pluginMcpRuntime.pluginUsers);
+      await pluginDataRuntime.checkpoint({ releaseLease: true });
+      pluginDataRuntime = null;
+    }
 
     executionStage = "finalize";
     if (summary.sessionId && summary.sessionId !== session.codexThreadId) {
@@ -709,12 +765,54 @@ export async function runCodexChatTurn(input: {
   } catch (error) {
     // A setup operation can finish or time out after shutdown requested a handoff. Prefer the
     // current ownership signal over that stale operation result so the next runner can recover it.
-    const effectiveError =
+    let effectiveError =
       error instanceof CodexChatHandoffError ||
       error instanceof CodexChatInterruptedError ||
       error instanceof CodexChatLeaseLostError
         ? error
         : (shouldAbort?.() ?? error);
+    if (pluginDataRuntime && pluginMcpRuntime) {
+      const dataRuntime = pluginDataRuntime;
+      const mcpRuntime = pluginMcpRuntime;
+      const handedOff = effectiveError instanceof CodexChatHandoffError;
+      try {
+        executionStage = "checkpoint_plugin_data";
+        if (!handedOff) {
+          await stopCodexAppServerForPluginCheckpoint({
+            sandbox,
+            codexWorkRoot: CODEX_CHAT_WORKDIR,
+            codexHome: CODEX_CHAT_HOME,
+            skillFingerprint: managedRuntimeFingerprint,
+            auth,
+            githubAuth: {
+              githubToken: github?.githubToken ?? null,
+              githubAuthHeader: github?.githubAuthHeader ?? null,
+            },
+            mcpServers: mcpRuntime.servers,
+          });
+          await stopPluginMcpProcesses(sandbox, mcpRuntime.pluginUsers);
+        }
+        await dataRuntime.checkpoint({ releaseLease: !handedOff });
+        pluginDataRuntime = null;
+      } catch (checkpointError) {
+        captureException(checkpointError, {
+          event: "opencompany.goat_plugin_data_checkpoint_failed",
+          turn_id: turn.id,
+        });
+        logger.warn("Failed to checkpoint Plugin data", {
+          event: "opencompany.goat_plugin_data_checkpoint_failed",
+          turn_id: turn.id,
+          error: redact(errorMessage(checkpointError)),
+        });
+        await dataRuntime.release().catch(() => undefined);
+        pluginDataRuntime = null;
+        if (!handedOff) {
+          effectiveError = new Error(
+            `The coding turn ended, but Plugin data checkpointing failed: ${errorMessage(checkpointError)}`,
+          );
+        }
+      }
+    }
     if (effectiveError instanceof CodexChatHandoffError) {
       outcome = "handed_off";
       await projector.cancelPendingInteractions();
@@ -749,6 +847,15 @@ export async function runCodexChatTurn(input: {
       }
     }
   } finally {
+    if (pluginDataRuntime) {
+      await pluginDataRuntime.release().catch((error) => {
+        captureException(error, {
+          event: "opencompany.goat_plugin_data_lease_release_failed",
+          turn_id: turn.id,
+        });
+      });
+      pluginDataRuntime = null;
+    }
     if (authCacheStaged) {
       await persistRefreshedCodexAuth({
         sandbox,

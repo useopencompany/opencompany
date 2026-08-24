@@ -84,6 +84,12 @@ import {
   reconcileInfisicalSandboxAuth,
 } from "./infisical-sandbox-auth";
 import { materializePluginPackagesForSession } from "./managed-plugins";
+import { type PluginDataRuntime, preparePluginDataRuntime } from "./plugin-data-runtime";
+import {
+  materializeTrustedPluginMcpLaunchers,
+  type PluginMcpLauncherRuntime,
+  stopPluginMcpProcesses,
+} from "./plugin-mcp-launcher";
 import { loadRepositoryBootstrap, stageRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
@@ -380,6 +386,8 @@ export async function runClaudeCodeChatTurn(input: {
 
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
+  let pluginDataRuntime: PluginDataRuntime | null = null;
+  let pluginMcpRuntime: PluginMcpLauncherRuntime | null = null;
   // A recovery run may not replay the raw assistant event that requested this wakeup, so restore
   // the request persisted by the previous worker before resuming the Claude session.
   let scheduledWakeup = scheduledWakeupFromTurnSettings(turn.settings);
@@ -430,7 +438,7 @@ export async function runClaudeCodeChatTurn(input: {
               workspaceId: session.workspaceId,
               chatSessionId: session.chatSessionId,
             })
-          : Promise.resolve({ plugins: [], skills: [] }),
+          : Promise.resolve({ plugins: [], skills: [], mcpPlugins: [] }),
     ]);
     const workflowPluginSkillBundleIds = taskContext
       ? getWorkflowHarnessPluginSkillBundleIds(taskContext.harnessSpec)
@@ -477,6 +485,27 @@ export async function runClaudeCodeChatTurn(input: {
           executable: file.executable,
         })),
       })),
+    });
+    await checkAbort();
+    if (pluginRuntime.mcpPlugins.length > 0) {
+      if (!skillWorkspaceId) throw new Error("Approved Plugin MCP requires a workspace ID.");
+      executionStage = "restore_plugin_data";
+      pluginDataRuntime = await preparePluginDataRuntime({
+        sandbox,
+        workRoot: CLAUDE_CHAT_WORKDIR,
+        workspaceId: skillWorkspaceId,
+        leaseOwner: `coding-session:${session.id}`,
+        mcpPlugins: pluginRuntime.mcpPlugins,
+        blobToken: env.blobReadWriteToken,
+        checkAbort,
+      });
+    }
+    executionStage = "configure_plugin_mcp";
+    pluginMcpRuntime = await materializeTrustedPluginMcpLaunchers({
+      sandbox,
+      workRoot: CLAUDE_CHAT_WORKDIR,
+      mcpPlugins: pluginRuntime.mcpPlugins,
+      dataRoots: pluginDataRuntime?.dataRoots ?? new Map(),
     });
     await checkAbort();
     const invokedSkillPaths = turnSkills.invokedSkillIds.map(
@@ -545,12 +574,15 @@ export async function runClaudeCodeChatTurn(input: {
     await checkAbort();
 
     executionStage = "configure_mcp";
-    const acpMcpServers = actionGatewayTicket
-      ? buildClaudeActionsAcpMcpServers({
-          runnerPublicUrl: env.runnerPublicUrl,
-          ticket: actionGatewayTicket,
-        })
-      : [];
+    const acpMcpServers = [
+      ...(actionGatewayTicket
+        ? buildClaudeActionsAcpMcpServers({
+            runnerPublicUrl: env.runnerPublicUrl,
+            ticket: actionGatewayTicket,
+          })
+        : []),
+      ...pluginMcpRuntime.servers,
+    ];
     await checkAbort();
     let sessionIdPersisted = false;
     const persistEngineSessionId = async () => {
@@ -601,7 +633,10 @@ export async function runClaudeCodeChatTurn(input: {
         permissionMode: "bypassPermissions",
         timeoutMs: env.codexTimeoutMs,
         redact,
-        checkAbort,
+        checkAbort: async () => {
+          pluginDataRuntime?.assertHealthy();
+          await checkAbort();
+        },
         onEngineSessionId: async (sessionId) => {
           acpNormalizer.beginRun(sessionId);
           await persistEngineSessionId();
@@ -639,6 +674,12 @@ export async function runClaudeCodeChatTurn(input: {
     };
 
     const acpResult = await runAcpOnce(resumeSessionId, task);
+    if (pluginDataRuntime && pluginMcpRuntime) {
+      executionStage = "checkpoint_plugin_data";
+      await stopPluginMcpProcesses(sandbox, pluginMcpRuntime.pluginUsers);
+      await pluginDataRuntime.checkpoint({ releaseLease: true });
+      pluginDataRuntime = null;
+    }
     const stderrTail = acpResult.stderrTail;
     let summary: AcpTurnSummary | null = acpNormalizer.summary();
 
@@ -781,12 +822,40 @@ export async function runClaudeCodeChatTurn(input: {
       }
     }
   } catch (error) {
-    const effectiveError =
+    let effectiveError =
       error instanceof CodexChatHandoffError ||
       error instanceof CodexChatInterruptedError ||
       error instanceof CodexChatLeaseLostError
         ? error
         : (shouldAbort?.() ?? error);
+    if (pluginDataRuntime && pluginMcpRuntime) {
+      const dataRuntime = pluginDataRuntime;
+      const mcpRuntime = pluginMcpRuntime;
+      const handedOff = effectiveError instanceof CodexChatHandoffError;
+      try {
+        executionStage = "checkpoint_plugin_data";
+        await stopPluginMcpProcesses(sandbox, mcpRuntime.pluginUsers);
+        await dataRuntime.checkpoint({ releaseLease: true });
+        pluginDataRuntime = null;
+      } catch (checkpointError) {
+        captureException(checkpointError, {
+          event: "opencompany.goat_plugin_data_checkpoint_failed",
+          turn_id: turn.id,
+        });
+        logger.warn("Failed to checkpoint Plugin data", {
+          event: "opencompany.goat_plugin_data_checkpoint_failed",
+          turn_id: turn.id,
+          error: redact(errorMessage(checkpointError)),
+        });
+        await dataRuntime.release().catch(() => undefined);
+        pluginDataRuntime = null;
+        if (!handedOff) {
+          effectiveError = new Error(
+            `The coding turn ended, but Plugin data checkpointing failed: ${errorMessage(checkpointError)}`,
+          );
+        }
+      }
+    }
     if (effectiveError instanceof CodexChatHandoffError) {
       // In-flight ACP prompts cannot be reattached; the replacement runner reclaims the
       // turn and reruns it with the recovery prompt against the persisted sandbox.
@@ -830,6 +899,15 @@ export async function runClaudeCodeChatTurn(input: {
       });
     }
   } finally {
+    if (pluginDataRuntime) {
+      await pluginDataRuntime.release().catch((error) => {
+        captureException(error, {
+          event: "opencompany.goat_plugin_data_lease_release_failed",
+          turn_id: turn.id,
+        });
+      });
+      pluginDataRuntime = null;
+    }
     // The sandbox outlives the turn so the next message reuses warm files and the
     // persisted ~/.claude session store.
     const idleTimeoutMs =

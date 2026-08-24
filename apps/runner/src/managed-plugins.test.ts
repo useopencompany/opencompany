@@ -76,9 +76,10 @@ describe("materializePluginPackagesForSession", () => {
     ]);
     const commands = sandbox.commands.run.mock.calls.map(([command]) => String(command));
     expect(commands[0]).toContain(
-      "if [ -L '/home/user/workspace/codex/.opencompany/plugins' ] || { [ -e '/home/user/workspace/codex/.opencompany/plugins' ] && [ ! -d '/home/user/workspace/codex/.opencompany/plugins' ]; }; then rm -f '/home/user/workspace/codex/.opencompany/plugins'; fi",
+      "test \"$(realpath -m -- '/home/user/workspace/codex/.opencompany')\" = '/home/user/workspace/codex/.opencompany'",
     );
-    expect(commands[0]!.indexOf("if [ -L")).toBeLessThan(commands[0]!.indexOf("mkdir -p"));
+    expect(commands[0]).toContain("test ! -L '/home/user/workspace/codex/.opencompany'");
+    expect(commands[0]!.indexOf("realpath -m")).toBeLessThan(commands[0]!.indexOf("mkdir -p"));
     expect(commands.some((command) => command.includes("-type d -exec chmod 555"))).toBe(true);
     expect(commands.some((command) => command.includes("-type f -exec chmod 444"))).toBe(true);
     expect(

@@ -40,6 +40,10 @@
       "types": "./src/plugin-runtime-repository.ts",
       "default": "./src/plugin-runtime-repository.ts"
     },
+    "./plugin-data-runtime-repository": {
+      "types": "./src/plugin-data-runtime-repository.ts",
+      "default": "./src/plugin-data-runtime-repository.ts"
+    },
     "./skill-catalog": {
       "types": "./src/skill-catalog.ts",
       "default": "./src/skill-catalog.ts"

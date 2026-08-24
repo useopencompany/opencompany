@@ -213,7 +213,7 @@ describe("Postgres immutable Plugin repository", () => {
     await repository.setStatus({ actor: actor(), name: "quality-tools", status: "disabled" });
     await expect(
       loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
-    ).resolves.toEqual({ plugins: [], skills: [] });
+    ).resolves.toEqual({ plugins: [], skills: [], mcpPlugins: [] });
 
     await repository.setStatus({ actor: actor(), name: "quality-tools", status: "enabled" });
     await repository.archive({ actor: actor(), name: "quality-tools" });
@@ -225,7 +225,93 @@ describe("Postgres immutable Plugin repository", () => {
     expect(replacement.plugin.id).not.toBe(installed.plugin.id);
     await expect(
       loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
-    ).resolves.toEqual({ plugins: [], skills: [] });
+    ).resolves.toEqual({ plugins: [], skills: [], mcpPlugins: [] });
+  });
+
+  it("starts MCP only for the exact approved package and clears approval on revoke or replacement", async () => {
+    const installed = await repository.install({
+      actor: actor(),
+      idempotencyKey: "mcp-runtime-plugin",
+      plugin: await resolvedPlugin("quality-tools", "review", "MCP runtime version.", {
+        mcp: true,
+      }),
+    });
+    await database.query(
+      "INSERT INTO goat.chat_session_plugins (chat_session_id, plugin_id) VALUES ($1, $2)",
+      ["chat_1", installed.plugin.id],
+    );
+    const db = drizzle(database);
+
+    await expect(
+      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+    ).resolves.toMatchObject({ mcpPlugins: [] });
+    await expect(
+      repository.approveMcp({
+        actor: actor(),
+        name: "quality-tools",
+        integrity: `sha256:${"f".repeat(64)}`,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    const approved = await repository.approveMcp({
+      actor: actor(),
+      name: "quality-tools",
+      integrity: installed.plugin.integrity,
+    });
+    expect(approved.mcpApprovedIntegrity).toBe(installed.plugin.integrity);
+    await expect(
+      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+    ).resolves.toMatchObject({
+      mcpPlugins: [
+        {
+          id: installed.plugin.id,
+          name: "quality-tools",
+          integrity: installed.plugin.integrity,
+          stdioServers: [
+            {
+              name: "local",
+              command: "node",
+              args: ["${PLUGIN_ROOT}/server.mjs"],
+              cwd: "${PLUGIN_DATA}",
+              env: { CACHE_DIR: "${PLUGIN_DATA}/cache", PUBLIC_MODE: "safe" },
+              type: "stdio",
+            },
+          ],
+        },
+      ],
+    });
+
+    const revoked = await repository.revokeMcp({ actor: actor(), name: "quality-tools" });
+    expect(revoked.mcpApprovedIntegrity).toBeNull();
+    await expect(
+      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+    ).resolves.toMatchObject({ mcpPlugins: [] });
+
+    await repository.approveMcp({
+      actor: actor(),
+      name: "quality-tools",
+      integrity: installed.plugin.integrity,
+    });
+    await repository.archive({ actor: actor(), name: "quality-tools" });
+    const replacement = await repository.install({
+      actor: actor(),
+      idempotencyKey: "mcp-runtime-plugin-replacement",
+      plugin: await resolvedPlugin("quality-tools", "review", "Replacement MCP runtime.", {
+        mcp: true,
+      }),
+    });
+    await database.query(
+      "UPDATE goat.chat_session_plugins SET plugin_id = $1 WHERE chat_session_id = $2",
+      [replacement.plugin.id, "chat_1"],
+    );
+    expect(replacement.plugin.integrity).not.toBe(installed.plugin.integrity);
+    expect(replacement.plugin.mcpApprovedIntegrity).toBeNull();
+    await expect(
+      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+    ).resolves.toMatchObject({
+      plugins: [{ id: replacement.plugin.id }],
+      mcpPlugins: [],
+    });
   });
 
   it("archives without deleting immutable rows and makes the live name replaceable", async () => {
@@ -257,7 +343,7 @@ describe("Postgres immutable Plugin repository", () => {
     ).resolves.toMatchObject({ rows: [{ plugins: 2 }] });
   });
 
-  it("enforces workspace ownership and deletes persistent data separately", async () => {
+  it("deletes archived plugin data rows before their private blobs", async () => {
     await repository.install({
       actor: actor(),
       idempotencyKey: "plugin",
@@ -275,6 +361,14 @@ describe("Postgres immutable Plugin repository", () => {
     await expect(
       repository.get({ actor: actor({ workspaceId: "workspace_2" }), name: "quality-tools" }),
     ).resolves.toBeNull();
+    await repository.archive({ actor: actor(), name: "quality-tools" });
+    deletePluginDataBlob.mockImplementationOnce(async () => {
+      await expect(
+        database.query<{ count: number }>(
+          "SELECT COUNT(*)::int AS count FROM goat.workspace_plugin_data WHERE workspace_id = 'workspace_1' AND plugin_name = 'quality-tools'",
+        ),
+      ).resolves.toMatchObject({ rows: [{ count: 0 }] });
+    });
     await expect(repository.deleteData({ actor: actor(), name: "quality-tools" })).resolves.toEqual(
       { deleted: true },
     );
@@ -289,7 +383,7 @@ async function resolvedPlugin(
   pluginName: string,
   skillName: string,
   description: string,
-  options: { skippedSkill?: boolean } = {},
+  options: { skippedSkill?: boolean; mcp?: boolean } = {},
 ): Promise<ResolvedPluginPackage> {
   const skill = await resolvedSkill(skillName, description, `skills/${skillName}`);
   const pluginJson = new TextEncoder().encode(
@@ -299,9 +393,33 @@ async function resolvedPlugin(
       description: `${pluginName} plugin.`,
     }),
   );
+  const mcpJson = new TextEncoder().encode(
+    JSON.stringify({
+      $schema: "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+      mcpServers: {
+        local: {
+          type: "stdio",
+          command: "node",
+          args: ["${PLUGIN_ROOT}/server.mjs"],
+          cwd: "${PLUGIN_DATA}",
+          env: { CACHE_DIR: "${PLUGIN_DATA}/cache", PUBLIC_MODE: "safe" },
+        },
+      },
+    }),
+  );
   const files = [
     { path: "plugin.json", content: pluginJson, executable: false },
     ...skill.files.map((file) => ({ ...file, path: `skills/${skillName}/${file.path}` })),
+    ...(options.mcp
+      ? [
+          { path: "mcp.json", content: mcpJson, executable: false },
+          {
+            path: "server.mjs",
+            content: new TextEncoder().encode("process.stdin.resume();"),
+            executable: false,
+          },
+        ]
+      : []),
   ];
   return {
     manifest: { name: pluginName, description: `${pluginName} plugin.` },
@@ -317,7 +435,18 @@ async function resolvedPlugin(
     fileCount: files.length,
     totalBytes: files.reduce((sum, file) => sum + file.content.length, 0),
     skills: [{ path: `skills/${skillName}`, bundle: skill }],
-    stdioServers: [],
+    stdioServers: options.mcp
+      ? [
+          {
+            name: "local",
+            type: "stdio",
+            command: "node",
+            args: ["${PLUGIN_ROOT}/server.mjs"],
+            env: { CACHE_DIR: "${PLUGIN_DATA}/cache", PUBLIC_MODE: "safe" },
+            cwd: "${PLUGIN_DATA}",
+          },
+        ]
+      : [],
     report: {
       ignoredManifestFields: [],
       skills: [
@@ -338,7 +467,13 @@ async function resolvedPlugin(
             ]
           : []),
       ],
-      mcp: { status: "absent" },
+      mcp: options.mcp
+        ? {
+            present: true,
+            status: "parsed",
+            reports: [{ name: "local", status: "selected", transport: "stdio" }],
+          }
+        : { status: "absent" },
     },
   };
 }

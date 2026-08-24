@@ -666,11 +666,16 @@ describe("canonical Hono API", () => {
     const list = vi.fn(async () => [listItem]);
     const get = vi.fn(async () => installation);
     const setStatus = vi.fn(async () => ({ ...installation, status: "disabled" as const }));
+    const approveMcp = vi.fn(async () => ({
+      ...installation,
+      mcpApprovedIntegrity: installation.integrity,
+    }));
+    const revokeMcp = vi.fn(async () => ({ ...installation, mcpApprovedIntegrity: null }));
     const archive = vi.fn(async () => undefined);
     const deleteData = vi.fn(async () => ({ deleted: true }));
     const app = testApp(fakeRepository(), {
       pluginImports: fakePluginImportService(
-        { install, list, get, setStatus, archive, deleteData },
+        { install, list, get, setStatus, approveMcp, revokeMcp, archive, deleteData },
         { resolve: vi.fn(async () => resolved) },
       ),
     });
@@ -714,6 +719,16 @@ describe("canonical Hono API", () => {
       app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
     ).resolves.toMatchObject({ status: 200 });
     await expect(
+      app.request("/v1/plugins/quality-tools/mcp/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ integrity: installation.integrity }),
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/mcp/revoke", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
       app.request("/v1/plugins/quality-tools/data/delete", { method: "POST" }),
     ).resolves.toMatchObject({ status: 200 });
     await expect(
@@ -721,6 +736,12 @@ describe("canonical Hono API", () => {
     ).resolves.toMatchObject({ status: 200 });
 
     expect(setStatus).toHaveBeenCalledWith({ actor, name: "quality-tools", status: "disabled" });
+    expect(approveMcp).toHaveBeenCalledWith({
+      actor,
+      name: "quality-tools",
+      integrity: installation.integrity,
+    });
+    expect(revokeMcp).toHaveBeenCalledWith({ actor, name: "quality-tools" });
     expect(deleteData).toHaveBeenCalledWith({ actor, name: "quality-tools" });
     expect(archive).toHaveBeenCalledWith({ actor, name: "quality-tools" });
   });
@@ -4455,6 +4476,8 @@ function fakePluginImportService(
     list: unexpected,
     get: unexpected,
     setStatus: unexpected,
+    approveMcp: unexpected,
+    revokeMcp: unexpected,
     archive: unexpected,
     deleteData: unexpected,
     ...repositoryOverrides,

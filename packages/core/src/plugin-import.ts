@@ -162,6 +162,8 @@ export interface PluginRepository {
     name: string;
     status: "enabled" | "disabled";
   }): Promise<PluginInstallation>;
+  approveMcp(input: { actor: Actor; name: string; integrity: string }): Promise<PluginInstallation>;
+  revokeMcp(input: { actor: Actor; name: string }): Promise<PluginInstallation>;
   archive(input: { actor: Actor; name: string }): Promise<void>;
   deleteData(input: { actor: Actor; name: string }): Promise<{ deleted: boolean }>;
 }
@@ -235,6 +237,20 @@ export class PluginImportApplicationService {
       name: pluginName(nameValue),
       status: enabled ? "enabled" : "disabled",
     });
+  }
+
+  approveMcp(actor: Actor, nameValue: string, integrityValue: string) {
+    requirePluginWrite(actor);
+    return this.repository.approveMcp({
+      actor,
+      name: pluginName(nameValue),
+      integrity: pluginIntegrity(integrityValue),
+    });
+  }
+
+  revokeMcp(actor: Actor, nameValue: string) {
+    requirePluginWrite(actor);
+    return this.repository.revokeMcp({ actor, name: pluginName(nameValue) });
   }
 
   archive(actor: Actor, nameValue: string) {
@@ -321,6 +337,14 @@ function pluginName(value: string) {
 
 function idempotencyKey(value: string) {
   return bounded(value, 200, "Idempotency-Key");
+}
+
+function pluginIntegrity(value: string) {
+  const integrity = bounded(value, 80, "integrity").toLowerCase();
+  if (!/^sha256:[0-9a-f]{64}$/u.test(integrity)) {
+    throw new CoreError("invalid_argument", "Plugin integrity is invalid.");
+  }
+  return integrity;
 }
 
 function bounded(value: string, maxLength: number, field: string) {
