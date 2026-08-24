@@ -799,7 +799,7 @@ describe("Postgres Chat repositories", () => {
     expect(assistant.rows[0]?.debug_trace.uiMessageParts).toEqual([
       expect.objectContaining({
         state: "approval-responded",
-        approval: expect.objectContaining({ id: "approval_1", approved: true }),
+        approval: { id: "approval_1", approved: true },
       }),
     ]);
     expect(
