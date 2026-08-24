@@ -1576,6 +1576,13 @@
       "when": 1787356800000,
       "tag": "0224_goat_image_generation_capability",
       "breakpoints": true
+    },
+    {
+      "idx": 225,
+      "version": "7",
+      "when": 1787565309968,
+      "tag": "0225_goat_wiki_ingestion_spine",
+      "breakpoints": true
     }
   ]
 }

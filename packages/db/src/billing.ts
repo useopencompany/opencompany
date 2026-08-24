@@ -294,6 +294,7 @@ async function tryAdmitIngestion(
 export async function reserveWorkspaceIngestion(input: {
   workspaceId: string;
   sourceItemId: string;
+  sourceKind?: "brain" | "wiki";
   sourceProvider: BrainSourceProvider;
   rawEventCount: number;
   now?: Date;
@@ -308,6 +309,7 @@ export async function reserveWorkspaceIngestion(input: {
   }
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
+  const wikiSource = input.sourceKind === "wiki";
   await ensureMonthlyIncludedUsage(input.workspaceId, { now, db });
   const run = async (tx: DbLike) => {
     await lockWorkspace(input.workspaceId, tx);
@@ -328,7 +330,8 @@ export async function reserveWorkspaceIngestion(input: {
       .values({
         id: `gir_${randomUUID().replace(/-/g, "")}`,
         workspaceId: input.workspaceId,
-        sourceItemId: input.sourceItemId,
+        sourceItemId: wikiSource ? null : input.sourceItemId,
+        wikiSourceItemId: wikiSource ? input.sourceItemId : null,
         sourceProvider: input.sourceProvider,
         rawEventCount: input.rawEventCount,
         status: "pending",
@@ -367,7 +370,9 @@ export async function reserveWorkspaceIngestion(input: {
       .where(
         and(
           eq(workspaceIngestionReservations.workspaceId, input.workspaceId),
-          eq(workspaceIngestionReservations.sourceItemId, input.sourceItemId),
+          wikiSource
+            ? eq(workspaceIngestionReservations.wikiSourceItemId, input.sourceItemId)
+            : eq(workspaceIngestionReservations.sourceItemId, input.sourceItemId),
         ),
       )
       .limit(1);

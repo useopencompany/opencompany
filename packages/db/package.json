@@ -92,6 +92,18 @@
       "types": "./src/wiki-backfill.ts",
       "default": "./src/wiki-backfill.ts"
     },
+    "./wiki-ingest": {
+      "types": "./src/wiki-ingest.ts",
+      "default": "./src/wiki-ingest.ts"
+    },
+    "./wiki-sources": {
+      "types": "./src/wiki-sources.ts",
+      "default": "./src/wiki-sources.ts"
+    },
+    "./wiki-event-claims": {
+      "types": "./src/wiki-event-claims.ts",
+      "default": "./src/wiki-event-claims.ts"
+    },
     "./brain-sources": {
       "types": "./src/brain-sources.ts",
       "default": "./src/brain-sources.ts"
