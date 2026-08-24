@@ -542,6 +542,55 @@ describe("runCodexChatTurn over ACP", () => {
     expect(sqlText(dbMocks.execute.mock.calls[0]?.[0])).toContain("recovery_attempts");
   });
 
+  it("defers a command-stream timeout during recovery preflight with its exact stage", async () => {
+    const preflightError = new Error("2: [unknown] The operation timed out.");
+    preflightError.name = "SandboxError";
+    repoMocks.loadRepositoryBootstrap.mockRejectedValueOnce(preflightError);
+    sandboxMocks.isRetryableCommandStreamError.mockImplementation(
+      (error) => error === preflightError,
+    );
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        recovery: { reason: "lease_reclaimed" },
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: preflightError,
+      diagnosticMessage:
+        "[load_repository_context] SandboxError: 2: [unknown] The operation timed out.",
+    });
+
+    expect(cliMocks.killLeftoverCodexTurnProcesses).toHaveBeenCalledOnce();
+    expect(eventMocks.createExternalEngineProjector).not.toHaveBeenCalled();
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+  });
+
+  it("persists the real stage and error when recovery context loading fails", async () => {
+    historyMocks.loadCodingChatHistory.mockRejectedValueOnce(
+      new Error("history projection failed"),
+    );
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        recovery: { reason: "lease_reclaimed" },
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.fail).toHaveBeenCalledWith("history projection failed", {
+      failureDiagnostic: "[load_repository_context] Error: history projection failed",
+    });
+    expect(cliMocks.killLeftoverCodexTurnProcesses).toHaveBeenCalledOnce();
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+  });
+
   it("fences a reused sandbox before starting the turn", async () => {
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
@@ -591,8 +640,7 @@ describe("runCodexChatTurn over ACP", () => {
     });
 
     expect(acpMocks.runTurn).not.toHaveBeenCalled();
-    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
-    expect(projector?.fail).not.toHaveBeenCalled();
+    expect(eventMocks.createExternalEngineProjector).not.toHaveBeenCalled();
   });
 
   it("hands a turn off without finalizing when ACP is interrupted by shutdown", async () => {
