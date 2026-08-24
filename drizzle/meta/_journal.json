@@ -1576,6 +1576,13 @@
       "when": 1787555186000,
       "tag": "0224_goat_plugins",
       "breakpoints": true
+    },
+    {
+      "idx": 225,
+      "version": "7",
+      "when": 1787561374000,
+      "tag": "0225_goat_chat_skill_bundle_names",
+      "breakpoints": true
     }
   ]
 }

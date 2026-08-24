@@ -394,8 +394,8 @@ export async function activateAndListChatSkillBundles(
   },
 ): Promise<ChatSkillBundleActivation[]> {
   return db.transaction(async (tx: DbClient) => {
-    // Host-tool activation can race replacement or another model call, so serialize it per Chat
-    // before applying the name-based first-writer rule.
+    // Keep host-tool calls serialized per Chat. The unique Chat/name key also arbitrates with the
+    // create-message activation path, which does not take this row lock.
     const [activationTarget] = await tx
       .select({ id: chatSessions.id })
       .from(chatSessions)
@@ -429,36 +429,38 @@ export async function activateAndListChatSkillBundles(
         throw new CoreError("not_found", "A Skill bundle is unavailable in this workspace.");
       }
 
-      const existing = await tx
-        .select({ name: skillBundles.name })
-        .from(chatSessionSkillBundles)
-        .innerJoin(skillBundles, eq(skillBundles.id, chatSessionSkillBundles.bundleId))
-        .where(
-          and(
-            eq(chatSessionSkillBundles.chatSessionId, input.chatSessionId),
-            eq(skillBundles.workspaceId, input.workspaceId),
-          ),
-        );
-      const fixedNames = new Set(existing.map((row: { name: string }) => row.name));
+      const candidatesById = new Map<string, { id: string; name: string }>(
+        candidates.map(
+          (candidate: { id: string; name: string }) => [candidate.id, candidate] as const,
+        ),
+      );
       const newNames = new Set<string>();
-      const values = candidates.flatMap((candidate: { id: string; name: string }) => {
-        if (fixedNames.has(candidate.name) || newNames.has(candidate.name)) return [];
+      const values = requestedIds.flatMap((candidateId) => {
+        const candidate = candidatesById.get(candidateId)!;
+        if (newNames.has(candidate.name)) return [];
         newNames.add(candidate.name);
-        const requested = requestedById.get(candidate.id)!;
+        const requested = requestedById.get(candidateId)!;
         return [
           {
             chatSessionId: input.chatSessionId,
-            bundleId: candidate.id,
+            bundleId: candidateId,
+            name: candidate.name,
             activatedMessageId: input.activatedMessageId,
             sourceKind: requested.sourceKind,
           },
         ];
       });
       if (values.length > 0) {
-        await tx.insert(chatSessionSkillBundles).values(values).onConflictDoNothing();
+        await tx
+          .insert(chatSessionSkillBundles)
+          .values(values)
+          .onConflictDoNothing({
+            target: [chatSessionSkillBundles.chatSessionId, chatSessionSkillBundles.name],
+          });
       }
     }
 
+    // Re-read after conflict arbitration so callers receive whichever bundle first fixed the name.
     return listChatSkillBundleActivations(tx, {
       workspaceId: input.workspaceId,
       chatSessionId: input.chatSessionId,

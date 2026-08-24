@@ -94,16 +94,15 @@ async function reconcileCodexManagedSkillTree(input: {
 }) {
   const previousSkillIds = await readCodexManagedSkillIds(input.sandbox, input.manifestPath);
   const resetSkillIds = [...new Set([...previousSkillIds, ...input.skillIds])];
+  const quotedRoot = shellQuote(input.root);
   const resetCommands = [
-    `chown ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${shellQuote(input.root)}`,
-    `chmod 755 ${shellQuote(input.root)}`,
+    `if [ -L ${quotedRoot} ] || { [ -e ${quotedRoot} ] && [ ! -d ${quotedRoot} ]; }; then rm -f ${quotedRoot}; fi`,
+    `mkdir -p ${quotedRoot}`,
+    `chown ${SANDBOX_ROOT_USER}:${SANDBOX_ROOT_USER} ${quotedRoot}`,
+    `chmod 755 ${quotedRoot}`,
     ...resetSkillIds.map((id) => `rm -rf ${shellQuote(`${input.root}/${id}`)}`),
   ];
 
-  await input.sandbox.commands.run(`mkdir -p ${shellQuote(input.root)}`, {
-    user: SANDBOX_ROOT_USER,
-    timeoutMs: 30_000,
-  });
   await input.sandbox.commands.run(resetCommands.join(" && "), {
     user: SANDBOX_ROOT_USER,
     timeoutMs: 30_000,

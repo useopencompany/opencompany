@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { PLUGIN_LIMITS } from "./artifact-policy";
 import { PluginResolverError, resolvePlugin } from "./plugin-resolver";
 import type { SkillResolverFetcher, SkillTreeEntry } from "./skill-resolver";
 
@@ -117,6 +118,38 @@ describe("resolvePlugin", () => {
       "a".repeat(40),
       "plugin.json",
     );
+  });
+
+  it("rejects declared per-file and total sizes before fetching any blob", async () => {
+    const manifest = text(
+      JSON.stringify({
+        $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+        name: "bounded-plugin",
+      }),
+    );
+    const files = new Map<string, Uint8Array>([["plugin.json", manifest]]);
+    for (let index = 0; index < 9; index += 1) {
+      files.set(`payload-${index}.bin`, Uint8Array.of(index));
+    }
+
+    const oversizedFileEntries = treeEntries(files);
+    oversizedFileEntries.find((entry) => entry.path === "payload-0.bin")!.size =
+      PLUGIN_LIMITS.maxFileBytes + 1;
+    const oversizedFileBoundary = fetcher(files, new Set(), oversizedFileEntries);
+    await expect(
+      resolvePlugin({ url: "example/plugins", fetcher: oversizedFileBoundary }),
+    ).rejects.toThrow("Plugin contains a file larger than the 2 MB limit.");
+    expect(oversizedFileBoundary.fetchBlob).not.toHaveBeenCalled();
+
+    const oversizedTreeEntries = treeEntries(files);
+    for (const entry of oversizedTreeEntries) {
+      if (entry.path !== "plugin.json") entry.size = PLUGIN_LIMITS.maxFileBytes;
+    }
+    const oversizedTreeBoundary = fetcher(files, new Set(), oversizedTreeEntries);
+    await expect(
+      resolvePlugin({ url: "example/plugins", fetcher: oversizedTreeBoundary }),
+    ).rejects.toThrow("Plugin is too large (max 16 MB).");
+    expect(oversizedTreeBoundary.fetchBlob).not.toHaveBeenCalled();
   });
 
   it("rejects symlinks anywhere in the selected package", async () => {

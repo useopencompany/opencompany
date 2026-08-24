@@ -935,10 +935,10 @@ export class PostgresChatRepository implements ChatRepository {
       ),
       activated_skill_bundles AS MATERIALIZED (
         INSERT INTO goat.chat_session_skill_bundles (
-          chat_session_id, bundle_id, activated_message_id, source_kind
+          chat_session_id, bundle_id, name, activated_message_id, source_kind
         )
         SELECT
-          target_chat.id, bundle.id, inserted_user_message.id, 'standalone'
+          target_chat.id, bundle.id, bundle.name, inserted_user_message.id, 'standalone'
         FROM inserted_user_message
         JOIN target_chat ON true
         CROSS JOIN jsonb_to_recordset(
@@ -960,7 +960,7 @@ export class PostgresChatRepository implements ChatRepository {
             WHERE fixed.chat_session_id = target_chat.id
               AND fixed_bundle.name = bundle.name
         )
-        ON CONFLICT (chat_session_id, bundle_id) DO NOTHING
+        ON CONFLICT (chat_session_id, name) DO NOTHING
         RETURNING bundle_id
       ),
       inserted_assistant_message AS (

@@ -50,6 +50,17 @@ describe("Postgres immutable Skill bundle repository", () => {
     for (const statement of snapshotMigration.split("--> statement-breakpoint")) {
       if (statement.trim()) await database.exec(statement);
     }
+    const nameMigration = await readFile(
+      path.resolve(
+        import.meta.dirname,
+        "../../..",
+        "drizzle/0225_goat_chat_skill_bundle_names.sql",
+      ),
+      "utf8",
+    );
+    for (const statement of nameMigration.split("--> statement-breakpoint")) {
+      if (statement.trim()) await database.exec(statement);
+    }
     repository = new PostgresSkillBundleRepository(drizzle(database));
   });
 
@@ -213,6 +224,52 @@ describe("Postgres immutable Skill bundle repository", () => {
     ]);
     expect(snapshottedBinary).toMatchObject({ executable: true, sizeBytes: 4 });
     expect([...snapshottedBinary!.content]).toEqual([0, 255, 1, 2]);
+  });
+
+  it("returns the single winning bundle when same-name versions activate concurrently", async () => {
+    const first = await repository.install({
+      actor: actor(),
+      idempotencyKey: "install-a",
+      bundle: await resolvedBundle("my-skill", "First version."),
+    });
+    const replacement = await repository.replace({
+      actor: actor(),
+      name: "my-skill",
+      bundle: await resolvedBundle("my-skill", "Second version."),
+    });
+    await database.exec(`
+      INSERT INTO goat.chat_sessions (id) VALUES ('chat_1');
+      INSERT INTO goat.chat_messages (id, session_id)
+      VALUES ('message_1', 'chat_1'), ('message_2', 'chat_1');
+    `);
+    const db = drizzle(database);
+
+    const activations = await Promise.all([
+      activateAndListChatSkillBundles(db, {
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_1",
+        activatedMessageId: "message_1",
+        bundles: [{ bundleId: first.installation.bundle.id, sourceKind: "standalone" }],
+      }),
+      activateAndListChatSkillBundles(db, {
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_1",
+        activatedMessageId: "message_2",
+        bundles: [{ bundleId: replacement.bundle.id, sourceKind: "standalone" }],
+      }),
+    ]);
+    const persisted = await database.query<{ bundle_id: string; name: string }>(`
+      SELECT bundle_id, name
+      FROM goat.chat_session_skill_bundles
+      WHERE chat_session_id = 'chat_1'
+    `);
+
+    expect(persisted.rows).toHaveLength(1);
+    expect(persisted.rows[0]).toMatchObject({ name: "my-skill" });
+    expect(activations).toEqual([
+      [expect.objectContaining({ bundleId: persisted.rows[0]!.bundle_id, name: "my-skill" })],
+      [expect.objectContaining({ bundleId: persisted.rows[0]!.bundle_id, name: "my-skill" })],
+    ]);
   });
 
   it("validates workspace ownership on installation and file reads", async () => {

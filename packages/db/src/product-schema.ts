@@ -4221,9 +4221,9 @@ export const chatSessionSkills = productSchema.table(
   }),
 );
 
-// Immutable Agent Skill bundle versions activated in a Chat. The application serializes
-// activation per Chat so the first bundle with a given declared name remains fixed even if its
-// workspace installation is later replaced, disabled, or archived.
+// Immutable Agent Skill bundle versions activated in a Chat. The denormalized name and unique
+// index make the first bundle with a given declared name remain fixed even when activation paths
+// race or the workspace installation is later replaced, disabled, or archived.
 export const chatSessionSkillBundles = productSchema.table(
   "chat_session_skill_bundles",
   {
@@ -4233,6 +4233,7 @@ export const chatSessionSkillBundles = productSchema.table(
     bundleId: text("bundle_id")
       .notNull()
       .references(() => skillBundles.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
     activatedMessageId: text("activated_message_id")
       .notNull()
       .references(() => chatMessages.id, { onDelete: "cascade" }),
@@ -4240,6 +4241,10 @@ export const chatSessionSkillBundles = productSchema.table(
   },
   (table) => ({
     pk: primaryKey({ columns: [table.chatSessionId, table.bundleId] }),
+    chatNameIdx: uniqueIndex("goat_chat_session_skill_bundles_chat_name_idx").on(
+      table.chatSessionId,
+      table.name,
+    ),
     bundleIdx: index("goat_chat_session_skill_bundles_bundle_idx").on(table.bundleId),
     activatedMessageIdx: index("goat_chat_session_skill_bundles_activated_message_idx").on(
       table.activatedMessageId,

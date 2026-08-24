@@ -32,6 +32,7 @@ const migrationPaths = [
   "0219_goat_run_attempt_deploy_version.sql",
   "0222_goat_immutable_skill_bundles.sql",
   "0223_goat_chat_skill_bundle_snapshots.sql",
+  "0225_goat_chat_skill_bundle_names.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -1347,10 +1348,11 @@ describe("Postgres Chat repositories", () => {
     await expect(
       database.query<{
         bundle_id: string;
+        name: string;
         activated_message_id: string;
         source_kind: string;
       }>(
-        `SELECT bundle_id, activated_message_id, source_kind
+        `SELECT bundle_id, name, activated_message_id, source_kind
          FROM goat.chat_session_skill_bundles
          WHERE chat_session_id = $1`,
         [first.conversationId],
@@ -1359,6 +1361,7 @@ describe("Postgres Chat repositories", () => {
       rows: [
         {
           bundle_id: "skill_bundle_review",
+          name: "review",
           activated_message_id: first.messageId,
           source_kind: "standalone",
         },
