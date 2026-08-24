@@ -57,6 +57,9 @@ describe("wiki ingestion schema", () => {
       "source_item_id",
       "content_hash",
     ]);
+    expect(
+      indexColumns(wikiIngestJobs, "opencompany_wiki_ingest_jobs_workspace_running_idx"),
+    ).toEqual(["workspace_id"]);
   });
 
   it("limits every wiki ingestion provider check to the six launch providers", () => {
@@ -253,7 +256,8 @@ describe("claimNextWikiIngestJob", () => {
     expect(query).toContain("source.provider = job.source_provider");
     expect(query).toContain("running.workspace_id = job.workspace_id");
     expect(query).toContain("running.status = 'running'");
-    expect(query).toContain("running.lease_expires_at >=");
+    expect(query).toContain("running.id <> job.id");
+    expect(query).not.toContain("running.lease_expires_at >=");
     expect(query).toContain("for update of job skip locked");
   });
 
@@ -284,6 +288,21 @@ describe("claimNextWikiIngestJob", () => {
     expect(compiled.params).toEqual(
       expect.arrayContaining(["lease_2", "runner_2", new Date("2026-08-24T09:01:00.000Z")]),
     );
+  });
+
+  it("treats the concurrent workspace-running uniqueness race as no available job", async () => {
+    const execute = vi.fn(async () => {
+      throw Object.assign(new Error("duplicate running workspace"), { code: "23505" });
+    });
+
+    await expect(
+      claimNextWikiIngestJob({
+        leaseOwner: "runner_2",
+        leaseId: "lease_2",
+        now: new Date("2026-08-24T09:00:00.000Z"),
+        db: { execute },
+      }),
+    ).resolves.toBeNull();
   });
 });
 

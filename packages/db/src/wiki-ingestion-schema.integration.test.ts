@@ -85,6 +85,27 @@ describe("0225_goat_wiki_ingestion_spine", () => {
       `),
     ).rejects.toThrow();
 
+    await database.exec(`
+      INSERT INTO goat.wiki_ingest_jobs (
+        id, workspace_id, source_item_id, source_provider, source_connection_id,
+        integration_id, content_hash, status
+      ) VALUES (
+        'gwjob_running_1', 'workspace_1', 'gwsrc_1', 'slack', 'team_1',
+        'integration_1', 'hash_running_1', 'running'
+      )
+    `);
+    await expect(
+      database.exec(`
+        INSERT INTO goat.wiki_ingest_jobs (
+          id, workspace_id, source_item_id, source_provider, source_connection_id,
+          integration_id, content_hash, status
+        ) VALUES (
+          'gwjob_running_2', 'workspace_1', 'gwsrc_1', 'slack', 'team_1',
+          'integration_1', 'hash_running_2', 'running'
+        )
+      `),
+    ).rejects.toThrow();
+
     await database.exec("DELETE FROM goat.wiki_source_items WHERE id = 'gwsrc_1'");
     await expect(count(database, "wiki_ingest_jobs")).resolves.toBe(0);
     await expect(count(database, "workspace_ingestion_reservations")).resolves.toBe(0);

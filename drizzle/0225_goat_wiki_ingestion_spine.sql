@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS "goat"."wiki_ingest_jobs" (
 	CONSTRAINT "opencompany_wiki_ingest_jobs_status_check" CHECK ("status" IN ('queued', 'running', 'succeeded', 'failed', 'skipped'))
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "opencompany_wiki_ingest_jobs_item_hash_idx" ON "goat"."wiki_ingest_jobs" ("source_item_id", "content_hash");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "opencompany_wiki_ingest_jobs_workspace_running_idx" ON "goat"."wiki_ingest_jobs" ("workspace_id") WHERE "status" = 'running';--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "opencompany_wiki_ingest_jobs_status_next_retry_idx" ON "goat"."wiki_ingest_jobs" ("status", "next_retry_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "opencompany_wiki_ingest_jobs_lease_expires_at_idx" ON "goat"."wiki_ingest_jobs" ("lease_expires_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "opencompany_wiki_ingest_jobs_workspace_created_idx" ON "goat"."wiki_ingest_jobs" ("workspace_id", "created_at");--> statement-breakpoint

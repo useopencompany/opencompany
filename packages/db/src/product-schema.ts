@@ -2233,6 +2233,9 @@ export const wikiIngestJobs = productSchema.table(
       table.sourceItemId,
       table.contentHash,
     ),
+    workspaceRunningIdx: uniqueIndex("opencompany_wiki_ingest_jobs_workspace_running_idx")
+      .on(table.workspaceId)
+      .where(sql`${table.status} = 'running'`),
     statusNextRetryIdx: index("opencompany_wiki_ingest_jobs_status_next_retry_idx").on(
       table.status,
       table.nextRetryAt,

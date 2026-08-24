@@ -229,7 +229,9 @@ export async function claimNextWikiIngestJob(input: {
   const now = input.now ?? new Date();
   const leaseId = input.leaseId ?? newWikiIngestLeaseId();
   const leaseExpiresAt = new Date(now.getTime() + (input.leaseTtlMs ?? WIKI_INGEST_LEASE_TTL_MS));
-  const result = await db.execute(sql`
+  let result: unknown;
+  try {
+    result = await db.execute(sql`
     WITH candidate AS (
       SELECT job.id
       FROM goat.wiki_ingest_jobs AS job
@@ -254,7 +256,6 @@ export async function claimNextWikiIngestJob(input: {
           FROM goat.wiki_ingest_jobs AS running
           WHERE running.workspace_id = job.workspace_id
             AND running.status = 'running'
-            AND running.lease_expires_at >= ${now}
             AND running.id <> job.id
         )
       ORDER BY job.next_retry_at ASC, job.created_at ASC
@@ -285,7 +286,13 @@ export async function claimNextWikiIngestJob(input: {
       source.raw_event_count AS "rawEventCount"
     FROM claimed
     INNER JOIN goat.wiki_source_items AS source ON source.id = claimed."sourceItemId"
-  `);
+    `);
+  } catch (error) {
+    // The partial unique index is the final concurrency fence for two claims that observed the
+    // same workspace before either transaction committed. The losing worker simply polls again.
+    if (isUniqueViolation(error)) return null;
+    throw error;
+  }
   return rowsFromExecute<ClaimedWikiIngestJob>(result)[0] ?? null;
 }
 
@@ -559,6 +566,12 @@ function rowsFromExecute<T>(result: unknown): T[] {
     return (result as { rows: T[] }).rows;
   }
   return [];
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: unknown; cause?: unknown };
+  return value.code === "23505" || isUniqueViolation(value.cause);
 }
 
 const wikiIngestJobColumnsSql = sql`
