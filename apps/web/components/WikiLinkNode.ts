@@ -124,13 +124,16 @@ function buildChip(resolved: ResolvedWikiLink, getState: () => WikiLinkState): H
   const { href, label, icon, external, title } = resolved;
   const chip = document.createElement(href ? "a" : "span");
   chip.className = href ? "wiki-brain-chip" : "wiki-brain-chip wiki-brain-chip-unresolved";
-  chip.title = title;
+  const displayLabel = label || "Untitled";
+  // The visible label can be ellipsized, so keep its full value available on
+  // hover while retaining the useful resolved/unresolved status text.
+  chip.title = `${displayLabel} — ${title}`;
   chip.setAttribute("data-wiki-link", "");
   chip.contentEditable = "false";
   chip.innerHTML = icon === "github" ? GITHUB_ICON : WIKI_LINK_ICON;
   const text = document.createElement("span");
   text.className = "wiki-brain-chip-label";
-  text.textContent = label || "Untitled";
+  text.textContent = displayLabel;
   chip.appendChild(text);
   if (href) {
     chip.setAttribute("href", href);

@@ -49,6 +49,23 @@ describe("MarkdownBrainEditor", () => {
     );
   });
 
+  it("keeps a long page title available when the visible chip is truncated", async () => {
+    const title = "Go-to-market — first customers: sell how we build with opencompany";
+    render(
+      <MarkdownBrainEditor
+        content="Related: [[go-to-market]]."
+        onChange={vi.fn()}
+        brainLinks={{ "go-to-market": "/wiki/go-to-market" }}
+        pageTitles={{ "go-to-market": title }}
+        readOnly
+      />,
+    );
+
+    const link = await screen.findByRole("link", { name: title });
+    expect(link.getAttribute("title")).toBe(`${title} — Open link`);
+    expect(link.querySelector(".wiki-brain-chip-label")?.textContent).toBe(title);
+  });
+
   it("keeps a leading link collapsed in read-only documents", async () => {
     const { container } = render(
       <MarkdownBrainEditor
