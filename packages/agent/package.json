@@ -22,7 +22,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@ai-sdk/mcp": "^2.0.34",
+    "@ai-sdk/mcp": "^1.0.44",
     "@browserbasehq/sdk": "^2.18.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@opencompany/agent-runtime": "workspace:*",
@@ -38,17 +38,17 @@
     "@opencompany/wiki": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@vercel/blob": "^2.4.0",
-    "@vercel/sandbox": "^3.0.1",
-    "ai": "^7.0.73",
+    "@vercel/sandbox": "^2.9.0",
+    "ai": "^6.0.189",
     "ajv": "8.20.0",
     "drizzle-orm": "^0.45.2",
-    "jose": "^6.2.9",
-    "mcp-handler": "^2.1.1",
+    "jose": "^5.10.0",
+    "mcp-handler": "^1.1.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
-    "typescript": "^7.0.2",
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   }
 }
