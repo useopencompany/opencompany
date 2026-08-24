@@ -775,9 +775,13 @@ export async function runCodexChatTurn(input: {
       const dataRuntime = pluginDataRuntime;
       const mcpRuntime = pluginMcpRuntime;
       const handedOff = effectiveError instanceof CodexChatHandoffError;
-      try {
-        executionStage = "checkpoint_plugin_data";
-        if (!handedOff) {
+      if (handedOff) {
+        // The detached Codex turn and its MCP servers can still be writing in this sandbox. Do not
+        // archive a torn directory: state-file recovery preserves this same-sandbox data, and the
+        // recovered turn will checkpoint it after stopping the plugin processes at turn end.
+      } else {
+        try {
+          executionStage = "checkpoint_plugin_data";
           await stopCodexAppServerForPluginCheckpoint({
             sandbox,
             codexWorkRoot: CODEX_CHAT_WORKDIR,
@@ -791,22 +795,20 @@ export async function runCodexChatTurn(input: {
             mcpServers: mcpRuntime.servers,
           });
           await stopPluginMcpProcesses(sandbox, mcpRuntime.pluginUsers);
-        }
-        await dataRuntime.checkpoint({ releaseLease: !handedOff });
-        pluginDataRuntime = null;
-      } catch (checkpointError) {
-        captureException(checkpointError, {
-          event: "opencompany.goat_plugin_data_checkpoint_failed",
-          turn_id: turn.id,
-        });
-        logger.warn("Failed to checkpoint Plugin data", {
-          event: "opencompany.goat_plugin_data_checkpoint_failed",
-          turn_id: turn.id,
-          error: redact(errorMessage(checkpointError)),
-        });
-        await dataRuntime.release().catch(() => undefined);
-        pluginDataRuntime = null;
-        if (!handedOff) {
+          await dataRuntime.checkpoint({ releaseLease: true });
+          pluginDataRuntime = null;
+        } catch (checkpointError) {
+          captureException(checkpointError, {
+            event: "opencompany.goat_plugin_data_checkpoint_failed",
+            turn_id: turn.id,
+          });
+          logger.warn("Failed to checkpoint Plugin data", {
+            event: "opencompany.goat_plugin_data_checkpoint_failed",
+            turn_id: turn.id,
+            error: redact(errorMessage(checkpointError)),
+          });
+          await dataRuntime.release().catch(() => undefined);
+          pluginDataRuntime = null;
           effectiveError = new Error(
             `The coding turn ended, but Plugin data checkpointing failed: ${errorMessage(checkpointError)}`,
           );

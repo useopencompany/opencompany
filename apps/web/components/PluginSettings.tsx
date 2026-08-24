@@ -270,9 +270,13 @@ export function PluginDetail({
             <span className="min-w-0 flex-1">
               {plugin.mcpApprovedIntegrity === plugin.integrity
                 ? "Approved for this exact package integrity. Its servers are available on the next coding turn while the plugin is enabled."
-                : "Installation alone never starts these processes. Review every declaration below before approving this exact package integrity."}
+                : plugin.status === "disabled"
+                  ? "This plugin is disabled. Enable it before approving this exact package integrity."
+                  : "Installation alone never starts these processes. Review every declaration below before approving this exact package integrity."}
             </span>
-            {canEdit && plugin.stdioServers.length > 0 ? (
+            {canEdit &&
+            plugin.stdioServers.length > 0 &&
+            (plugin.status === "enabled" || plugin.mcpApprovedIntegrity === plugin.integrity) ? (
               <button
                 type="button"
                 disabled={isMutating}

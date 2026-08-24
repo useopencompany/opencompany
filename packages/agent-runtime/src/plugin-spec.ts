@@ -259,6 +259,14 @@ function validateServer(name: string, value: unknown): McpServerReport {
         reason: "`command` must be a single token.",
       };
     }
+    if (record.command.includes("/") && !record.command.startsWith("./")) {
+      return {
+        name,
+        status: "invalid",
+        transport: "stdio",
+        reason: "`command` must be a bare executable name or a `./`-relative plugin path.",
+      };
+    }
     let args: string[] = [];
     if (record.args !== undefined) {
       const parsedArgs = parseStringArray(record.args);
