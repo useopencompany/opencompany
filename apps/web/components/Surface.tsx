@@ -199,7 +199,7 @@ import {
   cancelHeadlessTaskRun,
   createHeadlessTask,
 } from "@/lib/headless-task-commands";
-import { isRecentHomeActivity } from "@/lib/home-activity";
+import { isRecentChatActivity, isRecentHomeActivity } from "@/lib/home-activity";
 import { alwaysAllowChatActionAction } from "@/lib/integration-account-actions";
 import {
   CLAUDE_CODE_MODELS,
@@ -4532,7 +4532,7 @@ function visibleHomeChats(
       (chat) =>
         Boolean(chat.pinnedAt) ||
         isHomeChatStateVisible(chat, localChatStates.get(chat.id) ?? null) ||
-        isRecentHomeActivity(chat.updatedAt),
+        isRecentChatActivity(chat.updatedAt),
     )
     .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
