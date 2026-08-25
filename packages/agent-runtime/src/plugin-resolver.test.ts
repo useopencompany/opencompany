@@ -172,6 +172,28 @@ describe("resolvePlugin", () => {
       resolvePlugin({ url: "example/plugins", fetcher: fetcher(files, new Set(), entries) }),
     ).rejects.toThrow(/symlink/iu);
   });
+
+  it("normalizes repeated separators in a selected plugin path", async () => {
+    const files = new Map<string, Uint8Array>([
+      [
+        "packages/tool/plugin.json",
+        text(
+          JSON.stringify({
+            $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+            name: "safe-plugin",
+          }),
+        ),
+      ],
+    ]);
+
+    const plugin = await resolvePlugin({
+      url: "example/plugins",
+      selectedPath: "///packages////tool///",
+      fetcher: fetcher(files),
+    });
+
+    expect(plugin.source.path).toBe("packages/tool");
+  });
 });
 
 function text(value: string) {

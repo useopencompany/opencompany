@@ -246,7 +246,7 @@ function selectPluginRoot(entries: SkillTreeEntry[], requestedRoot?: string) {
 }
 
 function normalizeRoot(value: string) {
-  const root = value.replace(/^\/+|\/+$/gu, "").replace(/\/{2,}/gu, "/");
+  const root = value.split("/").filter(Boolean).join("/");
   if (!root) return "";
   try {
     assertSafeRelativePath(root);

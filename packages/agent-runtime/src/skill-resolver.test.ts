@@ -70,6 +70,10 @@ describe("parseSkillUrl", () => {
   test("rejects path traversal in a subpath", () => {
     expect(() => parseSkillUrl("o/r/../../etc")).toThrow(SkillResolverError);
   });
+
+  test("normalizes repeated separators in a subpath", () => {
+    expect(parseSkillUrl("o/r///skills////safe///").subpath).toBe("skills/safe");
+  });
 });
 
 describe("discoverSkillDirectories", () => {

@@ -315,7 +315,7 @@ function stripGitSuffix(repo: string): string {
 }
 
 function sanitizeSubpath(subpath: string): string {
-  const normalized = subpath.replace(/^\/+|\/+$/g, "").replace(/\/{2,}/g, "/");
+  const normalized = subpath.split("/").filter(Boolean).join("/");
   if (!normalized) return "";
   if (normalized.split("/").some((segment) => segment === "..")) {
     throw new SkillResolverError("Skill path may not contain '..'.");
