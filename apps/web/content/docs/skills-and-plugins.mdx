@@ -13,7 +13,7 @@ the retired `command` extension are rejected.
 Installed bundles are immutable: there is no Markdown editor. Replace creates a new bundle and
 moves the workspace installation to it; enable, disable, and archive control whether new Chats and
 Tasks can select it. Existing Chats and Tasks retain the exact bundle IDs they already captured.
-Use `@skill/name` in Chat to select a catalog entry.
+Type `/` in Chat and select a Skill to invoke it as `/<skill-name>`.
 
 ## Plugins
 
@@ -38,6 +38,6 @@ Skills and MCP from entering new turns but does not implicitly erase Plugin data
 
 ## Historical Skills
 
-The former hand-authored Brain Skill editor, slash-command extension, and legacy activation replay
-have been removed. Old Chat messages remain readable, but their historical Skill activations are
-not executable and were not converted into new bundles.
+The former hand-authored Brain Skill editor, custom command frontmatter extension, and legacy
+activation replay have been removed. Old Chat messages remain readable, but their historical Skill
+activations are not executable and were not converted into new bundles.

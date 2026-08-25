@@ -1105,7 +1105,7 @@ export function SkillBundleRoute({
   return (
     <SettingsContent
       title={bundle.name}
-      description={`Attach this immutable bundle with @skill/${installation.name} in chat.`}
+      description={`Invoke this immutable bundle with /${installation.name} in chat.`}
       backLink={{ href: "/settings/skills", label: "Skills" }}
     >
       <SkillSourceNotice source={bundle.source} />
