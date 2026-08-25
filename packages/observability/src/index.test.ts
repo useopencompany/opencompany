@@ -172,6 +172,61 @@ describe("sanitizeLogFields", () => {
     });
   });
 
+  it("serializes safe database diagnostics from nested error causes", () => {
+    const databaseError = Object.assign(
+      new Error('duplicate key value violates unique constraint "tasks_pkey"'),
+      {
+        code: "23505",
+        severity: "ERROR",
+        schema: "goat",
+        table: "tasks",
+        constraint: "tasks_pkey",
+        routine: "_bt_check_unique",
+        detail: "Key (id)=(sensitive_task_id) already exists.",
+        query: "SELECT secret FROM private_table",
+        parameters: ["secret-value"],
+      },
+    );
+    const error = new Error(
+      "Failed query: SELECT secret FROM private_table WHERE id = $1\nparams: secret-value",
+      { cause: databaseError },
+    );
+
+    const fields = errorToLogFields(error);
+
+    expect(fields).toMatchObject({
+      error: {
+        name: "Error",
+        message: "Database query failed",
+        cause: {
+          name: "Error",
+          message: 'duplicate key value violates unique constraint "tasks_pkey"',
+          code: "23505",
+          severity: "ERROR",
+          schema: "goat",
+          table: "tasks",
+          constraint: "tasks_pkey",
+          routine: "_bt_check_unique",
+        },
+      },
+    });
+    expect(JSON.stringify(fields)).not.toMatch(
+      /SELECT secret|sensitive_task_id|private_table|secret-value|detail|parameters/u,
+    );
+  });
+
+  it("bounds cyclic error cause chains", () => {
+    const error = new Error("cyclic failure") as Error & { cause?: unknown };
+    error.cause = error;
+
+    expect(errorToLogFields(error)).toMatchObject({
+      error: {
+        message: "cyclic failure",
+        cause: "[circular]",
+      },
+    });
+  });
+
   it("caps depth, arrays, and long strings", () => {
     const fields = sanitizeLogFields({
       nested: { a: { b: { c: { d: { e: "too deep" } } } } },
