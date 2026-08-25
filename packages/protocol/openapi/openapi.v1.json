@@ -6433,6 +6433,166 @@
           "nullable": true
         }
       },
+      "WikiIngestActivityListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WikiIngestActivityItem"
+                },
+                "maxItems": 100
+              },
+              "nextCursor": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 1024
+              }
+            },
+            "required": [
+              "items",
+              "nextCursor"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "WikiIngestActivityItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "gmail",
+              "slack",
+              "jamie",
+              "granola",
+              "linear",
+              "github"
+            ]
+          },
+          "sourceType": {
+            "type": "string",
+            "enum": [
+              "meeting",
+              "conversation",
+              "issue",
+              "activity",
+              "thread"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "skipped"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2000
+          },
+          "pages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiIngestActivityPage"
+            },
+            "maxItems": 100
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "sourceType",
+          "title",
+          "outcome",
+          "reason",
+          "pages",
+          "attempts",
+          "occurredAt",
+          "completedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "WikiIngestActivityPage": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "created",
+              "updated",
+              "moved",
+              "deleted"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "title",
+          "action"
+        ],
+        "additionalProperties": false
+      },
       "WikiSourceMutationEnvelope": {
         "type": "object",
         "properties": {
@@ -17555,6 +17715,66 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WikiSourceMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/sources/activity": {
+      "get": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent ingestion outcomes for the active workspace Wiki.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiIngestActivityListEnvelope"
                 }
               }
             }
