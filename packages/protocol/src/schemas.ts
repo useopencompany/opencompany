@@ -1343,6 +1343,33 @@ export const WikiSourceSchema = z
   .strict()
   .openapi("WikiSource");
 
+export const WikiIngestActivityPageSchema = z
+  .object({
+    path: z.string().min(1).max(512),
+    title: z.string().min(1).max(160),
+    action: z.enum(["created", "updated", "moved", "deleted"]),
+  })
+  .strict()
+  .openapi("WikiIngestActivityPage");
+
+export const WikiIngestActivityItemSchema = z
+  .object({
+    id: ResourceIdSchema,
+    provider: WikiSourceProviderSchema,
+    sourceType: z.enum(["meeting", "conversation", "issue", "activity", "thread"]),
+    title: z.string().max(512).nullable(),
+    outcome: z.enum(["queued", "running", "succeeded", "failed", "skipped"]),
+    reason: z.string().max(2_000).nullable(),
+    pages: z.array(WikiIngestActivityPageSchema).max(100),
+    attempts: z.number().int().min(0),
+    occurredAt: TimestampSchema,
+    completedAt: TimestampSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("WikiIngestActivityItem");
+
 export const SkillSourceSchema = z
   .object({
     type: z.enum(["github", "skills.sh"]),
@@ -1552,6 +1579,18 @@ export const WikiSourceListEnvelopeSchema = z
   .object({ data: z.array(WikiSourceSchema).max(1_000), meta: ProtocolMetadataSchema })
   .strict()
   .openapi("WikiSourceListEnvelope");
+export const WikiIngestActivityListEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        items: z.array(WikiIngestActivityItemSchema).max(100),
+        nextCursor: z.string().max(1_024).nullable(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WikiIngestActivityListEnvelope");
 export const WikiSourceMutationEnvelopeSchema = z
   .object({ data: WikiSourceSchema, meta: ProtocolMetadataSchema })
   .strict()
@@ -3630,8 +3669,30 @@ export type DeleteBrainFolderBody = z.infer<typeof DeleteBrainFolderBodySchema>;
 export type WikiPageDto = z.infer<typeof WikiPageSchema>;
 export type WikiPageReadModel = z.infer<typeof WikiPageReadModelSchema>;
 export type WikiTimelineReadModel = z.infer<typeof WikiTimelineReadModelSchema>;
-export type WikiSourceProvider = z.infer<typeof WikiSourceProviderSchema>;
+export type WikiSourceProvider = "gmail" | "slack" | "jamie" | "granola" | "linear" | "github";
 export type WikiSourceDto = z.infer<typeof WikiSourceSchema>;
+export type WikiIngestActivityItemDto = {
+  id: string;
+  provider: WikiSourceProvider;
+  sourceType: "meeting" | "conversation" | "issue" | "activity" | "thread";
+  title: string | null;
+  outcome: "queued" | "running" | "succeeded" | "failed" | "skipped";
+  reason: string | null;
+  pages: Array<{
+    path: string;
+    title: string;
+    action: "created" | "updated" | "moved" | "deleted";
+  }>;
+  attempts: number;
+  occurredAt: string;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type WikiIngestActivityPageDto = {
+  items: WikiIngestActivityItemDto[];
+  nextCursor: string | null;
+};
 export type UpsertWikiSourceBody = z.infer<typeof UpsertWikiSourceBodySchema>;
 export type SetWikiSourceEnabledBody = z.infer<typeof SetWikiSourceEnabledBodySchema>;
 export type CreateWikiPageBody = z.infer<typeof CreateWikiPageBodySchema>;

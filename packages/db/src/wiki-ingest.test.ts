@@ -29,6 +29,7 @@ const {
   completeWikiIngestJob,
   failWikiIngestJobWithBackoff,
   heartbeatWikiIngestJob,
+  listWikiIngestActivityRows,
   releaseWikiIngestJob,
   skipWikiIngestJob,
   upsertWikiSourceItemAndEnqueue,
@@ -312,6 +313,61 @@ describe("claimNextWikiIngestJob", () => {
         db: { execute },
       }),
     ).resolves.toBeNull();
+  });
+});
+
+describe("listWikiIngestActivityRows", () => {
+  it("joins source metadata and applies a stable workspace-scoped cursor", async () => {
+    const execute = vi.fn(async (_query: SQL) => ({
+      rows: [
+        {
+          id: "gwjob_1",
+          sourceProvider: "slack",
+          sourceType: "conversation",
+          title: "#product",
+          occurredAt: "2026-08-24T08:00:00.000Z",
+          status: "succeeded",
+          attempts: 1,
+          lastError: null,
+          skipReason: null,
+          result: { pages: [] },
+          completedAt: "2026-08-24T09:01:00.000Z",
+          createdAt: "2026-08-24T09:00:00.000Z",
+          updatedAt: "2026-08-24T09:01:00.000Z",
+        },
+      ],
+    }));
+
+    await expect(
+      listWikiIngestActivityRows({
+        workspaceId: "workspace_1",
+        limit: 21,
+        before: {
+          createdAt: new Date("2026-08-25T00:00:00.000Z"),
+          id: "gwjob_cursor",
+        },
+        db: { execute },
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: "gwjob_1",
+        title: "#product",
+        createdAt: new Date("2026-08-24T09:00:00.000Z"),
+      }),
+    ]);
+
+    const compiled = dialect.sqlToQuery(execute.mock.calls[0]![0] as SQL);
+    expect(normalizeSql(compiled.sql)).toContain("inner join goat.wiki_source_items as source");
+    expect(normalizeSql(compiled.sql)).toContain("where job.workspace_id =");
+    expect(normalizeSql(compiled.sql)).toContain("order by job.created_at desc, job.id desc");
+    expect(compiled.params).toEqual(
+      expect.arrayContaining([
+        "workspace_1",
+        new Date("2026-08-25T00:00:00.000Z"),
+        "gwjob_cursor",
+        21,
+      ]),
+    );
   });
 });
 

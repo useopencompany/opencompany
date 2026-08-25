@@ -84,6 +84,7 @@ describe("headless protocol", () => {
       "/v1/wiki/pages/{id}/delete",
       "/v1/wiki/pages/{id}/timeline",
       "/v1/wiki/sources",
+      "/v1/wiki/sources/activity",
       "/v1/wiki/sources/{sourceId}",
       "/v1/skills",
       "/v1/skills/imports/preview",

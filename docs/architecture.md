@@ -59,6 +59,14 @@ Brain import, Brain ingestion, Google Drive sync, polling, and schedules follow 
 principle: database state is authoritative, notifications reduce latency, and fenced claims provide
 recovery. The runner never calls the public API for execution persistence.
 
+## Wiki ingestion
+
+Provider ingress validates and normalizes source events before polling providers or buffering
+conversation windows. Buffer flushes use one transaction to enqueue the existing Brain work and the
+independent Wiki ingest job, so enabling Wiki does not change Brain behavior. A leased runner worker
+then triages each Wiki item and applies page mutations through the same authorized Wiki tool used by
+interactive agents; job results retain the outcome and touched page paths for ingestion activity.
+
 ## Integrations and security
 
 OAuth state and integration credentials are signed or encrypted at the backend boundary. Historical

@@ -1120,6 +1120,16 @@ export function createApiApp(input: CreateApiAppInput) {
       const sources = await input.wikiSources.list(actor);
       return c.json({ data: sources, meta }, 200);
     },
+    listWikiIngestActivity: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const query = c.req.valid("query");
+      const activity = await input.wikiSources.listActivity(actor, {
+        limit: query.limit,
+        ...(query.cursor ? { cursor: query.cursor } : {}),
+      });
+      return c.json({ data: activity, meta }, 200);
+    },
     upsertWikiSource: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);

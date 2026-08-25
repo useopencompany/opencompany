@@ -29,6 +29,11 @@ vi.mock("@/components/AppDataProvider", () => ({
     mocks.initialIntegrations ? { integrations: mocks.initialIntegrations } : null,
 }));
 
+vi.mock("@/components/WikiIngestActivityFeed", () => ({
+  WikiIngestActivityFeed: () => <section>Recent ingestion activity</section>,
+  WikiIngestActivitySkeleton: () => <section>Loading Wiki ingestion activity</section>,
+}));
+
 vi.mock("@/lib/headless-integration-collections", () => ({
   getHeadlessIntegrationAccounts: () => ({ id: "integration-accounts" }),
 }));

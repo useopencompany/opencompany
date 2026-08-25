@@ -536,11 +536,15 @@ describe("canonical Hono API", () => {
 
   it("serves and mutates workspace-scoped Wiki sources through typed routes", async () => {
     const list = vi.fn(async () => [wikiSourceView()]);
+    const listActivity = vi.fn(async () => ({
+      items: [wikiActivityItem()],
+      nextCursor: "cursor_2",
+    }));
     const upsert = vi.fn(async () => wikiSourceView());
     const setEnabled = vi.fn(async () => wikiSourceView({ enabled: false }));
     const remove = vi.fn(async () => undefined);
     const app = testApp(fakeRepository(), {
-      wikiSources: wikiSourceService({ list, upsert, setEnabled, remove }),
+      wikiSources: wikiSourceService({ list, listActivity, upsert, setEnabled, remove }),
     });
 
     const listed = await app.request("/v1/wiki/sources");
@@ -551,6 +555,23 @@ describe("canonical Hono API", () => {
     });
     expect(JSON.stringify(listedBody)).not.toMatch(/userWorkosId|workspaceId|credential|token/iu);
     expect(list).toHaveBeenCalledWith(actor);
+
+    const activity = await app.request("/v1/wiki/sources/activity?limit=10&cursor=cursor_1");
+    expect(activity.status).toBe(200);
+    await expect(activity.json()).resolves.toMatchObject({
+      data: {
+        items: [
+          {
+            id: "gwjob_1",
+            provider: "slack",
+            outcome: "succeeded",
+            pages: [{ path: "projects/launch", action: "updated" }],
+          },
+        ],
+        nextCursor: "cursor_2",
+      },
+    });
+    expect(listActivity).toHaveBeenCalledWith(actor, { limit: 10, cursor: "cursor_1" });
 
     const configured = await app.request("/v1/wiki/sources", {
       method: "PUT",
@@ -4101,6 +4122,9 @@ function fakeWikiSources(): Parameters<typeof createApiApp>[0]["wikiSources"] {
     list: async () => {
       throw new Error("Unexpected Wiki source list.");
     },
+    listActivity: async () => {
+      throw new Error("Unexpected Wiki activity list.");
+    },
     upsert: async () => {
       throw new Error("Unexpected Wiki source mutation.");
     },
@@ -4117,6 +4141,23 @@ function wikiSourceService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["wikiSources"]>,
 ): Parameters<typeof createApiApp>[0]["wikiSources"] {
   return { ...fakeWikiSources(), ...overrides };
+}
+
+function wikiActivityItem() {
+  return {
+    id: "gwjob_1",
+    provider: "slack" as const,
+    sourceType: "conversation" as const,
+    title: "#product",
+    outcome: "succeeded" as const,
+    reason: null,
+    pages: [{ path: "projects/launch", title: "Launch", action: "updated" as const }],
+    attempts: 1,
+    occurredAt: "2026-08-24T08:00:00.000Z",
+    completedAt: "2026-08-24T09:01:00.000Z",
+    createdAt: "2026-08-24T09:00:00.000Z",
+    updatedAt: "2026-08-24T09:01:00.000Z",
+  };
 }
 
 function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {

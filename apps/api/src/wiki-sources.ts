@@ -12,13 +12,23 @@ import {
   type WikiSourceProvider,
 } from "@opencompany/db/product-schema";
 import {
+  listWikiIngestActivityRows,
+  type WikiIngestActivityRow,
+} from "@opencompany/db/wiki-ingest";
+import {
   deleteWikiSource,
   listWikiSourcesForWorkspace,
   setWikiSourceEnabled,
   upsertWikiSource,
   type WikiSourceWithIntegration,
 } from "@opencompany/db/wiki-sources";
-import type { UpsertWikiSourceBody, WikiSourceDto } from "@opencompany/protocol";
+import type {
+  UpsertWikiSourceBody,
+  WikiIngestActivityItemDto,
+  WikiIngestActivityPageDto,
+  WikiSourceDto,
+} from "@opencompany/protocol";
+import { isValidWikiPath } from "@opencompany/wiki";
 import { and, eq, isNull, ne, type SQL } from "drizzle-orm";
 
 type DbLike = any;
@@ -33,6 +43,10 @@ type SourceIntegration = {
 
 export type WikiSourceService = {
   list(actor: Actor): Promise<WikiSourceDto[]>;
+  listActivity(
+    actor: Actor,
+    input: { limit: number; cursor?: string },
+  ): Promise<WikiIngestActivityPageDto>;
   upsert(actor: Actor, command: UpsertWikiSourceBody): Promise<WikiSourceDto>;
   setEnabled(actor: Actor, sourceId: string, enabled: boolean): Promise<WikiSourceDto>;
   remove(actor: Actor, sourceId: string): Promise<void>;
@@ -45,6 +59,26 @@ export function createWikiSourceService(input: { db: DbLike }): WikiSourceServic
     async list(actor) {
       requireWikiPermission(actor, WIKI_READ_PERMISSION);
       return listSourceViews(actor, db);
+    },
+
+    async listActivity(actor, command) {
+      requireWikiPermission(actor, WIKI_READ_PERMISSION);
+      const before = decodeActivityCursor(command.cursor);
+      const rows = await listWikiIngestActivityRows({
+        workspaceId: actor.workspaceId,
+        limit: command.limit + 1,
+        before,
+        db,
+      });
+      const visible = rows.slice(0, command.limit);
+      const last = visible.at(-1);
+      return {
+        items: visible.map(wikiIngestActivityView),
+        nextCursor:
+          rows.length > command.limit && last
+            ? encodeActivityCursor(last.createdAt, last.id)
+            : null,
+      };
     },
 
     async upsert(actor, command) {
@@ -239,4 +273,179 @@ function providerDisplayName(provider: WikiSourceProvider) {
   if (provider === "github") return "GitHub";
   if (provider === "gmail") return "Gmail";
   return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
+function wikiIngestActivityView(row: WikiIngestActivityRow): WikiIngestActivityItemDto {
+  return {
+    id: row.id,
+    provider: row.sourceProvider,
+    sourceType: row.sourceType,
+    title: boundedNullableString(row.title, 512),
+    outcome: row.status,
+    reason: activityReason(row),
+    pages: row.status === "succeeded" ? activityPages(row.result) : [],
+    attempts: row.attempts,
+    occurredAt: row.occurredAt.toISOString(),
+    completedAt: row.completedAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function activityReason(row: WikiIngestActivityRow) {
+  if (row.status === "skipped") {
+    return boundedNullableString(
+      row.skipReason ?? resultString(row.result, "reason") ?? resultString(row.result, "summary"),
+      2_000,
+    );
+  }
+  if (row.status === "failed" || (row.status === "queued" && row.attempts > 0)) {
+    return boundedNullableString(row.lastError, 2_000);
+  }
+  return null;
+}
+
+function activityPages(result: Record<string, unknown>) {
+  const explicitPages = Array.isArray(result.pages) ? result.pages.flatMap(parseActivityPage) : [];
+  const pages = explicitPages.length > 0 ? explicitPages : activityPagesFromTrace(result.trace);
+  const unique = new Map<string, WikiIngestActivityItemDto["pages"][number]>();
+  for (const page of pages) {
+    unique.set(page.path, page);
+    if (unique.size >= 100) break;
+  }
+  return [...unique.values()];
+}
+
+function activityPagesFromTrace(traceValue: unknown): WikiIngestActivityItemDto["pages"] {
+  const trace = asRecord(traceValue);
+  if (!trace || !Array.isArray(trace.toolCalls)) return [];
+  const pages: WikiIngestActivityItemDto["pages"] = [];
+  for (const value of trace.toolCalls) {
+    const call = asRecord(value);
+    if (!call || call.status !== "completed" || call.mutating !== true) continue;
+    const input = parseJsonRecord(call.inputPreview);
+    const output = parseJsonRecord(call.outputPreview);
+    const command = typeof call.command === "string" ? call.command : input?.command;
+    if (command === "write") {
+      if (output?.action === "unchanged") continue;
+      pages.push(
+        ...activityPage(
+          output?.path ?? input?.path,
+          output?.title ?? input?.title,
+          output?.action === "created" ? "created" : "updated",
+        ),
+      );
+    } else if (command === "mkdir") {
+      if (output?.action === "unchanged") continue;
+      pages.push(...activityPage(output?.path ?? input?.path, output?.title, "created"));
+    } else if (command === "timeline-add") {
+      pages.push(...activityPage(firstPageRef(input?.pages), null, "updated"));
+    } else if (command === "move") {
+      pages.push(...activityPage(output?.path, null, "moved"));
+      for (const path of stringArray(output?.rewrittenReferrers)) {
+        pages.push(...activityPage(path, null, "updated"));
+      }
+    } else if (command === "delete") {
+      for (const path of stringArray(output?.deletedPaths)) {
+        pages.push(...activityPage(path, null, "deleted"));
+      }
+    }
+  }
+  return pages;
+}
+
+function parseActivityPage(value: unknown): WikiIngestActivityItemDto["pages"] {
+  const page = asRecord(value);
+  if (!page) return [];
+  const action = page.action;
+  if (action !== "created" && action !== "updated" && action !== "moved" && action !== "deleted") {
+    return [];
+  }
+  return activityPage(page.path, page.title, action);
+}
+
+function activityPage(
+  pathValue: unknown,
+  titleValue: unknown,
+  action: WikiIngestActivityItemDto["pages"][number]["action"],
+): WikiIngestActivityItemDto["pages"] {
+  const path = boundedString(pathValue, 512);
+  if (!isValidWikiPath(path)) return [];
+  return [
+    {
+      path,
+      title: boundedString(titleValue, 160) || titleFromPath(path),
+      action,
+    },
+  ];
+}
+
+function parseJsonRecord(value: unknown) {
+  if (typeof value !== "string" || !value.trim() || value.includes("[truncated]")) return null;
+  try {
+    return asRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function resultString(result: Record<string, unknown>, key: string) {
+  return typeof result[key] === "string" ? result[key] : null;
+}
+
+function boundedNullableString(value: unknown, maxLength: number) {
+  const normalized = boundedString(value, maxLength);
+  return normalized || null;
+}
+
+function boundedString(value: unknown, maxLength: number) {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function titleFromPath(path: string) {
+  const slug = path.split("/").filter(Boolean).at(-1) ?? path;
+  return slug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+    .slice(0, 160);
+}
+
+function firstPageRef(value: unknown) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function encodeActivityCursor(createdAt: Date, id: string) {
+  return Buffer.from(JSON.stringify({ createdAt: createdAt.toISOString(), id }), "utf8").toString(
+    "base64url",
+  );
+}
+
+function decodeActivityCursor(cursor?: string): { createdAt: Date; id: string } | null {
+  if (!cursor) return null;
+  try {
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+    const record = asRecord(value);
+    const createdAt = typeof record?.createdAt === "string" ? new Date(record.createdAt) : null;
+    const id = typeof record?.id === "string" ? record.id.trim() : "";
+    if (!createdAt || !Number.isFinite(createdAt.getTime()) || !id || id.length > 128) {
+      throw new Error("invalid");
+    }
+    return { createdAt, id };
+  } catch {
+    throw new CoreError("invalid_argument", "The Wiki activity cursor is invalid.");
+  }
 }

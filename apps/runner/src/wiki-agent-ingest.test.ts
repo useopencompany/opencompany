@@ -128,9 +128,7 @@ function triageResult(
   } as const;
 }
 
-function githubInput(
-  runTriage: NonNullable<Parameters<typeof runWikiAgentIngest>[0]["runTriage"]>,
-) {
+function githubInput() {
   return {
     ...input(vi.fn()),
     sourceProvider: "github" as const,
@@ -160,7 +158,6 @@ function githubInput(
         },
       },
     },
-    runTriage,
   };
 }
 
@@ -186,7 +183,12 @@ describe("opencompany wiki librarian agent", () => {
 
     const result = await runWikiAgentIngest(input(executeCommand));
 
-    expect(result).toMatchObject({ skipped: false, mutations: 1, toolCalls: 1 });
+    expect(result).toMatchObject({
+      skipped: false,
+      mutations: 1,
+      toolCalls: 1,
+      pages: [{ path: "meetings/roadmap-review", title: "Roadmap Review", action: "created" }],
+    });
     const generation = aiMock.generateText.mock.calls[0]?.[0] as any;
     expect(Object.keys(generation.tools)).toEqual(["wiki"]);
     expect(generation.messages[0].providerOptions.anthropic.cacheControl.type).toBe("ephemeral");
@@ -390,7 +392,7 @@ describe("opencompany wiki librarian agent", () => {
   it("short-circuits a GitHub comment when cheap triage says skip", async () => {
     const runTriage = vi.fn(async () => triageResult("skip"));
 
-    await expect(runWikiAgentIngest(githubInput(runTriage))).resolves.toMatchObject({
+    await expect(runWikiAgentIngest(githubInput(), { runTriage })).resolves.toMatchObject({
       model: "openai/gpt-5.4-nano",
       skipped: true,
       skipMode: "triage",
@@ -432,7 +434,7 @@ describe("opencompany wiki librarian agent", () => {
     const runTriage = vi.fn(async () => triageResult("ingest"));
     generate({ text: "SKIP: no wiki update was needed after lookup" });
 
-    const result = await runWikiAgentIngest(githubInput(runTriage));
+    const result = await runWikiAgentIngest(githubInput(), { runTriage });
 
     expect(result.trace.triage).toMatchObject({
       decision: "ingest",
@@ -451,7 +453,7 @@ describe("opencompany wiki librarian agent", () => {
     });
     generate({ text: "SKIP: nothing durable" });
 
-    await expect(runWikiAgentIngest(githubInput(runTriage))).resolves.toMatchObject({
+    await expect(runWikiAgentIngest(githubInput(), { runTriage })).resolves.toMatchObject({
       skipped: true,
       skipMode: "explicit",
     });

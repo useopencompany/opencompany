@@ -174,6 +174,7 @@ import {
   UpdateWorkflowBodySchema,
   UpsertWikiSourceBodySchema,
   UserPreferencesEnvelopeSchema,
+  WikiIngestActivityListEnvelopeSchema,
   WikiPageDeleteEnvelopeSchema,
   WikiPageListEnvelopeSchema,
   WikiPageMutationEnvelopeSchema,
@@ -1075,6 +1076,26 @@ export const listWikiSourcesRoute = createRoute({
     200: {
       description: "Source configuration and connection state for the active workspace Wiki.",
       content: { "application/json": { schema: WikiSourceListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listWikiIngestActivityRoute = createRoute({
+  method: "get",
+  path: "/v1/wiki/sources/activity",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+      cursor: z.string().min(1).max(1_024).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Recent ingestion outcomes for the active workspace Wiki.",
+      content: { "application/json": { schema: WikiIngestActivityListEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3159,6 +3180,7 @@ export type V1RouteHandlers = {
   deleteWikiPage: RouteHandler<typeof deleteWikiPageRoute>;
   addWikiTimelineEntry: RouteHandler<typeof addWikiTimelineEntryRoute>;
   listWikiSources: RouteHandler<typeof listWikiSourcesRoute>;
+  listWikiIngestActivity: RouteHandler<typeof listWikiIngestActivityRoute>;
   upsertWikiSource: RouteHandler<typeof upsertWikiSourceRoute>;
   setWikiSourceEnabled: RouteHandler<typeof setWikiSourceEnabledRoute>;
   deleteWikiSource: RouteHandler<typeof deleteWikiSourceRoute>;
@@ -3336,6 +3358,7 @@ export function createV1Router(
       .openapi(deleteWikiPageRoute, handlers.deleteWikiPage)
       .openapi(addWikiTimelineEntryRoute, handlers.addWikiTimelineEntry)
       .openapi(listWikiSourcesRoute, handlers.listWikiSources)
+      .openapi(listWikiIngestActivityRoute, handlers.listWikiIngestActivity)
       .openapi(upsertWikiSourceRoute, handlers.upsertWikiSource)
       .openapi(setWikiSourceEnabledRoute, handlers.setWikiSourceEnabled)
       .openapi(deleteWikiSourceRoute, handlers.deleteWikiSource)
@@ -4147,6 +4170,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       201,
     ),
   listWikiSources: (c) => c.json({ data: [placeholderWikiSource], meta }, 200),
+  listWikiIngestActivity: (c) => c.json({ data: { items: [], nextCursor: null }, meta }, 200),
   upsertWikiSource: (c) => c.json({ data: placeholderWikiSource, meta }, 200),
   setWikiSourceEnabled: (c) => c.json({ data: placeholderWikiSource, meta }, 200),
   deleteWikiSource: (c) =>
