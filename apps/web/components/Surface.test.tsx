@@ -116,14 +116,9 @@ const automationCommandMocks = vi.hoisted(() => ({
 }));
 
 const knowledgeCommandMocks = vi.hoisted(() => ({
-  listSkillCatalog: vi.fn(async () => {
-    const response = await globalThis.fetch("/api/skills");
-    if (!response.ok) throw new Error(`Skill catalog loading failed with HTTP ${response.status}.`);
-    const payload = (await response.json()) as {
-      skills?: Array<{ id: string; name: string; description: string }>;
-    };
-    return payload.skills ?? [];
-  }),
+  listSkillCatalog: vi.fn(
+    async () => [] as Array<{ id: string; name: string; description: string }>,
+  ),
 }));
 
 const headlessChatMocks = vi.hoisted(() => ({
@@ -461,7 +456,8 @@ describe("Surface chat streaming UI", () => {
     automationCommandMocks.archiveSchedule.mockClear();
     automationCommandMocks.runSchedule.mockClear();
     automationCommandMocks.updateSchedule.mockClear();
-    knowledgeCommandMocks.listSkillCatalog.mockClear();
+    knowledgeCommandMocks.listSkillCatalog.mockReset();
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([]);
     headlessChatMocks.startBackground.mockClear();
     attachmentUploadMock.canonicalUpload.mockReset();
     attachmentUploadMock.canonicalUpload.mockResolvedValue({ id: "attachment_1" });
@@ -905,7 +901,6 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") return Response.json({ skills: [] });
       if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
           {
@@ -1257,23 +1252,15 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("offers Brain skill mentions when continuing a session-backed task", async () => {
+  it("offers Skill mentions when continuing a session-backed task", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/skills") {
-        return Response.json({
-          skills: [
-            {
-              id: "product-work",
-              name: "Product work",
-              description: "Shape and ship product changes.",
-            },
-          ],
-        });
-      }
-      return Response.json({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
+      {
+        id: "product-work",
+        name: "Product work",
+        description: "Shape and ship product changes.",
+      },
+    ]);
 
     render(
       <Surface
@@ -2126,23 +2113,16 @@ describe("Surface chat streaming UI", () => {
     });
   });
 
-  it("submits selected Brain skills to cloud Codex", async () => {
+  it("submits selected Skills to cloud Codex", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/skills") {
-        return new Response(
-          JSON.stringify({
-            skills: [
-              {
-                id: "coding-work",
-                name: "Coding work",
-                description: "How coding work should happen.",
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "How coding work should happen.",
+      },
+    ]);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       return new Response(
         JSON.stringify({
           ok: true,
@@ -2862,19 +2842,15 @@ describe("Surface chat streaming UI", () => {
 
   it("starts a selected workflow in the background without creating a chat turn", async () => {
     const user = userEvent.setup();
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
+      {
+        id: "smooth-shadow-ring",
+        name: "Smooth shadow ring",
+        description: "Polish elevation styles.",
+      },
+    ]);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") {
-        return Response.json({
-          skills: [
-            {
-              id: "smooth-shadow-ring",
-              name: "Smooth shadow ring",
-              description: "Polish elevation styles.",
-            },
-          ],
-        });
-      }
       if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
           {
@@ -2952,7 +2928,6 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") return Response.json({ skills: [] });
       if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
           {
@@ -3035,7 +3010,6 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") return Response.json({ skills: [] });
       if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
           {
@@ -3114,7 +3088,6 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") return Response.json({ skills: [] });
       if (url === "/api/workflows") return Response.json({ workflows: [] });
       void init;
       return Response.json({});
@@ -3164,16 +3137,19 @@ describe("Surface chat streaming UI", () => {
   it("does not load or offer workflow mentions when Tasks & Workflows is disabled", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/skills") return Response.json({ skills: [] });
-      return Response.json({
-        workflows: [
-          {
-            id: "morning-test",
-            name: "Morning Test",
-            description: "Run the morning checks.",
-          },
-        ],
-      });
+      return Response.json(
+        String(input) === "/api/workflows"
+          ? {
+              workflows: [
+                {
+                  id: "morning-test",
+                  name: "Morning Test",
+                  description: "Run the morning checks.",
+                },
+              ],
+            }
+          : {},
+      );
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -3182,9 +3158,7 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "#morning");
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/skills")).toBe(true),
-    );
+    await waitFor(() => expect(knowledgeCommandMocks.listSkillCatalog).toHaveBeenCalled());
 
     expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/workflows")).toBe(false);
     expect(screen.queryByRole("option", { name: /Morning Test/i })).not.toBeInTheDocument();
@@ -3233,29 +3207,20 @@ describe("Surface chat streaming UI", () => {
     });
   });
 
-  it("selects, highlights, and reconciles multiple Brain skill mentions", async () => {
+  it("selects, highlights, and reconciles multiple Skill mentions", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            skills: [
-              {
-                id: "coding-work",
-                name: "Coding work",
-                description: "Use focused verification for code changes.",
-              },
-              {
-                id: "writing-work",
-                name: "Writing work",
-                description: "Write clear product copy.",
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "Use focused verification for code changes.",
+      },
+      {
+        id: "writing-work",
+        name: "Writing work",
+        description: "Write clear product copy.",
+      },
+    ]);
 
     render(
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
@@ -3294,29 +3259,20 @@ describe("Surface chat streaming UI", () => {
     });
   });
 
-  it("resolves exact Brain skill mentions pasted into the composer", async () => {
+  it("resolves exact Skill mentions pasted into the composer", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            skills: [
-              {
-                id: "product-feature",
-                name: "Product feature",
-                description: "Plan and shape a product feature.",
-              },
-              {
-                id: "add-integration-to-main-chat",
-                name: "Add integration to main chat",
-                description: "Add a new integration to the main chat.",
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
+      {
+        id: "product-feature",
+        name: "Product feature",
+        description: "Plan and shape a product feature.",
+      },
+      {
+        id: "add-integration-to-main-chat",
+        name: "Add integration to main chat",
+        description: "Add a new integration to the main chat.",
+      },
+    ]);
 
     render(
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
@@ -3349,29 +3305,20 @@ describe("Surface chat streaming UI", () => {
     });
   });
 
-  it("retries the Brain skill catalog on the next mention-menu open after a failed fetch", async () => {
+  it("retries the Skill catalog on the next mention-menu open after a failed fetch", async () => {
     const user = userEvent.setup();
     let catalogCalls = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/skills") {
-        catalogCalls += 1;
-        if (catalogCalls === 1) return new Response("nope", { status: 500 });
-        return new Response(
-          JSON.stringify({
-            skills: [
-              {
-                id: "coding-work",
-                name: "Coding work",
-                description: "Use focused verification for code changes.",
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      return new Response(JSON.stringify({}), { status: 200 });
+    knowledgeCommandMocks.listSkillCatalog.mockImplementation(async () => {
+      catalogCalls += 1;
+      if (catalogCalls === 1) throw new Error("Skill catalog unavailable.");
+      return [
+        {
+          id: "coding-work",
+          name: "Coding work",
+          description: "Use focused verification for code changes.",
+        },
+      ];
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
@@ -4099,7 +4046,6 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") return Response.json({ skills: [] });
       if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
           {

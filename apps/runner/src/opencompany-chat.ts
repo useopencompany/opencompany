@@ -94,6 +94,7 @@ import {
   markTaskTurnRunning,
   type TaskTurnContext,
 } from "./task-turn";
+import { loadWorkflowTaskSkillBundles } from "./workflow-skill-bundles";
 
 // Durable chat_messages write cadence. Live text streams via the separate 50ms presentation-delta
 // path below, so this interval only bounds how often the Electric read-model row is rewritten.
@@ -1157,6 +1158,9 @@ async function resolveProductChatRuntime(input: {
         }
       : {}),
   });
+  const taskSkillBundles = taskContext
+    ? await loadWorkflowTaskSkillBundles(taskContext.harnessSpec)
+    : [];
   const taskSystemBlocks = taskContext
     ? [
         TASK_SYSTEM_BLOCK,
@@ -1166,6 +1170,10 @@ async function resolveProductChatRuntime(input: {
           : taskContext.harnessSpec.systemPrompt.trim()
             ? [taskContext.harnessSpec.systemPrompt]
             : []),
+        ...taskSkillBundles.map(
+          (bundle) =>
+            `<workflow_skill name=${JSON.stringify(bundle.name)}>\n${bundle.body}\n</workflow_skill>`,
+        ),
       ]
     : [];
   return {

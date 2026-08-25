@@ -12,6 +12,7 @@ import {
 } from "@opencompany/core";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
+import { drizzle } from "drizzle-orm/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type ChatRepositoryIdFactory,
@@ -19,6 +20,8 @@ import {
   PostgresChatRepository,
   PostgresRunExecutionRepository,
 } from "./chat-repository";
+import { loadChatSessionPluginRuntime } from "./plugin-runtime-repository";
+import { listChatSkillBundleActivations, readChatSkillBundleFile } from "./skill-bundle-repository";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const migrationPaths = [
@@ -31,6 +34,10 @@ const migrationPaths = [
   "0216_goat_conversation_runtime_summary.sql",
   "0219_goat_run_attempt_deploy_version.sql",
   "0223_goat_task_projection_preservation.sql",
+  "0226_goat_immutable_skill_bundles.sql",
+  "0227_goat_chat_skill_bundle_snapshots.sql",
+  "0228_goat_plugins.sql",
+  "0229_goat_chat_skill_bundle_names.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -891,6 +898,236 @@ describe("Postgres Chat repositories", () => {
     });
   });
 
+  it("keeps first-turn Plugin snapshots fixed unless an explicit Skill activation extends them", async () => {
+    await database.exec(`
+      INSERT INTO goat.plugins (
+        id, workspace_id, name, status, manifest, source_type, source_url, source_path,
+        source_ref, resolved_commit, integrity, install_report
+      ) VALUES
+        (
+          'plugin_first', 'workspace_1', 'first-plugin', 'enabled',
+          '{"name":"first-plugin"}'::jsonb, 'github', 'https://github.com/example/plugins',
+          'first-plugin', 'main', '${"a".repeat(40)}', 'sha256:${"b".repeat(64)}',
+          '{"ignoredManifestFields":[],"skills":[],"mcp":{"status":"absent"},"collisions":[]}'::jsonb
+        ),
+        (
+          'plugin_disabled', 'workspace_1', 'disabled-plugin', 'disabled',
+          '{"name":"disabled-plugin"}'::jsonb, 'github', 'https://github.com/example/plugins',
+          'disabled-plugin', 'main', '${"a".repeat(40)}', 'sha256:${"c".repeat(64)}',
+          '{"ignoredManifestFields":[],"skills":[],"mcp":{"status":"absent"},"collisions":[]}'::jsonb
+        );
+      INSERT INTO goat.plugin_files (plugin_id, path, content, executable, size_bytes)
+      VALUES ('plugin_first', 'plugin.json', convert_to('{}', 'UTF8'), false, 2);
+    `);
+    const first = await service.createMessage(actor(), {
+      idempotencyKey: "plugin-snapshot-first",
+      content: "Start coding.",
+      engine: "codex",
+      model: "provider/model",
+    });
+
+    await expect(
+      database.query<{ plugin_id: string }>(
+        "SELECT plugin_id FROM goat.chat_session_plugins WHERE chat_session_id = $1",
+        [first.conversationId],
+      ),
+    ).resolves.toMatchObject({ rows: [{ plugin_id: "plugin_first" }] });
+
+    await database.exec(`
+      INSERT INTO goat.plugins (
+        id, workspace_id, name, status, manifest, source_type, source_url, source_path,
+        source_ref, resolved_commit, integrity, install_report
+      ) VALUES (
+        'plugin_late', 'workspace_1', 'late-plugin', 'enabled',
+        '{"name":"late-plugin"}'::jsonb, 'github', 'https://github.com/example/plugins',
+        'late-plugin', 'main', '${"a".repeat(40)}', 'sha256:${"d".repeat(64)}',
+        '{"ignoredManifestFields":[],"skills":[],"mcp":{"status":"absent"},"collisions":[]}'::jsonb
+      );
+      INSERT INTO goat.skill_bundles (
+        id, workspace_id, integrity, name, description, body,
+        source_type, source_url, source_path, source_ref, resolved_commit
+      ) VALUES (
+        'skill_bundle_plugin_late', 'workspace_1',
+        'sha256:${"1".repeat(64)}', 'late-review', 'Late Plugin Skill.', 'Use late review.',
+        'github', 'https://github.com/example/plugins', 'late-plugin/skills/late-review',
+        'main', '${"a".repeat(40)}'
+      );
+      INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
+      VALUES ('skill_bundle_plugin_late', 'SKILL.md', ''::bytea, false, 0);
+      INSERT INTO goat.plugin_skills (
+        workspace_id, plugin_id, skill_name, skill_path, skill_bundle_id
+      ) VALUES (
+        'workspace_1', 'plugin_late', 'late-review',
+        'skills/late-review', 'skill_bundle_plugin_late'
+      );
+      INSERT INTO goat.plugin_files (plugin_id, path, content, executable, size_bytes)
+      VALUES ('plugin_late', 'plugin.json', convert_to('{}', 'UTF8'), false, 2);
+      UPDATE goat.codex_chat_turns
+      SET status = 'completed', completed_at = now()
+      WHERE id = '${first.runId}';
+      UPDATE goat.codex_chat_sessions
+      SET status = 'idle', active_turn_id = NULL
+      WHERE chat_session_id = '${first.conversationId}';
+    `);
+    const second = await service.createMessage(actor(), {
+      idempotencyKey: "plugin-snapshot-second",
+      conversationId: first.conversationId,
+      content: "Continue coding.",
+      engine: "codex",
+      model: "provider/model",
+    });
+
+    await expect(
+      database.query<{ plugin_id: string }>(
+        "SELECT plugin_id FROM goat.chat_session_plugins WHERE chat_session_id = $1 ORDER BY plugin_id",
+        [first.conversationId],
+      ),
+    ).resolves.toMatchObject({ rows: [{ plugin_id: "plugin_first" }] });
+
+    await database.exec(`
+      UPDATE goat.codex_chat_turns
+      SET status = 'completed', completed_at = now()
+      WHERE id = '${second.runId}';
+      UPDATE goat.codex_chat_sessions
+      SET status = 'idle', active_turn_id = NULL
+      WHERE chat_session_id = '${first.conversationId}';
+    `);
+    await service.createMessage(actor(), {
+      idempotencyKey: "plugin-snapshot-explicit-late-skill",
+      conversationId: first.conversationId,
+      content: "Use the late review skill.",
+      engine: "codex",
+      model: "provider/model",
+      mentions: [{ kind: "skill", id: "late-review" }],
+    });
+
+    await expect(
+      database.query<{ plugin_id: string }>(
+        "SELECT plugin_id FROM goat.chat_session_plugins WHERE chat_session_id = $1 ORDER BY plugin_id",
+        [first.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ plugin_id: "plugin_first" }, { plugin_id: "plugin_late" }],
+    });
+    await expect(
+      loadChatSessionPluginRuntime(drizzle(database), {
+        workspaceId: "workspace_1",
+        chatSessionId: first.conversationId,
+      }),
+    ).resolves.toMatchObject({
+      plugins: [{ id: "plugin_first" }, { id: "plugin_late" }],
+      skills: [{ id: "skill_bundle_plugin_late", name: "late-review" }],
+    });
+  });
+
+  it("activates a winning Plugin Skill with its immutable source kind", async () => {
+    await database.exec(`
+      INSERT INTO goat.plugins (
+        id, workspace_id, name, status, manifest, source_type, source_url, source_path,
+        source_ref, resolved_commit, integrity, install_report
+      ) VALUES (
+        'plugin_review', 'workspace_1', 'review-tools', 'enabled',
+        '{"name":"review-tools"}'::jsonb, 'github', 'https://github.com/example/plugins',
+        'review-tools', 'main', '${"a".repeat(40)}', 'sha256:${"e".repeat(64)}',
+        '{"ignoredManifestFields":[],"skills":[],"mcp":{"status":"absent"},"collisions":[]}'::jsonb
+      );
+      INSERT INTO goat.skill_bundles (
+        id, workspace_id, integrity, name, description, body,
+        source_type, source_url, source_path, source_ref, resolved_commit
+      ) VALUES (
+        'skill_bundle_plugin_review', 'workspace_1',
+        'sha256:${"f".repeat(64)}', 'review', 'Review from Plugin.', 'Use review.',
+        'github', 'https://github.com/example/plugins', 'review-tools/skills/review',
+        'main', '${"a".repeat(40)}'
+      );
+      INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
+      VALUES ('skill_bundle_plugin_review', 'SKILL.md', ''::bytea, false, 0);
+      INSERT INTO goat.plugin_skills (
+        workspace_id, plugin_id, skill_name, skill_path, skill_bundle_id
+      ) VALUES (
+        'workspace_1', 'plugin_review', 'review', 'skills/review', 'skill_bundle_plugin_review'
+      );
+    `);
+
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "plugin-skill-activation",
+      content: "Review this.",
+      engine: "codex",
+      model: "provider/model",
+      mentions: [{ kind: "skill", id: "review" }],
+    });
+
+    await expect(
+      database.query<{ bundle_id: string; name: string; source_kind: string }>(
+        `SELECT bundle_id, name, source_kind
+         FROM goat.chat_session_skill_bundles
+         WHERE chat_session_id = $1`,
+        [created.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ bundle_id: "skill_bundle_plugin_review", name: "review", source_kind: "plugin" }],
+    });
+
+    const db = drizzle(database);
+    await expect(
+      listChatSkillBundleActivations(db, {
+        workspaceId: "workspace_1",
+        chatSessionId: created.conversationId,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ bundleId: "skill_bundle_plugin_review", sourceKind: "plugin" }),
+    ]);
+    await database.exec(`
+      INSERT INTO goat.skill_bundles (
+        id, workspace_id, integrity, name, description, body,
+        source_type, source_url, source_path, source_ref, resolved_commit
+      ) VALUES (
+        'skill_bundle_standalone_review', 'workspace_1',
+        'sha256:${"2".repeat(64)}', 'review', 'Standalone Review.', 'Use standalone review.',
+        'github', 'https://github.com/example/skills', 'review',
+        'main', '${"a".repeat(40)}'
+      );
+      INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
+      VALUES ('skill_bundle_standalone_review', 'SKILL.md', ''::bytea, false, 0);
+      INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id)
+      VALUES (
+        'skill_installation_standalone_review', 'workspace_1',
+        'review', 'skill_bundle_standalone_review'
+      );
+    `);
+    await expect(
+      listChatSkillBundleActivations(db, {
+        workspaceId: "workspace_1",
+        chatSessionId: created.conversationId,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ bundleId: "skill_bundle_plugin_review", sourceKind: "plugin" }),
+    ]);
+    await expect(
+      readChatSkillBundleFile(db, {
+        workspaceId: "workspace_1",
+        chatSessionId: created.conversationId,
+        skillName: "review",
+        path: "SKILL.md",
+      }),
+    ).resolves.toMatchObject({ path: "SKILL.md" });
+    await database.exec("UPDATE goat.plugins SET status = 'disabled' WHERE id = 'plugin_review'");
+    await expect(
+      listChatSkillBundleActivations(db, {
+        workspaceId: "workspace_1",
+        chatSessionId: created.conversationId,
+      }),
+    ).resolves.toEqual([]);
+    await expect(
+      readChatSkillBundleFile(db, {
+        workspaceId: "workspace_1",
+        chatSessionId: created.conversationId,
+        skillName: "review",
+        path: "SKILL.md",
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("cancels a paused approval Run when the user sends a new Message", async () => {
     const paused = await service.createMessage(actor(), {
       idempotencyKey: "send-paused-before-new-message",
@@ -1224,13 +1461,13 @@ describe("Postgres Chat repositories", () => {
       },
     ]);
     expect(
-      await database.query<{ skill_id: string; activated_message_id: string }>(`
-        SELECT skill_id, activated_message_id
-        FROM goat.chat_session_skills
+      await database.query<{ bundle_id: string; activated_message_id: string }>(`
+        SELECT bundle_id, activated_message_id
+        FROM goat.chat_session_skill_bundles
         WHERE chat_session_id = 'task_conversation_1'
       `),
     ).toMatchObject({
-      rows: [{ skill_id: "review", activated_message_id: created.messageId }],
+      rows: [{ bundle_id: "skill_bundle_review", activated_message_id: created.messageId }],
     });
 
     await database.query("UPDATE goat.codex_chat_turns SET status = 'paused' WHERE id = $1", [
@@ -1291,6 +1528,83 @@ describe("Postgres Chat repositories", () => {
     ).toMatchObject({ rows: [{ status: "canceled", error: "Stopped by user." }] });
   });
 
+  it("keeps the first Chat bundle fixed after its installation is replaced and archived", async () => {
+    await seedStandaloneReviewSkill(database);
+    const first = await service.createMessage(actor(), {
+      idempotencyKey: "skill-snapshot-v1",
+      content: "Review this.",
+      engine: "codex",
+      model: "provider/model",
+      mentions: [{ kind: "skill", id: "review" }],
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'completed', completed_at = now()
+       WHERE id = $1`,
+      [first.runId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_sessions
+       SET status = 'idle', active_turn_id = NULL
+       WHERE chat_session_id = $1`,
+      [first.conversationId],
+    );
+    await database.exec(`
+      INSERT INTO goat.skill_bundles (
+        id, workspace_id, integrity, name, description, body,
+        source_type, source_url, source_path, source_ref, resolved_commit
+      ) VALUES (
+        'skill_bundle_review_v2', 'workspace_1',
+        'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        'review', 'Review carefully.', 'Replacement body.', 'github',
+        'https://github.com/example/review', 'review', 'main',
+        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+      );
+      INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
+      VALUES ('skill_bundle_review_v2', 'SKILL.md', ''::bytea, false, 0);
+      UPDATE goat.skill_installations
+      SET bundle_id = 'skill_bundle_review_v2'
+      WHERE id = 'skill_review';
+    `);
+
+    await service.createMessage(actor(), {
+      idempotencyKey: "skill-snapshot-v2",
+      conversationId: first.conversationId,
+      content: "Review this again.",
+      engine: "codex",
+      model: "provider/model",
+      mentions: [{ kind: "skill", id: "review" }],
+    });
+    await database.exec(`
+      UPDATE goat.skill_installations
+      SET enabled = false, archived_at = now()
+      WHERE id = 'skill_review';
+    `);
+
+    await expect(
+      database.query<{
+        bundle_id: string;
+        name: string;
+        activated_message_id: string;
+        source_kind: string;
+      }>(
+        `SELECT bundle_id, name, activated_message_id, source_kind
+         FROM goat.chat_session_skill_bundles
+         WHERE chat_session_id = $1`,
+        [first.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          bundle_id: "skill_bundle_review",
+          name: "review",
+          activated_message_id: first.messageId,
+          source_kind: "standalone",
+        },
+      ],
+    });
+  });
+
   it("does not let a malformed Task link broaden access to a normal Chat Run", async () => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "private-chat-run",
@@ -1345,8 +1659,26 @@ async function seedTerminalTask(database: PGlite) {
       'task_run_1', 'user_1', 'task_runtime_1', 'task_conversation_1',
       'task_message_1', 'task_assistant_1', 'completed', 'Review the repository.', now()
     );
-    INSERT INTO goat.skills (id, workspace_id, slug, name, description, instructions)
-    VALUES ('skill_review', 'workspace_1', 'review', 'Review', 'Review carefully.', 'Be thorough.');
+  `);
+  await seedStandaloneReviewSkill(database);
+}
+
+async function seedStandaloneReviewSkill(database: PGlite) {
+  await database.exec(`
+    INSERT INTO goat.skill_bundles (
+      id, workspace_id, integrity, name, description, body,
+      source_type, source_url, source_path, source_ref, resolved_commit
+    ) VALUES (
+      'skill_bundle_review', 'workspace_1',
+      'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'review', 'Review carefully.', 'Be thorough.', 'github',
+      'https://github.com/example/review', 'review', 'main',
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    );
+    INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
+    VALUES ('skill_bundle_review', 'SKILL.md', ''::bytea, false, 0);
+    INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id)
+    VALUES ('skill_review', 'workspace_1', 'review', 'skill_bundle_review');
   `);
 }
 
@@ -1427,15 +1759,6 @@ const BASE_SCHEMA = `
     archived_at timestamptz,
     updated_at timestamptz NOT NULL DEFAULT now()
   );
-  CREATE TABLE goat.skills (
-    id text PRIMARY KEY,
-    workspace_id text NOT NULL,
-    slug text NOT NULL,
-    name text NOT NULL,
-    description text NOT NULL DEFAULT '',
-    instructions text NOT NULL DEFAULT '',
-    archived_at timestamptz
-  );
   CREATE TABLE goat.chat_messages (
     id text PRIMARY KEY,
     session_id text NOT NULL REFERENCES goat.chat_sessions(id),
@@ -1506,16 +1829,5 @@ const BASE_SCHEMA = `
     resolved_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
-  );
-  CREATE TABLE goat.chat_session_skills (
-    chat_session_id text NOT NULL REFERENCES goat.chat_sessions(id),
-    skill_id text NOT NULL,
-    brain_ref text NOT NULL,
-    activated_message_id text NOT NULL REFERENCES goat.chat_messages(id),
-    name text NOT NULL,
-    description text NOT NULL,
-    instructions text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (chat_session_id, skill_id)
   );
 `;

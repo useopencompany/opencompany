@@ -89,6 +89,10 @@ describe("headless protocol", () => {
       "/v1/skills/catalog",
       "/v1/skills/{slug}",
       "/v1/skills/{slug}/archive",
+      "/v1/skills/{slug}/enable",
+      "/v1/skills/{slug}/disable",
+      "/v1/skills/{slug}/replace",
+      "/v1/skills/{slug}/files/read",
       "/v1/conversations",
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/share",
@@ -149,6 +153,16 @@ describe("headless protocol", () => {
       "/v1/billing/subscription-checkouts",
       "/v1/billing/portal-sessions",
       "/v1/billing/auto-refill",
+      "/v1/plugins",
+      "/v1/plugins/imports/preview",
+      "/v1/plugins/imports",
+      "/v1/plugins/{name}",
+      "/v1/plugins/{name}/archive",
+      "/v1/plugins/{name}/enable",
+      "/v1/plugins/{name}/disable",
+      "/v1/plugins/{name}/mcp/approve",
+      "/v1/plugins/{name}/mcp/revoke",
+      "/v1/plugins/{name}/data/delete",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");
   });

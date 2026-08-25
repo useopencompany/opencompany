@@ -4,8 +4,10 @@ import {
   type BrainOverviewDto,
   type BrainSnapshotDto,
   createApiClient,
+  type PluginInstallationDto,
+  type PluginListItemDto,
   type SkillCatalogItemDto,
-  type SkillDto,
+  type SkillInstallationDto,
   type SkillListItemDto,
   type WikiPageDto,
 } from "@opencompany/protocol";
@@ -45,12 +47,27 @@ export async function listHeadlessSkillCatalog(): Promise<SkillCatalogItemDto[]>
   return (await response.json()).data;
 }
 
-export async function getHeadlessSkill(slug: string): Promise<SkillDto | null> {
+export async function getHeadlessSkill(slug: string): Promise<SkillInstallationDto | null> {
   const response = await (await serverKnowledgeClient()).v1.skills[":slug"].$get({
     param: { slug },
   });
   if (response.status === 404) return null;
   if (!response.ok) throw await serverResponseError(response, "Skill loading failed");
+  return (await response.json()).data;
+}
+
+export async function listHeadlessPlugins(): Promise<PluginListItemDto[]> {
+  const response = await (await serverKnowledgeClient()).v1.plugins.$get();
+  if (!response.ok) throw await serverResponseError(response, "Plugin loading failed");
+  return (await response.json()).data;
+}
+
+export async function getHeadlessPlugin(name: string): Promise<PluginInstallationDto | null> {
+  const response = await (await serverKnowledgeClient()).v1.plugins[":name"].$get({
+    param: { name },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await serverResponseError(response, "Plugin loading failed");
   return (await response.json()).data;
 }
 

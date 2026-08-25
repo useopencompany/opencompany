@@ -1,16 +1,17 @@
-import { parse as parseYaml } from "yaml";
-import type { AgentRemoteSkillSource, AgentSkillFile } from "./types";
+import { type ArtifactFile, computeArtifactIntegrity } from "./artifact-integrity";
+import { SKILL_LIMITS } from "./artifact-policy";
+import {
+  assertSafeRelativePath,
+  executableBitForBlobMode,
+  isSubmodule,
+  PathSafetyError,
+} from "./path-safety";
+import { parseSkillDocument, type SkillFrontmatter, SkillSpecError } from "./skill-spec";
+import type { AgentRemoteSkillSource } from "./types";
 
-// Limits applied to every resolve / re-resolve. Skills are small text bundles; anything
-// larger is almost certainly not a skill (or is hostile) and is rejected.
-export const SKILL_RESOLVER_LIMITS = {
-  maxFileCount: 32,
-  maxTotalBytes: 256 * 1024,
-  maxFileBytes: 256 * 1024,
-  // Cap on how many candidate SKILL.md files we'll read to build a chooser, so a repo with
-  // hundreds of skills can't fan out into hundreds of requests.
-  maxCandidateReads: 25,
-};
+// Cap on how many candidate SKILL.md files we'll read to build a chooser, so a repo with hundreds
+// of skills can't fan out into hundreds of blob requests.
+const MAX_CANDIDATE_READS = 25;
 
 export class SkillResolverError extends Error {
   constructor(message: string) {
@@ -34,23 +35,33 @@ export type ParsedSkillUrl = {
 };
 
 // A GitHub tree entry, as the resolver needs it. Fetchers map the GitHub API shape onto this.
+// "commit" entries are Git submodules; they are retained here so the resolver can reject a skill
+// that contains one rather than silently dropping it.
 export type SkillTreeEntry = {
   path: string;
-  type: "blob" | "tree";
-  // Git mode string. "120000" is a symlink and is rejected.
+  type: "blob" | "tree" | "commit";
+  // Git mode string. "120000" is a symlink and "160000" is a submodule; both are rejected.
   mode: string;
   size?: number;
 };
 
+// Result of reading a repository tree. `truncated` mirrors the GitHub tree API flag: when the tree
+// is too large the API returns a partial listing, which we must reject rather than treat as complete.
+export type SkillTree = {
+  entries: SkillTreeEntry[];
+  truncated: boolean;
+};
+
 // Network boundary. Callers supply concrete implementations (unauthenticated GitHub requests to
-// api.github.com / raw.githubusercontent.com only). Keeping it injected makes the
-// resolver pure and unit-testable, and keeps the SSRF surface in one small place.
+// api.github.com / raw.githubusercontent.com only). Keeping it injected makes the resolver pure and
+// unit-testable, and keeps the SSRF surface in one small place. Blobs are returned as raw bytes;
+// only SKILL.md is UTF-8 decoded, and only by the resolver.
 export type SkillResolverFetcher = {
   defaultBranch(owner: string, repo: string): Promise<string>;
   // Returns the 40-hex commit sha for a ref, or null if the ref/repo can't be read.
   resolveCommit(owner: string, repo: string, ref: string): Promise<string | null>;
-  fetchTree(owner: string, repo: string, commit: string): Promise<SkillTreeEntry[]>;
-  fetchBlob(owner: string, repo: string, commit: string, path: string): Promise<string>;
+  fetchTree(owner: string, repo: string, commit: string): Promise<SkillTree>;
+  fetchBlob(owner: string, repo: string, commit: string, path: string): Promise<Uint8Array>;
 };
 
 export type SkillCandidate = {
@@ -58,20 +69,21 @@ export type SkillCandidate = {
   path: string;
   name: string;
   description: string;
-  // Optional slash-command slug declared in SKILL.md frontmatter (`command:`). When present,
-  // the composer surfaces a `/<command>` slash command for this skill on agents that enable it.
-  command?: string;
 };
 
 export type ResolvedSkill = {
-  skillId: string;
   name: string;
   description: string;
-  command?: string;
+  license?: string;
+  compatibility?: string;
+  metadata?: Record<string, string>;
+  allowedTools?: string;
+  // The model-facing SKILL.md body (everything after the frontmatter), decoded from SKILL.md.
+  body: string;
   source: AgentRemoteSkillSource;
   resolvedCommit: string;
   integrity: string;
-  files: AgentSkillFile[];
+  files: ArtifactFile[];
   fileCount: number;
   totalBytes: number;
 };
@@ -106,8 +118,8 @@ function encodeRepoPath(path: string): string {
     .join("/");
 }
 
-// Unauthenticated GitHub fetcher for public repositories (V1). A private repo or bad URL reads
-// as 404 and surfaces as a clean "couldn't read that repository" error.
+// Unauthenticated GitHub fetcher for public repositories (V1). A private repo or bad URL reads as
+// 404 and surfaces as a clean "couldn't read that repository" error.
 export function createGitHubSkillFetcher(): SkillResolverFetcher {
   return {
     async defaultBranch(owner, repo) {
@@ -142,15 +154,13 @@ export function createGitHubSkillFetcher(): SkillResolverFetcher {
         throw new Error(`Couldn't read repository tree (${response.status}).`);
       }
       const json = (await response.json()) as {
+        truncated?: boolean;
         tree?: Array<{ path?: string; type?: string; mode?: string; size?: number }>;
       };
-      const entries = Array.isArray(json.tree) ? json.tree : [];
-      return entries.flatMap<SkillTreeEntry>((entry) => {
+      const rawEntries = Array.isArray(json.tree) ? json.tree : [];
+      const entries = rawEntries.flatMap<SkillTreeEntry>((entry) => {
         if (typeof entry.path !== "string" || typeof entry.mode !== "string") return [];
-        // Only files and directories are mountable. Drop anything else (notably submodules,
-        // which come back as type "commit") rather than misclassifying them as blobs and then
-        // trying to fetch their contents.
-        if (entry.type !== "blob" && entry.type !== "tree") return [];
+        if (entry.type !== "blob" && entry.type !== "tree" && entry.type !== "commit") return [];
         return [
           {
             path: entry.path,
@@ -160,6 +170,7 @@ export function createGitHubSkillFetcher(): SkillResolverFetcher {
           },
         ];
       });
+      return { entries, truncated: json.truncated === true };
     },
     async fetchBlob(owner, repo, commit, path) {
       const response = await fetch(
@@ -169,16 +180,16 @@ export function createGitHubSkillFetcher(): SkillResolverFetcher {
       if (!response.ok) {
         throw new Error(`Couldn't read ${path} (${response.status}).`);
       }
-      return response.text();
+      return new Uint8Array(await response.arrayBuffer());
     },
   };
 }
 
 const OWNER_REPO_SEGMENT = /^[A-Za-z0-9_.-]+$/;
 
-// Parse a user-pasted source into a normalized GitHub reference. Accepts github.com repo and
-// /tree/ urls, skills.sh skill-page urls, and `owner/repo[/subpath][@name][#ref]` shorthand.
-// Throws SkillResolverError for anything else (non-allowlisted host, malformed, traversal).
+// Parse a user-pasted source into a normalized GitHub reference. Accepts github.com repo and /tree/
+// urls, skills.sh skill-page urls, and `owner/repo[/subpath][@name][#ref]` shorthand. Throws
+// SkillResolverError for anything else (non-allowlisted host, malformed, traversal).
 export function parseSkillUrl(input: string): ParsedSkillUrl {
   const raw = input.trim();
   if (!raw) throw new SkillResolverError("Provide a GitHub or skills.sh URL.");
@@ -304,7 +315,7 @@ function stripGitSuffix(repo: string): string {
 }
 
 function sanitizeSubpath(subpath: string): string {
-  const normalized = subpath.replace(/^\/+|\/+$/g, "").replace(/\/{2,}/g, "/");
+  const normalized = subpath.split("/").filter(Boolean).join("/");
   if (!normalized) return "";
   if (normalized.split("/").some((segment) => segment === "..")) {
     throw new SkillResolverError("Skill path may not contain '..'.");
@@ -312,79 +323,11 @@ function sanitizeSubpath(subpath: string): string {
   return normalized;
 }
 
-// Turn a skill's SKILL.md `name` into a valid mount slug.
-export function slugifySkillName(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64)
-    .replace(/-+$/g, "");
-}
-
-const SKILL_MOUNT_ID_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
-
-export function isValidSkillMountId(id: string): boolean {
-  return SKILL_MOUNT_ID_RE.test(id) && !id.includes("--");
-}
-
-// Ensure the slug is a valid mount id that doesn't collide with an already-reserved id.
-// Appends a short integrity-derived suffix on collision.
-export function ensureSkillMountId(slug: string, integrity: string, reserved: Set<string>): string {
-  const suffix = integrity.replace(/^sha256:/, "").slice(0, 6);
-  let base = isValidSkillMountId(slug) ? slug : `skill-${suffix}`;
-  if (!reserved.has(base)) return base;
-  const withSuffix = `${base.slice(0, 57)}-${suffix}`;
-  base = isValidSkillMountId(withSuffix) ? withSuffix : `skill-${suffix}`;
-  return base;
-}
-
-// Normalize a declared `command:` into a slash-token slug ([a-z0-9_]). A leading slash is
-// tolerated (`/graphify` → `graphify`), internal spaces/hyphens become underscores
-// (`deep-research` → `deep_research`), and anything that strips to empty yields null so callers
-// can omit the field. Kept in sync with `toSlashSlug` (web) and the slash matcher (`/^\/(\w+)/`).
-export function normalizeSkillCommand(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const slug = raw
-    .trim()
-    .replace(/^\/+/, "")
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^a-z0-9_]/g, "")
-    .replace(/_+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return slug || null;
-}
-
-export function parseSkillFrontmatter(
-  content: string,
-): { name: string; description: string; command?: string } | null {
-  const normalized = content.replace(/\r\n/g, "\n");
-  if (!normalized.startsWith("---\n")) return null;
-  const end = normalized.indexOf("\n---", 4);
-  if (end === -1) return null;
-  let frontmatter: unknown;
-  try {
-    frontmatter = parseYaml(normalized.slice(4, end));
-  } catch {
-    return null;
-  }
-  if (!frontmatter || typeof frontmatter !== "object") return null;
-  const record = frontmatter as Record<string, unknown>;
-  const name = typeof record.name === "string" ? record.name.trim() : "";
-  const description = typeof record.description === "string" ? record.description.trim() : "";
-  if (!name || !description) return null;
-  const command = normalizeSkillCommand(record.command);
-  return { name, description, ...(command ? { command } : {}) };
-}
-
 // Directories (relative to repo root) that contain a SKILL.md. "" = repository root.
-export function discoverSkillDirectories(tree: SkillTreeEntry[], subpath?: string): string[] {
+export function discoverSkillDirectories(entries: SkillTreeEntry[], subpath?: string): string[] {
   const dirs: string[] = [];
   const seen = new Set<string>();
-  for (const entry of tree) {
+  for (const entry of entries) {
     if (entry.type !== "blob") continue;
     if (!entry.path.endsWith("SKILL.md")) continue;
     const dir = entry.path === "SKILL.md" ? "" : entry.path.slice(0, -"/SKILL.md".length);
@@ -408,102 +351,88 @@ function basename(path: string): string {
   return index === -1 ? path : path.slice(index + 1);
 }
 
-function looksBinary(content: string): boolean {
-  // A NUL byte never appears in valid UTF-8 text; the replacement char (U+FFFD) appears
-  // when bytes failed to decode as UTF-8. Either means this isn't a text file.
-  return content.includes("\u0000") || content.includes("\uFFFD");
+// The directory name a skill at `dir` must match. A subdirectory skill matches its own basename; a
+// repository-root skill (`dir === ""`) matches the repository name, which is the checkout directory.
+function expectedNameForDir(dir: string, repo: string): string {
+  return dir === "" ? repo : basename(dir);
 }
 
-// Validate the gathered files. Returns an error message or null.
-export function validateSkillFiles(files: AgentSkillFile[]): string | null {
-  if (files.length === 0) return "Skill has no files.";
-  if (!files.some((file) => file.path === "SKILL.md")) {
-    return "Skill is missing a SKILL.md at its root.";
+function decodeSkillMarkdown(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new SkillResolverError("SKILL.md is not valid UTF-8 text.");
   }
-  if (files.length > SKILL_RESOLVER_LIMITS.maxFileCount) {
-    return `Skill has too many files (max ${SKILL_RESOLVER_LIMITS.maxFileCount}).`;
-  }
-  let total = 0;
-  for (const file of files) {
-    if (file.path.split("/").some((segment) => segment === "..")) {
-      return "Skill contains an unsafe file path.";
-    }
-    const bytes = new TextEncoder().encode(file.content).length;
-    if (bytes > SKILL_RESOLVER_LIMITS.maxFileBytes) {
-      return `Skill file ${file.path} is too large.`;
-    }
-    if (looksBinary(file.content)) {
-      return `Skill file ${file.path} is not a text file.`;
-    }
-    total += bytes;
-  }
-  if (total > SKILL_RESOLVER_LIMITS.maxTotalBytes) {
-    return `Skill is too large (max ${Math.floor(SKILL_RESOLVER_LIMITS.maxTotalBytes / 1024)} KB).`;
-  }
-  return null;
 }
 
-// Canonical content hash for a skill folder. Order-independent, path-sensitive, and usable in
-// both browser and server runtimes through Web Crypto.
-export async function computeSkillFolderIntegrity(files: AgentSkillFile[]): Promise<string> {
-  const sorted = [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  const parts: string[] = [];
-  for (const file of sorted) parts.push(file.path, "\0", file.content, "\0");
-  const digest = await globalThis.crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(parts.join("")),
-  );
-  const hex = Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-  return `sha256:${hex}`;
-}
-
+// Gather every file under `dir` as raw bytes plus its executable bit, enforcing path- and
+// mode-safety and the skill size limits. Rejects symlinks, submodules, `.git`, traversal, and
+// oversize packages.
 async function gatherSkillFiles(input: {
-  tree: SkillTreeEntry[];
+  entries: SkillTreeEntry[];
   dir: string;
   owner: string;
   repo: string;
   commit: string;
   fetcher: SkillResolverFetcher;
-}): Promise<AgentSkillFile[]> {
-  const { tree, dir, owner, repo, commit, fetcher } = input;
+}): Promise<ArtifactFile[]> {
+  const { entries, dir, owner, repo, commit, fetcher } = input;
   const prefix = dir === "" ? "" : `${dir}/`;
-  const blobs = tree.filter(
-    (entry) => entry.type === "blob" && (dir === "" || entry.path.startsWith(prefix)),
-  );
-  // Reject symlinks outright (mode 120000) — they can point outside the skill folder.
-  if (blobs.some((entry) => entry.mode === "120000")) {
-    throw new SkillResolverError("Skill contains a symlink, which is not allowed.");
+  const contained = entries.filter((entry) => dir === "" || entry.path.startsWith(prefix));
+
+  // Reject a submodule anywhere in the skill folder before fetching anything.
+  for (const entry of contained) {
+    if (isSubmodule(entry.mode, entry.type)) {
+      throw new SkillResolverError("Skill contains a submodule, which is not allowed.");
+    }
   }
-  if (blobs.length > SKILL_RESOLVER_LIMITS.maxFileCount) {
-    throw new SkillResolverError(
-      `Skill has too many files (max ${SKILL_RESOLVER_LIMITS.maxFileCount}).`,
-    );
+
+  const blobs = contained.filter((entry) => entry.type === "blob");
+  if (blobs.length > SKILL_LIMITS.maxFileCount) {
+    throw new SkillResolverError(`Skill has too many files (max ${SKILL_LIMITS.maxFileCount}).`);
   }
-  const files: AgentSkillFile[] = [];
+
+  const files: ArtifactFile[] = [];
+  let totalBytes = 0;
   for (const entry of blobs) {
     const relative = dir === "" ? entry.path : entry.path.slice(prefix.length);
-    if (!relative || relative.includes("/.git/") || relative.startsWith(".git/")) continue;
-    if (relative.split("/").includes("node_modules")) continue;
+    let executable: boolean;
+    try {
+      assertSafeRelativePath(relative);
+      executable = executableBitForBlobMode(entry.mode);
+    } catch (error) {
+      if (error instanceof PathSafetyError) throw new SkillResolverError(error.message);
+      throw error;
+    }
     const content = await fetcher.fetchBlob(owner, repo, commit, entry.path);
-    files.push({ path: relative, content });
+    if (content.length > SKILL_LIMITS.maxFileBytes) {
+      throw new SkillResolverError(`Skill file ${relative} is too large.`);
+    }
+    totalBytes += content.length;
+    if (totalBytes > SKILL_LIMITS.maxTotalBytes) {
+      throw new SkillResolverError(
+        `Skill is too large (max ${Math.floor(SKILL_LIMITS.maxTotalBytes / 1024)} KB).`,
+      );
+    }
+    files.push({ path: relative, content, executable });
+  }
+
+  if (!files.some((file) => file.path === "SKILL.md")) {
+    throw new SkillResolverError("Skill is missing a SKILL.md at its root.");
   }
   return files;
 }
 
-// Resolve a skill from a source url. Fetches via the injected fetcher (network), validates,
-// hashes, and returns either a fully resolved skill or an ambiguous candidate list.
+// Resolve a skill from a source url. Fetches via the injected fetcher (network), validates against
+// the strict Agent Skills spec, hashes, and returns either a fully resolved skill or an ambiguous
+// candidate list.
 export async function resolveSkill(input: {
   url: string;
   fetcher: SkillResolverFetcher;
   // When the repo has multiple skills, the caller re-invokes with the chosen directory path.
   selectedPath?: string;
-  // Mount ids already used in the workspace, so a new skill gets a non-colliding slug.
-  reservedIds?: Set<string>;
 }): Promise<ResolveSkillResult> {
   const parsed = parseSkillUrl(input.url);
-  const reserved = input.reservedIds ?? new Set<string>();
 
   const ref = parsed.ref ?? (await input.fetcher.defaultBranch(parsed.owner, parsed.repo));
   const commit = await input.fetcher.resolveCommit(parsed.owner, parsed.repo, ref);
@@ -514,7 +443,14 @@ export async function resolveSkill(input: {
   }
 
   const tree = await input.fetcher.fetchTree(parsed.owner, parsed.repo, commit);
-  let dirs = discoverSkillDirectories(tree, parsed.subpath);
+  if (tree.truncated) {
+    throw new SkillResolverError(
+      "That repository's file tree is too large to read completely; import a specific skill subdirectory instead.",
+    );
+  }
+  const entries = tree.entries;
+
+  let dirs = discoverSkillDirectories(entries, parsed.subpath);
   if (dirs.length === 0) {
     throw new SkillResolverError("No SKILL.md found in that repository or path.");
   }
@@ -534,28 +470,36 @@ export async function resolveSkill(input: {
         : undefined;
 
   if (chosenDir === undefined) {
-    // Build a candidate chooser by reading each SKILL.md's frontmatter (capped).
+    // Build a candidate chooser by reading each SKILL.md's frontmatter (capped). Skills that fail
+    // strict validation are skipped rather than surfaced.
     const candidates: SkillCandidate[] = [];
-    for (const dir of dirs.slice(0, SKILL_RESOLVER_LIMITS.maxCandidateReads)) {
+    for (const dir of dirs.slice(0, MAX_CANDIDATE_READS)) {
       const mdPath = dir === "" ? "SKILL.md" : `${dir}/SKILL.md`;
-      const md = await input.fetcher.fetchBlob(parsed.owner, parsed.repo, commit, mdPath);
-      const frontmatter = parseSkillFrontmatter(md);
-      if (!frontmatter) continue;
-      if (parsed.nameFilter && slugifySkillName(frontmatter.name) !== parsed.nameFilter) continue;
-      candidates.push({ path: dir, ...frontmatter });
+      const bytes = await input.fetcher.fetchBlob(parsed.owner, parsed.repo, commit, mdPath);
+      let frontmatter: SkillFrontmatter;
+      try {
+        frontmatter = parseSkillDocument(
+          decodeSkillMarkdown(bytes),
+          expectedNameForDir(dir, parsed.repo),
+        ).frontmatter;
+      } catch (error) {
+        if (error instanceof SkillSpecError || error instanceof SkillResolverError) continue;
+        throw error;
+      }
+      if (parsed.nameFilter && frontmatter.name !== parsed.nameFilter) continue;
+      candidates.push({ path: dir, name: frontmatter.name, description: frontmatter.description });
     }
     if (candidates.length === 0) {
       throw new SkillResolverError("No valid SKILL.md (with name and description) was found.");
     }
     if (candidates.length === 1) {
       return finalizeSkill({
-        ...input,
         parsed,
         ref,
         commit,
-        tree,
-        candidate: candidates[0]!,
-        reserved,
+        entries,
+        dir: candidates[0]!.path,
+        fetcher: input.fetcher,
       });
     }
     return {
@@ -566,65 +510,65 @@ export async function resolveSkill(input: {
     };
   }
 
-  const mdPath = chosenDir === "" ? "SKILL.md" : `${chosenDir}/SKILL.md`;
-  const md = await input.fetcher.fetchBlob(parsed.owner, parsed.repo, commit, mdPath);
-  const frontmatter = parseSkillFrontmatter(md);
-  if (!frontmatter) {
-    throw new SkillResolverError("SKILL.md is missing a valid `name` and `description`.");
-  }
-  return finalizeSkill({
-    ...input,
-    parsed,
-    ref,
-    commit,
-    tree,
-    candidate: { path: chosenDir, ...frontmatter },
-    reserved,
-  });
+  return finalizeSkill({ parsed, ref, commit, entries, dir: chosenDir, fetcher: input.fetcher });
 }
 
 async function finalizeSkill(input: {
   parsed: ParsedSkillUrl;
-  fetcher: SkillResolverFetcher;
   // The branch/ref already resolved by resolveSkill, threaded through so we don't re-fetch
   // defaultBranch and risk source.ref drifting from the commit we resolved against.
   ref: string;
   commit: string;
-  tree: SkillTreeEntry[];
-  candidate: SkillCandidate;
-  reserved: Set<string>;
+  entries: SkillTreeEntry[];
+  dir: string;
+  fetcher: SkillResolverFetcher;
 }): Promise<ResolveSkillResult> {
-  const { parsed, ref, commit, tree, candidate, reserved, fetcher } = input;
+  const { parsed, ref, commit, entries, dir, fetcher } = input;
   const files = await gatherSkillFiles({
-    tree,
-    dir: candidate.path,
+    entries,
+    dir,
     owner: parsed.owner,
     repo: parsed.repo,
     commit,
     fetcher,
   });
-  const validationError = validateSkillFiles(files);
-  if (validationError) throw new SkillResolverError(validationError);
 
-  const integrity = await computeSkillFolderIntegrity(files);
-  const skillId = ensureSkillMountId(slugifySkillName(candidate.name), integrity, reserved);
-  const totalBytes = files.reduce(
-    (sum, file) => sum + new TextEncoder().encode(file.content).length,
-    0,
-  );
+  const skillMarkdown = files.find((file) => file.path === "SKILL.md");
+  if (!skillMarkdown) {
+    throw new SkillResolverError("Skill is missing a SKILL.md at its root.");
+  }
+  let document: ReturnType<typeof parseSkillDocument>;
+  try {
+    document = parseSkillDocument(
+      decodeSkillMarkdown(skillMarkdown.content),
+      expectedNameForDir(dir, parsed.repo),
+    );
+  } catch (error) {
+    if (error instanceof SkillSpecError) throw new SkillResolverError(error.message);
+    throw error;
+  }
+
+  const integrity = await computeArtifactIntegrity(files);
+  const totalBytes = files.reduce((sum, file) => sum + file.content.length, 0);
+  const { frontmatter } = document;
 
   return {
     status: "resolved",
     skill: {
-      skillId,
-      name: candidate.name,
-      description: candidate.description,
-      ...(candidate.command ? { command: candidate.command } : {}),
+      name: frontmatter.name,
+      description: frontmatter.description,
+      ...(frontmatter.license !== undefined ? { license: frontmatter.license } : {}),
+      ...(frontmatter.compatibility !== undefined
+        ? { compatibility: frontmatter.compatibility }
+        : {}),
+      ...(frontmatter.metadata !== undefined ? { metadata: frontmatter.metadata } : {}),
+      ...(frontmatter.allowedTools !== undefined ? { allowedTools: frontmatter.allowedTools } : {}),
+      body: document.body,
       source: {
         type: parsed.sourceType,
         url: parsed.url,
         ref,
-        path: candidate.path,
+        path: dir,
       },
       resolvedCommit: commit,
       integrity,

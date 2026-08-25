@@ -32,6 +32,9 @@ const protectedCompatibilityTokens = [
     "physical and stored quoted goat_* identifiers",
     /["'`]goat_[a-z0-9_]*["'`]/gu,
     "[\"'`]goat_[a-z0-9_]*[\"'`]",
+    // The one-way Agent Skills cutover retires the old Skill/workflow id namespaces and physical
+    // indexes while replacing the live schema with immutable bundle/plugin identifiers.
+    -12,
   ],
   [
     "quoted sandbox runtime roots",
@@ -138,11 +141,18 @@ for (const [relativePath, fragments] of requiredCompatibilityFragments) {
   }
 }
 
-for (const [label, currentPattern, gitPattern] of protectedCompatibilityTokens) {
+for (const [
+  label,
+  currentPattern,
+  gitPattern,
+  acceptedCutoverDelta = 0,
+] of protectedCompatibilityTokens) {
   const currentCount = currentCompatibilityCorpus.match(currentPattern)?.length ?? 0;
-  const baseCount = gitMatchCount(gitPattern);
-  if (currentCount !== baseCount) {
-    failures.push(`${label}: expected ${baseCount} retained occurrences, found ${currentCount}`);
+  const expectedCount = gitMatchCount(gitPattern) + acceptedCutoverDelta;
+  if (currentCount !== expectedCount) {
+    failures.push(
+      `${label}: expected ${expectedCount} retained occurrences, found ${currentCount}`,
+    );
   }
 }
 

@@ -6,6 +6,7 @@ import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources"
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createMcpService } from "@opencompany/agent/mcp-http";
+import { createPluginImportResolver } from "@opencompany/agent/plugin-import";
 import { createSkillImportResolver } from "@opencompany/agent/skill-import";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import { createBillingApplicationService } from "@opencompany/billing/application-service";
@@ -14,6 +15,7 @@ import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
 import {
   ChatApplicationService,
   KnowledgeApplicationService,
+  PluginImportApplicationService,
   SkillImportApplicationService,
   TaskApplicationService,
   WikiCommandApplicationService,
@@ -23,7 +25,9 @@ import {
   PostgresChatRepository,
 } from "@opencompany/db/chat-repository";
 import { PostgresKnowledgeRepository } from "@opencompany/db/knowledge-repository";
+import { PostgresPluginRepository } from "@opencompany/db/plugin-repository";
 import { createPooledDb } from "@opencompany/db/pool";
+import { PostgresSkillBundleRepository } from "@opencompany/db/skill-bundle-repository";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { getWikiAccessForUser } from "@opencompany/db/wiki";
 import { PostgresWikiCommandRepository } from "@opencompany/db/wiki-command-repository";
@@ -117,8 +121,12 @@ const brainSources = new BrainSourceApplicationService(database.db);
 const brainImports = new BrainImportApplicationService(database.db, brainSources);
 const browserProfiles = new BrowserProfileApplicationService(database.db);
 const skillImports = new SkillImportApplicationService(
-  knowledgeRepository,
+  new PostgresSkillBundleRepository(database.db),
   createSkillImportResolver(),
+);
+const pluginImports = new PluginImportApplicationService(
+  new PostgresPluginRepository(database.db),
+  createPluginImportResolver(),
 );
 const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
@@ -143,6 +151,7 @@ const app = createApiApp({
   brainImports,
   browserProfiles,
   skillImports,
+  pluginImports,
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   chatResources: createChatResourceService({ db: database.db }),
   chatTitles: createChatTitleService({
