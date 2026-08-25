@@ -121,6 +121,40 @@ export async function upsertWikiSource(input: {
   return { id: row.id, created: Boolean(inserted) };
 }
 
+// Meeting providers have no scope picker, so their canonical connect paths
+// attach them to the workspace Wiki immediately. A previously paused row is
+// deliberately left untouched: reconnecting or rotating a key must not undo a
+// user's explicit pause.
+export async function ensureWikiSourceEnabledOnConnect(input: {
+  workspaceId: string;
+  provider: Extract<WikiSourceProvider, "jamie" | "granola">;
+  integrationId: string;
+  userWorkosId: string;
+  createdByWorkosId: string;
+  now?: Date;
+  db?: DbLike;
+}): Promise<boolean> {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const [inserted] = await db
+    .insert(wikiSources)
+    .values({
+      id: newWikiSourceId(),
+      workspaceId: input.workspaceId,
+      provider: input.provider,
+      integrationId: input.integrationId,
+      userWorkosId: input.userWorkosId,
+      createdByWorkosId: input.createdByWorkosId,
+      enabled: true,
+      updatedAt: now,
+    })
+    .onConflictDoNothing({
+      target: [wikiSources.workspaceId, wikiSources.integrationId],
+    })
+    .returning({ id: wikiSources.id });
+  return Boolean(inserted);
+}
+
 export async function setWikiSourceEnabled(input: {
   workspaceId: string;
   sourceId: string;

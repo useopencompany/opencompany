@@ -21,6 +21,82 @@ const context: ChatHostContext = {
 };
 
 describe("opencompany Chat Task host tools", () => {
+  it("activates a catalog skill before returning its snapshotted instructions", async () => {
+    const resolveSkillMentions = vi.fn(async () => [
+      {
+        id: "research",
+        bundleId: "skill_bundle_research_v1",
+        name: "research",
+        description: "Research carefully.",
+        instructions: "Current instructions.",
+        sourceKind: "standalone" as const,
+      },
+    ]);
+    const activateAndListSkills = vi.fn(async () => [
+      {
+        skillId: "research",
+        name: "research",
+        description: "Research carefully.",
+        instructions: "Chat-fixed instructions.",
+      },
+    ]);
+    const dependencies = testDependencies({ resolveSkillMentions, activateAndListSkills });
+
+    await expect(
+      executeChatHostToolService({
+        command: {
+          operation: "use_skill",
+          sessionId: "runtime_1",
+          runId: "run_1",
+          input: { skill: "research" },
+        },
+        dependencies,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: { skill: { id: "research", instructions: "Chat-fixed instructions." } },
+    });
+    expect(activateAndListSkills).toHaveBeenCalledWith({
+      conversationId: "conversation_1",
+      messageId: "message_1",
+      workspaceId: "workspace_1",
+      skills: [expect.objectContaining({ id: "research" })],
+    });
+  });
+
+  it("reads one bounded file chunk through the authorized Chat snapshot", async () => {
+    const readSkillFile = vi.fn(async () => ({
+      path: "references/guide.md",
+      executable: false,
+      sizeBytes: 10,
+      offset: 4,
+      nextOffset: 10,
+      eof: true,
+      encoding: "utf8" as const,
+      content: "guide",
+    }));
+    const dependencies = testDependencies({ readSkillFile });
+
+    await executeChatHostToolService({
+      command: {
+        operation: "read_skill_file",
+        sessionId: "runtime_1",
+        runId: "run_1",
+        input: { skill: "research", path: "references/guide.md", offset: 4, maxBytes: 64 },
+      },
+      dependencies,
+    });
+
+    expect(readSkillFile).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      conversationId: "conversation_1",
+      skill: "research",
+      path: "references/guide.md",
+      offset: 4,
+      maxBytes: 64,
+    });
+  });
+
   it("delegates an agent-created Task through the authenticated Task creator", async () => {
     const createTask = vi.fn(async () => taskResult);
     const dependencies = testDependencies({ createTask });
@@ -204,6 +280,7 @@ function testDependencies(
     resolveSkillMentions: vi.fn(async () => []),
     listSkillCatalog: vi.fn(async () => []),
     activateAndListSkills: vi.fn(async () => []),
+    readSkillFile: vi.fn(),
     createTask: vi.fn(async () => taskResult),
     listSchedules: vi.fn(async () => []),
     createSchedule: vi.fn(),

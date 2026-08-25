@@ -1,13 +1,13 @@
-import { SkillEditorRoute } from "@/components/Routes";
+import { SkillBundleRoute } from "@/components/Routes";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { currentUser } from "@/lib/auth";
 import { getHeadlessSkill } from "@/lib/headless-knowledge-server";
 
-type SkillEditorPageProps = {
+type SkillBundlePageProps = {
   params: Promise<{ slug: string }>;
 };
 
-export default async function SkillEditorPage({ params }: SkillEditorPageProps) {
+export default async function SkillBundlePage({ params }: SkillBundlePageProps) {
   const { slug } = await params;
   const context = await currentUser();
   const skill = await getHeadlessSkill(slug);
@@ -24,12 +24,5 @@ export default async function SkillEditorPage({ params }: SkillEditorPageProps) 
     );
   }
 
-  return (
-    <SkillEditorRoute
-      skill={skill}
-      initialStatus={skill.status}
-      canEdit={context.role === "admin"}
-      source={skill.source}
-    />
-  );
+  return <SkillBundleRoute installation={skill} canEdit={context.role === "admin"} />;
 }

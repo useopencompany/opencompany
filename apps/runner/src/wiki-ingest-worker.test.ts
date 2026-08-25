@@ -118,6 +118,7 @@ function result(overrides: Partial<WikiAgentIngestResult> = {}): WikiAgentIngest
     steps: 2,
     toolCalls: 2,
     mutations: 1,
+    pages: [{ path: "projects/roadmap", title: "Roadmap", action: "updated" }],
     usage,
     budget,
     summary: "Updated the roadmap page.",
@@ -283,6 +284,7 @@ describe("opencompany wiki ingest worker", () => {
       steps: budgetResult.steps,
       toolCalls: budgetResult.toolCalls,
       mutations: budgetResult.mutations,
+      pages: budgetResult.pages,
     });
     expect(retryMaxAttempts(budgetError)).toBe(WIKI_INGEST_BUDGET_MAX_ATTEMPTS);
     expect(retryMaxAttempts(new WikiAgentOutcomeError("outcome"))).toBe(
@@ -322,6 +324,7 @@ describe("opencompany wiki ingest worker", () => {
       steps: failureResult.steps,
       toolCalls: failureResult.toolCalls,
       mutations: 0,
+      pages: [],
     });
 
     await expect(

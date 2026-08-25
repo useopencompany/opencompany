@@ -1,4 +1,5 @@
 import type { Actor } from "@opencompany/core";
+import { listWikiIngestActivityRows } from "@opencompany/db/wiki-ingest";
 import {
   deleteWikiSource,
   listWikiSourcesForWorkspace,
@@ -16,6 +17,11 @@ vi.mock("@opencompany/db/wiki-sources", async (importOriginal) => ({
   upsertWikiSource: vi.fn(async () => ({ id: "gwscfg_1", created: true })),
 }));
 
+vi.mock("@opencompany/db/wiki-ingest", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listWikiIngestActivityRows: vi.fn(async () => []),
+}));
+
 const admin = actor({ role: "admin" });
 const member = actor({ role: "member" });
 
@@ -23,6 +29,7 @@ describe("Wiki source service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(listWikiSourcesForWorkspace).mockResolvedValue([]);
+    vi.mocked(listWikiIngestActivityRows).mockResolvedValue([]);
   });
 
   it("lists only the actor's workspace and derives member-safe capabilities", async () => {
@@ -65,6 +72,9 @@ describe("Wiki source service", () => {
     const previewDisabled = actor({ permissions: [] });
 
     await expect(service.list(previewDisabled)).rejects.toMatchObject({ code: "forbidden" });
+    await expect(service.listActivity(previewDisabled, { limit: 20 })).rejects.toMatchObject({
+      code: "forbidden",
+    });
     await expect(
       service.upsert(previewDisabled, {
         integrationId: "integration_1",
@@ -74,6 +84,83 @@ describe("Wiki source service", () => {
     ).rejects.toMatchObject({ code: "forbidden" });
     expect(listWikiSourcesForWorkspace).not.toHaveBeenCalled();
     expect(upsertWikiSource).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed activity cursors before querying persistence", async () => {
+    const service = createWikiSourceService({ db: integrationDb([]) });
+
+    await expect(
+      service.listActivity(member, { limit: 20, cursor: "not-a-valid-cursor" }),
+    ).rejects.toMatchObject({ code: "invalid_argument" });
+    expect(listWikiIngestActivityRows).not.toHaveBeenCalled();
+  });
+
+  it("returns paginated activity with sanitized reasons and page mutations", async () => {
+    vi.mocked(listWikiIngestActivityRows).mockResolvedValueOnce([
+      activityRow({
+        result: {
+          pages: [
+            { path: "projects/launch", title: "Launch", action: "updated" },
+            { path: "ignored", title: "Ignored", action: "bogus" },
+            { path: "../settings", title: "Unsafe", action: "updated" },
+          ],
+        },
+      }),
+      activityRow({
+        id: "gwjob_older",
+        status: "skipped",
+        skipReason: "Routine chatter",
+        createdAt: new Date("2026-08-23T09:00:00.000Z"),
+      }),
+    ] as never);
+    const service = createWikiSourceService({ db: integrationDb([]) });
+
+    await expect(service.listActivity(member, { limit: 1 })).resolves.toEqual({
+      items: [
+        expect.objectContaining({
+          id: "gwjob_1",
+          outcome: "succeeded",
+          reason: null,
+          pages: [{ path: "projects/launch", title: "Launch", action: "updated" }],
+        }),
+      ],
+      nextCursor: expect.any(String),
+    });
+    expect(listWikiIngestActivityRows).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      limit: 2,
+      before: null,
+      db: expect.anything(),
+    });
+  });
+
+  it("recovers touched pages from pre-Step-7 wiki traces", async () => {
+    vi.mocked(listWikiIngestActivityRows).mockResolvedValueOnce([
+      activityRow({
+        result: {
+          trace: {
+            toolCalls: [
+              {
+                command: "write",
+                status: "completed",
+                mutating: true,
+                inputPreview: '{"command":"write","path":"people/ada"}',
+                outputPreview: '{"action":"created","path":"people/ada","title":"Ada Lovelace"}',
+              },
+            ],
+          },
+        },
+      }),
+    ] as never);
+    const service = createWikiSourceService({ db: integrationDb([]) });
+
+    await expect(service.listActivity(member, { limit: 20 })).resolves.toMatchObject({
+      items: [
+        {
+          pages: [{ path: "people/ada", title: "Ada Lovelace", action: "created" }],
+        },
+      ],
+    });
   });
 
   it("upserts only an owned connection and carries actor workspace identity to persistence", async () => {
@@ -196,4 +283,23 @@ function integrationDb(rows: unknown[]) {
   const where = vi.fn(() => ({ limit }));
   const from = vi.fn(() => ({ where }));
   return { select: vi.fn(() => ({ from })) };
+}
+
+function activityRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "gwjob_1",
+    sourceProvider: "slack" as const,
+    sourceType: "conversation" as const,
+    title: "#product",
+    occurredAt: new Date("2026-08-24T08:00:00.000Z"),
+    status: "succeeded" as const,
+    attempts: 1,
+    lastError: null,
+    skipReason: null,
+    result: {},
+    completedAt: new Date("2026-08-24T09:01:00.000Z"),
+    createdAt: new Date("2026-08-24T09:00:00.000Z"),
+    updatedAt: new Date("2026-08-24T09:01:00.000Z"),
+    ...overrides,
+  };
 }

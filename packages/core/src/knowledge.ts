@@ -3,8 +3,6 @@ import {
   actorHasPermission,
   BRAIN_READ_PERMISSION,
   BRAIN_WRITE_PERMISSION,
-  SKILL_READ_PERMISSION,
-  SKILL_WRITE_PERMISSION,
   WIKI_READ_PERMISSION,
   WIKI_WRITE_PERMISSION,
 } from "./actor";
@@ -116,29 +114,6 @@ export type WikiTimelineEntry = {
   createdAt: Date;
 };
 
-export type SkillSource = {
-  type: "github" | "skills.sh";
-  url: string;
-  ref: string;
-  path: string;
-  resolvedCommit: string;
-};
-
-export type Skill = {
-  id: string;
-  slug: string;
-  name: string;
-  description: string;
-  instructions: string;
-  status: "draft" | "active";
-  source: SkillSource | null;
-  createdAt: Date;
-  updatedAt: Date;
-};
-
-export type SkillListItem = Omit<Skill, "instructions" | "createdAt">;
-export type SkillCatalogItem = Pick<Skill, "name" | "description"> & { id: string };
-
 export interface KnowledgeRepository {
   assertBrainAccess(input: { actor: Actor; brainId: string }): Promise<void>;
   getBrainSnapshot(input: { actor: Actor; brainId: string }): Promise<BrainSnapshot>;
@@ -208,24 +183,6 @@ export interface KnowledgeRepository {
     text: string;
     at?: Date;
   }): Promise<{ entry: WikiTimelineEntry; transactionId: number }>;
-  listSkills(input: { actor: Actor }): Promise<SkillListItem[]>;
-  listSkillCatalog(input: { actor: Actor }): Promise<SkillCatalogItem[]>;
-  getSkill(input: { actor: Actor; slug: string }): Promise<Skill | null>;
-  createSkill(input: {
-    actor: Actor;
-    idempotencyKey: string;
-    name: string;
-    description: string;
-  }): Promise<Skill>;
-  updateSkill(input: {
-    actor: Actor;
-    slug: string;
-    name: string;
-    description: string;
-    instructions: string;
-    status: Skill["status"];
-  }): Promise<Skill>;
-  archiveSkill(input: { actor: Actor; slug: string }): Promise<void>;
 }
 
 export class KnowledgeApplicationService {
@@ -451,59 +408,6 @@ export class KnowledgeApplicationService {
       text: bounded(input.text, 20_000, "text"),
       ...(at ? { at } : {}),
     });
-  }
-
-  listSkills(actor: Actor) {
-    requirePermission(actor, SKILL_READ_PERMISSION, "Skills");
-    return this.repository.listSkills({ actor });
-  }
-
-  listSkillCatalog(actor: Actor) {
-    requirePermission(actor, SKILL_READ_PERMISSION, "Skills");
-    return this.repository.listSkillCatalog({ actor });
-  }
-
-  async getSkill(actor: Actor, slug: string) {
-    requirePermission(actor, SKILL_READ_PERMISSION, "Skills");
-    const skill = await this.repository.getSkill({ actor, slug: resourceId(slug, "slug") });
-    if (!skill) throw new CoreError("not_found", "Skill not found.");
-    return skill;
-  }
-
-  createSkill(actor: Actor, input: { idempotencyKey: string; name: string; description?: string }) {
-    requirePermission(actor, SKILL_WRITE_PERMISSION, "Skills");
-    return this.repository.createSkill({
-      actor,
-      idempotencyKey: idempotencyKey(input.idempotencyKey),
-      name: bounded(input.name, 160, "name"),
-      description: boundedRaw(input.description ?? "", 1_024, "description"),
-    });
-  }
-
-  updateSkill(
-    actor: Actor,
-    slug: string,
-    input: {
-      name: string;
-      description: string;
-      instructions: string;
-      status: Skill["status"];
-    },
-  ) {
-    requirePermission(actor, SKILL_WRITE_PERMISSION, "Skills");
-    return this.repository.updateSkill({
-      actor,
-      slug: resourceId(slug, "slug"),
-      name: bounded(input.name, 160, "name"),
-      description: boundedRaw(input.description, 1_024, "description"),
-      instructions: boundedRaw(input.instructions, 256 * 1_024, "instructions"),
-      status: input.status,
-    });
-  }
-
-  archiveSkill(actor: Actor, slug: string) {
-    requirePermission(actor, SKILL_WRITE_PERMISSION, "Skills");
-    return this.repository.archiveSkill({ actor, slug: resourceId(slug, "slug") });
   }
 
   private async requireBrainWrite(actor: Actor, brainIdValue: string) {

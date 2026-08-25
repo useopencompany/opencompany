@@ -9,6 +9,7 @@ vi.mock("./client", () => ({ getDb: getDbMock }));
 const {
   WIKI_SOURCE_DISABLED_INGEST_REASON,
   deleteWikiSource,
+  ensureWikiSourceEnabledOnConnect,
   listEnabledWikiSourcesForIntegration,
   setWikiSourceEnabled,
   upsertWikiSource,
@@ -46,6 +47,33 @@ describe("upsertWikiSource", () => {
 
     expect(transaction).not.toHaveBeenCalled();
     expect(returning).toHaveBeenCalledOnce();
+  });
+});
+
+describe("ensureWikiSourceEnabledOnConnect", () => {
+  it("inserts an enabled meeting source without overwriting an existing pause", async () => {
+    const returning = vi.fn(async () => []);
+    const onConflictDoNothing = vi.fn(() => ({ returning }));
+    const values = vi.fn(() => ({ onConflictDoNothing }));
+    const db = { insert: vi.fn(() => ({ values })) };
+
+    await expect(
+      ensureWikiSourceEnabledOnConnect({
+        workspaceId: "workspace_1",
+        provider: "granola",
+        integrationId: "integration_1",
+        userWorkosId: "user_1",
+        createdByWorkosId: "user_1",
+        now: new Date("2026-08-24T09:00:00.000Z"),
+        db,
+      }),
+    ).resolves.toBe(false);
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "granola", enabled: true }),
+    );
+    expect(onConflictDoNothing).toHaveBeenCalledOnce();
+    expect(db).not.toHaveProperty("update");
   });
 });
 

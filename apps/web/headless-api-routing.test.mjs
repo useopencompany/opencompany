@@ -29,15 +29,12 @@ describe("headless API routing", () => {
     ).toEqual([{ source: "/v1/:path*", destination: "https://api.example.test/v1/:path*" }]);
   });
 
-  it.each([
-    undefined,
-    "",
-    "not a URL",
-    "ftp://api.example.test",
-    credentialedOrigin.toString(),
-  ])("leaves the fail-closed route active for invalid origin %s", (origin) => {
-    expect(headlessApiRouting(origin, [])).toEqual({ headers: [], rewrites: [] });
-  });
+  it.each([undefined, "", "not a URL", "ftp://api.example.test", credentialedOrigin.toString()])(
+    "leaves the fail-closed route active for invalid origin %s",
+    (origin) => {
+      expect(headlessApiRouting(origin, [])).toEqual({ headers: [], rewrites: [] });
+    },
+  );
 
   it.each([
     ["https://app.example.test", "https://app.example.test"],

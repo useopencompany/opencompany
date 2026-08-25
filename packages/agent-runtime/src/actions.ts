@@ -1,6 +1,6 @@
 export const ACTION_HOST_TOOL_CONTRACT_VERSION_V2 = "goat-codex-host-tools.v2";
 export const ACTION_HOST_TOOL_CONTRACT_VERSION = "goat-codex-host-tools.v3";
-export const CHAT_HOST_TOOL_CONTRACT_VERSION = "goat-chat-host-tools.v1";
+export const CHAT_HOST_TOOL_CONTRACT_VERSION = "goat-chat-host-tools.v2";
 
 export const ACTION_HOST_TOOL_CONTRACT_VERSIONS = [
   ACTION_HOST_TOOL_CONTRACT_VERSION_V2,

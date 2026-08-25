@@ -26,6 +26,8 @@ const migrationPaths = [
   "0215_goat_chat_sidebar_state.sql",
   "0216_goat_conversation_runtime_summary.sql",
   "0223_goat_task_projection_preservation.sql",
+  "0226_goat_immutable_skill_bundles.sql",
+  "0228_goat_plugins.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -523,6 +525,95 @@ describe("Postgres Task repository", () => {
     await expect(
       service.createTask(actor(), { ...command, goal: "A conflicting goal" }),
     ).rejects.toMatchObject({ code: "idempotency_conflict" });
+  });
+
+  it("snapshots currently enabled Plugin IDs into the Workflow Harness at Task creation", async () => {
+    await database.exec(`
+      INSERT INTO goat.plugins (
+        id, workspace_id, name, status, manifest, source_type, source_url, source_path,
+        source_ref, resolved_commit, integrity, install_report
+      ) VALUES
+        (
+          'plugin_enabled', 'workspace_1', 'enabled-plugin', 'enabled',
+          '{"name":"enabled-plugin"}'::jsonb, 'github', 'https://github.com/example/plugins',
+          'enabled-plugin', 'main', '${"a".repeat(40)}', 'sha256:${"b".repeat(64)}',
+          '{"ignoredManifestFields":[],"skills":[],"mcp":{"status":"absent"},"collisions":[]}'::jsonb
+        ),
+        (
+          'plugin_disabled', 'workspace_1', 'disabled-plugin', 'disabled',
+          '{"name":"disabled-plugin"}'::jsonb, 'github', 'https://github.com/example/plugins',
+          'disabled-plugin', 'main', '${"a".repeat(40)}', 'sha256:${"c".repeat(64)}',
+          '{"ignoredManifestFields":[],"skills":[],"mcp":{"status":"absent"},"collisions":[]}'::jsonb
+        )
+    `);
+    const workflowService = new TaskApplicationService(
+      new PostgresTaskRepository(execute, {
+        ids: deterministicTaskIds(),
+        resolveHarness: async ({ command }) => ({
+          schemaVersion: "goat.harness.v1",
+          engine: command.engine,
+          model: command.model,
+          systemPrompt: "Run the workflow.",
+          initialUserMessage: command.goal,
+          tools: [],
+          skills: [],
+          maxModelSteps: 16,
+          resultMode: "assistant_final",
+          workflow: {
+            id: "release-workflow",
+            workspaceId: "workspace_1",
+            skillIds: [],
+            skillBundleIds: [],
+            pluginIds: [],
+            steps: [
+              {
+                index: 0,
+                title: "Release",
+                engine: command.engine,
+                model: command.model,
+                systemPrompt: "Run the workflow.",
+                systemBlocks: ["Run the workflow."],
+                skillIds: [],
+                skillBundleIds: [],
+              },
+            ],
+          },
+        }),
+      }),
+    );
+    const command = {
+      idempotencyKey: "workflow-plugin-snapshot",
+      name: "Release",
+      goal: "Prepare the release.",
+      engine: "opencompany" as const,
+      model: "moonshotai/kimi-k3",
+      source: "workflow" as const,
+      workflowId: "release-workflow",
+    };
+    const created = await workflowService.createTask(actor(), command);
+
+    await database.exec(`
+      INSERT INTO goat.plugins (
+        id, workspace_id, name, status, manifest, source_type, source_url, source_path,
+        source_ref, resolved_commit, integrity, install_report
+      ) VALUES (
+        'plugin_late', 'workspace_1', 'late-plugin', 'enabled',
+        '{"name":"late-plugin"}'::jsonb, 'github', 'https://github.com/example/plugins',
+        'late-plugin', 'main', '${"a".repeat(40)}', 'sha256:${"d".repeat(64)}',
+        '{"ignoredManifestFields":[],"skills":[],"mcp":{"status":"absent"},"collisions":[]}'::jsonb
+      )
+    `);
+    await expect(workflowService.createTask(actor(), command)).resolves.toEqual({
+      ...created,
+      idempotentReplay: true,
+    });
+
+    await expect(
+      database.query<{ plugin_ids: string[] }>(
+        "SELECT harness_spec->'workflow'->'pluginIds' AS plugin_ids FROM goat.tasks WHERE id = $1",
+        [created.task.id],
+      ),
+    ).resolves.toMatchObject({ rows: [{ plugin_ids: ["plugin_enabled"] }] });
   });
 
   it("enforces feature policy and actor/workspace isolation without partial writes", async () => {

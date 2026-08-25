@@ -6,10 +6,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const migrationPath = path.resolve(
   import.meta.dirname,
   "../../..",
-  "drizzle/0225_goat_wiki_ingestion_spine.sql",
+  "drizzle/0231_goat_wiki_ingestion_spine.sql",
 );
 
-describe("0225_goat_wiki_ingestion_spine", () => {
+describe("0231_goat_wiki_ingestion_spine", () => {
   let database: PGlite;
 
   beforeAll(async () => {

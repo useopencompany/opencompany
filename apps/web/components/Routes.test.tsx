@@ -8,7 +8,7 @@ import {
   HomeRoute,
   McpSettingsRoute,
   PreferencesSettingsRoute,
-  SkillEditorRoute,
+  SkillBundleRoute,
   SkillsSettingsRoute,
   WorkflowsRoute,
 } from "./Routes";
@@ -54,21 +54,28 @@ const workflowLiveQueryMock = vi.hoisted(() => ({
 const surfaceMock = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
 
 const skillActionsMock = vi.hoisted(() => ({
-  updateHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
-  archiveHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
-  createHeadlessSkill: vi.fn(async () => ({ slug: "test-skill" })),
+  archiveHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
+  enableHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
+  disableHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
+  replaceHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
   previewHeadlessSkillImport: vi.fn(async () => ({
     status: "resolved" as const,
-    proposedSlug: "imported-skill",
-    name: "Imported skill",
+    name: "imported-skill",
     description: "Does an imported thing",
-    instructions: "Use this when imported.",
-    extraFiles: [] as string[],
-    resolvedCommit: "a".repeat(40),
+    source: {
+      type: "github" as const,
+      url: "https://github.com/o/r",
+      ref: "main",
+      path: "",
+      resolvedCommit: "a".repeat(40),
+    },
     integrity: `sha256:${"b".repeat(64)}`,
+    files: [{ path: "SKILL.md", sizeBytes: 128 }],
+    fileCount: 1,
+    totalBytes: 128,
   })),
   importHeadlessSkill: vi.fn(async () => ({
-    skill: { slug: "imported-skill" },
+    installation: { name: "imported-skill" },
     replayed: false,
   })),
 }));
@@ -159,9 +166,10 @@ vi.mock("@/lib/headless-automation-commands", () => ({
 }));
 
 vi.mock("@/lib/headless-knowledge-commands", () => ({
-  updateHeadlessSkill: skillActionsMock.updateHeadlessSkill,
   archiveHeadlessSkill: skillActionsMock.archiveHeadlessSkill,
-  createHeadlessSkill: skillActionsMock.createHeadlessSkill,
+  enableHeadlessSkill: skillActionsMock.enableHeadlessSkill,
+  disableHeadlessSkill: skillActionsMock.disableHeadlessSkill,
+  replaceHeadlessSkill: skillActionsMock.replaceHeadlessSkill,
   previewHeadlessSkillImport: skillActionsMock.previewHeadlessSkillImport,
   importHeadlessSkill: skillActionsMock.importHeadlessSkill,
 }));
@@ -435,68 +443,58 @@ describe("BrainRoute", () => {
   });
 });
 
-describe("SkillEditorRoute", () => {
+describe("SkillBundleRoute", () => {
   beforeEach(() => {
-    skillActionsMock.updateHeadlessSkill.mockClear();
+    skillActionsMock.disableHeadlessSkill.mockClear();
     routerMock.refresh.mockReset();
   });
 
-  it("edits instructions with a rich text editor instead of a plain textarea", async () => {
-    const skill = {
-      id: "goat_skill_opaque_id",
-      slug: "test-skill",
-      name: "Test skill",
-      description: "Does a thing",
-      instructions: "Use this when asked.",
-    };
-
-    const { container } = render(
-      <SkillEditorRoute skill={skill} initialStatus="draft" canEdit source={null} />,
-    );
-
-    expect(container.querySelector("textarea")).toBeNull();
-    expect(await screen.findByText("Use this when asked.")).toBeInTheDocument();
-    expect(screen.getByText(/@skill\/test-skill/)).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() =>
-      expect(skillActionsMock.updateHeadlessSkill).toHaveBeenCalledWith(
-        "test-skill",
-        expect.objectContaining({
-          instructions: "Use this when asked.",
-        }),
-      ),
-    );
-  });
-
-  it("renders an imported skill read-only, with no Save button", async () => {
-    const skill = {
-      slug: "imported-skill",
-      name: "Imported skill",
-      description: "Does an imported thing",
-      instructions: "Use this when imported.",
-    };
-
+  it("inspects an immutable bundle and manages its installation separately", async () => {
     render(
-      <SkillEditorRoute
-        skill={skill}
-        initialStatus="active"
-        canEdit
-        source={{
-          type: "github",
-          url: "https://github.com/o/r",
-          ref: "main",
-          path: "",
-          resolvedCommit: "a".repeat(40),
+      <SkillBundleRoute
+        installation={{
+          id: "installation_1",
+          name: "imported-skill",
+          enabled: true,
+          archivedAt: null,
+          createdAt: "2026-08-22T05:00:00.000Z",
+          updatedAt: "2026-08-22T05:00:00.000Z",
+          bundle: {
+            id: "bundle_1",
+            name: "imported-skill",
+            description: "Does an imported thing",
+            body: "Use this when imported.",
+            license: null,
+            compatibility: null,
+            metadata: null,
+            allowedTools: null,
+            integrity: `sha256:${"b".repeat(64)}`,
+            source: {
+              type: "github",
+              url: "https://github.com/o/r",
+              ref: "main",
+              path: "",
+              resolvedCommit: "a".repeat(40),
+            },
+            files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
+            createdAt: "2026-08-22T05:00:00.000Z",
+          },
         }}
+        canEdit
       />,
     );
 
     expect(await screen.findByText(/Imported from/)).toBeInTheDocument();
+    expect(screen.getByText("Use this when imported.")).toBeInTheDocument();
+    expect(screen.getByText("SKILL.md")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Replace bundle" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Imported skill")).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Disable" }));
+    await waitFor(() =>
+      expect(skillActionsMock.disableHeadlessSkill).toHaveBeenCalledWith("imported-skill"),
+    );
   });
 });
 
@@ -510,16 +508,16 @@ describe("SkillsSettingsRoute", () => {
   it("previews then imports a skill from a pasted URL", async () => {
     render(<SkillsSettingsRoute skills={[]} canEdit />);
 
-    await userEvent.click(screen.getByRole("button", { name: /Import from a link/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Import skill" }));
     await userEvent.type(screen.getByPlaceholderText("github.com/owner/repo"), "github.com/o/r");
     await userEvent.click(screen.getByRole("button", { name: "Preview" }));
 
-    expect(await screen.findByText("Use this when imported.")).toBeInTheDocument();
+    expect(await screen.findByText("SKILL.md")).toBeInTheDocument();
     expect(skillActionsMock.previewHeadlessSkillImport).toHaveBeenCalledWith({
       url: "github.com/o/r",
     });
 
-    const importButton = screen.getByRole("button", { name: "Import skill" });
+    const importButton = screen.getByRole("button", { name: "Install skill" });
     await waitFor(() => expect(importButton).toBeEnabled());
     await userEvent.click(importButton);
 

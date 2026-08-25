@@ -92,6 +92,7 @@ export type AcpHarnessTurnInput = {
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
   onEngineSessionId: (sessionId: string) => Promise<void>;
   onExistingSessionInvalidated: () => Promise<void>;
+  onEngineStopped?: () => Promise<void>;
   onPermissionRequest: (request: AcpPermissionRequest) => Promise<AcpPermissionResponse>;
   onElicitationRequest?: (request: AcpElicitationRequest) => Promise<AcpElicitationResponse>;
   prompt?: AcpPromptBlock[];
@@ -258,7 +259,11 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
         stderrTail: client.stderrTail(),
       };
     } finally {
-      await client.stop();
+      try {
+        await client.stop();
+      } finally {
+        await input.onEngineStopped?.();
+      }
     }
   }
 }

@@ -3,6 +3,7 @@
 import {
   createApiClient,
   type UpsertWikiSourceBody,
+  type WikiIngestActivityPageDto,
   type WikiSourceDto,
 } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
@@ -15,6 +16,19 @@ type ClientOptions = {
 export async function listWikiSources(options: ClientOptions = {}): Promise<WikiSourceDto[]> {
   const response = await wikiSourceClient(options).v1.wiki.sources.$get();
   return responseData(response, "Wiki sources could not be loaded");
+}
+
+export async function listWikiIngestActivity(
+  input: { limit?: number; cursor?: string } = {},
+  options: ClientOptions = {},
+): Promise<WikiIngestActivityPageDto> {
+  const response = await wikiSourceClient(options).v1.wiki.sources.activity.$get({
+    query: {
+      limit: String(input.limit ?? 20),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
+    },
+  });
+  return responseData(response, "Wiki ingestion activity could not be loaded");
 }
 
 export async function upsertWikiSource(

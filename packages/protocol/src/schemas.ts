@@ -1343,36 +1343,110 @@ export const WikiSourceSchema = z
   .strict()
   .openapi("WikiSource");
 
-export const SkillSourceSchema = z
+export const WikiIngestActivityPageSchema = z
   .object({
-    type: z.enum(["github", "skills.sh"]),
-    url: z.url(),
-    ref: z.string(),
-    path: z.string(),
-    resolvedCommit: z.string(),
+    path: z.string().min(1).max(512),
+    title: z.string().min(1).max(160),
+    action: z.enum(["created", "updated", "moved", "deleted"]),
   })
   .strict()
-  .openapi("SkillSource");
+  .openapi("WikiIngestActivityPage");
 
-export const SkillSchema = z
+export const WikiIngestActivityItemSchema = z
   .object({
     id: ResourceIdSchema,
-    slug: z.string().min(1).max(64),
-    name: z.string().min(1).max(64),
-    description: z.string().max(1_024),
-    instructions: z.string().max(256 * 1_024),
-    status: z.enum(["draft", "active"]),
-    source: SkillSourceSchema.nullable(),
+    provider: WikiSourceProviderSchema,
+    sourceType: z.enum(["meeting", "conversation", "issue", "activity", "thread"]),
+    title: z.string().max(512).nullable(),
+    outcome: z.enum(["queued", "running", "succeeded", "failed", "skipped"]),
+    reason: z.string().max(2_000).nullable(),
+    pages: z.array(WikiIngestActivityPageSchema).max(100),
+    attempts: z.number().int().min(0),
+    occurredAt: TimestampSchema,
+    completedAt: TimestampSchema.nullable(),
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
   })
   .strict()
-  .openapi("Skill");
+  .openapi("WikiIngestActivityItem");
 
-export const SkillListItemSchema = SkillSchema.omit({
-  instructions: true,
-  createdAt: true,
-}).openapi("SkillListItem");
+export const SkillSourceSchema = z
+  .object({
+    type: z.enum(["github", "skills.sh"]),
+    url: z.url().max(2_048),
+    ref: z.string().max(256),
+    path: z.string().max(512),
+    resolvedCommit: z.string().regex(/^[0-9a-f]{40}$/u),
+  })
+  .strict()
+  .openapi("SkillSource");
+
+export const SkillBundleFileMetadataSchema = z
+  .object({
+    path: z.string().min(1).max(1_024),
+    executable: z.boolean(),
+    sizeBytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(512 * 1_024),
+  })
+  .strict()
+  .openapi("SkillBundleFileMetadata");
+
+export const SkillImportFileMetadataSchema = z
+  .object({
+    path: z.string().min(1).max(1_024),
+    sizeBytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(512 * 1_024),
+  })
+  .strict()
+  .openapi("SkillImportFileMetadata");
+
+export const SkillBundleSummarySchema = z
+  .object({
+    id: ResourceIdSchema,
+    integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+    name: z.string().min(1).max(64),
+    description: z.string().min(1).max(1_024),
+    license: z.string().nullable(),
+    compatibility: z.string().max(500).nullable(),
+    metadata: z.record(z.string(), z.string()).nullable(),
+    allowedTools: z.string().nullable(),
+    source: SkillSourceSchema,
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("SkillBundleSummary");
+
+export const SkillBundleSchema = SkillBundleSummarySchema.extend({
+  body: z.string(),
+  files: z.array(SkillBundleFileMetadataSchema).max(64),
+})
+  .strict()
+  .openapi("SkillBundle");
+
+export const SkillListItemSchema = z
+  .object({
+    id: ResourceIdSchema,
+    name: z.string().min(1).max(64),
+    enabled: z.boolean(),
+    archivedAt: TimestampSchema.nullable(),
+    updatedAt: TimestampSchema,
+    bundle: SkillBundleSummarySchema,
+  })
+  .strict()
+  .openapi("SkillInstallationListItem");
+
+export const SkillInstallationSchema = SkillListItemSchema.extend({
+  createdAt: TimestampSchema,
+  bundle: SkillBundleSchema,
+})
+  .strict()
+  .openapi("SkillInstallation");
 export const SkillCatalogItemSchema = z
   .object({
     id: z.string().min(1).max(64),
@@ -1396,23 +1470,239 @@ export const SkillImportPreviewSchema = z
     z
       .object({
         status: z.literal("resolved"),
-        proposedSlug: z.string().min(1).max(64),
         name: z.string().min(1).max(64),
-        description: z.string().max(1_024),
-        instructions: z.string().max(256 * 1_024),
-        extraFiles: z.array(z.string().max(512)).max(31),
-        resolvedCommit: z.string().regex(/^[0-9a-f]{40}$/iu),
+        description: z.string().min(1).max(1_024),
+        license: z.string().optional(),
+        compatibility: z.string().max(500).optional(),
+        metadata: z.record(z.string(), z.string()).optional(),
+        allowedTools: z.string().optional(),
+        source: SkillSourceSchema,
         integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
+        files: z.array(SkillImportFileMetadataSchema).min(1).max(64),
+        fileCount: z.number().int().min(1).max(64),
+        totalBytes: z
+          .number()
+          .int()
+          .min(0)
+          .max(1024 * 1024),
       })
       .strict(),
     z
       .object({
         status: z.literal("ambiguous"),
         candidates: z.array(SkillImportCandidateSchema).min(1).max(25),
+        source: SkillSourceSchema.omit({ path: true }),
       })
       .strict(),
   ])
   .openapi("SkillImportPreview");
+
+export const PluginManifestSchema = z
+  .object({
+    name: z.string().min(1).max(64),
+    version: z.string().optional(),
+    description: z.string().optional(),
+    author: z
+      .object({
+        name: z.string().optional(),
+        email: z.string().optional(),
+        url: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    homepage: z.string().optional(),
+    repository: z.string().optional(),
+    license: z.string().optional(),
+    keywords: z.array(z.string()).optional(),
+    extensions: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict()
+  .openapi("PluginManifest");
+
+export const PluginSourceSchema = SkillSourceSchema.openapi("PluginSource");
+
+export const PluginFileMetadataSchema = z
+  .object({
+    path: z.string().min(1).max(1_024),
+    executable: z.boolean(),
+    sizeBytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(2 * 1024 * 1024),
+  })
+  .strict()
+  .openapi("PluginFileMetadata");
+
+export const PluginImportFileMetadataSchema = PluginFileMetadataSchema.omit({
+  executable: true,
+}).openapi("PluginImportFileMetadata");
+
+export const PluginStdioServerSchema = z
+  .object({
+    name: z.string().min(1),
+    type: z.literal("stdio"),
+    command: z.string().min(1),
+    args: z.array(z.string()),
+    envKeys: z.array(z.string()),
+    cwd: z.string().optional(),
+  })
+  .strict()
+  .openapi("PluginStdioServer");
+
+export const PluginMcpServerReportSchema = z
+  .object({
+    name: z.string(),
+    status: z.enum(["selected", "unsupported", "invalid"]),
+    transport: z.enum(["stdio", "streamable-http", "sse"]).optional(),
+    reason: z.string().optional(),
+  })
+  .strict()
+  .openapi("PluginMcpServerReport");
+
+export const PluginSkillReportSchema = z
+  .discriminatedUnion("status", [
+    z
+      .object({
+        path: z.string().min(1).max(1_024),
+        name: z.string().min(1).max(64),
+        status: z.literal("valid"),
+        integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+      })
+      .strict(),
+    z
+      .object({
+        path: z.string().min(1).max(1_024),
+        name: z.string().min(1).max(64),
+        status: z.literal("skipped"),
+        reason: z.string().min(1),
+      })
+      .strict(),
+  ])
+  .openapi("PluginSkillReport");
+
+export const PluginMcpReportSchema = z
+  .discriminatedUnion("status", [
+    z.object({ status: z.literal("absent") }).strict(),
+    z
+      .object({ present: z.literal(true), status: z.literal("disabled"), reason: z.string() })
+      .strict(),
+    z
+      .object({
+        present: z.literal(true),
+        status: z.literal("parsed"),
+        reports: z.array(PluginMcpServerReportSchema),
+      })
+      .strict(),
+  ])
+  .openapi("PluginMcpReport");
+
+export const PluginSkillCollisionSchema = z
+  .object({
+    skillName: z.string().min(1).max(64),
+    winner: z.discriminatedUnion("source", [
+      z.object({ source: z.literal("standalone") }).strict(),
+      z.object({ source: z.literal("plugin"), pluginName: z.string().min(1).max(64) }).strict(),
+    ]),
+    hiddenPluginNames: z.array(z.string().min(1).max(64)).min(1),
+  })
+  .strict()
+  .openapi("PluginSkillCollision");
+
+export const PluginValidationReportSchema = z
+  .object({
+    ignoredManifestFields: z.array(z.string()),
+    skills: z.array(PluginSkillReportSchema),
+    mcp: PluginMcpReportSchema,
+  })
+  .strict()
+  .openapi("PluginValidationReport");
+
+export const PluginInstallReportSchema = PluginValidationReportSchema.extend({
+  collisions: z.array(PluginSkillCollisionSchema),
+})
+  .strict()
+  .openapi("PluginInstallReport");
+
+export const PluginSkillSummarySchema = z
+  .object({
+    name: z.string().min(1).max(64),
+    path: z.string().min(1).max(1_024),
+    bundleId: ResourceIdSchema,
+    integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+    description: z.string().min(1).max(1_024),
+  })
+  .strict()
+  .openapi("PluginSkillSummary");
+
+const PluginBaseSchema = z
+  .object({
+    id: ResourceIdSchema,
+    name: z.string().min(1).max(64),
+    status: z.enum(["enabled", "disabled", "archived"]),
+    manifest: PluginManifestSchema,
+    source: PluginSourceSchema,
+    integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+    installReport: PluginInstallReportSchema,
+    mcpApprovedIntegrity: z
+      .string()
+      .regex(/^sha256:[0-9a-f]{64}$/u)
+      .nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+    archivedAt: TimestampSchema.nullable(),
+  })
+  .strict();
+
+export const PluginListItemSchema = PluginBaseSchema.extend({
+  fileCount: z.number().int().min(1).max(512),
+  skillCount: z.number().int().min(0),
+  stdioServerCount: z.number().int().min(0),
+})
+  .strict()
+  .openapi("PluginListItem");
+
+export const PluginInstallationSchema = PluginBaseSchema.extend({
+  files: z.array(PluginFileMetadataSchema).min(1).max(512),
+  skills: z.array(PluginSkillSummarySchema),
+  stdioServers: z.array(PluginStdioServerSchema),
+})
+  .strict()
+  .openapi("PluginInstallation");
+
+export const PluginImportPreviewSchema = z
+  .object({
+    manifest: PluginManifestSchema,
+    source: PluginSourceSchema,
+    integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+    files: z.array(PluginImportFileMetadataSchema).min(1).max(512),
+    fileCount: z.number().int().min(1).max(512),
+    totalBytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(16 * 1024 * 1024),
+    skills: z.array(
+      z
+        .object({
+          path: z.string().min(1).max(1_024),
+          name: z.string().min(1).max(64),
+          description: z.string().min(1).max(1_024),
+          integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+          fileCount: z.number().int().min(1).max(64),
+          totalBytes: z
+            .number()
+            .int()
+            .min(0)
+            .max(1024 * 1024),
+        })
+        .strict(),
+    ),
+    stdioServers: z.array(PluginStdioServerSchema),
+    report: PluginValidationReportSchema,
+  })
+  .strict()
+  .openapi("PluginImportPreview");
 
 export const BrainSnapshotEnvelopeSchema = z
   .object({ data: BrainSnapshotSchema, meta: ProtocolMetadataSchema })
@@ -1552,6 +1842,18 @@ export const WikiSourceListEnvelopeSchema = z
   .object({ data: z.array(WikiSourceSchema).max(1_000), meta: ProtocolMetadataSchema })
   .strict()
   .openapi("WikiSourceListEnvelope");
+export const WikiIngestActivityListEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        items: z.array(WikiIngestActivityItemSchema).max(100),
+        nextCursor: z.string().max(1_024).nullable(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WikiIngestActivityListEnvelope");
 export const WikiSourceMutationEnvelopeSchema = z
   .object({ data: WikiSourceSchema, meta: ProtocolMetadataSchema })
   .strict()
@@ -1629,6 +1931,7 @@ export const AddWikiTimelineEntryBodySchema = z
 export const WikiCommandSchema = z
   .object({
     command: z.enum([...WIKI_TOOL_COMMANDS]),
+    depth: z.number().int().min(0).max(10).optional(),
     pages: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(20)]).optional(),
     path: z.string().min(1).max(512).optional(),
     body: z.string().max(1_000_000).optional(),
@@ -1678,10 +1981,6 @@ export const SkillCatalogEnvelopeSchema = z
   .object({ data: z.array(SkillCatalogItemSchema), meta: ProtocolMetadataSchema })
   .strict()
   .openapi("SkillCatalogEnvelope");
-export const SkillEnvelopeSchema = z
-  .object({ data: SkillSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("SkillEnvelope");
 export const SkillImportPreviewBodySchema = z
   .object({
     url: z.string().min(1).max(2_048),
@@ -1701,31 +2000,90 @@ export const ImportSkillBodySchema = SkillImportPreviewBodySchema.extend({
   .openapi("ImportSkillBody");
 export const SkillImportEnvelopeSchema = z
   .object({
-    data: z.object({ skill: SkillSchema, replayed: z.boolean() }).strict(),
+    data: z.object({ installation: SkillInstallationSchema, replayed: z.boolean() }).strict(),
     meta: ProtocolMetadataSchema,
   })
   .strict()
   .openapi("SkillImportEnvelope");
-export const CreateSkillBodySchema = z
-  .object({ name: z.string().min(1).max(64), description: z.string().max(1_024).optional() })
+export const SkillInstallationEnvelopeSchema = z
+  .object({ data: SkillInstallationSchema, meta: ProtocolMetadataSchema })
   .strict()
-  .openapi("CreateSkillBody");
-export const UpdateSkillBodySchema = z
+  .openapi("SkillInstallationEnvelope");
+export const SkillFileChunkSchema = z
   .object({
-    name: z.string().min(1).max(64),
-    description: z.string().max(1_024),
-    instructions: z.string().max(256 * 1_024),
-    status: z.enum(["draft", "active"]),
+    path: z.string().min(1).max(1_024),
+    executable: z.boolean(),
+    sizeBytes: z.number().int().min(0),
+    offset: z.number().int().min(0),
+    nextOffset: z.number().int().min(0),
+    eof: z.boolean(),
+    encoding: z.enum(["utf8", "base64"]),
+    content: z.string(),
   })
   .strict()
-  .openapi("UpdateSkillBody");
+  .openapi("SkillFileChunk");
+export const SkillFileChunkEnvelopeSchema = z
+  .object({ data: SkillFileChunkSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("SkillFileChunkEnvelope");
 export const SkillArchiveEnvelopeSchema = z
   .object({
-    data: z.object({ slug: z.string().min(1).max(64) }).strict(),
+    data: z.object({ name: z.string().min(1).max(64) }).strict(),
     meta: ProtocolMetadataSchema,
   })
   .strict()
   .openapi("SkillArchiveEnvelope");
+
+export const PluginImportPreviewBodySchema = z
+  .object({
+    url: z.string().min(1).max(2_048),
+    selectedPath: z.string().max(512).optional(),
+  })
+  .strict()
+  .openapi("PluginImportPreviewBody");
+export const InstallPluginBodySchema = PluginImportPreviewBodySchema.extend({
+  expectedResolvedCommit: z.string().regex(/^[0-9a-f]{40}$/iu),
+  expectedIntegrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
+})
+  .strict()
+  .openapi("InstallPluginBody");
+export const ApprovePluginMcpBodySchema = z
+  .object({ integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu) })
+  .strict()
+  .openapi("ApprovePluginMcpBody");
+export const PluginListEnvelopeSchema = z
+  .object({ data: z.array(PluginListItemSchema), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("PluginListEnvelope");
+export const PluginInstallationEnvelopeSchema = z
+  .object({ data: PluginInstallationSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("PluginInstallationEnvelope");
+export const PluginImportPreviewEnvelopeSchema = z
+  .object({ data: PluginImportPreviewSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("PluginImportPreviewEnvelope");
+export const PluginImportEnvelopeSchema = z
+  .object({
+    data: z.object({ plugin: PluginInstallationSchema, replayed: z.boolean() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PluginImportEnvelope");
+export const PluginArchiveEnvelopeSchema = z
+  .object({
+    data: z.object({ name: z.string().min(1).max(64) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PluginArchiveEnvelope");
+export const PluginDataDeleteEnvelopeSchema = z
+  .object({
+    data: z.object({ name: z.string().min(1).max(64), deleted: z.boolean() }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PluginDataDeleteEnvelope");
 
 export const ErrorCodeSchema = z.enum([
   "authentication_required",
@@ -3630,23 +3988,56 @@ export type DeleteBrainFolderBody = z.infer<typeof DeleteBrainFolderBodySchema>;
 export type WikiPageDto = z.infer<typeof WikiPageSchema>;
 export type WikiPageReadModel = z.infer<typeof WikiPageReadModelSchema>;
 export type WikiTimelineReadModel = z.infer<typeof WikiTimelineReadModelSchema>;
-export type WikiSourceProvider = z.infer<typeof WikiSourceProviderSchema>;
+export type WikiSourceProvider = "gmail" | "slack" | "jamie" | "granola" | "linear" | "github";
 export type WikiSourceDto = z.infer<typeof WikiSourceSchema>;
+export type WikiIngestActivityItemDto = {
+  id: string;
+  provider: WikiSourceProvider;
+  sourceType: "meeting" | "conversation" | "issue" | "activity" | "thread";
+  title: string | null;
+  outcome: "queued" | "running" | "succeeded" | "failed" | "skipped";
+  reason: string | null;
+  pages: Array<{
+    path: string;
+    title: string;
+    action: "created" | "updated" | "moved" | "deleted";
+  }>;
+  attempts: number;
+  occurredAt: string;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type WikiIngestActivityPageDto = {
+  items: WikiIngestActivityItemDto[];
+  nextCursor: string | null;
+};
 export type UpsertWikiSourceBody = z.infer<typeof UpsertWikiSourceBodySchema>;
 export type SetWikiSourceEnabledBody = z.infer<typeof SetWikiSourceEnabledBodySchema>;
 export type CreateWikiPageBody = z.infer<typeof CreateWikiPageBodySchema>;
 export type UpdateWikiPageBody = z.infer<typeof UpdateWikiPageBodySchema>;
 export type DeleteWikiPageBody = z.infer<typeof DeleteWikiPageBodySchema>;
 export type AddWikiTimelineEntryBody = z.infer<typeof AddWikiTimelineEntryBodySchema>;
-export type SkillDto = z.infer<typeof SkillSchema>;
+export type SkillSourceDto = z.infer<typeof SkillSourceSchema>;
 export type SkillListItemDto = z.infer<typeof SkillListItemSchema>;
+export type SkillInstallationDto = z.infer<typeof SkillInstallationSchema>;
+export type SkillBundleDto = z.infer<typeof SkillBundleSchema>;
+export type SkillBundleFileMetadataDto = z.infer<typeof SkillBundleFileMetadataSchema>;
+export type SkillImportFileMetadataDto = z.infer<typeof SkillImportFileMetadataSchema>;
+export type SkillFileChunkDto = z.infer<typeof SkillFileChunkSchema>;
 export type SkillCatalogItemDto = z.infer<typeof SkillCatalogItemSchema>;
-export type CreateSkillBody = z.infer<typeof CreateSkillBodySchema>;
-export type UpdateSkillBody = z.infer<typeof UpdateSkillBodySchema>;
 export type SkillImportCandidateDto = z.infer<typeof SkillImportCandidateSchema>;
 export type SkillImportPreviewDto = z.infer<typeof SkillImportPreviewSchema>;
 export type SkillImportPreviewBody = z.infer<typeof SkillImportPreviewBodySchema>;
 export type ImportSkillBody = z.infer<typeof ImportSkillBodySchema>;
+export type PluginManifestDto = z.infer<typeof PluginManifestSchema>;
+export type PluginSourceDto = z.infer<typeof PluginSourceSchema>;
+export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;
+export type PluginInstallationDto = z.infer<typeof PluginInstallationSchema>;
+export type PluginImportPreviewDto = z.infer<typeof PluginImportPreviewSchema>;
+export type PluginImportPreviewBody = z.infer<typeof PluginImportPreviewBodySchema>;
+export type InstallPluginBody = z.infer<typeof InstallPluginBodySchema>;
+export type ApprovePluginMcpBody = z.infer<typeof ApprovePluginMcpBodySchema>;
 export type CreateWorkflowBody = z.infer<typeof CreateWorkflowBodySchema>;
 export type UpdateWorkflowBody = z.infer<typeof UpdateWorkflowBodySchema>;
 export type ArchiveVersionBody = z.infer<typeof ArchiveVersionBodySchema>;

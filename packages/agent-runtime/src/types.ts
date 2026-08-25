@@ -42,6 +42,7 @@ export type AgentModelId =
   | "moonshotai/kimi-k2-thinking-turbo"
   | "moonshotai/kimi-k2-turbo"
   | "moonshotai/kimi-k2"
+  | "xai/grok-4.6"
   | "xai/grok-4.3"
   | "xai/grok-4.20-reasoning"
   | "xai/grok-4.20-non-reasoning"
@@ -58,7 +59,8 @@ export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 export type AgentSkillFile = {
   path: string;
-  content: string;
+  content: Uint8Array;
+  executable: boolean;
 };
 
 export type AgentRemoteSkillSource = {

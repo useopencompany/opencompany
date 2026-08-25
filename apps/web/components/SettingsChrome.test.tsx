@@ -32,6 +32,9 @@ describe("SettingsSidebar", () => {
     expect(
       within(workspaceGroup as HTMLElement).getByRole("link", { name: "Repositories" }),
     ).toHaveAttribute("href", "/settings/repositories");
+    expect(
+      within(workspaceGroup as HTMLElement).getByRole("link", { name: "Plugins" }),
+    ).toHaveAttribute("href", "/settings/plugins");
   });
 
   it("marks workspace usage active without also marking members active", () => {

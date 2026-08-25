@@ -27,6 +27,10 @@ import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
 import { useHydrated } from "@/components/useHydrated";
+import {
+  WikiIngestActivityFeed,
+  WikiIngestActivitySkeleton,
+} from "@/components/WikiIngestActivityFeed";
 import { WikiGmailSourceEditor, WikiSlackChannelPicker } from "@/components/WikiSourceScopeEditors";
 import { WikiGitHubRepoPicker, WikiLinearTeamPicker } from "@/components/WikiSourceScopePickers";
 import {
@@ -64,6 +68,7 @@ export function WikiSourcesPanel({
     return (
       <WikiSourcesLayout>
         <WikiSourceCardSkeletons />
+        <WikiIngestActivitySkeleton />
       </WikiSourcesLayout>
     );
   }
@@ -354,6 +359,7 @@ function WikiSourcesLivePanel({
           ))}
         </section>
       )}
+      <WikiIngestActivityFeed />
     </WikiSourcesLayout>
   );
 }

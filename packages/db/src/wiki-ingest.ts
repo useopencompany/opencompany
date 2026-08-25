@@ -58,6 +58,64 @@ export type ClaimedWikiIngestJob = WikiIngestJob & {
   rawEventCount: number;
 };
 
+export type WikiIngestActivityRow = {
+  id: string;
+  sourceProvider: WikiSourceProvider;
+  sourceType: WikiSourceType;
+  title: string | null;
+  occurredAt: Date;
+  status: WikiIngestJobStatus;
+  attempts: number;
+  lastError: string | null;
+  skipReason: string | null;
+  result: Record<string, unknown>;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export async function listWikiIngestActivityRows(input: {
+  workspaceId: string;
+  limit: number;
+  before?: { createdAt: Date; id: string } | null;
+  db?: DbLike;
+}): Promise<WikiIngestActivityRow[]> {
+  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 101) {
+    throw new Error("Wiki ingestion activity limit must be between 1 and 101.");
+  }
+  const db = input.db ?? getDb();
+  const beforeCreatedAt = input.before?.createdAt ?? null;
+  const beforeId = input.before?.id ?? null;
+  const result = await db.execute(sql`
+    SELECT
+      job.id,
+      job.source_provider AS "sourceProvider",
+      source.source_type AS "sourceType",
+      source.title,
+      source.occurred_at AS "occurredAt",
+      job.status,
+      job.attempts,
+      job.last_error AS "lastError",
+      job.skip_reason AS "skipReason",
+      job.result,
+      job.completed_at AS "completedAt",
+      job.created_at AS "createdAt",
+      job.updated_at AS "updatedAt"
+    FROM goat.wiki_ingest_jobs AS job
+    INNER JOIN goat.wiki_source_items AS source
+      ON source.id = job.source_item_id
+     AND source.workspace_id = job.workspace_id
+    WHERE job.workspace_id = ${input.workspaceId}
+      AND (
+        ${beforeCreatedAt}::timestamptz IS NULL
+        OR (job.created_at, job.id) < (${beforeCreatedAt}::timestamptz, ${beforeId})
+      )
+    ORDER BY job.created_at DESC, job.id DESC
+    LIMIT ${input.limit}
+  `);
+  return rowsFromExecute<WikiIngestActivityRow>(result).map(normalizeWikiIngestActivityRowDates);
+}
+
 export async function upsertWikiSourceItemAndEnqueue(input: {
   workspaceId: string;
   sourceConnectionId: string;
@@ -612,6 +670,16 @@ function normalizeClaimedWikiIngestJobDates(job: ClaimedWikiIngestJob): ClaimedW
     createdAt: requiredDbDate(job.createdAt, "createdAt"),
     updatedAt: requiredDbDate(job.updatedAt, "updatedAt"),
     occurredAt: requiredDbDate(job.occurredAt, "occurredAt"),
+  };
+}
+
+function normalizeWikiIngestActivityRowDates(row: WikiIngestActivityRow): WikiIngestActivityRow {
+  return {
+    ...row,
+    occurredAt: requiredDbDate(row.occurredAt, "occurredAt"),
+    completedAt: optionalDbDate(row.completedAt, "completedAt"),
+    createdAt: requiredDbDate(row.createdAt, "createdAt"),
+    updatedAt: requiredDbDate(row.updatedAt, "updatedAt"),
   };
 }
 

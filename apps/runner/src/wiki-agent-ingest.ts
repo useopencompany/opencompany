@@ -9,7 +9,9 @@ import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import { createGatewayAttribution, gatewayProviderOptions } from "@opencompany/telemetry";
 import { latitudeTelemetry } from "@opencompany/telemetry/latitude";
+import { isValidWikiPath } from "@opencompany/wiki";
 import {
+  firstWikiPageRef,
   WIKI_READ_COMMANDS,
   WIKI_TOOL_DESCRIPTION,
   WIKI_TOOL_INPUT_JSON_SCHEMA,
@@ -116,6 +118,12 @@ export type WikiIngestTrace = {
   createdAt: string;
 };
 
+export type WikiIngestTouchedPage = {
+  path: string;
+  title: string;
+  action: "created" | "updated" | "moved" | "deleted";
+};
+
 export type WikiAgentIngestResult = {
   model: string;
   skipped: boolean;
@@ -124,6 +132,7 @@ export type WikiAgentIngestResult = {
   steps: number;
   toolCalls: number;
   mutations: number;
+  pages: WikiIngestTouchedPage[];
   usage: WikiIngestTraceUsage;
   budget: WikiIngestBudget;
   summary: string;
@@ -139,7 +148,7 @@ export class WikiAgentOutcomeError extends Error {
 
 export type WikiIngestBudgetErrorResult = Pick<
   WikiAgentIngestResult,
-  "budget" | "trace" | "usage" | "steps" | "toolCalls" | "mutations"
+  "budget" | "trace" | "usage" | "steps" | "toolCalls" | "mutations" | "pages"
 >;
 
 export class WikiIngestBudgetError extends Error {
@@ -168,7 +177,16 @@ export type WikiAgentIngestInput = {
   env: Pick<RunnerEnv, "apiOrigin" | "apiInternalToken" | "vercelAiGatewayApiKey">;
   signal?: AbortSignal;
   executeCommand?: typeof executeApiWikiCommand;
-  runTriage?: typeof runGitHubWikiIngestTriage;
+};
+
+type WikiPreparedTriageInput =
+  | WikiIngestTriageInput
+  | Parameters<typeof runGitHubWikiIngestTriage>[0];
+
+type WikiAgentIngestDependencies = {
+  runTriage?: (
+    input: WikiPreparedTriageInput,
+  ) => Promise<WikiIngestTriageTrace | BrainIngestTriageTrace>;
 };
 
 export type WikiSourceContextHeaderInput = Pick<
@@ -294,7 +312,7 @@ export function buildWikiIngestUserMessage(
 
 export async function runWikiAgentIngest(
   input: WikiAgentIngestInput,
-  deps: { runTriage?: (input: WikiIngestTriageInput) => Promise<WikiIngestTriageTrace> } = {},
+  deps: WikiAgentIngestDependencies = {},
 ): Promise<WikiAgentIngestResult> {
   validateNormalizedPayload(input);
   const triage = await runPreparedWikiIngestTriage(input, deps);
@@ -308,6 +326,7 @@ export async function runWikiAgentIngest(
     steps: loop.steps,
     toolCalls: loop.toolCalls,
     mutations: loop.mutations,
+    pages: loop.pages,
   };
 
   if (!loop.budget.accountingComplete) {
@@ -362,6 +381,7 @@ export async function runWikiAgentIngest(
     steps: loop.steps,
     toolCalls: loop.toolCalls,
     mutations: loop.mutations,
+    pages: loop.pages,
     usage: loop.usage,
     budget: loop.budget,
     summary: (outcome.reason ?? loop.finalText).slice(0, RESULT_SUMMARY_MAX_CHARS),
@@ -371,23 +391,23 @@ export async function runWikiAgentIngest(
 
 async function runPreparedWikiIngestTriage(
   input: WikiAgentIngestInput,
-  deps: { runTriage?: (input: WikiIngestTriageInput) => Promise<WikiIngestTriageTrace> },
+  deps: WikiAgentIngestDependencies,
 ): Promise<WikiIngestTriageTrace | null> {
   const slackOrGmailPrompt = buildWikiIngestTriagePrompt(input);
   const githubItem = githubItemForTriage(input);
   if (!slackOrGmailPrompt && !githubItem) return null;
 
   try {
-    const triage = slackOrGmailPrompt
-      ? await (deps.runTriage ?? runSlackGmailWikiIngestTriage)({
+    const triageInput: WikiPreparedTriageInput = slackOrGmailPrompt
+      ? {
           prompt: slackOrGmailPrompt,
           gatewayApiKey: input.env.vercelAiGatewayApiKey,
           actorUserWorkosId: input.actorUserWorkosId,
           workspaceId: input.workspaceId,
           ingestJobId: input.jobId,
           ...(input.signal ? { signal: input.signal } : {}),
-        })
-      : await (input.runTriage ?? runGitHubWikiIngestTriage)({
+        }
+      : {
           prompt: buildGitHubCommentIngestTriagePrompt(
             githubItem as NormalizedGitHubActivitySourceItem,
           ),
@@ -396,7 +416,14 @@ async function runPreparedWikiIngestTriage(
           workspaceId: input.workspaceId,
           ingestJobId: input.jobId,
           ...(input.signal ? { signal: input.signal } : {}),
-        });
+        };
+    const triage = deps.runTriage
+      ? await deps.runTriage(triageInput)
+      : slackOrGmailPrompt
+        ? await runSlackGmailWikiIngestTriage(triageInput as WikiIngestTriageInput)
+        : await runGitHubWikiIngestTriage(
+            triageInput as Parameters<typeof runGitHubWikiIngestTriage>[0],
+          );
     const normalizedTriage = normalizeWikiIngestTriage(triage);
     logger.info("opencompany wiki cheap triage finished", {
       event: "opencompany.goat_wiki_ingest_triage_finished",
@@ -473,6 +500,7 @@ function wikiTriageSkipResult(triage: WikiIngestTriageTrace): WikiAgentIngestRes
     steps: 1,
     toolCalls: 0,
     mutations: 0,
+    pages: [],
     usage: triage.usage,
     budget,
     summary: triage.reason.slice(0, RESULT_SUMMARY_MAX_CHARS),
@@ -611,6 +639,7 @@ export async function runWikiIngestAgentLoop(
   let budgetExhausted = modelCostUsdMicros >= WIKI_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS;
   let budgetAccountingError: string | null = null;
   const traceToolCalls: WikiIngestTraceToolCall[] = [];
+  const touchedPages: WikiIngestTouchedPage[] = [];
   const executeCommand = input.executeCommand ?? executeApiWikiCommand;
   const budgetSnapshot = (): WikiIngestBudget => ({
     limitUsdMicros: WIKI_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS,
@@ -681,8 +710,10 @@ export async function runWikiIngestAgentLoop(
             signal: abort.signal,
           });
           if (mutating) {
-            if (output.ok) mutations += 1;
-            else failedMutatingToolCalls += 1;
+            if (output.ok) {
+              mutations += 1;
+              appendTouchedPages(touchedPages, wikiTouchedPages(toolInput, output.result));
+            } else failedMutatingToolCalls += 1;
           }
           appendTraceToolCall(traceToolCalls, {
             id: traceId,
@@ -783,6 +814,7 @@ export async function runWikiIngestAgentLoop(
       steps: result.steps.length,
       toolCalls,
       mutations,
+      pages: touchedPages,
       failedMutatingToolCalls,
       usage,
       budget,
@@ -793,6 +825,84 @@ export async function runWikiIngestAgentLoop(
     clearTimeout(timeout);
     input.signal?.removeEventListener("abort", onParentAbort);
   }
+}
+
+function wikiTouchedPages(toolInput: WikiToolInput, result: unknown): WikiIngestTouchedPage[] {
+  const output = isRecord(result) ? result : {};
+  if (toolInput.command === "write") {
+    const action = output.action === "created" ? "created" : "updated";
+    if (output.action === "unchanged") return [];
+    return pageMutation(output.path ?? toolInput.path, output.title ?? toolInput.title, action);
+  }
+  if (toolInput.command === "mkdir") {
+    if (output.action === "unchanged") return [];
+    return pageMutation(output.path ?? toolInput.path, output.title ?? toolInput.title, "created");
+  }
+  if (toolInput.command === "timeline-add") {
+    return pageMutation(firstWikiPageRef(toolInput), null, "updated");
+  }
+  if (toolInput.command === "move") {
+    return [
+      ...pageMutation(output.path, null, "moved"),
+      ...stringArray(output.rewrittenReferrers).flatMap((path) =>
+        pageMutation(path, null, "updated"),
+      ),
+    ];
+  }
+  if (toolInput.command === "delete") {
+    return stringArray(output.deletedPaths).flatMap((path) => pageMutation(path, null, "deleted"));
+  }
+  return [];
+}
+
+function appendTouchedPages(
+  target: WikiIngestTouchedPage[],
+  additions: readonly WikiIngestTouchedPage[],
+) {
+  for (const page of additions) {
+    const existing = target.findIndex((candidate) => candidate.path === page.path);
+    if (existing >= 0) target[existing] = page;
+    else if (target.length < 100) target.push(page);
+  }
+}
+
+function pageMutation(
+  pathValue: unknown,
+  titleValue: unknown,
+  action: WikiIngestTouchedPage["action"],
+): WikiIngestTouchedPage[] {
+  const path = normalizedString(pathValue);
+  if (!isValidWikiPath(path)) return [];
+  return [
+    {
+      path,
+      title: normalizedString(titleValue) || pageTitleFromPath(path),
+      action,
+    },
+  ];
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function normalizedString(value: unknown) {
+  return typeof value === "string" ? value.trim().slice(0, 512) : "";
+}
+
+function pageTitleFromPath(path: string) {
+  const slug = path.split("/").filter(Boolean).at(-1) ?? path;
+  return slug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function validateNormalizedPayload(input: WikiAgentIngestInput) {

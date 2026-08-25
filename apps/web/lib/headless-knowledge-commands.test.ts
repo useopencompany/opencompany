@@ -2,12 +2,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { awaitHeadlessWikiTransactions } from "./headless-knowledge-collections";
 import {
   addHeadlessWikiTimelineEntry,
+  approveHeadlessPluginMcp,
+  archiveHeadlessPlugin,
   createHeadlessBrainDocument,
-  createHeadlessSkill,
+  deleteHeadlessPluginData,
+  disableHeadlessPlugin,
+  disableHeadlessSkill,
+  enableHeadlessPlugin,
+  enableHeadlessSkill,
+  importHeadlessPlugin,
   importHeadlessSkill,
   listHeadlessBrainSourceItems,
+  previewHeadlessPluginImport,
   previewHeadlessSkillImport,
-  updateHeadlessSkill,
+  readHeadlessSkillFile,
+  replaceHeadlessSkill,
+  revokeHeadlessPluginMcp,
 } from "./headless-knowledge-commands";
 
 vi.mock("./headless-knowledge-collections", () => ({
@@ -16,17 +26,7 @@ vi.mock("./headless-knowledge-collections", () => ({
 
 const meta = { apiVersion: "v1", protocolVersion: "1.0.0" };
 const createdAt = "2026-08-12T08:00:00.000Z";
-const skill = {
-  id: "skill_1",
-  slug: "visual-review",
-  name: "Visual Review",
-  description: "Review visual artifacts.",
-  instructions: "Inspect the rendered output.",
-  status: "active",
-  source: null,
-  createdAt,
-  updatedAt: createdAt,
-} as const;
+const skillDescription = "Review visual artifacts.";
 
 describe("headless knowledge commands", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -116,32 +116,6 @@ describe("headless knowledge commands", () => {
     ).rejects.toThrow("limited to 100 ids");
   });
 
-  it("uses canonical Skill create and update resources", async () => {
-    const requests: Request[] = [];
-    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-      requests.push(input instanceof Request ? input : new Request(input, init));
-      return Response.json({ data: skill, meta });
-    });
-    const options = { baseUrl: "https://api.example.test", fetch: fetchMock as typeof fetch };
-
-    await createHeadlessSkill({ name: "Visual Review", description: skill.description }, options);
-    await updateHeadlessSkill(
-      skill.slug,
-      {
-        name: skill.name,
-        description: skill.description,
-        instructions: skill.instructions,
-        status: skill.status,
-      },
-      options,
-    );
-
-    expect(requests.map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual(
-      ["POST /v1/skills", "PATCH /v1/skills/visual-review"],
-    );
-    expect(requests[0]?.headers.get("idempotency-key")).toMatch(/^web-skill:/u);
-  });
-
   it("previews and imports external Skills through the typed resources", async () => {
     const requests: Request[] = [];
     const resolvedCommit = "a".repeat(40);
@@ -153,17 +127,26 @@ describe("headless knowledge commands", () => {
         ? Response.json({
             data: {
               status: "resolved",
-              proposedSlug: skill.slug,
-              name: skill.name,
-              description: skill.description,
-              instructions: skill.instructions,
-              extraFiles: [],
-              resolvedCommit,
+              name: "visual-review",
+              description: skillDescription,
+              source: {
+                type: "github",
+                url: "https://github.com/o/r",
+                ref: "main",
+                path: "",
+                resolvedCommit,
+              },
               integrity,
+              files: [{ path: "SKILL.md", sizeBytes: 128 }],
+              fileCount: 1,
+              totalBytes: 128,
             },
             meta,
           })
-        : Response.json({ data: { skill, replayed: false }, meta }, { status: 201 });
+        : Response.json(
+            { data: { installation: { name: "visual-review" }, replayed: false }, meta },
+            { status: 201 },
+          );
     });
     const options = { baseUrl: "https://api.example.test", fetch: fetchMock as typeof fetch };
 
@@ -183,6 +166,81 @@ describe("headless knowledge commands", () => {
     expect(requests[1]?.headers.get("idempotency-key")).toMatch(/^web-skill-import:/u);
   });
 
+  it("uses installation actions and bounded file reads", async () => {
+    const requests: Request[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return Response.json({ data: {}, meta });
+    });
+    const options = { baseUrl: "https://api.example.test", fetch: fetchMock as typeof fetch };
+    const command = {
+      url: "github.com/o/r",
+      expectedResolvedCommit: "a".repeat(40),
+      expectedIntegrity: `sha256:${"b".repeat(64)}`,
+    };
+
+    await enableHeadlessSkill("visual-review", options);
+    await disableHeadlessSkill("visual-review", options);
+    await replaceHeadlessSkill("visual-review", command, options);
+    await readHeadlessSkillFile(
+      "visual-review",
+      { path: "references/guide.md", offset: 12, maxBytes: 64 },
+      options,
+    );
+
+    expect(requests.map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual(
+      [
+        "POST /v1/skills/visual-review/enable",
+        "POST /v1/skills/visual-review/disable",
+        "POST /v1/skills/visual-review/replace",
+        "GET /v1/skills/visual-review/files/read",
+      ],
+    );
+    const fileUrl = new URL(requests[3]!.url);
+    expect(fileUrl.searchParams.get("path")).toBe("references/guide.md");
+    expect(fileUrl.searchParams.get("offset")).toBe("12");
+    expect(fileUrl.searchParams.get("maxBytes")).toBe("64");
+  });
+
+  it("uses the typed Plugin preview, install, lifecycle, and data deletion resources", async () => {
+    const requests: Request[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return Response.json({ data: {}, meta }, { status: request.method === "POST" ? 201 : 200 });
+    });
+    const options = { baseUrl: "https://api.example.test", fetch: fetchMock as typeof fetch };
+    const command = {
+      url: "github.com/example/plugins",
+      expectedResolvedCommit: "a".repeat(40),
+      expectedIntegrity: `sha256:${"b".repeat(64)}`,
+    };
+
+    await previewHeadlessPluginImport({ url: command.url }, options);
+    await importHeadlessPlugin(command, options);
+    await enableHeadlessPlugin("quality-tools", options);
+    await disableHeadlessPlugin("quality-tools", options);
+    await approveHeadlessPluginMcp("quality-tools", command.expectedIntegrity, options);
+    await revokeHeadlessPluginMcp("quality-tools", options);
+    await deleteHeadlessPluginData("quality-tools", options);
+    await archiveHeadlessPlugin("quality-tools", options);
+
+    expect(requests.map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual(
+      [
+        "POST /v1/plugins/imports/preview",
+        "POST /v1/plugins/imports",
+        "POST /v1/plugins/quality-tools/enable",
+        "POST /v1/plugins/quality-tools/disable",
+        "POST /v1/plugins/quality-tools/mcp/approve",
+        "POST /v1/plugins/quality-tools/mcp/revoke",
+        "POST /v1/plugins/quality-tools/data/delete",
+        "POST /v1/plugins/quality-tools/archive",
+      ],
+    );
+    expect(requests[1]?.headers.get("idempotency-key")).toMatch(/^web-plugin-import:/u);
+  });
+
   it("surfaces canonical errors with the request id", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json(
@@ -200,16 +258,10 @@ describe("headless knowledge commands", () => {
     );
 
     await expect(
-      updateHeadlessSkill(
-        skill.slug,
-        {
-          name: skill.name,
-          description: skill.description,
-          instructions: skill.instructions,
-          status: skill.status,
-        },
-        { baseUrl: "https://api.example.test", fetch: fetchMock as typeof fetch },
-      ),
+      disableHeadlessSkill("visual-review", {
+        baseUrl: "https://api.example.test",
+        fetch: fetchMock as typeof fetch,
+      }),
     ).rejects.toThrow("The Skill is imported and immutable. (request request_1)");
   });
 });

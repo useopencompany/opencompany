@@ -9,6 +9,11 @@ import type { ComponentType, SVGProps } from "react";
  * marks alike — all of which accept `size` plus any SVG prop and inherit
  * `currentColor`.
  */
-export type IconProps = SVGProps<SVGSVGElement> & { size?: string | number };
+export type IconProps = Omit<SVGProps<SVGSVGElement>, "mode"> & {
+  size?: string | number;
+  ariaHidden?: boolean;
+  mode?: "masked" | "raw";
+  maskId?: string;
+};
 export type LucideProps = IconProps;
 export type LucideIcon = ComponentType<IconProps>;
