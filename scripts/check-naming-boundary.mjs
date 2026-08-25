@@ -32,9 +32,6 @@ const protectedCompatibilityTokens = [
     "physical and stored quoted goat_* identifiers",
     /["'`]goat_[a-z0-9_]*["'`]/gu,
     "[\"'`]goat_[a-z0-9_]*[\"'`]",
-    // The one-way Agent Skills cutover retires the old Skill/workflow id namespaces and physical
-    // indexes while replacing the live schema with immutable bundle/plugin identifiers.
-    -12,
   ],
   [
     "quoted sandbox runtime roots",

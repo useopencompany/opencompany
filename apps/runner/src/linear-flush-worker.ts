@@ -61,7 +61,7 @@ export type LinearDueWindow = {
   issueId: string;
 };
 
-export type BufferedLinearEventRow = {
+type BufferedLinearEventRow = {
   id: string;
   deliveryId: string;
   teamId: string | null;

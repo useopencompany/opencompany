@@ -1,7 +1,6 @@
 import { normalizeLinearIssueWindow } from "@opencompany/brain";
 import { describe, expect, it } from "vitest";
 import {
-  type BufferedLinearEventRow,
   classifyLinearIssueWindowForIngest,
   resolveLinearIssueWindowRoutes,
 } from "./linear-flush-worker";
@@ -194,7 +193,7 @@ describe("classifyLinearIssueWindowForIngest", () => {
 });
 
 describe("resolveLinearIssueWindowRoutes", () => {
-  const event: BufferedLinearEventRow = {
+  const event = {
     id: "glinevt_1",
     deliveryId: "delivery_1",
     teamId: "team_1",
@@ -204,7 +203,7 @@ describe("resolveLinearIssueWindowRoutes", () => {
     actorName: "Ada",
     payload: { data: { id: "issue_1" } },
     eventTime: "2026-07-10T10:00:00.000Z",
-  };
+  } satisfies Parameters<typeof resolveLinearIssueWindowRoutes>[0]["events"][number];
   const brainRoute = {
     integrationId: "gint_1",
     brainRef: "gbrain_1",

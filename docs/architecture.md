@@ -64,8 +64,9 @@ recovery. The runner never calls the public API for execution persistence.
 Provider ingress validates and normalizes source events before polling providers or buffering
 conversation windows. Buffer flushes use one transaction to enqueue the existing Brain work and the
 independent Wiki ingest job, so enabling Wiki does not change Brain behavior. A leased runner worker
-then triages each Wiki item and applies page mutations through the same authorized Wiki tool used by
-interactive agents; job results retain the outcome and touched page paths for ingestion activity.
+then cheaply triages Slack, Gmail, and GitHub items before the librarian applies page mutations
+through the same authorized Wiki tool used by interactive agents; job results retain the outcome and
+touched page paths for ingestion activity.
 
 ## Agent Skills and Plugins
 
