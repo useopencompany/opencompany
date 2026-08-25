@@ -3400,6 +3400,56 @@ describe("canonical Hono API", () => {
     }
   });
 
+  it("correlates Message command failures with the actor and target without logging content", async () => {
+    const failure = new Error("Failed query", {
+      cause: Object.assign(new Error("duplicate key value violates unique constraint"), {
+        code: "23505",
+        constraint: "tasks_pkey",
+      }),
+    });
+    const repository = fakeRepository();
+    repository.createMessageAndRun = async () => {
+      throw failure;
+    };
+    const captureException = vi.fn();
+    setExceptionReporter({ captureException });
+    try {
+      const app = testApp(repository);
+      const response = await app.request("/v1/messages", {
+        method: "POST",
+        headers: messageHeaders("message-failure-1"),
+        body: JSON.stringify({
+          conversationId: "conversation_1",
+          content: "private prompt that must not enter telemetry",
+          engine: { type: "opencompany", schemaVersion: 1 },
+        }),
+      });
+
+      expect(response.status).toBe(500);
+      expect(captureException).toHaveBeenCalledWith(
+        failure,
+        expect.objectContaining({
+          event: "opencompany.api_request_failed",
+          method: "POST",
+          path: "/v1/messages",
+          operation: "message.create",
+          message_target: "existing",
+          target_resource: "chat",
+          engine: "opencompany",
+          conversation_id: "conversation_1",
+          user_id: "user_1",
+          workspace_id: "workspace_1",
+          request_id: expect.stringMatching(/^request_/u),
+        }),
+      );
+      expect(JSON.stringify(captureException.mock.calls)).not.toContain(
+        "private prompt that must not enter telemetry",
+      );
+    } finally {
+      setExceptionReporter(undefined);
+    }
+  });
+
   it("forwards the required idempotency key to billing commands", async () => {
     const createCreditTopUp = vi.fn(async () => ({
       redirectUrl: "https://checkout.stripe.test/session",
