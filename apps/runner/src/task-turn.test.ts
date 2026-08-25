@@ -301,35 +301,34 @@ describe("session-backed task turns", () => {
   it.each([
     { turnStatus: "failed" as const, terminalEvent: "run.failed", error: "Provider failed." },
     { turnStatus: "interrupted" as const, terminalEvent: "run.canceled", error: null },
-  ])("orders the complete Message snapshot before $terminalEvent", async ({
-    turnStatus,
-    terminalEvent,
-    error,
-  }) => {
-    await settleDurableTurn({
-      target: {
-        userWorkosId: "user_1",
-        workspaceId: "workspace_1",
-        codexChatSessionId: "runtime_1",
-        chatSessionId: "goat_chat_1",
-        turnId: "turn_1",
-        leaseId: "lease_1",
-        leaseOwner: "runner_1",
-      },
-      turnStatus,
-      sessionStatus: turnStatus === "interrupted" ? "interrupted" : "idle",
-      error,
-      completedAt: new Date("2026-07-30T09:30:00.000Z"),
-      canonicalRun: {
-        attemptId: "attempt_1",
-        assistantMessageId: "assistant_message_1",
-        content: "Latest response",
-      },
-    });
+  ])(
+    "orders the complete Message snapshot before $terminalEvent",
+    async ({ turnStatus, terminalEvent, error }) => {
+      await settleDurableTurn({
+        target: {
+          userWorkosId: "user_1",
+          workspaceId: "workspace_1",
+          codexChatSessionId: "runtime_1",
+          chatSessionId: "goat_chat_1",
+          turnId: "turn_1",
+          leaseId: "lease_1",
+          leaseOwner: "runner_1",
+        },
+        turnStatus,
+        sessionStatus: turnStatus === "interrupted" ? "interrupted" : "idle",
+        error,
+        completedAt: new Date("2026-07-30T09:30:00.000Z"),
+        canonicalRun: {
+          attemptId: "attempt_1",
+          assistantMessageId: "assistant_message_1",
+          content: "Latest response",
+        },
+      });
 
-    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
-    expect(canonicalEventTypes(query.params)).toEqual(["message.content_updated", terminalEvent]);
-  });
+      const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
+      expect(canonicalEventTypes(query.params)).toEqual(["message.content_updated", terminalEvent]);
+    },
+  );
 
   it("stores an internal Attempt diagnostic separately from the user-facing Run error", async () => {
     await settleDurableTurn({
