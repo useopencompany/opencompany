@@ -14,7 +14,6 @@ test-results
 .vercel/*
 !.vercel/project.json.example
 .context/
-.firecrawl/
 .env*.local
 *.local.*
 .source
