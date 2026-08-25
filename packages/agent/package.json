@@ -22,7 +22,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@ai-sdk/mcp": "^1.0.44",
+    "@ai-sdk/mcp": "^2.0.34",
     "@browserbasehq/sdk": "^2.18.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@opencompany/agent-runtime": "workspace:*",
