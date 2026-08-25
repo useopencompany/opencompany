@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
-    "@central-icons-react/round-outlined-radius-2-stroke-2": "1.1.257",
+    "@central-icons-react/round-outlined-radius-2-stroke-2": "1.1.315",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -37,7 +37,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.3.2",
     "postcss": "8.5.26",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3"
