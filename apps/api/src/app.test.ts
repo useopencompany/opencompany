@@ -1389,35 +1389,35 @@ describe("canonical Hono API", () => {
     expect(bearer.status).toBe(202);
   });
 
-  it.each([
-    undefined,
-    "0.9.0",
-  ])("rejects stale Message clients with an actionable refresh error (%s)", async (protocolVersion) => {
-    const repository = fakeRepository();
-    const response = await testApp(repository).request("/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": "send_stale_1",
-        ...(protocolVersion ? { [PROTOCOL_VERSION_HEADER]: protocolVersion } : {}),
-      },
-      body: JSON.stringify({
-        content: "Hello",
-        engine: "opencompany",
-      }),
-    });
+  it.each([undefined, "0.9.0"])(
+    "rejects stale Message clients with an actionable refresh error (%s)",
+    async (protocolVersion) => {
+      const repository = fakeRepository();
+      const response = await testApp(repository).request("/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "send_stale_1",
+          ...(protocolVersion ? { [PROTOCOL_VERSION_HEADER]: protocolVersion } : {}),
+        },
+        body: JSON.stringify({
+          content: "Hello",
+          engine: "opencompany",
+        }),
+      });
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "invalid_request",
-        message: PROTOCOL_UPDATE_REQUIRED_MESSAGE,
-        retryable: false,
-      },
-      meta: { protocolVersion: PROTOCOL_VERSION },
-    });
-    expect(repository.lastCommand).toBeNull();
-  });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "invalid_request",
+          message: PROTOCOL_UPDATE_REQUIRED_MESSAGE,
+          retryable: false,
+        },
+        meta: { protocolVersion: PROTOCOL_VERSION },
+      });
+      expect(repository.lastCommand).toBeNull();
+    },
+  );
 
   it("exposes durable cursor and Electric headers to the configured browser origin", async () => {
     const app = testApp(fakeRepository(), {

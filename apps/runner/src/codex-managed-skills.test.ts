@@ -181,29 +181,27 @@ describe("materializeCodexSkillSnapshotsForSession", () => {
     expect(first.fingerprint).not.toBe(changedMode.fingerprint);
   });
 
-  it.each([
-    "../escape",
-    "/absolute",
-    "nested/../../escape",
-    "nested\\escape",
-  ])("rejects unsafe stored path %s before touching the sandbox", async (unsafePath) => {
-    const sandbox = fakeSandbox();
+  it.each(["../escape", "/absolute", "nested/../../escape", "nested\\escape"])(
+    "rejects unsafe stored path %s before touching the sandbox",
+    async (unsafePath) => {
+      const sandbox = fakeSandbox();
 
-    await expect(
-      materializeCodexSkillSnapshotsForSession({
-        sandbox: sandbox as never,
-        codexWorkRoot: "/home/user/workspace/codex",
-        skills: [
-          {
-            name: "safe-skill",
-            files: [{ path: unsafePath, content: bytes("Body."), executable: false }],
-          },
-        ],
-      }),
-    ).rejects.toThrow("Cannot materialize Skill file with unsafe path");
-    expect(sandbox.commands.run).not.toHaveBeenCalled();
-    expect(sandbox.files.write).not.toHaveBeenCalled();
-  });
+      await expect(
+        materializeCodexSkillSnapshotsForSession({
+          sandbox: sandbox as never,
+          codexWorkRoot: "/home/user/workspace/codex",
+          skills: [
+            {
+              name: "safe-skill",
+              files: [{ path: unsafePath, content: bytes("Body."), executable: false }],
+            },
+          ],
+        }),
+      ).rejects.toThrow("Cannot materialize Skill file with unsafe path");
+      expect(sandbox.commands.run).not.toHaveBeenCalled();
+      expect(sandbox.files.write).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects unsafe Skill names before touching the sandbox", async () => {
     const sandbox = fakeSandbox();

@@ -141,63 +141,64 @@ describe("Postgres Chat repositories", () => {
     expect(legacyRuntimeSurvivedMigration).toBe(true);
   });
 
-  it.each([
-    "opencompany",
-    "codex",
-    "claude_code",
-  ] as const)("returns and atomically refreshes the %s runtime summary without exposing raw errors", async (engine) => {
-    const created = await service.createMessage(actor(), {
-      idempotencyKey: `runtime-${engine}`,
-      content: `Exercise the ${engine} runtime.`,
-      engine,
-      model: "provider/model",
-    });
+  it.each(["opencompany", "codex", "claude_code"] as const)(
+    "returns and atomically refreshes the %s runtime summary without exposing raw errors",
+    async (engine) => {
+      const created = await service.createMessage(actor(), {
+        idempotencyKey: `runtime-${engine}`,
+        content: `Exercise the ${engine} runtime.`,
+        engine,
+        model: "provider/model",
+      });
 
-    const initial = await service.getConversation(actor(), created.conversationId);
-    expect(initial.runtime).toMatchObject({
-      status: "queued",
-      activeRunId: created.runId,
-      hasError: false,
-    });
-    await expect(service.listConversations(actor())).resolves.toMatchObject({
-      conversations: [{ runtime: initial.runtime }],
-    });
-
-    await database.query(
-      `UPDATE goat.codex_chat_sessions
-         SET status = 'running', active_turn_id = $2, updated_at = $3
-         WHERE chat_session_id = $1`,
-      [created.conversationId, created.runId, "2026-08-10T20:01:00.000Z"],
-    );
-    await expect(service.getConversation(actor(), created.conversationId)).resolves.toMatchObject({
-      activityState: "working",
-      runtime: {
-        status: "running",
+      const initial = await service.getConversation(actor(), created.conversationId);
+      expect(initial.runtime).toMatchObject({
+        status: "queued",
         activeRunId: created.runId,
         hasError: false,
-        updatedAt: new Date("2026-08-10T20:01:00.000Z"),
-      },
-    });
+      });
+      await expect(service.listConversations(actor())).resolves.toMatchObject({
+        conversations: [{ runtime: initial.runtime }],
+      });
 
-    const rawError = "provider-private failure detail";
-    await database.query(
-      `UPDATE goat.codex_chat_sessions
+      await database.query(
+        `UPDATE goat.codex_chat_sessions
+         SET status = 'running', active_turn_id = $2, updated_at = $3
+         WHERE chat_session_id = $1`,
+        [created.conversationId, created.runId, "2026-08-10T20:01:00.000Z"],
+      );
+      await expect(service.getConversation(actor(), created.conversationId)).resolves.toMatchObject(
+        {
+          activityState: "working",
+          runtime: {
+            status: "running",
+            activeRunId: created.runId,
+            hasError: false,
+            updatedAt: new Date("2026-08-10T20:01:00.000Z"),
+          },
+        },
+      );
+
+      const rawError = "provider-private failure detail";
+      await database.query(
+        `UPDATE goat.codex_chat_sessions
          SET status = 'failed', active_turn_id = NULL, error = $2, updated_at = $3
          WHERE chat_session_id = $1`,
-      [created.conversationId, rawError, "2026-08-10T20:02:00.000Z"],
-    );
-    const failed = await service.getConversation(actor(), created.conversationId);
-    expect(failed).toMatchObject({
-      activityState: "idle",
-      runtime: {
-        status: "failed",
-        activeRunId: null,
-        hasError: true,
-        updatedAt: new Date("2026-08-10T20:02:00.000Z"),
-      },
-    });
-    expect(JSON.stringify(failed)).not.toContain(rawError);
-  });
+        [created.conversationId, rawError, "2026-08-10T20:02:00.000Z"],
+      );
+      const failed = await service.getConversation(actor(), created.conversationId);
+      expect(failed).toMatchObject({
+        activityState: "idle",
+        runtime: {
+          status: "failed",
+          activeRunId: null,
+          hasError: true,
+          updatedAt: new Date("2026-08-10T20:02:00.000Z"),
+        },
+      });
+      expect(JSON.stringify(failed)).not.toContain(rawError);
+    },
+  );
 
   it("normalizes JSON null attachment text and rejects non-object JSON at the database boundary", async () => {
     const created = await service.createMessage(actor(), {

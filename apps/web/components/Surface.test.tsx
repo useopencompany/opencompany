@@ -504,81 +504,80 @@ describe("Surface chat streaming UI", () => {
       model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
       connection: { claudeCodeConnected: true },
     },
-  ])("captures $engine send-to-first-render latency once per foreground turn", async ({
-    engine,
-    model,
-    connection,
-  }) => {
-    const user = userEvent.setup();
-    let currentTime = 1_000;
-    vi.spyOn(performance, "now").mockImplementation(() => currentTime);
+  ])(
+    "captures $engine send-to-first-render latency once per foreground turn",
+    async ({ engine, model, connection }) => {
+      const user = userEvent.setup();
+      let currentTime = 1_000;
+      vi.spyOn(performance, "now").mockImplementation(() => currentTime);
 
-    render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={{
-          id: `goat_chat_${engine}_latency`,
-          title: "Latency test",
-          model,
+      render(
+        <Surface
+          tasks={[]}
+          defaultModel={DEFAULT_MODEL}
+          initialChat={{
+            id: `goat_chat_${engine}_latency`,
+            title: "Latency test",
+            model,
+            engine,
+            messages: [],
+          }}
+          workspaceId="workspace_1"
+          {...connection}
+        />,
+      );
+
+      await user.type(screen.getByPlaceholderText("Reply..."), "Measure this turn");
+      await user.click(screen.getByRole("button", { name: "Send message" }));
+      expect(productAnalyticsMock.capture).not.toHaveBeenCalled();
+
+      currentTime = 2_750;
+      acceptHeadlessConversation(`goat_chat_${engine}_latency`);
+      act(() => {
+        chatMock.renderAssistantMessage?.({
+          id: "assistant_accepted_1",
+          role: "assistant",
+          metadata: {
+            sessionId: `goat_chat_${engine}_latency`,
+            runId: "run_accepted_1",
+            model,
+          },
+          parts: [{ type: "reasoning", text: "I’ll inspect the repository.", state: "streaming" }],
+        });
+      });
+
+      await waitFor(() =>
+        expect(productAnalyticsMock.capture).toHaveBeenCalledWith("chat_first_output_rendered", {
+          workspace_id: "workspace_1",
+          session_id: `goat_chat_${engine}_latency`,
+          run_id: "run_accepted_1",
+          message_id: "assistant_accepted_1",
           engine,
-          messages: [],
-        }}
-        workspaceId="workspace_1"
-        {...connection}
-      />,
-    );
-
-    await user.type(screen.getByPlaceholderText("Reply..."), "Measure this turn");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-    expect(productAnalyticsMock.capture).not.toHaveBeenCalled();
-
-    currentTime = 2_750;
-    acceptHeadlessConversation(`goat_chat_${engine}_latency`);
-    act(() => {
-      chatMock.renderAssistantMessage?.({
-        id: "assistant_accepted_1",
-        role: "assistant",
-        metadata: {
-          sessionId: `goat_chat_${engine}_latency`,
-          runId: "run_accepted_1",
           model,
-        },
-        parts: [{ type: "reasoning", text: "I’ll inspect the repository.", state: "streaming" }],
-      });
-    });
+          selected_model: model,
+          is_new_session: false,
+          sandbox_status_at_send: "unknown",
+          send_source: "composer",
+          output_kind: "reasoning",
+          time_to_first_output_ms: 1_750,
+        }),
+      );
 
-    await waitFor(() =>
-      expect(productAnalyticsMock.capture).toHaveBeenCalledWith("chat_first_output_rendered", {
-        workspace_id: "workspace_1",
-        session_id: `goat_chat_${engine}_latency`,
-        run_id: "run_accepted_1",
-        message_id: "assistant_accepted_1",
-        engine,
-        model,
-        selected_model: model,
-        is_new_session: false,
-        sandbox_status_at_send: "unknown",
-        send_source: "composer",
-        output_kind: "reasoning",
-        time_to_first_output_ms: 1_750,
-      }),
-    );
-
-    act(() => {
-      chatMock.renderAssistantMessage?.({
-        id: "assistant_accepted_1",
-        role: "assistant",
-        metadata: {
-          sessionId: `goat_chat_${engine}_latency`,
-          runId: "run_accepted_1",
-          model,
-        },
-        parts: [{ type: "text", text: "The repository is ready." }],
+      act(() => {
+        chatMock.renderAssistantMessage?.({
+          id: "assistant_accepted_1",
+          role: "assistant",
+          metadata: {
+            sessionId: `goat_chat_${engine}_latency`,
+            runId: "run_accepted_1",
+            model,
+          },
+          parts: [{ type: "text", text: "The repository is ready." }],
+        });
       });
-    });
-    expect(productAnalyticsMock.capture).toHaveBeenCalledOnce();
-  });
+      expect(productAnalyticsMock.capture).toHaveBeenCalledOnce();
+    },
+  );
 
   it("shows transcript loading instead of an unexplained empty persisted chat", () => {
     render(

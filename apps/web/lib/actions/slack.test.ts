@@ -159,36 +159,36 @@ describe("resolveSlackActions", () => {
     expect(result.nextCursor).toBe("cursor_2");
   });
 
-  it.each([
-    "engineering",
-    "#Engineering",
-  ])("resolves a channel name before fetching history: %s", async (channel) => {
-    mocks.slackApiRequest
-      .mockResolvedValueOnce({
-        channels: [{ id: "CENGINE1", name: "engineering" }],
-        response_metadata: { next_cursor: "" },
-      })
-      .mockResolvedValueOnce({ messages: [] });
+  it.each(["engineering", "#Engineering"])(
+    "resolves a channel name before fetching history: %s",
+    async (channel) => {
+      mocks.slackApiRequest
+        .mockResolvedValueOnce({
+          channels: [{ id: "CENGINE1", name: "engineering" }],
+          response_metadata: { next_cursor: "" },
+        })
+        .mockResolvedValueOnce({ messages: [] });
 
-    const catalog = await resolveSlackActions("user_1");
-    const history = catalog?.actions.find((action) => action.id === "slack.fetch_history");
-    await history?.execute({ channel }, CONTEXT);
+      const catalog = await resolveSlackActions("user_1");
+      const history = catalog?.actions.find((action) => action.id === "slack.fetch_history");
+      await history?.execute({ channel }, CONTEXT);
 
-    expect(mocks.slackApiRequest).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        method: "conversations.list",
-        form: expect.objectContaining({ limit: "200", exclude_archived: "true" }),
-      }),
-    );
-    expect(mocks.slackApiRequest).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        method: "conversations.history",
-        form: expect.objectContaining({ channel: "CENGINE1" }),
-      }),
-    );
-  });
+      expect(mocks.slackApiRequest).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          method: "conversations.list",
+          form: expect.objectContaining({ limit: "200", exclude_archived: "true" }),
+        }),
+      );
+      expect(mocks.slackApiRequest).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          method: "conversations.history",
+          form: expect.objectContaining({ channel: "CENGINE1" }),
+        }),
+      );
+    },
+  );
 
   it("paginates channel-name resolution until a match is found", async () => {
     mocks.slackApiRequest
