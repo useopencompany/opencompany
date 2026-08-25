@@ -1370,7 +1370,7 @@ export const WikiIngestActivityItemSchema = z
   .strict()
   .openapi("WikiIngestActivityItem");
 
-export const SkillSourceSchema = z
+export const ExternalSkillSourceSchema = z
   .object({
     type: z.enum(["github", "skills.sh"]),
     url: z.url().max(2_048),
@@ -1379,6 +1379,15 @@ export const SkillSourceSchema = z
     resolvedCommit: z.string().regex(/^[0-9a-f]{40}$/u),
   })
   .strict()
+  .openapi("ExternalSkillSource");
+
+export const WorkspaceSkillSourceSchema = z
+  .object({ type: z.literal("workspace") })
+  .strict()
+  .openapi("WorkspaceSkillSource");
+
+export const SkillSourceSchema = z
+  .discriminatedUnion("type", [ExternalSkillSourceSchema, WorkspaceSkillSourceSchema])
   .openapi("SkillSource");
 
 export const SkillBundleFileMetadataSchema = z
@@ -1476,7 +1485,7 @@ export const SkillImportPreviewSchema = z
         compatibility: z.string().max(500).optional(),
         metadata: z.record(z.string(), z.string()).optional(),
         allowedTools: z.string().optional(),
-        source: SkillSourceSchema,
+        source: ExternalSkillSourceSchema,
         integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
         files: z.array(SkillImportFileMetadataSchema).min(1).max(64),
         fileCount: z.number().int().min(1).max(64),
@@ -1491,7 +1500,7 @@ export const SkillImportPreviewSchema = z
       .object({
         status: z.literal("ambiguous"),
         candidates: z.array(SkillImportCandidateSchema).min(1).max(25),
-        source: SkillSourceSchema.omit({ path: true }),
+        source: ExternalSkillSourceSchema.omit({ path: true }),
       })
       .strict(),
   ])
@@ -1519,7 +1528,7 @@ export const PluginManifestSchema = z
   .strict()
   .openapi("PluginManifest");
 
-export const PluginSourceSchema = SkillSourceSchema.openapi("PluginSource");
+export const PluginSourceSchema = ExternalSkillSourceSchema.openapi("PluginSource");
 
 export const PluginFileMetadataSchema = z
   .object({
@@ -1998,6 +2007,26 @@ export const ImportSkillBodySchema = SkillImportPreviewBodySchema.extend({
 })
   .strict()
   .openapi("ImportSkillBody");
+export const WorkspaceSkillNameSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
+export const CreateWorkspaceSkillBodySchema = z
+  .object({
+    name: WorkspaceSkillNameSchema,
+    description: z.string().trim().min(1).max(1_024),
+    instructions: z
+      .string()
+      .trim()
+      .min(1)
+      .max(512 * 1_024),
+  })
+  .strict()
+  .openapi("CreateWorkspaceSkillBody");
+export const UpdateWorkspaceSkillBodySchema = CreateWorkspaceSkillBodySchema.omit({ name: true })
+  .strict()
+  .openapi("UpdateWorkspaceSkillBody");
 export const SkillImportEnvelopeSchema = z
   .object({
     data: z.object({ installation: SkillInstallationSchema, replayed: z.boolean() }).strict(),
@@ -4030,6 +4059,8 @@ export type SkillImportCandidateDto = z.infer<typeof SkillImportCandidateSchema>
 export type SkillImportPreviewDto = z.infer<typeof SkillImportPreviewSchema>;
 export type SkillImportPreviewBody = z.infer<typeof SkillImportPreviewBodySchema>;
 export type ImportSkillBody = z.infer<typeof ImportSkillBodySchema>;
+export type CreateWorkspaceSkillBody = z.infer<typeof CreateWorkspaceSkillBodySchema>;
+export type UpdateWorkspaceSkillBody = z.infer<typeof UpdateWorkspaceSkillBodySchema>;
 export type PluginManifestDto = z.infer<typeof PluginManifestSchema>;
 export type PluginSourceDto = z.infer<typeof PluginSourceSchema>;
 export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;

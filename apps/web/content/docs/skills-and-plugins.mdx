@@ -5,15 +5,22 @@ description: Install immutable Agent Skills and Plugins, pin runtime versions, a
 
 ## Skills
 
-Workspace admins manage Agent Skills in **Settings → Skills**. Preview a supported public GitHub or
-skills.sh URL before installing it. opencompany validates the official Agent Skills frontmatter,
-name and directory alignment, every bundled file, and the resolved commit. Unknown fields such as
-the retired `command` extension are rejected.
+Workspace admins manage Agent Skills in **Settings → Skills**. Choose **New skill** to author one
+for the workspace, or preview a supported public GitHub or skills.sh URL before importing it.
+Workspace-authored Skills use the same official Agent Skills document format as imported Skills;
+opencompany generates the `SKILL.md` frontmatter from the name and description and stores the
+instructions as its Markdown body. The slash command is always derived from the Skill name as
+`/<skill-name>` rather than stored in a separate `command` field.
 
-Installed bundles are immutable: there is no Markdown editor. Replace creates a new bundle and
-moves the workspace installation to it; enable, disable, and archive control whether new Chats and
-Tasks can select it. Existing Chats and Tasks retain the exact bundle IDs they already captured.
-Type `/` in Chat and select a Skill to invoke it as `/<skill-name>`.
+Imported Skills are validated for official frontmatter, name and directory alignment, every
+bundled file, and the resolved commit. Unknown fields such as the retired `command` extension are
+rejected.
+
+Installed bundles are immutable. Editing a workspace-authored Skill or replacing an imported Skill
+creates a new bundle and moves the workspace installation to it. A Skill cannot switch between
+workspace-authored and imported provenance. Enable, disable, and archive control whether new Chats
+and Tasks can select it. Existing Chats and Tasks retain the exact bundle IDs they already
+captured. Type `/` in Chat and select a Skill to invoke it as `/<skill-name>`.
 
 ## Plugins
 
@@ -38,6 +45,7 @@ Skills and MCP from entering new turns but does not implicitly erase Plugin data
 
 ## Historical Skills
 
-The former hand-authored Brain Skill editor, custom command frontmatter extension, and legacy
-activation replay have been removed. Old Chat messages remain readable, but their historical Skill
+The former Brain-backed Skill editor, custom command frontmatter extension, and legacy activation
+replay have been removed. Workspace authoring now creates standard immutable Skill bundles instead
+of restoring that legacy data model. Old Chat messages remain readable, but their historical Skill
 activations are not executable and were not converted into new bundles.

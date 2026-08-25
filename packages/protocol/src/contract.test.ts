@@ -334,9 +334,9 @@ describe("v1 protocol contract", () => {
       "/v1/plugins/{name}/data/delete",
     ]);
     expect(document.paths?.["/v1/skills"]).toHaveProperty("get");
-    expect(document.paths?.["/v1/skills"]).not.toHaveProperty("post");
+    expect(document.paths?.["/v1/skills"]).toHaveProperty("post");
     expect(document.paths?.["/v1/skills/{slug}"]).toHaveProperty("get");
-    expect(document.paths?.["/v1/skills/{slug}"]).not.toHaveProperty("patch");
+    expect(document.paths?.["/v1/skills/{slug}"]).toHaveProperty("patch");
     expect(document.paths?.["/v1/messages"]?.post?.parameters).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
