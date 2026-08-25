@@ -26,17 +26,17 @@
     "@opencompany/protocol": "workspace:*",
     "@opencompany/wiki": "workspace:*",
     "@vercel/blob": "^2.4.0",
-    "@workos-inc/node": "^9.3.1",
+    "@workos-inc/node": "^10.10.0",
     "drizzle-orm": "^0.45.2",
     "hono": "4.12.28",
     "jose": "^5.10.0",
-    "pg": "^8.13.1",
-    "stripe": "^22.1.1"
+    "pg": "^8.23.0",
+    "stripe": "22.1.1"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
-    "@types/pg": "^8.11.10",
+    "@types/pg": "^8.23.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.11"
   }
 }

@@ -7,9 +7,10 @@ import {
 import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import {
-  CODEX_APP_SERVER_EVENT_TYPES,
   CODEX_CHAT_EVENT_TYPES,
+  CODING_HARNESS_EVENT_TYPES,
   codexChatEvents,
+  codexChatInteractions,
   runApprovals,
   runAttempts,
   runEvents,
@@ -20,12 +21,24 @@ const pgDialect = new PgDialect();
 describe("Codex event constraints", () => {
   it("uses the canonical cloud Codex event list without delta-only event types", () => {
     expect(CODEX_CHAT_EVENT_TYPES).toEqual(
-      CODEX_APP_SERVER_EVENT_TYPES.filter(
+      CODING_HARNESS_EVENT_TYPES.filter(
         (eventType) => eventType !== "assistant.delta" && eventType !== "command.output",
       ),
     );
     expect(checkParams(codexChatEvents, "goat_codex_chat_events_type_check")).toEqual(
       CODEX_CHAT_EVENT_TYPES,
+    );
+  });
+});
+
+describe("ACP interaction constraints", () => {
+  it("accepts ACP elicitation while preserving rolling-deploy compatibility", () => {
+    const methodCheck = getTableConfig(codexChatInteractions).checks.find((constraint) =>
+      pgDialect.sqlToQuery(constraint.value).sql.includes("elicitation/create"),
+    );
+    expect(methodCheck).toBeDefined();
+    expect(pgDialect.sqlToQuery(methodCheck!.value).sql).toContain(
+      `"method" IN ('elicitation/create', 'item/tool/requestUserInput')`,
     );
   });
 });
@@ -46,10 +59,27 @@ describe("canonical Run constraints", () => {
 });
 
 function checkParams(
-  table: typeof codexChatEvents | typeof runAttempts | typeof runApprovals | typeof runEvents,
+  table:
+    | typeof codexChatEvents
+    | typeof codexChatInteractions
+    | typeof runAttempts
+    | typeof runApprovals
+    | typeof runEvents,
+  constraintName: string,
+) {
+  return checkQuery(table, constraintName).params;
+}
+
+function checkQuery(
+  table:
+    | typeof codexChatEvents
+    | typeof codexChatInteractions
+    | typeof runAttempts
+    | typeof runApprovals
+    | typeof runEvents,
   constraintName: string,
 ) {
   const constraint = getTableConfig(table).checks.find((check) => check.name === constraintName);
   expect(constraint, `Missing ${constraintName}`).toBeDefined();
-  return pgDialect.sqlToQuery(constraint!.value).params;
+  return pgDialect.sqlToQuery(constraint!.value);
 }

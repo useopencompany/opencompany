@@ -6,13 +6,18 @@ import type {
 } from "@opencompany/agent/actions/types";
 import { ACTION_EFFECTS_METERED_READ } from "@opencompany/agent/actions/types";
 import { listWorkspaceCapabilities } from "@opencompany/db/capabilities";
-import { MANAGED_CAPABILITY_ACTIONS, MANAGED_CAPABILITY_SOURCE_DETAILS } from "./catalog";
+import {
+  isImageGenerationActionSpec,
+  MANAGED_CAPABILITY_ACTIONS,
+  MANAGED_CAPABILITY_SOURCE_DETAILS,
+} from "./catalog";
 import {
   CAPABILITY_ACTION_TIMEOUT_MS,
   executeManagedCapability,
   isManagedCapabilitiesKilled,
   isManagedCapabilityActionKilled,
 } from "./execute";
+import { executeImageGenerationCapability, IMAGE_GENERATION_TIMEOUT_MS } from "./image-generation";
 
 // Managed (Monid) capabilities share the same catalog and execution service in
 // every backend composition root. Workspace enablement and pricing authority
@@ -21,14 +26,20 @@ export async function resolveManagedCapabilities(
   workspaceId: string,
 ): Promise<ManagedCapabilitiesResolution> {
   const managedCapabilityStates =
-    process.env.MONID_API_KEY?.trim() && !isManagedCapabilitiesKilled()
+    (process.env.MONID_API_KEY?.trim() || process.env.VERCEL_AI_GATEWAY_API_KEY?.trim()) &&
+    !isManagedCapabilitiesKilled()
       ? await listWorkspaceCapabilities(workspaceId).catch(() => [])
       : [];
   const enabledManagedSources = new Set(
     managedCapabilityStates.filter((entry) => entry.enabled).map((entry) => entry.source),
   );
   const actions: ResolvedAction[] = MANAGED_CAPABILITY_ACTIONS.filter(
-    (spec) => enabledManagedSources.has(spec.source) && !isManagedCapabilityActionKilled(spec.id),
+    (spec) =>
+      enabledManagedSources.has(spec.source) &&
+      !isManagedCapabilityActionKilled(spec.id) &&
+      (isImageGenerationActionSpec(spec)
+        ? Boolean(process.env.VERCEL_AI_GATEWAY_API_KEY?.trim())
+        : Boolean(process.env.MONID_API_KEY?.trim())),
   ).map((spec) => ({
     id: spec.id,
     provider: spec.source,
@@ -36,13 +47,17 @@ export async function resolveManagedCapabilities(
     effects: ACTION_EFFECTS_METERED_READ,
     description: spec.description,
     params: spec.params,
-    timeoutMs: CAPABILITY_ACTION_TIMEOUT_MS,
+    timeoutMs: isImageGenerationActionSpec(spec)
+      ? IMAGE_GENERATION_TIMEOUT_MS
+      : CAPABILITY_ACTION_TIMEOUT_MS,
     ...(spec.maxActionResultChars === undefined
       ? {}
       : { maxResultChars: spec.maxActionResultChars }),
     permissionMode: "on" as const,
     execute: (params: Record<string, unknown>, context: ActionExecuteContext) =>
-      executeManagedCapability({ spec, params, context }),
+      isImageGenerationActionSpec(spec)
+        ? executeImageGenerationCapability({ spec, params, context })
+        : executeManagedCapability({ spec, params, context }),
   }));
   const sources: ActionSourceDescriptor[] = managedCapabilityStates
     .filter((entry) => entry.enabled)

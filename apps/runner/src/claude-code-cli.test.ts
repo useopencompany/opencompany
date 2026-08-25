@@ -28,7 +28,7 @@ describe("buildClaudeCommandEnv", () => {
     expect(env.CLAUDE_CODE_RATE_LIMIT_TIER).toBe("default_claude_max_20x");
   });
 
-  // An API key silently outranks the subscription token and flips the
+  // In -p mode an API key silently outranks the subscription token and flips the
   // session to metered API billing — it must never reach the command env.
   it("strips API-key credentials even if a caller leaks them through githubEnv", () => {
     const env = buildClaudeCommandEnv({
@@ -73,14 +73,11 @@ describe("buildClaudeAcpCommand", () => {
 });
 
 describe("KILL_LEFTOVER_CLAUDE_TURN_COMMAND", () => {
-  it("matches the ACP adapter invocation but not its own command line", () => {
+  it("matches an ACP adapter process but not its own command line", () => {
     const pattern = /'(.+)'/.exec(KILL_LEFTOVER_CLAUDE_TURN_COMMAND)?.[1];
     expect(pattern).toBeTruthy();
     const regex = new RegExp(pattern as string);
-    const turnCommand = buildClaudeAcpCommand("/home/user/opencompany-goat/claude-chat");
-    // pkill -f matches the leftover wrapper shell and ACP adapter by this signature...
-    expect(regex.test(turnCommand)).toBe(true);
-    // ...but must not match the shell running the cleanup itself, or pkill kills its own parent.
+    expect(regex.test(buildClaudeAcpCommand("/work"))).toBe(true);
     expect(regex.test(KILL_LEFTOVER_CLAUDE_TURN_COMMAND)).toBe(false);
   });
 

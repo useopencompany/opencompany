@@ -49,6 +49,8 @@ vi.mock("@/components/useHydrated", () => ({
 vi.mock("@/lib/headless-chat-collections", () => ({
   getHeadlessChatMessages: mocks.getHeadlessChatMessages,
   getHeadlessChatRuns: mocks.getHeadlessChatRuns,
+  getHeadlessChatMessagesGeneration: () => 0,
+  subscribeHeadlessChatMessagesGeneration: () => () => undefined,
 }));
 
 describe("useHeadlessChatTranscript", () => {
@@ -157,6 +159,68 @@ describe("useHeadlessChatTranscript", () => {
 
     expect(result.current.isLoading).toBe(false);
     expect(result.current.messages[0]?.parts).toEqual([{ type: "text", text: "Loaded" }]);
+  });
+
+  it("keeps the last resolved transcript while the collection reloads", () => {
+    mocks.messagesCollection.rows = [
+      {
+        id: "message_1",
+        conversationId: "chat_1",
+        role: "assistant",
+        content: "Existing answer",
+        taskId: null,
+        presentation: null,
+        attachments: null,
+        createdAt: "2026-08-19T10:00:00.000Z",
+        updatedAt: "2026-08-19T10:00:00.000Z",
+      },
+    ];
+    const { result } = renderHook(() => useHeadlessChatTranscript("chat_1"));
+
+    expect(result.current.messages[0]?.parts).toEqual([{ type: "text", text: "Existing answer" }]);
+
+    act(() => {
+      mocks.messagesCollection.status = "loading";
+      mocks.messagesCollection.rows = [];
+      mocks.listeners.messages?.();
+    });
+
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.messages[0]?.parts).toEqual([{ type: "text", text: "Existing answer" }]);
+
+    act(() => {
+      mocks.messagesCollection.status = "ready";
+      mocks.messagesCollection.rows = [
+        {
+          id: "message_1",
+          conversationId: "chat_1",
+          role: "assistant",
+          content: "Existing answer",
+          taskId: null,
+          presentation: null,
+          attachments: null,
+          createdAt: "2026-08-19T10:00:00.000Z",
+          updatedAt: "2026-08-19T10:00:00.000Z",
+        },
+        {
+          id: "message_2",
+          conversationId: "chat_1",
+          role: "user",
+          content: "Follow up",
+          taskId: null,
+          presentation: null,
+          attachments: null,
+          createdAt: "2026-08-19T10:00:01.000Z",
+          updatedAt: "2026-08-19T10:00:01.000Z",
+        },
+      ];
+      mocks.listeners.messages?.();
+    });
+
+    expect(result.current.messages.map((message) => message.id)).toEqual([
+      "message_1",
+      "message_2",
+    ]);
   });
 
   it("provides a stable empty snapshot during server rendering", () => {

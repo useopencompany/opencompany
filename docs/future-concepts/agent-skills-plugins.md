@@ -197,9 +197,8 @@ For each approved stdio server, the runner creates a trusted launcher that:
 5. changes directory and uses `exec` without building a shell command string.
 
 This launcher is required because ACP's stdio server schema has no cwd field and requires an
-absolute command. Claude receives the launcher through `session/new.mcpServers`. Codex receives a
-generated `[mcp_servers.*]` entry. Plugin MCP configuration participates in the Codex app-server
-fingerprint so configuration changes restart the daemon instead of reusing stale state.
+absolute command. Claude and Codex receive the launcher through `session/new.mcpServers`; each ACP
+adapter is turn-scoped, so no persistent daemon configuration or restart fingerprint is needed.
 
 Runtime server names are namespaced as `<plugin-name>.<server-name>` to avoid cross-plugin MCP name
 collisions. No runner, model, GitHub, repository, or process environment secrets are inherited by
@@ -241,7 +240,7 @@ The plugin detail screen clearly separates passive skills from executable MCP se
 - Main Chat disclosure: `packages/agent/src/skills.ts`, host-tool registration, and runner host-tool
   adapters.
 - Sandbox mounts and MCP: `apps/runner/src/codex-managed-skills.ts`, `codex-chat.ts`,
-  `claude-code-chat.ts`, `acp-harness.ts`, `codex-app-server.ts`, and new managed-plugin/data modules.
+  `claude-code-chat.ts`, `acp-harness.ts`, and the managed-plugin/data modules.
 - Product UI: the current Skills settings routes and new Plugins settings routes under `apps/web`.
 
 ## Delivery sequence
@@ -323,7 +322,7 @@ At the end of this phase opencompany is an Agent Plugins skills client. No plugi
   environment, and namespaced server IDs.
 - Restore and checkpoint `PLUGIN_DATA` through private blob storage with size caps, generation
   fencing, and the per-plugin lease.
-- Thread MCP configuration through Claude ACP and Codex app-server configuration/fingerprinting.
+- Thread MCP configuration through the turn-scoped Claude and Codex ACP sessions.
 - Surface server start, exit, invalid configuration, approval, data restore, and checkpoint failures
   without exposing environment values.
 

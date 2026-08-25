@@ -68,7 +68,6 @@ describe("TaskDetailPanel", () => {
     expect(mocks.surfaceProps?.taskConversation).toMatchObject({
       taskId: "goat_task_1",
       status: "succeeded",
-      sessionBacked: true,
     });
     expect(mocks.surfaceProps).toMatchObject({
       taskSpawningEnabled: true,
@@ -104,6 +103,32 @@ describe("TaskDetailPanel", () => {
     });
   });
 
+  it("isolates sessionless history behind the read-only compatibility boundary", () => {
+    const run = buildHarnessRun({
+      task: { ...task(), sessionId: null },
+      messages: [
+        message({ id: "user_1", role: "user", content: "Research the market" }),
+        message({
+          id: "assistant_1",
+          role: "assistant",
+          content: "Historical result",
+          created_at: "2026-01-01T00:00:01.000Z",
+        }),
+      ],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    const chat = mocks.surfaceProps?.initialChat as ChatSessionView;
+    expect(chat.messages.map((entry) => entry.id)).toEqual(["user_1", "assistant_1"]);
+    expect(mocks.surfaceProps?.readOnlyNotice).toMatch(/pre-cutover task/i);
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      taskId: run.task.id,
+      status: "succeeded",
+    });
+  });
+
   it("adopts the live canonical Task status after its active Run completes", () => {
     const initialTask = { ...task(), status: "running" as const, stage: "running" as const };
     mocks.tasks = [
@@ -123,7 +148,6 @@ describe("TaskDetailPanel", () => {
     expect(mocks.surfaceProps?.taskConversation).toMatchObject({
       taskId: "goat_task_1",
       status: "succeeded",
-      sessionBacked: true,
     });
   });
 });

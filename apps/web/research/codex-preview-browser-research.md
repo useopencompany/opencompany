@@ -66,7 +66,6 @@ Local repo files inspected:
 - `apps/runner/src/harness.ts`
 - `apps/runner/src/codex.ts`
 - `apps/runner/src/codex-session.ts`
-- `apps/runner/src/codex-app-server.ts`
 - `apps/web/lib/sandbox/browser-tools.ts`
 - `apps/runner/e2b/codex/template.ts`
 - `scripts/dev.mjs`

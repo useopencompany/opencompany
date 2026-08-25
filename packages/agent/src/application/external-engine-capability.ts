@@ -1,13 +1,14 @@
 import { isActionHostToolContractVersion } from "@opencompany/agent-runtime";
+import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 
-export type ClaudeToolCapability = {
+export type ExternalEngineToolCapability = {
   codexChatSessionId: string;
   codexChatTurnId: string;
   attemptId: string;
   leaseId: string;
 };
 
-export type ClaudeToolAuthorityState = {
+export type ExternalEngineToolAuthorityState = {
   sessionId: string;
   turnId: string;
   attemptId: string;
@@ -29,20 +30,28 @@ export type ClaudeToolAuthorityState = {
   turnLeaseExpiresAt: Date | null;
   interruptRequestedAt: Date | null;
   membershipId: string;
+  brainRef: string | null;
+  userMessageId: string;
+  assistantMessageId: string;
 };
 
-export type ClaudeToolAuthorizedContext = {
+export type ExternalEngineToolAuthorizedContext = {
   actorId: string;
   workspaceId: string;
   conversationId: string;
   sandboxId: string;
+  engine: "codex" | "claude_code";
+  brainRef: string | null;
+  userMessageId: string;
+  assistantMessageId: string;
+  hostToolContractVersion: string;
 };
 
-export function authorizeClaudeToolCapability(input: {
-  capability: ClaudeToolCapability;
-  state: ClaudeToolAuthorityState | null;
+export function authorizeExternalEngineToolCapability(input: {
+  capability: ExternalEngineToolCapability;
+  state: ExternalEngineToolAuthorityState | null;
   now: Date;
-}): ClaudeToolAuthorizedContext | null {
+}): ExternalEngineToolAuthorizedContext | null {
   const { capability, state } = input;
   if (
     !state ||
@@ -53,10 +62,11 @@ export function authorizeClaudeToolCapability(input: {
     state.attemptLeaseId !== capability.leaseId ||
     state.attemptWorkerId !== state.turnLeaseOwner ||
     state.attemptStatus !== "running" ||
-    state.engine !== "claude_code" ||
+    (state.engine !== "claude_code" && state.engine !== "codex") ||
     state.sessionStatus !== "running" ||
     state.activeTurnId !== capability.codexChatTurnId ||
-    !isActionHostToolContractVersion(state.hostToolContractVersion) ||
+    (!isActionHostToolContractVersion(state.hostToolContractVersion) &&
+      state.hostToolContractVersion !== CODEX_BRAIN_TOOL_CONTRACT_VERSION) ||
     !state.workspaceId ||
     !state.sandboxId ||
     state.turnStatus !== "running" ||
@@ -74,5 +84,10 @@ export function authorizeClaudeToolCapability(input: {
     workspaceId: state.workspaceId,
     conversationId: state.conversationId,
     sandboxId: state.sandboxId,
+    engine: state.engine,
+    brainRef: state.brainRef,
+    userMessageId: state.userMessageId,
+    assistantMessageId: state.assistantMessageId,
+    hostToolContractVersion: state.hostToolContractVersion as string,
   };
 }

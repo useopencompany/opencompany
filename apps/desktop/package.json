@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "Thin Electron shell that wraps the production opencompany web app for macOS.",
+  "homepage": "https://opencompany.ai",
+  "author": "opencompany <louis@acta.so>",
   "main": "dist/main.js",
   "scripts": {
     "build:src": "node scripts/build.mjs",
@@ -22,6 +24,6 @@
     "electron": "43.4.1",
     "esbuild": "0.28.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.11"
   }
 }

@@ -1552,43 +1552,71 @@
     {
       "idx": 221,
       "version": "7",
-      "when": 1787298242217,
-      "tag": "0221_drop_dormant_workspace_skill_tables",
+      "when": 1787167009000,
+      "tag": "0221_goat_acp_elicitation_method",
       "breakpoints": true
     },
     {
       "idx": 222,
       "version": "7",
-      "when": 1787376229000,
-      "tag": "0222_goat_immutable_skill_bundles",
+      "when": 1787232000000,
+      "tag": "0222_goat_workflow_event_triggers",
       "breakpoints": true
     },
     {
       "idx": 223,
       "version": "7",
-      "when": 1787550000000,
-      "tag": "0223_goat_chat_skill_bundle_snapshots",
+      "when": 1787270400000,
+      "tag": "0223_goat_task_projection_preservation",
       "breakpoints": true
     },
     {
       "idx": 224,
       "version": "7",
-      "when": 1787555186000,
-      "tag": "0224_goat_plugins",
+      "when": 1787356800000,
+      "tag": "0224_goat_image_generation_capability",
       "breakpoints": true
     },
     {
       "idx": 225,
       "version": "7",
-      "when": 1787561374000,
-      "tag": "0225_goat_chat_skill_bundle_names",
+      "when": 1787356800001,
+      "tag": "0225_drop_dormant_workspace_skill_tables",
       "breakpoints": true
     },
     {
       "idx": 226,
       "version": "7",
+      "when": 1787376229000,
+      "tag": "0226_goat_immutable_skill_bundles",
+      "breakpoints": true
+    },
+    {
+      "idx": 227,
+      "version": "7",
+      "when": 1787550000000,
+      "tag": "0227_goat_chat_skill_bundle_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 228,
+      "version": "7",
+      "when": 1787555186000,
+      "tag": "0228_goat_plugins",
+      "breakpoints": true
+    },
+    {
+      "idx": 229,
+      "version": "7",
+      "when": 1787561374000,
+      "tag": "0229_goat_chat_skill_bundle_names",
+      "breakpoints": true
+    },
+    {
+      "idx": 230,
+      "version": "7",
       "when": 1787586941000,
-      "tag": "0226_legacy_skill_cutover",
+      "tag": "0230_legacy_skill_cutover",
       "breakpoints": true
     }
   ]

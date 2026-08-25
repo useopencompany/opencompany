@@ -961,6 +961,13 @@ function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
             </span>
           </span>
         ) : null}
+        {workflow.trigger.type === "event" ? (
+          <span className="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-[11.5px] leading-4 text-ink-subtle">
+            <span className="truncate">
+              Linear · {workflow.trigger.team.key ?? workflow.trigger.team.name} enters triage
+            </span>
+          </span>
+        ) : null}
       </span>
       <span className="shrink-0 text-[11.5px] leading-4 text-ink-subtle">
         {formatRelativeTime(workflow.updatedAt)}

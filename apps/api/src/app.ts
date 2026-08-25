@@ -1826,10 +1826,16 @@ export function createApiApp(input: CreateApiAppInput) {
         if (query.conversationId) {
           await input.chat.getConversation(actor, query.conversationId);
         }
-      } else if (
-        params.readModel !== "chat-conversations-v1" &&
-        params.readModel !== "engine-sessions-v1"
-      ) {
+      } else if (params.readModel === "engine-sessions-v1") {
+        if (query.brainId) {
+          throw new ApiError(400, "invalid_request", "brainId is not valid for this read model.");
+        }
+        // Task Conversations resolve through the Task boundary, so the chat-only lookup is not
+        // enough here.
+        if (query.conversationId) {
+          await authorizeConversationRead(input, actor, query.conversationId);
+        }
+      } else if (params.readModel !== "chat-conversations-v1") {
         if (!query.conversationId || query.brainId) {
           throw new ApiError(
             400,
@@ -2285,6 +2291,10 @@ export function createApiApp(input: CreateApiAppInput) {
                 });
               }
               c.res = apiErrorResponse(c, error);
+              span.setAttributes({ "goat.http_status_code": c.res.status });
+              if (c.res.status >= 500) {
+                span.fail(error, { "goat.http_status_code": c.res.status });
+              }
               return c.res;
             } finally {
               logger.info("API request completed", {
@@ -2895,13 +2905,13 @@ function workflowDto(workflow: Workflow) {
   return {
     ...workflow,
     trigger:
-      workflow.trigger.type === "manual"
-        ? workflow.trigger
-        : {
+      workflow.trigger.type === "schedule"
+        ? {
             ...workflow.trigger,
             lastRunAt: workflow.trigger.lastRunAt?.toISOString() ?? null,
             nextRunAt: workflow.trigger.nextRunAt?.toISOString() ?? null,
-          },
+          }
+        : workflow.trigger,
     archivedAt: workflow.archivedAt?.toISOString() ?? null,
     createdAt: workflow.createdAt.toISOString(),
     updatedAt: workflow.updatedAt.toISOString(),

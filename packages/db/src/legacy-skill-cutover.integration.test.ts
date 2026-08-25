@@ -10,15 +10,15 @@ describe("legacy Skill cutover migration", () => {
     database = new PGlite();
     await database.exec(BASE_SCHEMA);
     for (const migrationName of [
-      "0222_goat_immutable_skill_bundles.sql",
-      "0223_goat_chat_skill_bundle_snapshots.sql",
-      "0224_goat_plugins.sql",
-      "0225_goat_chat_skill_bundle_names.sql",
+      "0226_goat_immutable_skill_bundles.sql",
+      "0227_goat_chat_skill_bundle_snapshots.sql",
+      "0228_goat_plugins.sql",
+      "0229_goat_chat_skill_bundle_names.sql",
     ]) {
       await applyMigration(database, migrationName);
     }
     await database.exec(SEED);
-    await applyMigration(database, "0226_legacy_skill_cutover.sql");
+    await applyMigration(database, "0230_legacy_skill_cutover.sql");
   });
 
   afterAll(async () => {

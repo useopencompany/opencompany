@@ -26,6 +26,7 @@ const capabilities = [
   { source: "tiktok", enabled: true },
   { source: "lead", enabled: true },
   { source: "seo", enabled: true },
+  { source: "image", enabled: true },
 ] as const;
 
 describe("CapabilitiesPanel", () => {
@@ -42,7 +43,7 @@ describe("CapabilitiesPanel", () => {
         isAdmin={false}
       />,
     );
-    expect(screen.getAllByRole("switch")).toHaveLength(7);
+    expect(screen.getAllByRole("switch")).toHaveLength(8);
     for (const toggle of screen.getAllByRole("switch")) {
       expect(toggle).toBeChecked();
       expect(toggle).toHaveAttribute("aria-disabled", "true");
@@ -51,6 +52,7 @@ describe("CapabilitiesPanel", () => {
     expect(screen.getByText(/underlying provider cost/i)).toBeVisible();
     expect(screen.getByText("Prospecting")).toBeVisible();
     expect(screen.getByText(/Look up work emails for known prospects/i)).toBeVisible();
+    expect(screen.getByText("AI image generation")).toBeVisible();
   });
 
   it("lets an admin disable one source without changing the others", async () => {

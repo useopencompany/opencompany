@@ -31,6 +31,12 @@ const groups = {
       "BLOB_READ_WRITE_TOKEN",
       "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
       "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
+      "BETTER_STACK_ERRORS_DSN",
+      "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
+      "OBSERVABILITY_ENABLED",
+      "OBSERVABILITY_ENV",
+      "NEXT_PUBLIC_OBSERVABILITY_ENABLED",
+      "NEXT_PUBLIC_OBSERVABILITY_ENV",
     ],
     optional: [
       "RUNNER_INTERNAL_URL",
@@ -44,13 +50,9 @@ const groups = {
       "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
       "WORKOS_REDIRECT_URI",
       "NEXT_PUBLIC_ANALYTICS_DEBUG",
-      "OBSERVABILITY_ENABLED",
-      "OBSERVABILITY_ENV",
       "OBSERVABILITY_RELEASE",
       "OBSERVABILITY_LOG_LEVEL",
       "OBSERVABILITY_TIMING",
-      "NEXT_PUBLIC_OBSERVABILITY_ENABLED",
-      "NEXT_PUBLIC_OBSERVABILITY_ENV",
       "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
       "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
       "OPENCOMPANY_OBSERVABILITY_ENABLED",
@@ -520,7 +522,7 @@ function selectGroups() {
     .map((arg) => arg.slice(2))
     .filter((arg) => groups[arg]);
 
-  return requested.length > 0 ? requested : ["web", "api", "runner"];
+  return requested.length > 0 ? requested : ["web", "api", "runner", "release"];
 }
 
 function isBase64Encoded32ByteKey(value) {

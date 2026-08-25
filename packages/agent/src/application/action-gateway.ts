@@ -3,6 +3,7 @@ import type {
   ActionGatewayResponse,
   ActionHostGatewayRequest,
 } from "@opencompany/agent-runtime";
+import type { CodexChatEngine } from "@opencompany/db/product-schema";
 import { type ActionCatalogPolicyName, projectActionCatalog } from "../actions/policy";
 import { type ActionInvocationClaim, serveActionRequest } from "../actions/service";
 import type { CapabilityTurnState, ResolvedActionCatalog } from "../actions/types";
@@ -12,6 +13,8 @@ export type ActionPrincipal = {
   workspaceId: string;
   conversationId: string;
   userTimezone: string;
+  engine?: CodexChatEngine;
+  assistantMessageId?: string;
   policy?: ActionCatalogPolicyName;
 };
 
@@ -46,6 +49,9 @@ export type ActionGatewayServiceDependencies = {
     signal: AbortSignal;
     currentDate: Date;
     userTimezone: string;
+    sourceTurnId?: string;
+    sourceMessageId?: string;
+    sourceEngine?: CodexChatEngine;
   }) => Promise<ActionGatewayResponse>;
   getCapabilityTurnState: (
     request: ActionServiceRequest,
@@ -160,6 +166,9 @@ export async function executeActionHostGatewayService(input: {
           signal: input.signal,
           currentDate: dependencies.now(),
           userTimezone: context.userTimezone,
+          sourceTurnId: input.request.runId,
+          ...(context.assistantMessageId ? { sourceMessageId: context.assistantMessageId } : {}),
+          ...(context.engine ? { sourceEngine: context.engine } : {}),
         }),
     });
   } catch {

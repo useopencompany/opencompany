@@ -16,6 +16,7 @@ import { startAttioFlushWorker } from "./attio-flush-worker";
 import { setBrainImportWakeup, startBrainImportWorker } from "./brain-import-worker";
 import { setBrainIngestWakeup, startBrainIngestWorker } from "./brain-ingest-worker";
 import { startBrainWorkerAdmissionListener } from "./brain-worker-admission";
+import { startCodexChatSelfHealSweeper } from "./codex-chat-self-heal";
 import {
   setCodexChatWakeup,
   startCodexChatWorker,
@@ -39,6 +40,7 @@ import { createServer } from "./server";
 import { activeSlackBotEventCount, drainSlackBotEvents } from "./slack-bot-events";
 import { startSlackFlushWorker } from "./slack-flush-worker";
 import { startStuckWorkMonitor } from "./stuck-work-monitor";
+import { startWorkflowEventWorker } from "./workflow-event-worker";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -107,9 +109,18 @@ const stuckWorkMonitor = env.taskWorkerEnabled
       turnThresholdMs: Math.max(env.codexTimeoutMs + 15 * 60_000, 20 * 60_000),
     })
   : null;
+const codexChatSelfHealSweeper =
+  env.taskWorkerEnabled && env.codexChatSelfHealEnabled ? startCodexChatSelfHealSweeper() : null;
 const sandboxReconciler = env.taskWorkerEnabled ? startSandboxReconciler() : null;
 const taskScheduleWorker = codexChatWorker
   ? startTaskScheduleWorker({
+      onTaskCreated: () => {
+        codexChatWorker.notify();
+      },
+    })
+  : null;
+const workflowEventWorker = codexChatWorker
+  ? startWorkflowEventWorker({
       onTaskCreated: () => {
         codexChatWorker.notify();
       },
@@ -172,6 +183,7 @@ await server.listen({ host: "0.0.0.0", port: env.port });
 async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
   const tasks = [
     runnerDrainTask("task_schedule", taskScheduleWorker),
+    runnerDrainTask("workflow_event", workflowEventWorker),
     codexChatWorker
       ? {
           name: "codex_chat",
@@ -206,6 +218,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
     runnerDrainTask("fathom_poll", fathomPollWorker),
     runnerDrainTask("google_drive_sync", googleDriveSyncWorker),
     runnerDrainTask("stuck_work_monitor", stuckWorkMonitor),
+    runnerDrainTask("codex_chat_self_heal", codexChatSelfHealSweeper),
     runnerDrainTask("sandbox_reconciler", sandboxReconciler),
     runnerDrainTask("brain_worker_admission", brainWorkerAdmissionListener),
     { name: "http_server", stop: async () => server.close() },

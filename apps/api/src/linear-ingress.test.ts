@@ -1,9 +1,11 @@
 import { createHmac } from "node:crypto";
 import { createLinearIngestState } from "@opencompany/agent/integrations/linear-ingest";
 import {
+  enqueueLinearWorkflowEventRuns,
   insertLinearIssueEvents,
   listEnabledLinearBrainSourceRoutes,
   listLinearIntegrationsForOrganization,
+  listLinearWorkflowTriggerRoutes,
 } from "@opencompany/db/linear";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,9 +16,11 @@ vi.mock("@opencompany/db/linear", async (importOriginal) => {
   const original = await importOriginal<typeof import("@opencompany/db/linear")>();
   return {
     ...original,
+    enqueueLinearWorkflowEventRuns: vi.fn(),
     insertLinearIssueEvents: vi.fn(),
     listEnabledLinearBrainSourceRoutes: vi.fn(),
     listLinearIntegrationsForOrganization: vi.fn(),
+    listLinearWorkflowTriggerRoutes: vi.fn(),
   };
 });
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
@@ -96,6 +100,8 @@ describe("Linear ingress", () => {
       },
     ] as never);
     vi.mocked(insertLinearIssueEvents).mockResolvedValue(1);
+    vi.mocked(listLinearWorkflowTriggerRoutes).mockResolvedValue([]);
+    vi.mocked(enqueueLinearWorkflowEventRuns).mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -179,6 +185,45 @@ describe("Linear ingress", () => {
       expect(insertLinearIssueEvents).not.toHaveBeenCalled();
     });
 
+    it("durably enqueues a matching issue that enters triage", async () => {
+      vi.mocked(listEnabledLinearBrainSourceRoutes).mockResolvedValue([]);
+      vi.mocked(listLinearWorkflowTriggerRoutes).mockResolvedValue([
+        {
+          workflowId: "workflow_1",
+          workspaceId: "workspace_1",
+          userWorkosId: "user_1",
+          workflowSlug: "triage-issues",
+          workflowName: "Triage issues",
+          prompt: "Assess this issue.",
+          harnessSpec: { engine: "opencompany", model: "default" },
+          triageStateId: "state_triage",
+        },
+      ] as never);
+      vi.mocked(enqueueLinearWorkflowEventRuns).mockResolvedValue(1);
+
+      const response = await ingress().webhook(
+        signedRequest(
+          issueEnvelope({
+            data: {
+              id: "issue_1",
+              teamId: "team_1",
+              title: "Billing bug",
+              state: { id: "state_triage", name: "Triage", type: "triage" },
+            },
+          }),
+        ),
+      );
+
+      expect(await response.json()).toMatchObject({ ok: true, workflowRuns: 1 });
+      expect(enqueueLinearWorkflowEventRuns).toHaveBeenCalledWith(
+        expect.objectContaining({
+          deliveryId: "delivery_1",
+          routes: [expect.objectContaining({ workflowId: "workflow_1" })],
+        }),
+        expect.objectContaining({ sentinel: "db" }),
+      );
+    });
+
     it("drops events for unselected teams", async () => {
       const response = await ingress().webhook(
         signedRequest(issueEnvelope({ data: { id: "issue_2", teamId: "team_other", title: "x" } })),
@@ -186,11 +231,13 @@ describe("Linear ingress", () => {
       expect(await response.json()).toMatchObject({ ok: true, dropped: true });
     });
 
-    it("acks with 200 when processing fails after verification", async () => {
+    it("requests a retry when durable processing fails after verification", async () => {
       vi.mocked(listLinearIntegrationsForOrganization).mockRejectedValue(new Error("db down"));
       const response = await ingress().webhook(signedRequest(issueEnvelope()));
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ ok: true });
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "Linear event processing failed; retry this delivery.",
+      });
     });
   });
 });

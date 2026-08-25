@@ -22,7 +22,6 @@ export type PreparedPluginMcpServer = {
 
 export type PluginMcpLauncherRuntime = {
   servers: PreparedPluginMcpServer[];
-  fingerprint: string;
   pluginUsers: Array<{ pluginName: string; user: string }>;
 };
 
@@ -162,7 +161,6 @@ export async function materializeTrustedPluginMcpLaunchers(input: {
   }));
   return {
     servers,
-    fingerprint: launcherFingerprint(input.mcpPlugins),
     pluginUsers,
   };
 }
@@ -293,26 +291,6 @@ export function pluginRuntimeUser(pluginName: string) {
 
 function hashId(value: string) {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function launcherFingerprint(plugins: EnabledPluginRuntime["mcpPlugins"]) {
-  const hash = createHash("sha256");
-  hash.update(trustedPluginMcpLauncherScript);
-  hash.update(JSON.stringify(plugins));
-  return hash.digest("hex");
-}
-
-export function codexPluginMcpConfig(servers: PreparedPluginMcpServer[]) {
-  if (servers.length === 0) return "";
-  return `${servers
-    .map((server) =>
-      [
-        `[mcp_servers.${JSON.stringify(server.name)}]`,
-        `command = ${JSON.stringify(server.command)}`,
-        `args = ${JSON.stringify(server.args)}`,
-      ].join("\n"),
-    )
-    .join("\n\n")}\n`;
 }
 
 export const trustedPluginMcpLauncherScript = String.raw`#!/usr/bin/python3

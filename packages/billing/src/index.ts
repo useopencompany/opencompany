@@ -10,7 +10,7 @@ export const PLATFORM_FEE_BPS = 0;
 
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;
-const MODEL_PRICING_VERSION = "2026-07-29.standard.2";
+const MODEL_PRICING_VERSION = "2026-08-24.standard.1";
 
 type PricingProvider =
   | "openai"
@@ -361,6 +361,21 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 570_000,
     outputUsdMicrosPerMillion: 2_300_000,
   },
+  // verified 2026-08-24 against SpaceXAI's published API pricing
+  "xai/grok-4.6": {
+    model: "xai/grok-4.6",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 2_000_000,
+    cachedInputUsdMicrosPerMillion: 500_000,
+    cacheWriteUsdMicrosPerMillion: 2_000_000,
+    outputUsdMicrosPerMillion: 6_000_000,
+    longContext: {
+      inputTokenThreshold: 200_000,
+      inputMultiplier: 2,
+      outputMultiplier: 2,
+    },
+  },
+  // verified 2026-08-24 against SpaceXAI's published API pricing
   "xai/grok-4.3": {
     model: "xai/grok-4.3",
     provider: "xai",
@@ -369,11 +384,12 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 1_250_000,
     outputUsdMicrosPerMillion: 2_500_000,
     longContext: {
-      inputTokenThreshold: 200_001,
+      inputTokenThreshold: 200_000,
       inputMultiplier: 2,
       outputMultiplier: 2,
     },
   },
+  // verified 2026-08-24 against SpaceXAI's published API pricing
   "xai/grok-4.20-reasoning": {
     model: "xai/grok-4.20-reasoning",
     provider: "xai",
@@ -382,11 +398,12 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 1_250_000,
     outputUsdMicrosPerMillion: 2_500_000,
     longContext: {
-      inputTokenThreshold: 200_001,
+      inputTokenThreshold: 200_000,
       inputMultiplier: 2,
       outputMultiplier: 2,
     },
   },
+  // verified 2026-08-24 against SpaceXAI's published API pricing
   "xai/grok-4.20-non-reasoning": {
     model: "xai/grok-4.20-non-reasoning",
     provider: "xai",
@@ -395,7 +412,7 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 1_250_000,
     outputUsdMicrosPerMillion: 2_500_000,
     longContext: {
-      inputTokenThreshold: 200_001,
+      inputTokenThreshold: 200_000,
       inputMultiplier: 2,
       outputMultiplier: 2,
     },
@@ -416,6 +433,7 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 200_000,
     outputUsdMicrosPerMillion: 500_000,
   },
+  // verified 2026-08-24 against SpaceXAI's published API pricing
   "xai/grok-build-0.1": {
     model: "xai/grok-build-0.1",
     provider: "xai",
@@ -424,7 +442,7 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 1_000_000,
     outputUsdMicrosPerMillion: 2_000_000,
     longContext: {
-      inputTokenThreshold: 200_001,
+      inputTokenThreshold: 200_000,
       inputMultiplier: 2,
       outputMultiplier: 2,
     },
@@ -499,7 +517,7 @@ export function calculateModelUsageCost(input: UsageCostInput): UsageCostResult 
 
   const configuredLongContext =
     pricing.longContext &&
-    safeTokenCount(input.inputTokens) > pricing.longContext.inputTokenThreshold
+    safeTokenCount(input.inputTokens) >= pricing.longContext.inputTokenThreshold
       ? {
           input: pricing.longContext.inputMultiplier,
           output: pricing.longContext.outputMultiplier,

@@ -65,7 +65,7 @@ vi.mock("@opencompany/telemetry", async (importOriginal) => {
 
 const eventMocks = vi.hoisted(() => ({
   fail: vi.fn(),
-  createCodexChatProjector: vi.fn(() => ({ fail: eventMocks.fail })),
+  createExternalEngineProjector: vi.fn(() => ({ fail: eventMocks.fail })),
   loadCodexChatAssistantMessageParts: vi.fn(async () => []),
 }));
 
@@ -82,7 +82,7 @@ vi.mock("./opencompany-chat", () => ({
 }));
 
 vi.mock("./codex-chat-events", () => ({
-  createCodexChatProjector: eventMocks.createCodexChatProjector,
+  createExternalEngineProjector: eventMocks.createExternalEngineProjector,
   loadCodexChatAssistantMessageParts: eventMocks.loadCodexChatAssistantMessageParts,
 }));
 
@@ -848,6 +848,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     codexChatIdleTimeoutMs: 1_800_000,
     jobLeaseTtlMs: 300_000,
     taskWorkerEnabled: false,
+    codexChatSelfHealEnabled: true,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

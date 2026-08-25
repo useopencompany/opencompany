@@ -28,6 +28,8 @@ import {
 } from "./actor";
 import { CoreError } from "./chat";
 
+const WIKI_TREE_AUTO_DEPTH_THRESHOLD = 40;
+
 // Domain-level failure raised by validation or the repository. Mapped to the
 // tool's { ok: false, error } contract — never leaked as an HTTP 5xx. Permission
 // failures use CoreError instead, so they surface as 403 at the API boundary.
@@ -236,8 +238,14 @@ export class WikiCommandApplicationService {
     switch (toolInput.command) {
       case "tree": {
         const tree = await this.repository.getTree({ workspaceId });
+        const automaticDepthLimit =
+          toolInput.depth === undefined && tree.length > WIKI_TREE_AUTO_DEPTH_THRESHOLD;
+        const depth = toolInput.depth ?? (automaticDepthLimit ? 0 : undefined);
+        const visibleTree =
+          depth === undefined ? tree : tree.filter((entry) => wikiPathDepth(entry.path) <= depth);
+        const truncated = visibleTree.length < tree.length;
         return {
-          nodes: tree.map((entry) =>
+          nodes: visibleTree.map((entry) =>
             entry.nodeType === "folder"
               ? {
                   path: `${entry.path}/`,
@@ -254,10 +262,19 @@ export class WikiCommandApplicationService {
                   updatedAt: entry.updatedAt.toISOString(),
                 },
           ),
+          depth: depth ?? "unlimited",
+          shown: visibleTree.length,
           total: tree.length,
+          truncated,
           ...(tree.length === 0
             ? { hint: 'The wiki is empty. Create the first page with { command: "write" }.' }
-            : {}),
+            : truncated
+              ? {
+                  hint: automaticDepthLimit
+                    ? `Showing depth 0 (root entries only) because this wiki has more than ${WIKI_TREE_AUTO_DEPTH_THRESHOLD} entries. Use { command: "tree", depth: 1 } to expand one more level, or read a folder to inspect only its direct children.`
+                    : `Showing through depth ${depth}; ${tree.length - visibleTree.length} deeper entries are omitted. Increase depth or read a folder to inspect only its direct children.`,
+                }
+              : {}),
         };
       }
       case "read": {
@@ -493,4 +510,8 @@ function directChildren(tree: WikiCommandTreeNode[], parentPath: string): string
         isWikiDescendantPath(entry.path, parentPath) && entry.path.split("/").length === depth,
     )
     .map((entry) => (entry.nodeType === "folder" ? `${entry.path}/` : entry.path));
+}
+
+function wikiPathDepth(path: string): number {
+  return path.split("/").length - 1;
 }

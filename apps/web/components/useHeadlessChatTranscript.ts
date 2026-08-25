@@ -1,7 +1,7 @@
 "use client";
 
 import type { CollectionStatus } from "@tanstack/react-db";
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import {
   type ChatUiMessage,
@@ -11,16 +11,20 @@ import {
 } from "@/lib/chat-ui";
 import {
   getHeadlessChatMessages,
+  getHeadlessChatMessagesGeneration,
   getHeadlessChatRuns,
   type HeadlessChatMessageReadModel,
   type HeadlessChatRunReadModel,
+  subscribeHeadlessChatMessagesGeneration,
 } from "@/lib/headless-chat-collections";
+import { clearChatSyncError, useChatSyncFailed } from "@/lib/headless-chat-sync-status";
 
 export type HeadlessChatTranscript = {
   sessionId: string | null;
   messages: ChatUiMessage[];
   runsById: ReadonlyMap<string, HeadlessChatRunReadModel>;
   isLoading: boolean;
+  syncFailed: boolean;
 };
 
 type ReadableCollection<TRow extends object> = {
@@ -33,14 +37,24 @@ type ReadableCollection<TRow extends object> = {
 type CollectionSnapshot<TRow extends object> = {
   collection: ReadableCollection<TRow> | null;
   version: number;
+  rows: TRow[];
+  isLoading: boolean;
 };
 
 export function useHeadlessChatTranscript(sessionId: string | null): HeadlessChatTranscript {
   const hydrated = useHydrated();
-  const messagesCollection = useMemo(
-    () => (hydrated && sessionId ? getHeadlessChatMessages(sessionId) : null),
-    [hydrated, sessionId],
+  // A manual retry recreates the message collection; resubscribe to the fresh instance when it does.
+  const messagesGeneration = useSyncExternalStore(
+    subscribeHeadlessChatMessagesGeneration,
+    useCallback(() => getHeadlessChatMessagesGeneration(sessionId), [sessionId]),
+    () => 0,
   );
+  const messagesCollection = useMemo(() => {
+    // getHeadlessChatMessages reads a module cache whose identity changes when a retry recreates the
+    // collection; messagesGeneration is the signal that re-runs this memo so we pick up the fresh one.
+    void messagesGeneration;
+    return hydrated && sessionId ? getHeadlessChatMessages(sessionId) : null;
+  }, [hydrated, sessionId, messagesGeneration]);
   const runsCollection = useMemo(
     () => (hydrated && sessionId ? getHeadlessChatRuns(sessionId) : null),
     [hydrated, sessionId],
@@ -71,11 +85,19 @@ export function useHeadlessChatTranscript(sessionId: string | null): HeadlessCha
       .map((row) => headlessChatMessageRowToUiMessage(row, runsByAssistantMessage.get(row.id)));
   }, [rows, runRows]);
 
+  const syncFailed = useChatSyncFailed(sessionId);
+  // A successful (re)sync delivers durable rows; clear any prior failure so the retry surface hides
+  // itself without waiting for the user. Empty conversations recover via an explicit retry instead.
+  useEffect(() => {
+    if (sessionId && messages.length > 0) clearChatSyncError(sessionId);
+  }, [sessionId, messages.length]);
+
   return {
     sessionId,
     messages,
     runsById,
     isLoading: Boolean(sessionId) && (!hydrated || messagesLoading),
+    syncFailed,
   };
 }
 
@@ -84,7 +106,7 @@ function useCollectionRows<TRow extends object>(
 ): { rows: TRow[]; isLoading: boolean } {
   const store = useMemo(() => createCollectionStore(collection), [collection]);
   const serverSnapshot = useMemo<CollectionSnapshot<TRow>>(
-    () => ({ collection: null, version: 0 }),
+    () => ({ collection: null, version: 0, rows: [], isLoading: false }),
     [],
   );
   const getServerSnapshot = useCallback(() => serverSnapshot, [serverSnapshot]);
@@ -92,22 +114,32 @@ function useCollectionRows<TRow extends object>(
 
   return useMemo(() => {
     if (!snapshot.collection) return { rows: [], isLoading: false };
-    return {
-      rows: Array.from(snapshot.collection.values()),
-      isLoading:
-        snapshot.collection.status === "idle" ||
-        snapshot.collection.status === "loading" ||
-        snapshot.collection.status === "cleaned-up",
-    };
+    return { rows: snapshot.rows, isLoading: snapshot.isLoading };
   }, [snapshot]);
 }
 
 function createCollectionStore<TRow extends object>(collection: ReadableCollection<TRow> | null) {
   let version = 0;
-  let snapshot: CollectionSnapshot<TRow> = { collection, version };
+  let resolvedRows: TRow[] | null = null;
+  const readSnapshot = (): CollectionSnapshot<TRow> => {
+    if (!collection) return { collection, version, rows: [], isLoading: false };
+    const loading =
+      collection.status === "idle" ||
+      collection.status === "loading" ||
+      collection.status === "cleaned-up";
+    if (!loading) resolvedRows = Array.from(collection.values());
+    return {
+      collection,
+      version,
+      rows: resolvedRows ?? [],
+      // Once a full snapshot has rendered, keep it visible while Electric reconnects.
+      isLoading: loading && resolvedRows === null,
+    };
+  };
+  let snapshot = readSnapshot();
   const publish = (onStoreChange: () => void) => {
     version += 1;
-    snapshot = { collection, version };
+    snapshot = readSnapshot();
     onStoreChange();
   };
   return {

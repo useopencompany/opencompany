@@ -1,4 +1,5 @@
 import type { ChatUiMessage } from "@/lib/chat-ui";
+import { nestHeadlessToolParts } from "./headless-chat-ui-projector";
 
 type ComposeChatTranscriptInput = {
   persistedMessages: readonly ChatUiMessage[];
@@ -18,12 +19,13 @@ export function composeChatTranscript({
   transientMessages,
   streaming,
 }: ComposeChatTranscriptInput): ChatUiMessage[] {
-  if (persistedMessages.length === 0) return [...transientMessages];
+  const nestedTransientMessages = transientMessages.map(nestHeadlessToolParts);
+  if (persistedMessages.length === 0) return nestedTransientMessages;
 
   const persistedIds = new Set(persistedMessages.map((message) => message.id));
-  const transientOnly = transientMessages.filter((message) => !persistedIds.has(message.id));
+  const transientOnly = nestedTransientMessages.filter((message) => !persistedIds.has(message.id));
   const latestTransientAssistant = streaming
-    ? transientMessages.findLast((message) => message.role === "assistant")
+    ? nestedTransientMessages.findLast((message) => message.role === "assistant")
     : undefined;
   const activeAssistant =
     latestTransientAssistant && persistedIds.has(latestTransientAssistant.id)
@@ -52,6 +54,7 @@ function augmentPersistedMessage(
     persisted.parts.map(toolCallId).filter((id): id is string => Boolean(id)),
   );
   const additions: ChatUiMessage["parts"] = [];
+  const replacements = new Map<string, ChatUiMessage["parts"][number]>();
 
   for (const part of transient.parts) {
     if (part.type === "text") {
@@ -67,16 +70,54 @@ function augmentPersistedMessage(
     if (id && !persistedToolCallIds.has(id)) {
       additions.push(part);
       persistedToolCallIds.add(id);
+      continue;
+    }
+    if (id) {
+      const persistedPart = persisted.parts.find((candidate) => toolCallId(candidate) === id);
+      if (!persistedPart) continue;
+      const merged = mergeTransientChildren(persistedPart, part);
+      if (merged !== persistedPart) replacements.set(id, merged);
     }
   }
 
-  if (additions.length === 0) return persisted;
+  if (additions.length === 0 && replacements.size === 0) return persisted;
   return {
     ...transient,
     ...persisted,
     metadata: { ...transient.metadata, ...persisted.metadata },
-    parts: [...persisted.parts, ...additions],
+    parts: [
+      ...persisted.parts.map((part) => {
+        const id = toolCallId(part);
+        return id ? (replacements.get(id) ?? part) : part;
+      }),
+      ...additions,
+    ],
   };
+}
+
+function mergeTransientChildren(
+  persisted: ChatUiMessage["parts"][number],
+  transient: ChatUiMessage["parts"][number],
+) {
+  const persistedRecord = persisted as unknown as Record<string, unknown>;
+  const transientRecord = transient as unknown as Record<string, unknown>;
+  if (!Array.isArray(transientRecord.children)) return persisted;
+  const transientChildren = transientRecord.children as ChatUiMessage["parts"];
+  const existingChildren = Array.isArray(persistedRecord.children)
+    ? (persistedRecord.children as ChatUiMessage["parts"])
+    : [];
+  const existingIds = new Set(
+    existingChildren.map(toolCallId).filter((id): id is string => Boolean(id)),
+  );
+  const additions = transientChildren.filter((part) => {
+    const id = toolCallId(part);
+    return !id || !existingIds.has(id);
+  });
+  if (additions.length === 0) return persisted;
+  return {
+    ...persistedRecord,
+    children: [...existingChildren, ...additions],
+  } as unknown as typeof persisted;
 }
 
 function textFromParts(parts: ChatUiMessage["parts"]) {

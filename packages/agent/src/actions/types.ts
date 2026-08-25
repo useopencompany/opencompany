@@ -1,4 +1,4 @@
-import type { ManagedCapabilitySource } from "@opencompany/db/product-schema";
+import type { CodexChatEngine, ManagedCapabilitySource } from "@opencompany/db/product-schema";
 import type { JSONSchema7 } from "ai";
 import type { CapabilityId } from "./capabilities";
 
@@ -143,6 +143,9 @@ export type ActionExecuteContext = {
   workspaceId?: string;
   chatSessionId?: string;
   toolCallId?: string;
+  sourceTurnId?: string;
+  sourceMessageId?: string;
+  sourceEngine?: CodexChatEngine;
   capabilityTurnState?: CapabilityTurnState;
   signal: AbortSignal;
   currentDate: Date;

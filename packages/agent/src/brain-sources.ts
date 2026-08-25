@@ -748,14 +748,22 @@ export class BrainSourceApplicationService {
       do {
         const page = await linearGraphqlRequest<{
           teams?: {
-            nodes?: Array<{ id?: string; key?: string; name?: string }>;
+            nodes?: Array<{
+              id?: string;
+              key?: string;
+              name?: string;
+              states?: { nodes?: Array<{ id?: string }> };
+            }>;
             pageInfo?: { hasNextPage?: boolean; endCursor?: string };
           };
         }>({
           token,
           query: `query LinearTeams($after: String) {
             teams(first: 100, after: $after) {
-              nodes { id key name }
+              nodes {
+                id key name
+                states(first: 1, filter: { type: { eq: "triage" } }) { nodes { id } }
+              }
               pageInfo { hasNextPage endCursor }
             }
           }`,
@@ -767,6 +775,7 @@ export class BrainSourceApplicationService {
             id: team.id,
             name: team.name?.trim() || team.key?.trim() || team.id,
             ...(team.key?.trim() ? { key: team.key.trim() } : {}),
+            ...(team.states?.nodes?.[0]?.id ? { triageStateId: team.states.nodes[0].id } : {}),
           });
         }
         cursor = page.teams?.pageInfo?.hasNextPage
@@ -1369,7 +1378,15 @@ function sanitizeTeamRefs(refs: LinearTeamRef[]): LinearTeamRef[] {
     seen.add(id);
     const name = typeof ref.name === "string" ? ref.name.trim() : "";
     const key = typeof ref.key === "string" ? ref.key.trim() : "";
-    return [{ id, name: name || id, ...(key ? { key } : {}) }];
+    const triageStateId = typeof ref.triageStateId === "string" ? ref.triageStateId.trim() : "";
+    return [
+      {
+        id,
+        name: name || id,
+        ...(key ? { key } : {}),
+        ...(triageStateId ? { triageStateId } : {}),
+      },
+    ];
   });
 }
 

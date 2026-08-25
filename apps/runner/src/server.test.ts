@@ -51,6 +51,7 @@ const env = {
   codexChatIdleTimeoutMs: 1_800_000,
   jobLeaseTtlMs: 300_000,
   taskWorkerEnabled: false,
+  codexChatSelfHealEnabled: true,
   workerConcurrency: 2,
   port: 3040,
   allowedOrigins: ["https://app.example.com"],
@@ -84,7 +85,7 @@ describe("runner server CORS", () => {
     expect(response.headers["access-control-allow-origin"]).toBe("https://app.example.com");
     expect(response.headers.vary).toBe("Origin");
     expect(response.json()).toMatchObject({
-      capabilities: { claudeActionsMcp: "v2", brainWorkerAdmission: "postgres-v1" },
+      capabilities: { acpToolsMcp: "v3", brainWorkerAdmission: "postgres-v1" },
     });
   });
 
@@ -282,7 +283,7 @@ describe("opencompany coding workspace access", () => {
 
     const response = await server.inject({
       method: "POST",
-      url: "/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
+      url: "/internal/goat/coding-workspaces/sessions/runtime_1/runtime-access",
       headers: { authorization: `Bearer ${env.internalToken}` },
     });
 
@@ -296,14 +297,14 @@ describe("opencompany coding workspace access", () => {
 
     const unauthorized = await server.inject({
       method: "POST",
-      url: "/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
+      url: "/internal/goat/coding-workspaces/sessions/runtime_1/runtime-access",
       payload: { userWorkosId: "user_1" },
     });
     expect(unauthorized.statusCode).toBe(401);
 
     const response = await server.inject({
       method: "POST",
-      url: "/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
+      url: "/internal/goat/coding-workspaces/sessions/runtime_1/runtime-access",
       headers: { authorization: `Bearer ${env.internalToken}` },
       payload: { userWorkosId: "user_1" },
     });
@@ -313,6 +314,25 @@ describe("opencompany coding workspace access", () => {
       ticket: "ticket_1",
       sandboxStatus: "sleeping",
     });
+    expect(mintCodingWorkspaceAccess).toHaveBeenCalledWith({
+      codingSessionId: "runtime_1",
+      userWorkosId: "user_1",
+      env,
+    });
+  });
+
+  it("keeps forwarding legacy session ids during rolling deployments", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+      payload: { userWorkosId: "user_1" },
+    });
+
+    expect(response.statusCode).toBe(200);
     expect(mintCodingWorkspaceAccess).toHaveBeenCalledWith({
       codingSessionId: "goat_codex_chat_1",
       userWorkosId: "user_1",

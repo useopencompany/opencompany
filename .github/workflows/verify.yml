@@ -82,7 +82,7 @@ jobs:
 
       - name: Restore policy caches
         id: cache
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .turbo
@@ -121,7 +121,7 @@ jobs:
 
       - name: Save trusted policy caches
         if: ${{ success() && inputs.cache_write && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .turbo
@@ -148,7 +148,7 @@ jobs:
           bun-version: 1.3.2
 
       - name: Restore static caches
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .turbo
@@ -171,7 +171,7 @@ jobs:
 
       - name: Save trusted static caches
         if: ${{ success() && inputs.cache_write && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .turbo
@@ -196,7 +196,7 @@ jobs:
           bun-version: 1.3.2
 
       - name: Restore test caches
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .turbo
@@ -215,11 +215,13 @@ jobs:
         run: |
           scope_args=()
           if [[ "$RESOLVED_SCOPE" == "affected" ]]; then scope_args+=(--affected); fi
-          bun --bun turbo run test --concurrency=2 "${scope_args[@]}" -- --maxWorkers=2
+          # Vitest's PGlite suite uses WASM that intermittently traps in Bun-backed fork workers.
+          # Keep Bun as the package manager, but let Vitest workers inherit the supported Node runtime.
+          bun turbo run test --concurrency=2 "${scope_args[@]}" -- --maxWorkers=2
 
       - name: Save trusted test caches
         if: ${{ success() && inputs.cache_write && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .turbo
@@ -246,7 +248,7 @@ jobs:
           bun-version: 1.3.2
 
       - name: Restore build caches
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .turbo
@@ -290,7 +292,7 @@ jobs:
 
       - name: Save trusted build caches
         if: ${{ success() && inputs.cache_write && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .turbo
@@ -309,7 +311,7 @@ jobs:
           persist-credentials: false
 
       - name: Scan the exact commit range for secrets
-        uses: trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11 # v3.96.0
+        uses: trufflesecurity/trufflehog@bcfcf73aaf4759d4dadc2783177c245a02792318 # v3.97.0
         with:
           base: ${{ inputs.base_sha }}
           head: ${{ inputs.head_sha }}

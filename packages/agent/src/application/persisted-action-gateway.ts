@@ -25,8 +25,12 @@ import { and, eq, inArray } from "drizzle-orm";
 import { isChatActionsKilled, resolveActionCatalog } from "../actions/catalog";
 import { executeAction } from "../actions/execute";
 import type { CapabilityQuote, CapabilityTurnState } from "../actions/types";
-import { MANAGED_CAPABILITY_ACTIONS_BY_ID } from "../capabilities/catalog";
+import {
+  isImageGenerationActionSpec,
+  MANAGED_CAPABILITY_ACTIONS_BY_ID,
+} from "../capabilities/catalog";
 import { evaluateManagedCapabilityApproval } from "../capabilities/execute";
+import { evaluateImageGenerationApproval } from "../capabilities/image-generation";
 import { resolveManagedCapabilities } from "../capabilities/resolve";
 import {
   type ActionGatewayServiceDependencies,
@@ -88,6 +92,17 @@ async function evaluateActionApproval(input: {
 }) {
   const spec = MANAGED_CAPABILITY_ACTIONS_BY_ID.get(input.request.action);
   if (!spec) return false;
+  if (isImageGenerationActionSpec(spec)) {
+    return evaluateImageGenerationApproval({
+      spec,
+      params: input.request.params,
+      toolCallId: input.request.invocationId,
+      workspaceId: input.context.workspaceId,
+      userWorkosId: input.context.actorId,
+      chatSessionId: input.context.conversationId,
+      turnState: input.turnState,
+    });
+  }
   return evaluateManagedCapabilityApproval({
     spec,
     params: input.request.params,
@@ -160,6 +175,7 @@ async function loadCodexActionContext(
       chatSessionId: codexChatSessions.chatSessionId,
       userTimezone: users.timezone,
       engine: codexChatSessions.engine,
+      assistantMessageId: codexChatTurns.assistantMessageId,
     })
     .from(codexChatSessions)
     .innerJoin(
@@ -196,6 +212,8 @@ async function loadCodexActionContext(
     workspaceId: row.workspaceId,
     conversationId: row.chatSessionId,
     userTimezone: row.userTimezone,
+    engine: row.engine,
+    assistantMessageId: row.assistantMessageId,
     policy: row.engine === "opencompany" ? "foregroundInteractive" : "cloudReadOnly",
   };
 }

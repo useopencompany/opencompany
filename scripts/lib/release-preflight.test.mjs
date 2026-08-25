@@ -16,10 +16,22 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   ]);
   const groups = readGroups(source);
 
+  assert.match(
+    source,
+    /requested\.length > 0 \? requested : \["web", "api", "runner", "release"\]/u,
+    "the documented default preflight must include the release-only cutover gate",
+  );
+
   assertIncludes(groups.web.required, [
     "DATABASE_URL",
     "BLOB_READ_WRITE_TOKEN",
     "OPENCOMPANY_DESKTOP_AUTH_SECRET",
+    "BETTER_STACK_ERRORS_DSN",
+    "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
+    "OBSERVABILITY_ENABLED",
+    "OBSERVABILITY_ENV",
+    "NEXT_PUBLIC_OBSERVABILITY_ENABLED",
+    "NEXT_PUBLIC_OBSERVABILITY_ENV",
   ]);
   assertExcludes(
     [...groups.web.required, ...groups.web.optional],

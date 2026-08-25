@@ -32,7 +32,7 @@ describe("Postgres immutable Skill bundle repository", () => {
       path.resolve(
         import.meta.dirname,
         "../../..",
-        "drizzle/0222_goat_immutable_skill_bundles.sql",
+        "drizzle/0226_goat_immutable_skill_bundles.sql",
       ),
       "utf8",
     );
@@ -43,7 +43,7 @@ describe("Postgres immutable Skill bundle repository", () => {
       path.resolve(
         import.meta.dirname,
         "../../..",
-        "drizzle/0223_goat_chat_skill_bundle_snapshots.sql",
+        "drizzle/0227_goat_chat_skill_bundle_snapshots.sql",
       ),
       "utf8",
     );
@@ -51,7 +51,7 @@ describe("Postgres immutable Skill bundle repository", () => {
       if (statement.trim()) await database.exec(statement);
     }
     const pluginMigration = await readFile(
-      path.resolve(import.meta.dirname, "../../..", "drizzle/0224_goat_plugins.sql"),
+      path.resolve(import.meta.dirname, "../../..", "drizzle/0228_goat_plugins.sql"),
       "utf8",
     );
     for (const statement of pluginMigration.split("--> statement-breakpoint")) {
@@ -61,7 +61,7 @@ describe("Postgres immutable Skill bundle repository", () => {
       path.resolve(
         import.meta.dirname,
         "../../..",
-        "drizzle/0225_goat_chat_skill_bundle_names.sql",
+        "drizzle/0229_goat_chat_skill_bundle_names.sql",
       ),
       "utf8",
     );

@@ -22,7 +22,7 @@ import {
   type CapabilityQuote,
   type CapabilityTurnState,
 } from "../actions/types";
-import type { ManagedCapabilityActionSpec } from "./catalog";
+import type { ManagedCapabilityMonidActionSpec } from "./catalog";
 import { assertManagedCapabilityInspection } from "./contract";
 import { hashCapabilityInput } from "./hash";
 import {
@@ -57,7 +57,7 @@ export function isManagedCapabilityActionKilled(actionId: string) {
 }
 
 export async function evaluateManagedCapabilityApproval(input: {
-  spec: ManagedCapabilityActionSpec;
+  spec: ManagedCapabilityMonidActionSpec;
   params: Record<string, unknown>;
   toolCallId: string;
   workspaceId: string;
@@ -161,7 +161,7 @@ export async function evaluateManagedCapabilityApproval(input: {
 }
 
 export async function executeManagedCapability(input: {
-  spec: ManagedCapabilityActionSpec;
+  spec: ManagedCapabilityMonidActionSpec;
   params: Record<string, unknown>;
   context: ActionExecuteContext;
   client?: MonidClient;
@@ -647,8 +647,8 @@ function capabilityQuote(
 }
 
 async function inspectCapabilityQuote(input: {
-  spec: ManagedCapabilityActionSpec;
-  mapped: ReturnType<ManagedCapabilityActionSpec["mapInput"]>;
+  spec: ManagedCapabilityMonidActionSpec;
+  mapped: ReturnType<ManagedCapabilityMonidActionSpec["mapInput"]>;
   inputHash: string;
   client: MonidClient;
   signal: AbortSignal;
@@ -664,11 +664,11 @@ async function inspectCapabilityQuote(input: {
   };
 }
 
-async function capabilityTurnSnapshot(turnState: CapabilityTurnState) {
+export async function capabilityTurnSnapshot(turnState: CapabilityTurnState) {
   return turnState.governance?.load() ?? turnState;
 }
 
-async function storeCapabilityQuote(
+export async function storeCapabilityQuote(
   turnState: CapabilityTurnState,
   toolCallId: string,
   quote: CapabilityQuote,
@@ -698,7 +698,7 @@ async function storeCapabilityQuote(
   return true;
 }
 
-async function admitCapabilityQuote(
+export async function admitCapabilityQuote(
   turnState: CapabilityTurnState,
   toolCallId: string,
   quote: CapabilityQuote,
@@ -707,7 +707,7 @@ async function admitCapabilityQuote(
   return storeCapabilityQuote(turnState, toolCallId, quote, true, maxQuotedTotalUsdMicros);
 }
 
-async function releaseCapabilityQuote(turnState: CapabilityTurnState, toolCallId: string) {
+export async function releaseCapabilityQuote(turnState: CapabilityTurnState, toolCallId: string) {
   const quote = (await capabilityTurnSnapshot(turnState)).quotesByToolCallId.get(toolCallId);
   if (!quote) return;
   if (turnState.governance) {
@@ -726,7 +726,7 @@ async function releaseCapabilityQuote(turnState: CapabilityTurnState, toolCallId
 }
 
 async function claimAsyncCapabilityRun(
-  spec: ManagedCapabilityActionSpec,
+  spec: ManagedCapabilityMonidActionSpec,
   turnState: CapabilityTurnState,
   toolCallId: string,
 ) {
@@ -755,7 +755,7 @@ async function claimAsyncCapabilityRun(
 }
 
 async function releaseAsyncCapabilityRun(
-  spec: ManagedCapabilityActionSpec,
+  spec: ManagedCapabilityMonidActionSpec,
   turnState: CapabilityTurnState,
   toolCallId: string,
 ) {
@@ -788,11 +788,11 @@ export function providerRunCostUsdMicros(run: MonidRun): number | null {
   return null;
 }
 
-function providerRunMatches(spec: ManagedCapabilityActionSpec, run: MonidRun) {
+function providerRunMatches(spec: ManagedCapabilityMonidActionSpec, run: MonidRun) {
   return run.provider === spec.provider && run.endpoint === spec.endpoint;
 }
 
-function assertProviderRunMatches(spec: ManagedCapabilityActionSpec, run: MonidRun) {
+function assertProviderRunMatches(spec: ManagedCapabilityMonidActionSpec, run: MonidRun) {
   if (!providerRunMatches(spec, run)) {
     throw new ActionExecutionError(
       "provider_error",

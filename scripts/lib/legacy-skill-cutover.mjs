@@ -4,6 +4,7 @@ const ACTIVE_WORKFLOW_TASK_COUNTS_SQL = `
   WITH active_workflow_tasks AS (
     SELECT
       jsonb_path_exists(task.harness_spec, '$.**.skillSnapshots') AS has_skill_snapshots,
+      jsonb_typeof(task.harness_spec->'workflow') = 'object' AS has_workflow_contract,
       CASE
         WHEN jsonb_typeof(task.harness_spec #> '{workflow,steps}') = 'array'
           THEN task.harness_spec #> '{workflow,steps}'
@@ -15,11 +16,14 @@ const ACTIVE_WORKFLOW_TASK_COUNTS_SQL = `
   ), classified AS (
     SELECT
       has_skill_snapshots,
-      jsonb_array_length(steps) = 0
-        OR EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements(steps) AS step(value)
-          WHERE jsonb_typeof(step.value->'skillBundleIds') IS DISTINCT FROM 'array'
+      has_workflow_contract
+        AND (
+          jsonb_array_length(steps) = 0
+          OR EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(steps) AS step(value)
+            WHERE jsonb_typeof(step.value->'skillBundleIds') IS DISTINCT FROM 'array'
+          )
         ) AS missing_skill_bundle_ids
     FROM active_workflow_tasks
   )

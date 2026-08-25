@@ -1191,7 +1191,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "succeeded",
           startedAtMs: Date.now(),
-          sessionBacked: true,
         }}
       />,
     );
@@ -1236,8 +1235,8 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_legacy_1",
           status: "succeeded",
           startedAtMs: Date.now(),
-          sessionBacked: false,
         }}
+        readOnlyNotice="This pre-cutover task is available as read-only history. Start a new task to continue the work."
       />,
     );
 
@@ -1247,6 +1246,11 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByRole("button", { name: "Attach files" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start voice dictation" })).toBeDisabled();
     expect(screen.getByLabelText("Model")).toBeDisabled();
+
+    const form = screen.getByRole("button", { name: "Send message" }).closest("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
   it("offers Skill mentions when continuing a session-backed task", async () => {
@@ -1274,7 +1278,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "succeeded",
           startedAtMs: Date.now(),
-          sessionBacked: true,
         }}
         userWorkosId="user_1"
       />,
@@ -1318,7 +1321,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "running",
           startedAtMs: Date.now(),
-          sessionBacked: true,
         }}
         taskSpawningEnabled
       />,
@@ -1378,7 +1380,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "running",
           startedAtMs: Date.now(),
-          sessionBacked: true,
           activeRunId: "run_1",
         }}
       />,
@@ -1420,7 +1421,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "canceled",
           startedAtMs: Date.now(),
-          sessionBacked: true,
           activeRunId: null,
         }}
       />,
@@ -1451,7 +1451,6 @@ describe("Surface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "running",
           startedAtMs: Date.now(),
-          sessionBacked: true,
           activeRunId: "run_1",
         }}
       />,
@@ -2510,6 +2509,37 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByLabelText("Codex status: Ready")).toHaveTextContent("Ready");
     expect(screen.queryByText("Sleeping")).not.toBeInTheDocument();
     expect(screen.queryByText("Expired")).not.toBeInTheDocument();
+  });
+
+  it("shows the synced engine session status on a Task Conversation", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        codexConnected
+        initialChat={{
+          id: "conversation_task_codex_1",
+          title: "Codex task",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_1",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "task_codex_1",
+          status: "running",
+          startedAtMs: Date.now(),
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Codex status: Working")).toHaveTextContent("Working");
+    expect(screen.queryByLabelText("Codex status: Connecting")).not.toBeInTheDocument();
   });
 
   it("shows the context token usage in a tooltip", async () => {
@@ -3600,20 +3630,20 @@ describe("Surface chat streaming UI", () => {
               id: "old_running",
               title: "Old but working",
               status: "running",
-              updatedAt: "2026-07-01T17:00:00.000Z",
+              updatedAt: "2026-06-26T17:00:00.000Z",
             }),
             codexChatSummary({
               id: "old_pinned",
               title: "Pinned ready",
               status: "idle",
-              updatedAt: "2026-07-01T17:00:00.000Z",
+              updatedAt: "2026-06-26T17:00:00.000Z",
               pinnedAt: "2026-07-04T12:00:00.000Z",
             }),
             codexChatSummary({
               id: "old_hidden",
               title: "Old hidden",
               status: "idle",
-              updatedAt: "2026-07-01T17:00:00.000Z",
+              updatedAt: "2026-06-26T17:00:00.000Z",
             }),
           ]}
         />,
@@ -3711,7 +3741,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByRole("button", { name: "Archive Legacy result" })).not.toBeInTheDocument();
   });
 
-  it("hides home chats and results older than one day", () => {
+  it("hides home chats older than seven days and results older than one day", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
     try {
@@ -3749,7 +3779,7 @@ describe("Surface chat streaming UI", () => {
               title: "Old chat",
               model: DEFAULT_MODEL,
               preview: "Hidden",
-              updatedAt: "2026-07-02T10:00:00.000Z",
+              updatedAt: "2026-06-26T10:00:00.000Z",
             },
           ]}
         />,

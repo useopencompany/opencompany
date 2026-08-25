@@ -33,10 +33,11 @@ const migrationPaths = [
   "0215_goat_chat_sidebar_state.sql",
   "0216_goat_conversation_runtime_summary.sql",
   "0219_goat_run_attempt_deploy_version.sql",
-  "0222_goat_immutable_skill_bundles.sql",
-  "0223_goat_chat_skill_bundle_snapshots.sql",
-  "0224_goat_plugins.sql",
-  "0225_goat_chat_skill_bundle_names.sql",
+  "0223_goat_task_projection_preservation.sql",
+  "0226_goat_immutable_skill_bundles.sql",
+  "0227_goat_chat_skill_bundle_snapshots.sql",
+  "0228_goat_plugins.sql",
+  "0229_goat_chat_skill_bundle_names.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -805,7 +806,7 @@ describe("Postgres Chat repositories", () => {
     expect(assistant.rows[0]?.debug_trace.uiMessageParts).toEqual([
       expect.objectContaining({
         state: "approval-responded",
-        approval: expect.objectContaining({ id: "approval_1", approved: true }),
+        approval: { id: "approval_1", approved: true },
       }),
     ]);
     expect(

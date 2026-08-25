@@ -24,6 +24,14 @@ export type WorkflowStep = {
 export type WorkflowTrigger =
   | { type: "manual" }
   | {
+      type: "event";
+      provider: "linear";
+      event: "issue_enters_triage";
+      integrationId: string;
+      team: { id: string; name: string; key?: string; triageStateId: string };
+      prompt: string;
+    }
+  | {
       type: "schedule";
       cron: string;
       timezone: string;
@@ -36,11 +44,30 @@ export type WorkflowTrigger =
 export type WorkflowTriggerInput =
   | { type: "manual" }
   | {
+      type: "event";
+      provider: "linear";
+      event: "issue_enters_triage";
+      integrationId: string;
+      team: { id: string; name: string; key?: string; triageStateId: string };
+      prompt?: string | null;
+    }
+  | {
       type: "schedule";
       cron: string;
       timezone?: string | null;
       prompt?: string | null;
       enabled?: boolean;
+    };
+
+type NormalizedWorkflowTriggerInput =
+  | { type: "manual" }
+  | Extract<WorkflowTrigger, { type: "event" }>
+  | {
+      type: "schedule";
+      cron: string;
+      timezone: string;
+      prompt: string;
+      enabled: boolean;
     };
 
 export type Workflow = {
@@ -188,6 +215,7 @@ export interface WorkflowRepository {
       definition: ScheduleDefinition;
       execution?: AutomationExecutionPlan;
     };
+    event?: { execution?: AutomationExecutionPlan };
   }): Promise<VersionedRepositoryResult<Workflow>>;
   archiveWorkflow(input: {
     actor: Actor;
@@ -376,6 +404,7 @@ export class WorkflowApplicationService {
     let schedule:
       | { definition: ScheduleDefinition; execution?: AutomationExecutionPlan }
       | undefined;
+    let event: { execution?: AutomationExecutionPlan } | undefined;
     if (normalized.trigger.type === "schedule") {
       const definition = this.options.scheduleRules.normalize({
         cron: normalized.trigger.cron,
@@ -415,12 +444,32 @@ export class WorkflowApplicationService {
         );
       }
     }
+    if (normalized.trigger.type === "event") {
+      event = {};
+      if (normalized.status === "active") {
+        if (normalized.steps.some((step) => !step.instructions.trim())) {
+          throw new CoreError(
+            "invalid_argument",
+            "Event-triggered Workflows need instructions in every step.",
+          );
+        }
+        const pending: Workflow = { ...current, ...normalized, trigger: normalized.trigger };
+        event.execution = validatedExecution(
+          await this.options.planner.prepareWorkflow({
+            actor,
+            workflow: pending,
+            prompt: normalized.trigger.prompt,
+          }),
+        );
+      }
+    }
     const result = await this.repository.updateWorkflow({
       actor,
       workflowId: id,
       expectedVersion,
       ...normalized,
       ...(schedule ? { schedule } : {}),
+      ...(event ? { event } : {}),
     });
     return workflowVersionResult(result);
   }
@@ -794,8 +843,32 @@ function workflowSteps(steps: WorkflowStep[]) {
   });
 }
 
-function workflowTrigger(trigger: WorkflowTriggerInput): WorkflowTriggerInput {
+function workflowTrigger(trigger: WorkflowTriggerInput): NormalizedWorkflowTriggerInput {
   if (trigger.type === "manual") return { type: "manual" };
+  if (trigger.type === "event") {
+    if (trigger.provider !== "linear" || trigger.event !== "issue_enters_triage") {
+      throw new CoreError("invalid_argument", "Workflow event trigger is invalid.");
+    }
+    const key = trigger.team.key?.trim();
+    return {
+      type: "event",
+      provider: "linear",
+      event: "issue_enters_triage",
+      integrationId: bounded(trigger.integrationId, 256, "Linear integration ID"),
+      team: {
+        id: bounded(trigger.team.id, 256, "Linear team ID"),
+        name: bounded(trigger.team.name, 256, "Linear team name"),
+        triageStateId: bounded(trigger.team.triageStateId, 256, "Linear triage state ID"),
+        ...(key ? { key: bounded(key, 32, "Linear team key") } : {}),
+      },
+      prompt:
+        boundedOptional(
+          trigger.prompt ?? "Review and triage this Linear issue.",
+          MAX_PROMPT_LENGTH,
+          "Workflow event prompt",
+        ) || "Review and triage this Linear issue.",
+    };
+  }
   return {
     type: "schedule",
     cron: bounded(trigger.cron, 128, "Workflow schedule cron"),

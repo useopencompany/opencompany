@@ -10,7 +10,8 @@ export type ManagedCapabilitySource =
   | "instagram"
   | "tiktok"
   | "lead"
-  | "seo";
+  | "seo"
+  | "image";
 
 export type WorkspaceCapabilityState = {
   source: ManagedCapabilitySource;
@@ -94,7 +95,7 @@ export async function setWorkspaceCapabilitySessionBudgetAction(input: {
 }
 
 function isManagedCapabilitySource(value: unknown): value is ManagedCapabilitySource {
-  return ["x", "linkedin", "youtube", "instagram", "tiktok", "lead", "seo"].includes(
+  return ["x", "linkedin", "youtube", "instagram", "tiktok", "lead", "seo", "image"].includes(
     value as ManagedCapabilitySource,
   );
 }

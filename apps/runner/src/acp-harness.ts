@@ -1,11 +1,11 @@
 import type { Harness } from "@opencompany/agent-runtime";
-import { buildClaudeAcpCommand } from "./claude-code-cli";
-import type { SandboxHandle } from "./sandbox";
+import { isRetryableCommandStreamError, type SandboxHandle } from "./sandbox";
 
 const ACP_REQUEST_TIMEOUT_MS = 30_000;
 const ACP_ABORT_POLL_INTERVAL_MS = 500;
 const ACP_CANCEL_GRACE_MS = 5_000;
 const ACP_STDERR_TAIL_LIMIT = 4_000;
+const ACP_COMMAND_STREAM_RECONNECT_ATTEMPTS = 3;
 
 export type AcpMcpServer =
   | {
@@ -31,7 +31,54 @@ export type AcpPermissionResponse = {
   outcome: { outcome: "cancelled" } | { outcome: "selected"; optionId: string };
 };
 
+export type AcpElicitationRequest = {
+  id: number | string;
+  method: "elicitation/create";
+  params: Record<string, unknown>;
+};
+
+export type AcpElicitationResponse = {
+  action: "accept" | "decline" | "cancel";
+  content?: Record<string, unknown> | null;
+  _meta?: Record<string, unknown> | null;
+};
+
+export type AcpPromptBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string }
+  | { type: "resource_link"; name: string; uri: string; mimeType?: string };
+
+export type AcpEngineAdapter = {
+  id: string;
+  displayName: string;
+  command: (workdir: string) => string;
+  sessionMeta?: (input: { hasMcpServers: boolean }) => Record<string, unknown> | null;
+  configOptions: {
+    model?: string;
+    reasoningEffort?: {
+      id: string;
+      value: (effort: string) => string;
+    };
+    permissionMode?: {
+      id: string;
+      values: Record<"default" | "bypassPermissions", string>;
+    };
+    collaborationMode?: {
+      id: string;
+      values: Record<"default" | "plan", string>;
+    };
+  };
+  goalControlMethod?: string;
+  steeringControlMethod?: string;
+};
+
+export type AcpExtensionRequest = {
+  method: string;
+  params: Record<string, unknown>;
+};
+
 export type AcpHarnessTurnInput = {
+  adapter: AcpEngineAdapter;
   sandbox: SandboxHandle;
   workdir: string;
   task: string;
@@ -45,10 +92,18 @@ export type AcpHarnessTurnInput = {
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
   onEngineSessionId: (sessionId: string) => Promise<void>;
   onExistingSessionInvalidated: () => Promise<void>;
+  onEngineStopped?: () => Promise<void>;
   onPermissionRequest: (request: AcpPermissionRequest) => Promise<AcpPermissionResponse>;
+  onElicitationRequest?: (request: AcpElicitationRequest) => Promise<AcpElicitationResponse>;
+  prompt?: AcpPromptBlock[];
+  prepareFreshPrompt?: () => Promise<AcpPromptBlock[]>;
+  extensionRequests?: AcpExtensionRequest[];
   model?: string | null;
   reasoningEffort?: string | null;
   permissionMode?: "default" | "bypassPermissions";
+  collaborationMode?: "default" | "plan";
+  goal?: { objective: string; tokenBudget?: number | null } | null;
+  steering?: AsyncIterable<AcpPromptBlock[]>;
 };
 
 export type AcpHarnessTurnResult = {
@@ -63,7 +118,8 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
     let projectUpdates = false;
     const client = new AcpJsonRpcClient({
       sandbox: input.sandbox,
-      command: buildClaudeAcpCommand(input.workdir),
+      adapterName: input.adapter.displayName,
+      command: input.adapter.command(input.workdir),
       envs: input.envs,
       redact: input.redact,
       onNotification: async (notification) => {
@@ -76,6 +132,14 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
           return input.onPermissionRequest({
             id: request.id,
             method: "session/request_permission",
+            params: request.params,
+          });
+        }
+        if (request.method === "elicitation/create") {
+          if (!input.onElicitationRequest) return { action: "cancel" };
+          return input.onElicitationRequest({
+            id: request.id,
+            method: "elicitation/create",
             params: request.params,
           });
         }
@@ -94,27 +158,29 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
         },
         clientCapabilities: {
           terminal: false,
+          elicitation: { form: {}, url: {} },
+          session: { configOptions: { boolean: {} } },
+          auth: { _meta: { gateway: true } },
           _meta: { "subagent-transcript": true },
         },
       });
       const capabilities = readRecord(readRecord(initialized)?.agentCapabilities) ?? {};
-      const adapterEffort = input.reasoningEffort === "xhigh" ? "max" : input.reasoningEffort;
+      for (const request of input.extensionRequests ?? []) {
+        await client.request(request.method, request.params);
+      }
+      const sessionMeta = input.adapter.sessionMeta?.({
+        hasMcpServers: input.mcpServers.length > 0,
+      });
       const sessionParams = {
         cwd: input.workdir,
         mcpServers: input.mcpServers,
-        _meta: {
-          claudeCode: {
-            options: {
-              maxTurns: 250,
-              ...(input.mcpServers.length ? { strictMcpConfig: true } : {}),
-            },
-          },
-        },
+        ...(sessionMeta ? { _meta: sessionMeta } : {}),
       };
 
       let loadedSession = false;
       let sessionId = input.existingSessionId;
       let task = input.task;
+      let prompt = input.prompt ?? textPrompt(input.task);
       let sessionResponse: Record<string, unknown> | null = null;
       if (sessionId && capabilities.loadSession === true) {
         try {
@@ -123,15 +189,24 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
           );
           loadedSession = true;
         } catch (error) {
-          if (!isMissingAcpSession(error)) throw error;
+          // A transport-level failure (adapter process died, RPC timeout, adapter not running)
+          // means the connection itself is unusable — session/new cannot succeed on it either — so
+          // abort the turn and let the worker settle or retry. Any application-level JSON-RPC error
+          // (AcpRpcError: -32603 "Internal error", -32002 missing session, "no rollout found for
+          // thread id …", …) means the saved thread cannot be resumed on this (freshly-fenced)
+          // process; invalidate it and fall through to session/new so this turn proceeds and the
+          // next turn is never poisoned by the same thread id.
+          if (!(error instanceof AcpRpcError)) throw error;
           await input.onExistingSessionInvalidated();
           sessionId = null;
           task = await input.prepareFreshTask();
+          prompt = input.prepareFreshPrompt ? await input.prepareFreshPrompt() : textPrompt(task);
         }
       } else if (sessionId) {
         await input.onExistingSessionInvalidated();
         sessionId = null;
         task = await input.prepareFreshTask();
+        prompt = input.prepareFreshPrompt ? await input.prepareFreshPrompt() : textPrompt(task);
       }
 
       if (!sessionId) {
@@ -141,10 +216,11 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
         sessionResponse = created;
       }
       await input.onEngineSessionId(sessionId);
-      await configureSession(client, sessionId, sessionResponse, {
+      await configureSession(client, input.adapter, sessionId, sessionResponse, {
         model: input.model,
-        reasoningEffort: adapterEffort,
+        reasoningEffort: input.reasoningEffort,
         permissionMode: input.permissionMode,
+        collaborationMode: input.collaborationMode,
       });
       // session/load replays historical updates. Drain those (and any config notifications)
       // while projection is still disabled so a reclaimed turn only renders new output.
@@ -152,7 +228,19 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
 
       projectUpdates = true;
       await input.onRuntimeEvents([{ method: "session/started", params: { sessionId } }]);
-      const promptResponse = await requestPromptWithAbort({ client, input, sessionId, task });
+      if (input.goal) {
+        const controlMethod = input.adapter.goalControlMethod;
+        if (!controlMethod) {
+          throw new Error(`${input.adapter.displayName} does not advertise ACP goal controls.`);
+        }
+        await client.request(controlMethod, {
+          sessionId,
+          action: "set",
+          objective: input.goal.objective,
+          ...(input.goal.tokenBudget != null ? { tokenBudget: input.goal.tokenBudget } : {}),
+        });
+      }
+      const promptResponse = await requestPromptWithAbort({ client, input, sessionId, prompt });
       await client.flush();
       await input.onRuntimeEvents([
         {
@@ -171,19 +259,25 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
         stderrTail: client.stderrTail(),
       };
     } finally {
-      await client.stop();
+      try {
+        await client.stop();
+      } finally {
+        await input.onEngineStopped?.();
+      }
     }
   }
 }
 
 async function configureSession(
   client: AcpJsonRpcClient,
+  adapter: AcpEngineAdapter,
   sessionId: string,
   sessionResponse: Record<string, unknown> | null,
   input: {
     model: string | null | undefined;
     reasoningEffort: string | null | undefined;
     permissionMode: "default" | "bypassPermissions" | undefined;
+    collaborationMode: "default" | "plan" | undefined;
   },
 ) {
   const optionIds = new Set(
@@ -194,13 +288,33 @@ async function configureSession(
       },
     ),
   );
+  const config = adapter.configOptions;
   const requested = [
-    { configId: "model", value: input.model },
-    { configId: "effort", value: input.reasoningEffort },
-    { configId: "mode", value: input.permissionMode },
+    { configId: config.model, value: input.model },
+    {
+      configId: config.reasoningEffort?.id,
+      value:
+        input.reasoningEffort && config.reasoningEffort
+          ? config.reasoningEffort.value(input.reasoningEffort)
+          : null,
+    },
+    {
+      configId: config.permissionMode?.id,
+      value:
+        input.permissionMode && config.permissionMode
+          ? config.permissionMode.values[input.permissionMode]
+          : null,
+    },
+    {
+      configId: config.collaborationMode?.id,
+      value:
+        input.collaborationMode && config.collaborationMode
+          ? config.collaborationMode.values[input.collaborationMode]
+          : null,
+    },
   ];
   for (const option of requested) {
-    if (!option.value || !optionIds.has(option.configId)) continue;
+    if (!option.configId || !option.value || !optionIds.has(option.configId)) continue;
     await client.request("session/set_config_option", {
       sessionId,
       configId: option.configId,
@@ -213,31 +327,62 @@ async function requestPromptWithAbort(input: {
   client: AcpJsonRpcClient;
   input: AcpHarnessTurnInput;
   sessionId: string;
-  task: string;
+  prompt: AcpPromptBlock[];
 }) {
   const outcome = input.client
     .request(
       "session/prompt",
       {
         sessionId: input.sessionId,
-        prompt: [{ type: "text", text: input.task }],
+        prompt: input.prompt,
       },
       input.input.timeoutMs + ACP_CANCEL_GRACE_MS,
     )
     .then(
-      (value) => ({ ok: true as const, value: readRecord(value) ?? {} }),
-      (error) => ({ ok: false as const, error }),
+      (value) => ({ type: "prompt" as const, ok: true as const, value: readRecord(value) ?? {} }),
+      (error) => ({ type: "prompt" as const, ok: false as const, error }),
     );
+  const steeringIterator = input.input.steering?.[Symbol.asyncIterator]();
+  let nextSteering = steeringIterator
+    ?.next()
+    .then((value) => ({ type: "steering" as const, value }));
   const deadline = Date.now() + input.input.timeoutMs;
 
   while (true) {
     const settled = await Promise.race([
       outcome,
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), ACP_ABORT_POLL_INTERVAL_MS)),
+      ...(nextSteering ? [nextSteering] : []),
+      new Promise<{ type: "tick" }>((resolve) =>
+        setTimeout(() => resolve({ type: "tick" }), ACP_ABORT_POLL_INTERVAL_MS),
+      ),
     ]);
-    if (settled) {
+    if (settled.type === "prompt") {
+      await steeringIterator?.return?.();
       if (settled.ok) return settled.value;
       throw settled.error;
+    }
+    if (settled.type === "steering") {
+      if (settled.value.done) {
+        nextSteering = undefined;
+        continue;
+      }
+      const steeringMethod = input.input.adapter.steeringControlMethod;
+      if (!steeringMethod) {
+        throw new Error(`${input.input.adapter.displayName} does not advertise ACP steering.`);
+      }
+      const response = readRecord(
+        await input.client.request(steeringMethod, {
+          sessionId: input.sessionId,
+          prompt: settled.value.value,
+        }),
+      );
+      if (response?.outcome === "failed") {
+        throw new Error(`${input.input.adapter.displayName} could not steer the active ACP turn.`);
+      }
+      nextSteering = steeringIterator
+        ?.next()
+        .then((value) => ({ type: "steering" as const, value }));
+      continue;
     }
 
     let abortError: unknown = null;
@@ -247,7 +392,7 @@ async function requestPromptWithAbort(input: {
       abortError = error;
     }
     if (!abortError && Date.now() >= deadline) {
-      abortError = new Error("Claude ACP turn timed out.");
+      abortError = new Error(`${input.input.adapter.displayName} ACP turn timed out.`);
     }
     if (!abortError) continue;
 
@@ -257,6 +402,7 @@ async function requestPromptWithAbort(input: {
       new Promise<null>((resolve) => setTimeout(() => resolve(null), ACP_CANCEL_GRACE_MS)),
     ]);
     await input.client.flush().catch(() => {});
+    await steeringIterator?.return?.();
     throw abortError;
   }
 }
@@ -280,6 +426,7 @@ class AcpJsonRpcClient {
   private failure: Error | null = null;
   private lastStderr = "";
   private processing: Promise<void> = Promise.resolve();
+  private watchGeneration = 0;
   private readonly pending = new Map<
     number | string,
     {
@@ -292,6 +439,7 @@ class AcpJsonRpcClient {
   constructor(
     private readonly input: {
       sandbox: SandboxHandle;
+      adapterName: string;
       command: string;
       envs: Record<string, string>;
       redact: (value: string) => string;
@@ -313,17 +461,7 @@ class AcpJsonRpcClient {
         this.lastStderr = (this.lastStderr + this.input.redact(data)).slice(-ACP_STDERR_TAIL_LIMIT);
       },
     });
-    const handle = this.handle as { wait?: () => Promise<unknown> };
-    if (typeof handle.wait === "function") {
-      void handle.wait().then(
-        () => {
-          if (!this.stopping) this.fail(new Error("Claude ACP adapter exited unexpectedly."));
-        },
-        (error) => {
-          if (!this.stopping) this.fail(asError(error));
-        },
-      );
-    }
+    this.watch(this.handle);
   }
 
   async stop() {
@@ -332,7 +470,7 @@ class AcpJsonRpcClient {
     if (pid != null) await this.input.sandbox.commands.kill(pid).catch(() => false);
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
-      pending.reject(new Error("Claude ACP adapter stopped before responding."));
+      pending.reject(new Error(`${this.input.adapterName} ACP adapter stopped before responding.`));
     }
     this.pending.clear();
   }
@@ -449,7 +587,7 @@ class AcpJsonRpcClient {
   private async send(message: Record<string, unknown>) {
     this.throwIfFailed();
     const pid = commandHandlePid(this.handle);
-    if (pid == null) throw new Error("Claude ACP adapter is not running.");
+    if (pid == null) throw new Error(`${this.input.adapterName} ACP adapter is not running.`);
     const data = `${JSON.stringify(message)}\n`;
     const handle = this.handle as { sendStdin?: (value: string) => Promise<void> };
     if (typeof handle.sendStdin === "function") {
@@ -457,6 +595,64 @@ class AcpJsonRpcClient {
       return;
     }
     await this.input.sandbox.commands.sendStdin(pid, data);
+  }
+
+  private watch(handle: unknown) {
+    const wait = readRecord(handle)?.wait;
+    if (typeof wait !== "function") return;
+    const generation = ++this.watchGeneration;
+    void (wait as () => Promise<unknown>).call(handle).then(
+      () => {
+        if (!this.stopping && generation === this.watchGeneration) {
+          this.fail(new Error(`${this.input.adapterName} ACP adapter exited unexpectedly.`));
+        }
+      },
+      (error) => {
+        if (this.stopping || generation !== this.watchGeneration) return;
+        const transportError = asError(error);
+        if (!isRetryableCommandStreamError(transportError)) {
+          this.fail(transportError);
+          return;
+        }
+        void this.reconnect(handle, generation, transportError);
+      },
+    );
+  }
+
+  private async reconnect(handle: unknown, generation: number, streamError: Error) {
+    const pid = commandHandlePid(handle);
+    if (pid == null) {
+      this.fail(streamError);
+      return;
+    }
+
+    for (let attempt = 1; attempt <= ACP_COMMAND_STREAM_RECONNECT_ATTEMPTS; attempt += 1) {
+      if (this.stopping || generation !== this.watchGeneration) return;
+      try {
+        const connected = await this.input.sandbox.commands.connect(pid, {
+          timeoutMs: 0,
+          onStdout: (data: string) => {
+            this.consumeStdout(data);
+          },
+          onStderr: (data: string) => {
+            this.lastStderr = (this.lastStderr + this.input.redact(data)).slice(
+              -ACP_STDERR_TAIL_LIMIT,
+            );
+          },
+        });
+        if (this.stopping || generation !== this.watchGeneration) {
+          await connected.disconnect().catch(() => undefined);
+          return;
+        }
+        this.handle = connected;
+        this.watch(connected);
+        return;
+      } catch {
+        // The original stream error is the actionable failure: it preserves the durable-turn
+        // retry classification if the adapter process cannot be reattached.
+      }
+    }
+    if (!this.stopping && generation === this.watchGeneration) this.fail(streamError);
   }
 
   private fail(error: Error) {
@@ -484,15 +680,6 @@ class AcpRpcError extends Error {
   }
 }
 
-function isMissingAcpSession(error: unknown) {
-  return (
-    (error instanceof AcpRpcError && error.code === -32002) ||
-    /no conversation found|session.*not found|could not resume|resource.*not found/i.test(
-      asError(error).message,
-    )
-  );
-}
-
 function commandHandlePid(handle: unknown) {
   const pid = readRecord(handle)?.pid;
   return typeof pid === "number" && Number.isInteger(pid) ? pid : null;
@@ -514,4 +701,8 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function readString(value: unknown) {
   return typeof value === "string" && value ? value : null;
+}
+
+function textPrompt(task: string): AcpPromptBlock[] {
+  return [{ type: "text", text: task }];
 }

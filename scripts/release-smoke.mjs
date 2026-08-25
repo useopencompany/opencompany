@@ -71,8 +71,8 @@ async function checkUntilReady(name, url, maxAttempts, waitMs) {
       if (payload?.ok !== true) {
         throw new Error(`unexpected payload: ${body.slice(0, 200)}`);
       }
-      if (name === "runner" && payload.capabilities?.claudeActionsMcp !== "v2") {
-        throw new Error("runner does not advertise the v2 Claude actions MCP transport");
+      if (name === "runner" && payload.capabilities?.acpToolsMcp !== "v3") {
+        throw new Error("runner does not advertise the v3 ACP tools MCP transport");
       }
 
       if (expectedRelease && !matchesExpectedRelease(payload, expectedRelease)) {

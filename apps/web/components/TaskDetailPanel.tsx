@@ -42,14 +42,16 @@ function CanonicalTaskDetailPanel({
         .toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null,
     [runRows],
   );
-  const title = taskDetailTitle(run);
-  const initialChat: ChatSessionView = {
-    id: conversationId,
-    title,
-    model: normalizeModel(run.task.model),
-    engine: run.task.engine,
-    messages: run.chat?.messages ?? [],
-  };
+  const initialChat: ChatSessionView = useMemo(
+    () => ({
+      id: conversationId,
+      title: taskDetailTitle(run),
+      model: normalizeModel(run.task.model),
+      engine: run.task.engine,
+      messages: run.chat?.messages ?? [],
+    }),
+    [conversationId, run],
+  );
 
   return (
     <Surface
@@ -69,7 +71,6 @@ function CanonicalTaskDetailPanel({
         taskId: run.task.id,
         status: activeRun ? "running" : (liveTask?.status ?? run.task.status),
         startedAtMs: taskActivityStartedAtMs(run),
-        sessionBacked: true,
         activeRunId: activeRun?.id ?? null,
       }}
     />
@@ -106,8 +107,8 @@ function LegacyTaskDetailPanel({ initialRun }: { initialRun: HarnessRunViewModel
         taskId: initialRun.task.id,
         status: initialRun.task.status,
         startedAtMs: taskActivityStartedAtMs(initialRun),
-        sessionBacked: false,
       }}
+      readOnlyNotice="This pre-cutover task is available as read-only history. Start a new task to continue the work."
     />
   );
 }

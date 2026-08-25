@@ -77,7 +77,15 @@ export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancel
 
 // Workflows retain the draft/active lifecycle from their original Brain documents.
 export type WorkflowStatus = "draft" | "active";
-export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule";
+export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule" | "event";
+export type WorkflowEventConfig = {
+  provider: "linear";
+  event: "issue_enters_triage";
+  integrationId: string;
+  team: { id: string; name: string; key?: string; triageStateId: string };
+  prompt: string;
+};
+export type WorkflowEventRunStatus = "pending" | "created" | "ignored" | "failed";
 export type AutomationCommandOperation = "workflow.create" | "task_schedule.create";
 export type KnowledgeCommandOperation =
   | "brain_document.create"
@@ -438,7 +446,8 @@ export type ManagedCapabilitySource =
   | "instagram"
   | "tiktok"
   | "lead"
-  | "seo";
+  | "seo"
+  | "image";
 export type CapabilityRunStatus =
   | "awaiting_approval"
   | "approved"
@@ -590,7 +599,7 @@ export type CodexChatTurnStatus =
   | "completed"
   | "failed"
   | "interrupted";
-export const CODEX_APP_SERVER_EVENT_TYPES = [
+export const CODING_HARNESS_EVENT_TYPES = [
   "assistant.delta",
   "assistant.completed",
   "reasoning.completed",
@@ -618,13 +627,13 @@ export const CODEX_APP_SERVER_EVENT_TYPES = [
   "error",
   "unknown",
 ] as const;
-export type CodexAppServerEventType = (typeof CODEX_APP_SERVER_EVENT_TYPES)[number];
+export type CodingHarnessEventType = (typeof CODING_HARNESS_EVENT_TYPES)[number];
 export type CodexChatEventType = Exclude<
-  CodexAppServerEventType,
+  CodingHarnessEventType,
   "assistant.delta" | "command.output"
 >;
 export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
-  CODEX_APP_SERVER_EVENT_TYPES.filter(
+  CODING_HARNESS_EVENT_TYPES.filter(
     (eventType): eventType is CodexChatEventType =>
       eventType !== "assistant.delta" && eventType !== "command.output",
   );
@@ -857,7 +866,7 @@ export const workspaceCapabilities = productSchema.table(
     pk: primaryKey({ columns: [table.workspaceId, table.source] }),
     sourceCheck: check(
       "goat_workspace_capabilities_source_check",
-      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo')`,
+      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo', 'image')`,
     ),
   }),
 );
@@ -2891,6 +2900,11 @@ export const workflows = productSchema.table(
     scheduleEnabled: boolean("schedule_enabled").notNull().default(false),
     scheduleLastRunAt: timestamp("schedule_last_run_at", { withTimezone: true }),
     scheduleNextRunAt: timestamp("schedule_next_run_at", { withTimezone: true }),
+    eventConfig: jsonb("event_config").$type<WorkflowEventConfig | null>(),
+    eventUserWorkosId: text("event_user_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    eventHarnessSpec: jsonb("event_harness_spec").$type<HarnessSpec | null>(),
     status: text("status").$type<WorkflowStatus>().notNull().default("active"),
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
@@ -2919,8 +2933,11 @@ export const workflows = productSchema.table(
     statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
     triggerCheck: check(
       "goat_workflows_trigger_check",
-      sql`${table.trigger} IN ('manual', 'slack', 'linear', 'schedule')`,
+      sql`${table.trigger} IN ('manual', 'slack', 'linear', 'schedule', 'event')`,
     ),
+    eventRouteIdx: index("opencompany_workflows_event_route_idx")
+      .on(table.eventUserWorkosId, table.trigger)
+      .where(sql`${table.trigger} = 'event' AND ${table.archivedAt} IS NULL`),
   }),
 );
 
@@ -3420,6 +3437,59 @@ export const workflowScheduleRuns = productSchema.table(
   }),
 );
 
+// Durable inbox for provider events that matched an active workflow. Webhook
+// handlers only enqueue these rows; the runner materializes Tasks so provider
+// response deadlines and deploys cannot drop workflow runs.
+export const workflowEventRuns = productSchema.table(
+  "workflow_event_runs",
+  {
+    id: text("id").primaryKey(),
+    workflowId: text("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    workflowSlug: text("workflow_slug").notNull(),
+    workflowName: text("workflow_name").notNull(),
+    provider: text("provider").notNull(),
+    eventType: text("event_type").notNull(),
+    deliveryId: text("delivery_id").notNull(),
+    goal: text("goal").notNull(),
+    harnessSpec: jsonb("harness_spec").$type<HarnessSpec>().notNull(),
+    eventAt: timestamp("event_at", { withTimezone: true }).notNull(),
+    taskId: text("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    status: text("status").$type<WorkflowEventRunStatus>().notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workflowDeliveryIdx: uniqueIndex("opencompany_workflow_event_runs_workflow_delivery_idx").on(
+      table.workflowId,
+      table.provider,
+      table.deliveryId,
+    ),
+    pendingIdx: index("opencompany_workflow_event_runs_pending_idx")
+      .on(table.status, table.nextAttemptAt, table.createdAt)
+      .where(sql`${table.status} = 'pending'`),
+    taskIdx: index("opencompany_workflow_event_runs_task_idx").on(table.taskId),
+    providerCheck: check(
+      "opencompany_workflow_event_runs_provider_check",
+      sql`${table.provider} IN ('linear')`,
+    ),
+    statusCheck: check(
+      "opencompany_workflow_event_runs_status_check",
+      sql`${table.status} IN ('pending', 'created', 'ignored', 'failed')`,
+    ),
+  }),
+);
+
 export const taskMessages = productSchema.table(
   "task_messages",
   {
@@ -3844,11 +3914,11 @@ export const capabilityRuns = productSchema.table(
     ),
     sourceCheck: check(
       "goat_capability_runs_source_check",
-      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo')`,
+      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo', 'image')`,
     ),
     providerCheck: check(
       "goat_capability_runs_provider_check",
-      sql`${table.provider} IN ('tikhub', 'apify', 'pdl', 'semrush')`,
+      sql`${table.provider} IN ('tikhub', 'apify', 'pdl', 'semrush', 'vercel-ai-gateway')`,
     ),
     inputHashCheck: check(
       "goat_capability_runs_input_hash_check",
@@ -5026,7 +5096,7 @@ export const chatArtifactVersions = productSchema.table(
     ),
     sourceEngineCheck: check(
       "goat_chat_artifact_versions_source_engine_check",
-      sql`${table.sourceEngine} IN ('codex', 'claude_code')`,
+      sql`${table.sourceEngine} IN ('opencompany', 'codex', 'claude_code')`,
     ),
   }),
 );
@@ -5071,7 +5141,10 @@ export const codexChatInteractions = productSchema.table(
     ),
     methodCheck: check(
       "goat_codex_chat_interactions_method_check",
-      sql`${table.method} = 'item/tool/requestUserInput'`,
+      // Keep the retired app-server method valid at the physical DB boundary for one rolling
+      // deployment. New runtime code writes only the ACP method; a later cleanup migration can
+      // remove this compatibility value once no old runner can still be serving a turn.
+      sql`${table.method} IN ('elicitation/create', 'item/tool/requestUserInput')`,
     ),
   }),
 );

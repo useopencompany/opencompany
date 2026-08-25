@@ -21,16 +21,18 @@ export class TaskTurnTerminalError extends Error {
 // failed assistant message.
 export class CodexChatRetryableInfrastructureError extends Error {
   override readonly cause: unknown;
+  readonly diagnosticMessage: string | null;
 
-  constructor(message: string, cause: unknown) {
+  constructor(message: string, cause: unknown, diagnosticMessage?: string) {
     super(message);
     this.name = "CodexChatRetryableInfrastructureError";
     this.cause = cause;
+    this.diagnosticMessage = diagnosticMessage?.trim() || null;
   }
 }
 
-// A runner shutdown transfers observation of the Codex turn to another worker. Unlike a user
-// interrupt, this must only detach the app-server proxy: the turn itself keeps running in E2B.
+// A runner shutdown transfers ownership of the engine turn to another worker. Unlike a user
+// interrupt, it leaves the durable turn available for ACP session recovery in the next worker.
 export class CodexChatHandoffError extends Error {
   constructor() {
     super("Codex chat turn is being handed off to another runner.");

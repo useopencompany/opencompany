@@ -2,8 +2,15 @@ import { Template } from "e2b";
 import {
   CLAUDE_CODE_ACP_ADAPTER_PACKAGE,
   CLAUDE_CODE_ACP_ADAPTER_VERSION,
+  CLAUDE_CODE_CLI_PACKAGE,
+  CLAUDE_CODE_CLI_VERSION,
 } from "../../src/claude-code-version";
-import { CODEX_CLI_PACKAGE, CODEX_CLI_VERSION } from "../../src/codex-version";
+import {
+  CODEX_ACP_ADAPTER_PACKAGE,
+  CODEX_ACP_ADAPTER_VERSION,
+  CODEX_CLI_PACKAGE,
+  CODEX_CLI_VERSION,
+} from "../../src/codex-version";
 import {
   INFISICAL_CLI_LINUX_AMD64_SHA256,
   INFISICAL_CLI_VERSION,
@@ -12,8 +19,15 @@ import {
 export {
   CLAUDE_CODE_ACP_ADAPTER_PACKAGE,
   CLAUDE_CODE_ACP_ADAPTER_VERSION,
+  CLAUDE_CODE_CLI_PACKAGE,
+  CLAUDE_CODE_CLI_VERSION,
 } from "../../src/claude-code-version";
-export { CODEX_CLI_PACKAGE, CODEX_CLI_VERSION } from "../../src/codex-version";
+export {
+  CODEX_ACP_ADAPTER_PACKAGE,
+  CODEX_ACP_ADAPTER_VERSION,
+  CODEX_CLI_PACKAGE,
+  CODEX_CLI_VERSION,
+} from "../../src/codex-version";
 export {
   INFISICAL_CLI_LINUX_AMD64_SHA256,
   INFISICAL_CLI_VERSION,
@@ -86,6 +100,17 @@ export const template = Template()
   )
   .runCmd(
     [
+      "curl -fsSL https://get.docker.com | sh",
+      "usermod -aG docker user",
+      "command -v docker",
+      "docker --version",
+      "docker compose version",
+      "docker run --rm hello-world",
+    ].join(" && "),
+    root,
+  )
+  .runCmd(
+    [
       "if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(\".\")[0]) >= 22 ? 0 : 1)'; then",
       "  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -;",
       "  export DEBIAN_FRONTEND=noninteractive;",
@@ -104,7 +129,7 @@ export const template = Template()
     [
       `curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}"`,
       `test "$(bun --version)" = "${BUN_VERSION}"`,
-      `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g --prefix /usr/local ${CODEX_CLI_PACKAGE} ${CLAUDE_CODE_ACP_ADAPTER_PACKAGE} ${PLAYWRIGHT_PACKAGE}`,
+      `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g --prefix /usr/local ${CODEX_CLI_PACKAGE} ${CODEX_ACP_ADAPTER_PACKAGE} ${CLAUDE_CODE_CLI_PACKAGE} ${CLAUDE_CODE_ACP_ADAPTER_PACKAGE} ${PLAYWRIGHT_PACKAGE}`,
       "command -v rg",
       "command -v fd",
       "command -v jq",
@@ -118,6 +143,10 @@ export const template = Template()
       "command -v bun",
       "command -v codex",
       `test "$(codex --version)" = "codex-cli ${CODEX_CLI_VERSION}"`,
+      "command -v codex-acp",
+      `test "$(codex-acp --version)" = "@agentclientprotocol/codex-acp ${CODEX_ACP_ADAPTER_VERSION}"`,
+      "command -v claude",
+      `claude --version | grep -F "${CLAUDE_CODE_CLI_VERSION}"`,
       "command -v claude-agent-acp",
       `test "$(claude-agent-acp --version)" = "${CLAUDE_CODE_ACP_ADAPTER_VERSION}"`,
       "command -v playwright",
@@ -143,4 +172,5 @@ export const template = Template()
       "rm -f /tmp/playwright-chromium-smoke.png",
     ].join(" && "),
     user,
-  );
+  )
+  .runCmd(["id -nG | tr ' ' '\\n' | grep -qx docker", "docker version"].join(" && "), user);

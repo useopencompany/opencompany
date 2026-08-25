@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-08-24
+
+### Added
+- AI image generation is now available as a chat capability, so you can create or restyle images from a prompt and an optional reference image, right from chat (#1375) — @opencompany-bot.
+- Grok 4.6 is now available as a chat model (#1392) — @opencompany-bot.
+
+### Changed
+- The macOS desktop app has a redesigned title bar that shows what you're looking at and gives quick access to a new chat, the sidebar, and settings (#1384) — @louis.
+- Recent chats on Home now stay visible for seven days instead of just one (#1383) — @opencompany-bot.
+
+### Fixed
+- Coding sessions now recover automatically from interrupted deploys and dropped command streams instead of getting stuck, and long coding chats load faster (#1370, #1371, #1372, #1373, #1390) — @louis and @opencompany-bot.
+- Terminal and Preview access in coding sandboxes works again for sessions started before a recent update (#1388) — @opencompany-bot.
+- Approving a tool action in an older chat no longer breaks the conversation view (#1386) — @opencompany-bot.
+- Long wiki page link titles are now truncated instead of overflowing (#1389) — @opencompany-bot.
+- Signing in now reliably syncs your account instead of occasionally failing right after login (#1374) — @louis.
+
+## [1.17.0] - 2026-08-21
+
+### Added
+- opencompany can now trigger a workflow automatically when a Linear issue enters triage, so the right task kicks off the moment something needs attention (#1347) — @opencompany-bot.
+- Coding sandboxes now include Docker, so tasks that need to build or run containers can do that directly inside a coding session (#1336) — @opencompany-bot.
+
+### Changed
+- Live coding chat now shows clear, labeled actions — reads, writes, edits, searches, commands, and plans — with file names and a preview of the assistant's thinking, instead of raw tool output (#1359, #1361) — @opencompany-bot.
+- Coding sessions can now run for up to three hours before timing out, up from one hour, giving longer tasks room to finish (#1363) — @opencompany-bot.
+- Wiki folders now remember which ones you had open the last time you visited (#1356) — @opencompany-bot.
+
+### Fixed
+- Opening an active task no longer hides your earlier messages, and its status no longer gets stuck on "Connecting" while work is still happening (#1358) — @opencompany-bot.
+- A coding session that loses its connection now recovers reliably instead of getting marked as failed while it's still working in the background (#1360) — @opencompany-bot.
+- Listing comments on a LinkedIn post works again (#1350) — @opencompany-bot.
+
+## [1.16.0] - 2026-08-20
+
+### Added
+- Run a scheduled workflow right away with a new "Run now" action on its editor page, instead of waiting for its next scheduled time (#1346) — @opencompany-bot.
+- Choose which model handles a task you spawn from chat, instead of always using the workspace default (#1342) — @opencompany-bot.
+- opencompany now has a native macOS desktop app, with secure Google sign-in handoff from your browser (#1328, #1331) — @louis.
+- opencompany can now read Gmail attachments and Google Drive files, like PDFs and spreadsheets, when helping you (#1335) — @opencompany-bot.
+- Wiki pages can now be organized into folders, with a smoother editor and reliable page-link suggestions (#1325) — @louis.
+
+### Changed
+- If a chat reply gets cut off partway through, you now keep everything it already wrote along with a clear note about what stopped, instead of losing the response (#1332) — @louis.
+- Clicking a chat in the sidebar now opens it instantly instead of after a noticeable delay (#1290) — @opencompany-bot.
+
+### Fixed
+- Chats and coding sessions are more resilient during app updates: they recover automatically instead of getting stuck or breaking with an error mid-conversation when we ship a routine update (#1338, #1314) — @louis.
+- Reopening a task no longer briefly shows it as empty while your message history reloads (#1341) — @louis.
+- Expanding a tool call in chat now shows exactly what was sent and returned, instead of a generic placeholder (#1343) — @louis.
+- Sending a follow-up message to a finished task now works reliably instead of sometimes failing (#1339) — @louis.
+- Invoking a workflow by typing "#workflow-name" in chat now actually works (#1333) — @louis.
+- Starting a background chat with "&" now correctly uses your default model instead of copying whatever session you happened to be viewing (#1322) — @louis.
+- Finished chat replies no longer keep showing a "still running" timer after they're done (#1319) — @louis.
+- Claude Code sessions no longer sometimes mislabel themselves as Codex in the status indicator (#1312) — @opencompany-bot.
+- Editing a workflow, task, recurring task, or wiki page no longer shows a false "save failed" message right after it actually saved (#1296, #1291) — @louis.
+- A brand-new chat started from Home no longer gets stuck on a broken page if you click away too quickly (#1288) — @louis.
+- The sidebar's unread and "working" indicators for chats are now more accurate (#1292) — @louis.
+- A background chat you sent is no longer shown as failed just because the sidebar took a moment to catch up (#1286) — @louis.
+- Coding chats no longer get stuck endlessly retrying, or stuck on "Connecting" with no messages (#1283) — @louis.
+- Looking up a lead's email that genuinely has none on file no longer shows a failed action and retries (#1285) — @louis.
+- Stripe billing webhook processing, which keeps your subscription and payment status in sync, no longer silently fails (#1282) — @louis.
+
 ## [1.15.0] - 2026-08-17
 
 ### Fixed

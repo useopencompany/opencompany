@@ -11,6 +11,7 @@ import type {
 } from "@opencompany/agent/task-runtime-types";
 import { getAgentModelDefinition, isCloudCodingEngine } from "@opencompany/agent-runtime";
 import type { ChatSessionView } from "@/lib/chat-ui";
+import { codingToolPresentation } from "@/lib/coding-tool-presentation";
 
 export type TaskRunTaskInput =
   | {
@@ -666,7 +667,11 @@ function makeToolCall(input: {
   raw: unknown;
   createdAt: string;
 }): HarnessRunToolCall {
-  const description = describeTool(input.name);
+  const description = describeTool(input.name, {
+    input: input.input,
+    output: input.output,
+    metadata: input.raw,
+  });
   return {
     id: input.id,
     name: input.name,
@@ -681,7 +686,17 @@ function makeToolCall(input: {
   };
 }
 
-function describeTool(name: string): Pick<HarnessRunToolCall, "label" | "kind"> {
+function describeTool(
+  name: string,
+  values: { input?: unknown; output?: unknown; metadata?: unknown } = {},
+): Pick<HarnessRunToolCall, "label" | "kind"> {
+  const codingPresentation = codingToolPresentation({ name, ...values });
+  if (codingPresentation) {
+    return {
+      label: codingPresentation.label,
+      kind: codingPresentation.category === "search" ? "search" : "tool",
+    };
+  }
   if (name === "exa_search") return { label: "Web search", kind: "search" };
   if (name.startsWith("browser_")) {
     const labels: Record<string, string> = {
@@ -734,8 +749,17 @@ function describeTool(name: string): Pick<HarnessRunToolCall, "label" | "kind"> 
     };
     return { label: labels[name] ?? "Linear", kind: "linear" };
   }
-  if (name === "codex_command") return { label: "Codex command", kind: "tool" };
-  return { label: name, kind: "tool" };
+  return { label: humanizeToolName(name), kind: "tool" };
+}
+
+function humanizeToolName(name: string) {
+  const label = name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+  return label || "Tool";
 }
 
 function readTaskHarnessSpec(task: TaskRunTaskInput): unknown {

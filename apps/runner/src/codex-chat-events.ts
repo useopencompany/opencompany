@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 import {
   applyCodexEventToUiMessageParts,
-  type CodexAppServerNormalizedEvent,
+  CODEX_COMMAND_TOOL_NAME,
+  CODEX_FILE_CHANGE_TOOL_NAME,
+  CODEX_MCP_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_NAME,
+  CODEX_WEB_SEARCH_TOOL_NAME,
   type CodexUiMessagePart,
   createCodexCommandOutputAccumulator,
   finalizeCodexUiMessageParts,
-  normalizeCodexAppServerEvent,
+  type HarnessNormalizedEvent,
   offerCodexPlanImplementation,
   parseCodexUiMessageParts,
   parsePublishedChatArtifact,
@@ -28,21 +32,35 @@ import {
 } from "@opencompany/db/product-schema";
 import { captureException } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
-import type { CodexAppServerRequest, CodexAppServerSummary } from "./codex-app-server";
 import { CodexChatLeaseLostError } from "./codex-chat-errors";
 import { getDb } from "./db";
+import type { ExternalEngineRequest, ExternalEngineTurnSummary } from "./external-engine-contract";
 import { rowsFromExecute } from "./sql-exec";
 import { settleDurableTurn, type TaskTurnCompletion } from "./task-turn";
 
 const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1" as const;
 
-// Event types that are persisted to goat.codex_chat_events. High-volume deltas skip the audit
-// log, while assistant deltas still update the message row so an interrupt preserves partial text.
+// Live deltas already stream to the client over SSE run_events; the durable chat_messages row only
+// needs periodic checkpoints plus a guaranteed terminal write. Debouncing the row write (instead of
+// writing on every token) keeps the Electric read-model shape log from growing with streaming
+// activity. Part boundaries and terminal settles bypass the debounce via a forced write.
+const ASSISTANT_DURABLE_WRITE_DEBOUNCE_MS = 2000;
+
+// Streamed projection events that must NOT force a durable write. assistant.delta has its own branch
+// below; the ACP normalizer maps every agent_thought_chunk to reasoning.completed, so a
+// reasoning-heavy Claude Code turn emits many of these per second. Debounce them like text deltas
+// and reserve forced writes for true part boundaries (tool lifecycle, questions, plan/goal, etc.).
+const STREAMED_PROJECTION_EVENT_TYPES = new Set<HarnessNormalizedEvent["type"]>([
+  "assistant.delta",
+  "reasoning.completed",
+]);
+
+// Event types that are persisted to goat.codex_chat_events. High-volume deltas skip the audit log.
 const PERSISTED_EVENT_TYPES = new Set<CodexChatEventType>(
   CODEX_CHAT_EVENT_TYPES.filter((eventType) => eventType !== "unknown"),
 );
 
-export type CodexChatProjectorTarget = {
+export type ExternalEngineProjectorTarget = {
   userWorkosId: string;
   workspaceId?: string | null;
   codexChatSessionId: string;
@@ -59,27 +77,33 @@ export type CodexChatProjectorTarget = {
   turnCreatedAt?: Date;
 };
 
-// Folds normalized Codex app-server events into the turn's assistant chat_messages row (the
+// Folds normalized coding-harness events into the turn's assistant chat_messages row (the
 // Electric-synced streaming surface), the codex_chat_events audit log, and turn/session status.
-// One message UPDATE per logical chunk; Electric ships the full row so the client is always
-// consistent, including across reloads.
-export function createCodexChatProjector(input: {
-  target: CodexChatProjectorTarget;
+// The live surface is the SSE run_events stream (emitted per event); the durable chat_messages
+// UPDATE is debounced so the Electric read-model shape log stays bounded, with a forced write on
+// every part boundary and terminal settle so reloads always see the latest committed state.
+export function createExternalEngineProjector(input: {
+  target: ExternalEngineProjectorTarget;
   redact: (value: string) => string;
   initialParts?: CodexUiMessagePart[];
-  // Engines that don't speak the codex app-server protocol (Claude Code) inject their
-  // own raw-event → normalized-event translation; everything downstream is shared.
-  normalizeEvent?: (raw: Record<string, unknown>) => CodexAppServerNormalizedEvent[];
+  normalizeEvent?: (raw: Record<string, unknown>) => HarnessNormalizedEvent[];
   execution?: RunExecutionRepository;
+  now?: () => number;
+  assistantWriteDebounceMs?: number;
 }) {
   const { target, redact } = input;
   const execution =
     input.execution ?? new PostgresRunExecutionRepository((query) => getDb().execute(query));
-  const normalizeEvent = input.normalizeEvent ?? normalizeCodexAppServerEvent;
+  const normalizeEvent = input.normalizeEvent ?? (() => []);
+  const now = input.now ?? Date.now;
+  const assistantWriteDebounceMs =
+    input.assistantWriteDebounceMs ?? ASSISTANT_DURABLE_WRITE_DEBOUNCE_MS;
   let parts: CodexUiMessagePart[] = input.initialParts ?? [];
   let turnError: string | null = null;
   let auditFailureReported = false;
   let lastProjectedContent: string | null = null;
+  // Persist the first delta immediately (crash/interrupt safety), then debounce subsequent writes.
+  let lastDurableWriteAt = now() - assistantWriteDebounceMs;
   const toolEventStates = new Map<string, "started" | "completed" | "failed">();
   const publishedArtifactIds = new Set<string>();
   const outputAccumulator = createCodexCommandOutputAccumulator();
@@ -109,16 +133,15 @@ export function createCodexChatProjector(input: {
     if (inserted.length !== events.length) throw new CodexChatLeaseLostError();
   };
 
-  const writeAssistantMessage = async (
-    options: {
-      error?: string | null;
-      aborted?: boolean;
-      usage?: ChatMessageDebugTrace["usage"];
-      durationMs?: number | undefined;
-    } = {},
-  ) => {
-    const redactedParts = redactJson(parts, redact) as unknown[];
-    const content = redact(
+  type AssistantWriteOptions = {
+    error?: string | null;
+    aborted?: boolean;
+    usage?: ChatMessageDebugTrace["usage"];
+    durationMs?: number | undefined;
+  };
+
+  const computeContent = () =>
+    redact(
       parts
         .filter(
           (part): part is Extract<CodexUiMessagePart, { type: "text" }> => part.type === "text",
@@ -127,6 +150,9 @@ export function createCodexChatProjector(input: {
         .filter((text) => text.trim())
         .join("\n\n"),
     );
+
+  const persistAssistantMessage = async (content: string, options: AssistantWriteOptions) => {
+    const redactedParts = redactJson(parts, redact) as unknown[];
     const debugTrace: ChatMessageDebugTrace = {
       schemaVersion: CODEX_CHAT_DEBUG_SCHEMA_VERSION,
       model: target.model,
@@ -148,11 +174,25 @@ export function createCodexChatProjector(input: {
         RETURNING message.id
       `),
     );
+  };
+
+  // Emits the live SSE projection on every call and commits the durable chat_messages row when
+  // forced (a part boundary or terminal settle) or once the debounce window elapses. Both live
+  // rendering and lease-loss detection run through appendProjectionEvents, so a debounced skip of
+  // the DB write never hides a lost lease or stalls the client.
+  const syncAssistantMessage = async (
+    options: AssistantWriteOptions & { force?: boolean } = {},
+  ) => {
+    const content = computeContent();
     await appendProjectionEvents(content);
+    const nowMs = now();
+    if (!options.force && nowMs - lastDurableWriteAt < assistantWriteDebounceMs) return content;
+    lastDurableWriteAt = nowMs;
+    await persistAssistantMessage(content, options);
     return content;
   };
 
-  const insertEventRow = async (event: CodexAppServerNormalizedEvent) => {
+  const insertEventRow = async (event: HarnessNormalizedEvent) => {
     if (!PERSISTED_EVENT_TYPES.has(event.type as CodexChatEventType)) return true;
     const eventKey = codexChatEventKey(event);
     try {
@@ -242,7 +282,7 @@ export function createCodexChatProjector(input: {
     );
   };
 
-  const handleEvent = async (event: CodexAppServerNormalizedEvent) => {
+  const handleEvent = async (event: HarnessNormalizedEvent) => {
     if (event.type === "command.output") {
       outputAccumulator.push(event);
       return;
@@ -253,7 +293,8 @@ export function createCodexChatProjector(input: {
       const projection = applyCodexEventToUiMessageParts(parts, event);
       if (!projection.changed) return;
       parts = projection.parts;
-      await writeAssistantMessage({ error: turnError });
+      // High-frequency token stream: debounce the durable write; the live SSE delta still flows.
+      await syncAssistantMessage({ error: turnError });
       return;
     }
 
@@ -280,7 +321,12 @@ export function createCodexChatProjector(input: {
     if (!projection.changed) return;
     parts = projection.parts;
     if (projection.error) turnError = projection.error;
-    await writeAssistantMessage({ error: turnError });
+    // True part boundaries (tool lifecycle, questions, plan/goal, etc.) commit immediately; streamed
+    // reasoning chunks debounce like text so a reasoning-heavy turn cannot grow the shape log.
+    await syncAssistantMessage({
+      error: turnError,
+      force: !STREAMED_PROJECTION_EVENT_TYPES.has(event.type),
+    });
   };
 
   const cancelPendingInteractions = async () => {
@@ -375,6 +421,7 @@ export function createCodexChatProjector(input: {
     completedAt?: Date;
     taskCompletion?: TaskTurnCompletion | null | undefined;
     content: string;
+    failureDiagnostic?: string;
   }) => {
     const now = options.completedAt ?? new Date();
     await settleDurableTurn({
@@ -390,6 +437,9 @@ export function createCodexChatProjector(input: {
               attemptId: target.canonicalAttemptId,
               assistantMessageId: target.assistantMessageId,
               content: options.content,
+              ...(options.failureDiagnostic
+                ? { failureDiagnostic: redact(options.failureDiagnostic) }
+                : {}),
             },
           }
         : {}),
@@ -438,7 +488,7 @@ export function createCodexChatProjector(input: {
       ${options.runningOnly ? sql`AND lease_turn.status = 'running'` : sql``}
   `;
 
-  // Notifications are already batched serially, but app-server requests are handled on a
+  // Notifications are already batched serially, but ACP client requests are handled on a
   // separate async path. Serialize every projection mutation so concurrent question/event writes
   // cannot land out of order and overwrite newer message parts.
   let projectionChain: Promise<void> = Promise.resolve();
@@ -462,20 +512,33 @@ export function createCodexChatProjector(input: {
       });
     },
 
-    requestUserInput(request: CodexAppServerRequest) {
+    requestUserInput(request: ExternalEngineRequest) {
       return serializeProjection(async () => {
-        if (request.method !== "item/tool/requestUserInput") {
-          throw new Error(`Unsupported Codex app-server request: ${request.method}`);
+        if (request.method !== "elicitation/create") {
+          throw new Error(`Unsupported external-engine request: ${request.method}`);
         }
-        if (!isValidCodexUserInputRequest(request.params)) {
-          throw new Error("Codex sent an invalid user-input request.");
+        if (!isValidEngineUserInputRequest(request.params)) {
+          throw new Error("The coding engine sent an invalid user-input request.");
         }
+        const questions = request.params.questions as Array<Record<string, unknown>>;
         const interactionId = `goat_codex_chat_interaction_${randomUUID()}`;
-        const rawEvent: Record<string, unknown> = { ...request, interactionId };
-        const [event] = normalizeCodexAppServerEvent(rawEvent);
-        if (!event || event.type !== "question.requested") {
-          throw new Error("Codex sent an invalid user-input request.");
-        }
+        const event: HarnessNormalizedEvent = {
+          type: "question.requested",
+          rawEvent: { ...request, interactionId },
+          payload: {
+            threadId: typeof request.params.threadId === "string" ? request.params.threadId : null,
+            turnId: typeof request.params.turnId === "string" ? request.params.turnId : null,
+            itemId: typeof request.params.itemId === "string" ? request.params.itemId : null,
+            requestId: request.id,
+            method: request.method,
+            interactionId,
+            question: typeof questions[0]?.question === "string" ? questions[0].question : null,
+            questions,
+            ...(typeof request.params.autoResolutionMs === "number"
+              ? { autoResolutionMs: request.params.autoResolutionMs }
+              : {}),
+          },
+        };
         const now = new Date();
         assertRowsChanged(
           await getDb().execute(sql`
@@ -529,13 +592,13 @@ export function createCodexChatProjector(input: {
         const projection = applyCodexEventToUiMessageParts(parts, event);
         if (projection.changed) {
           parts = projection.parts;
-          await writeAssistantMessage({ error: turnError });
+          await syncAssistantMessage({ error: turnError, force: true });
         }
         return { interactionId };
       });
     },
 
-    requestApproval(request: CodexAppServerRequest) {
+    requestApproval(request: ExternalEngineRequest) {
       return serializeProjection(async () => {
         if (request.method !== "session/request_permission") {
           throw new Error(`Unsupported ACP client request: ${request.method}`);
@@ -578,7 +641,7 @@ export function createCodexChatProjector(input: {
         const projection = applyCodexEventToUiMessageParts(parts, event);
         if (projection.changed) {
           parts = projection.parts;
-          await writeAssistantMessage({ error: turnError });
+          await syncAssistantMessage({ error: turnError, force: true });
         }
         return { approvalId };
       });
@@ -607,7 +670,7 @@ export function createCodexChatProjector(input: {
         const projection = resolveCodexUiInteraction(parts, { interactionId, status });
         if (!projection.changed) return;
         parts = projection.parts;
-        await writeAssistantMessage({ error: turnError });
+        await syncAssistantMessage({ error: turnError, force: true });
       });
     },
 
@@ -616,20 +679,20 @@ export function createCodexChatProjector(input: {
         const projection = resolveCodexUiApproval(parts, { approvalId, status });
         if (!projection.changed) return;
         parts = projection.parts;
-        await writeAssistantMessage({ error: turnError });
+        await syncAssistantMessage({ error: turnError, force: true });
       });
     },
 
     cancelPendingInteractions() {
       return serializeProjection(async () => {
         const didCancel = await cancelPendingInteractions();
-        if (didCancel) await writeAssistantMessage({ error: turnError });
+        if (didCancel) await syncAssistantMessage({ error: turnError, force: true });
         return didCancel;
       });
     },
 
     finalize(
-      summary: CodexAppServerSummary,
+      summary: ExternalEngineTurnSummary,
       options: {
         taskCompletion?: TaskTurnCompletion | null;
         replacementContent?: string | null;
@@ -668,10 +731,11 @@ export function createCodexChatProjector(input: {
           if (target.planMode) {
             parts = offerCodexPlanImplementation(parts).parts;
           }
-          const content = await writeAssistantMessage({
+          const content = await syncAssistantMessage({
             error: null,
             usage,
             durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+            force: true,
           });
           await settleTurn({
             turnStatus: "completed",
@@ -686,10 +750,11 @@ export function createCodexChatProjector(input: {
         const error =
           summary.error ?? turnError ?? `Codex finished with status: ${summary.status}.`;
         parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
-        const content = await writeAssistantMessage({
+        const content = await syncAssistantMessage({
           error,
           usage,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+          force: true,
         });
         await settleTurn({
           turnStatus: "failed",
@@ -708,9 +773,10 @@ export function createCodexChatProjector(input: {
         await cancelPendingInteractions();
         await reconcilePublishedArtifacts();
         parts = finalizeCodexUiMessageParts(parts, "interrupted").parts;
-        const content = await writeAssistantMessage({
+        const content = await syncAssistantMessage({
           aborted: true,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+          force: true,
         });
         await settleTurn({
           turnStatus: "interrupted",
@@ -728,6 +794,7 @@ export function createCodexChatProjector(input: {
       options: {
         sessionStatus?: CodexChatSessionStatus;
         taskCompletion?: TaskTurnCompletion | null;
+        failureDiagnostic?: string;
       } = {},
     ) {
       return serializeProjection(async () => {
@@ -735,9 +802,10 @@ export function createCodexChatProjector(input: {
         await cancelPendingInteractions();
         await reconcilePublishedArtifacts();
         parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
-        const content = await writeAssistantMessage({
+        const content = await syncAssistantMessage({
           error,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+          force: true,
         });
         await settleTurn({
           turnStatus: "failed",
@@ -746,6 +814,7 @@ export function createCodexChatProjector(input: {
           completedAt,
           taskCompletion: options.taskCompletion,
           content,
+          ...(options.failureDiagnostic ? { failureDiagnostic: options.failureDiagnostic } : {}),
         });
       });
     },
@@ -753,8 +822,8 @@ export function createCodexChatProjector(input: {
 }
 
 async function captureExternalHarnessUsage(input: {
-  target: CodexChatProjectorTarget;
-  summary: CodexAppServerSummary;
+  target: ExternalEngineProjectorTarget;
+  summary: ExternalEngineTurnSummary;
   taskCompletion?: TaskTurnCompletion | null | undefined;
 }) {
   const usage = input.summary.usage;
@@ -832,7 +901,7 @@ function semanticEventsFromCodexParts(
   redact: (value: string) => string,
 ) {
   const events: RunEventDraft[] = [];
-  const visit = (values: readonly CodexUiMessagePart[]) => {
+  const visit = (values: readonly CodexUiMessagePart[], parentToolCallId?: string) => {
     for (const part of values) {
       const record = part as unknown as Record<string, unknown>;
       const type = typeof record.type === "string" ? record.type : "";
@@ -845,10 +914,7 @@ function semanticEventsFromCodexParts(
             type: "tool.started",
             payload: {
               toolCallId,
-              name:
-                typeof record.toolName === "string"
-                  ? record.toolName
-                  : type.slice("tool-".length) || "tool",
+              ...semanticToolStartedPayload(record, type, parentToolCallId, redact),
             },
           });
           toolStates.set(toolCallId, "started");
@@ -860,7 +926,10 @@ function semanticEventsFromCodexParts(
           events.push({
             id: `run_event_${randomUUID()}`,
             type: "tool.completed",
-            payload: { toolCallId },
+            payload: {
+              toolCallId,
+              summary: semanticToolOutcome(record, redact),
+            },
           });
           toolStates.set(toolCallId, "completed");
         } else if (
@@ -909,11 +978,118 @@ function semanticEventsFromCodexParts(
           artifactIds.add(artifactId);
         }
       }
-      if (Array.isArray(record.children)) visit(record.children as CodexUiMessagePart[]);
+      if (Array.isArray(record.children)) {
+        visit(record.children as CodexUiMessagePart[], toolCallId ?? parentToolCallId);
+      }
     }
   };
   visit(parts);
   return events;
+}
+
+const SEMANTIC_TOOL_LABEL_LIMIT = 500;
+const SEMANTIC_TOOL_DETAIL_LIMIT = 4_000;
+const SEMANTIC_TOOL_KIND_LIMIT = 100;
+
+function semanticToolStartedPayload(
+  part: Record<string, unknown>,
+  type: string,
+  parentToolCallId: string | undefined,
+  redact: (value: string) => string,
+) {
+  const name =
+    typeof part.toolName === "string" ? part.toolName : type.slice("tool-".length) || "tool";
+  const input = isRecord(part.input) ? part.input : {};
+  const fallback = semanticToolFallback(name);
+  const label = semanticToolText(
+    name === CODEX_COMMAND_TOOL_NAME
+      ? (input.description ?? input.label ?? fallback.label)
+      : (input.label ?? input.title ?? fallback.label),
+    SEMANTIC_TOOL_LABEL_LIMIT,
+    redact,
+  );
+  const detail = semanticToolText(
+    semanticToolDetail(name, input),
+    SEMANTIC_TOOL_DETAIL_LIMIT,
+    redact,
+  );
+  const kind = semanticToolText(
+    input.kind ??
+      (name === CODEX_SUBAGENT_TOOL_NAME ? input.subagentType : undefined) ??
+      fallback.kind,
+    SEMANTIC_TOOL_KIND_LIMIT,
+    redact,
+  );
+  return {
+    name,
+    ...(label ? { label } : {}),
+    ...(detail ? { detail } : {}),
+    ...(kind ? { kind } : {}),
+    ...(parentToolCallId ? { parentToolCallId } : {}),
+  };
+}
+
+function semanticToolDetail(name: string, input: Record<string, unknown>) {
+  if (name === CODEX_COMMAND_TOOL_NAME) return input.command;
+  if (name === CODEX_MCP_TOOL_NAME) {
+    const target = [input.server, input.tool ?? input.toolName]
+      .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+      .join(".");
+    return target || input.title;
+  }
+  if (name === CODEX_WEB_SEARCH_TOOL_NAME) return input.query ?? input.title ?? input.toolName;
+  if (name === CODEX_SUBAGENT_TOOL_NAME) return input.description ?? input.prompt ?? input.title;
+  if (name === CODEX_FILE_CHANGE_TOOL_NAME) {
+    const paths = Array.isArray(input.changes)
+      ? input.changes
+          .map((change) =>
+            isRecord(change) && typeof change.path === "string" ? change.path : null,
+          )
+          .filter((path): path is string => Boolean(path))
+      : [];
+    return paths.length > 0 ? paths.join(", ") : input.title;
+  }
+  return (
+    input.detail ??
+    input.description ??
+    input.command ??
+    input.query ??
+    input.action ??
+    input.question ??
+    input.title
+  );
+}
+
+function semanticToolFallback(name: string) {
+  if (name === CODEX_COMMAND_TOOL_NAME) return { label: "Command", kind: "execute" };
+  if (name === CODEX_MCP_TOOL_NAME) return { label: "MCP tool", kind: "mcp" };
+  if (name === CODEX_WEB_SEARCH_TOOL_NAME) return { label: "Web search", kind: "search" };
+  if (name === CODEX_FILE_CHANGE_TOOL_NAME) return { label: "File change", kind: "edit" };
+  if (name === CODEX_SUBAGENT_TOOL_NAME) return { label: "Subagent", kind: "subagent" };
+  return { label: humanizeToolName(name), kind: "tool" };
+}
+
+function semanticToolOutcome(part: Record<string, unknown>, redact: (value: string) => string) {
+  const output = isRecord(part.output) ? part.output : {};
+  return (
+    semanticToolText(output.status ?? output.summary, SEMANTIC_TOOL_LABEL_LIMIT, redact) ??
+    "completed"
+  );
+}
+
+function semanticToolText(value: unknown, limit: number, redact: (value: string) => string) {
+  if (typeof value !== "string") return undefined;
+  const redacted = redact(value).trim();
+  return redacted ? redacted.slice(0, limit) : undefined;
+}
+
+function humanizeToolName(name: string) {
+  const label = name
+    .split(/[._-]+/u)
+    .filter(Boolean)
+    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
+    .join(" ");
+  return label || "Tool";
 }
 
 function collectProjectedArtifactVersionIds(parts: readonly CodexUiMessagePart[]) {
@@ -928,7 +1104,7 @@ function collectProjectedArtifactVersionIds(parts: readonly CodexUiMessagePart[]
   return ids;
 }
 
-function codexChatEventKey(event: CodexAppServerNormalizedEvent) {
+function codexChatEventKey(event: HarnessNormalizedEvent) {
   const itemId = typeof event.payload.itemId === "string" ? event.payload.itemId : null;
   if (itemId && ITEM_LIFECYCLE_EVENT_TYPES.has(event.type)) return `${event.type}:${itemId}`;
   const turnId = typeof event.payload.turnId === "string" ? event.payload.turnId : null;
@@ -938,7 +1114,7 @@ function codexChatEventKey(event: CodexAppServerNormalizedEvent) {
   return null;
 }
 
-const ITEM_LIFECYCLE_EVENT_TYPES = new Set<CodexAppServerNormalizedEvent["type"]>([
+const ITEM_LIFECYCLE_EVENT_TYPES = new Set<HarnessNormalizedEvent["type"]>([
   "assistant.completed",
   "reasoning.completed",
   "command.started",
@@ -965,7 +1141,7 @@ function databaseErrorCode(error: unknown): string | undefined {
   return undefined;
 }
 
-function isValidCodexUserInputRequest(params: Record<string, unknown>) {
+function isValidEngineUserInputRequest(params: Record<string, unknown>) {
   if (
     typeof params.threadId !== "string" ||
     !params.threadId ||

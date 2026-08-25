@@ -9,8 +9,8 @@ import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize
 
 describe("managed capability catalog", () => {
   it("contains only the reviewed fixed action and endpoint allowlist", () => {
-    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(52);
-    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(52);
+    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(53);
+    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(53);
     expect(
       Object.fromEntries(
         MANAGED_CAPABILITY_ACTIONS.map((action) => [
@@ -23,6 +23,7 @@ describe("managed capability catalog", () => {
       "x.search_profiles": "tikhub:/api/v1/twitter/web/fetch_search_timeline",
       "x.list_followers": "tikhub:/api/v1/twitter/web/fetch_user_followers",
       "linkedin.get_person_profile": "tikhub:/api/v1/linkedin/web_v2/get_user_profile",
+      "linkedin.list_comments": "tikhub:/api/v1/linkedin/web_v2/get_post_comments",
       "youtube.get_transcript": "apify:/starvibe/youtube-video-transcript",
       "youtube.find_in_transcript": "apify:/starvibe/youtube-video-transcript",
       "instagram.search_reels": "tikhub:/api/v1/instagram/v2/search_reels",
@@ -37,10 +38,41 @@ describe("managed capability catalog", () => {
       "seo.list_organic_competitors": "semrush:/domain_organic_organic",
       "seo.get_keyword_metrics": "semrush:/keyword_metrics",
       "seo.get_backlink_overview": "semrush:/backlinks_overview",
+      "image.generate": "vercel-ai-gateway:google/gemini-3.1-flash-image",
     });
     expect(MANAGED_CAPABILITY_SOURCE_DETAILS.lead.description).toMatch(
       /look up work emails for known prospects/i,
     );
+  });
+
+  it("maps reference-image generation to the requested Nano Banana tier", () => {
+    expect(
+      action("image.generate").mapInput({
+        prompt: "Preserve the layout and restyle this as a blueprint.",
+        referenceImageAttachmentId: "attachment_123",
+        aspectRatio: "16:9",
+        resolution: "2K",
+      }),
+    ).toEqual({
+      providerInput: {
+        prompt: "Preserve the layout and restyle this as a blueprint.",
+        referenceImageAttachmentId: "attachment_123",
+        aspectRatio: "16:9",
+        resolution: "2K",
+        quality: "standard",
+        model: "google/gemini-3.1-flash-image",
+      },
+      resultLimit: 1,
+      canonicalLinks: [],
+    });
+    expect(
+      action("image.generate").mapInput({ prompt: "Highest fidelity", quality: "pro" }),
+    ).toMatchObject({
+      providerInput: {
+        model: "google/gemini-3-pro-image",
+        quality: "pro",
+      },
+    });
   });
 
   it("validates and maps every adapter while enforcing the product caps", () => {
@@ -190,7 +222,43 @@ describe("managed capability catalog", () => {
       action("linkedin.list_comments").mapInput({
         url: "https://www.linkedin.com/feed/update/urn:li:activity:7244804629786419202",
       }).providerInput,
-    ).toEqual({ post_id: "7244804629786419202" });
+    ).toEqual({ urn: "7244804629786419202" });
+    expect(
+      action("linkedin.list_comments").mapInput({
+        url: "https://www.linkedin.com/posts/openai_example-activity-7244804629786419202-AbCd",
+        limit: 20,
+      }),
+    ).toMatchObject({
+      providerInput: { urn: "7244804629786419202" },
+      resultLimit: 20,
+    });
+    expect(
+      action("linkedin.list_comments").mapInput({
+        url: "https://www.linkedin.com/posts/openai_example-share-7244804629786419202-AbCd",
+      }).providerInput,
+    ).toEqual({ urn: "7244804629786419202" });
+    expect(
+      (
+        action("linkedin.list_comments").params.properties as Record<
+          string,
+          { maximum?: number; description?: string }
+        >
+      ).limit,
+    ).toMatchObject({ maximum: 20 });
+    expect(
+      (
+        action("linkedin.list_comments").params.properties as Record<
+          string,
+          { maximum?: number; description?: string }
+        >
+      ).url?.description,
+    ).toMatch(/returned by linkedin\.get_post/i);
+    expect(() =>
+      action("linkedin.list_comments").mapInput({
+        url: "https://www.linkedin.com/feed/update/urn:li:activity:7244804629786419202",
+        limit: 21,
+      }),
+    ).toThrow(/1 to 20/i);
     expect(
       action("tiktok.get_video").mapInput({
         url: "https://www.tiktok.com/@openai/video/7331234567890123456",
@@ -442,8 +510,8 @@ describe("managed capability catalog", () => {
 
   it("normalizes SEO targets and maps only the bounded Semrush inputs", () => {
     expect(
-      MANAGED_CAPABILITY_ACTIONS.filter((entry) => entry.source === "seo").map(
-        (entry) => entry.inputLocation,
+      MANAGED_CAPABILITY_ACTIONS.filter((entry) => entry.source === "seo").map((entry) =>
+        "inputLocation" in entry ? entry.inputLocation : undefined,
       ),
     ).toEqual(Array(6).fill("queryParams"));
     expect(

@@ -25,8 +25,8 @@ describe("Postgres immutable Plugin repository", () => {
       INSERT INTO goat.chat_sessions (id) VALUES ('chat_1');
     `);
     for (const migrationName of [
-      "0222_goat_immutable_skill_bundles.sql",
-      "0224_goat_plugins.sql",
+      "0226_goat_immutable_skill_bundles.sql",
+      "0228_goat_plugins.sql",
     ]) {
       const migration = await readFile(
         path.resolve(import.meta.dirname, "../../..", `drizzle/${migrationName}`),

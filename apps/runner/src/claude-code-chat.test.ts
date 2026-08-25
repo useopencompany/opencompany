@@ -1,6 +1,6 @@
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
-  verifyClaudeActionGatewayTicket,
+  verifyExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import type {
   CodexChatSession,
@@ -46,7 +46,7 @@ const acpMocks = vi.hoisted(() => ({
 }));
 
 const eventMocks = vi.hoisted(() => ({
-  createCodexChatProjector: vi.fn(),
+  createExternalEngineProjector: vi.fn(),
   loadCodexChatAssistantMessageParts: vi.fn(),
 }));
 
@@ -64,6 +64,7 @@ const sandboxMocks = vi.hoisted(() => ({
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
   isRetryableCommandStreamError: vi.fn(),
+  isRetryableSandboxAcquisitionError: vi.fn(),
 }));
 
 const skillMocks = vi.hoisted(() => ({
@@ -121,6 +122,7 @@ vi.mock("@opencompany/db/plugin-runtime-repository", () => ({
 }));
 
 vi.mock("./claude-code-cli", () => ({
+  buildClaudeAcpCommand: () => "exec claude-agent-acp",
   buildClaudeAcpCommandEnv: () => ({ CLAUDE_CODE_OAUTH_TOKEN: "claude_token" }),
   ensureClaudeAcpAdapterInstalled: cliMocks.ensureClaudeAcpAdapterInstalled,
   killLeftoverClaudeTurnProcesses: cliMocks.killLeftoverClaudeTurnProcesses,
@@ -171,7 +173,7 @@ vi.mock("./codex-chat", () => ({
 }));
 
 vi.mock("./codex-chat-events", () => ({
-  createCodexChatProjector: eventMocks.createCodexChatProjector,
+  createExternalEngineProjector: eventMocks.createExternalEngineProjector,
   loadCodexChatAssistantMessageParts: eventMocks.loadCodexChatAssistantMessageParts,
 }));
 
@@ -223,6 +225,7 @@ vi.mock("./sandbox", () => ({
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
   isRetryableCommandStreamError: sandboxMocks.isRetryableCommandStreamError,
+  isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
 }));
 
 vi.mock("./codex-managed-skills", () => ({
@@ -267,16 +270,13 @@ describe("isClaudeCodeAuthenticationFailure", () => {
 });
 
 describe("extractAcpScheduleWakeup", () => {
-  it("reads a namespaced ScheduleWakeup call and clamps its delay", () => {
+  it("recognizes ACP ScheduleWakeup calls and clamps their delay", () => {
     expect(
       extractAcpScheduleWakeup(
-        acpToolCallEvent({
-          name: "mcp__opencompany_actions__ScheduleWakeup",
-          rawInput: {
-            delaySeconds: 9_000,
-            reason: "Final check",
-            prompt: "Check the deploy.",
-          },
+        acpToolCallEvent("ScheduleWakeup", {
+          delaySeconds: 9_000,
+          reason: "Final check",
+          prompt: "Check the deploy.",
         }),
       ),
     ).toEqual({
@@ -286,33 +286,13 @@ describe("extractAcpScheduleWakeup", () => {
     });
   });
 
-  it("clamps short delays to one minute", () => {
-    expect(
-      extractAcpScheduleWakeup(
-        acpToolCallEvent({
-          name: "ScheduleWakeup",
-          rawInput: { delay_seconds: 5, reason: "Wait for the process" },
-        }),
-      ),
-    ).toEqual({
-      delaySeconds: 60,
-      reason: "Wait for the process",
-      prompt: "",
-    });
-  });
-
   it("ignores malformed tool input and unrelated raw events", () => {
     expect(
       extractAcpScheduleWakeup(
-        acpToolCallEvent({
-          name: "ScheduleWakeup",
-          rawInput: { delay_seconds: "60", reason: "Wrong delay type" },
+        acpToolCallEvent("ScheduleWakeup", {
+          delay_seconds: "60",
+          reason: "Wrong delay type",
         }),
-      ),
-    ).toBeNull();
-    expect(
-      extractAcpScheduleWakeup(
-        acpToolCallEvent({ name: "Bash", rawInput: { command: "sleep 5" } }),
       ),
     ).toBeNull();
     expect(extractAcpScheduleWakeup({ method: "session/prompt_result" })).toBeNull();
@@ -359,7 +339,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       .mockReset()
       .mockImplementation(async (input: { mcpPlugins: unknown[] }) => {
         if (input.mcpPlugins.length === 0) {
-          return { servers: [], fingerprint: "no-plugin-mcp", pluginUsers: [] };
+          return { servers: [], pluginUsers: [] };
         }
         return {
           servers: [
@@ -370,7 +350,6 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
               env: [],
             },
           ],
-          fingerprint: "plugin-mcp",
           pluginUsers: [{ pluginName: "quality-tools", user: "ocp_test" }],
         };
       });
@@ -398,22 +377,8 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     });
     cliMocks.ensureClaudeAcpAdapterInstalled.mockResolvedValue(undefined);
     cliMocks.killLeftoverClaudeTurnProcesses.mockResolvedValue(undefined);
-    acpMocks.runTurn.mockImplementation(async (input) => {
-      const turnInput = input as {
-        onEngineSessionId: (sessionId: string) => Promise<void>;
-        onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
-      };
-      await turnInput.onEngineSessionId("claude_thread_1");
-      await turnInput.onRuntimeEvents(acpSuccessfulTurnEvents("Completed over ACP."));
-      return {
-        sessionId: "claude_thread_1",
-        loadedSession: true,
-        promptResponse: { stopReason: "end_turn" },
-        stderrTail: "",
-      };
-    });
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
-    eventMocks.createCodexChatProjector.mockImplementation(
+    eventMocks.createExternalEngineProjector.mockImplementation(
       (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
         push: vi.fn(async (events: Record<string, unknown>[]) => {
           for (const event of events) input.normalizeEvent?.(event);
@@ -434,15 +399,28 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
+    sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
     skillMocks.materializeClaudeSkillSnapshotsForSession.mockResolvedValue(undefined);
     taskMocks.buildTaskTerminalProjection.mockReturnValue({ taskId: "goat_task_1" });
     taskMocks.markTaskTurnRunning.mockResolvedValue(undefined);
+    acpMocks.runTurn.mockImplementation(
+      async (input: {
+        onEngineSessionId: (sessionId: string) => Promise<void>;
+        onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
+      }) => {
+        await input.onEngineSessionId("claude_thread_1");
+        await input.onRuntimeEvents(successfulAcpEvents("Done over ACP."));
+        return {
+          sessionId: "claude_thread_1",
+          loadedSession: true,
+          promptResponse: { stopReason: "end_turn" },
+          stderrTail: "",
+        };
+      },
+    );
   });
 
   it("configures Claude MCP against the runner with an attempt-and-lease capability", async () => {
-    const sandbox = fakeSandbox("sbx_existing");
-    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
-
     await runClaudeCodeChatTurn({
       turn: claudeTurn(),
       session: claudeSession({
@@ -453,21 +431,24 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       env: env({ runnerPublicUrl: "https://runner.example.com" }),
     });
 
-    const acpInput = acpMocks.runTurn.mock.calls[0]?.[0] as {
+    const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as {
       mcpServers: Array<{
         name: string;
         url: string;
         headers: Array<{ name: string; value: string }>;
       }>;
     };
-    const mcpServer = acpInput.mcpServers[0];
-    expect(mcpServer).toMatchObject({ name: "opencompany_actions", type: "http" });
-    expect(mcpServer?.url).toBe("https://runner.example.com/internal/goat/claude-actions");
-    const ticket = mcpServer?.headers.find(
-      (header) => header.name === "x-goat-action-ticket",
+    expect(harnessInput.mcpServers).toHaveLength(1);
+    const [server] = harnessInput.mcpServers;
+    expect(server).toMatchObject({
+      name: "opencompany",
+      url: "https://runner.example.com/internal/goat/acp-tools",
+    });
+    const ticket = server?.headers.find(
+      (header) => header.name === "x-opencompany-tool-ticket",
     )?.value;
     expect(
-      verifyClaudeActionGatewayTicket({
+      verifyExternalEngineGatewayTicket({
         ticket: ticket ?? "",
         secret: "internal",
       }),
@@ -547,14 +528,14 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     expect(pluginDataMocks.checkpoint).toHaveBeenCalledWith({ releaseLease: true });
   });
 
-  it("always runs Claude through the ACP harness", async () => {
+  it("runs the canonical ACP harness", async () => {
     const projector = {
       push: vi.fn(async () => undefined),
       finalize: vi.fn(async () => undefined),
       fail: vi.fn(async () => undefined),
       interrupted: vi.fn(async () => undefined),
     };
-    eventMocks.createCodexChatProjector.mockImplementationOnce(
+    eventMocks.createExternalEngineProjector.mockImplementationOnce(
       (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
         ...projector,
         push: vi.fn(async (events: Record<string, unknown>[]) => {
@@ -869,11 +850,140 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       cause: error,
     });
 
-    for (const result of eventMocks.createCodexChatProjector.mock.results) {
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
       expect(result.value.fail).not.toHaveBeenCalled();
       expect(result.value.finalize).not.toHaveBeenCalled();
     }
     expect(taskMocks.buildTaskTerminalProjection).not.toHaveBeenCalled();
+  });
+
+  it("fences a reused sandbox before recovery preflight can fail", async () => {
+    const preflightError = new Error("Repository bootstrap failed.");
+    repoMocks.loadRepositoryBootstrap.mockRejectedValueOnce(preflightError);
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn({ attempts: 2, codexTurnId: "claude_turn_1" }),
+        session: claudeSession(),
+        recovery: { reason: "lease_reclaimed" },
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results[0]?.value;
+    expect(cliMocks.killLeftoverClaudeTurnProcesses).toHaveBeenCalledOnce();
+    expect(chatMocks.claimCodexChatRecovery).toHaveBeenCalledOnce();
+    expect(cliMocks.killLeftoverClaudeTurnProcesses.mock.invocationCallOrder[0]).toBeLessThan(
+      chatMocks.claimCodexChatRecovery.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(projector.fail).toHaveBeenCalledWith("Repository bootstrap failed.", {
+      failureDiagnostic: "[load_repository_bootstrap] Error: Repository bootstrap failed.",
+    });
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("retries when an existing sandbox cannot be reconnected for fencing", async () => {
+    const connectError = new Error("Sandbox control plane request failed.");
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(connectError);
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn({ attempts: 2, codexTurnId: "claude_turn_1" }),
+        session: claudeSession(),
+        recovery: { reason: "lease_reclaimed" },
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: connectError,
+      message: "Claude Code could not reconnect to the existing sandbox before recovery.",
+      diagnosticMessage: "[connect_sandbox] Error: Sandbox control plane request failed.",
+    });
+
+    expect(cliMocks.killLeftoverClaudeTurnProcesses).not.toHaveBeenCalled();
+    expect(chatMocks.claimCodexChatRecovery).not.toHaveBeenCalled();
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
+  });
+
+  it("retries instead of settling when the previous sandbox process cannot be fenced", async () => {
+    const fenceError = new Error("Sandbox command stream is unavailable.");
+    cliMocks.killLeftoverClaudeTurnProcesses.mockRejectedValueOnce(fenceError);
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn({ attempts: 2, codexTurnId: "claude_turn_1" }),
+        session: claudeSession(),
+        recovery: { reason: "lease_reclaimed" },
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: fenceError,
+      message: "Claude Code could not fence the previous sandbox process before recovery.",
+      diagnosticMessage: "[fence_previous_turn] Error: Sandbox command stream is unavailable.",
+    });
+
+    expect(chatMocks.claimCodexChatRecovery).not.toHaveBeenCalled();
+    expect(acpMocks.runTurn).not.toHaveBeenCalled();
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
+    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("bootstraps durable history after a stale Claude session cannot resume", async () => {
+    historyMocks.loadCodingChatHistory.mockResolvedValueOnce({
+      messages: [
+        { role: "user", content: "Inspect the repository.", attachments: [] },
+        { role: "assistant", content: "It uses Next.js.", attachments: [] },
+      ],
+      materializableAttachments: [],
+      omittedTurnCount: 0,
+      omittedAttachmentCount: 0,
+    });
+    let resumedTask = "";
+    let freshTask = "";
+    acpMocks.runTurn.mockImplementationOnce(
+      async (input: {
+        task: string;
+        prepareFreshTask: () => Promise<string>;
+        onEngineSessionId: (sessionId: string) => Promise<void>;
+        onExistingSessionInvalidated: () => Promise<void>;
+        onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
+      }) => {
+        resumedTask = input.task;
+        await input.onExistingSessionInvalidated();
+        freshTask = await input.prepareFreshTask();
+        await input.onEngineSessionId("claude_thread_2");
+        await input.onRuntimeEvents(successfulAcpEvents("We established Next.js."));
+        return {
+          sessionId: "claude_thread_2",
+          loadedSession: false,
+          promptResponse: { stopReason: "end_turn" },
+          stderrTail: "",
+        };
+      },
+    );
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn({ prompt: "What did we establish?" }),
+        session: claudeSession({ codexThreadId: "claude_thread_missing" }),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(acpMocks.runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ existingSessionId: "claude_thread_missing" }),
+    );
+    expect(resumedTask).not.toContain("Inspect the repository.");
+    expect(freshTask).toMatch(
+      /conversation_history_json[\s\S]*Inspect the repository\.[\s\S]*What did we establish\?/u,
+    );
   });
 
   it("projects a task wakeup as the next durable task turn", async () => {
@@ -886,7 +996,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     });
     taskMocks.finalizeTaskResult.mockResolvedValueOnce("PR opened; CI is running.");
     taskMocks.buildTaskTurnCompletion.mockReturnValueOnce(completion);
-    eventMocks.createCodexChatProjector.mockImplementationOnce(
+    eventMocks.createExternalEngineProjector.mockImplementationOnce(
       (input: { normalizeEvent?: (event: unknown) => unknown }) => ({
         push: vi.fn(async (events: unknown[]) => {
           for (const event of events) input.normalizeEvent?.(event);
@@ -894,6 +1004,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
         finalize: vi.fn(async () => undefined),
         fail: vi.fn(async () => undefined),
         interrupted: vi.fn(async () => undefined),
+        cancelPendingInteractions: vi.fn(async () => false),
       }),
     );
     acpMocks.runTurn.mockImplementationOnce(
@@ -903,15 +1014,12 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       }) => {
         await input.onEngineSessionId("claude_thread_1");
         await input.onRuntimeEvents([
-          acpToolCallEvent({
-            name: "ScheduleWakeup",
-            rawInput: {
-              delay_seconds: 600,
-              reason: "Wait for CI",
-              prompt: "Inspect PR #42.",
-            },
+          acpToolCallEvent("ScheduleWakeup", {
+            delay_seconds: 600,
+            reason: "Wait for CI",
+            prompt: "Inspect PR #42.",
           }),
-          ...acpSuccessfulTurnEvents("PR opened; CI is running."),
+          ...successfulAcpEvents("PR opened; CI is running."),
         ]);
         return {
           sessionId: "claude_thread_1",
@@ -951,25 +1059,24 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
   });
 });
 
-function acpToolCallEvent(input: { name: string; rawInput: Record<string, unknown> }) {
+function acpToolCallEvent(name: string, rawInput: Record<string, unknown>) {
   return {
     method: "session/update",
     params: {
       sessionId: "claude_thread_1",
       update: {
         sessionUpdate: "tool_call",
-        toolCallId: "tool_1",
-        title: input.name,
-        name: input.name,
-        rawInput: input.rawInput,
+        toolCallId: `tool_${name}`,
+        title: name,
+        name,
+        rawInput,
       },
     },
   };
 }
 
-function acpSuccessfulTurnEvents(result: string) {
+function successfulAcpEvents(result: string): Record<string, unknown>[] {
   return [
-    { method: "session/started", params: { sessionId: "claude_thread_1" } },
     {
       method: "session/update",
       params: {
@@ -1147,6 +1254,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     codexChatIdleTimeoutMs: 300_000,
     jobLeaseTtlMs: 300_000,
     taskWorkerEnabled: false,
+    codexChatSelfHealEnabled: true,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

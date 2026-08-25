@@ -13,10 +13,10 @@ import {
 } from "@opencompany/agent-runtime";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import type {
-  CodexAppServerDynamicTool,
-  CodexAppServerDynamicToolCall,
-  CodexAppServerDynamicToolResponse,
-} from "./codex-app-server";
+  ExternalEngineTool,
+  ExternalEngineToolCall,
+  ExternalEngineToolResponse,
+} from "./external-engine-contract";
 
 type CodexBrainCaptureToolContext = {
   codexChatSessionId: string;
@@ -39,7 +39,7 @@ const defaultDependencies: CodexBrainCaptureToolDependencies = {
 export function createCodexBrainCaptureDynamicTool(
   context: CodexBrainCaptureToolContext,
   dependencies: Partial<CodexBrainCaptureToolDependencies> = {},
-): CodexAppServerDynamicTool {
+): ExternalEngineTool {
   const resolvedDependencies = { ...defaultDependencies, ...dependencies };
   return {
     spec: {
@@ -101,7 +101,7 @@ async function executeGatewayCall(input: {
   context: CodexBrainCaptureToolContext;
   dependencies: CodexBrainCaptureToolDependencies;
   request: CodexBrainCaptureGatewayRequest;
-}): Promise<CodexAppServerDynamicToolResponse> {
+}): Promise<ExternalEngineToolResponse> {
   try {
     await input.context.checkAbort();
     const result = await input.dependencies.execute(input.request);
@@ -120,7 +120,7 @@ async function executeGatewayCall(input: {
 
 function captureRequest(
   context: CodexBrainCaptureToolContext,
-  call: CodexAppServerDynamicToolCall,
+  call: ExternalEngineToolCall,
 ):
   | { ok: true; request: CodexBrainCaptureGatewayRequest }
   | { ok: false; response: CodexBrainCaptureGatewayResponse } {
@@ -183,9 +183,7 @@ function invalidParams(message: string): {
   return { ok: false, response: { ok: false, error: message } };
 }
 
-function modelResponse(
-  response: CodexBrainCaptureGatewayResponse,
-): CodexAppServerDynamicToolResponse {
+function modelResponse(response: CodexBrainCaptureGatewayResponse): ExternalEngineToolResponse {
   return {
     success: response.ok,
     contentItems: [{ type: "inputText", text: JSON.stringify(response) }],

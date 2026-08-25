@@ -947,6 +947,80 @@
               "type": {
                 "type": "string",
                 "enum": [
+                  "event"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "linear"
+                ]
+              },
+              "event": {
+                "type": "string",
+                "enum": [
+                  "issue_enters_triage"
+                ]
+              },
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "team": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "triageStateId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "triageStateId"
+                ],
+                "additionalProperties": false
+              },
+              "prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            },
+            "required": [
+              "type",
+              "provider",
+              "event",
+              "integrationId",
+              "team",
+              "prompt"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
                   "schedule"
                 ]
               },
@@ -1149,6 +1223,78 @@
             },
             "required": [
               "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "event"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "linear"
+                ]
+              },
+              "event": {
+                "type": "string",
+                "enum": [
+                  "issue_enters_triage"
+                ]
+              },
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "team": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "triageStateId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "triageStateId"
+                ],
+                "additionalProperties": false
+              },
+              "prompt": {
+                "type": "string",
+                "maxLength": 10000
+              }
+            },
+            "required": [
+              "type",
+              "provider",
+              "event",
+              "integrationId",
+              "team"
             ],
             "additionalProperties": false
           },
@@ -3147,6 +3293,11 @@
                     "key": {
                       "type": "string",
                       "maxLength": 128
+                    },
+                    "triageStateId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
                     }
                   },
                   "required": [
@@ -3846,7 +3997,8 @@
               "instagram",
               "tiktok",
               "lead",
-              "seo"
+              "seo",
+              "image"
             ]
           },
           "enabled": {
@@ -3960,7 +4112,8 @@
               "instagram",
               "tiktok",
               "lead",
-              "seo"
+              "seo",
+              "image"
             ]
           },
           "action": {
@@ -5253,6 +5406,11 @@
                     "key": {
                       "type": "string",
                       "maxLength": 128
+                    },
+                    "triageStateId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
                     }
                   },
                   "required": [
@@ -8384,6 +8542,27 @@
                   "name": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "detail": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "parentToolCallId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
                   }
                 },
                 "required": [
@@ -14549,7 +14728,8 @@
                 "instagram",
                 "tiktok",
                 "lead",
-                "seo"
+                "seo",
+                "image"
               ]
             },
             "required": true,

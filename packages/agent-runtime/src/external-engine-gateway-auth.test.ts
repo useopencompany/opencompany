@@ -1,9 +1,9 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  createClaudeActionGatewayTicket,
-  verifyClaudeActionGatewayTicket,
-} from "./claude-action-gateway-auth";
+  createExternalEngineGatewayTicket,
+  verifyExternalEngineGatewayTicket,
+} from "./external-engine-gateway-auth";
 
 const secret = "test-secret-at-least-long-enough";
 const codexChatSessionId = "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000";
@@ -12,9 +12,9 @@ const attemptId = "run_attempt_323e4567-e89b-12d3-a456-426614174000";
 const leaseId = "goat_codex_chat_lease_423e4567-e89b-12d3-a456-426614174000";
 
 function createTicket(
-  overrides: Partial<Parameters<typeof createClaudeActionGatewayTicket>[0]> = {},
+  overrides: Partial<Parameters<typeof createExternalEngineGatewayTicket>[0]> = {},
 ) {
-  return createClaudeActionGatewayTicket({
+  return createExternalEngineGatewayTicket({
     codexChatSessionId,
     codexChatTurnId,
     attemptId,
@@ -25,11 +25,13 @@ function createTicket(
   });
 }
 
-describe("opencompany claude action gateway tickets", () => {
+describe("opencompany external-engine gateway tickets", () => {
   it("round-trips a turn-bound short-lived ticket", () => {
     const signed = createTicket();
 
-    expect(verifyClaudeActionGatewayTicket({ ticket: signed.ticket, secret, now: 2_000 })).toEqual({
+    expect(
+      verifyExternalEngineGatewayTicket({ ticket: signed.ticket, secret, now: 2_000 }),
+    ).toEqual({
       v: 2,
       codexChatSessionId,
       codexChatTurnId,
@@ -43,13 +45,13 @@ describe("opencompany claude action gateway tickets", () => {
     const signed = createTicket();
 
     expect(
-      verifyClaudeActionGatewayTicket({ ticket: signed.ticket, secret, now: 3_601_000 }),
+      verifyExternalEngineGatewayTicket({ ticket: signed.ticket, secret, now: 3_601_000 }),
     ).toBeNull();
     expect(
-      verifyClaudeActionGatewayTicket({ ticket: `${signed.ticket}x`, secret, now: 2_000 }),
+      verifyExternalEngineGatewayTicket({ ticket: `${signed.ticket}x`, secret, now: 2_000 }),
     ).toBeNull();
     expect(
-      verifyClaudeActionGatewayTicket({
+      verifyExternalEngineGatewayTicket({
         ticket: signed.ticket,
         secret: "wrong-secret-value",
         now: 2_000,
@@ -62,16 +64,16 @@ describe("opencompany claude action gateway tickets", () => {
 
     expect(signed.expiresAt).toBe(6_000);
     expect(
-      verifyClaudeActionGatewayTicket({ ticket: signed.ticket, secret, now: 6_000 }),
+      verifyExternalEngineGatewayTicket({ ticket: signed.ticket, secret, now: 6_000 }),
     ).toBeNull();
     expect(
-      verifyClaudeActionGatewayTicket({ ticket: signed.ticket, secret, now: 5_999 }),
+      verifyExternalEngineGatewayTicket({ ticket: signed.ticket, secret, now: 5_999 }),
     ).not.toBeNull();
   });
 
   it("rejects malformed tickets", () => {
-    expect(verifyClaudeActionGatewayTicket({ ticket: "not-a-ticket", secret })).toBeNull();
-    expect(verifyClaudeActionGatewayTicket({ ticket: "", secret })).toBeNull();
+    expect(verifyExternalEngineGatewayTicket({ ticket: "not-a-ticket", secret })).toBeNull();
+    expect(verifyExternalEngineGatewayTicket({ ticket: "", secret })).toBeNull();
   });
 
   it("accepts legacy v1 tickets during the rollback window", () => {
@@ -85,7 +87,7 @@ describe("opencompany claude action gateway tickets", () => {
       .digest("base64url");
 
     expect(
-      verifyClaudeActionGatewayTicket({
+      verifyExternalEngineGatewayTicket({
         ticket: `${payload}.${signature}`,
         secret,
         now: 5_000,

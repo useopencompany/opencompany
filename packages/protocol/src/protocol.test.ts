@@ -290,6 +290,38 @@ describe("headless protocol", () => {
     ).toBe(false);
   });
 
+  it("accepts enriched and legacy tool event payloads", () => {
+    const base = {
+      id: "event_1",
+      runId: "run_1",
+      attemptId: "attempt_1",
+      cursor: "v1:1",
+      schemaVersion: 1,
+      occurredAt: "2026-08-10T00:00:00.000Z",
+      type: "tool.started" as const,
+    };
+
+    expect(
+      RunEventSchema.safeParse({
+        ...base,
+        payload: { toolCallId: "tool_1", name: "codex_command" },
+      }).success,
+    ).toBe(true);
+    expect(
+      RunEventSchema.safeParse({
+        ...base,
+        payload: {
+          toolCallId: "tool_2",
+          name: "codex_command",
+          label: "Run tests",
+          detail: "bun test",
+          kind: "execute",
+          parentToolCallId: "subagent_1",
+        },
+      }).success,
+    ).toBe(true);
+  });
+
   it("keeps approval answers exclusive to answered resolutions", () => {
     expect(
       ResolveApprovalBodySchema.safeParse({ resolution: "answered", answer: "continue" }).success,

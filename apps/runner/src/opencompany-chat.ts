@@ -29,8 +29,10 @@ import { createSendUserMessageRunner } from "@opencompany/agent/imessage/send-us
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import {
   AGENT_MODEL_CATALOG,
+  CHAT_ARTIFACT_DATA_PART_TYPE,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
+  parsePublishedChatArtifact,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
@@ -94,7 +96,9 @@ import {
 } from "./task-turn";
 import { loadWorkflowTaskSkillBundles } from "./workflow-skill-bundles";
 
-const ASSISTANT_PARTS_FLUSH_INTERVAL_MS = 500;
+// Durable chat_messages write cadence. Live text streams via the separate 50ms presentation-delta
+// path below, so this interval only bounds how often the Electric read-model row is rewritten.
+const ASSISTANT_PARTS_FLUSH_INTERVAL_MS = 2000;
 const PRESENTATION_DELTA_FLUSH_INTERVAL_MS = 50;
 const INTERRUPT_POLL_INTERVAL_MS = 500;
 
@@ -622,6 +626,18 @@ export async function consumeProductChatStream(input: {
           } else {
             replacePart(index, { ...parts[index], ...nextPart });
           }
+          const artifact = publishedArtifactFromActionResult(toolName, part.output);
+          if (
+            artifact &&
+            !parts.some(
+              (candidate) =>
+                candidate.type === CHAT_ARTIFACT_DATA_PART_TYPE &&
+                isRecord(candidate.data) &&
+                candidate.data.artifactVersionId === artifact.artifactVersionId,
+            )
+          ) {
+            appendPart({ type: CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact });
+          }
           await flush(true);
         }
       } else if (part.type === "tool-error") {
@@ -691,6 +707,12 @@ export async function consumeProductChatStream(input: {
   present(true);
   await flush(true);
   return projection();
+}
+
+function publishedArtifactFromActionResult(toolName: string, output: unknown) {
+  if (toolName !== "use_action" || !isRecord(output) || output.ok !== true) return null;
+  const result = isRecord(output.result) ? output.result : null;
+  return result ? parsePublishedChatArtifact({ ok: true, artifact: result.artifact }) : null;
 }
 
 export async function opencompanyModelMessagesFromStored(
@@ -979,6 +1001,9 @@ async function resolveProductChatRuntime(input: {
               workspaceId,
               chatSessionId: session.chatSessionId,
               toolCallId: call.toolCallId,
+              sourceTurnId: turn.id,
+              sourceMessageId: turn.assistantMessageId,
+              sourceEngine: "opencompany",
               signal,
               currentDate: new Date(),
               userTimezone: "UTC",

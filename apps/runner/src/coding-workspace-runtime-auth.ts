@@ -1,9 +1,11 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 const TICKET_VERSION = 1;
-const PREVIEW_CAPABILITY_VERSION = 1;
+const LEGACY_PREVIEW_CAPABILITY_VERSION = 1;
+const PREVIEW_CAPABILITY_VERSION = 2;
 const PREVIEW_SIGNATURE_BYTES = 16;
-const CODING_SESSION_PREFIX = "goat_codex_chat_";
+const LEGACY_CODING_SESSION_PREFIX = "goat_codex_chat_";
+const CODING_SESSION_PREFIX = "runtime_";
 const BASE32_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
 
 type CodingWorkspaceTicketPayload = {
@@ -60,7 +62,7 @@ export function verifyCodingWorkspaceTicket(input: {
     if (
       value.v !== TICKET_VERSION ||
       typeof value.codingSessionId !== "string" ||
-      !value.codingSessionId.startsWith(CODING_SESSION_PREFIX) ||
+      !hasCodingSessionPrefix(value.codingSessionId) ||
       typeof value.userWorkosId !== "string" ||
       !value.userWorkosId ||
       typeof value.expiresAt !== "number" ||
@@ -83,12 +85,12 @@ export function createCodingWorkspacePreviewCapability(input: {
   ttlMs?: number;
 }) {
   assertPreviewPort(input.port);
-  const uuidBytes = parseCodingSessionUuid(input.codingSessionId);
+  const { uuidBytes, version } = parseCodingSessionUuid(input.codingSessionId);
   const expiresAtSeconds = Math.floor(
     ((input.now ?? Date.now()) + (input.ttlMs ?? 8 * 60 * 60_000)) / 1_000,
   );
   const body = Buffer.alloc(23);
-  body.writeUInt8(PREVIEW_CAPABILITY_VERSION, 0);
+  body.writeUInt8(version, 0);
   uuidBytes.copy(body, 1);
   body.writeUInt16BE(input.port, 17);
   body.writeUInt32BE(expiresAtSeconds, 19);
@@ -125,14 +127,21 @@ export function verifyCodingWorkspacePreviewCapability(input: {
     input.secret,
   ).subarray(0, PREVIEW_SIGNATURE_BYTES);
   if (!timingSafeEqual(expectedSignature, suppliedSignature)) return null;
-  if (body.readUInt8(0) !== PREVIEW_CAPABILITY_VERSION) return null;
+  const version = body.readUInt8(0);
+  const codingSessionPrefix =
+    version === PREVIEW_CAPABILITY_VERSION
+      ? CODING_SESSION_PREFIX
+      : version === LEGACY_PREVIEW_CAPABILITY_VERSION
+        ? LEGACY_CODING_SESSION_PREFIX
+        : null;
+  if (!codingSessionPrefix) return null;
 
   const port = body.readUInt16BE(17);
   const expiresAt = body.readUInt32BE(19) * 1_000;
   if (!isPreviewPort(port) || expiresAt <= (input.now ?? Date.now())) return null;
 
   return {
-    codingSessionId: `${CODING_SESSION_PREFIX}${formatUuid(body.subarray(1, 17))}`,
+    codingSessionId: `${codingSessionPrefix}${formatUuid(body.subarray(1, 17))}`,
     port,
     expiresAt,
   };
@@ -175,14 +184,30 @@ function decodeBase32(encoded: string) {
 }
 
 function parseCodingSessionUuid(sessionId: string) {
-  const uuid = sessionId.startsWith(CODING_SESSION_PREFIX)
-    ? sessionId.slice(CODING_SESSION_PREFIX.length)
-    : "";
+  const prefix = sessionId.startsWith(CODING_SESSION_PREFIX)
+    ? CODING_SESSION_PREFIX
+    : sessionId.startsWith(LEGACY_CODING_SESSION_PREFIX)
+      ? LEGACY_CODING_SESSION_PREFIX
+      : null;
+  const uuid = prefix ? sessionId.slice(prefix.length) : "";
   const hex = uuid.replaceAll("-", "");
   if (!/^[0-9a-f]{32}$/i.test(hex)) {
     throw new Error("Coding workspace session id does not contain a valid UUID.");
   }
-  return Buffer.from(hex, "hex");
+  return {
+    uuidBytes: Buffer.from(hex, "hex"),
+    version:
+      prefix === CODING_SESSION_PREFIX
+        ? PREVIEW_CAPABILITY_VERSION
+        : LEGACY_PREVIEW_CAPABILITY_VERSION,
+  };
+}
+
+function hasCodingSessionPrefix(sessionId: string) {
+  return (
+    sessionId.startsWith(CODING_SESSION_PREFIX) ||
+    sessionId.startsWith(LEGACY_CODING_SESSION_PREFIX)
+  );
 }
 
 function formatUuid(bytes: Uint8Array) {

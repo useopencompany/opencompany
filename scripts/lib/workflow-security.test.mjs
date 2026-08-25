@@ -62,7 +62,7 @@ test("the pull request path remains credential-free", async () => {
     "bun run boundary:check",
     "bun --filter @opencompany/protocol openapi:check",
     "bun --bun turbo run lint typecheck --concurrency=2",
-    "bun --bun turbo run test --concurrency=2",
+    "bun turbo run test --concurrency=2",
     "-- --maxWorkers=2",
     "bun --bun turbo run build --concurrency=2",
     "node --test scripts/lib/*.test.mjs",
@@ -77,6 +77,20 @@ test("the pull request path remains credential-free", async () => {
   assert.match(verifier, /github\.ref == 'refs\/heads\/main'/u);
   assert.match(verifier, /trufflesecurity\/trufflehog@[a-f0-9]{40}/u);
   assert.doesNotMatch(verifier, /^\s+version:/mu);
+});
+
+test("cache restore and save use the same pinned action release", async () => {
+  const verifier = await readFile(verifyWorkflowUrl, "utf8");
+  const restoreRefs = [...verifier.matchAll(/actions\/cache\/restore@(?<ref>[a-f0-9]{40})/gu)].map(
+    (match) => match.groups?.ref,
+  );
+  const saveRefs = [...verifier.matchAll(/actions\/cache\/save@(?<ref>[a-f0-9]{40})/gu)].map(
+    (match) => match.groups?.ref,
+  );
+
+  assert.ok(restoreRefs.length > 0, "verification must restore at least one cache");
+  assert.ok(saveRefs.length > 0, "verification must save at least one cache");
+  assert.equal(new Set([...restoreRefs, ...saveRefs]).size, 1);
 });
 
 test("the PR gate aggregates every direct gate job", async () => {

@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { loadEncryptionKey } from "@opencompany/crypto";
-
-const DEFAULT_CODEX_TIMEOUT_MS = 60 * 60 * 1000;
+import { DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS } from "./coding-sandbox-lifecycle";
 
 export type RunnerEnv = {
   internalToken: string;
@@ -43,12 +42,12 @@ export type RunnerEnv = {
   hubspotOAuthClientSecret?: string | undefined;
   codexE2bTemplate: string | undefined;
   blobReadWriteToken?: string | undefined;
-  // Wall-clock ceiling for a single Codex engine turn: timeouts surface partial output but
-  // never publish a pull request.
+  // Wall-clock ceiling shared by Codex and Claude Code engine turns. Timeouts surface partial
+  // output but never publish a pull request.
   codexTimeoutMs: number;
   codexModel: string;
   // Idle timeout for persistent opencompany codex-chat sandboxes. Unlike per-task sandboxes (killed after
-  // each run), a chat sandbox stays alive across turns so files and the app-server daemon survive;
+  // each run), a chat sandbox stays alive across turns so files and ACP session state survive;
   // on idle timeout E2B pauses it and Sandbox.connect auto-resumes on the next message.
   codexChatIdleTimeoutMs: number;
   // Delivery-lease TTL for runner jobs. The lease heartbeats every 5s while a job runs, so this only
@@ -59,6 +58,9 @@ export type RunnerEnv = {
   codexChatLeaseTtlMs?: number | undefined;
   // Explicit opt-in for opencompany's durable task worker and runner-hosted tools.
   taskWorkerEnabled: boolean;
+  // Kill switch for the codex-chat self-heal sweeper (resets runtime state of sessions stuck in a
+  // fast-fail loop). Defaults on; only set false to disable the automatic remediation in an incident.
+  codexChatSelfHealEnabled: boolean;
   workerConcurrency: number;
   port: number;
   allowedOrigins: string[];
@@ -92,7 +94,10 @@ export function loadEnv(): RunnerEnv {
     hubspotOAuthClientSecret: optionalEnv("OPENCOMPANY_HUBSPOT_CLIENT_SECRET"),
     codexE2bTemplate: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE"),
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
-    codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", DEFAULT_CODEX_TIMEOUT_MS),
+    codexTimeoutMs: optionalPositiveIntegerEnv(
+      "RUNNER_CODEX_TIMEOUT_MS",
+      DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS,
+    ),
     codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.6-sol",
     codexChatIdleTimeoutMs: optionalPositiveIntegerEnv(
       "RUNNER_OPENCOMPANY_CODEX_CHAT_IDLE_TIMEOUT_MS",
@@ -101,6 +106,7 @@ export function loadEnv(): RunnerEnv {
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
     codexChatLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_CODEX_CHAT_LEASE_TTL_MS", 90_000),
     taskWorkerEnabled: optionalBooleanEnv("RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED", false),
+    codexChatSelfHealEnabled: optionalBooleanEnv("RUNNER_CODEX_CHAT_SELF_HEAL_ENABLED", true),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
     // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not

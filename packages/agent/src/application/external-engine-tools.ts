@@ -10,13 +10,13 @@ import {
 } from "@opencompany/agent-runtime";
 import * as z from "zod/v4-mini";
 
-export type ClaudeToolContext = {
+export type ExternalEngineToolContext = {
   sessionId: string;
   runId: string;
   signal?: AbortSignal;
 };
 
-export type ClaudeActionToolDependencies = {
+export type ExternalEngineToolDependencies = {
   executeAction: (input: {
     request: ActionGatewayRequest;
     signal: AbortSignal;
@@ -30,17 +30,16 @@ export type ClaudeActionToolDependencies = {
   }) => Promise<PublishArtifactToolResponse>;
 };
 
-// MCP requires Zod validators, while Codex accepts JSON Schema directly. Build
-// the MCP validators from the same dependency-light contract so field names,
-// requiredness, descriptions, and annotations cannot drift between harnesses.
+// MCP requires Zod validators. Build them from the dependency-light shared contracts so
+// field names, requiredness, descriptions, and annotations cannot drift between engines.
 const listActionsInputSchema = mcpInputSchema(ACTION_TOOL_CONTRACT.list.inputSchema);
 const useActionInputSchema = mcpInputSchema(ACTION_TOOL_CONTRACT.execute.inputSchema);
 const publishArtifactInputSchema = mcpInputSchema(PUBLISH_ARTIFACT_INPUT_JSON_SCHEMA);
 
-export function registerClaudeActionServiceTools(
+export function registerExternalEngineServiceTools(
   server: McpServer,
-  ctx: ClaudeToolContext,
-  dependencies: ClaudeActionToolDependencies,
+  ctx: ExternalEngineToolContext,
+  dependencies: ExternalEngineToolDependencies,
 ) {
   server.registerTool(
     PUBLISH_ARTIFACT_TOOL_NAME,
@@ -109,21 +108,17 @@ export function registerClaudeActionServiceTools(
   );
 }
 
-type ContractInputSchema = {
-  properties: Record<
-    string,
-    {
-      type: string;
-      description?: string;
-    }
-  >;
-  required?: readonly string[];
-};
-
-function mcpInputSchema(schema: ContractInputSchema): Record<string, z.ZodMiniType> {
-  const required = new Set(schema.required ?? []);
+export function mcpInputSchema(schema: unknown): Record<string, z.ZodMiniType> {
+  const record = isRecord(schema) ? schema : {};
+  const properties = isRecord(record.properties) ? record.properties : {};
+  const required = new Set(
+    Array.isArray(record.required)
+      ? record.required.filter((value): value is string => typeof value === "string")
+      : [],
+  );
   return Object.fromEntries(
-    Object.entries(schema.properties).map(([name, property]) => {
+    Object.entries(properties).map(([name, value]) => {
+      const property = isRecord(value) ? value : {};
       let validator: z.ZodMiniType =
         property.type === "string"
           ? z.string()
@@ -132,7 +127,7 @@ function mcpInputSchema(schema: ContractInputSchema): Record<string, z.ZodMiniTy
             : property.type === "object"
               ? z.record(z.string(), z.unknown())
               : z.unknown();
-      if (property.description) {
+      if (typeof property.description === "string" && property.description) {
         validator = validator.check(z.meta({ description: property.description }));
       }
       return [name, required.has(name) ? validator : z.optional(validator)];
@@ -151,8 +146,8 @@ function mcpInvocationId(
 }
 
 async function runGateway(
-  executeAction: ClaudeActionToolDependencies["executeAction"],
-  ctx: ClaudeToolContext,
+  executeAction: ExternalEngineToolDependencies["executeAction"],
+  ctx: ExternalEngineToolContext,
   request: ActionGatewayRequest,
 ) {
   const response = await executeAction({

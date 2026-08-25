@@ -5,7 +5,6 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildPluginProcessEnvironment,
-  codexPluginMcpConfig,
   expandPluginVariablesOnce,
   materializeTrustedPluginMcpLaunchers,
   pluginRuntimeUser,
@@ -184,7 +183,6 @@ describe("Plugin MCP trusted launcher", () => {
     expect(commands.join("\n")).toContain(
       "test \"$(realpath -m -- '/workspace/.opencompany')\" = '/workspace/.opencompany'",
     );
-    expect(codexPluginMcpConfig(runtime.servers)).toContain('[mcp_servers."quality-tools.local"]');
   });
 
   it("kills stale Plugin users and removes sudoers when approval disappears", async () => {

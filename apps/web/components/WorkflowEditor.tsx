@@ -18,17 +18,21 @@ import {
   Clock,
   Loader2,
   MoreHorizontal,
+  Play,
   Plus,
   Sparkles,
   Trash2,
+  Webhook,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Markdown } from "@/components/Markdown";
 import { MarkdownBrainEditor } from "@/components/MarkdownBrainEditor";
+import { type LinearTeamListResult, listLinearTeamsAction } from "@/lib/brain-source-actions";
 import {
   archiveHeadlessWorkflow,
+  runHeadlessWorkflowNow,
   updateHeadlessWorkflow,
 } from "@/lib/headless-automation-commands";
 import type { WorkflowDetail } from "@/lib/headless-automation-types";
@@ -54,12 +58,22 @@ import {
 
 const AUTOSAVE_DELAY_MS = 1200;
 const MAX_WORKFLOW_STEPS = 20;
+const DEFAULT_LINEAR_EVENT_PROMPT = "Review and triage this Linear issue.";
 
 type WorkflowStatus = WorkflowDetail["status"];
 type WorkflowStep = WorkflowDetail["steps"][number];
 type WorkflowTriggerDraft =
   | { type: "manual" }
+  | {
+      type: "event";
+      provider: "linear";
+      event: "issue_enters_triage";
+      integrationId: string;
+      team: { id: string; name: string; key?: string; triageStateId: string };
+      prompt: string;
+    }
   | { type: "schedule"; cron: string; timezone: string; prompt: string };
+type LinearWorkflowAccount = { integrationId: string; label: string };
 type WorkflowStepPatch = Partial<Omit<WorkflowStep, "runtimeModel" | "reasoningEffort">> & {
   runtimeModel?: WorkflowStep["runtimeModel"] | undefined;
   reasoningEffort?: WorkflowStep["reasoningEffort"] | undefined;
@@ -75,17 +89,22 @@ const DEFAULT_MODEL_LABEL =
 
 export function WorkflowEditor({
   workflow,
+  workspaceId,
   canEdit,
   skillCatalog,
+  linearAccounts = [],
 }: {
   workflow: WorkflowDetail;
+  workspaceId: string;
   canEdit: boolean;
   skillCatalog: SkillCatalogItem[];
+  linearAccounts?: LinearWorkflowAccount[];
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<WorkflowDraft>(() => workflowDraft(workflow));
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isRunning, startRunning] = useTransition();
   const [isArchiving, startArchiving] = useTransition();
   const draftRef = useRef(draft);
   const versionRef = useRef(workflow.version);
@@ -112,6 +131,7 @@ export function WorkflowEditor({
     async function saveLatestDraft() {
       const autosave = autosaveRef.current;
       const snapshot = draftRef.current;
+      if (!workflowDraftReadyToSave(snapshot)) return;
       const value = serializeWorkflowDraft(snapshot);
       if (value === autosave.savedValue) return;
       if (autosave.inFlight) return;
@@ -169,6 +189,11 @@ export function WorkflowEditor({
 
   useEffect(() => {
     if (!canEdit) return;
+    if (!workflowDraftReadyToSave(draft)) {
+      setSaveState("saved");
+      setSaveError(null);
+      return;
+    }
     const value = serializeWorkflowDraft(draft);
     const autosave = autosaveRef.current;
     if (value === autosave.savedValue) {
@@ -225,7 +250,7 @@ export function WorkflowEditor({
   };
 
   const archive = () => {
-    if (!canEdit) return;
+    if (!canEdit || isRunning) return;
     setSaveError(null);
     startArchiving(async () => {
       try {
@@ -236,6 +261,28 @@ export function WorkflowEditor({
       }
     });
   };
+
+  const runNow = () => {
+    if (draft.trigger.type !== "schedule") return;
+    setSaveError(null);
+    startRunning(async () => {
+      try {
+        const result = await runHeadlessWorkflowNow(workflow.id, { scopeKey: workspaceId });
+        router.push(`/tasks/${encodeURIComponent(result.task.displayId)}`);
+      } catch (error) {
+        setSaveError(workflowCommandError(error, "run"));
+      }
+    });
+  };
+
+  const runDisabledReason = workflowRunDisabledReason({
+    canEdit,
+    draft,
+    saveState,
+  });
+  const runActionDisabledReason = isArchiving
+    ? "Wait for the archive action to finish before running."
+    : runDisabledReason;
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -250,11 +297,27 @@ export function WorkflowEditor({
                 </span>
               ) : null}
               <SaveIndicator state={saveState} canEdit={canEdit} onRetry={saveLatest} />
+              {draft.trigger.type === "schedule" && canEdit ? (
+                <button
+                  type="button"
+                  disabled={isRunning || runActionDisabledReason !== null}
+                  title={runActionDisabledReason ?? "Run this workflow now"}
+                  onClick={runNow}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isRunning ? (
+                    <Loader2 size={13} strokeWidth={2} className="animate-spin" />
+                  ) : (
+                    <Play size={13} strokeWidth={2} />
+                  )}
+                  {isRunning ? "Starting…" : "Run now"}
+                </button>
+              ) : null}
               {canEdit ? (
                 <EditorMoreMenu
                   onArchive={archive}
                   isArchiving={isArchiving}
-                  saveInProgress={saveState === "saving"}
+                  saveInProgress={saveState === "saving" || isRunning}
                 />
               ) : null}
             </div>
@@ -285,6 +348,7 @@ export function WorkflowEditor({
           <TriggerSection
             trigger={draft.trigger}
             canEdit={canEdit}
+            linearAccounts={linearAccounts}
             onChange={(trigger) => patch({ trigger })}
           />
 
@@ -464,10 +528,12 @@ function StatusDot({ status }: { status: WorkflowStatus }) {
 function TriggerSection({
   trigger,
   canEdit,
+  linearAccounts,
   onChange,
 }: {
   trigger: WorkflowTriggerDraft;
   canEdit: boolean;
+  linearAccounts: LinearWorkflowAccount[];
   onChange: (trigger: WorkflowTriggerDraft) => void;
 }) {
   const setManual = () => onChange({ type: "manual" });
@@ -482,6 +548,22 @@ function TriggerSection({
             prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
           },
     );
+  const setLinearEvent = () => {
+    if (trigger.type === "event") {
+      onChange(trigger);
+      return;
+    }
+    const account = linearAccounts[0];
+    if (!account) return;
+    onChange({
+      type: "event",
+      provider: "linear",
+      event: "issue_enters_triage",
+      integrationId: account.integrationId,
+      team: { id: "", name: "", triageStateId: "" },
+      prompt: DEFAULT_LINEAR_EVENT_PROMPT,
+    });
+  };
   const updateSchedule = (
     partial: Partial<Extract<WorkflowTriggerDraft, { type: "schedule" }>>,
   ) => {
@@ -512,7 +594,26 @@ function TriggerSection({
             disabled={!canEdit}
             onSelect={setSchedule}
           />
+          <TriggerModeButton
+            icon={Webhook}
+            label="On an event"
+            selected={trigger.type === "event"}
+            disabled={!canEdit || (linearAccounts.length === 0 && trigger.type !== "event")}
+            onSelect={setLinearEvent}
+          />
         </div>
+
+        {linearAccounts.length === 0 && trigger.type !== "event" ? (
+          <p className="mt-3 text-[12px] text-ink-subtle">
+            <Link
+              href="/settings/integrations"
+              className="underline underline-offset-2 hover:text-ink"
+            >
+              Connect Linear
+            </Link>{" "}
+            to trigger workflows from issues entering triage.
+          </p>
+        ) : null}
 
         {trigger.type === "schedule" ? (
           <div className="mt-3 flex flex-col gap-3">
@@ -536,8 +637,138 @@ function TriggerSection({
             </label>
           </div>
         ) : null}
+        {trigger.type === "event" ? (
+          <LinearEventTriggerEditor
+            trigger={trigger}
+            accounts={linearAccounts}
+            canEdit={canEdit}
+            onChange={onChange}
+          />
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function LinearEventTriggerEditor({
+  trigger,
+  accounts,
+  canEdit,
+  onChange,
+}: {
+  trigger: Extract<WorkflowTriggerDraft, { type: "event" }>;
+  accounts: LinearWorkflowAccount[];
+  canEdit: boolean;
+  onChange: (trigger: WorkflowTriggerDraft) => void;
+}) {
+  const [teamsState, setTeamsState] = useState<{
+    integrationId: string;
+    result: LinearTeamListResult;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listLinearTeamsAction(trigger.integrationId).then((result) => {
+      if (!cancelled) setTeamsState({ integrationId: trigger.integrationId, result });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [trigger.integrationId]);
+
+  const teams = teamsState?.integrationId === trigger.integrationId ? teamsState.result : null;
+
+  const accountOptions = accounts.some((account) => account.integrationId === trigger.integrationId)
+    ? accounts
+    : [{ integrationId: trigger.integrationId, label: "Disconnected Linear account" }, ...accounts];
+  const teamOptions =
+    teams?.ok && !teams.teams.some((team) => team.id === trigger.team.id)
+      ? [trigger.team, ...teams.teams]
+      : teams?.ok
+        ? teams.teams
+        : [trigger.team];
+
+  return (
+    <div className="mt-3 flex flex-col gap-3">
+      <p className="text-[12px] leading-5 text-ink-subtle">
+        Starts one task when an issue for the selected team is created in or moved into Linear
+        triage.
+      </p>
+      {accounts.length === 0 ? (
+        <p className="text-[12px] text-warning">
+          This Linear account is disconnected.{" "}
+          <Link href="/settings/integrations" className="underline underline-offset-2">
+            Reconnect Linear
+          </Link>
+          .
+        </p>
+      ) : null}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="flex min-w-0 flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-subtle">Linear account</span>
+          <select
+            value={trigger.integrationId}
+            disabled={!canEdit}
+            onChange={(event) =>
+              onChange({
+                ...trigger,
+                integrationId: event.target.value,
+                team: { id: "", name: "", triageStateId: "" },
+              })
+            }
+            className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+          >
+            {accountOptions.map((account) => (
+              <option key={account.integrationId} value={account.integrationId}>
+                {account.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex min-w-0 flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-subtle">Team</span>
+          <select
+            value={trigger.team.id}
+            disabled={!canEdit || !teams?.ok}
+            onChange={(event) => {
+              const team = teamOptions.find((candidate) => candidate.id === event.target.value);
+              if (team?.triageStateId)
+                onChange({ ...trigger, team: { ...team, triageStateId: team.triageStateId } });
+            }}
+            className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+          >
+            {!trigger.team.id ? <option value="">Select a team…</option> : null}
+            {teamOptions
+              .filter((team) => team.id && team.triageStateId)
+              .map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.key ? `${team.key} · ` : ""}
+                  {team.name}
+                </option>
+              ))}
+          </select>
+          {teams && !teams.ok ? (
+            <span className="text-[11.5px] text-warning">{teams.error}</span>
+          ) : null}
+          {teams?.ok && teams.teams.every((team) => !team.triageStateId) ? (
+            <span className="text-[11.5px] text-warning">
+              No teams with Triage enabled were found in this Linear workspace.
+            </span>
+          ) : null}
+        </label>
+      </div>
+      <label className="flex min-w-0 flex-col gap-1.5">
+        <span className="text-[12px] font-medium text-ink-subtle">Task request</span>
+        <textarea
+          value={trigger.prompt}
+          readOnly={!canEdit}
+          onChange={(event) => onChange({ ...trigger, prompt: event.target.value })}
+          rows={3}
+          placeholder={DEFAULT_LINEAR_EVENT_PROMPT}
+          className="min-h-20 resize-y rounded-lg border border-border bg-canvas px-2.5 py-2 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+        />
+      </label>
+    </div>
   );
 }
 
@@ -1240,7 +1471,9 @@ function workflowDraft(workflow: WorkflowDetail): WorkflowDraft {
             timezone: workflow.trigger.timezone,
             prompt: workflow.trigger.prompt,
           }
-        : { type: "manual" },
+        : workflow.trigger.type === "event"
+          ? { ...workflow.trigger }
+          : { type: "manual" },
   };
 }
 
@@ -1260,12 +1493,45 @@ function serializeWorkflowDraft(draft: WorkflowDraft) {
   return JSON.stringify(draft);
 }
 
+function workflowDraftReadyToSave(draft: WorkflowDraft) {
+  return (
+    draft.trigger.type !== "event" ||
+    Boolean(
+      draft.trigger.integrationId &&
+        draft.trigger.team.id &&
+        draft.trigger.team.name &&
+        draft.trigger.team.triageStateId,
+    )
+  );
+}
+
 function newWorkflowStepId() {
   return `step-${globalThis.crypto.randomUUID()}`;
 }
 
-function workflowCommandError(error: unknown, operation: "saved" | "archived") {
-  return error instanceof Error
-    ? error.message
-    : `The workflow could not be ${operation}. Try again.`;
+function workflowRunDisabledReason({
+  canEdit,
+  draft,
+  saveState,
+}: {
+  canEdit: boolean;
+  draft: WorkflowDraft;
+  saveState: SaveState;
+}) {
+  if (!canEdit) return "Only workspace admins can run workflows.";
+  if (draft.status !== "active") return "Set the workflow to Active before running it.";
+  if (draft.steps.length === 0 || draft.steps.some((step) => !step.instructions.trim())) {
+    return "Add instructions to every step before running the workflow.";
+  }
+  if (saveState === "saving") return "Wait for the latest changes to save before running.";
+  if (saveState === "error") return "Save the latest changes before running.";
+  return null;
+}
+
+function workflowCommandError(error: unknown, operation: "saved" | "archived" | "run") {
+  const fallback =
+    operation === "run"
+      ? "The workflow could not be run. Try again."
+      : `The workflow could not be ${operation}. Try again.`;
+  return error instanceof Error ? error.message : fallback;
 }

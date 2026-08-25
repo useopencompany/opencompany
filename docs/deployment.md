@@ -62,7 +62,7 @@ finish first, but Render builds happen after migration, so migrations must be ad
 with the currently deployed API and runner as well as the previous safe application revision. Never
 use a routine release to drop retained compatibility tables or rewrite migration history.
 
-Migration `0226_legacy_skill_cutover.sql` is an explicitly authorized destructive cutover. Before
+Migration `0230_legacy_skill_cutover.sql` is an explicitly authorized destructive cutover. Before
 deploying it, operators must record the legacy row counts:
 
 ```sql

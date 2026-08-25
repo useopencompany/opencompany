@@ -331,6 +331,37 @@ describe("session-backed task turns", () => {
     expect(canonicalEventTypes(query.params)).toEqual(["message.content_updated", terminalEvent]);
   });
 
+  it("stores an internal Attempt diagnostic separately from the user-facing Run error", async () => {
+    await settleDurableTurn({
+      target: {
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        codexChatSessionId: "runtime_1",
+        chatSessionId: "conversation_1",
+        turnId: "turn_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+      turnStatus: "failed",
+      sessionStatus: "idle",
+      error: "Repository preparation failed.",
+      completedAt: new Date("2026-07-30T09:30:00.000Z"),
+      canonicalRun: {
+        attemptId: "attempt_1",
+        assistantMessageId: "assistant_message_1",
+        content: "Latest response",
+        failureDiagnostic: "[load_bootstrap] DatabaseError: connection closed",
+      },
+    });
+
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
+    expect(query.params).toContain("Repository preparation failed.");
+    expect(query.params).toContain("[load_bootstrap] DatabaseError: connection closed");
+    expect(query.params).toContainEqual(
+      expect.stringContaining('"message":"Repository preparation failed."'),
+    );
+  });
+
   it("bounds coding-session and turn errors at durable settlement", async () => {
     const overlongError = `${"x".repeat(2_000)}private-tail`;
     const boundedError = overlongError.slice(0, 2_000);

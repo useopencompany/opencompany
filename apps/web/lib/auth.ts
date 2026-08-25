@@ -1,6 +1,7 @@
 import type { IdentityDto } from "@opencompany/protocol";
 import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
 import type { AuthenticationResponse, User as WorkOSUser } from "@workos-inc/node";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { NextRequest } from "next/server";
 import { cache } from "react";
@@ -74,7 +75,18 @@ export async function completeAuthentication(
 ) {
   await saveSession(authResponse, request);
   await recordLastAuthMethod(authResponse.authenticationMethod);
-  const client = await serverApiClient({ authorization: `Bearer ${authResponse.accessToken}` });
+  // saveSession updates Next.js's mutable cookie store; the incoming Cookie
+  // header still contains the pre-authentication session (or no session).
+  const sessionCookieName = process.env.WORKOS_COOKIE_NAME?.trim() || "wos-session";
+  const sessionCookie = (await cookies()).get(sessionCookieName);
+  if (!sessionCookie) {
+    throw new Error("Could not read the newly saved authentication session.");
+  }
+  const requestUrl = typeof request === "string" ? request : request.url;
+  const client = await serverApiClient({
+    sessionCookie,
+    origin: new URL(requestUrl).origin,
+  });
   const response = await client.v1.identity.sync.$post();
   if (!response.ok) {
     throw await serverApiError(response, "Could not synchronize the authenticated identity.");

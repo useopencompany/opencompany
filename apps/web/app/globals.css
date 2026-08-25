@@ -77,6 +77,24 @@ body {
   overscroll-behavior: none;
 }
 
+.desktop-drag-region {
+  -webkit-app-region: drag;
+}
+
+.desktop-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+html[data-opencompany-desktop="true"] .desktop-standalone-title-bar {
+  padding-left: 5rem;
+  -webkit-app-region: drag;
+}
+
+html[data-opencompany-desktop="true"] .desktop-standalone-title-bar a,
+html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
+  -webkit-app-region: no-drag;
+}
+
 @keyframes goat-thinking-shimmer {
   0% {
     background-position: 160% 0;
@@ -407,6 +425,8 @@ body {
 .tiptap-brain .wiki-brain-chip {
   display: inline-flex;
   align-items: center;
+  max-width: calc(100% - 0.08em);
+  box-sizing: border-box;
   gap: 0.25em;
   padding: 0.06em 0.42em 0.06em 0.34em;
   margin: 0 0.04em;
@@ -443,9 +463,12 @@ body {
   opacity: 0.75;
 }
 .tiptap-brain .wiki-brain-chip-label {
+  display: block;
+  min-width: 0;
+  max-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 32ch;
+  white-space: nowrap;
 }
 .tiptap-brain .wiki-brain-chip-unresolved {
   color: var(--color-ink-muted);

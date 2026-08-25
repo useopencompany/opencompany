@@ -40,6 +40,7 @@ test("legacy Skill cutover reports table rows and deduplicated active Workflow T
   assert.ok(taskQuery);
   assert.match(taskQuery, /task\.status IN \('queued', 'running'\)/u);
   assert.match(taskQuery, /task\.workflow_id IS NOT NULL/u);
+  assert.match(taskQuery, /jsonb_typeof\(task\.harness_spec->'workflow'\) = 'object'/u);
   assert.match(taskQuery, /\$\.\*\*\.skillSnapshots/u);
   assert.match(taskQuery, /jsonb_typeof\(step\.value->'skillBundleIds'\)/u);
   assert.match(taskQuery, /has_skill_snapshots OR missing_skill_bundle_ids/u);

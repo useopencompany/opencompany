@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { CodexAppServerNormalizedEvent } from "./codex-app-server-events";
-import { normalizeCodexAppServerEvent } from "./codex-app-server-events";
 import {
   applyCodexEventToUiMessageParts,
   CODEX_APPROVAL_TOOL_NAME,
@@ -23,29 +21,18 @@ import {
   resolveCodexUiApproval,
   resolveCodexUiInteraction,
 } from "./codex-ui-message-parts";
+import type { HarnessNormalizedEvent } from "./harness-events";
 
 function normalizedEvent(
-  type: CodexAppServerNormalizedEvent["type"],
+  type: HarnessNormalizedEvent["type"],
   payload: Record<string, unknown>,
-): CodexAppServerNormalizedEvent {
+): HarnessNormalizedEvent {
   return { type, payload, rawEvent: {} };
 }
 
-function reduceNormalized(parts: CodexUiMessagePart[], raw: CodexAppServerNormalizedEvent[]) {
+function reduceNormalized(parts: CodexUiMessagePart[], raw: HarnessNormalizedEvent[]) {
   let current = parts;
   for (const event of raw) {
-    current = applyCodexEventToUiMessageParts(current, event).parts;
-  }
-  return current;
-}
-
-function events(raw: Record<string, unknown>[]) {
-  return raw.flatMap((event) => normalizeCodexAppServerEvent(event));
-}
-
-function reduce(parts: CodexUiMessagePart[], raw: Record<string, unknown>[]) {
-  let current = parts;
-  for (const event of events(raw)) {
     current = applyCodexEventToUiMessageParts(current, event).parts;
   }
   return current;
@@ -183,560 +170,115 @@ describe("applyCodexEventToUiMessageParts", () => {
     });
   });
 
-  it("projects an interleaved reasoning/command/text turn in order", () => {
-    const parts = reduce(
+  it("folds MCP tool arguments and result into the durable part", () => {
+    const parts = reduceNormalized(
       [],
       [
-        {
-          method: "item/completed",
-          params: { item: { id: "r_1", type: "reasoning", text: "Considering the repo layout." } },
-        },
-        {
-          method: "item/started",
-          params: { item: { id: "cmd_1", type: "commandExecution", command: "ls apps" } },
-        },
-        {
-          method: "item/completed",
-          params: {
-            item: {
-              id: "cmd_1",
-              type: "commandExecution",
-              command: "ls apps",
-              status: "completed",
-              exitCode: 0,
-            },
-          },
-        },
-        {
-          method: "item/completed",
-          params: { item: { id: "msg_1", type: "agentMessage", text: "The repo has three apps." } },
-        },
-      ],
-    );
-
-    expect(parts).toEqual([
-      { type: "reasoning", text: "Considering the repo layout.", state: "done" },
-      {
-        type: CODEX_COMMAND_TOOL_PART_TYPE,
-        toolCallId: "cmd_1",
-        state: "output-available",
-        input: { command: "ls apps" },
-        output: { status: "completed", exitCode: 0 },
-      },
-      { type: "text", text: "The repo has three apps." },
-    ]);
-    expect(codexUiMessagePartsContent(parts)).toBe("The repo has three apps.");
-  });
-
-  it("keeps a started command in input-available state until it completes", () => {
-    const parts = reduce(
-      [],
-      [
-        {
-          method: "item/started",
-          params: { item: { id: "cmd_1", type: "commandExecution", command: "bun test" } },
-        },
-      ],
-    );
-    expect(parts).toEqual([
-      {
-        type: CODEX_COMMAND_TOOL_PART_TYPE,
-        toolCallId: "cmd_1",
-        state: "input-available",
-        input: { command: "bun test" },
-      },
-    ]);
-  });
-
-  it("matches command completion by itemId and marks failures as output-error", () => {
-    const parts = reduce(
-      [],
-      [
-        {
-          method: "item/started",
-          params: { item: { id: "cmd_1", type: "commandExecution", command: "one" } },
-        },
-        {
-          method: "item/started",
-          params: { item: { id: "cmd_2", type: "commandExecution", command: "two" } },
-        },
-        {
-          method: "item/completed",
-          params: {
-            item: {
-              id: "cmd_1",
-              type: "commandExecution",
-              command: "one",
-              status: "failed",
-              exitCode: 2,
-              error: "boom",
-            },
-          },
-        },
-      ],
-    );
-
-    expect(parts[0]).toEqual({
-      type: CODEX_COMMAND_TOOL_PART_TYPE,
-      toolCallId: "cmd_1",
-      state: "output-error",
-      input: { command: "one" },
-      errorText: "boom",
-    });
-    expect(parts[1]).toMatchObject({ toolCallId: "cmd_2", state: "input-available" });
-  });
-
-  it("synthesizes a terminal command part when the started event was lost", () => {
-    const parts = reduce(
-      [],
-      [
-        {
-          method: "item/completed",
-          params: {
-            item: {
-              id: "cmd_9",
-              type: "commandExecution",
-              command: "make",
-              status: "completed",
-              exitCode: 0,
-            },
-          },
-        },
-      ],
-    );
-    expect(parts).toEqual([
-      {
-        type: CODEX_COMMAND_TOOL_PART_TYPE,
-        toolCallId: "cmd_9",
-        state: "output-available",
-        input: { command: "make" },
-        output: { status: "completed", exitCode: 0 },
-      },
-    ]);
-  });
-
-  it("ignores duplicate command.started events for the same item", () => {
-    const started = {
-      method: "item/started",
-      params: { item: { id: "cmd_1", type: "commandExecution", command: "pwd" } },
-    };
-    const parts = reduce([], [started, started]);
-    expect(parts).toHaveLength(1);
-  });
-
-  it("treats turn events and usage as no-ops", () => {
-    for (const raw of [
-      { method: "turn/started", params: { turn: { id: "t1" } } },
-      { method: "turn/completed", params: { turn: { id: "t1", status: "completed" } } },
-      { method: "thread/tokenUsage/updated", params: { tokenUsage: { total: 5 } } },
-    ]) {
-      const [event] = normalizeCodexAppServerEvent(raw);
-      const projection = applyCodexEventToUiMessageParts([], event!);
-      expect(projection.changed).toBe(false);
-      expect(projection.parts).toEqual([]);
-    }
-  });
-
-  it("surfaces error events without adding parts", () => {
-    const [event] = normalizeCodexAppServerEvent({
-      method: "error",
-      params: { message: "rate limited" },
-    });
-    const projection = applyCodexEventToUiMessageParts([], event!);
-    expect(projection.changed).toBe(true);
-    expect(projection.error).toBe("rate limited");
-    expect(projection.parts).toEqual([]);
-  });
-
-  it("attaches a truncated output preview on completion when provided", () => {
-    const accumulator = createCodexCommandOutputAccumulator(10);
-    for (const raw of [
-      {
-        method: "item/commandExecution/outputDelta",
-        params: { itemId: "cmd_1", delta: "0123456789" },
-      },
-      { method: "item/commandExecution/outputDelta", params: { itemId: "cmd_1", delta: "abcdef" } },
-    ]) {
-      for (const event of normalizeCodexAppServerEvent(raw)) accumulator.push(event);
-    }
-
-    const [completed] = normalizeCodexAppServerEvent({
-      method: "item/completed",
-      params: {
-        item: {
-          id: "cmd_1",
-          type: "commandExecution",
-          command: "cat file",
+        normalizedEvent("mcp_tool.started", {
+          itemId: "read_1",
+          toolName: "Read",
+          kind: "read",
+          title: "Read the package manifest",
+          tool: "Read",
+          rawInput: { file_path: "package.json" },
+        }),
+        normalizedEvent("mcp_tool.completed", {
+          itemId: "read_1",
+          toolName: "Read",
+          kind: "read",
+          title: "Read the package manifest",
+          tool: "Read",
           status: "completed",
-          exitCode: 0,
-        },
-      },
-    });
-    const projection = applyCodexEventToUiMessageParts([], completed!, {
-      commandOutputPreview: accumulator.take("cmd_1"),
-    });
-    expect(projection.parts[0]).toMatchObject({
-      state: "output-available",
-      output: { status: "completed", exitCode: 0, outputPreview: "6789abcdef" },
-    });
-    expect(accumulator.take("cmd_1")).toBeNull();
-  });
-
-  it("projects plan deltas into a durable plan part", () => {
-    const parts = reduce(
-      [],
-      [
-        {
-          method: "item/plan/delta",
-          params: { itemId: "plan_1", delta: "1. Read code\n" },
-        },
-        {
-          method: "item/plan/delta",
-          params: { itemId: "plan_1", delta: "2. Patch tests" },
-        },
-        {
-          method: "item/completed",
-          params: {
-            item: {
-              id: "plan_1",
-              type: "plan",
-              text: "1. Read code\n2. Patch tests",
-              status: "completed",
-            },
-          },
-        },
+          rawInput: { file_path: "package.json" },
+          result: '{ "name": "opencompany" }',
+        }),
       ],
     );
 
     expect(parts).toEqual([
-      {
-        type: "dynamic-tool",
-        toolName: CODEX_PLAN_TOOL_NAME,
-        toolCallId: "plan_1",
-        state: "output-available",
-        input: { label: "Plan" },
-        output: { status: "completed", text: "1. Read code\n2. Patch tests" },
-      },
-    ]);
-
-    const offered = offerCodexPlanImplementation(parts);
-    expect(offered.changed).toBe(true);
-    expect(offered.parts[0]).toMatchObject({
-      output: { implementationAvailable: true },
-    });
-  });
-
-  it("projects native turn plan updates without offering implementation", () => {
-    const parts = reduce(
-      [],
-      [
-        {
-          method: "turn/plan/updated",
-          params: {
-            turnId: "turn_1",
-            plan: [
-              { step: "Inspect the renderer", status: "completed" },
-              { step: "Patch native plan support", status: "inProgress" },
-            ],
-          },
-        },
-      ],
-    );
-
-    expect(parts).toEqual([
-      {
-        type: "dynamic-tool",
-        toolName: CODEX_PLAN_TOOL_NAME,
-        toolCallId: "turn-plan:turn_1",
-        state: "input-available",
-        input: {
-          label: "Plan",
-          source: "turn_plan",
-          text: "[x] Inspect the renderer\n[~] Patch native plan support",
-          plan: [
-            { step: "Inspect the renderer", status: "completed" },
-            { step: "Patch native plan support", status: "inProgress" },
-          ],
-        },
-      },
-    ]);
-
-    const finalized = finalizeCodexUiMessageParts(parts, "completed").parts;
-    expect(finalized[0]).toMatchObject({
-      state: "output-available",
-      output: {
-        status: "completed",
-        source: "turn_plan",
-        text: "[x] Inspect the renderer\n[~] Patch native plan support",
-      },
-    });
-    expect(offerCodexPlanImplementation(finalized).changed).toBe(false);
-  });
-
-  it("offers implementation only through the explicit terminal Plan-mode transition", () => {
-    const noPlan = offerCodexPlanImplementation([{ type: "text", text: "Done" }]);
-    expect(noPlan.changed).toBe(false);
-
-    const runningPlan: CodexUiMessagePart[] = [
-      {
-        type: "dynamic-tool",
-        toolName: CODEX_PLAN_TOOL_NAME,
-        toolCallId: "plan_1",
-        state: "input-available",
-        input: { label: "Plan", text: "1. Inspect" },
-      },
-    ];
-    expect(offerCodexPlanImplementation(runningPlan).changed).toBe(false);
-  });
-
-  it("projects and resolves an interactive app-server question", () => {
-    const [event] = normalizeCodexAppServerEvent({
-      id: 42,
-      method: "item/tool/requestUserInput",
-      interactionId: "interaction_1",
-      params: {
-        threadId: "thread_1",
-        turnId: "turn_1",
-        itemId: "question_1",
-        questions: [
-          {
-            id: "scope",
-            header: "Scope",
-            question: "How broad should the fix be?",
-            options: [{ label: "Foundational", description: "Harden the full path." }],
-          },
-        ],
-      },
-    });
-    const waiting = applyCodexEventToUiMessageParts([], event!).parts;
-    expect(waiting[0]).toMatchObject({
-      toolName: CODEX_QUESTION_TOOL_NAME,
-      state: "approval-requested",
-      input: {
-        interactionId: "interaction_1",
-        question: "How broad should the fix be?",
-      },
-    });
-
-    const answered = resolveCodexUiInteraction(waiting, {
-      interactionId: "interaction_1",
-      status: "answered",
-    });
-    expect(answered.parts[0]).toMatchObject({
-      state: "output-available",
-      output: { status: "answered" },
-    });
-  });
-
-  it("projects file changes, MCP tool calls, and web searches as durable parts", () => {
-    const parts = reduce(
-      [],
-      [
-        {
-          method: "item/started",
-          params: {
-            item: { id: "file_1", type: "fileChange", changes: [{ path: "src/a.ts" }] },
-          },
-        },
-        {
-          method: "item/completed",
-          params: {
-            item: {
-              id: "file_1",
-              type: "fileChange",
-              status: "completed",
-              changes: [{ path: "src/a.ts", kind: "edit" }, { path: "src/b.ts" }],
-            },
-          },
-        },
-        {
-          method: "item/completed",
-          params: {
-            item: {
-              id: "mcp_1",
-              type: "mcpToolCall",
-              server: "linear",
-              tool: "create_issue",
-              status: "failed",
-              error: { message: "auth expired" },
-            },
-          },
-        },
-        {
-          method: "item/completed",
-          params: { item: { id: "search_1", type: "webSearch", query: "drizzle upsert" } },
-        },
-      ],
-    );
-
-    expect(parts).toEqual([
-      {
-        type: "dynamic-tool",
-        toolName: CODEX_FILE_CHANGE_TOOL_NAME,
-        toolCallId: "file_1",
-        state: "output-available",
-        input: {
-          label: "File change",
-          changes: [{ path: "src/a.ts", kind: "edit" }, { path: "src/b.ts" }],
-        },
-        output: {
-          status: "completed",
-          changes: [{ path: "src/a.ts", kind: "edit" }, { path: "src/b.ts" }],
-        },
-      },
       {
         type: "dynamic-tool",
         toolName: CODEX_MCP_TOOL_NAME,
-        toolCallId: "mcp_1",
+        toolCallId: "read_1",
         state: "output-available",
-        input: { label: "MCP tool", server: "linear", tool: "create_issue" },
-        output: { status: "failed", error: "auth expired" },
+        input: {
+          label: "MCP tool",
+          toolName: "Read",
+          kind: "read",
+          title: "Read the package manifest",
+          tool: "Read",
+          arguments: { file_path: "package.json" },
+        },
+        output: { status: "completed", result: '{ "name": "opencompany" }' },
       },
+    ]);
+  });
+
+  it("replaces a command placeholder and persists its description", () => {
+    const parts = reduceNormalized(
+      [],
+      [
+        normalizedEvent("command.started", { itemId: "command_1", command: "Terminal" }),
+        normalizedEvent("command.completed", {
+          itemId: "command_1",
+          command: "git status --short",
+          description: "Check the working tree",
+          output: { status: "completed", exitCode: 0 },
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: CODEX_COMMAND_TOOL_PART_TYPE,
+        toolCallId: "command_1",
+        state: "output-available",
+        input: {
+          command: "git status --short",
+          description: "Check the working tree",
+        },
+        output: { status: "completed", exitCode: 0 },
+      },
+    ]);
+    expect(parseCodexUiMessageParts(JSON.parse(JSON.stringify(parts)))).toEqual(parts);
+  });
+
+  it("folds web-search tool semantics into the durable part", () => {
+    const parts = reduceNormalized(
+      [],
+      [
+        normalizedEvent("web_search.started", {
+          itemId: "grep_1",
+          toolName: "Grep",
+          kind: "search",
+          title: "Search source files",
+          query: "normalizeToolCallUpdate",
+        }),
+        normalizedEvent("web_search.completed", {
+          itemId: "grep_1",
+          toolName: "Grep",
+          kind: "search",
+          title: "Search source files",
+          query: "normalizeToolCallUpdate",
+          status: "completed",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
       {
         type: "dynamic-tool",
         toolName: CODEX_WEB_SEARCH_TOOL_NAME,
-        toolCallId: "search_1",
+        toolCallId: "grep_1",
         state: "output-available",
-        input: { label: "Web search", query: "drizzle upsert" },
+        input: {
+          label: "Web search",
+          toolName: "Grep",
+          kind: "search",
+          title: "Search source files",
+          query: "normalizeToolCallUpdate",
+        },
         output: { status: "completed" },
-      },
-    ]);
-  });
-
-  it("projects a Brain host tool call as a durable generic tool part", () => {
-    const parts = reduce(
-      [],
-      [
-        {
-          method: "item/started",
-          params: {
-            item: {
-              id: "dynamic_1",
-              type: "dynamicToolCall",
-              tool: "goat_brain",
-              arguments: { command: "query", flags: { text: "pricing" } },
-            },
-          },
-        },
-        {
-          method: "item/completed",
-          params: {
-            item: {
-              id: "dynamic_1",
-              type: "dynamicToolCall",
-              tool: "goat_brain",
-              arguments: { command: "query", flags: { text: "pricing" } },
-              status: "completed",
-              success: true,
-              contentItems: [{ type: "inputText", text: '{"hits":[]}' }],
-            },
-          },
-        },
-      ],
-    );
-
-    expect(parts).toEqual([
-      {
-        type: "dynamic-tool",
-        toolName: CODEX_DYNAMIC_TOOL_NAME,
-        toolCallId: "dynamic_1",
-        state: "output-available",
-        input: {
-          label: "Brain",
-          tool: "goat_brain",
-          arguments: { command: "query", flags: { text: "pricing" } },
-        },
-        output: { status: "completed", success: true },
-      },
-    ]);
-  });
-
-  it("labels a Brain capture host tool clearly", () => {
-    const parts = reduce(
-      [],
-      [
-        {
-          method: "item/started",
-          params: {
-            item: {
-              id: "dynamic_save_1",
-              type: "dynamicToolCall",
-              tool: "save_to_brain",
-              arguments: { content: "Remember this." },
-            },
-          },
-        },
-      ],
-    );
-
-    expect(parts).toEqual([
-      {
-        type: "dynamic-tool",
-        toolName: CODEX_DYNAMIC_TOOL_NAME,
-        toolCallId: "dynamic_save_1",
-        state: "input-available",
-        input: {
-          label: "Save to Brain",
-          tool: "save_to_brain",
-          arguments: { content: "Remember this." },
-        },
-      },
-    ]);
-  });
-
-  it("projects goal, question, and approval request states", () => {
-    const parts = reduce(
-      [],
-      [
-        {
-          method: "thread/goal/updated",
-          params: {
-            goal: {
-              objective: "Ship this UI",
-              status: "active",
-              tokenBudget: 1000,
-              tokensUsed: 25,
-            },
-          },
-        },
-        {
-          method: "userInput/requested",
-          params: { itemId: "question_1", question: "Which branch should I use?" },
-        },
-        {
-          method: "approval/requested",
-          params: { itemId: "approval_1", title: "Apply patch", action: "apply_patch" },
-        },
-      ],
-    );
-
-    expect(parts).toEqual([
-      {
-        type: "dynamic-tool",
-        toolName: CODEX_GOAL_TOOL_NAME,
-        toolCallId: `${CODEX_GOAL_TOOL_NAME}_1`,
-        state: "output-available",
-        input: { label: "Goal" },
-        output: {
-          objective: "Ship this UI",
-          status: "active",
-          tokenBudget: 1000,
-          tokensUsed: 25,
-        },
-      },
-      {
-        type: "dynamic-tool",
-        toolName: CODEX_QUESTION_TOOL_NAME,
-        toolCallId: "question_1",
-        state: "approval-requested",
-        input: { label: "Question", question: "Which branch should I use?" },
-      },
-      {
-        type: "dynamic-tool",
-        toolName: CODEX_APPROVAL_TOOL_NAME,
-        toolCallId: "approval_1",
-        state: "approval-requested",
-        input: { label: "Approval", title: "Apply patch", action: "apply_patch" },
       },
     ]);
   });
@@ -859,7 +401,7 @@ describe("parseCodexUiMessageParts", () => {
         type: CODEX_COMMAND_TOOL_PART_TYPE,
         toolCallId: "cmd_1",
         state: "output-available",
-        input: { command: "ls" },
+        input: { command: "ls", description: "List files" },
         output: { status: "completed", exitCode: 0, outputPreview: "apps" },
       },
       {

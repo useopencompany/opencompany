@@ -255,6 +255,23 @@ export const WorkflowTriggerSchema = z
     z.object({ type: z.literal("manual") }).strict(),
     z
       .object({
+        type: z.literal("event"),
+        provider: z.literal("linear"),
+        event: z.literal("issue_enters_triage"),
+        integrationId: ResourceIdSchema,
+        team: z
+          .object({
+            id: z.string().min(1).max(256),
+            name: z.string().min(1).max(256),
+            key: z.string().min(1).max(32).optional(),
+            triageStateId: z.string().min(1).max(256),
+          })
+          .strict(),
+        prompt: z.string().min(1).max(10_000),
+      })
+      .strict(),
+    z
+      .object({
         type: z.literal("schedule"),
         cron: z.string().min(1).max(128),
         timezone: z.string().min(1).max(128),
@@ -270,6 +287,23 @@ export const WorkflowTriggerSchema = z
 export const WorkflowTriggerInputSchema = z
   .discriminatedUnion("type", [
     z.object({ type: z.literal("manual") }).strict(),
+    z
+      .object({
+        type: z.literal("event"),
+        provider: z.literal("linear"),
+        event: z.literal("issue_enters_triage"),
+        integrationId: ResourceIdSchema,
+        team: z
+          .object({
+            id: z.string().min(1).max(256),
+            name: z.string().min(1).max(256),
+            key: z.string().min(1).max(32).optional(),
+            triageStateId: z.string().min(1).max(256),
+          })
+          .strict(),
+        prompt: z.string().max(10_000).optional(),
+      })
+      .strict(),
     z
       .object({
         type: z.literal("schedule"),
@@ -911,6 +945,7 @@ const NamedSourceRefSchema = z
   .strict();
 const LinearTeamRefSchema = NamedSourceRefSchema.extend({
   key: z.string().max(128).optional(),
+  triageStateId: z.string().min(1).max(256).optional(),
 }).strict();
 const GmailEventRefSchema = z.object({ id: z.enum(["email_received", "email_sent"]) }).strict();
 const LinearEventRefSchema = z
@@ -1787,6 +1822,7 @@ export const AddWikiTimelineEntryBodySchema = z
 export const WikiCommandSchema = z
   .object({
     command: z.enum([...WIKI_TOOL_COMMANDS]),
+    depth: z.number().int().min(0).max(10).optional(),
     pages: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(20)]).optional(),
     path: z.string().min(1).max(512).optional(),
     body: z.string().max(1_000_000).optional(),
@@ -2737,6 +2773,7 @@ export const ManagedCapabilitySourceSchema = z.enum([
   "tiktok",
   "lead",
   "seo",
+  "image",
 ]);
 
 export const WorkspaceCapabilitySchema = z
