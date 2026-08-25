@@ -17,7 +17,7 @@
     "@opencompany/ui": "workspace:*",
     "github-slugger": "^2.0.0",
     "gray-matter": "^4.0.3",
-    "next": "16.2.6",
+    "next": "16.3.2",
     "next-mdx-remote": "^6.0.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -30,7 +30,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.3.2",
     "postcss": "8.5.26",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3"

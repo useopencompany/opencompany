@@ -25,13 +25,13 @@
     "@opencompany/observability": "workspace:*",
     "@opencompany/protocol": "workspace:*",
     "@opencompany/wiki": "workspace:*",
-    "@vercel/blob": "^2.4.0",
+    "@vercel/blob": "^2.8.0",
     "@workos-inc/node": "^10.10.0",
     "drizzle-orm": "^0.45.2",
-    "hono": "4.12.28",
+    "hono": "4.13.3",
     "jose": "^5.10.0",
     "pg": "^8.23.0",
-    "stripe": "22.1.1"
+    "stripe": "22.5.0"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

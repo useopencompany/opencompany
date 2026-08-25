@@ -25,9 +25,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hono/zod-openapi": "1.5.2",
+    "@hono/zod-openapi": "1.6.1",
     "@opencompany/wiki": "workspace:*",
-    "hono": "4.12.28",
+    "hono": "4.13.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
