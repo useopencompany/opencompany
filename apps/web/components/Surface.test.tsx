@@ -132,6 +132,7 @@ const headlessChatMocks = vi.hoisted(() => ({
     }) => ({
       conversationId: input.clientConversationId,
       runId: "run_background_1",
+      completion: Promise.resolve(),
     }),
   ),
 }));
@@ -726,14 +727,31 @@ describe("Surface chat streaming UI", () => {
 
   it("starts a background chat from the main composer when the message starts with ampersand", async () => {
     const user = userEvent.setup();
-    let resolveChatResponse: (() => void) | null = null;
-    const chatResponseReady = new Promise<void>((resolve) => {
-      resolveChatResponse = resolve;
+    let resolveFirstCompletion: (() => void) | null = null;
+    let resolveSecondCompletion: (() => void) | null = null;
+    let resolveFirstLaunch:
+      | ((launch: { conversationId: string; runId: string; completion: Promise<void> }) => void)
+      | null = null;
+    const firstLaunch = new Promise<{
+      conversationId: string;
+      runId: string;
+      completion: Promise<void>;
+    }>((resolve) => {
+      resolveFirstLaunch = resolve;
     });
-    headlessChatMocks.startBackground.mockImplementationOnce(async (input) => {
-      await chatResponseReady;
-      return { conversationId: input.clientConversationId, runId: "run_background_1" };
+    const firstCompletion = new Promise<void>((resolve) => {
+      resolveFirstCompletion = resolve;
     });
+    const secondCompletion = new Promise<void>((resolve) => {
+      resolveSecondCompletion = resolve;
+    });
+    headlessChatMocks.startBackground
+      .mockImplementationOnce(async () => firstLaunch)
+      .mockImplementationOnce(async (input) => ({
+        conversationId: input.clientConversationId,
+        runId: "run_background_2",
+        completion: secondCompletion,
+      }));
 
     render(
       <>
@@ -781,13 +799,91 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
+    await waitFor(() => expect(textarea).toHaveFocus());
+    expect(textarea).not.toBeDisabled();
+
+    await user.type(textarea, "& Summarize Q4");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledTimes(2));
+    const secondBody = headlessChatMocks.startBackground.mock.calls[1]![0];
+    expect(secondBody).toMatchObject({ content: "Summarize Q4", model: DEFAULT_MODEL });
+    expect(screen.getByTestId("local-chat-states")).toHaveTextContent(
+      `${body.clientConversationId}:working`,
+    );
+    expect(screen.getByTestId("local-chat-states")).toHaveTextContent(
+      `${secondBody.clientConversationId}:working`,
+    );
+    expect(textarea).toHaveValue("");
+    expect(textarea).not.toBeDisabled();
+
     await act(async () => {
-      resolveChatResponse?.();
+      resolveFirstLaunch?.({
+        conversationId: body.clientConversationId,
+        runId: "run_background_1",
+        completion: firstCompletion,
+      });
+    });
+    await act(async () => {
+      resolveFirstCompletion?.();
     });
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByTestId("local-chat-states")).not.toHaveTextContent(
+        `${body.clientConversationId}:working`,
+      ),
+    );
+    expect(screen.getByTestId("local-chat-states")).toHaveTextContent(
+      `${secondBody.clientConversationId}:working`,
+    );
+    await act(async () => {
+      resolveSecondCompletion?.();
+    });
     await waitFor(() => expect(screen.getByTestId("local-chat-states")).toHaveTextContent("none"));
     expect(textarea).toHaveValue("");
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+  });
+
+  it("keeps an accepted background chat when live completion monitoring fails", async () => {
+    const user = userEvent.setup();
+    let rejectCompletion: ((error: Error) => void) | null = null;
+    const completion = new Promise<void>((_resolve, reject) => {
+      rejectCompletion = reject;
+    });
+    headlessChatMocks.startBackground.mockImplementationOnce(async (input) => ({
+      conversationId: input.clientConversationId,
+      runId: "run_background_1",
+      completion,
+    }));
+
+    render(
+      <>
+        <Surface
+          tasks={[]}
+          defaultModel={DEFAULT_MODEL}
+          initialChat={null}
+          userWorkosId="user_1"
+          workspaceId="workspace_1"
+        />
+        <LocalChatStatesProbe />
+        <OptimisticChatSummariesProbe />
+      </>,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    await user.type(textarea, "& Research Q3");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledOnce());
+    const body = headlessChatMocks.startBackground.mock.calls[0]![0];
+    await user.type(textarea, "Keep this new draft");
+    await act(async () => rejectCompletion?.(new Error("event stream disconnected")));
+
+    await waitFor(() => expect(screen.getByTestId("local-chat-states")).toHaveTextContent("none"));
+    expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
+      `${body.clientConversationId}:Research Q3`,
+    );
+    expect(textarea).toHaveValue("Keep this new draft");
   });
 
   it("starts a bare ampersand message from Home defaults instead of the active Codex runtime", async () => {

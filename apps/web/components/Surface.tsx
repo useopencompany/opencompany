@@ -1712,6 +1712,10 @@ export function Surface({
         setSelectedMentions(mentions);
         composerAttachments.setAttachments(pendingAttachments);
       };
+      const restoreDraftIfComposerIsEmpty = () => {
+        if (inputRef.current?.value.trim()) return;
+        restoreDraft();
+      };
 
       if (taskSpawningEnabled && hasAdHocTaskToken(messagePrompt)) {
         const description = descriptionFromAdHocTaskPrompt(messagePrompt);
@@ -1822,8 +1826,8 @@ export function Surface({
         setMentionToken(null);
         setSelectedMentions([]);
         prepareMainComposerFocusRestoreAfterBackgroundTask();
-        setBackgroundTaskSubmitting(true);
         composerAttachments.setAttachments([]);
+        refocusMainComposerAfterBackgroundTask();
         toast("Started a new chat in the background.");
 
         const engine = backgroundEngine;
@@ -1844,25 +1848,29 @@ export function Surface({
           engine: canonicalMessageEngine(engine, settings.settings),
           ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         })
-          .then(() => {
+          .then(({ completion }) => {
             revokeAttachmentPreviews(pendingAttachments);
-            if (!mountedRef.current) return;
-            router.refresh();
-            toast.success(`${config.label} is ready.`);
+            void completion
+              .then(() => {
+                if (!mountedRef.current) return;
+                router.refresh();
+                toast.success(`${config.label} is ready.`);
+              })
+              .catch(() => {
+                if (!mountedRef.current) return;
+                router.refresh();
+                toast.error(`${config.label} started, but live status updates were interrupted.`);
+              })
+              .finally(() => clearLocalChatState(newSessionId, "working"));
           })
           .catch((error) => {
             removeOptimisticChatSummary(newSessionId);
             clearLocalChatState(newSessionId, "working");
             if (!mountedRef.current) return;
-            restoreDraft();
+            restoreDraftIfComposerIsEmpty();
             toast.error(
               error instanceof Error ? error.message : `${config.label} could not start that turn.`,
             );
-          })
-          .finally(() => {
-            if (!mountedRef.current) return;
-            setBackgroundTaskSubmitting(false);
-            refocusMainComposerAfterBackgroundTask();
           });
         return;
       }
@@ -1873,8 +1881,8 @@ export function Surface({
       setMentionToken(null);
       setSelectedMentions([]);
       prepareMainComposerFocusRestoreAfterBackgroundTask();
-      setBackgroundTaskSubmitting(true);
       composerAttachments.setAttachments([]);
+      refocusMainComposerAfterBackgroundTask();
       toast("Started a new chat in the background.");
 
       const newSessionId = newOptimisticChatSessionId();
@@ -1892,23 +1900,27 @@ export function Surface({
         newSessionId,
         ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       })
-        .then(() => {
+        .then(({ completion }) => {
           revokeAttachmentPreviews(pendingAttachments);
-          if (!mountedRef.current) return;
-          router.refresh();
-          toast.success("Background chat is ready.");
+          void completion
+            .then(() => {
+              if (!mountedRef.current) return;
+              router.refresh();
+              toast.success("Background chat is ready.");
+            })
+            .catch(() => {
+              if (!mountedRef.current) return;
+              router.refresh();
+              toast.error("Background chat started, but live status updates were interrupted.");
+            })
+            .finally(() => clearLocalChatState(newSessionId, "working"));
         })
         .catch((error) => {
           removeOptimisticChatSummary(newSessionId);
-          if (!mountedRef.current) return;
-          restoreDraft();
-          toast.error(error instanceof Error ? error.message : "Could not start that chat.");
-        })
-        .finally(() => {
           clearLocalChatState(newSessionId, "working");
           if (!mountedRef.current) return;
-          setBackgroundTaskSubmitting(false);
-          refocusMainComposerAfterBackgroundTask();
+          restoreDraftIfComposerIsEmpty();
+          toast.error(error instanceof Error ? error.message : "Could not start that chat.");
         });
       return;
     }
@@ -3841,10 +3853,19 @@ function QuickChatComposer({
           ...(mentions.some(isSkillMention) ? { mentions: mentions.filter(isSkillMention) } : {}),
         },
       })
-        .then(() => {
-          // Not gated on mountedRef: see the workflow branch above.
-          router.refresh();
-          toast.success(`${config.label} is ready.`);
+        .then(({ completion }) => {
+          if (mountedRef.current) setIsSubmitting(false);
+          void completion
+            .then(() => {
+              // Not gated on mountedRef: see the workflow branch above.
+              router.refresh();
+              toast.success(`${config.label} is ready.`);
+            })
+            .catch(() => {
+              router.refresh();
+              toast.error(`${config.label} started, but live status updates were interrupted.`);
+            })
+            .finally(() => clearLocalChatState(newSessionId, "working"));
         })
         .catch((error) => {
           removeOptimisticChatSummary(newSessionId);
@@ -3852,8 +3873,6 @@ function QuickChatComposer({
           toast.error(
             error instanceof Error ? error.message : `${config.label} could not start that turn.`,
           );
-        })
-        .finally(() => {
           if (mountedRef.current) setIsSubmitting(false);
         });
       return;
@@ -3886,17 +3905,24 @@ function QuickChatComposer({
       newSessionId,
       ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     })
-      .then(() => {
-        // Not gated on mountedRef: see the workflow branch above.
-        router.refresh();
-        toast.success("Background chat is ready.");
+      .then(({ completion }) => {
+        if (mountedRef.current) setIsSubmitting(false);
+        void completion
+          .then(() => {
+            // Not gated on mountedRef: see the workflow branch above.
+            router.refresh();
+            toast.success("Background chat is ready.");
+          })
+          .catch(() => {
+            router.refresh();
+            toast.error("Background chat started, but live status updates were interrupted.");
+          })
+          .finally(() => clearLocalChatState(newSessionId, "working"));
       })
       .catch((error) => {
         removeOptimisticChatSummary(newSessionId);
-        toast.error(error instanceof Error ? error.message : "Could not start that chat.");
-      })
-      .finally(() => {
         clearLocalChatState(newSessionId, "working");
+        toast.error(error instanceof Error ? error.message : "Could not start that chat.");
         if (mountedRef.current) setIsSubmitting(false);
       });
   };
@@ -6438,7 +6464,7 @@ async function runBackgroundChatTurn(input: {
   metadata?: ChatMessageMetadata;
 }) {
   const clientMessageId = newBackgroundChatMessageId();
-  await startHeadlessBackgroundChat({
+  return startHeadlessBackgroundChat({
     content: input.prompt,
     clientConversationId: input.newSessionId,
     clientMessageId,
