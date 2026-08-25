@@ -7,40 +7,40 @@ describe("API authentication", () => {
     vi.unstubAllEnvs();
   });
 
-  it.each([
-    "",
-    "   ",
-  ])("uses the default WorkOS session cookie when WORKOS_COOKIE_NAME is %j", async (cookieName) => {
-    vi.stubEnv("WORKOS_COOKIE_NAME", cookieName);
-    const loadSealedSession = vi.fn(async () => ({
-      authenticate: async () => ({
-        authenticated: true,
-        user: { id: "user_1" },
-        organizationId: "org_1",
-        sessionId: "session_1",
-      }),
-    }));
-    const identify = createWorkOsApiIdentityVerifier({
-      cookiePassword: "a-secure-cookie-password-with-32-chars",
-      workos: { userManagement: { loadSealedSession } } as never,
-    });
-
-    await expect(
-      identify(
-        new Request("https://api.example.test/v1/identity", {
-          headers: { Cookie: "wos-session=sealed-session" },
+  it.each(["", "   "])(
+    "uses the default WorkOS session cookie when WORKOS_COOKIE_NAME is %j",
+    async (cookieName) => {
+      vi.stubEnv("WORKOS_COOKIE_NAME", cookieName);
+      const loadSealedSession = vi.fn(async () => ({
+        authenticate: async () => ({
+          authenticated: true,
+          user: { id: "user_1" },
+          organizationId: "org_1",
+          sessionId: "session_1",
         }),
-      ),
-    ).resolves.toMatchObject({
-      userId: "user_1",
-      organizationId: "org_1",
-      method: "session",
-    });
-    expect(loadSealedSession).toHaveBeenCalledWith({
-      sessionData: "sealed-session",
-      cookiePassword: "a-secure-cookie-password-with-32-chars",
-    });
-  });
+      }));
+      const identify = createWorkOsApiIdentityVerifier({
+        cookiePassword: "a-secure-cookie-password-with-32-chars",
+        workos: { userManagement: { loadSealedSession } } as never,
+      });
+
+      await expect(
+        identify(
+          new Request("https://api.example.test/v1/identity", {
+            headers: { Cookie: "wos-session=sealed-session" },
+          }),
+        ),
+      ).resolves.toMatchObject({
+        userId: "user_1",
+        organizationId: "org_1",
+        method: "session",
+      });
+      expect(loadSealedSession).toHaveBeenCalledWith({
+        sessionData: "sealed-session",
+        cookiePassword: "a-secure-cookie-password-with-32-chars",
+      });
+    },
+  );
 
   it("accepts the encoded browser session and preferences used by identity sync", async () => {
     const loadSealedSession = vi.fn(async () => ({

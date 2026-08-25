@@ -434,22 +434,22 @@ describe("google_calendar.list_events", () => {
     );
   });
 
-  it.each([
-    "No stored Google credentials for this account.",
-    "Google refused the refresh token.",
-  ])("maps missing or expired authentication to a reconnect error: %s", async (detail) => {
-    mocks.dbRows = [connectedRow()];
-    mocks.googleApiCall.mockRejectedValue(new GoogleAccessAuthError(detail));
-    const action = findListEvents(await resolveGoogleCalendarActions("user_1"));
+  it.each(["No stored Google credentials for this account.", "Google refused the refresh token."])(
+    "maps missing or expired authentication to a reconnect error: %s",
+    async (detail) => {
+      mocks.dbRows = [connectedRow()];
+      mocks.googleApiCall.mockRejectedValue(new GoogleAccessAuthError(detail));
+      const action = findListEvents(await resolveGoogleCalendarActions("user_1"));
 
-    const execution = action.execute(WINDOW, CONTEXT);
-    await expect(execution).rejects.toBeInstanceOf(ActionAuthError);
-    await expect(execution).rejects.toMatchObject({
-      code: "auth_expired",
-      provider: "google_calendar",
-      message: expect.stringContaining("Settings → Integrations"),
-    });
-  });
+      const execution = action.execute(WINDOW, CONTEXT);
+      await expect(execution).rejects.toBeInstanceOf(ActionAuthError);
+      await expect(execution).rejects.toMatchObject({
+        code: "auth_expired",
+        provider: "google_calendar",
+        message: expect.stringContaining("Settings → Integrations"),
+      });
+    },
+  );
 
   it("surfaces Calendar API failures as provider errors", async () => {
     mocks.dbRows = [connectedRow()];

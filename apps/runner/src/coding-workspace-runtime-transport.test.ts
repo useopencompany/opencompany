@@ -126,91 +126,94 @@ describe("opencompany coding workspace terminal transport", () => {
   it.each([
     ["codex", "/home/user/opencompany-goat/codex-chat"],
     ["claude_code", "/home/user/opencompany-goat/claude-chat"],
-  ] as const)("opens %s terminals in the trusted engine directory", async (engine, expectedWorkDirectory) => {
-    const kill = vi.fn(async () => true);
-    const sendInput = vi.fn(async () => undefined);
-    const resize = vi.fn(async () => undefined);
-    const create = vi.fn(async (options: { onData: (data: Uint8Array) => void }) => {
-      options.onData(Buffer.from("live output\n"));
-      return { pid: 42, kill };
-    });
-    const sandbox = {
-      sandboxId: "sandbox_1",
-      commands: {
-        run: vi.fn(async () => ({ stdout: "persisted output\n" })),
-      },
-      pty: { create, sendInput, resize },
-      setTimeout: vi.fn(async () => undefined),
-    } as unknown as SandboxHandle;
-    const restoreTimeout = vi.fn(async () => undefined);
-    const server = new WebSocketServer({ port: 0 });
-    openServers.push(server);
-    await new Promise<void>((resolve) => server.once("listening", resolve));
-    server.on("connection", (webSocket) => {
-      attachRuntimeConnection(
-        webSocket,
-        sandbox,
-        {
-          id: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
-          chatSessionId: "chat_1",
-          userWorkosId: "user_1",
-          sandboxId: "sandbox_1",
-          status: "idle",
-          engine,
-        } satisfies CodingWorkspaceSession,
-        { codexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
-        restoreTimeout,
+  ] as const)(
+    "opens %s terminals in the trusted engine directory",
+    async (engine, expectedWorkDirectory) => {
+      const kill = vi.fn(async () => true);
+      const sendInput = vi.fn(async () => undefined);
+      const resize = vi.fn(async () => undefined);
+      const create = vi.fn(async (options: { onData: (data: Uint8Array) => void }) => {
+        options.onData(Buffer.from("live output\n"));
+        return { pid: 42, kill };
+      });
+      const sandbox = {
+        sandboxId: "sandbox_1",
+        commands: {
+          run: vi.fn(async () => ({ stdout: "persisted output\n" })),
+        },
+        pty: { create, sendInput, resize },
+        setTimeout: vi.fn(async () => undefined),
+      } as unknown as SandboxHandle;
+      const restoreTimeout = vi.fn(async () => undefined);
+      const server = new WebSocketServer({ port: 0 });
+      openServers.push(server);
+      await new Promise<void>((resolve) => server.once("listening", resolve));
+      server.on("connection", (webSocket) => {
+        attachRuntimeConnection(
+          webSocket,
+          sandbox,
+          {
+            id: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
+            chatSessionId: "chat_1",
+            userWorkosId: "user_1",
+            sandboxId: "sandbox_1",
+            status: "idle",
+            engine,
+          } satisfies CodingWorkspaceSession,
+          { codexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
+          restoreTimeout,
+        );
+      });
+
+      const address = server.address() as AddressInfo;
+      const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
+      const binaryOutput: string[] = [];
+      client.on("message", (data, binary) => {
+        if (binary) binaryOutput.push(data.toString());
+      });
+      await new Promise<void>((resolve) => client.once("open", resolve));
+
+      client.send(JSON.stringify({ type: "terminal.attach", cols: 100, rows: 30 }));
+      client.send(Buffer.from("pwd\r"));
+      await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cols: 100,
+          rows: 30,
+          cwd: expectedWorkDirectory,
+          user: "user",
+        }),
       );
-    });
-
-    const address = server.address() as AddressInfo;
-    const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
-    const binaryOutput: string[] = [];
-    client.on("message", (data, binary) => {
-      if (binary) binaryOutput.push(data.toString());
-    });
-    await new Promise<void>((resolve) => client.once("open", resolve));
-
-    client.send(JSON.stringify({ type: "terminal.attach", cols: 100, rows: 30 }));
-    client.send(Buffer.from("pwd\r"));
-    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cols: 100,
-        rows: 30,
-        cwd: expectedWorkDirectory,
+      expect(sandbox.commands.run).toHaveBeenCalledWith(`mkdir -p '${expectedWorkDirectory}'`, {
         user: "user",
-      }),
-    );
-    expect(sandbox.commands.run).toHaveBeenCalledWith(`mkdir -p '${expectedWorkDirectory}'`, {
-      user: "user",
-      timeoutMs: 10_000,
-    });
-    expect(binaryOutput.join("")).toContain("persisted output");
-    expect(binaryOutput.join("")).toContain("live output");
-    expect(sendInput).toHaveBeenCalledWith(
-      42,
-      Buffer.from("exec tmux new-session -A -s goat-coding-workspace\r"),
-    );
-    expect(sendInput).toHaveBeenCalledWith(42, Buffer.from("pwd\r"));
+        timeoutMs: 10_000,
+      });
+      expect(binaryOutput.join("")).toContain("persisted output");
+      expect(binaryOutput.join("")).toContain("live output");
+      expect(sendInput).toHaveBeenCalledWith(
+        42,
+        Buffer.from("exec tmux new-session -A -s goat-coding-workspace\r"),
+      );
+      expect(sendInput).toHaveBeenCalledWith(42, Buffer.from("pwd\r"));
 
-    client.send(JSON.stringify({ type: "terminal.attach", cols: 110, rows: 35 }));
-    await vi.waitFor(() => expect(sandbox.commands.run).toHaveBeenCalledTimes(3));
-    expect(create).toHaveBeenCalledOnce();
-    expect(resize).toHaveBeenCalledWith(42, { cols: 110, rows: 35 });
+      client.send(JSON.stringify({ type: "terminal.attach", cols: 110, rows: 35 }));
+      await vi.waitFor(() => expect(sandbox.commands.run).toHaveBeenCalledTimes(3));
+      expect(create).toHaveBeenCalledOnce();
+      expect(resize).toHaveBeenCalledWith(42, { cols: 110, rows: 35 });
 
-    client.send(JSON.stringify({ type: "terminal.resize", cols: 120, rows: 40 }));
-    await vi.waitFor(() => expect(resize).toHaveBeenCalledWith(42, { cols: 120, rows: 40 }));
+      client.send(JSON.stringify({ type: "terminal.resize", cols: 120, rows: 40 }));
+      await vi.waitFor(() => expect(resize).toHaveBeenCalledWith(42, { cols: 120, rows: 40 }));
 
-    client.close();
-    await new Promise<void>((resolve) => client.once("close", resolve));
-    await vi.waitFor(() => expect(kill).toHaveBeenCalledOnce());
-    expect(restoreTimeout).toHaveBeenCalledWith(
-      "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
-      sandbox,
-      300_000,
-    );
-  });
+      client.close();
+      await new Promise<void>((resolve) => client.once("close", resolve));
+      await vi.waitFor(() => expect(kill).toHaveBeenCalledOnce());
+      expect(restoreTimeout).toHaveBeenCalledWith(
+        "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
+        sandbox,
+        300_000,
+      );
+    },
+  );
 });
 
 describe("opencompany coding workspace terminal input latency", () => {

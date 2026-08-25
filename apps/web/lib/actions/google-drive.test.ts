@@ -1078,24 +1078,24 @@ describe("google_drive.append_spreadsheet_values", () => {
 });
 
 describe("Google Drive account and auth handling", () => {
-  it.each([
-    "missing credentials",
-    "expired credentials",
-  ])("maps %s to the structured reconnect error", async (message) => {
-    mocks.dbRows = [connectedRow()];
-    mocks.googleApiCall.mockRejectedValue(new GoogleAccessAuthError(message));
-    const action = findAction(
-      await resolveGoogleDriveActions("user_1"),
-      "google_drive.search_files",
-    );
+  it.each(["missing credentials", "expired credentials"])(
+    "maps %s to the structured reconnect error",
+    async (message) => {
+      mocks.dbRows = [connectedRow()];
+      mocks.googleApiCall.mockRejectedValue(new GoogleAccessAuthError(message));
+      const action = findAction(
+        await resolveGoogleDriveActions("user_1"),
+        "google_drive.search_files",
+      );
 
-    await expect(action.execute({ query: "roadmap" }, CONTEXT)).rejects.toMatchObject({
-      name: "ActionAuthError",
-      code: "auth_expired",
-      provider: "google_drive",
-      message: expect.stringContaining("Settings → Integrations"),
-    } satisfies Partial<ActionAuthError>);
-  });
+      await expect(action.execute({ query: "roadmap" }, CONTEXT)).rejects.toMatchObject({
+        name: "ActionAuthError",
+        code: "auth_expired",
+        provider: "google_drive",
+        message: expect.stringContaining("Settings → Integrations"),
+      } satisfies Partial<ActionAuthError>);
+    },
+  );
 
   it("surfaces provider API failures", async () => {
     mocks.dbRows = [connectedRow()];

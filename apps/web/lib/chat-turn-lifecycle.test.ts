@@ -59,19 +59,18 @@ describe("chat turn lifecycle", () => {
     expect(isChatTurnWorking(phase)).toBe(false);
   });
 
-  it.each([
-    "completed",
-    "failed",
-    "canceled",
-  ] as const)("keeps %s terminal when transport state is stale", (runStatus) => {
-    expect(
-      deriveChatTurnPhase({
-        ...idleInput,
-        runStatus,
-        transportStatus: "streaming",
-      }),
-    ).toBe(runStatus);
-  });
+  it.each(["completed", "failed", "canceled"] as const)(
+    "keeps %s terminal when transport state is stale",
+    (runStatus) => {
+      expect(
+        deriveChatTurnPhase({
+          ...idleInput,
+          runStatus,
+          transportStatus: "streaming",
+        }),
+      ).toBe(runStatus);
+    },
+  );
 
   it.each([
     ["submitted", "submitting"],

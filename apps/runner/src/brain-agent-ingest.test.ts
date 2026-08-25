@@ -563,13 +563,13 @@ describe("capture-first ingest profiles", () => {
 });
 
 describe("tracker ingest profiles", () => {
-  it.each([
-    LINEAR_ISSUE_INGEST_SYSTEM_PROMPT,
-    GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT,
-  ])("allows pointer-backed pages to become active without evidence snapshots", (prompt) => {
-    expect(prompt).toContain("cites provenance with [[evidence:...]] or [[source:...]]");
-    expect(prompt).toContain("compiled truth has neither citation");
-  });
+  it.each([LINEAR_ISSUE_INGEST_SYSTEM_PROMPT, GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT])(
+    "allows pointer-backed pages to become active without evidence snapshots",
+    (prompt) => {
+      expect(prompt).toContain("cites provenance with [[evidence:...]] or [[source:...]]");
+      expect(prompt).toContain("compiled truth has neither citation");
+    },
+  );
 });
 
 describe("buildJamieMeetingAgentIngestPrompt", () => {
