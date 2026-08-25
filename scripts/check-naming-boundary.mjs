@@ -138,11 +138,18 @@ for (const [relativePath, fragments] of requiredCompatibilityFragments) {
   }
 }
 
-for (const [label, currentPattern, gitPattern] of protectedCompatibilityTokens) {
+for (const [
+  label,
+  currentPattern,
+  gitPattern,
+  acceptedCutoverDelta = 0,
+] of protectedCompatibilityTokens) {
   const currentCount = currentCompatibilityCorpus.match(currentPattern)?.length ?? 0;
-  const baseCount = gitMatchCount(gitPattern);
-  if (currentCount !== baseCount) {
-    failures.push(`${label}: expected ${baseCount} retained occurrences, found ${currentCount}`);
+  const expectedCount = gitMatchCount(gitPattern) + acceptedCutoverDelta;
+  if (currentCount !== expectedCount) {
+    failures.push(
+      `${label}: expected ${expectedCount} retained occurrences, found ${currentCount}`,
+    );
   }
 }
 

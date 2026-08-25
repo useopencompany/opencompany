@@ -679,6 +679,19 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     ratings: { capability: 2, speed: 1, cost: 1 },
   },
   {
+    id: "xai/grok-4.6",
+    type: "model",
+    contextWindowTokens: 500_000,
+    label: "Grok 4.6",
+    description:
+      "SpaceXAI frontier reasoning model for long-running agents, coding, and knowledge work.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 3, speed: 2, cost: 2 },
+  },
+  {
     id: "xai/grok-4.3",
     type: "model",
     contextWindowTokens: 1_000_000,

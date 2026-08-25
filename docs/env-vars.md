@@ -22,15 +22,20 @@ mirror an API-owned secret into `/web` unless a current thin relay actually cons
 
 The names-only production audit is recorded in [#1243](https://github.com/useopencompany/opencompany-experimental/issues/1243).
 Two web exceptions remain deliberately classified as suspects rather than prune candidates:
-`BLOB_READ_WRITE_TOKEN` backs the cached-client Brain upload adapter, and `DATABASE_URL` is still
-reached indirectly by `AppShell` integration-state loaders composed from shared packages. The
-latter violates the intended pure-client boundary and must be removed from code before the web
-database value can be deleted.
+`BLOB_READ_WRITE_TOKEN` backs the cached-client Brain upload adapter. The runner also uses its
+`/runner` value for private, bounded durable Plugin data archives; it never places that token in a
+Plugin process environment. `DATABASE_URL` is still reached indirectly by `AppShell`
+integration-state loaders composed from shared packages. The latter violates the intended
+pure-client boundary and must be removed from code before the web database value can be deleted.
 
 ## Required groups
 
 `scripts/release-preflight.mjs` is the executable source of truth for required web, API, runner, and
-release variables. Important contracts include:
+release variables. When the release group is selected, it also reads the production database and
+reports row counts for the retired `goat.skills` and `goat.chat_session_skills` tables plus counts
+of queued/running Workflow Tasks that contain legacy `skillSnapshots` or lack per-step
+`skillBundleIds` arrays. Any such active Task, or an inspection error, fails preflight. Important
+contracts include:
 
 - Web: WorkOS/AuthKit, canonical URL, shared cookie domain, first-party API origins, the narrow
   runner relay token/URL, cron relay secret, opencompany PostHog, the cached-client Blob adapter, and the
@@ -45,9 +50,9 @@ release variables. Important contracts include:
 - Runner: database, internal/stream tokens, `OPENCOMPANY_API_ORIGIN` and `API_INTERNAL_TOKEN` for
   the internal wiki command endpoint (agent wiki writes cross the canonical API, never the wiki
   database directly), opencompany origin, allowed origins, integration encryption, an explicitly
-  enabled task-worker gate, E2B, Blob, model providers, GitHub/Google/X integration credentials,
-  opencompany PostHog, and Redis values; capability controls and provider-specific tuning remain
-  optional.
+  enabled task-worker gate, E2B, Blob (including Plugin data archives), model providers,
+  GitHub/Google/X integration credentials, opencompany PostHog, and Redis values; capability
+  controls and provider-specific tuning remain optional.
 - Release: production DB URL, Vercel/Render credentials and project/service IDs, opencompany/API/runner
   URLs.
 
@@ -58,6 +63,10 @@ fix-forward as documented in [Chat operations](./chat-operations.md).
 
 `CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
+
+`BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
+The runner uses it for bounded, durable `PLUGIN_DATA` archives and never injects it into Plugin
+processes.
 
 `OPENCOMPANY_DESKTOP_AUTH_SECRET` is a web-only base64 32-byte key (same convention as
 `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`) that seals the macOS desktop app's Google sign-in handoff

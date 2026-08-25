@@ -62,6 +62,22 @@ finish first, but Render builds happen after migration, so migrations must be ad
 with the currently deployed API and runner as well as the previous safe application revision. Never
 use a routine release to drop retained compatibility tables or rewrite migration history.
 
+Migration `0230_legacy_skill_cutover.sql` is an explicitly authorized destructive cutover. Before
+deploying it, operators must record the legacy row counts:
+
+```sql
+SELECT
+  (SELECT COUNT(*) FROM goat.skills) AS legacy_skill_rows,
+  (SELECT COUNT(*) FROM goat.chat_session_skills) AS legacy_chat_session_skill_rows;
+```
+
+The release preflight reports those counts and fails while any queued/running Workflow Task either
+contains a legacy `skillSnapshots` value or has a Workflow step without a `skillBundleIds` array.
+Complete or cancel every reported Task, and confirm `BLOB_READ_WRITE_TOKEN` exists in Infisical
+`prod` `/runner`, before migration. The migration drops the legacy tables without converting their
+rows. It is one-way: an application rollback does not restore old Skills, and recovery requires a
+database restore or an explicit forward repair.
+
 ## Health checks and recovery
 
 Web and API `/healthz` responses include both the deployed release and canonical protocol version;

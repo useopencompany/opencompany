@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   BRAIN_RETRIEVAL_COMMANDS,
-  BRAIN_SKILL_DESCRIPTION_MAX_LENGTH,
-  BRAIN_SKILL_NAME_MAX_LENGTH,
   isValidBrainFolder,
   normalizeBrainCompiledTruth,
   normalizeBrainFolderForV1,
@@ -20,15 +18,11 @@ import {
   type BrainSourceItem,
   CoreError,
   type KnowledgeRepository,
-  type Skill,
-  type SkillCatalogItem,
-  type SkillImportSource,
-  type SkillListItem,
   type WikiPage,
   type WikiTimelineEntry,
 } from "@opencompany/core";
 import { isValidWikiKind, isValidWikiSlug, wikiSlugFromTitle } from "@opencompany/wiki";
-import { and, asc, count, desc, eq, gte, inArray, isNull, ne } from "drizzle-orm";
+import { and, count, eq, gte, inArray, ne } from "drizzle-orm";
 import {
   brainFilePathFor,
   createBrainFolderRow,
@@ -46,7 +40,6 @@ import {
 import type {
   BrainDocument as BrainDocumentRow,
   KnowledgeCommandOperation,
-  Skill as SkillRow,
   WikiPage as WikiPageRow,
   WikiTimelineEntry as WikiTimelineEntryRow,
 } from "./product-schema";
@@ -57,7 +50,6 @@ import {
   brainSources,
   brainToolRuns,
   knowledgeCommandIdempotency,
-  skills,
   wikiPages,
   wikiTimelineEntries,
 } from "./product-schema";
@@ -681,358 +673,10 @@ export class PostgresKnowledgeRepository implements KnowledgeRepository {
     }
   }
 
-  async listSkills(input: { actor: Actor }): Promise<SkillListItem[]> {
-    const rows: SkillListRow[] = await this.db
-      .select({
-        id: skills.id,
-        slug: skills.slug,
-        name: skills.name,
-        description: skills.description,
-        status: skills.status,
-        sourceType: skills.sourceType,
-        sourceUrl: skills.sourceUrl,
-        sourceRef: skills.sourceRef,
-        sourcePath: skills.sourcePath,
-        resolvedCommit: skills.resolvedCommit,
-        updatedAt: skills.updatedAt,
-      })
-      .from(skills)
-      .where(and(eq(skills.workspaceId, input.actor.workspaceId), isNull(skills.archivedAt)))
-      .orderBy(desc(skills.updatedAt));
-    return rows.map(skillListRow);
-  }
-
-  async listSkillCatalog(input: { actor: Actor }): Promise<SkillCatalogItem[]> {
-    const rows = await this.db
-      .select({ slug: skills.slug, name: skills.name, description: skills.description })
-      .from(skills)
-      .where(
-        and(
-          eq(skills.workspaceId, input.actor.workspaceId),
-          eq(skills.status, "active"),
-          isNull(skills.archivedAt),
-        ),
-      )
-      .orderBy(asc(skills.name));
-    return rows.map((row: { slug: string; name: string; description: string }) => ({
-      id: row.slug,
-      name: row.name,
-      description: row.description,
-    }));
-  }
-
-  async getSkill(input: { actor: Actor; slug: string }) {
-    const [row] = await this.skillRows(input.actor.workspaceId, input.slug);
-    return row ? skillRow(row) : null;
-  }
-
-  async createSkill(input: {
-    actor: Actor;
-    idempotencyKey: string;
-    name: string;
-    description: string;
-  }) {
-    validateSkill(input);
-    const id = await this.reserveCreate(
-      input,
-      "skill.create",
-      { name: input.name.trim(), description: input.description.trim() },
-      deterministicResourceId("goat_skill", input, input.idempotencyKey),
-    );
-    const [replay] = await this.db
-      .select()
-      .from(skills)
-      .where(and(eq(skills.workspaceId, input.actor.workspaceId), eq(skills.id, id)))
-      .limit(1);
-    if (replay) return skillRow(replay);
-    const slug = await this.uniqueSkillSlug(input.actor.workspaceId, input.name);
-    let rows: SkillRow[];
-    try {
-      rows = await this.db
-        .insert(skills)
-        .values({
-          id,
-          workspaceId: input.actor.workspaceId,
-          slug,
-          name: input.name.trim(),
-          description: input.description.trim(),
-          instructions: "",
-          status: "draft",
-          createdByWorkosId: input.actor.userId,
-        })
-        .returning();
-    } catch (error) {
-      if (!isUniqueViolation(error)) throw error;
-      const [replay] = await this.db
-        .select()
-        .from(skills)
-        .where(and(eq(skills.workspaceId, input.actor.workspaceId), eq(skills.id, id)))
-        .limit(1);
-      if (replay) return skillRow(replay);
-      throw new CoreError("conflict", "A Skill with that identity already exists.");
-    }
-    const [row] = rows;
-    if (!row) throw new CoreError("conflict", "Could not create the skill.");
-    return skillRow(row);
-  }
-
-  async importSkill(input: {
-    actor: Actor;
-    idempotencyKey: string;
-    name: string;
-    description: string;
-    instructions: string;
-    source: SkillImportSource;
-    resolvedCommit: string;
-    integrity: string;
-  }) {
-    validateSkill({ ...input, status: "active" });
-    const operation = "skill.import" as const;
-    const command = {
-      source: input.source,
-      resolvedCommit: input.resolvedCommit,
-      integrity: input.integrity,
-    };
-    const requestHash = commandHash(operation, command);
-    const proposedResourceId = deterministicResourceId("goat_skill", input, input.idempotencyKey);
-    const [reservation] = await this.db
-      .insert(knowledgeCommandIdempotency)
-      .values({
-        commandId: deterministicResourceId("goat_knowledge_command", input, input.idempotencyKey),
-        userWorkosId: input.actor.userId,
-        workspaceId: input.actor.workspaceId,
-        idempotencyKey: input.idempotencyKey,
-        requestHash,
-        operation,
-        resourceId: proposedResourceId,
-      })
-      .onConflictDoUpdate({
-        target: [
-          knowledgeCommandIdempotency.userWorkosId,
-          knowledgeCommandIdempotency.workspaceId,
-          knowledgeCommandIdempotency.idempotencyKey,
-        ],
-        set: { touchedAt: new Date() },
-      })
-      .returning({
-        requestHash: knowledgeCommandIdempotency.requestHash,
-        operation: knowledgeCommandIdempotency.operation,
-        resourceId: knowledgeCommandIdempotency.resourceId,
-      });
-    if (!reservation) throw new CoreError("conflict", "Could not reserve the Skill import.");
-    if (reservation.operation !== operation || reservation.requestHash !== requestHash) {
-      throw new CoreError(
-        "idempotency_conflict",
-        "The Idempotency-Key was already used for another command.",
-      );
-    }
-
-    const replay = await this.findSkillById(input.actor.workspaceId, reservation.resourceId);
-    if (replay) {
-      await this.completeImportCommand(input, replay.id);
-      return { skill: skillRow(replay), idempotentReplay: true };
-    }
-    const existing = await this.findImportedSkill(input.actor.workspaceId, input.source);
-    if (existing) {
-      await this.completeImportCommand(input, existing.id);
-      return { skill: skillRow(existing), idempotentReplay: true };
-    }
-
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      const slug = await this.uniqueSkillSlug(input.actor.workspaceId, input.name);
-      try {
-        const [created] = await this.db
-          .insert(skills)
-          .values({
-            id: proposedResourceId,
-            workspaceId: input.actor.workspaceId,
-            slug,
-            name: input.name.trim(),
-            description: input.description.trim(),
-            instructions: input.instructions,
-            status: "active",
-            createdByWorkosId: input.actor.userId,
-            sourceType: input.source.type,
-            sourceUrl: input.source.url,
-            sourceRef: input.source.ref,
-            sourcePath: input.source.path,
-            resolvedCommit: input.resolvedCommit,
-            integrity: input.integrity,
-          })
-          .returning();
-        if (!created) throw new CoreError("conflict", "Could not import the Skill.");
-        await this.completeImportCommand(input, created.id);
-        return { skill: skillRow(created), idempotentReplay: false };
-      } catch (error) {
-        if (!isUniqueViolation(error)) throw error;
-        const winner =
-          (await this.findSkillById(input.actor.workspaceId, proposedResourceId)) ??
-          (await this.findImportedSkill(input.actor.workspaceId, input.source));
-        if (winner) {
-          await this.completeImportCommand(input, winner.id);
-          return { skill: skillRow(winner), idempotentReplay: true };
-        }
-      }
-    }
-    throw new CoreError("conflict", "Could not allocate a unique Skill slug.");
-  }
-
-  async updateSkill(input: {
-    actor: Actor;
-    slug: string;
-    name: string;
-    description: string;
-    instructions: string;
-    status: Skill["status"];
-  }) {
-    validateSkill(input);
-    const [target] = await this.db
-      .select({ sourceType: skills.sourceType, sourceUrl: skills.sourceUrl })
-      .from(skills)
-      .where(
-        and(
-          eq(skills.workspaceId, input.actor.workspaceId),
-          eq(skills.slug, input.slug),
-          isNull(skills.archivedAt),
-        ),
-      )
-      .limit(1);
-    if (!target) throw new CoreError("not_found", "Skill not found.");
-    if (target.sourceType) {
-      throw new CoreError(
-        "conflict",
-        `This skill was imported from ${target.sourceUrl} and can't be edited here. Remove and re-import if the source changed.`,
-      );
-    }
-    const [row] = await this.db
-      .update(skills)
-      .set({
-        name: input.name.trim(),
-        description: input.description.trim(),
-        instructions: input.instructions,
-        status: input.status,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(skills.workspaceId, input.actor.workspaceId),
-          eq(skills.slug, input.slug),
-          isNull(skills.archivedAt),
-        ),
-      )
-      .returning();
-    if (!row) throw new CoreError("not_found", "Skill not found.");
-    return skillRow(row);
-  }
-
-  async archiveSkill(input: { actor: Actor; slug: string }) {
-    const rows = await this.db
-      .update(skills)
-      .set({ archivedAt: new Date(), updatedAt: new Date() })
-      .where(
-        and(
-          eq(skills.workspaceId, input.actor.workspaceId),
-          eq(skills.slug, input.slug),
-          isNull(skills.archivedAt),
-        ),
-      )
-      .returning({ slug: skills.slug });
-    if (rows.length === 0) throw new CoreError("not_found", "Skill not found.");
-  }
-
   private async requireBrainDocument(brainId: string, documentId: string) {
     const row = await getBrainFile({ brainRef: brainId, fileId: documentId }, { db: this.db });
     if (!row) throw new CoreError("not_found", "Brain document not found.");
     return row;
-  }
-
-  private skillRows(workspaceId: string, slug?: string) {
-    return this.db
-      .select({
-        id: skills.id,
-        slug: skills.slug,
-        name: skills.name,
-        description: skills.description,
-        instructions: skills.instructions,
-        status: skills.status,
-        sourceType: skills.sourceType,
-        sourceUrl: skills.sourceUrl,
-        sourceRef: skills.sourceRef,
-        sourcePath: skills.sourcePath,
-        resolvedCommit: skills.resolvedCommit,
-        createdAt: skills.createdAt,
-        updatedAt: skills.updatedAt,
-      })
-      .from(skills)
-      .where(
-        and(
-          eq(skills.workspaceId, workspaceId),
-          ...(slug ? [eq(skills.slug, slug)] : []),
-          isNull(skills.archivedAt),
-        ),
-      )
-      .orderBy(desc(skills.updatedAt));
-  }
-
-  private async findSkillById(workspaceId: string, id: string): Promise<SkillRow | null> {
-    const [row] = await this.db
-      .select()
-      .from(skills)
-      .where(and(eq(skills.workspaceId, workspaceId), eq(skills.id, id)))
-      .limit(1);
-    return row ?? null;
-  }
-
-  private async findImportedSkill(
-    workspaceId: string,
-    source: SkillImportSource,
-  ): Promise<SkillRow | null> {
-    const [row] = await this.db
-      .select()
-      .from(skills)
-      .where(
-        and(
-          eq(skills.workspaceId, workspaceId),
-          eq(skills.sourceUrl, source.url),
-          eq(skills.sourceRef, source.ref),
-          eq(skills.sourcePath, source.path),
-          isNull(skills.archivedAt),
-        ),
-      )
-      .limit(1);
-    return row ?? null;
-  }
-
-  private async completeImportCommand(
-    input: { actor: Actor; idempotencyKey: string },
-    resourceId: string,
-  ) {
-    await this.db
-      .update(knowledgeCommandIdempotency)
-      .set({ resourceId, completedAt: new Date(), touchedAt: new Date() })
-      .where(
-        and(
-          eq(knowledgeCommandIdempotency.userWorkosId, input.actor.userId),
-          eq(knowledgeCommandIdempotency.workspaceId, input.actor.workspaceId),
-          eq(knowledgeCommandIdempotency.idempotencyKey, input.idempotencyKey),
-          eq(knowledgeCommandIdempotency.operation, "skill.import"),
-        ),
-      );
-  }
-
-  private async uniqueSkillSlug(workspaceId: string, name: string) {
-    const base = normalizeBrainId(name).slice(0, 64).replace(/-+$/gu, "") || "skill";
-    const rows = await this.db
-      .select({ slug: skills.slug })
-      .from(skills)
-      .where(and(eq(skills.workspaceId, workspaceId), isNull(skills.archivedAt)));
-    const taken = new Set(rows.map((row: { slug: string }) => row.slug));
-    if (!taken.has(base)) return base;
-    for (let suffix = 2; suffix < 1_000; suffix += 1) {
-      const candidate = `${base.slice(0, 60)}-${suffix}`;
-      if (!taken.has(candidate)) return candidate;
-    }
-    throw new CoreError("conflict", "Could not allocate a unique skill slug.");
   }
 
   private async reserveCreate(
@@ -1152,90 +796,6 @@ function wikiTimelineEntry(row: WikiTimelineEntryRow): WikiTimelineEntry {
     text: row.text,
     createdAt: row.createdAt,
   };
-}
-
-function skillRow(row: SkillRow): Skill {
-  return {
-    id: row.id,
-    slug: row.slug,
-    name: row.name,
-    description: row.description,
-    instructions: row.instructions,
-    status: row.status,
-    source: skillSource(row),
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-type SkillListRow = Pick<
-  SkillRow,
-  | "id"
-  | "slug"
-  | "name"
-  | "description"
-  | "status"
-  | "sourceType"
-  | "sourceUrl"
-  | "sourceRef"
-  | "sourcePath"
-  | "resolvedCommit"
-  | "updatedAt"
->;
-
-function skillListRow(row: SkillListRow): SkillListItem {
-  return {
-    id: row.id,
-    slug: row.slug,
-    name: row.name,
-    description: row.description,
-    status: row.status,
-    source: skillSource(row),
-    updatedAt: row.updatedAt,
-  };
-}
-
-function skillSource(
-  row: Pick<SkillRow, "sourceType" | "sourceUrl" | "sourceRef" | "sourcePath" | "resolvedCommit">,
-) {
-  return row.sourceType && row.sourceUrl
-    ? {
-        type: row.sourceType,
-        url: row.sourceUrl,
-        ref: row.sourceRef ?? "",
-        path: row.sourcePath ?? "",
-        resolvedCommit: row.resolvedCommit ?? "",
-      }
-    : null;
-}
-
-function validateSkill(input: {
-  name: string;
-  description: string;
-  instructions?: string;
-  status?: Skill["status"];
-}) {
-  const name = input.name.trim();
-  const description = input.description.trim();
-  if (!name) throw new CoreError("invalid_argument", "Skill name cannot be empty.");
-  if (name.length > BRAIN_SKILL_NAME_MAX_LENGTH) {
-    throw new CoreError(
-      "invalid_argument",
-      `Skill names must be ${BRAIN_SKILL_NAME_MAX_LENGTH} characters or fewer.`,
-    );
-  }
-  if (description.length > BRAIN_SKILL_DESCRIPTION_MAX_LENGTH) {
-    throw new CoreError(
-      "invalid_argument",
-      `Skill descriptions must be ${BRAIN_SKILL_DESCRIPTION_MAX_LENGTH} characters or fewer.`,
-    );
-  }
-  if (description.includes("<") || description.includes(">")) {
-    throw new CoreError("invalid_argument", 'Skill descriptions cannot contain "<" or ">".');
-  }
-  if (input.status === "active" && !input.instructions?.trim()) {
-    throw new CoreError("invalid_argument", "Add skill instructions before making it active.");
-  }
 }
 
 function deterministicResourceId(prefix: string, input: { actor: Actor }, key: string) {

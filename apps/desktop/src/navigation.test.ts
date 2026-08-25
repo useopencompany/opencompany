@@ -49,22 +49,22 @@ describe("desktop navigation policy", () => {
     mocks.openExternal.mockReset();
   });
 
-  it.each([
-    "will-navigate",
-    "will-redirect",
-  ])("keeps %s navigation inside the configured app origin", (eventName) => {
-    const fake = fakeWindow();
-    applyNavigationPolicy(fake.window as never);
-    const navigate = fake.handlers.get(eventName) as NavigationHandler;
-    const sameOriginEvent = { preventDefault: vi.fn() };
-    navigate(sameOriginEvent, `${APP_URL}/chat`);
-    expect(sameOriginEvent.preventDefault).not.toHaveBeenCalled();
+  it.each(["will-navigate", "will-redirect"])(
+    "keeps %s navigation inside the configured app origin",
+    (eventName) => {
+      const fake = fakeWindow();
+      applyNavigationPolicy(fake.window as never);
+      const navigate = fake.handlers.get(eventName) as NavigationHandler;
+      const sameOriginEvent = { preventDefault: vi.fn() };
+      navigate(sameOriginEvent, `${APP_URL}/chat`);
+      expect(sameOriginEvent.preventDefault).not.toHaveBeenCalled();
 
-    const externalEvent = { preventDefault: vi.fn() };
-    navigate(externalEvent, "https://accounts.example.test/oauth");
-    expect(externalEvent.preventDefault).toHaveBeenCalledOnce();
-    expect(mocks.openExternal).toHaveBeenCalledWith("https://accounts.example.test/oauth");
-  });
+      const externalEvent = { preventDefault: vi.fn() };
+      navigate(externalEvent, "https://accounts.example.test/oauth");
+      expect(externalEvent.preventDefault).toHaveBeenCalledOnce();
+      expect(mocks.openExternal).toHaveBeenCalledWith("https://accounts.example.test/oauth");
+    },
+  );
 
   it("loads the fixed offline page without carrying a query-controlled retry URL", () => {
     const fake = fakeWindow();

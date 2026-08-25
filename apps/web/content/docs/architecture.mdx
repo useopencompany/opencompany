@@ -43,6 +43,18 @@ targets the active Run.
 The 35 sessionless historical Tasks remain available only through an actor-scoped, read-only
 compatibility API. They are a separate ADR 0002 retention gate.
 
+## Agent Skills and Plugins
+
+Workspace admins install strict Agent Skills and Agent Plugins from supported public sources. The
+API stores exact immutable files and resolved commits. Chats snapshot bundle and Plugin IDs;
+Workflow Tasks pin `skillBundleIds` on every step, so replacement or archive never changes an
+existing execution.
+
+Plugins contribute passive Skills by default. Their stdio MCP servers become available only after
+an admin approves the exact installed integrity, and only inside Codex or Claude coding sandboxes.
+The runner restores and checkpoints bounded Plugin data archives without exposing Blob credentials
+to Plugin processes. The old Brain-backed Skill editor and replay model no longer exist.
+
 ## Boundaries
 
 - Protocol DTOs contain no credentials, secret values, private storage locators, WorkOS IDs, or
@@ -50,4 +62,5 @@ compatibility API. They are a separate ADR 0002 retention gate.
 - Every `/v1` route authenticates an Actor and enforces workspace membership.
 - The runner owns durable execution, coding sandboxes, and fenced lease settlement.
 - The web app owns presentation and uses typed API clients for Chat and Task data.
-- Schema changes belong in `packages/db` and require additive Drizzle migrations.
+- Schema changes belong in `packages/db` and require reviewed Drizzle migrations; destructive
+  cutovers additionally require an explicit preflight and rollback runbook.

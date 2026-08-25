@@ -67,6 +67,25 @@ independent Wiki ingest job, so enabling Wiki does not change Brain behavior. A 
 then triages each Wiki item and applies page mutations through the same authorized Wiki tool used by
 interactive agents; job results retain the outcome and touched page paths for ingestion activity.
 
+## Agent Skills and Plugins
+
+Agent Skills and Agent Plugins are immutable workspace artifacts. The API resolves and validates a
+public GitHub or skills.sh source, stores the exact files and resolved commit, and moves a small
+installation record when an admin replaces a standalone Skill. Plugins keep their own immutable
+package, valid immediate-child Skills, install report, and optional stdio MCP declarations.
+
+A Chat snapshots bundle and plugin IDs instead of names; a Workflow Task stores exact
+`skillBundleIds` on every step and its exact plugin IDs in the Harness spec. The runner mounts those
+versions even if workspace settings later change. Standalone Skills win name collisions with Plugin
+Skills, and Plugin collisions resolve deterministically by Plugin name. Archived artifacts remain
+available while a durable snapshot references them.
+
+Installing a Plugin never grants execution. An admin separately approves the exact package
+integrity before its stdio MCP servers can run, and MCP is available only in Codex and Claude coding
+sandboxes. Writable `PLUGIN_DATA` is archived per workspace and Plugin name so it survives sandbox
+and Plugin replacement. Brain's historical `skills/` pages and the dropped `goat.skills` tables are
+not compatibility inputs or replay sources.
+
 ## Integrations and security
 
 OAuth state and integration credentials are signed or encrypted at the backend boundary. Historical

@@ -98,7 +98,101 @@ describe("WikiCommandApplicationService", () => {
     const output = await run(service, readActor, { command: "tree" });
     expect(output).toEqual({
       ok: true,
-      result: { nodes: [], total: 0, hint: expect.stringContaining("empty") },
+      result: {
+        nodes: [],
+        depth: "unlimited",
+        shown: 0,
+        total: 0,
+        truncated: false,
+        hint: expect.stringContaining("empty"),
+      },
+    });
+  });
+
+  it("automatically limits large trees to root entries and makes the omission explicit", async () => {
+    const nodes = Array.from({ length: 41 }, (_, index) => ({
+      slug: `page-${index}`,
+      path: index === 0 ? "projects" : `projects/page-${index}`,
+      title: `Page ${index}`,
+      kind: "other" as const,
+      nodeType: index === 0 ? ("folder" as const) : ("page" as const),
+      sizeBytes: 0,
+      updatedAt: new Date("2026-08-01T00:00:00.000Z"),
+      childCount: index === 0 ? 40 : 0,
+    }));
+    const { repository } = fakeRepository({ getTree: async () => nodes });
+    const service = new WikiCommandApplicationService(repository);
+
+    const output = await run(service, readActor, { command: "tree" });
+
+    expect(output).toEqual({
+      ok: true,
+      result: {
+        nodes: [
+          {
+            path: "projects/",
+            type: "folder",
+            title: "Page 0",
+            children: 40,
+            updatedAt: "2026-08-01T00:00:00.000Z",
+          },
+        ],
+        depth: 0,
+        shown: 1,
+        total: 41,
+        truncated: true,
+        hint: expect.stringContaining("Showing depth 0"),
+      },
+    });
+  });
+
+  it("honors an explicit tree depth and reports how much remains hidden", async () => {
+    const nodes = [
+      {
+        slug: "projects",
+        path: "projects",
+        title: "Projects",
+        kind: "other" as const,
+        nodeType: "folder" as const,
+        sizeBytes: 0,
+        updatedAt: new Date("2026-08-01T00:00:00.000Z"),
+        childCount: 1,
+      },
+      {
+        slug: "website",
+        path: "projects/website",
+        title: "Website",
+        kind: "project" as const,
+        nodeType: "folder" as const,
+        sizeBytes: 0,
+        updatedAt: new Date("2026-08-01T00:00:00.000Z"),
+        childCount: 1,
+      },
+      {
+        slug: "launch",
+        path: "projects/website/launch",
+        title: "Launch",
+        kind: "project" as const,
+        nodeType: "page" as const,
+        sizeBytes: 0,
+        updatedAt: new Date("2026-08-01T00:00:00.000Z"),
+        childCount: 0,
+      },
+    ];
+    const { repository } = fakeRepository({ getTree: async () => nodes });
+    const service = new WikiCommandApplicationService(repository);
+
+    const output = await run(service, readActor, { command: "tree", depth: 1 });
+
+    expect(output).toMatchObject({
+      ok: true,
+      result: {
+        depth: 1,
+        shown: 2,
+        total: 3,
+        truncated: true,
+        hint: expect.stringContaining("1 deeper entries are omitted"),
+      },
     });
   });
 
