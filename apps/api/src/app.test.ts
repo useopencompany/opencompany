@@ -113,6 +113,7 @@ describe("canonical Hono API", () => {
       knowledge: fakeKnowledgeService(),
       wikiCommands: fakeWikiCommandsService(),
       resolveWikiServiceActor: async () => actor,
+      wikiSources: fakeWikiSources(),
       brainSources: fakeBrainSources(),
       brainImports: fakeBrainImports(),
       browserProfiles: fakeBrowserProfiles(),
@@ -521,6 +522,99 @@ describe("canonical Hono API", () => {
         bundle,
       }),
     );
+  });
+
+  it("serves and mutates workspace-scoped Wiki sources through typed routes", async () => {
+    const list = vi.fn(async () => [wikiSourceView()]);
+    const listActivity = vi.fn(async () => ({
+      items: [wikiActivityItem()],
+      nextCursor: "cursor_2",
+    }));
+    const upsert = vi.fn(async () => wikiSourceView());
+    const setEnabled = vi.fn(async () => wikiSourceView({ enabled: false }));
+    const remove = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      wikiSources: wikiSourceService({ list, listActivity, upsert, setEnabled, remove }),
+    });
+
+    const listed = await app.request("/v1/wiki/sources");
+    expect(listed.status).toBe(200);
+    const listedBody = await listed.json();
+    expect(listedBody).toMatchObject({
+      data: [{ id: "gwscfg_1", provider: "gmail", enabled: true, canToggle: true }],
+    });
+    expect(JSON.stringify(listedBody)).not.toMatch(/userWorkosId|workspaceId|credential|token/iu);
+    expect(list).toHaveBeenCalledWith(actor);
+
+    const activity = await app.request("/v1/wiki/sources/activity?limit=10&cursor=cursor_1");
+    expect(activity.status).toBe(200);
+    await expect(activity.json()).resolves.toMatchObject({
+      data: {
+        items: [
+          {
+            id: "gwjob_1",
+            provider: "slack",
+            outcome: "succeeded",
+            pages: [{ path: "projects/launch", action: "updated" }],
+          },
+        ],
+        nextCursor: "cursor_2",
+      },
+    });
+    expect(listActivity).toHaveBeenCalledWith(actor, { limit: 10, cursor: "cursor_1" });
+
+    const configured = await app.request("/v1/wiki/sources", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        integrationId: "integration_1",
+        provider: "gmail",
+        enabled: true,
+        config: { instructions: "Only customer mail" },
+      }),
+    });
+    expect(configured.status).toBe(200);
+    expect(upsert).toHaveBeenCalledWith(actor, {
+      integrationId: "integration_1",
+      provider: "gmail",
+      enabled: true,
+      config: { instructions: "Only customer mail" },
+    });
+
+    const disabled = await app.request("/v1/wiki/sources/gwscfg_1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(disabled.status).toBe(200);
+    await expect(disabled.json()).resolves.toMatchObject({ data: { enabled: false } });
+    expect(setEnabled).toHaveBeenCalledWith(actor, "gwscfg_1", false);
+
+    const removed = await app.request("/v1/wiki/sources/gwscfg_1", { method: "DELETE" });
+    expect(removed.status).toBe(200);
+    await expect(removed.json()).resolves.toMatchObject({
+      data: { sourceId: "gwscfg_1", deleted: true },
+    });
+    expect(remove).toHaveBeenCalledWith(actor, "gwscfg_1");
+  });
+
+  it("rejects unsupported Wiki source providers before invoking source logic", async () => {
+    const upsert = vi.fn(async () => wikiSourceView());
+    const app = testApp(fakeRepository(), {
+      wikiSources: wikiSourceService({ upsert }),
+    });
+    const response = await app.request("/v1/wiki/sources", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        integrationId: "integration_1",
+        provider: "google_drive",
+        enabled: true,
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it("does not expose the retired hand-authored Skill create or edit routes", async () => {
@@ -3782,6 +3876,7 @@ function testApp(
     knowledge: fakeKnowledgeService(),
     wikiCommands: fakeWikiCommandsService(),
     resolveWikiServiceActor: async () => actor,
+    wikiSources: fakeWikiSources(),
     brainSources: fakeBrainSources(),
     brainImports: fakeBrainImports(),
     browserProfiles: fakeBrowserProfiles(),
@@ -4238,6 +4333,49 @@ function engineSessionService(
   return { ...fakeEngineSessions(), ...overrides };
 }
 
+function fakeWikiSources(): Parameters<typeof createApiApp>[0]["wikiSources"] {
+  return {
+    list: async () => {
+      throw new Error("Unexpected Wiki source list.");
+    },
+    listActivity: async () => {
+      throw new Error("Unexpected Wiki activity list.");
+    },
+    upsert: async () => {
+      throw new Error("Unexpected Wiki source mutation.");
+    },
+    setEnabled: async () => {
+      throw new Error("Unexpected Wiki source enabled mutation.");
+    },
+    remove: async () => {
+      throw new Error("Unexpected Wiki source removal.");
+    },
+  };
+}
+
+function wikiSourceService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["wikiSources"]>,
+): Parameters<typeof createApiApp>[0]["wikiSources"] {
+  return { ...fakeWikiSources(), ...overrides };
+}
+
+function wikiActivityItem() {
+  return {
+    id: "gwjob_1",
+    provider: "slack" as const,
+    sourceType: "conversation" as const,
+    title: "#product",
+    outcome: "succeeded" as const,
+    reason: null,
+    pages: [{ path: "projects/launch", title: "Launch", action: "updated" as const }],
+    attempts: 1,
+    occurredAt: "2026-08-24T08:00:00.000Z",
+    completedAt: "2026-08-24T09:01:00.000Z",
+    createdAt: "2026-08-24T09:00:00.000Z",
+    updatedAt: "2026-08-24T09:01:00.000Z",
+  };
+}
+
 function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {
   return {
     list: async () => {
@@ -4288,6 +4426,29 @@ function browserProfileService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["browserProfiles"]>,
 ): Parameters<typeof createApiApp>[0]["browserProfiles"] {
   return { ...fakeBrowserProfiles(), ...overrides };
+}
+
+function wikiSourceView(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "gwscfg_1",
+    provider: "gmail" as const,
+    integrationId: "integration_1",
+    enabled: true,
+    config: {},
+    integrationStatus: "connected" as const,
+    accountName: null,
+    accountEmail: "ada@example.com",
+    connectionLabel: null,
+    ownerName: "Ada Lovelace",
+    ownerEmail: "ada@example.com",
+    ownerAvatarUrl: null,
+    ownerKind: "user" as const,
+    isOwn: true,
+    canConfigure: true,
+    canToggle: true,
+    canDelete: true,
+    ...overrides,
+  };
 }
 
 function brainSourceDetails() {

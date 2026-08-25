@@ -12,6 +12,12 @@ import {
   listEnabledBrainRefsForIntegration,
 } from "@opencompany/db/brain-sources";
 import { getDb } from "@opencompany/db/client";
+import {
+  attributeWikiSourceEventClaims,
+  claimWikiSourceEvents,
+} from "@opencompany/db/wiki-event-claims";
+import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
+import { listEnabledWikiSourcesForIntegration } from "@opencompany/db/wiki-sources";
 import { getDefaultBrainForUser } from "@opencompany/db/workspaces";
 import {
   type JamieWebhookContext,
@@ -27,6 +33,7 @@ export async function handleJamieWebhookDelivery(input: {
   webhookContext: JamieWebhookContext | null;
   missingContextStatus: 401 | 404;
   db?: DbLike;
+  wakeWikiIngest?: () => void;
 }) {
   const { request, webhookContext } = input;
   const db: DbLike = input.db ?? getDb();
@@ -116,10 +123,70 @@ export async function handleJamieWebhookDelivery(input: {
     db,
   );
 
+  const wikiEnqueued = await enqueueJamieMeetingToWiki({
+    integrationId: webhookContext.integrationId,
+    item,
+    rawPayload: payload,
+    now: receivedAt,
+    db,
+  });
+  if (wikiEnqueued) input.wakeWikiIngest?.();
+
   return Response.json({
     ok: true,
     sourceItemId: result.sourceItemId,
     jobId: result.jobId,
     enqueued: result.enqueued,
   });
+}
+
+export async function enqueueJamieMeetingToWiki(input: {
+  integrationId: string;
+  item: ReturnType<typeof normalizeJamieMeetingCompletedWebhook>;
+  rawPayload: unknown;
+  now: Date;
+  db: DbLike;
+}): Promise<boolean> {
+  const routes = (await listEnabledWikiSourcesForIntegration(input.integrationId, input.db)).filter(
+    (source) => source.provider === "jamie",
+  );
+  if (routes.length === 0) return false;
+
+  const eventKey = `meeting:${input.item.externalId}`;
+  let enqueued = false;
+  for (const route of routes) {
+    const persist = async (db: DbLike) => {
+      const claim = await claimWikiSourceEvents({
+        workspaceId: route.workspaceId,
+        sourceProvider: "jamie",
+        eventKeys: [eventKey],
+        db,
+      });
+      if (claim.claimedCount === 0) return null;
+
+      const result = await upsertWikiSourceItemAndEnqueue({
+        workspaceId: route.workspaceId,
+        sourceConnectionId: input.integrationId,
+        integrationId: input.integrationId,
+        item: input.item,
+        rawPayload: input.rawPayload,
+        now: input.now,
+        db,
+      });
+      await attributeWikiSourceEventClaims({
+        workspaceId: route.workspaceId,
+        sourceProvider: "jamie",
+        eventKeys: claim.claimedEventKeys,
+        sourceItemId: result.sourceItemId,
+        db,
+      });
+      return result;
+    };
+    const result =
+      typeof input.db.transaction === "function"
+        ? await input.db.transaction((tx: DbLike) => persist(tx))
+        : await persist(input.db);
+    enqueued = enqueued || Boolean(result?.enqueued);
+  }
+  return enqueued;
 }

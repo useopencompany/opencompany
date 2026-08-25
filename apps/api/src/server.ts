@@ -73,6 +73,7 @@ import { createSlackBotSettingsService } from "./slack-bot-settings";
 import { createSlackIngress } from "./slack-ingress";
 import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
+import { createWikiSourceService } from "./wiki-sources";
 import { createWorkspaceCapabilityService } from "./workspace-capabilities";
 import { createWorkspaceControlService } from "./workspace-control";
 import { createXAccountIngress } from "./x-account-ingress";
@@ -117,6 +118,7 @@ const knowledge = new KnowledgeApplicationService(knowledgeRepository);
 const wikiCommands = new WikiCommandApplicationService(
   new PostgresWikiCommandRepository(database.db),
 );
+const wikiSources = createWikiSourceService({ db: database.db });
 const brainSources = new BrainSourceApplicationService(database.db);
 const brainImports = new BrainImportApplicationService(database.db, brainSources);
 const browserProfiles = new BrowserProfileApplicationService(database.db);
@@ -147,6 +149,7 @@ const app = createApiApp({
   ...(process.env.API_INTERNAL_TOKEN?.trim()
     ? { wikiCommandsInternalSecret: process.env.API_INTERNAL_TOKEN.trim() }
     : {}),
+  wikiSources,
   brainSources,
   brainImports,
   browserProfiles,
@@ -225,13 +228,30 @@ const app = createApiApp({
   identify: identityVerifier,
   ...(process.env.CRON_SECRET ? { emailLifecycleInternalSecret: process.env.CRON_SECRET } : {}),
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
-  githubIngress: createGitHubIngress({ db: database.db, identify: identityVerifier }),
+  githubIngress: createGitHubIngress({
+    db: database.db,
+    identify: identityVerifier,
+    wakeWikiIngest: () =>
+      runnerClient.postJson(
+        "/internal/goat/wiki-ingest/wake",
+        {},
+        { errorFormat: "error-message" },
+      ),
+  }),
   googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
   slackIngress: createSlackIngress({ db: database.db, identify: identityVerifier }),
   linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
   hubspotIngress: createHubspotIngress({ db: database.db, identify: identityVerifier }),
   attioIngress: createAttioIngress({ db: database.db }),
-  jamieIngress: createJamieIngress({ db: database.db }),
+  jamieIngress: createJamieIngress({
+    db: database.db,
+    wakeWikiIngest: () =>
+      runnerClient.postJson(
+        "/internal/goat/wiki-ingest/wake",
+        {},
+        { errorFormat: "error-message" },
+      ),
+  }),
   mcpOAuthIngress: createMcpOAuthIngress({ db: database.db, identify: identityVerifier }),
   xAccountIngress: createXAccountIngress({ db: database.db, identify: identityVerifier }),
   slackBotIngress: createSlackBotIngress({

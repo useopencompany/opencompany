@@ -20,6 +20,7 @@ import {
   linearRouteMatchesEvent,
   linearSelectedTeamIds,
   listEnabledLinearBrainSourceRoutes,
+  listEnabledLinearWikiSourceRoutes,
   listLinearIntegrationsForOrganization,
   listLinearWorkflowTriggerRoutes,
 } from "@opencompany/db/linear";
@@ -274,15 +275,14 @@ async function handleLinearEvent(
     );
   }
 
-  const routes = await listEnabledLinearBrainSourceRoutes(
-    connected.map((integration) => integration.id),
-    db,
-  );
+  const integrationIds = connected.map((integration) => integration.id);
+  const brainRoutes = await listEnabledLinearBrainSourceRoutes(integrationIds, db);
+  const wikiRoutes = await listEnabledLinearWikiSourceRoutes(integrationIds, db);
   // With a known team the selection is exact; comment events may not carry the
   // team, so any integration with a selection buffers and the flush worker
   // re-filters against the live issue's team.
   const matchedIntegrationIds = new Set(
-    routes
+    [...brainRoutes, ...wikiRoutes]
       .filter((route) => {
         const selected = linearSelectedTeamIds(route.config);
         if (selected.size === 0) return false;

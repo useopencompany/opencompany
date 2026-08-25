@@ -172,6 +172,7 @@
         "@opencompany/file-extract": "workspace:*",
         "@opencompany/observability": "workspace:*",
         "@opencompany/telemetry": "workspace:*",
+        "@opencompany/wiki": "workspace:*",
         "@sentry/bun": "^10.70.0",
         "@vercel/blob": "^2.8.0",
         "ai": "^6.0.189",

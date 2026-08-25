@@ -21,6 +21,7 @@ import {
   applyIntegrationCapabilityMode,
   disconnectPersonalIntegration,
 } from "@opencompany/db/integrations";
+import { ensureWikiSourceEnabledOnConnect } from "@opencompany/db/wiki-sources";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIntegrationAccountService } from "./integration-accounts";
 import type { RunnerClient } from "./runner-client";
@@ -39,6 +40,11 @@ vi.mock("@opencompany/db/imessage", async (importOriginal) => ({
   incrementImessageChallengeAttempts: vi.fn(async () => undefined),
   consumeImessageChallenge: vi.fn(async () => undefined),
   recordImessageSend: vi.fn(async () => undefined),
+}));
+
+vi.mock("@opencompany/db/wiki-sources", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ensureWikiSourceEnabledOnConnect: vi.fn(async () => true),
 }));
 
 vi.mock("@opencompany/agent/imessage/connect", async (importOriginal) => ({
@@ -296,6 +302,14 @@ describe("integration account service", () => {
     expect(connectGranolaIntegration).toHaveBeenCalledWith(
       expect.objectContaining({ userWorkosId: "user_1", apiKey: "grn_valid_key_12345" }),
     );
+    expect(ensureWikiSourceEnabledOnConnect).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      provider: "granola",
+      integrationId: "gint_granola",
+      userWorkosId: "user_1",
+      createdByWorkosId: "user_1",
+      db: expect.anything(),
+    });
     expect(getGranolaIntegrationState).toHaveBeenCalled();
   });
 
@@ -465,6 +479,30 @@ describe("integration account service", () => {
     await expect(service.saveJamieWebhookApiKey(admin, "sk_x")).rejects.toMatchObject({
       status: 400,
       message: "Create a Jamie webhook endpoint before saving the API key.",
+    });
+  });
+
+  it("auto-enables Jamie for the Wiki when its API key is saved", async () => {
+    vi.mocked(saveJamieWebhookApiKey).mockResolvedValueOnce({
+      integrationId: "gint_jamie",
+      webhookUrl: "https://example.test/webhooks/jamie",
+      headerName: "x-jamie-api-key",
+      apiKeyConfigured: true,
+    });
+    const db = fakeDb([[{ userWorkosId: "user_connector" }]]);
+    const service = createIntegrationAccountService({ db });
+
+    await expect(service.saveJamieWebhookApiKey(admin, "sk_x")).resolves.toMatchObject({
+      integrationId: "gint_jamie",
+      apiKeyConfigured: true,
+    });
+    expect(ensureWikiSourceEnabledOnConnect).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      provider: "jamie",
+      integrationId: "gint_jamie",
+      userWorkosId: "user_connector",
+      createdByWorkosId: "user_1",
+      db,
     });
   });
 });

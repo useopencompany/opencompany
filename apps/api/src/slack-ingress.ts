@@ -19,6 +19,7 @@ import type { SlackChannelType } from "@opencompany/db/product-schema";
 import {
   insertSlackMessageEvents,
   listEnabledSlackBrainSourceRoutes,
+  listEnabledSlackWikiSourceRoutes,
   listSlackIntegrationsForTeam,
   type SlackMessageEventInsert,
   slackSelectedConversationIds,
@@ -272,12 +273,13 @@ async function handleMessage(db: DbLike, teamId: string, event: Record<string, u
   const connected = integrations.filter((integration) => integration.status === "connected");
   if (connected.length === 0) return { ok: true, dropped: true };
 
-  const routes = await listEnabledSlackBrainSourceRoutes(
-    connected.map((integration) => integration.id),
-    db,
-  );
+  const integrationIds = connected.map((integration) => integration.id);
+  const [brainRoutes, wikiRoutes] = await Promise.all([
+    listEnabledSlackBrainSourceRoutes(integrationIds, db),
+    listEnabledSlackWikiSourceRoutes(integrationIds, db),
+  ]);
   const matchedIntegrationIds = new Set(
-    routes
+    [...brainRoutes, ...wikiRoutes]
       .filter((route) => slackSelectedConversationIds(route.config).has(channelId))
       .map((route) => route.integrationId),
   );
