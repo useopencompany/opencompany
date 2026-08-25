@@ -74,6 +74,151 @@ describe("protocol SSE client", () => {
     expect(cursors).toEqual(["v1:1", "v1:2"]);
   });
 
+  it("reconnects from the last validated cursor when the response body throws", async () => {
+    const encoder = new TextEncoder();
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      calls.push(url.searchParams.get("cursor") ?? "");
+      if (calls.length === 1) {
+        let reads = 0;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              reads += 1;
+              if (reads === 1) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(event(1))}\n\n`));
+                return;
+              }
+              controller.error(new TypeError("Error in input stream"));
+            },
+          }),
+          { headers: { "Content-Type": "text/event-stream" } },
+        );
+      }
+      return new Response(
+        [event(1), event(2, "run.completed")]
+          .map((value) => `data: ${JSON.stringify(value)}\n\n`)
+          .join(""),
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
+    });
+
+    const received = [];
+    for await (const value of streamRunEvents({
+      baseUrl: "https://api.example.test",
+      runId: "run_1",
+      fetch: fetchMock as typeof fetch,
+      reconnectDelayMs: 0,
+    })) {
+      received.push(value.id);
+    }
+
+    expect(received).toEqual(["event_1", "event_2"]);
+    expect(calls).toEqual(["", "v1:1"]);
+  });
+
+  it("retries transient fetch and retryable HTTP failures", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { message: "Temporarily unavailable.", retryable: true } },
+          { status: 503 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(`data: ${JSON.stringify(event(1, "run.completed"))}\n\n`, {
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+      );
+
+    const received = [];
+    for await (const value of streamRunEvents({
+      baseUrl: "https://api.example.test",
+      runId: "run_1",
+      fetch: fetchMock,
+      reconnectDelayMs: 0,
+    })) {
+      received.push(value.type);
+    }
+
+    expect(received).toEqual(["run.completed"]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry non-retryable HTTP or protocol failures", async () => {
+    const unauthorizedFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json(
+          { error: { message: "Authentication is required.", retryable: false } },
+          { status: 401 },
+        ),
+      );
+    const unauthorized = streamRunEvents({
+      baseUrl: "https://api.example.test",
+      runId: "run_1",
+      fetch: unauthorizedFetch,
+      reconnectDelayMs: 0,
+    });
+    await expect(unauthorized.next()).rejects.toThrow("Authentication is required.");
+    expect(unauthorizedFetch).toHaveBeenCalledTimes(1);
+
+    const malformedFetch = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("data: not-json\n\n", {
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+    const malformed = streamRunEvents({
+      baseUrl: "https://api.example.test",
+      runId: "run_1",
+      fetch: malformedFetch,
+      reconnectDelayMs: 0,
+    });
+    await expect(malformed.next()).rejects.toThrow("malformed JSON");
+    expect(malformedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops retrying immediately when aborted", async () => {
+    const abortController = new AbortController();
+    const fetchMock = vi.fn(async (_input: URL | RequestInfo, init?: RequestInit) => {
+      abortController.abort();
+      throw new DOMException("The operation was aborted.", "AbortError");
+    });
+
+    const received = [];
+    for await (const value of streamRunEvents({
+      baseUrl: "https://api.example.test",
+      runId: "run_1",
+      fetch: fetchMock as typeof fetch,
+      signal: abortController.signal,
+      reconnectDelayMs: 0,
+    })) {
+      received.push(value);
+    }
+
+    expect(received).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces one stable error after transient reconnects are exhausted", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("Failed to fetch"));
+    const stream = streamRunEvents({
+      baseUrl: "https://api.example.test",
+      runId: "run_1",
+      fetch: fetchMock,
+      reconnectDelayMs: 0,
+      maxReconnectAttempts: 2,
+    });
+
+    await expect(stream.next()).rejects.toThrow(
+      "The Run event stream disconnected repeatedly before the Run finished.",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("binds the default browser fetch to its runtime receiver", async () => {
     const fetchMock = vi.fn(function (this: unknown) {
       if (this !== globalThis) throw new TypeError("Illegal invocation");
