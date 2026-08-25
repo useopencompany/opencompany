@@ -178,3 +178,9 @@ export const USE_SKILL_TOOL_DESCRIPTION =
 
 export const USE_SKILL_ID_DESCRIPTION =
   "The exact skill id returned by a successful list_skills call in this chat.";
+
+export const READ_SKILL_FILE_TOOL_DESCRIPTION =
+  "Read one file bundled with a skill that has already been activated with use_skill or @skill. Files are returned in bounded chunks: UTF-8 files as text and binary files as base64. Continue with nextOffset until eof is true.";
+
+export const READ_SKILL_FILE_PATH_DESCRIPTION =
+  "The exact relative file path referenced by the activated skill, such as references/guide.md.";

@@ -126,43 +126,43 @@ describe("ChatShareButton", () => {
     });
   });
 
-  it.each([
-    "Codex chat",
-    "Claude Code chat",
-  ] as const)("uses %s copy when sharing cloud coding sessions", async (subject) => {
-    vi.mocked(createChatShareAction).mockResolvedValue({
-      ok: true,
-      shareId: SHARE_ID,
-    });
-    render(<ChatShareButton chatSessionId="goat_chat_cloud_1" subject={subject} />);
+  it.each(["Codex chat", "Claude Code chat"] as const)(
+    "uses %s copy when sharing cloud coding sessions",
+    async (subject) => {
+      vi.mocked(createChatShareAction).mockResolvedValue({
+        ok: true,
+        shareId: SHARE_ID,
+      });
+      render(<ChatShareButton chatSessionId="goat_chat_cloud_1" subject={subject} />);
 
-    fireEvent.click(screen.getByRole("button", { name: `Share ${subject}` }));
+      fireEvent.click(screen.getByRole("button", { name: `Share ${subject}` }));
 
-    expect(
-      await screen.findByRole("heading", { name: `Share this ${subject}` }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        new RegExp(
-          `Anyone with the link can view this read-only ${subject}, including new messages`,
+      expect(
+        await screen.findByRole("heading", { name: `Share this ${subject}` }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          new RegExp(
+            `Anyone with the link can view this read-only ${subject}, including new messages`,
+          ),
         ),
-      ),
-    ).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("button", { name: "Create & copy link" }));
+      ).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole("button", { name: "Create & copy link" }));
 
-    await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/share/${SHARE_ID}`),
-    );
-    expect(
-      await screen.findByRole("heading", { name: `${subject} is shared` }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: `Read-only ${subject} link` })).toHaveValue(
-      `${window.location.origin}/share/${SHARE_ID}`,
-    );
-    expect(toastMock.success).toHaveBeenCalledWith("Read-only link copied", {
-      description: `Anyone with the link can view this ${subject}, including new messages.`,
-    });
-  });
+      await waitFor(() =>
+        expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/share/${SHARE_ID}`),
+      );
+      expect(
+        await screen.findByRole("heading", { name: `${subject} is shared` }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: `Read-only ${subject} link` })).toHaveValue(
+        `${window.location.origin}/share/${SHARE_ID}`,
+      );
+      expect(toastMock.success).toHaveBeenCalledWith("Read-only link copied", {
+        description: `Anyone with the link can view this ${subject}, including new messages.`,
+      });
+    },
+  );
 
   it("keeps a failed revocation open so the owner can retry", async () => {
     vi.mocked(getChatShareAction).mockResolvedValue({ ok: true, shareId: SHARE_ID });

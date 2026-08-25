@@ -27,6 +27,7 @@ import { createChatBrowserToolSession } from "../browser-tools-runtime";
 import {
   activateAndListChatSessionSkills,
   listSkillCatalog,
+  readChatSkillFile,
   resolveSkillMentions,
 } from "../skills";
 import {
@@ -97,9 +98,11 @@ export function executePersistedChatHostTool(input: {
       activateAndListChatSessionSkills({
         chatSessionId: conversationId,
         activatedMessageId: messageId,
-        workspaceRef: workspaceId,
+        workspaceId,
         skills,
       }),
+    readSkillFile: ({ conversationId, ...skillFile }) =>
+      readChatSkillFile({ chatSessionId: conversationId, ...skillFile }),
     createTask: (task) =>
       createTaskForActor(
         {

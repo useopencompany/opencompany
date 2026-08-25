@@ -27,6 +27,9 @@ export const SPANS = {
   brainIngestRun: "goat.brain_ingest.run",
   brainIngestComplete: "goat.brain_ingest.complete",
   brainIngestFail: "goat.brain_ingest.fail",
+  wikiIngestRun: "goat.wiki_ingest.run",
+  wikiIngestComplete: "goat.wiki_ingest.complete",
+  wikiIngestFail: "goat.wiki_ingest.fail",
 } as const;
 
 export const METRICS = {
@@ -101,6 +104,7 @@ export type GatewayFeature =
   | "task"
   | "brain-ingest"
   | "brain-query"
+  | "wiki-ingest"
   | "slack-bot";
 
 export type GatewayAttribution = {

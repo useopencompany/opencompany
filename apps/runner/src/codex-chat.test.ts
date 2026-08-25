@@ -35,6 +35,24 @@ const dbMocks = vi.hoisted(() => ({
   selectRows: [] as unknown[][],
   execute: vi.fn(),
 }));
+const skillBundleMocks = vi.hoisted(() => ({ loadImmutableSkillBundles: vi.fn() }));
+const pluginRuntimeMocks = vi.hoisted(() => ({
+  loadChatSessionPluginRuntime: vi.fn(),
+  loadEnabledPluginSkillBundleIds: vi.fn(),
+}));
+const managedPluginMocks = vi.hoisted(() => ({
+  materializePluginPackagesForSession: vi.fn(),
+}));
+const pluginDataMocks = vi.hoisted(() => ({
+  preparePluginDataRuntime: vi.fn(),
+  checkpoint: vi.fn(),
+  release: vi.fn(),
+  assertHealthy: vi.fn(),
+}));
+const pluginMcpMocks = vi.hoisted(() => ({
+  materializeTrustedPluginMcpLaunchers: vi.fn(),
+  stopPluginMcpProcesses: vi.fn(),
+}));
 const eventMocks = vi.hoisted(() => ({
   createExternalEngineProjector: vi.fn(),
   loadCodexChatAssistantMessageParts: vi.fn(),
@@ -56,8 +74,12 @@ const skillMocks = vi.hoisted(() => ({ materializeCodexSkillSnapshotsForSession:
 
 vi.mock("./acp-harness", () => ({
   AcpHarness: class AcpHarness {
-    runTurn(input: AcpHarnessTurnInput) {
-      return acpMocks.runTurn(input);
+    async runTurn(input: AcpHarnessTurnInput) {
+      try {
+        return await acpMocks.runTurn(input);
+      } finally {
+        await input.onEngineStopped?.();
+      }
     }
   },
 }));
@@ -100,6 +122,28 @@ vi.mock("./codex-managed-skills", () => ({
 
 vi.mock("./db", () => ({
   getDb: () => queryBuilder(dbMocks.selectRows, dbMocks.execute),
+}));
+
+vi.mock("@opencompany/db/skill-bundle-repository", () => ({
+  loadImmutableSkillBundles: skillBundleMocks.loadImmutableSkillBundles,
+}));
+
+vi.mock("@opencompany/db/plugin-runtime-repository", () => ({
+  loadChatSessionPluginRuntime: pluginRuntimeMocks.loadChatSessionPluginRuntime,
+  loadEnabledPluginSkillBundleIds: pluginRuntimeMocks.loadEnabledPluginSkillBundleIds,
+}));
+
+vi.mock("./managed-plugins", () => ({
+  materializePluginPackagesForSession: managedPluginMocks.materializePluginPackagesForSession,
+}));
+
+vi.mock("./plugin-data-runtime", () => ({
+  preparePluginDataRuntime: pluginDataMocks.preparePluginDataRuntime,
+}));
+
+vi.mock("./plugin-mcp-launcher", () => ({
+  materializeTrustedPluginMcpLaunchers: pluginMcpMocks.materializeTrustedPluginMcpLaunchers,
+  stopPluginMcpProcesses: pluginMcpMocks.stopPluginMcpProcesses,
 }));
 
 vi.mock("./github", () => ({ getGitHubWorkInstallationToken: vi.fn() }));
@@ -366,6 +410,35 @@ describe("runCodexChatTurn over ACP", () => {
     vi.clearAllMocks();
     dbMocks.selectRows.length = 0;
     dbMocks.execute.mockReset().mockResolvedValue({ rows: [{ id: "updated" }] });
+    skillBundleMocks.loadImmutableSkillBundles.mockReset().mockResolvedValue([]);
+    pluginRuntimeMocks.loadChatSessionPluginRuntime
+      .mockReset()
+      .mockResolvedValue({ plugins: [], skills: [], mcpPlugins: [] });
+    pluginRuntimeMocks.loadEnabledPluginSkillBundleIds.mockReset().mockResolvedValue(new Set());
+    managedPluginMocks.materializePluginPackagesForSession.mockReset().mockResolvedValue({
+      fingerprint: "plugins",
+      count: 0,
+    });
+    pluginDataMocks.preparePluginDataRuntime.mockReset().mockResolvedValue({
+      dataRoots: new Map([["quality-tools", "/plugin-data/quality-tools"]]),
+      checkpoint: pluginDataMocks.checkpoint,
+      release: pluginDataMocks.release,
+      assertHealthy: pluginDataMocks.assertHealthy,
+    });
+    pluginDataMocks.checkpoint.mockReset().mockResolvedValue(undefined);
+    pluginDataMocks.release.mockReset().mockResolvedValue(undefined);
+    pluginDataMocks.assertHealthy.mockReset();
+    pluginMcpMocks.materializeTrustedPluginMcpLaunchers
+      .mockReset()
+      .mockImplementation(async (input: { mcpPlugins: unknown[] }) =>
+        input.mcpPlugins.length === 0
+          ? { servers: [], pluginUsers: [] }
+          : {
+              servers: [preparedPluginMcpServer()],
+              pluginUsers: [{ pluginName: "quality-tools", user: "ocp_test" }],
+            },
+      );
+    pluginMcpMocks.stopPluginMcpProcesses.mockReset().mockResolvedValue(undefined);
     authMocks.loadCodexCliAuth.mockResolvedValue({
       kind: "api",
       baseUrl: "https://api.openai.test/v1",
@@ -485,6 +558,115 @@ describe("runCodexChatTurn over ACP", () => {
       mimeType: "image/png",
     });
     expect(harnessInput.task).toContain("image_1-screenshot.png");
+  });
+
+  it("never exposes MCP for an installed but unapproved Plugin", async () => {
+    const { pluginPackage } = approvedPluginRuntime();
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+      mcpPlugins: [],
+    });
+
+    await runCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession({ workspaceId: "workspace_1" }),
+      env: env(),
+    });
+
+    expect(pluginDataMocks.preparePluginDataRuntime).not.toHaveBeenCalled();
+    expect(pluginMcpMocks.materializeTrustedPluginMcpLaunchers).toHaveBeenCalledWith(
+      expect.objectContaining({ mcpPlugins: [], dataRoots: new Map() }),
+    );
+    expect(acpMocks.runTurn).toHaveBeenCalledWith(expect.objectContaining({ mcpServers: [] }));
+  });
+
+  it("passes approved Plugin MCP through ACP and checkpoints only after turn-end quiesce", async () => {
+    const { pluginPackage, mcpPlugin } = approvedPluginRuntime();
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+      mcpPlugins: [mcpPlugin],
+    });
+
+    await runCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession({ workspaceId: "workspace_1" }),
+      env: env(),
+    });
+
+    expect(pluginDataMocks.preparePluginDataRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "workspace_1", mcpPlugins: [mcpPlugin] }),
+    );
+    expect(acpMocks.runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcpServers: [expect.objectContaining({ name: "quality-tools.local", env: [] })],
+        onEngineStopped: expect.any(Function),
+      }),
+    );
+    expect(pluginMcpMocks.stopPluginMcpProcesses).toHaveBeenCalledWith(expect.anything(), [
+      { pluginName: "quality-tools", user: "ocp_test" },
+    ]);
+    expect(pluginDataMocks.checkpoint).toHaveBeenCalledWith({ releaseLease: true });
+    expect(pluginMcpMocks.stopPluginMcpProcesses.mock.invocationCallOrder[0]).toBeLessThan(
+      pluginDataMocks.checkpoint.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it.each([
+    ["disabled", { plugins: [], skills: [], mcpPlugins: [] }],
+    [
+      "approval revoked",
+      { plugins: [approvedPluginRuntime().pluginPackage], skills: [], mcpPlugins: [] },
+    ],
+  ])("removes Plugin MCP on the next turn when it is %s", async (_state, nextRuntime) => {
+    const { pluginPackage, mcpPlugin } = approvedPluginRuntime();
+    pluginRuntimeMocks.loadChatSessionPluginRuntime
+      .mockResolvedValueOnce({ plugins: [pluginPackage], skills: [], mcpPlugins: [mcpPlugin] })
+      .mockResolvedValueOnce(nextRuntime);
+
+    await runCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession({ workspaceId: "workspace_1" }),
+      env: env(),
+    });
+    await runCodexChatTurn({
+      turn: codexTurn({ id: "goat_codex_turn_2" }),
+      session: codexSession({ workspaceId: "workspace_1" }),
+      env: env(),
+    });
+
+    const firstInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
+    const nextInput = acpMocks.runTurn.mock.calls[1]?.[0] as AcpHarnessTurnInput;
+    expect(firstInput.mcpServers).toEqual([
+      expect.objectContaining({ name: "quality-tools.local" }),
+    ]);
+    expect(nextInput.mcpServers).toEqual([]);
+  });
+
+  it("reports a Plugin checkpoint failure without retrying the one-shot checkpoint", async () => {
+    const { pluginPackage, mcpPlugin } = approvedPluginRuntime();
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+      mcpPlugins: [mcpPlugin],
+    });
+    pluginDataMocks.checkpoint.mockRejectedValueOnce(new Error("checkpoint storage unavailable"));
+
+    await runCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession({ workspaceId: "workspace_1" }),
+      env: env(),
+    });
+
+    expect(pluginDataMocks.checkpoint).toHaveBeenCalledOnce();
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.fail).toHaveBeenCalledWith(
+      expect.stringContaining("Plugin data checkpointing failed: checkpoint storage unavailable"),
+      expect.objectContaining({
+        failureDiagnostic: expect.stringContaining("checkpoint storage unavailable"),
+      }),
+    );
   });
 
   it("bootstraps durable history after ACP invalidates a stored session", async () => {
@@ -644,15 +826,28 @@ describe("runCodexChatTurn over ACP", () => {
   });
 
   it("hands a turn off without finalizing when ACP is interrupted by shutdown", async () => {
+    const { pluginPackage, mcpPlugin } = approvedPluginRuntime();
+    pluginRuntimeMocks.loadChatSessionPluginRuntime.mockResolvedValueOnce({
+      plugins: [pluginPackage],
+      skills: [],
+      mcpPlugins: [mcpPlugin],
+    });
     acpMocks.runTurn.mockRejectedValueOnce(new CodexChatHandoffError());
 
     await expect(
-      runCodexChatTurn({ turn: codexTurn(), session: codexSession(), env: env() }),
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession({ workspaceId: "workspace_1" }),
+        env: env(),
+      }),
     ).resolves.toBe("handed_off");
 
     const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
     expect(projector.finalize).not.toHaveBeenCalled();
     expect(projector.fail).not.toHaveBeenCalled();
+    expect(pluginMcpMocks.stopPluginMcpProcesses).toHaveBeenCalledOnce();
+    expect(pluginDataMocks.checkpoint).not.toHaveBeenCalled();
+    expect(pluginDataMocks.release).toHaveBeenCalledOnce();
   });
 
   it("stages ChatGPT authentication for the ACP adapter", async () => {
@@ -777,6 +972,47 @@ function emptyHistory() {
     materializableAttachments: [],
     omittedTurnCount: 0,
     omittedAttachmentCount: 0,
+  };
+}
+
+function approvedPluginRuntime() {
+  const pluginPackage = {
+    id: "plugin_quality_v1",
+    name: "quality-tools",
+    files: [
+      {
+        path: "plugin.json",
+        content: new TextEncoder().encode('{"name":"quality-tools"}'),
+        executable: false,
+        sizeBytes: 24,
+      },
+    ],
+  };
+  return {
+    pluginPackage,
+    mcpPlugin: {
+      id: pluginPackage.id,
+      name: pluginPackage.name,
+      integrity: `sha256:${"a".repeat(64)}`,
+      stdioServers: [
+        {
+          name: "local",
+          type: "stdio" as const,
+          command: "node",
+          args: ["${PLUGIN_ROOT}/server.mjs"],
+          env: {},
+        },
+      ],
+    },
+  };
+}
+
+function preparedPluginMcpServer() {
+  return {
+    name: "quality-tools.local",
+    command: "/usr/bin/sudo",
+    args: ["-n", "-u", "ocp_test", "--", "/launcher.py", "/config.json"],
+    env: [],
   };
 }
 

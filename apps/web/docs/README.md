@@ -51,11 +51,18 @@ The 35 known sessionless pre-cutover Tasks are intentionally separate. They rema
 the actor-scoped compatibility API and cannot be replied to, canceled, or archived. ADR 0002 owns
 their retention gate.
 
-## Knowledge and integrations
+## Knowledge, Skills, Plugins, and integrations
 
-Brain, Wiki, Skills, and integration commands are API- or runner-owned. Browser reads use fixed
-authorized API read models, including `integration-accounts-v1`. The generic web Electric shape
-proxy is deleted; clients cannot select physical tables or predicates.
+Brain, Wiki, Agent Skills, Agent Plugins, and integration commands are API- or runner-owned. Skills
+and Plugins are immutable packages installed by exact resolved commit. Chats snapshot immutable
+bundle and Plugin IDs; Workflow Tasks pin bundle IDs per step in their Harness spec. The runner
+mounts those exact versions, and only integrity-approved stdio MCP servers are exposed to Codex or
+Claude coding sandboxes. Plugin writable data is restored and checkpointed through bounded Blob
+archives.
+
+Browser reads use typed `/v1` resources and fixed authorized API read models, including
+`integration-accounts-v1`. The generic web Electric shape proxy and the legacy `/api/skills`
+response adapter are deleted; clients cannot select physical tables or predicates.
 
 ## Ownership rules
 

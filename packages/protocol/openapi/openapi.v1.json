@@ -6295,14 +6295,15 @@
         ],
         "additionalProperties": false
       },
-      "SkillListEnvelope": {
+      "WikiSourceListEnvelope": {
         "type": "object",
         "properties": {
           "data": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SkillListItem"
-            }
+              "$ref": "#/components/schemas/WikiSource"
+            },
+            "maxItems": 1000
           },
           "meta": {
             "$ref": "#/components/schemas/ProtocolMetadata"
@@ -6314,7 +6315,7 @@
         ],
         "additionalProperties": false
       },
-      "SkillListItem": {
+      "WikiSource": {
         "type": "object",
         "properties": {
           "id": {
@@ -6323,85 +6324,139 @@
             "maxLength": 256,
             "example": "run_019fed53"
           },
-          "slug": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 1024
-          },
-          "status": {
+          "provider": {
             "type": "string",
             "enum": [
-              "draft",
-              "active"
+              "gmail",
+              "slack",
+              "jamie",
+              "granola",
+              "linear",
+              "github"
             ]
           },
-          "source": {
-            "$ref": "#/components/schemas/SkillSource"
-          },
-          "updatedAt": {
+          "integrationId": {
             "type": "string",
-            "format": "date-time"
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "config": {
+            "$ref": "#/components/schemas/WikiSourceConfig"
+          },
+          "integrationStatus": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "sync_failed",
+              "disconnected"
+            ]
+          },
+          "accountName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "accountEmail": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 320
+          },
+          "connectionLabel": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "ownerName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "ownerEmail": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 320
+          },
+          "ownerAvatarUrl": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2048
+          },
+          "ownerKind": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "user"
+            ]
+          },
+          "isOwn": {
+            "type": "boolean"
+          },
+          "canConfigure": {
+            "type": "boolean"
+          },
+          "canToggle": {
+            "type": "boolean"
+          },
+          "canDelete": {
+            "type": "boolean"
           }
         },
         "required": [
           "id",
-          "slug",
-          "name",
-          "description",
-          "status",
-          "source",
-          "updatedAt"
+          "provider",
+          "integrationId",
+          "enabled",
+          "config",
+          "integrationStatus",
+          "accountName",
+          "accountEmail",
+          "connectionLabel",
+          "ownerName",
+          "ownerEmail",
+          "ownerAvatarUrl",
+          "ownerKind",
+          "isOwn",
+          "canConfigure",
+          "canToggle",
+          "canDelete"
         ],
         "additionalProperties": false
       },
-      "SkillSource": {
+      "WikiSourceConfig": {
         "type": "object",
-        "nullable": true,
-        "properties": {
-          "type": {
-            "type": "string",
-            "enum": [
-              "github",
-              "skills.sh"
-            ]
-          },
-          "url": {
-            "type": "string",
-            "format": "uri"
-          },
-          "ref": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          },
-          "resolvedCommit": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "url",
-          "ref",
-          "path",
-          "resolvedCommit"
-        ],
-        "additionalProperties": false
+        "additionalProperties": {
+          "nullable": true
+        }
       },
-      "SkillEnvelope": {
+      "WikiIngestActivityListEnvelope": {
         "type": "object",
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/Skill"
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WikiIngestActivityItem"
+                },
+                "maxItems": 100
+              },
+              "nextCursor": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 1024
+              }
+            },
+            "required": [
+              "items",
+              "nextCursor"
+            ],
+            "additionalProperties": false
           },
           "meta": {
             "$ref": "#/components/schemas/ProtocolMetadata"
@@ -6413,7 +6468,7 @@
         ],
         "additionalProperties": false
       },
-      "Skill": {
+      "WikiIngestActivityItem": {
         "type": "object",
         "properties": {
           "id": {
@@ -6422,33 +6477,66 @@
             "maxLength": 256,
             "example": "run_019fed53"
           },
-          "slug": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 1024
-          },
-          "instructions": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "status": {
+          "provider": {
             "type": "string",
             "enum": [
-              "draft",
-              "active"
+              "gmail",
+              "slack",
+              "jamie",
+              "granola",
+              "linear",
+              "github"
             ]
           },
-          "source": {
-            "$ref": "#/components/schemas/SkillSource"
+          "sourceType": {
+            "type": "string",
+            "enum": [
+              "meeting",
+              "conversation",
+              "issue",
+              "activity",
+              "thread"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 512
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "skipped"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2000
+          },
+          "pages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WikiIngestActivityPage"
+            },
+            "maxItems": 100
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
           },
           "createdAt": {
             "type": "string",
@@ -6461,20 +6549,219 @@
         },
         "required": [
           "id",
-          "slug",
-          "name",
-          "description",
-          "instructions",
-          "status",
-          "source",
+          "provider",
+          "sourceType",
+          "title",
+          "outcome",
+          "reason",
+          "pages",
+          "attempts",
+          "occurredAt",
+          "completedAt",
           "createdAt",
           "updatedAt"
         ],
         "additionalProperties": false
       },
-      "CreateSkillBody": {
+      "WikiIngestActivityPage": {
         "type": "object",
         "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "created",
+              "updated",
+              "moved",
+              "deleted"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "title",
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "WikiSourceMutationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WikiSource"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "UpsertWikiSourceBody": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "gmail",
+              "slack",
+              "jamie",
+              "granola",
+              "linear",
+              "github"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "config": {
+            "$ref": "#/components/schemas/WikiSourceConfig"
+          }
+        },
+        "required": [
+          "integrationId",
+          "provider",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "SetWikiSourceEnabledBody": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "WikiSourceDeleteEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "sourceId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "deleted": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "sourceId",
+              "deleted"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SkillListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillInstallationListItem"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SkillInstallationListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bundle": {
+            "$ref": "#/components/schemas/SkillBundleSummary"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "archivedAt",
+          "updatedAt",
+          "bundle"
+        ],
+        "additionalProperties": false
+      },
+      "SkillBundleSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/u"
+          },
           "name": {
             "type": "string",
             "minLength": 1,
@@ -6482,11 +6769,85 @@
           },
           "description": {
             "type": "string",
+            "minLength": 1,
             "maxLength": 1024
+          },
+          "license": {
+            "type": "string",
+            "nullable": true
+          },
+          "compatibility": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 500
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "allowedTools": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": {
+            "$ref": "#/components/schemas/SkillSource"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
-          "name"
+          "id",
+          "integrity",
+          "name",
+          "description",
+          "license",
+          "compatibility",
+          "metadata",
+          "allowedTools",
+          "source",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "SkillSource": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "github",
+              "skills.sh"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "format": "uri"
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "resolvedCommit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$/u"
+          }
+        },
+        "required": [
+          "type",
+          "url",
+          "ref",
+          "path",
+          "resolvedCommit"
         ],
         "additionalProperties": false
       },
@@ -6517,11 +6878,6 @@
                   "resolved"
                 ]
               },
-              "proposedSlug": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
               "name": {
                 "type": "string",
                 "minLength": 1,
@@ -6529,38 +6885,60 @@
               },
               "description": {
                 "type": "string",
+                "minLength": 1,
                 "maxLength": 1024
               },
-              "instructions": {
-                "type": "string",
-                "maxLength": 262144
+              "license": {
+                "type": "string"
               },
-              "extraFiles": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "maxLength": 512
-                },
-                "maxItems": 31
-              },
-              "resolvedCommit": {
+              "compatibility": {
                 "type": "string",
-                "pattern": "^[0-9a-f]{40}$/iu"
+                "maxLength": 500
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "allowedTools": {
+                "type": "string"
+              },
+              "source": {
+                "$ref": "#/components/schemas/SkillSource"
               },
               "integrity": {
                 "type": "string",
                 "pattern": "^sha256:[0-9a-f]{64}$/iu"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SkillImportFileMetadata"
+                },
+                "minItems": 1,
+                "maxItems": 64
+              },
+              "fileCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64
+              },
+              "totalBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048576
               }
             },
             "required": [
               "status",
-              "proposedSlug",
               "name",
               "description",
-              "instructions",
-              "extraFiles",
-              "resolvedCommit",
-              "integrity"
+              "source",
+              "integrity",
+              "files",
+              "fileCount",
+              "totalBytes"
             ],
             "additionalProperties": false
           },
@@ -6580,15 +6958,68 @@
                 },
                 "minItems": 1,
                 "maxItems": 25
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "github",
+                      "skills.sh"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  },
+                  "ref": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "resolvedCommit": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$/u"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url",
+                  "ref",
+                  "resolvedCommit"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
               "status",
-              "candidates"
+              "candidates",
+              "source"
             ],
             "additionalProperties": false
           }
         ]
+      },
+      "SkillImportFileMetadata": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 524288
+          }
+        },
+        "required": [
+          "path",
+          "sizeBytes"
+        ],
+        "additionalProperties": false
       },
       "SkillImportCandidate": {
         "type": "object",
@@ -6638,15 +7069,15 @@
           "data": {
             "type": "object",
             "properties": {
-              "skill": {
-                "$ref": "#/components/schemas/Skill"
+              "installation": {
+                "$ref": "#/components/schemas/SkillInstallation"
               },
               "replayed": {
                 "type": "boolean"
               }
             },
             "required": [
-              "skill",
+              "installation",
               "replayed"
             ],
             "additionalProperties": false
@@ -6658,6 +7089,152 @@
         "required": [
           "data",
           "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SkillInstallation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bundle": {
+            "$ref": "#/components/schemas/SkillBundle"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "archivedAt",
+          "updatedAt",
+          "bundle",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "SkillBundle": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/u"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "license": {
+            "type": "string",
+            "nullable": true
+          },
+          "compatibility": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 500
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "allowedTools": {
+            "type": "string",
+            "nullable": true
+          },
+          "source": {
+            "$ref": "#/components/schemas/SkillSource"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "body": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillBundleFileMetadata"
+            },
+            "maxItems": 64
+          }
+        },
+        "required": [
+          "id",
+          "integrity",
+          "name",
+          "description",
+          "license",
+          "compatibility",
+          "metadata",
+          "allowedTools",
+          "source",
+          "createdAt",
+          "body",
+          "files"
+        ],
+        "additionalProperties": false
+      },
+      "SkillBundleFileMetadata": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "executable": {
+            "type": "boolean"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 524288
+          }
+        },
+        "required": [
+          "path",
+          "executable",
+          "sizeBytes"
         ],
         "additionalProperties": false
       },
@@ -6733,35 +7310,19 @@
         ],
         "additionalProperties": false
       },
-      "UpdateSkillBody": {
+      "SkillInstallationEnvelope": {
         "type": "object",
         "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
+          "data": {
+            "$ref": "#/components/schemas/SkillInstallation"
           },
-          "description": {
-            "type": "string",
-            "maxLength": 1024
-          },
-          "instructions": {
-            "type": "string",
-            "maxLength": 262144
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "draft",
-              "active"
-            ]
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
           }
         },
         "required": [
-          "name",
-          "description",
-          "instructions",
-          "status"
+          "data",
+          "meta"
         ],
         "additionalProperties": false
       },
@@ -6771,14 +7332,14 @@
           "data": {
             "type": "object",
             "properties": {
-              "slug": {
+              "name": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 64
               }
             },
             "required": [
-              "slug"
+              "name"
             ],
             "additionalProperties": false
           },
@@ -6789,6 +7350,71 @@
         "required": [
           "data",
           "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SkillFileChunkEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillFileChunk"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SkillFileChunk": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "executable": {
+            "type": "boolean"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextOffset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "eof": {
+            "type": "boolean"
+          },
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "utf8",
+              "base64"
+            ]
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "executable",
+          "sizeBytes",
+          "offset",
+          "nextOffset",
+          "eof",
+          "encoding",
+          "content"
         ],
         "additionalProperties": false
       },
@@ -11628,6 +12254,995 @@
           "amountCents"
         ],
         "additionalProperties": false
+      },
+      "PluginListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginListItem"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PluginListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled",
+              "archived"
+            ]
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "source": {
+            "$ref": "#/components/schemas/PluginSource"
+          },
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/u"
+          },
+          "installReport": {
+            "$ref": "#/components/schemas/PluginInstallReport"
+          },
+          "mcpApprovedIntegrity": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^sha256:[0-9a-f]{64}$/u"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "fileCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 512
+          },
+          "skillCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stdioServerCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "manifest",
+          "source",
+          "integrity",
+          "installReport",
+          "mcpApprovedIntegrity",
+          "createdAt",
+          "updatedAt",
+          "archivedAt",
+          "fileCount",
+          "skillCount",
+          "stdioServerCount"
+        ],
+        "additionalProperties": false
+      },
+      "PluginManifest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "version": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "author": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "homepage": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "license": {
+            "type": "string"
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "extensions": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "PluginSource": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "github",
+              "skills.sh"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "format": "uri"
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "resolvedCommit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$/u"
+          }
+        },
+        "required": [
+          "type",
+          "url",
+          "ref",
+          "path",
+          "resolvedCommit"
+        ],
+        "additionalProperties": false
+      },
+      "PluginInstallReport": {
+        "type": "object",
+        "properties": {
+          "ignoredManifestFields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginSkillReport"
+            }
+          },
+          "mcp": {
+            "$ref": "#/components/schemas/PluginMcpReport"
+          },
+          "collisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginSkillCollision"
+            }
+          }
+        },
+        "required": [
+          "ignoredManifestFields",
+          "skills",
+          "mcp",
+          "collisions"
+        ],
+        "additionalProperties": false
+      },
+      "PluginSkillReport": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "valid"
+                ]
+              },
+              "integrity": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$/u"
+              }
+            },
+            "required": [
+              "path",
+              "name",
+              "status",
+              "integrity"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "skipped"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "path",
+              "name",
+              "status",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "PluginMcpReport": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "absent"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "present": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "disabled"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "present",
+              "status",
+              "reason"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "present": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "parsed"
+                ]
+              },
+              "reports": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PluginMcpServerReport"
+                }
+              }
+            },
+            "required": [
+              "present",
+              "status",
+              "reports"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "PluginMcpServerReport": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "selected",
+              "unsupported",
+              "invalid"
+            ]
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "stdio",
+              "streamable-http",
+              "sse"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "PluginSkillCollision": {
+        "type": "object",
+        "properties": {
+          "skillName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "winner": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "standalone"
+                    ]
+                  }
+                },
+                "required": [
+                  "source"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "plugin"
+                    ]
+                  },
+                  "pluginName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "source",
+                  "pluginName"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "hiddenPluginNames": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "skillName",
+          "winner",
+          "hiddenPluginNames"
+        ],
+        "additionalProperties": false
+      },
+      "PluginImportPreviewEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PluginImportPreview"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PluginImportPreview": {
+        "type": "object",
+        "properties": {
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "source": {
+            "$ref": "#/components/schemas/PluginSource"
+          },
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/u"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginImportFileMetadata"
+            },
+            "minItems": 1,
+            "maxItems": 512
+          },
+          "fileCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 512
+          },
+          "totalBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 16777216
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                },
+                "integrity": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$/u"
+                },
+                "fileCount": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 64
+                },
+                "totalBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1048576
+                }
+              },
+              "required": [
+                "path",
+                "name",
+                "description",
+                "integrity",
+                "fileCount",
+                "totalBytes"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "stdioServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginStdioServer"
+            }
+          },
+          "report": {
+            "$ref": "#/components/schemas/PluginValidationReport"
+          }
+        },
+        "required": [
+          "manifest",
+          "source",
+          "integrity",
+          "files",
+          "fileCount",
+          "totalBytes",
+          "skills",
+          "stdioServers",
+          "report"
+        ],
+        "additionalProperties": false
+      },
+      "PluginImportFileMetadata": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2097152
+          }
+        },
+        "required": [
+          "path",
+          "sizeBytes"
+        ],
+        "additionalProperties": false
+      },
+      "PluginStdioServer": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "stdio"
+            ]
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "envKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cwd": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "command",
+          "args",
+          "envKeys"
+        ],
+        "additionalProperties": false
+      },
+      "PluginValidationReport": {
+        "type": "object",
+        "properties": {
+          "ignoredManifestFields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginSkillReport"
+            }
+          },
+          "mcp": {
+            "$ref": "#/components/schemas/PluginMcpReport"
+          }
+        },
+        "required": [
+          "ignoredManifestFields",
+          "skills",
+          "mcp"
+        ],
+        "additionalProperties": false
+      },
+      "PluginImportPreviewBody": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "selectedPath": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "PluginImportEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "plugin": {
+                "$ref": "#/components/schemas/PluginInstallation"
+              },
+              "replayed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "plugin",
+              "replayed"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PluginInstallation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled",
+              "archived"
+            ]
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "source": {
+            "$ref": "#/components/schemas/PluginSource"
+          },
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/u"
+          },
+          "installReport": {
+            "$ref": "#/components/schemas/PluginInstallReport"
+          },
+          "mcpApprovedIntegrity": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^sha256:[0-9a-f]{64}$/u"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "archivedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginFileMetadata"
+            },
+            "minItems": 1,
+            "maxItems": 512
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginSkillSummary"
+            }
+          },
+          "stdioServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginStdioServer"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "manifest",
+          "source",
+          "integrity",
+          "installReport",
+          "mcpApprovedIntegrity",
+          "createdAt",
+          "updatedAt",
+          "archivedAt",
+          "files",
+          "skills",
+          "stdioServers"
+        ],
+        "additionalProperties": false
+      },
+      "PluginFileMetadata": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "executable": {
+            "type": "boolean"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2097152
+          }
+        },
+        "required": [
+          "path",
+          "executable",
+          "sizeBytes"
+        ],
+        "additionalProperties": false
+      },
+      "PluginSkillSummary": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "bundleId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/u"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "bundleId",
+          "integrity",
+          "description"
+        ],
+        "additionalProperties": false
+      },
+      "InstallPluginBody": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "selectedPath": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "expectedResolvedCommit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$/iu"
+          },
+          "expectedIntegrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/iu"
+          }
+        },
+        "required": [
+          "url",
+          "expectedResolvedCommit",
+          "expectedIntegrity"
+        ],
+        "additionalProperties": false
+      },
+      "PluginInstallationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PluginInstallation"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PluginArchiveEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ApprovePluginMcpBody": {
+        "type": "object",
+        "properties": {
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$/iu"
+          }
+        },
+        "required": [
+          "integrity"
+        ],
+        "additionalProperties": false
+      },
+      "PluginDataDeleteEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "deleted": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "deleted"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {}
@@ -16035,6 +17650,256 @@
         }
       }
     },
+    "/v1/wiki/sources": {
+      "get": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Source configuration and connection state for the active workspace Wiki.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiSourceListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertWikiSourceBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A Wiki source configured or updated for the active workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiSourceMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/sources/activity": {
+      "get": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent ingestion outcomes for the active workspace Wiki.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiIngestActivityListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/sources/{sourceId}": {
+      "patch": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "sourceId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWikiSourceEnabledBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A Wiki source enabled state updated for the active workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiSourceMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "sourceId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A Wiki source removed from the active workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WikiSourceDeleteEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/skills": {
       "get": {
         "tags": [
@@ -16055,63 +17920,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SkillListEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Skills"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "required": true,
-            "name": "idempotency-key",
-            "in": "header"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSkillBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Skill draft created or replayed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillEnvelope"
                 }
               }
             }
@@ -16154,7 +17962,7 @@
         },
         "responses": {
           "200": {
-            "description": "External Skill metadata and instructions resolved for confirmation.",
+            "description": "External Skill metadata and file sizes resolved for confirmation.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16213,7 +18021,7 @@
         },
         "responses": {
           "201": {
-            "description": "External Skill imported or replayed after confirmation.",
+            "description": "Immutable Skill bundle installed or replayed after confirmation.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16304,65 +18112,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SkillEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "Skills"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "slug",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateSkillBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Hand-authored skill updated.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillEnvelope"
+                  "$ref": "#/components/schemas/SkillInstallationEnvelope"
                 }
               }
             }
@@ -16413,6 +18163,246 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SkillArchiveEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/{slug}/enable": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill installation enabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/{slug}/disable": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill installation disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/{slug}/replace": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSkillBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Skill installation moved to a newly verified immutable bundle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/{slug}/files/read": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "required": true,
+            "name": "path",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true,
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 4,
+              "maximum": 65536
+            },
+            "required": false,
+            "name": "maxBytes",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One bounded chunk of an authorized Skill bundle file.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillFileChunkEnvelope"
                 }
               }
             }
@@ -20065,6 +22055,509 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BillingAutoRefillEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live immutable Plugin packages in the active workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/imports/preview": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginImportPreviewBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plugin metadata, components, validation report, and file sizes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginImportPreviewEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/imports": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallPluginBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Immutable Plugin package installed or replayed after confirmation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginImportEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin package detail with passive Skills and executable MCP declarations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/archive": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin archived without deleting its immutable package.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginArchiveEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/enable": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin enabled for Skill resolution.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/disable": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin disabled for Skill resolution.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/mcp/approve": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovePluginMcpBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plugin MCP approved for the exact installed package integrity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/mcp/revoke": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin MCP approval revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/data/delete": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persistent data metadata deleted as an explicit destructive action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginDataDeleteEnvelope"
                 }
               }
             }

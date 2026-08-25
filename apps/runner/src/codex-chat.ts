@@ -3,7 +3,6 @@ import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   CLOUD_CODING_ENGINE_CONFIG,
   CODEX_COMMAND_TOOL_PART_TYPE,
-  CODEX_DYNAMIC_TOOL_NAME,
   CODEX_SUBAGENT_TOOL_PART_TYPE,
   type CodexUiMessagePart,
   createAcpEventNormalizer,
@@ -13,24 +12,29 @@ import {
   shellQuote,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
+import { getWorkflowHarnessPluginSkillBundleIds } from "@opencompany/db/harness";
 import {
-  type BrainSkill,
-  CODEX_BRAIN_TOOL_CONTRACT_VERSION,
-  serializeBrainSkillMarkdown,
-} from "@opencompany/brain";
-import { getWorkflowHarnessSkillSnapshots } from "@opencompany/db/harness";
+  loadChatSessionPluginRuntime,
+  loadEnabledPluginSkillBundleIds,
+} from "@opencompany/db/plugin-runtime-repository";
 import {
   type ChatMessageAttachment,
   type CodexChatSession,
   type CodexChatTurn,
   chatMessages,
-  chatSessionSkills,
+  chatSessionSkillBundles,
   codexChatInteractions,
   codexChatTurns,
   type HarnessSpec,
   integrations,
   runApprovals,
+  skillBundles,
 } from "@opencompany/db/product-schema";
+import {
+  type ImmutableSkillBundle,
+  loadImmutableSkillBundles,
+} from "@opencompany/db/skill-bundle-repository";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, desc, eq, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import { ACP_ENGINE_ADAPTERS } from "./acp-engine-adapters";
@@ -82,6 +86,13 @@ import {
   combineSandboxPromptFragments,
   reconcileInfisicalSandboxAuth,
 } from "./infisical-sandbox-auth";
+import { materializePluginPackagesForSession } from "./managed-plugins";
+import { type PluginDataRuntime, preparePluginDataRuntime } from "./plugin-data-runtime";
+import {
+  materializeTrustedPluginMcpLaunchers,
+  type PluginMcpLauncherRuntime,
+  stopPluginMcpProcesses,
+} from "./plugin-mcp-launcher";
 import { loadRepositoryBootstrap, stageRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
@@ -102,6 +113,10 @@ import {
   prepareCodexTaskTurn,
   type TaskTurnContext,
 } from "./task-turn";
+import {
+  loadWorkflowTaskPluginRuntime,
+  loadWorkflowTaskSkillBundles,
+} from "./workflow-skill-bundles";
 
 export const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
 const CODEX_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.codex.workDirectory;
@@ -282,15 +297,30 @@ export async function runCodexChatTurn(input: {
     const abort = shouldAbort?.();
     if (abort) throw abort;
   };
+  const checkAbort = createTurnAbortCheck({
+    turnId: turn.id,
+    leaseId,
+    leaseOwner,
+    ...(shouldAbort ? { shouldAbort } : {}),
+  });
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
   let authCacheStaged = false;
+  let pluginDataRuntime: PluginDataRuntime | null = null;
+  let pluginMcpRuntime: PluginMcpLauncherRuntime | null = null;
+  let pluginMcpQuiesced = false;
+  let pluginCheckpointStarted = false;
   let executionStage = "persist_sandbox_replacement";
   let redact = (value: string) => value;
   let projector: ReturnType<typeof createExternalEngineProjector> | null = null;
   const activeProjector = async () => {
     projector ??= await bareProjector();
     return projector;
+  };
+  const quiescePluginMcp = async () => {
+    if (!pluginMcpRuntime || pluginMcpQuiesced) return;
+    await stopPluginMcpProcesses(sandbox, pluginMcpRuntime.pluginUsers);
+    pluginMcpQuiesced = true;
   };
   try {
     if (sandboxReplaced) {
@@ -429,26 +459,84 @@ export async function runCodexChatTurn(input: {
     await ensureCodexAcpAdapterInstalled(sandbox);
     checkExternalAbort();
     executionStage = "load_skills";
-    const sessionSkills = await loadCodexChatSessionSkills(turn);
+    const [sessionSkills, workflowSkills, pluginRuntime] = await Promise.all([
+      loadCodexChatSessionSkills(turn),
+      taskContext ? loadWorkflowTaskSkillBundles(taskContext.harnessSpec) : Promise.resolve([]),
+      taskContext
+        ? loadWorkflowTaskPluginRuntime(taskContext.harnessSpec)
+        : session.workspaceId
+          ? loadChatSessionPluginRuntime(getDb(), {
+              workspaceId: session.workspaceId,
+              chatSessionId: session.chatSessionId,
+            })
+          : Promise.resolve({ plugins: [], skills: [], mcpPlugins: [] }),
+    ]);
+    const workflowPluginSkillBundleIds = taskContext
+      ? getWorkflowHarnessPluginSkillBundleIds(taskContext.harnessSpec)
+      : [];
+    const activatedPluginBundleIds = [
+      ...sessionSkills.flatMap((skill) => (skill.sourceKind === "plugin" ? [skill.id] : [])),
+      ...workflowPluginSkillBundleIds,
+    ];
+    const skillWorkspaceId = taskContext?.harnessSpec.workflow?.workspaceId ?? session.workspaceId;
+    if (activatedPluginBundleIds.length > 0 && !skillWorkspaceId) {
+      throw new Error("Activated Plugin Skills require a workspace ID.");
+    }
+    const enabledPluginSkillBundleIds = skillWorkspaceId
+      ? await loadEnabledPluginSkillBundleIds(getDb(), {
+          workspaceId: skillWorkspaceId,
+          bundleIds: activatedPluginBundleIds,
+        })
+      : new Set<string>();
     const turnSkills = resolveCodexTurnSkills({
       sessionSkills,
       userMessageId: turn.userMessageId,
-      ...(taskContext ? { harnessSpec: taskContext.harnessSpec } : {}),
+      workflowSkills,
+      workflowPluginSkillBundleIds,
+      pluginSkills: pluginRuntime.skills,
+      enabledPluginSkillBundleIds,
+    });
+    checkExternalAbort();
+    executionStage = "materialize_plugins";
+    await materializePluginPackagesForSession({
+      sandbox,
+      workRoot: CODEX_CHAT_WORKDIR,
+      plugins: pluginRuntime.plugins,
     });
     checkExternalAbort();
     executionStage = "materialize_skills";
     await materializeCodexSkillSnapshotsForSession({
       sandbox,
       codexWorkRoot: CODEX_CHAT_WORKDIR,
-      skills: turnSkills.snapshots.map((skill) => ({
-        id: skill.id,
-        files: [
-          {
-            path: "SKILL.md",
-            content: serializeBrainSkillMarkdown(skill),
-          },
-        ],
+      skills: turnSkills.bundles.map((bundle) => ({
+        name: bundle.name,
+        files: bundle.files.map((file) => ({
+          path: file.path,
+          content: file.content,
+          executable: file.executable,
+        })),
       })),
+    });
+    checkExternalAbort();
+    if (pluginRuntime.mcpPlugins.length > 0) {
+      if (!skillWorkspaceId) throw new Error("Approved Plugin MCP requires a workspace ID.");
+      executionStage = "restore_plugin_data";
+      pluginDataRuntime = await preparePluginDataRuntime({
+        sandbox,
+        workRoot: CODEX_CHAT_WORKDIR,
+        workspaceId: skillWorkspaceId,
+        leaseOwner: `coding-session:${session.id}`,
+        mcpPlugins: pluginRuntime.mcpPlugins,
+        blobToken: env.blobReadWriteToken,
+        checkAbort,
+      });
+    }
+    executionStage = "configure_plugin_mcp";
+    pluginMcpRuntime = await materializeTrustedPluginMcpLaunchers({
+      sandbox,
+      workRoot: CODEX_CHAT_WORKDIR,
+      mcpPlugins: pluginRuntime.mcpPlugins,
+      dataRoots: pluginDataRuntime?.dataRoots ?? new Map(),
     });
     checkExternalAbort();
     executionStage = "materialize_attachments";
@@ -460,12 +548,10 @@ export async function runCodexChatTurn(input: {
     });
     checkExternalAbort();
 
-    const checkAbort = createTurnAbortCheck({
-      turnId: turn.id,
-      leaseId,
-      leaseOwner,
-      ...(shouldAbort ? { shouldAbort } : {}),
-    });
+    const checkRuntimeAbort = async () => {
+      pluginDataRuntime?.assertHealthy();
+      await checkAbort();
+    };
     executionStage = "run_turn";
     const buildTask = (
       history: CodingChatHistory,
@@ -535,12 +621,15 @@ export async function runCodexChatTurn(input: {
       { type: "text", text: task },
       ...materializedAttachments.imagePromptBlocks,
     ];
-    const mcpServers = toolGatewayTicket
-      ? buildAcpToolsMcpServers({
-          runnerPublicUrl: env.runnerPublicUrl,
-          ticket: toolGatewayTicket,
-        })
-      : [];
+    const mcpServers = [
+      ...(toolGatewayTicket
+        ? buildAcpToolsMcpServers({
+            runnerPublicUrl: env.runnerPublicUrl,
+            ticket: toolGatewayTicket,
+          })
+        : []),
+      ...pluginMcpRuntime.servers,
+    ];
     if (input.recovery) {
       await claimCodexChatRecovery({
         turn,
@@ -585,7 +674,7 @@ export async function runCodexChatTurn(input: {
       goal: taskContext?.harnessSpec.codex?.goalMode ?? settings.goalMode,
       timeoutMs: env.codexTimeoutMs,
       redact,
-      checkAbort,
+      checkAbort: checkRuntimeAbort,
       onRuntimeEvents: (events) => turnProjector.push(events),
       onEngineSessionId: async (codexThreadId) => {
         acpNormalizer.beginRun(codexThreadId);
@@ -604,6 +693,7 @@ export async function runCodexChatTurn(input: {
           leaseOwner,
           setSql: sql`codex_thread_id = NULL, updated_at = ${new Date()}`,
         }),
+      onEngineStopped: quiescePluginMcp,
       onPermissionRequest: (request) =>
         handleAcpPermissionRequest({
           request,
@@ -642,6 +732,13 @@ export async function runCodexChatTurn(input: {
           usage: null,
           goal: null,
         };
+
+    if (pluginDataRuntime && pluginMcpRuntime) {
+      executionStage = "checkpoint_plugin_data";
+      pluginCheckpointStarted = true;
+      await pluginDataRuntime.checkpoint({ releaseLease: true });
+      pluginDataRuntime = null;
+    }
 
     executionStage = "finalize";
     if (summary.sessionId && summary.sessionId !== session.codexThreadId) {
@@ -713,12 +810,51 @@ export async function runCodexChatTurn(input: {
   } catch (error) {
     // A setup operation can finish or time out after shutdown requested a handoff. Prefer the
     // current ownership signal over that stale operation result so the next runner can recover it.
-    const effectiveError =
+    let effectiveError =
       error instanceof CodexChatHandoffError ||
       error instanceof CodexChatInterruptedError ||
       error instanceof CodexChatLeaseLostError
         ? error
         : (shouldAbort?.() ?? error);
+    if (pluginDataRuntime && pluginMcpRuntime) {
+      const dataRuntime = pluginDataRuntime;
+      const handedOff = effectiveError instanceof CodexChatHandoffError;
+      if (handedOff) {
+        // Preserve the same-sandbox Plugin data for recovery without publishing a checkpoint from
+        // a handed-off attempt. The ACP harness has already stopped the engine and quiesced its MCP
+        // processes; the recovered turn will checkpoint the retained directory when it settles.
+        await quiescePluginMcp().catch((quiesceError) => {
+          captureException(quiesceError, {
+            event: "opencompany.goat_plugin_mcp_quiesce_failed",
+            turn_id: turn.id,
+          });
+        });
+      } else {
+        try {
+          executionStage = "checkpoint_plugin_data";
+          if (pluginCheckpointStarted) throw error;
+          await quiescePluginMcp();
+          pluginCheckpointStarted = true;
+          await dataRuntime.checkpoint({ releaseLease: true });
+          pluginDataRuntime = null;
+        } catch (checkpointError) {
+          captureException(checkpointError, {
+            event: "opencompany.goat_plugin_data_checkpoint_failed",
+            turn_id: turn.id,
+          });
+          logger.warn("Failed to checkpoint Plugin data", {
+            event: "opencompany.goat_plugin_data_checkpoint_failed",
+            turn_id: turn.id,
+            error: redact(errorMessage(checkpointError)),
+          });
+          await dataRuntime.release().catch(() => undefined);
+          pluginDataRuntime = null;
+          effectiveError = new Error(
+            `The coding turn ended, but Plugin data checkpointing failed: ${errorMessage(checkpointError)}`,
+          );
+        }
+      }
+    }
     if (effectiveError instanceof CodexChatHandoffError) {
       outcome = "handed_off";
       await (await activeProjector()).cancelPendingInteractions();
@@ -769,6 +905,15 @@ export async function runCodexChatTurn(input: {
       }
     }
   } finally {
+    if (pluginDataRuntime) {
+      await pluginDataRuntime.release().catch((error) => {
+        captureException(error, {
+          event: "opencompany.goat_plugin_data_lease_release_failed",
+          turn_id: turn.id,
+        });
+      });
+      pluginDataRuntime = null;
+    }
     if (authCacheStaged) {
       await persistRefreshedCodexAuth({
         sandbox,
@@ -1327,20 +1472,20 @@ function currentInteractionLeaseSql() {
 }
 
 export async function loadCodexChatSessionSkills(turn: CodexChatTurn) {
-  return getDb()
+  const activations = await getDb()
     .select({
-      skillId: chatSessionSkills.skillId,
-      activatedMessageId: chatSessionSkills.activatedMessageId,
-      name: chatSessionSkills.name,
-      description: chatSessionSkills.description,
-      instructions: chatSessionSkills.instructions,
+      bundleId: chatSessionSkillBundles.bundleId,
+      sourceKind: chatSessionSkillBundles.sourceKind,
+      activatedMessageId: chatSessionSkillBundles.activatedMessageId,
+      workspaceId: skillBundles.workspaceId,
       activatedAt: codexChatTurns.createdAt,
     })
-    .from(chatSessionSkills)
+    .from(chatSessionSkillBundles)
+    .innerJoin(skillBundles, eq(skillBundles.id, chatSessionSkillBundles.bundleId))
     .innerJoin(
       chatMessages,
       and(
-        eq(chatMessages.id, chatSessionSkills.activatedMessageId),
+        eq(chatMessages.id, chatSessionSkillBundles.activatedMessageId),
         eq(chatMessages.sessionId, turn.chatSessionId),
       ),
     )
@@ -1353,56 +1498,71 @@ export async function loadCodexChatSessionSkills(turn: CodexChatTurn) {
     )
     .where(
       and(
-        eq(chatSessionSkills.chatSessionId, turn.chatSessionId),
+        eq(chatSessionSkillBundles.chatSessionId, turn.chatSessionId),
         or(
           lt(codexChatTurns.createdAt, turn.createdAt),
           and(eq(codexChatTurns.createdAt, turn.createdAt), lte(codexChatTurns.id, turn.id)),
         ),
       ),
     )
-    .orderBy(asc(codexChatTurns.createdAt), asc(codexChatTurns.id), asc(chatSessionSkills.skillId));
+    .orderBy(asc(codexChatTurns.createdAt), asc(codexChatTurns.id), asc(skillBundles.name));
+  if (activations.length === 0) return [];
+  const workspaceIds = new Set(activations.map((activation) => activation.workspaceId));
+  if (workspaceIds.size !== 1) {
+    throw new Error(`Chat ${turn.chatSessionId} has Skill bundles from multiple workspaces.`);
+  }
+  const bundles = await loadImmutableSkillBundles(getDb(), {
+    workspaceId: activations[0]!.workspaceId,
+    bundleIds: activations.map((activation) => activation.bundleId),
+  });
+  const bundleById = new Map(bundles.map((bundle) => [bundle.id, bundle]));
+  return activations.map((activation) => ({
+    ...bundleById.get(activation.bundleId)!,
+    sourceKind: activation.sourceKind,
+    activatedMessageId: activation.activatedMessageId,
+    activatedAt: activation.activatedAt,
+  }));
 }
 
-type CodexTurnSessionSkill = {
-  skillId: string;
+type CodexTurnSessionSkill = ImmutableSkillBundle & {
+  sourceKind: "standalone" | "plugin";
   activatedMessageId: string;
-  name: string;
-  description: string;
-  instructions: string;
 };
 
 function resolveCodexTurnSkills(input: {
   sessionSkills: readonly CodexTurnSessionSkill[];
   userMessageId: string;
-  harnessSpec?: HarnessSpec | undefined;
+  workflowSkills: readonly ImmutableSkillBundle[];
+  workflowPluginSkillBundleIds: readonly string[];
+  pluginSkills: readonly ImmutableSkillBundle[];
+  enabledPluginSkillBundleIds: ReadonlySet<string>;
 }) {
-  const snapshotsById = new Map<string, BrainSkill>();
+  const bundlesByName = new Map<string, ImmutableSkillBundle>();
   const invokedSkillIds = new Set<string>();
+  const workflowPluginBundleIds = new Set(input.workflowPluginSkillBundleIds);
+
+  for (const skill of input.pluginSkills) bundlesByName.set(skill.name, skill);
 
   for (const skill of input.sessionSkills) {
-    snapshotsById.set(skill.skillId, {
-      id: skill.skillId,
-      name: skill.name,
-      description: skill.description,
-      instructions: skill.instructions,
-    });
+    if (skill.sourceKind === "plugin" && !input.enabledPluginSkillBundleIds.has(skill.id)) continue;
+    bundlesByName.set(skill.name, skill);
     if (skill.activatedMessageId === input.userMessageId) {
-      invokedSkillIds.add(skill.skillId);
+      invokedSkillIds.add(skill.name);
     }
   }
 
-  const workflowSkills = input.harnessSpec
-    ? (getWorkflowHarnessSkillSnapshots(input.harnessSpec) ?? [])
-    : [];
-  for (const skill of workflowSkills) {
-    // The task-creation snapshot is the workflow's immutable contract. Prefer it when an
-    // interactive session snapshot happens to use the same id.
-    snapshotsById.set(skill.id, skill);
-    invokedSkillIds.add(skill.id);
+  for (const skill of input.workflowSkills) {
+    if (workflowPluginBundleIds.has(skill.id) && !input.enabledPluginSkillBundleIds.has(skill.id)) {
+      continue;
+    }
+    // The task-creation bundle ID is the workflow's immutable contract. Prefer it when an
+    // interactive session snapshot happens to use the same declared name.
+    bundlesByName.set(skill.name, skill);
+    invokedSkillIds.add(skill.name);
   }
 
   return {
-    snapshots: [...snapshotsById.values()],
+    bundles: [...bundlesByName.values()],
     invokedSkillIds: [...invokedSkillIds],
   };
 }

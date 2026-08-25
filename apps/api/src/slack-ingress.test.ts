@@ -3,6 +3,7 @@ import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/d
 import {
   insertSlackMessageEvents,
   listEnabledSlackBrainSourceRoutes,
+  listEnabledSlackWikiSourceRoutes,
   listSlackIntegrationsForTeam,
 } from "@opencompany/db/slack";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
@@ -21,6 +22,7 @@ vi.mock("@opencompany/db/slack", async (importOriginal) => {
     ...original,
     insertSlackMessageEvents: vi.fn(),
     listEnabledSlackBrainSourceRoutes: vi.fn(),
+    listEnabledSlackWikiSourceRoutes: vi.fn(),
     listSlackIntegrationsForTeam: vi.fn(),
   };
 });
@@ -107,6 +109,7 @@ describe("Slack ingress", () => {
         config: { channels: [{ id: "C09ABC", name: "product" }] },
       },
     ] as never);
+    vi.mocked(listEnabledSlackWikiSourceRoutes).mockResolvedValue([]);
     vi.mocked(insertSlackMessageEvents).mockResolvedValue(1);
   });
 
@@ -185,6 +188,22 @@ describe("Slack ingress", () => {
         ],
         expect.objectContaining({ sentinel: "db" }),
       );
+    });
+
+    it("buffers a selected-channel message for a wiki-only route", async () => {
+      vi.mocked(listEnabledSlackBrainSourceRoutes).mockResolvedValue([]);
+      vi.mocked(listEnabledSlackWikiSourceRoutes).mockResolvedValue([
+        {
+          integrationId: "gint_1",
+          workspaceId: "workspace_1",
+          config: { channels: [{ id: "C09ABC", name: "product" }] },
+        },
+      ] as never);
+
+      const response = await ingress().webhook(signedRequest(messageEnvelope()));
+
+      expect(await response.json()).toMatchObject({ ok: true, buffered: 1 });
+      expect(insertSlackMessageEvents).toHaveBeenCalledOnce();
     });
 
     it("drops unselected channels, bots, and noise subtypes", async () => {

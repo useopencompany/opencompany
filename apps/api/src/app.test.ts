@@ -11,10 +11,17 @@ import {
   type CreateTaskCommand,
   KnowledgeApplicationService,
   type KnowledgeRepository,
-  type Skill,
+  PluginImportApplicationService,
+  type PluginImportResolver,
+  type PluginInstallation,
+  type PluginInstallationListItem,
+  type PluginRepository,
+  type ResolvedPluginPackage,
+  type SkillBundleRepository,
   SkillImportApplicationService,
-  type SkillImportRepository,
   type SkillImportResolver,
+  type SkillInstallation,
+  type SkillInstallationListItem,
   type Task,
   TaskApplicationService,
   type TaskRepository,
@@ -107,10 +114,12 @@ describe("canonical Hono API", () => {
       knowledge: fakeKnowledgeService(),
       wikiCommands: fakeWikiCommandsService(),
       resolveWikiServiceActor: async () => actor,
+      wikiSources: fakeWikiSources(),
       brainSources: fakeBrainSources(),
       brainImports: fakeBrainImports(),
       browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
+      pluginImports: fakePluginImportService(),
       brainAssets: fakeBrainAssets(),
       brainControl: fakeBrainControl(),
       attachments: fakeAttachments(),
@@ -314,13 +323,12 @@ describe("canonical Hono API", () => {
     expect(JSON.stringify(scheduleBody)).not.toMatch(/workos|workspace_id|harness|goat_/iu);
   });
 
-  it("serves Brain, Wiki, and Skill resources through the typed Knowledge boundary", async () => {
+  it("serves Brain and Wiki resources alongside the immutable Skill catalog", async () => {
     const assertBrainAccess = vi.fn(async () => undefined);
     const updateWikiPage = vi.fn(async ({ id }: { id: string }) => ({
       page: fakeWikiPage({ id }),
       transactionIds: [71],
     }));
-    const createSkill = vi.fn(async () => fakeSkill());
     const listSkillCatalog = vi.fn(async () => [
       { id: "research", name: "Research", description: "Find primary sources." },
     ]);
@@ -350,11 +358,12 @@ describe("canonical Hono API", () => {
         documents: [fakeBrainDocument()],
       }),
       updateWikiPage,
-      createSkill,
-      listSkillCatalog,
       listBrainSourceItems,
     });
-    const app = testApp(fakeRepository(), { knowledge });
+    const app = testApp(fakeRepository(), {
+      knowledge,
+      skillImports: fakeSkillImportService({ listCatalog: listSkillCatalog }),
+    });
 
     const brain = await app.request("/v1/brains/brain_1");
     expect(brain.status).toBe(200);
@@ -429,23 +438,6 @@ describe("canonical Hono API", () => {
       }),
     );
 
-    const skill = await app.request("/v1/skills", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "skill-create-1" },
-      body: JSON.stringify({ name: "Research", description: "Find primary sources." }),
-    });
-    expect(skill.status).toBe(201);
-    await expect(skill.json()).resolves.toMatchObject({
-      data: { slug: "research", status: "draft", source: null },
-    });
-    expect(createSkill).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actor,
-        idempotencyKey: "skill-create-1",
-        name: "Research",
-      }),
-    );
-
     const catalog = await app.request("/v1/skills/catalog");
     expect(catalog.status).toBe(200);
     await expect(catalog.json()).resolves.toMatchObject({
@@ -454,40 +446,37 @@ describe("canonical Hono API", () => {
     expect(listSkillCatalog).toHaveBeenCalledWith({ actor });
   });
 
-  it("previews and idempotently imports an external Skill through the API boundary", async () => {
+  it("previews metadata only and installs an immutable Skill through the API boundary", async () => {
     const resolvedCommit = "a".repeat(40);
     const integrity = `sha256:${"b".repeat(64)}`;
     const source = {
       type: "github" as const,
       url: "https://github.com/o/r",
       ref: "main",
-      path: "",
+      path: "imported-skill",
+      resolvedCommit,
+    };
+    const fileContent = new TextEncoder().encode("private bundle bytes");
+    const bundle = {
+      name: "imported-skill",
+      description: "Imported instructions.",
+      body: "Use this when imported.",
+      source,
+      integrity,
+      files: [{ path: "SKILL.md", content: fileContent, executable: false }],
+      fileCount: 1,
+      totalBytes: fileContent.length,
     };
     const resolve = vi.fn(async () => ({
       status: "resolved" as const,
-      proposedSlug: "imported-skill",
-      name: "Imported skill",
-      description: "Imported instructions.",
-      instructions: "Use this when imported.",
-      source,
-      resolvedCommit,
-      integrity,
-      extraFiles: ["references/notes.md"],
+      bundle,
     }));
-    const importSkill = vi.fn(async () => ({
-      skill: fakeSkill({
-        id: "skill_imported",
-        slug: "imported-skill",
-        name: "Imported skill",
-        description: "Imported instructions.",
-        instructions: "Use this when imported.",
-        status: "active" as const,
-        source: { ...source, resolvedCommit },
-      }),
+    const install = vi.fn(async () => ({
+      installation: fakeSkillInstallation(),
       idempotentReplay: false,
     }));
     const app = testApp(fakeRepository(), {
-      skillImports: fakeSkillImportService({ importSkill }, { resolve }),
+      skillImports: fakeSkillImportService({ install }, { resolve }),
     });
 
     const preview = await app.request("/v1/skills/imports/preview", {
@@ -496,16 +485,20 @@ describe("canonical Hono API", () => {
       body: JSON.stringify({ url: "github.com/o/r" }),
     });
     expect(preview.status).toBe(200);
-    await expect(preview.json()).resolves.toMatchObject({
+    const previewBody = await preview.json();
+    expect(previewBody).toMatchObject({
       data: {
         status: "resolved",
-        proposedSlug: "imported-skill",
-        instructions: "Use this when imported.",
-        resolvedCommit,
+        name: "imported-skill",
+        files: [{ path: "SKILL.md", sizeBytes: fileContent.length }],
+        source: { resolvedCommit },
         integrity,
       },
       meta: { apiVersion: "v1" },
     });
+    expect(JSON.stringify(previewBody)).not.toContain("private bundle bytes");
+    expect(previewBody.data).not.toHaveProperty("body");
+    expect(Object.keys(previewBody.data.files[0]).sort()).toEqual(["path", "sizeBytes"]);
 
     const imported = await app.request("/v1/skills/imports", {
       method: "POST",
@@ -521,17 +514,333 @@ describe("canonical Hono API", () => {
     });
     expect(imported.status).toBe(201);
     await expect(imported.json()).resolves.toMatchObject({
-      data: { skill: { slug: "imported-skill" }, replayed: false },
+      data: { installation: { name: "imported-skill" }, replayed: false },
     });
-    expect(importSkill).toHaveBeenCalledWith(
+    expect(install).toHaveBeenCalledWith(
       expect.objectContaining({
         actor,
         idempotencyKey: "skill-import-1",
-        source,
-        resolvedCommit,
-        integrity,
+        bundle,
       }),
     );
+  });
+
+  it("serves and mutates workspace-scoped Wiki sources through typed routes", async () => {
+    const list = vi.fn(async () => [wikiSourceView()]);
+    const listActivity = vi.fn(async () => ({
+      items: [wikiActivityItem()],
+      nextCursor: "cursor_2",
+    }));
+    const upsert = vi.fn(async () => wikiSourceView());
+    const setEnabled = vi.fn(async () => wikiSourceView({ enabled: false }));
+    const remove = vi.fn(async () => undefined);
+    const app = testApp(fakeRepository(), {
+      wikiSources: wikiSourceService({ list, listActivity, upsert, setEnabled, remove }),
+    });
+
+    const listed = await app.request("/v1/wiki/sources");
+    expect(listed.status).toBe(200);
+    const listedBody = await listed.json();
+    expect(listedBody).toMatchObject({
+      data: [{ id: "gwscfg_1", provider: "gmail", enabled: true, canToggle: true }],
+    });
+    expect(JSON.stringify(listedBody)).not.toMatch(/userWorkosId|workspaceId|credential|token/iu);
+    expect(list).toHaveBeenCalledWith(actor);
+
+    const activity = await app.request("/v1/wiki/sources/activity?limit=10&cursor=cursor_1");
+    expect(activity.status).toBe(200);
+    await expect(activity.json()).resolves.toMatchObject({
+      data: {
+        items: [
+          {
+            id: "gwjob_1",
+            provider: "slack",
+            outcome: "succeeded",
+            pages: [{ path: "projects/launch", action: "updated" }],
+          },
+        ],
+        nextCursor: "cursor_2",
+      },
+    });
+    expect(listActivity).toHaveBeenCalledWith(actor, { limit: 10, cursor: "cursor_1" });
+
+    const configured = await app.request("/v1/wiki/sources", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        integrationId: "integration_1",
+        provider: "gmail",
+        enabled: true,
+        config: { instructions: "Only customer mail" },
+      }),
+    });
+    expect(configured.status).toBe(200);
+    expect(upsert).toHaveBeenCalledWith(actor, {
+      integrationId: "integration_1",
+      provider: "gmail",
+      enabled: true,
+      config: { instructions: "Only customer mail" },
+    });
+
+    const disabled = await app.request("/v1/wiki/sources/gwscfg_1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(disabled.status).toBe(200);
+    await expect(disabled.json()).resolves.toMatchObject({ data: { enabled: false } });
+    expect(setEnabled).toHaveBeenCalledWith(actor, "gwscfg_1", false);
+
+    const removed = await app.request("/v1/wiki/sources/gwscfg_1", { method: "DELETE" });
+    expect(removed.status).toBe(200);
+    await expect(removed.json()).resolves.toMatchObject({
+      data: { sourceId: "gwscfg_1", deleted: true },
+    });
+    expect(remove).toHaveBeenCalledWith(actor, "gwscfg_1");
+  });
+
+  it("rejects unsupported Wiki source providers before invoking source logic", async () => {
+    const upsert = vi.fn(async () => wikiSourceView());
+    const app = testApp(fakeRepository(), {
+      wikiSources: wikiSourceService({ upsert }),
+    });
+    const response = await app.request("/v1/wiki/sources", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        integrationId: "integration_1",
+        provider: "google_drive",
+        enabled: true,
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("does not expose the retired hand-authored Skill create or edit routes", async () => {
+    const app = testApp(fakeRepository());
+
+    const create = await app.request("/v1/skills", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "legacy-create" },
+      body: JSON.stringify({ name: "Legacy Skill" }),
+    });
+    const update = await app.request("/v1/skills/imported-skill", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Legacy Skill",
+        description: "Retired.",
+        instructions: "Do the thing.",
+        status: "active",
+      }),
+    });
+
+    expect(create.status).toBe(404);
+    expect(update.status).toBe(404);
+  });
+
+  it("lists, inspects, reads, replaces, disables, and archives Skill installations", async () => {
+    const installation = fakeSkillInstallation();
+    const { createdAt: _createdAt, bundle, ...installationFields } = installation;
+    const { body: _body, files: _files, ...bundleSummary } = bundle;
+    const listItem: SkillInstallationListItem = {
+      ...installationFields,
+      bundle: bundleSummary,
+    };
+    const list = vi.fn(async () => [listItem]);
+    const get = vi.fn(async () => installation);
+    const readFile = vi.fn(async () => ({
+      path: "references/data.bin",
+      content: Uint8Array.of(0, 255, 1, 2),
+      executable: false,
+      sizeBytes: 4,
+    }));
+    const setEnabled = vi.fn(async () => ({ ...installation, enabled: false }));
+    const replace = vi.fn(async () => installation);
+    const archive = vi.fn(async () => undefined);
+    const resolvedBundle = {
+      name: installation.name,
+      description: bundle.description,
+      body: bundle.body,
+      source: bundle.source,
+      integrity: bundle.integrity,
+      files: [
+        {
+          path: "SKILL.md",
+          content: new TextEncoder().encode("private bytes"),
+          executable: false,
+        },
+      ],
+      fileCount: 1,
+      totalBytes: 13,
+    };
+    const app = testApp(fakeRepository(), {
+      skillImports: fakeSkillImportService(
+        { list, get, readFile, setEnabled, replace, archive },
+        { resolve: vi.fn(async () => ({ status: "resolved" as const, bundle: resolvedBundle })) },
+      ),
+    });
+
+    const listResponse = await app.request("/v1/skills");
+    await expect(listResponse.json()).resolves.toMatchObject({
+      data: [{ name: "imported-skill", bundle: { integrity: bundle.integrity } }],
+    });
+    const inspectResponse = await app.request("/v1/skills/imported-skill");
+    await expect(inspectResponse.json()).resolves.toMatchObject({
+      data: { bundle: { body: bundle.body, files: bundle.files } },
+    });
+    const readResponse = await app.request(
+      "/v1/skills/imported-skill/files/read?path=references%2Fdata.bin&maxBytes=4",
+    );
+    await expect(readResponse.json()).resolves.toMatchObject({
+      data: { encoding: "base64", content: Buffer.from([0, 255, 1, 2]).toString("base64") },
+    });
+    await expect(
+      app.request("/v1/skills/imported-skill/disable", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/skills/imported-skill/replace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: bundle.source.url,
+          expectedResolvedCommit: bundle.source.resolvedCommit,
+          expectedIntegrity: bundle.integrity,
+        }),
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/skills/imported-skill/archive", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+
+    expect(readFile).toHaveBeenCalledWith({
+      actor,
+      name: "imported-skill",
+      path: "references/data.bin",
+    });
+    expect(setEnabled).toHaveBeenCalledWith({ actor, name: "imported-skill", enabled: false });
+    expect(replace).toHaveBeenCalledWith({
+      actor,
+      name: "imported-skill",
+      bundle: resolvedBundle,
+    });
+    expect(archive).toHaveBeenCalledWith({ actor, name: "imported-skill" });
+  });
+
+  it("previews and manages Plugins without exposing package bytes or MCP environment values", async () => {
+    const installation = fakePluginInstallation();
+    const packageBytes = new TextEncoder().encode("private plugin package");
+    const resolved: ResolvedPluginPackage = {
+      manifest: installation.manifest,
+      source: installation.source,
+      integrity: installation.integrity,
+      files: [{ path: "plugin.json", content: packageBytes, executable: false }],
+      fileCount: 1,
+      totalBytes: packageBytes.length,
+      skills: [],
+      stdioServers: installation.stdioServers,
+      report: {
+        ignoredManifestFields: [],
+        skills: [],
+        mcp: installation.installReport.mcp,
+      },
+    };
+    const install = vi.fn(async () => ({ plugin: installation, idempotentReplay: false }));
+    const {
+      stdioServers: _stdioServers,
+      files: _pluginFiles,
+      skills: _pluginSkills,
+      ...pluginListFields
+    } = installation;
+    const listItem: PluginInstallationListItem = {
+      ...pluginListFields,
+      fileCount: 1,
+      skillCount: 0,
+      stdioServerCount: 1,
+    };
+    const list = vi.fn(async () => [listItem]);
+    const get = vi.fn(async () => installation);
+    const setStatus = vi.fn(async () => ({ ...installation, status: "disabled" as const }));
+    const approveMcp = vi.fn(async () => ({
+      ...installation,
+      mcpApprovedIntegrity: installation.integrity,
+    }));
+    const revokeMcp = vi.fn(async () => ({ ...installation, mcpApprovedIntegrity: null }));
+    const archive = vi.fn(async () => undefined);
+    const deleteData = vi.fn(async () => ({ deleted: true }));
+    const app = testApp(fakeRepository(), {
+      pluginImports: fakePluginImportService(
+        { install, list, get, setStatus, approveMcp, revokeMcp, archive, deleteData },
+        { resolve: vi.fn(async () => resolved) },
+      ),
+    });
+
+    const preview = await app.request("/v1/plugins/imports/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "github.com/example/plugins" }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json();
+    expect(previewBody).toMatchObject({
+      data: {
+        manifest: { name: "quality-tools" },
+        files: [{ path: "plugin.json", sizeBytes: packageBytes.length }],
+        stdioServers: [{ name: "local", envKeys: ["PRIVATE_TOKEN"] }],
+      },
+    });
+    expect(JSON.stringify(previewBody)).not.toContain("private plugin package");
+    expect(JSON.stringify(previewBody)).not.toContain("secret-value");
+
+    const imported = await app.request("/v1/plugins/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "plugin-import-1" },
+      body: JSON.stringify({
+        url: "github.com/example/plugins",
+        expectedResolvedCommit: installation.source.resolvedCommit,
+        expectedIntegrity: installation.integrity,
+      }),
+    });
+    expect(imported.status).toBe(201);
+    const importedBody = await imported.json();
+    expect(importedBody).toMatchObject({
+      data: { plugin: { name: "quality-tools", stdioServers: [{ envKeys: ["PRIVATE_TOKEN"] }] } },
+    });
+    expect(JSON.stringify(importedBody)).not.toContain("secret-value");
+
+    await expect(app.request("/v1/plugins")).resolves.toMatchObject({ status: 200 });
+    await expect(app.request("/v1/plugins/quality-tools")).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/mcp/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ integrity: installation.integrity }),
+      }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/mcp/revoke", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/data/delete", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/archive", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+
+    expect(setStatus).toHaveBeenCalledWith({ actor, name: "quality-tools", status: "disabled" });
+    expect(approveMcp).toHaveBeenCalledWith({
+      actor,
+      name: "quality-tools",
+      integrity: installation.integrity,
+    });
+    expect(revokeMcp).toHaveBeenCalledWith({ actor, name: "quality-tools" });
+    expect(deleteData).toHaveBeenCalledWith({ actor, name: "quality-tools" });
+    expect(archive).toHaveBeenCalledWith({ actor, name: "quality-tools" });
   });
 
   it("serves and mutates Brain sources through the authenticated provider boundary", async () => {
@@ -1175,35 +1484,35 @@ describe("canonical Hono API", () => {
     expect(bearer.status).toBe(202);
   });
 
-  it.each([
-    undefined,
-    "0.9.0",
-  ])("rejects stale Message clients with an actionable refresh error (%s)", async (protocolVersion) => {
-    const repository = fakeRepository();
-    const response = await testApp(repository).request("/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": "send_stale_1",
-        ...(protocolVersion ? { [PROTOCOL_VERSION_HEADER]: protocolVersion } : {}),
-      },
-      body: JSON.stringify({
-        content: "Hello",
-        engine: "opencompany",
-      }),
-    });
+  it.each([undefined, "0.9.0"])(
+    "rejects stale Message clients with an actionable refresh error (%s)",
+    async (protocolVersion) => {
+      const repository = fakeRepository();
+      const response = await testApp(repository).request("/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "send_stale_1",
+          ...(protocolVersion ? { [PROTOCOL_VERSION_HEADER]: protocolVersion } : {}),
+        },
+        body: JSON.stringify({
+          content: "Hello",
+          engine: "opencompany",
+        }),
+      });
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "invalid_request",
-        message: PROTOCOL_UPDATE_REQUIRED_MESSAGE,
-        retryable: false,
-      },
-      meta: { protocolVersion: PROTOCOL_VERSION },
-    });
-    expect(repository.lastCommand).toBeNull();
-  });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "invalid_request",
+          message: PROTOCOL_UPDATE_REQUIRED_MESSAGE,
+          retryable: false,
+        },
+        meta: { protocolVersion: PROTOCOL_VERSION },
+      });
+      expect(repository.lastCommand).toBeNull();
+    },
+  );
 
   it("exposes durable cursor and Electric headers to the configured browser origin", async () => {
     const app = testApp(fakeRepository(), {
@@ -3138,6 +3447,56 @@ describe("canonical Hono API", () => {
     }
   });
 
+  it("correlates Message command failures with the actor and target without logging content", async () => {
+    const failure = new Error("Failed query", {
+      cause: Object.assign(new Error("duplicate key value violates unique constraint"), {
+        code: "23505",
+        constraint: "tasks_pkey",
+      }),
+    });
+    const repository = fakeRepository();
+    repository.createMessageAndRun = async () => {
+      throw failure;
+    };
+    const captureException = vi.fn();
+    setExceptionReporter({ captureException });
+    try {
+      const app = testApp(repository);
+      const response = await app.request("/v1/messages", {
+        method: "POST",
+        headers: messageHeaders("message-failure-1"),
+        body: JSON.stringify({
+          conversationId: "conversation_1",
+          content: "private prompt that must not enter telemetry",
+          engine: { type: "opencompany", schemaVersion: 1 },
+        }),
+      });
+
+      expect(response.status).toBe(500);
+      expect(captureException).toHaveBeenCalledWith(
+        failure,
+        expect.objectContaining({
+          event: "opencompany.api_request_failed",
+          method: "POST",
+          path: "/v1/messages",
+          operation: "message.create",
+          message_target: "existing",
+          target_resource: "chat",
+          engine: "opencompany",
+          conversation_id: "conversation_1",
+          user_id: "user_1",
+          workspace_id: "workspace_1",
+          request_id: expect.stringMatching(/^request_/u),
+        }),
+      );
+      expect(JSON.stringify(captureException.mock.calls)).not.toContain(
+        "private prompt that must not enter telemetry",
+      );
+    } finally {
+      setExceptionReporter(undefined);
+    }
+  });
+
   it("forwards the required idempotency key to billing commands", async () => {
     const createCreditTopUp = vi.fn(async () => ({
       redirectUrl: "https://checkout.stripe.test/session",
@@ -3663,10 +4022,12 @@ function testApp(
     knowledge: fakeKnowledgeService(),
     wikiCommands: fakeWikiCommandsService(),
     resolveWikiServiceActor: async () => actor,
+    wikiSources: fakeWikiSources(),
     brainSources: fakeBrainSources(),
     brainImports: fakeBrainImports(),
     browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
+    pluginImports: fakePluginImportService(),
     brainAssets: fakeBrainAssets(),
     brainControl: fakeBrainControl(),
     attachments: fakeAttachments(),
@@ -4124,6 +4485,49 @@ function engineSessionService(
   return { ...fakeEngineSessions(), ...overrides };
 }
 
+function fakeWikiSources(): Parameters<typeof createApiApp>[0]["wikiSources"] {
+  return {
+    list: async () => {
+      throw new Error("Unexpected Wiki source list.");
+    },
+    listActivity: async () => {
+      throw new Error("Unexpected Wiki activity list.");
+    },
+    upsert: async () => {
+      throw new Error("Unexpected Wiki source mutation.");
+    },
+    setEnabled: async () => {
+      throw new Error("Unexpected Wiki source enabled mutation.");
+    },
+    remove: async () => {
+      throw new Error("Unexpected Wiki source removal.");
+    },
+  };
+}
+
+function wikiSourceService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["wikiSources"]>,
+): Parameters<typeof createApiApp>[0]["wikiSources"] {
+  return { ...fakeWikiSources(), ...overrides };
+}
+
+function wikiActivityItem() {
+  return {
+    id: "gwjob_1",
+    provider: "slack" as const,
+    sourceType: "conversation" as const,
+    title: "#product",
+    outcome: "succeeded" as const,
+    reason: null,
+    pages: [{ path: "projects/launch", title: "Launch", action: "updated" as const }],
+    attempts: 1,
+    occurredAt: "2026-08-24T08:00:00.000Z",
+    completedAt: "2026-08-24T09:01:00.000Z",
+    createdAt: "2026-08-24T09:00:00.000Z",
+    updatedAt: "2026-08-24T09:01:00.000Z",
+  };
+}
+
 function fakeBrainSources(): Parameters<typeof createApiApp>[0]["brainSources"] {
   return {
     list: async () => {
@@ -4174,6 +4578,29 @@ function browserProfileService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["browserProfiles"]>,
 ): Parameters<typeof createApiApp>[0]["browserProfiles"] {
   return { ...fakeBrowserProfiles(), ...overrides };
+}
+
+function wikiSourceView(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "gwscfg_1",
+    provider: "gmail" as const,
+    integrationId: "integration_1",
+    enabled: true,
+    config: {},
+    integrationStatus: "connected" as const,
+    accountName: null,
+    accountEmail: "ada@example.com",
+    connectionLabel: null,
+    ownerName: "Ada Lovelace",
+    ownerEmail: "ada@example.com",
+    ownerAvatarUrl: null,
+    ownerKind: "user" as const,
+    isOwn: true,
+    canConfigure: true,
+    canToggle: true,
+    canDelete: true,
+    ...overrides,
+  };
 }
 
 function brainSourceDetails() {
@@ -4326,13 +4753,21 @@ function fakeWikiCommandsService(overrides: Partial<WikiCommandRepository> = {})
 }
 
 function fakeSkillImportService(
-  repositoryOverrides: Partial<SkillImportRepository> = {},
+  repositoryOverrides: Partial<SkillBundleRepository> = {},
   resolverOverrides: Partial<SkillImportResolver> = {},
 ) {
-  const repository: SkillImportRepository = {
-    importSkill: async () => {
-      throw new Error("Unexpected Skill import.");
-    },
+  const unexpected = async (): Promise<never> => {
+    throw new Error("Unexpected Skill installation operation.");
+  };
+  const repository: SkillBundleRepository = {
+    install: unexpected,
+    replace: unexpected,
+    list: unexpected,
+    listCatalog: unexpected,
+    get: unexpected,
+    readFile: unexpected,
+    setEnabled: unexpected,
+    archive: unexpected,
     ...repositoryOverrides,
   };
   const resolver: SkillImportResolver = {
@@ -4342,6 +4777,33 @@ function fakeSkillImportService(
     ...resolverOverrides,
   };
   return new SkillImportApplicationService(repository, resolver);
+}
+
+function fakePluginImportService(
+  repositoryOverrides: Partial<PluginRepository> = {},
+  resolverOverrides: Partial<PluginImportResolver> = {},
+) {
+  const unexpected = async (): Promise<never> => {
+    throw new Error("Unexpected Plugin installation operation.");
+  };
+  const repository: PluginRepository = {
+    install: unexpected,
+    list: unexpected,
+    get: unexpected,
+    setStatus: unexpected,
+    approveMcp: unexpected,
+    revokeMcp: unexpected,
+    archive: unexpected,
+    deleteData: unexpected,
+    ...repositoryOverrides,
+  };
+  const resolver: PluginImportResolver = {
+    resolve: async () => {
+      throw new Error("Unexpected Plugin import preview.");
+    },
+    ...resolverOverrides,
+  };
+  return new PluginImportApplicationService(repository, resolver);
 }
 
 function knowledgeService(overrides: Partial<KnowledgeRepository>) {
@@ -4409,21 +4871,76 @@ function baseWikiPage() {
   };
 }
 
-function fakeSkill(overrides: Partial<Skill> = {}): Skill {
-  return { ...baseSkill(), ...overrides };
-}
-
-function baseSkill(): Skill {
+function fakeSkillInstallation(): SkillInstallation {
   return {
-    id: "skill_1",
-    slug: "research",
-    name: "Research",
-    description: "Find primary sources.",
-    instructions: "",
-    status: "draft" as const,
-    source: null,
+    id: "skill_installation_1",
+    name: "imported-skill",
+    enabled: true,
+    archivedAt: null,
     createdAt,
     updatedAt: createdAt,
+    bundle: {
+      id: "skill_bundle_1",
+      integrity: `sha256:${"b".repeat(64)}`,
+      name: "imported-skill",
+      description: "Imported instructions.",
+      license: null,
+      compatibility: null,
+      metadata: null,
+      allowedTools: null,
+      body: "Use this when imported.",
+      source: {
+        type: "github",
+        url: "https://github.com/o/r",
+        ref: "main",
+        path: "imported-skill",
+        resolvedCommit: "a".repeat(40),
+      },
+      files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
+      createdAt,
+    },
+  };
+}
+
+function fakePluginInstallation(): PluginInstallation {
+  return {
+    id: "plugin_1",
+    name: "quality-tools",
+    status: "enabled",
+    manifest: { name: "quality-tools", description: "Quality helpers." },
+    source: {
+      type: "github",
+      url: "https://github.com/example/plugins",
+      ref: "main",
+      path: "",
+      resolvedCommit: "a".repeat(40),
+    },
+    integrity: `sha256:${"c".repeat(64)}`,
+    files: [{ path: "plugin.json", executable: false, sizeBytes: 128 }],
+    skills: [],
+    stdioServers: [
+      {
+        name: "local",
+        type: "stdio",
+        command: "./server",
+        args: [],
+        env: { PRIVATE_TOKEN: "secret-value" },
+      },
+    ],
+    installReport: {
+      ignoredManifestFields: [],
+      skills: [],
+      mcp: {
+        present: true,
+        status: "parsed",
+        reports: [{ name: "local", status: "selected", transport: "stdio" }],
+      },
+      collisions: [],
+    },
+    mcpApprovedIntegrity: null,
+    createdAt,
+    updatedAt: createdAt,
+    archivedAt: null,
   };
 }
 

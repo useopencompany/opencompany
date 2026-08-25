@@ -249,12 +249,19 @@ describe("v1 protocol contract", () => {
       "/v1/wiki/pages/{id}",
       "/v1/wiki/pages/{id}/delete",
       "/v1/wiki/pages/{id}/timeline",
+      "/v1/wiki/sources",
+      "/v1/wiki/sources/activity",
+      "/v1/wiki/sources/{sourceId}",
       "/v1/skills",
       "/v1/skills/imports/preview",
       "/v1/skills/imports",
       "/v1/skills/catalog",
       "/v1/skills/{slug}",
       "/v1/skills/{slug}/archive",
+      "/v1/skills/{slug}/enable",
+      "/v1/skills/{slug}/disable",
+      "/v1/skills/{slug}/replace",
+      "/v1/skills/{slug}/files/read",
       "/v1/conversations",
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/share",
@@ -315,7 +322,21 @@ describe("v1 protocol contract", () => {
       "/v1/billing/subscription-checkouts",
       "/v1/billing/portal-sessions",
       "/v1/billing/auto-refill",
+      "/v1/plugins",
+      "/v1/plugins/imports/preview",
+      "/v1/plugins/imports",
+      "/v1/plugins/{name}",
+      "/v1/plugins/{name}/archive",
+      "/v1/plugins/{name}/enable",
+      "/v1/plugins/{name}/disable",
+      "/v1/plugins/{name}/mcp/approve",
+      "/v1/plugins/{name}/mcp/revoke",
+      "/v1/plugins/{name}/data/delete",
     ]);
+    expect(document.paths?.["/v1/skills"]).toHaveProperty("get");
+    expect(document.paths?.["/v1/skills"]).not.toHaveProperty("post");
+    expect(document.paths?.["/v1/skills/{slug}"]).toHaveProperty("get");
+    expect(document.paths?.["/v1/skills/{slug}"]).not.toHaveProperty("patch");
     expect(document.paths?.["/v1/messages"]?.post?.parameters).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

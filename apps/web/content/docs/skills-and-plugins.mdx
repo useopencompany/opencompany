@@ -1,0 +1,43 @@
+---
+title: Agent Skills and Plugins
+description: Install immutable Agent Skills and Plugins, pin runtime versions, and approve coding-sandbox MCP.
+---
+
+## Skills
+
+Workspace admins manage Agent Skills in **Settings → Skills**. Preview a supported public GitHub or
+skills.sh URL before installing it. opencompany validates the official Agent Skills frontmatter,
+name and directory alignment, every bundled file, and the resolved commit. Unknown fields such as
+the retired `command` extension are rejected.
+
+Installed bundles are immutable: there is no Markdown editor. Replace creates a new bundle and
+moves the workspace installation to it; enable, disable, and archive control whether new Chats and
+Tasks can select it. Existing Chats and Tasks retain the exact bundle IDs they already captured.
+Type `/` in Chat and select a Skill to invoke it as `/<skill-name>`.
+
+## Plugins
+
+Workspace admins manage Agent Plugins in **Settings → Plugins**. A Plugin install stores the exact
+package, its valid immediate-child Skills, and an install report. An invalid Plugin manifest fails
+the install; invalid child Skills are skipped and reported. Standalone Skills win name collisions,
+then the lexically smaller Plugin name wins between Plugins. Settings shows hidden collisions.
+
+Plugin Skills are passive instructions. Installing or enabling a Plugin does not launch its MCP
+servers. HTTP and SSE MCP are unsupported in this release.
+
+## MCP approval and Plugin data
+
+An admin must approve the exact installed Plugin integrity before its stdio MCP servers can start.
+Replacing the Plugin produces a new integrity and requires new approval. The approval UI shows the
+command, arguments, and declared environment variable names, never secret values. Main Chat does
+not start Plugin processes; approved MCP runs only in Codex and Claude coding sandboxes.
+
+Each Plugin gets a writable `PLUGIN_DATA` directory. The runner restores and checkpoints a bounded
+workspace archive so data survives sandbox and Plugin replacement. Archiving a Plugin stops its
+Skills and MCP from entering new turns but does not implicitly erase Plugin data.
+
+## Historical Skills
+
+The former hand-authored Brain Skill editor, custom command frontmatter extension, and legacy
+activation replay have been removed. Old Chat messages remain readable, but their historical Skill
+activations are not executable and were not converted into new bundles.

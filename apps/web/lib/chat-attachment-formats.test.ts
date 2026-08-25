@@ -41,16 +41,14 @@ describe("chatAttachmentKindForMime", () => {
 });
 
 describe("normalizedChatAttachmentMediaType", () => {
-  it.each([
-    "",
-    "text/plain",
-    "application/octet-stream",
-    "text/srt",
-  ])("normalizes %j for an SRT filename", (mediaType) => {
-    expect(normalizedChatAttachmentMediaType({ mediaType, filename: "captions.SRT" })).toBe(
-      CHAT_SRT_MIME_TYPE,
-    );
-  });
+  it.each(["", "text/plain", "application/octet-stream", "text/srt"])(
+    "normalizes %j for an SRT filename",
+    (mediaType) => {
+      expect(normalizedChatAttachmentMediaType({ mediaType, filename: "captions.SRT" })).toBe(
+        CHAT_SRT_MIME_TYPE,
+      );
+    },
+  );
 
   it("does not treat generic text files as subtitles", () => {
     expect(

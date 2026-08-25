@@ -2,7 +2,9 @@ import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getHeadlessBrainSnapshot,
+  getHeadlessPlugin,
   getHeadlessSkill,
+  listHeadlessPlugins,
   listHeadlessSkillCatalog,
   listHeadlessWikiPages,
 } from "./headless-knowledge-server";
@@ -54,7 +56,7 @@ describe("server knowledge reads", () => {
     expect((upstream as unknown as { init?: RequestInit }).init?.cache).toBe("no-store");
   });
 
-  it("loads Wiki pages and the Skill catalog from canonical resources", async () => {
+  it("loads Wiki pages, the Skill catalog, and Plugins from canonical resources", async () => {
     const paths: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -67,8 +69,9 @@ describe("server knowledge reads", () => {
 
     await listHeadlessWikiPages();
     await listHeadlessSkillCatalog();
+    await listHeadlessPlugins();
 
-    expect(paths).toEqual(["/v1/wiki/pages", "/v1/skills/catalog"]);
+    expect(paths).toEqual(["/v1/wiki/pages", "/v1/skills/catalog", "/v1/plugins"]);
   });
 
   it("returns null only for a canonical missing Skill", async () => {
@@ -78,6 +81,7 @@ describe("server knowledge reads", () => {
     );
 
     await expect(getHeadlessSkill("missing-skill")).resolves.toBeNull();
+    await expect(getHeadlessPlugin("missing-plugin")).resolves.toBeNull();
   });
 
   it("rejects an unsafe API origin before issuing a request", async () => {

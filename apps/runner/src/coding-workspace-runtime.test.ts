@@ -148,29 +148,29 @@ ${command}
 });
 
 describe("opencompany coding workspace access", () => {
-  it.each([
-    "codex",
-    "claude_code",
-  ] as const)("mints owner-bound access for %s sessions", async (engine) => {
-    mocks.rows = [runtimeSession({ engine })];
+  it.each(["codex", "claude_code"] as const)(
+    "mints owner-bound access for %s sessions",
+    async (engine) => {
+      mocks.rows = [runtimeSession({ engine })];
 
-    const access = await mintCodingWorkspaceAccess({
-      codingSessionId: "runtime_123e4567-e89b-12d3-a456-426614174000",
-      userWorkosId: "user_1",
-      env: { streamTokenSecret: secret },
-    });
+      const access = await mintCodingWorkspaceAccess({
+        codingSessionId: "runtime_123e4567-e89b-12d3-a456-426614174000",
+        userWorkosId: "user_1",
+        env: { streamTokenSecret: secret },
+      });
 
-    expect(access.sandboxStatus).toBe("running");
-    expect(
-      verifyCodingWorkspaceTicket({
-        ticket: access.ticket,
-        secret,
-      }),
-    ).toMatchObject({
-      codingSessionId: "runtime_123e4567-e89b-12d3-a456-426614174000",
-      userWorkosId: "user_1",
-    });
-  });
+      expect(access.sandboxStatus).toBe("running");
+      expect(
+        verifyCodingWorkspaceTicket({
+          ticket: access.ticket,
+          secret,
+        }),
+      ).toMatchObject({
+        codingSessionId: "runtime_123e4567-e89b-12d3-a456-426614174000",
+        userWorkosId: "user_1",
+      });
+    },
+  );
 
   it.each([
     ["foreign or missing", [], 404],

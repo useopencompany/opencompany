@@ -14,15 +14,23 @@ import type {
   ScheduleTaskToolInput,
   ScheduleTaskToolOutput,
 } from "@opencompany/agent/chat-ui";
+import {
+  activateAndListChatSessionSkills,
+  listSkillCatalog,
+  readChatSkillFile,
+  resolveSkillMentions,
+} from "@opencompany/agent/skills";
 import type {
   ChatHostBootstrap,
   ChatHostToolGatewayRequest,
   ChatHostToolGatewayResponse,
 } from "@opencompany/agent-runtime";
+import { assertSafeRelativePath } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { HarnessEngine } from "@opencompany/db/product-schema";
 import { executeApiWikiCommand } from "./api-wiki-client";
 import { wakeCodexChatWorker } from "./codex-chat-worker";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { planHarnessForTask } from "./harness";
 import { getHarnessPlannerContextForRunner } from "./harness-planner";
@@ -151,6 +159,12 @@ export async function loadHostTools(
                 };
               }
             },
+            readFile: (input) => {
+              assertSafeRelativePath(input.path);
+              return call("read_skill_file", input) as Promise<
+                Awaited<ReturnType<NonNullable<SkillDispatcher["readFile"]>>>
+              >;
+            },
           },
         }
       : {}),
@@ -203,6 +217,20 @@ async function callGateway(
   const response = await execute({
     request,
     ...(includeTurnSignal ? { signal: context.signal } : {}),
+    dependencies: {
+      resolveSkillMentions: (input) => resolveSkillMentions({ ...input, db: getDb() }),
+      listSkillCatalog: (workspaceId) => listSkillCatalog(workspaceId, getDb()),
+      activateAndListSkills: ({ conversationId, messageId, workspaceId, skills }) =>
+        activateAndListChatSessionSkills({
+          chatSessionId: conversationId,
+          activatedMessageId: messageId,
+          workspaceId,
+          skills,
+          db: getDb(),
+        }),
+      readSkillFile: ({ conversationId, ...input }) =>
+        readChatSkillFile({ ...input, chatSessionId: conversationId, db: getDb() }),
+    },
     runtime: {
       wakeTaskWorker: wakeCodexChatWorker,
       defer: (work) => {

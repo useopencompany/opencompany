@@ -121,6 +121,7 @@ describe("AcpHarness", () => {
     const onPermissionRequest = vi.fn(async () => ({
       outcome: { outcome: "selected" as const, optionId: "allow-once" },
     }));
+    const onEngineStopped = vi.fn(async () => undefined);
     const input = harnessInput(transport.sandbox, {
       mcpServers: [
         {
@@ -134,6 +135,7 @@ describe("AcpHarness", () => {
         runtimeEvents.push(...events);
       }),
       onPermissionRequest,
+      onEngineStopped,
       model: "claude-sonnet-5",
       reasoningEffort: "xhigh",
       permissionMode: "default",
@@ -183,6 +185,10 @@ describe("AcpHarness", () => {
       "session/prompt_result",
     ]);
     expect(transport.kill).toHaveBeenCalledWith(41);
+    expect(onEngineStopped).toHaveBeenCalledOnce();
+    expect(transport.kill.mock.invocationCallOrder[0]).toBeLessThan(
+      onEngineStopped.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it("reattaches to the running ACP process when the E2B command watch times out", async () => {
@@ -276,50 +282,50 @@ describe("AcpHarness", () => {
       errorText: "no rollout found for thread id 9b5fee11",
       label: "a non-matching error message",
     },
-  ])("invalidates the stored session and starts fresh when session/load fails with $label", async ({
-    errorCode,
-    errorText,
-  }) => {
-    const transport = fakeAcpSandbox(async (message, emit) => {
-      if (message.method === "initialize") {
-        await emit({
-          jsonrpc: "2.0",
-          id: message.id,
-          result: { agentCapabilities: { loadSession: true } },
-        });
-      } else if (message.method === "session/load") {
-        await emit({
-          jsonrpc: "2.0",
-          id: message.id,
-          error: { code: errorCode, message: errorText },
-        });
-      } else if (message.method === "session/new") {
-        await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "session_fresh" } });
-      } else if (message.method === "session/prompt") {
-        await emit({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
-      }
-    });
-    const prepareFreshTask = vi.fn(async () => "Recover with full history.");
-    const onExistingSessionInvalidated = vi.fn(async () => {});
-    const input = harnessInput(transport.sandbox, {
-      existingSessionId: "session_stale",
-      prepareFreshTask,
-      onExistingSessionInvalidated,
-    });
+  ])(
+    "invalidates the stored session and starts fresh when session/load fails with $label",
+    async ({ errorCode, errorText }) => {
+      const transport = fakeAcpSandbox(async (message, emit) => {
+        if (message.method === "initialize") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { agentCapabilities: { loadSession: true } },
+          });
+        } else if (message.method === "session/load") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: errorCode, message: errorText },
+          });
+        } else if (message.method === "session/new") {
+          await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "session_fresh" } });
+        } else if (message.method === "session/prompt") {
+          await emit({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+        }
+      });
+      const prepareFreshTask = vi.fn(async () => "Recover with full history.");
+      const onExistingSessionInvalidated = vi.fn(async () => {});
+      const input = harnessInput(transport.sandbox, {
+        existingSessionId: "session_stale",
+        prepareFreshTask,
+        onExistingSessionInvalidated,
+      });
 
-    const result = await new AcpHarness().runTurn(input);
+      const result = await new AcpHarness().runTurn(input);
 
-    expect(result).toMatchObject({ sessionId: "session_fresh", loadedSession: false });
-    expect(onExistingSessionInvalidated).toHaveBeenCalledOnce();
-    expect(prepareFreshTask).toHaveBeenCalledOnce();
-    const prompt = transport.requests.find((request) => request.method === "session/prompt");
-    expect(prompt).toMatchObject({
-      params: {
-        sessionId: "session_fresh",
-        prompt: [{ type: "text", text: "Recover with full history." }],
-      },
-    });
-  });
+      expect(result).toMatchObject({ sessionId: "session_fresh", loadedSession: false });
+      expect(onExistingSessionInvalidated).toHaveBeenCalledOnce();
+      expect(prepareFreshTask).toHaveBeenCalledOnce();
+      const prompt = transport.requests.find((request) => request.method === "session/prompt");
+      expect(prompt).toMatchObject({
+        params: {
+          sessionId: "session_fresh",
+          prompt: [{ type: "text", text: "Recover with full history." }],
+        },
+      });
+    },
+  );
 
   it("aborts the turn without invalidating the thread when session/load fails at the transport level", async () => {
     let resolveExit: (() => void) | null = null;

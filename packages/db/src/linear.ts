@@ -9,6 +9,7 @@ import {
   type LinearEventAction,
   type LinearEventEntityType,
   linearIssueEvents,
+  wikiSources,
   workflowEventRuns,
   workflows,
 } from "./product-schema";
@@ -52,6 +53,11 @@ export type LinearBrainSourceConfig = {
   events?: LinearEventRef[];
 };
 
+export type LinearWikiSourceConfig = {
+  teams?: LinearTeamRef[];
+  events?: LinearEventRef[];
+};
+
 export type LinearIntegrationForOrganization = {
   id: string;
   userWorkosId: string;
@@ -75,6 +81,12 @@ export type LinearBrainSourceRoute = {
   config: LinearBrainSourceConfig;
 };
 
+export type LinearWikiSourceRoute = {
+  integrationId: string;
+  workspaceId: string;
+  config: LinearWikiSourceConfig;
+};
+
 export type LinearIssueEventInsert = {
   integrationId: string;
   userWorkosId: string;
@@ -91,6 +103,14 @@ export type LinearIssueEventInsert = {
 };
 
 export function parseLinearBrainSourceConfig(value: unknown): LinearBrainSourceConfig {
+  return parseLinearSourceConfig(value);
+}
+
+export function parseLinearWikiSourceConfig(value: unknown): LinearWikiSourceConfig {
+  return parseLinearSourceConfig(value);
+}
+
+function parseLinearSourceConfig(value: unknown): LinearWikiSourceConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const teams = parseTeamRefs(record.teams);
@@ -189,6 +209,33 @@ export async function listEnabledLinearBrainSourceRoutes(
     integrationId: row.integrationId,
     brainRef: row.brainRef,
     config: parseLinearBrainSourceConfig(row.config),
+  }));
+}
+
+export async function listEnabledLinearWikiSourceRoutes(
+  integrationIds: readonly string[],
+  db: DbLike = getDb(),
+): Promise<LinearWikiSourceRoute[]> {
+  if (integrationIds.length === 0) return [];
+  const rows = await db
+    .select({
+      integrationId: wikiSources.integrationId,
+      workspaceId: wikiSources.workspaceId,
+      config: wikiSources.config,
+    })
+    .from(wikiSources)
+    .where(
+      and(
+        eq(wikiSources.provider, "linear"),
+        eq(wikiSources.enabled, true),
+        inArray(wikiSources.integrationId, [...integrationIds]),
+      ),
+    );
+
+  return rows.map((row: { integrationId: string; workspaceId: string; config: unknown }) => ({
+    integrationId: row.integrationId,
+    workspaceId: row.workspaceId,
+    config: parseLinearWikiSourceConfig(row.config),
   }));
 }
 
