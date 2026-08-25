@@ -110,8 +110,8 @@ export type WorkflowStep = {
   instructions: string;
 };
 export type ChatSessionSkillBundleSourceKind = "standalone" | "plugin";
-// Remote source types shared by immutable Skill bundles and Plugins.
-export type SkillSourceType = "github" | "skills.sh";
+export type ExternalArtifactSourceType = "github" | "skills.sh";
+export type SkillSourceType = ExternalArtifactSourceType | "workspace";
 
 export type HarnessEngine = "opencompany" | "codex" | "claude_code";
 
@@ -3179,10 +3179,10 @@ export const skillBundles = productSchema.table(
     allowedTools: text("allowed_tools"),
     body: text("body").notNull(),
     sourceType: text("source_type").$type<SkillSourceType>().notNull(),
-    sourceUrl: text("source_url").notNull(),
-    sourcePath: text("source_path").notNull(),
-    sourceRef: text("source_ref").notNull(),
-    resolvedCommit: text("resolved_commit").notNull(),
+    sourceUrl: text("source_url"),
+    sourcePath: text("source_path"),
+    sourceRef: text("source_ref"),
+    resolvedCommit: text("resolved_commit"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
@@ -3198,7 +3198,7 @@ export const skillBundles = productSchema.table(
     ),
     sourceTypeCheck: check(
       "skill_bundles_source_type_check",
-      sql`${table.sourceType} IN ('github', 'skills.sh')`,
+      sql`${table.sourceType} IN ('github', 'skills.sh', 'workspace')`,
     ),
     integrityCheck: check(
       "skill_bundles_integrity_check",
@@ -3206,7 +3206,7 @@ export const skillBundles = productSchema.table(
     ),
     commitCheck: check(
       "skill_bundles_commit_check",
-      sql`${table.resolvedCommit} ~ '^[0-9a-f]{40}$'`,
+      sql`(${table.sourceType} = 'workspace' AND ${table.sourceUrl} IS NULL AND ${table.sourcePath} IS NULL AND ${table.sourceRef} IS NULL AND ${table.resolvedCommit} IS NULL) OR (${table.sourceType} IN ('github', 'skills.sh') AND ${table.sourceUrl} IS NOT NULL AND ${table.sourcePath} IS NOT NULL AND ${table.sourceRef} IS NOT NULL AND ${table.resolvedCommit} ~ '^[0-9a-f]{40}$')`,
     ),
   }),
 );
@@ -3277,7 +3277,7 @@ export const plugins = productSchema.table(
     name: text("name").notNull(),
     status: text("status").$type<PluginStatus>().notNull().default("enabled"),
     manifest: jsonb("manifest").$type<PluginManifest>().notNull(),
-    sourceType: text("source_type").$type<SkillSourceType>().notNull(),
+    sourceType: text("source_type").$type<ExternalArtifactSourceType>().notNull(),
     sourceUrl: text("source_url").notNull(),
     sourcePath: text("source_path").notNull(),
     sourceRef: text("source_ref").notNull(),

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
-import { computeArtifactIntegrity } from "@opencompany/agent-runtime";
+import { computeArtifactIntegrity, createWorkspaceSkillArtifact } from "@opencompany/agent-runtime";
 import type { Actor, ResolvedSkillBundle } from "@opencompany/core";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -66,6 +66,13 @@ describe("Postgres immutable Skill bundle repository", () => {
       "utf8",
     );
     for (const statement of nameMigration.split("--> statement-breakpoint")) {
+      if (statement.trim()) await database.exec(statement);
+    }
+    const workspaceAuthoringMigration = await readFile(
+      path.resolve(import.meta.dirname, "../../..", "drizzle/0232_workspace_authored_skills.sql"),
+      "utf8",
+    );
+    for (const statement of workspaceAuthoringMigration.split("--> statement-breakpoint")) {
       if (statement.trim()) await database.exec(statement);
     }
     repository = new PostgresSkillBundleRepository(drizzle(database));
@@ -167,6 +174,73 @@ describe("Postgres immutable Skill bundle repository", () => {
     await expect(
       database.query<{ count: number }>("SELECT COUNT(*)::int AS count FROM goat.skill_bundles"),
     ).resolves.toMatchObject({ rows: [{ count: 2 }] });
+  });
+
+  it("stores workspace provenance without fabricating remote source metadata", async () => {
+    const bundle = await createWorkspaceSkillArtifact({
+      name: "investigate-bug",
+      description: "Reproduce and diagnose reported bugs.",
+      instructions: "Reproduce the issue first.",
+    });
+    const installed = await repository.install({
+      actor: actor(),
+      idempotencyKey: "workspace-author-1",
+      bundle,
+    });
+
+    expect(installed.installation.bundle.source).toEqual({ type: "workspace" });
+    await expect(repository.listCatalog({ actor: actor() })).resolves.toEqual([
+      {
+        id: "investigate-bug",
+        name: "investigate-bug",
+        description: "Reproduce and diagnose reported bugs.",
+      },
+    ]);
+    await expect(
+      database.query<{
+        source_type: string;
+        source_url: string | null;
+        source_path: string | null;
+        source_ref: string | null;
+        resolved_commit: string | null;
+      }>(
+        "SELECT source_type, source_url, source_path, source_ref, resolved_commit FROM goat.skill_bundles",
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          source_type: "workspace",
+          source_url: null,
+          source_path: null,
+          source_ref: null,
+          resolved_commit: null,
+        },
+      ],
+    });
+  });
+
+  it("does not convert an imported Skill into a workspace-authored Skill", async () => {
+    await repository.install({
+      actor: actor(),
+      idempotencyKey: "install-imported",
+      bundle: await resolvedBundle("my-skill", "Imported version."),
+    });
+
+    await expect(
+      repository.replace({
+        actor: actor(),
+        name: "my-skill",
+        bundle: await createWorkspaceSkillArtifact({
+          name: "my-skill",
+          description: "A workspace-authored replacement.",
+          instructions: "Workspace-authored instructions.",
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    await expect(repository.get({ actor: actor(), name: "my-skill" })).resolves.toMatchObject({
+      bundle: { body: "Imported version.", source: { type: "github" } },
+    });
   });
 
   it("keeps Chat and Task bundle IDs immutable after replacement and archive", async () => {
