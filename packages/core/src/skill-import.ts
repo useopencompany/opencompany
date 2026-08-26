@@ -8,13 +8,15 @@ import { CoreError } from "./chat";
 
 export const SKILL_FILE_CHUNK_MAX_BYTES = 64 * 1024;
 
-export type SkillBundleSource = {
+export type ExternalSkillBundleSource = {
   type: "github" | "skills.sh";
   url: string;
   ref: string;
   path: string;
   resolvedCommit: string;
 };
+
+export type SkillBundleSource = ExternalSkillBundleSource | { type: "workspace" };
 
 export type SkillBundleFileInput = {
   path: string;
@@ -45,6 +47,10 @@ export type ResolvedSkillBundle = {
   totalBytes: number;
 };
 
+export type ExternalResolvedSkillBundle = Omit<ResolvedSkillBundle, "source"> & {
+  source: ExternalSkillBundleSource;
+};
+
 export type SkillImportCandidate = {
   path: string;
   name: string;
@@ -52,11 +58,11 @@ export type SkillImportCandidate = {
 };
 
 export type SkillImportResolution =
-  | { status: "resolved"; bundle: ResolvedSkillBundle }
+  | { status: "resolved"; bundle: ExternalResolvedSkillBundle }
   | {
       status: "ambiguous";
       candidates: SkillImportCandidate[];
-      source: Omit<SkillBundleSource, "path">;
+      source: Omit<ExternalSkillBundleSource, "path">;
     };
 
 export type SkillImportPreview =
@@ -68,7 +74,7 @@ export type SkillImportPreview =
       compatibility?: string;
       metadata?: Record<string, string>;
       allowedTools?: string;
-      source: SkillBundleSource;
+      source: ExternalSkillBundleSource;
       integrity: string;
       files: SkillImportFileMetadata[];
       fileCount: number;
@@ -77,7 +83,7 @@ export type SkillImportPreview =
   | {
       status: "ambiguous";
       candidates: SkillImportCandidate[];
-      source: Omit<SkillBundleSource, "path">;
+      source: Omit<ExternalSkillBundleSource, "path">;
     };
 
 export type SkillBundle = {
@@ -129,6 +135,16 @@ export interface SkillImportResolver {
   resolve(input: { url: string; selectedPath?: string }): Promise<SkillImportResolution>;
 }
 
+export type SkillAuthoringInput = {
+  name: string;
+  description: string;
+  instructions: string;
+};
+
+export interface SkillBundleAuthor {
+  create(input: SkillAuthoringInput): Promise<ResolvedSkillBundle>;
+}
+
 export interface SkillBundleRepository {
   install(input: {
     actor: Actor;
@@ -152,7 +168,25 @@ export class SkillImportApplicationService {
   constructor(
     private readonly repository: SkillBundleRepository,
     private readonly resolver: SkillImportResolver,
+    private readonly author: SkillBundleAuthor,
   ) {}
+
+  async create(actor: Actor, input: SkillAuthoringInput & { idempotencyKey: string }) {
+    requireSkillWrite(actor);
+    const bundle = await this.author.create(authoringInput(input));
+    return this.repository.install({
+      actor,
+      idempotencyKey: idempotencyKey(input.idempotencyKey),
+      bundle,
+    });
+  }
+
+  async update(actor: Actor, nameValue: string, input: Omit<SkillAuthoringInput, "name">) {
+    requireSkillWrite(actor);
+    const name = resourceName(nameValue);
+    const bundle = await this.author.create(authoringInput({ name, ...input }));
+    return this.repository.replace({ actor, name, bundle });
+  }
 
   async preview(
     actor: Actor,
@@ -332,7 +366,7 @@ export function createSkillFileChunk(
 }
 
 function publicPreview(
-  bundle: ResolvedSkillBundle,
+  bundle: ExternalResolvedSkillBundle,
 ): Extract<SkillImportPreview, { status: "resolved" }> {
   return {
     status: "resolved",
@@ -395,6 +429,14 @@ function idempotencyKey(value: string) {
 
 function resourceName(value: string) {
   return bounded(value, 64, "name");
+}
+
+function authoringInput(input: SkillAuthoringInput): SkillAuthoringInput {
+  return {
+    name: resourceName(input.name),
+    description: bounded(input.description, 1_024, "description"),
+    instructions: bounded(input.instructions, 512 * 1_024, "instructions"),
+  };
 }
 
 function bounded(value: string, max: number, field: string) {
