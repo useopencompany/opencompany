@@ -26,6 +26,7 @@ import {
 import { createChatBrowserToolSession } from "../browser-tools-runtime";
 import {
   activateAndListChatSessionSkills,
+  createWorkspaceSkillForActor,
   listSkillCatalog,
   readChatSkillFile,
   resolveSkillMentions,
@@ -103,6 +104,7 @@ export function executePersistedChatHostTool(input: {
       }),
     readSkillFile: ({ conversationId, ...skillFile }) =>
       readChatSkillFile({ chatSessionId: conversationId, ...skillFile }),
+    createWorkspaceSkill: createWorkspaceSkillForActor,
     createTask: (task) =>
       createTaskForActor(
         {
@@ -261,6 +263,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     lastName: row.lastName,
     timezone: row.timezone,
     taskToolsEnabled: row.taskSpawningEnabled && row.workspaceRole === "admin",
+    skillToolsEnabled: row.workspaceRole === "admin",
     wikiEnabled: row.wikiEnabled,
   };
 }

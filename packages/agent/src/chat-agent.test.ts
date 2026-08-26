@@ -6,9 +6,60 @@ import {
   prepareProductChatStep,
   UPDATE_TASK_STATUS_TOOL_NAME,
 } from "./chat-agent";
-import { START_TASK_TOOL_NAME, START_WORKFLOW_TOOL_NAME } from "./chat-ui";
+import {
+  CREATE_WORKSPACE_SKILL_TOOL_NAME,
+  START_TASK_TOOL_NAME,
+  START_WORKFLOW_TOOL_NAME,
+} from "./chat-ui";
 
 const model = "moonshotai/kimi-k2.6" as never;
+
+describe("create_workspace_skill tool", () => {
+  it("is available only when the authenticated host injects its runner", () => {
+    expect(CREATE_WORKSPACE_SKILL_TOOL_NAME in createProductChatToolContext({ model }).tools).toBe(
+      false,
+    );
+    expect(
+      CREATE_WORKSPACE_SKILL_TOOL_NAME in
+        createProductChatToolContext({ model, createWorkspaceSkill: vi.fn() }).tools,
+    ).toBe(true);
+  });
+
+  it("passes the synthesized Skill and stable SDK tool-call id to the host", async () => {
+    const createWorkspaceSkill = vi.fn(async () => ({
+      created: true as const,
+      name: "customer-health-review",
+      command: "/customer-health-review",
+      bundleId: "skill_bundle_1",
+    }));
+    const context = createProductChatToolContext({ model, createWorkspaceSkill });
+    const skillTool = context.tools[CREATE_WORKSPACE_SKILL_TOOL_NAME] as {
+      description: string;
+      execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown>;
+    };
+
+    await expect(
+      skillTool.execute(
+        {
+          name: " customer-health-review ",
+          description: " Review customer health. ",
+          instructions: " Review the account signals. ",
+        },
+        { toolCallId: "call_skill_1" },
+      ),
+    ).resolves.toMatchObject({ created: true, command: "/customer-health-review" });
+
+    expect(skillTool.description).toContain("latest message explicitly asks");
+    expect(createWorkspaceSkill).toHaveBeenCalledWith(
+      {
+        name: "customer-health-review",
+        description: "Review customer health.",
+        instructions: "Review the account signals.",
+      },
+      { toolCallId: "call_skill_1" },
+    );
+  });
+});
 
 describe("start_task tool", () => {
   it.each(["moonshotai/kimi-k3", "xai/grok-4.3", "anthropic/claude-sonnet-5"])(
