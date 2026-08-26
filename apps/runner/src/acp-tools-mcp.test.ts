@@ -155,6 +155,111 @@ describe("runner ACP tools MCP", () => {
     }
   });
 
+  it.each([
+    {
+      engine: "codex" as const,
+      decision: "approved" as const,
+      executes: true,
+      expectedError: false,
+    },
+    {
+      engine: "codex" as const,
+      decision: "denied" as const,
+      executes: false,
+      expectedError: true,
+    },
+    {
+      engine: "claude_code" as const,
+      decision: "approved" as const,
+      executes: true,
+      expectedError: false,
+    },
+    {
+      engine: "claude_code" as const,
+      decision: "denied" as const,
+      executes: false,
+      expectedError: true,
+    },
+  ])(
+    "parks a $engine ask action until it is $decision",
+    async ({ engine, decision, executes, expectedError }) => {
+      const authorize = vi.fn(async () => ({ ...authorized, engine }));
+      const executeAction = vi.fn(async () => ({
+        ok: true as const,
+        action: "gmail.send",
+        result: { sent: true },
+      }));
+      const evaluateApproval = vi.fn(async () => ({
+        ok: true as const,
+        needsApproval: true,
+      }));
+      const requestApproval = vi.fn(async () => "approval_1");
+      const waitForApproval = vi.fn(async () => decision);
+      const resolveApproval = vi.fn(async () => ({
+        ok: true as const,
+        duplicate: false,
+        record: {
+          actionId: "gmail.send",
+          sourceId: "gmail",
+          capabilityId: "write",
+          inputHash: "a".repeat(64),
+          status: decision,
+          requestedAt: "2026-08-26T00:00:00.000Z",
+          resolvedAt: "2026-08-26T00:01:00.000Z",
+        },
+      }));
+      const app = Fastify();
+      apps.push(app);
+      registerAcpToolsMcpRoute(app, env, {
+        authorize,
+        executeAction,
+        evaluateApproval,
+        requestApproval,
+        waitForApproval,
+        resolveApproval,
+      });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+      const ticket = createExternalEngineGatewayTicket({
+        ...capability,
+        secret: env.internalToken,
+      }).ticket;
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+        { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+      );
+      const client = new Client({ name: "runner-test", version: "0.1.0" });
+
+      try {
+        await client.connect(transport as Parameters<typeof client.connect>[0]);
+        const result = await client.callTool({
+          name: "use_action",
+          arguments: { action: "gmail.send", params: { to: "customer@example.com" } },
+        });
+
+        expect(result.isError).toBe(expectedError);
+        expect(evaluateApproval).toHaveBeenCalledOnce();
+        expect(requestApproval).toHaveBeenCalledOnce();
+        expect(waitForApproval).toHaveBeenCalledWith(
+          expect.objectContaining({ approvalId: "approval_1", runId: "run_1" }),
+        );
+        expect(resolveApproval).toHaveBeenCalledWith(
+          expect.objectContaining({ decision, invocationId: expect.stringContaining("mcp:run_1") }),
+        );
+        expect(executeAction).toHaveBeenCalledTimes(executes ? 1 : 0);
+        if (!executes) {
+          expect(result.structuredContent).toMatchObject({
+            ok: false,
+            error: { code: "not_permitted" },
+          });
+        }
+      } finally {
+        await client.close();
+      }
+    },
+  );
+
   it("exposes actions, artifacts, Brain reads, and Brain capture to Codex", async () => {
     const authorize = vi.fn(async () => ({
       ...authorized,

@@ -9289,6 +9289,12 @@
                     "maxLength": 256,
                     "example": "run_019fed53"
                   },
+                  "toolCallId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
                   "resolution": {
                     "type": "string",
                     "enum": [

@@ -77,6 +77,9 @@ export const RunEventSchema = z
       z
         .object({
           approvalId: ResourceIdSchema,
+          // Optional for replay compatibility with approval events written before action gateway
+          // approvals could resolve while an engine run remained active.
+          toolCallId: ResourceIdSchema.optional(),
           resolution: z.enum(["approved", "denied", "answered", "canceled"]),
         })
         .strict(),

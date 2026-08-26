@@ -1360,6 +1360,7 @@ export class PostgresChatRepository implements ChatRepository {
     }
     const now = this.options.now?.() ?? new Date();
     const eventId = (this.options.ids ?? defaultIds).event();
+    const liveEventId = (this.options.ids ?? defaultIds).event();
     const response = { resolution: input.command.resolution, answer: input.command.answer };
     const approvalResponse = {
       id: input.command.approvalId,
@@ -1419,7 +1420,29 @@ export class PostgresChatRepository implements ChatRepository {
             updated_at = ${now}
         WHERE approval.id IN (SELECT id FROM authorized)
           AND approval.status = 'pending'
-        RETURNING approval.id, approval.run_id, approval.tool_call_id
+        RETURNING approval.id, approval.run_id, approval.tool_call_id, approval.kind
+      ),
+      resolved_action_approval AS MATERIALIZED (
+        UPDATE goat.action_turns AS action_turn
+        SET approval_records = jsonb_set(
+              action_turn.approval_records,
+              ARRAY[changed.tool_call_id]::text[],
+              (action_turn.approval_records -> changed.tool_call_id) || jsonb_build_object(
+                'status', CASE
+                  WHEN ${input.command.resolution === "approved"}::boolean
+                    THEN 'approved'::text
+                  ELSE 'denied'::text
+                END,
+                'resolvedAt', ${now.toISOString()}::text
+              )
+            ),
+            updated_at = ${now}
+        FROM changed
+        WHERE changed.tool_call_id IS NOT NULL
+          AND action_turn.turn_id = changed.run_id
+          AND action_turn.approval_records ? changed.tool_call_id
+          AND action_turn.approval_records -> changed.tool_call_id ->> 'status' = 'pending'
+        RETURNING action_turn.id
       ),
       transitioned_capability AS MATERIALIZED (
         UPDATE goat.capability_runs AS capability
@@ -1518,6 +1541,16 @@ export class PostgresChatRepository implements ChatRepository {
           AND EXISTS (SELECT 1 FROM rewritten_assistant)
         RETURNING run.id, run.event_sequence, run.status, run.codex_chat_session_id
       ),
+      advanced_live_run AS MATERIALIZED (
+        UPDATE goat.codex_chat_turns AS run
+        SET event_sequence = run.event_sequence + 1,
+            updated_at = ${now}
+        FROM changed
+        WHERE run.id = changed.run_id
+          AND run.status = 'running'
+          AND changed.kind = 'use_action'
+        RETURNING run.id, run.event_sequence, changed.tool_call_id
+      ),
       queued_runtime AS MATERIALIZED (
         UPDATE goat.codex_chat_sessions AS runtime
         SET status = 'queued',
@@ -1543,19 +1576,39 @@ export class PostgresChatRepository implements ChatRepository {
         FROM advanced_run
         RETURNING id, run_id, sequence
       ),
+      inserted_live_event AS (
+        INSERT INTO goat.run_events (
+          id, run_id, sequence, schema_version, type, payload, created_at
+        )
+        SELECT
+          ${liveEventId}, advanced.id, advanced.event_sequence, 1, 'approval.resolved',
+          jsonb_build_object(
+            'approvalId', ${input.command.approvalId}::text,
+            'toolCallId', advanced.tool_call_id,
+            'resolution', ${input.command.resolution}::text
+          ),
+          ${now}
+        FROM advanced_live_run AS advanced
+        RETURNING id, run_id, sequence
+      ),
       notified AS MATERIALIZED (
         SELECT pg_notify(
           ${RUN_EVENT_NOTIFY_CHANNEL},
           jsonb_build_object('runId', run_id, 'sequence', sequence)::text
         )
-        FROM inserted_event
+        FROM (
+          SELECT run_id, sequence FROM inserted_event
+          UNION ALL
+          SELECT run_id, sequence FROM inserted_live_event
+        ) AS event
       )
       SELECT
         approval.run_id AS "runId",
         approval.response,
         NOT EXISTS (SELECT 1 FROM changed) AS replayed,
         (SELECT count(*) FROM notified) AS "notifyCount",
-        (SELECT count(*) FROM transitioned_capability) AS "capabilityTransitionCount"
+        (SELECT count(*) FROM transitioned_capability) AS "capabilityTransitionCount",
+        (SELECT count(*) FROM resolved_action_approval) AS "actionApprovalTransitionCount"
       FROM goat.run_approvals AS approval
       JOIN authorized ON authorized.id = approval.id
     `);

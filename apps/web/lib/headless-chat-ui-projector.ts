@@ -148,6 +148,26 @@ export class HeadlessChatUiProjector {
       return chunks;
     }
 
+    if (event.type === "approval.resolved" && event.payload.toolCallId) {
+      if (!this.activeToolCalls.has(event.payload.toolCallId)) return [];
+      this.activeToolCalls.delete(event.payload.toolCallId);
+      return event.payload.resolution === "approved"
+        ? [
+            {
+              type: "tool-output-available",
+              toolCallId: event.payload.toolCallId,
+              output: { approved: true },
+            },
+          ]
+        : [
+            {
+              type: "tool-output-error",
+              toolCallId: event.payload.toolCallId,
+              errorText: "Action denied by user.",
+            },
+          ];
+    }
+
     if (event.type === "run.failed") {
       return [...this.endText(), { type: "error", errorText: event.payload.message }];
     }

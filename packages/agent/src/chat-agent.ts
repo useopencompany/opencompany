@@ -1315,13 +1315,13 @@ export function createProductChatToolContext(input: {
         const action = typeof args.action === "string" ? args.action : "";
         const resolvedAction = actions.catalog.actions.find((entry) => entry.id === action);
         if (!resolvedAction) return false;
-        if (resolvedAction.permissionMode === "ask") return true;
         if (
-          !actionTurnGovernance.hasDiscoveredSource?.(resolvedAction.source) ||
-          !actions.needsApproval
+          resolvedAction.permissionMode !== "ask" &&
+          !actionTurnGovernance.hasDiscoveredSource?.(resolvedAction.source)
         ) {
           return false;
         }
+        if (!actions.needsApproval) return false;
         const params =
           args.params && typeof args.params === "object" && !Array.isArray(args.params)
             ? args.params

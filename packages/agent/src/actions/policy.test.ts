@@ -40,19 +40,13 @@ describe("projectActionCatalog", () => {
     ).toEqual(["gmail.search", "gmail.send", "neon.run_sql", "linkedin.search"]);
   });
 
-  it("selects cloud reads by effects and includes metered managed reads", () => {
-    const projected = projectActionCatalog(catalog, "cloudReadOnly");
+  it("keeps On and Ask integrations for headless runs so the gateway can auto-deny Ask", () => {
+    const projected = projectActionCatalog(catalog, "headless");
     expect(projected.actions.map(({ id }) => id)).toEqual([
       "gmail.search",
+      "gmail.send",
       "neon.run_sql",
-      "linkedin.search",
     ]);
-    expect(projected.providers.map(({ id }) => id)).toEqual(["gmail", "neon", "linkedin"]);
-  });
-
-  it("keeps only explicitly enabled connected integrations for headless runs", () => {
-    const projected = projectActionCatalog(catalog, "headless");
-    expect(projected.actions.map(({ id }) => id)).toEqual(["gmail.search", "neon.run_sql"]);
     expect(projected.providers.map(({ id }) => id)).toEqual(["gmail", "neon"]);
   });
 });
