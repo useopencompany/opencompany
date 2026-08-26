@@ -78,6 +78,11 @@ const skillActionsMock = vi.hoisted(() => ({
     installation: { name: "imported-skill" },
     replayed: false,
   })),
+  createHeadlessWorkspaceSkill: vi.fn(async () => ({
+    installation: { name: "investigate-bug" },
+    replayed: false,
+  })),
+  updateHeadlessWorkspaceSkill: vi.fn(async () => ({ name: "investigate-bug" })),
 }));
 
 const themeMock = vi.hoisted(() => ({
@@ -172,6 +177,8 @@ vi.mock("@/lib/headless-knowledge-commands", () => ({
   replaceHeadlessSkill: skillActionsMock.replaceHeadlessSkill,
   previewHeadlessSkillImport: skillActionsMock.previewHeadlessSkillImport,
   importHeadlessSkill: skillActionsMock.importHeadlessSkill,
+  createHeadlessWorkspaceSkill: skillActionsMock.createHeadlessWorkspaceSkill,
+  updateHeadlessWorkspaceSkill: skillActionsMock.updateHeadlessWorkspaceSkill,
 }));
 
 vi.mock("@/components/ThemeProvider", () => ({
@@ -496,12 +503,62 @@ describe("SkillBundleRoute", () => {
       expect(skillActionsMock.disableHeadlessSkill).toHaveBeenCalledWith("imported-skill"),
     );
   });
+
+  it("edits a workspace-authored Skill by publishing a new immutable version", async () => {
+    render(
+      <SkillBundleRoute
+        installation={{
+          id: "installation_1",
+          name: "investigate-bug",
+          enabled: true,
+          archivedAt: null,
+          createdAt: "2026-08-25T05:00:00.000Z",
+          updatedAt: "2026-08-25T05:00:00.000Z",
+          bundle: {
+            id: "bundle_1",
+            name: "investigate-bug",
+            description: "Reproduce and diagnose reported bugs.",
+            body: "Reproduce the issue first.\n",
+            license: null,
+            compatibility: null,
+            metadata: null,
+            allowedTools: null,
+            integrity: `sha256:${"b".repeat(64)}`,
+            source: { type: "workspace" },
+            files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
+            createdAt: "2026-08-25T05:00:00.000Z",
+          },
+        }}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByText(/Created in this workspace/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Replace bundle" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Edit skill" }));
+    const instructions = screen.getByLabelText("Instructions");
+    await userEvent.clear(instructions);
+    await userEvent.type(instructions, "Reproduce, isolate, and explain the root cause.");
+    await userEvent.click(screen.getByRole("button", { name: "Save new version" }));
+
+    await waitFor(() =>
+      expect(skillActionsMock.updateHeadlessWorkspaceSkill).toHaveBeenCalledWith(
+        "investigate-bug",
+        {
+          description: "Reproduce and diagnose reported bugs.",
+          instructions: "Reproduce, isolate, and explain the root cause.",
+        },
+      ),
+    );
+    expect(routerMock.refresh).toHaveBeenCalled();
+  });
 });
 
 describe("SkillsSettingsRoute", () => {
   beforeEach(() => {
     skillActionsMock.previewHeadlessSkillImport.mockClear();
     skillActionsMock.importHeadlessSkill.mockClear();
+    skillActionsMock.createHeadlessWorkspaceSkill.mockClear();
     routerMock.push.mockReset();
   });
 
@@ -531,6 +588,32 @@ describe("SkillsSettingsRoute", () => {
     await waitFor(() =>
       expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/imported-skill"),
     );
+  });
+
+  it("creates a standard workspace-authored Skill with a derived slash command", async () => {
+    render(<SkillsSettingsRoute skills={[]} canEdit />);
+
+    await userEvent.click(screen.getByRole("button", { name: "New skill" }));
+    await userEvent.type(screen.getByPlaceholderText("investigate-bug"), "incident-review");
+    expect(screen.getByText("/incident-review")).toBeInTheDocument();
+    await userEvent.type(
+      screen.getByPlaceholderText(/What this skill does/),
+      "Review incidents and identify root causes.",
+    );
+    await userEvent.type(
+      screen.getByPlaceholderText(/Write the operating instructions/),
+      "Reproduce the incident before proposing changes.",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Create skill" }));
+
+    await waitFor(() =>
+      expect(skillActionsMock.createHeadlessWorkspaceSkill).toHaveBeenCalledWith({
+        name: "incident-review",
+        description: "Review incidents and identify root causes.",
+        instructions: "Reproduce the incident before proposing changes.",
+      }),
+    );
+    expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/incident-review");
   });
 });
 

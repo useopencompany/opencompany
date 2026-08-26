@@ -68,6 +68,7 @@ import {
   CreateWikiPageBodySchema,
   CreateWorkflowBodySchema,
   CreateWorkspaceBodySchema,
+  CreateWorkspaceSkillBodySchema,
   CursorSchema,
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
@@ -180,6 +181,7 @@ import {
   UpdateUserPreferencesBodySchema,
   UpdateWikiPageBodySchema,
   UpdateWorkflowBodySchema,
+  UpdateWorkspaceSkillBodySchema,
   UpsertWikiSourceBodySchema,
   UserPreferencesEnvelopeSchema,
   WikiIngestActivityListEnvelopeSchema,
@@ -201,6 +203,7 @@ import {
   WorkspaceCommandEnvelopeSchema,
   WorkspaceRenameEnvelopeSchema,
   WorkspaceSettingsEnvelopeSchema,
+  WorkspaceSkillNameSchema,
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "./version";
 
@@ -1179,6 +1182,27 @@ export const listSkillsRoute = createRoute({
   },
 });
 
+export const createWorkspaceSkillRoute = createRoute({
+  method: "post",
+  path: "/v1/skills",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateWorkspaceSkillBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Workspace-authored Skill installed as an immutable standard bundle.",
+      content: { "application/json": { schema: SkillImportEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const previewSkillImportRoute = createRoute({
   method: "post",
   path: "/v1/skills/imports/preview",
@@ -1240,6 +1264,27 @@ export const getSkillRoute = createRoute({
   responses: {
     200: {
       description: "Skill detail.",
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateWorkspaceSkillRoute = createRoute({
+  method: "patch",
+  path: "/v1/skills/{slug}",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: WorkspaceSkillNameSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateWorkspaceSkillBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Workspace-authored Skill moved to a new immutable bundle version.",
       content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
     },
     default: errorResponse,
@@ -3395,10 +3440,12 @@ export type V1RouteHandlers = {
   setWikiSourceEnabled: RouteHandler<typeof setWikiSourceEnabledRoute>;
   deleteWikiSource: RouteHandler<typeof deleteWikiSourceRoute>;
   listSkills: RouteHandler<typeof listSkillsRoute>;
+  createWorkspaceSkill: RouteHandler<typeof createWorkspaceSkillRoute>;
   previewSkillImport: RouteHandler<typeof previewSkillImportRoute>;
   importSkill: RouteHandler<typeof importSkillRoute>;
   listSkillCatalog: RouteHandler<typeof listSkillCatalogRoute>;
   getSkill: RouteHandler<typeof getSkillRoute>;
+  updateWorkspaceSkill: RouteHandler<typeof updateWorkspaceSkillRoute>;
   archiveSkill: RouteHandler<typeof archiveSkillRoute>;
   enableSkill: RouteHandler<typeof enableSkillRoute>;
   disableSkill: RouteHandler<typeof disableSkillRoute>;
@@ -3585,10 +3632,12 @@ export function createV1Router(
       .openapi(setWikiSourceEnabledRoute, handlers.setWikiSourceEnabled)
       .openapi(deleteWikiSourceRoute, handlers.deleteWikiSource)
       .openapi(listSkillsRoute, handlers.listSkills)
+      .openapi(createWorkspaceSkillRoute, handlers.createWorkspaceSkill)
       .openapi(previewSkillImportRoute, handlers.previewSkillImport)
       .openapi(importSkillRoute, handlers.importSkill)
       .openapi(listSkillCatalogRoute, handlers.listSkillCatalog)
       .openapi(getSkillRoute, handlers.getSkill)
+      .openapi(updateWorkspaceSkillRoute, handlers.updateWorkspaceSkill)
       .openapi(archiveSkillRoute, handlers.archiveSkill)
       .openapi(enableSkillRoute, handlers.enableSkill)
       .openapi(disableSkillRoute, handlers.disableSkill)
@@ -4503,6 +4552,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  createWorkspaceSkill: (c) =>
+    c.json({ data: { installation: placeholderSkillInstallation, replayed: false }, meta }, 201),
   previewSkillImport: (c) =>
     c.json(
       {
@@ -4537,6 +4588,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   getSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
+  updateWorkspaceSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   archiveSkill: (c) => c.json({ data: { name: placeholderSkillInstallation.name }, meta }, 200),
   enableSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   disableSkill: (c) =>

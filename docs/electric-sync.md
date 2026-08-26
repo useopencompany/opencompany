@@ -1,4 +1,4 @@
-# Electric sync
+# Electric read models
 
 Electric is an authorized read optimization, not a product API or execution dependency. Postgres
 source rows remain authoritative. The web app uses Electric only through API-owned authorized read

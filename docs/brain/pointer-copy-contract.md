@@ -1,4 +1,4 @@
-# Brain pointer/copy contract
+# Brain pointer and copy contract
 
 How brain writers cite external sources. This is design principle 6 of the brain foundation
 (issue #597): the brain keeps claims and pointers, and copies content only when it has to.
