@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import type { PluginImportPreviewDto, PluginInstallationDto } from "@opencompany/protocol";
+import type { PluginInstallationDto } from "@opencompany/protocol";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,9 +10,10 @@ import {
   type PluginToolsState,
   uncuratedPluginToolGroups,
 } from "./LinearPluginSettings";
-import { LINEAR_PLUGIN_SOURCE } from "./PluginSettings";
+import { LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
+const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 const commands = vi.hoisted(() => ({
   approveHeadlessPluginMcp: vi.fn(),
   archiveHeadlessPlugin: vi.fn(async () => undefined),
@@ -33,6 +34,7 @@ const accountActions = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("@opencompany/ui/components/sonner", () => ({ toast: toasts }));
 vi.mock("@/lib/headless-knowledge-commands", () => commands);
 vi.mock("@/lib/integration-account-actions", () => accountActions);
 
@@ -131,10 +133,14 @@ describe("Linear plugin settings", () => {
     router.refresh.mockReset();
     for (const command of Object.values(commands)) command.mockReset();
     commands.archiveHeadlessPlugin.mockResolvedValue(undefined);
+    commands.enableHeadlessPlugin.mockResolvedValue(undefined);
+    toasts.error.mockReset();
+    toasts.success.mockReset();
     accountActions.disconnectIntegrationAccountAction.mockClear();
     accountActions.getIntegrationAccountUsageAction.mockClear();
     accountActions.setIntegrationCapabilityModeAction.mockReset();
     accountActions.setIntegrationCapabilityModeAction.mockResolvedValue({ ok: true });
+    window.history.replaceState({}, "", "/settings/plugins/linear");
   });
 
   it("shows provenance, accounts, discovered tools, and read-only skills", async () => {
@@ -211,10 +217,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Install Linear to add its skills.")).toBeInTheDocument();
   });
 
-  it("installs only after previewing the expected source commit and integrity", async () => {
-    const preview = pluginPreview();
-    commands.previewHeadlessPluginImport.mockResolvedValue(preview);
-    commands.importHeadlessPlugin.mockResolvedValue({ plugin });
+  it("gates installation until the official package has a public source", () => {
     render(
       <LinearPluginDetailView
         pluginState={{ status: "ready", plugin: null }}
@@ -228,24 +231,45 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Install" }));
-    const source = screen.getByDisplayValue(LINEAR_PLUGIN_SOURCE);
-    expect(source).toHaveAttribute("readonly");
-    await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
+    expect(screen.getByText(new RegExp(LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE))).toBeVisible();
+    expect(commands.previewHeadlessPluginImport).not.toHaveBeenCalled();
+  });
 
-    await waitFor(() =>
-      expect(commands.previewHeadlessPluginImport).toHaveBeenCalledWith({
-        url: LINEAR_PLUGIN_SOURCE,
-      }),
+  it("can re-enable a disabled installation", async () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin: { ...plugin, status: "disabled" } }}
+        accountsState={accountsState}
+        toolsState={toolsState}
+        canEdit
+      />,
     );
-    await userEvent.click(await screen.findByRole("button", { name: "Install plugin" }));
-    await waitFor(() =>
-      expect(commands.importHeadlessPlugin).toHaveBeenCalledWith({
-        url: LINEAR_PLUGIN_SOURCE,
-        expectedResolvedCommit: preview.source.resolvedCommit,
-        expectedIntegrity: preview.integrity,
-      }),
+
+    await userEvent.click(screen.getByRole("button", { name: "Enable" }));
+
+    await waitFor(() => expect(commands.enableHeadlessPlugin).toHaveBeenCalledWith("linear"));
+    expect(router.refresh).toHaveBeenCalled();
+  });
+
+  it.each([
+    { query: "integration=linear&setup=connected", toast: "success" as const },
+    { query: "integration=linear&setup=error&reason=oauth_failed", toast: "error" as const },
+  ])("surfaces and clears OAuth return status: $toast", async ({ query, toast }) => {
+    window.history.replaceState({}, "", `/settings/plugins/linear?${query}`);
+
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={accountsState}
+        toolsState={toolsState}
+        canEdit
+      />,
     );
+
+    await waitFor(() => expect(toasts[toast]).toHaveBeenCalledTimes(1));
+    expect(window.location.pathname).toBe("/settings/plugins/linear");
+    expect(window.location.search).toBe("");
   });
 
   it("renders loading, error, and empty states for each section", () => {
@@ -322,23 +346,5 @@ function account(
     statusReason: null,
     scopes: [],
     capabilityModes,
-  };
-}
-
-function pluginPreview(): PluginImportPreviewDto {
-  return {
-    manifest: plugin.manifest,
-    source: plugin.source,
-    integrity: plugin.integrity,
-    files: [{ path: "plugin.json", sizeBytes: 128 }],
-    fileCount: 1,
-    totalBytes: 128,
-    skills: [],
-    stdioServers: [],
-    report: {
-      ignoredManifestFields: [],
-      skills: [],
-      mcp: { status: "absent" },
-    },
   };
 }

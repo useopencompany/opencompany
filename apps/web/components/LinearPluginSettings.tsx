@@ -36,22 +36,26 @@ import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import {
   InstallPluginDialog,
+  LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE,
   LINEAR_PLUGIN_NAME,
   LINEAR_PLUGIN_SOURCE,
 } from "@/components/PluginSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
-import { IntegrationAccountRow } from "@/components/SettingsIntegrationsPanel";
+import {
+  IntegrationAccountRow,
+  IntegrationSetupFeedback,
+} from "@/components/SettingsIntegrationsPanel";
 import {
   type CapabilityId,
   type CapabilityMode,
-  isCapabilityMode,
+  effectiveCapabilityMode,
   providerCapabilities,
 } from "@/lib/actions/capabilities";
 import {
   getHeadlessIntegrationAccounts,
   type HeadlessIntegrationAccountReadModel,
 } from "@/lib/headless-integration-collections";
-import { archiveHeadlessPlugin } from "@/lib/headless-knowledge-commands";
+import { archiveHeadlessPlugin, enableHeadlessPlugin } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
 import {
   type IntegrationAccountView,
@@ -177,22 +181,25 @@ export function LinearPluginDetailView({
   const plugin = pluginState.status === "ready" ? pluginState.plugin : null;
 
   return (
-    <SettingsContent
-      title={plugin?.manifest.name || "Linear"}
-      description={plugin?.manifest.description || LINEAR_DESCRIPTION}
-      backLink={{ href: "/settings/plugins", label: "Plugins" }}
-    >
-      <PluginHeaderSection state={pluginState} canEdit={canEdit} />
-      <AccountsSection state={accountsState} />
-      <ToolsSection
-        pluginState={pluginState}
-        state={toolsState}
-        permissionConnection={
-          accountsState.status === "ready" ? accountsState.permissionConnection : null
-        }
-      />
-      <SkillsSection state={pluginState} />
-    </SettingsContent>
+    <>
+      <IntegrationSetupFeedback />
+      <SettingsContent
+        title={plugin?.manifest.name || "Linear"}
+        description={plugin?.manifest.description || LINEAR_DESCRIPTION}
+        backLink={{ href: "/settings/plugins", label: "Plugins" }}
+      >
+        <PluginHeaderSection state={pluginState} canEdit={canEdit} />
+        <AccountsSection state={accountsState} />
+        <ToolsSection
+          pluginState={pluginState}
+          state={toolsState}
+          permissionConnection={
+            accountsState.status === "ready" ? accountsState.permissionConnection : null
+          }
+        />
+        <SkillsSection state={pluginState} />
+      </SettingsContent>
+    </>
   );
 }
 
@@ -209,6 +216,18 @@ function PluginHeaderSection({ state, canEdit }: { state: PluginLoadState; canEd
   }
 
   const plugin = state.plugin;
+  const enable = () => {
+    if (!plugin) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        await enableHeadlessPlugin(plugin.name);
+        router.refresh();
+      } catch (cause) {
+        setError(errorMessage(cause));
+      }
+    });
+  };
   const uninstall = () => {
     if (!plugin) return;
     setError(null);
@@ -259,16 +278,28 @@ function PluginHeaderSection({ state, canEdit }: { state: PluginLoadState; canEd
           ) : null}
           {canEdit ? (
             plugin ? (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={isPending}
-                onClick={() => setConfirmingUninstall(true)}
-              >
-                <Unplug className="size-3.5" /> Uninstall
-              </Button>
+              <>
+                {plugin.status === "disabled" ? (
+                  <Button size="sm" disabled={isPending} onClick={enable}>
+                    <PlugZap className="size-3.5" /> Enable
+                  </Button>
+                ) : null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => setConfirmingUninstall(true)}
+                >
+                  <Unplug className="size-3.5" /> Uninstall
+                </Button>
+              </>
             ) : (
-              <Button size="sm" onClick={() => setInstalling(true)}>
+              <Button
+                size="sm"
+                disabled={!LINEAR_PLUGIN_SOURCE}
+                title={LINEAR_PLUGIN_SOURCE ? undefined : LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE}
+                onClick={() => setInstalling(true)}
+              >
                 <PlugZap className="size-3.5" /> Install
               </Button>
             )
@@ -287,8 +318,9 @@ function PluginHeaderSection({ state, canEdit }: { state: PluginLoadState; canEd
         </dl>
       ) : (
         <SectionEmpty icon={PackageCheck}>
-          Install the package to add Linear tools and skills. Your Linear accounts are connected
-          separately and remain in place if you uninstall it.
+          {LINEAR_PLUGIN_SOURCE
+            ? "Install the package to add Linear tools and skills. Your Linear accounts remain separate."
+            : `${LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE} Existing Linear accounts remain connected.`}
         </SectionEmpty>
       )}
 
@@ -299,7 +331,7 @@ function PluginHeaderSection({ state, canEdit }: { state: PluginLoadState; canEd
       ) : null}
       {error ? <SectionError title="Plugin update failed" message={error} /> : null}
 
-      {installing ? (
+      {installing && LINEAR_PLUGIN_SOURCE ? (
         <InstallPluginDialog
           initialUrl={LINEAR_PLUGIN_SOURCE}
           expectedName={LINEAR_PLUGIN_NAME}
@@ -490,8 +522,19 @@ function PluginCapabilityModeRow({
   const router = useRouter();
   const [pendingMode, setPendingMode] = useState<CapabilityMode | null>(null);
   const [isPending, startTransition] = useTransition();
-  const stored = connection?.capabilityModes[group.modeKey];
-  const mode = pendingMode ?? (isCapabilityMode(stored) ? stored : group.defaultMode);
+  const storedModes = connection?.capabilityModes;
+  const hasStoredMode =
+    storedModes !== null &&
+    typeof storedModes === "object" &&
+    !Array.isArray(storedModes) &&
+    Object.hasOwn(storedModes, group.modeKey);
+  const mode =
+    pendingMode ??
+    effectiveCapabilityMode(
+      connection?.provider ?? "linear",
+      group.modeKey,
+      hasStoredMode ? storedModes : { [group.modeKey]: group.defaultMode },
+    );
 
   const select = (nextMode: CapabilityMode) => {
     if (!connection || isPending || nextMode === mode) return;

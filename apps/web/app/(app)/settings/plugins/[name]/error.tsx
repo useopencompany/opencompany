@@ -8,7 +8,7 @@ import { SettingsContent } from "@/components/SettingsChrome";
 export default function PluginDetailError({ reset }: { reset: () => void }) {
   return (
     <SettingsContent
-      title="Linear"
+      title="Plugin"
       description="Plugin settings could not be loaded."
       backLink={{ href: "/settings/plugins", label: "Plugins" }}
     >

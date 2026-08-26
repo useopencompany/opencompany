@@ -274,7 +274,7 @@ export function SettingsIntegrationsPanel({
   );
 }
 
-function IntegrationSetupFeedback() {
+export function IntegrationSetupFeedback() {
   const handled = useRef(false);
 
   useEffect(() => {

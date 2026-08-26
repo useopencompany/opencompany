@@ -82,10 +82,11 @@ type PluginReportView = {
 };
 
 export const LINEAR_PLUGIN_NAME = "linear";
-// WS4 (#1432) owns this in-tree package. A dedicated public package repository can replace this
-// source without changing the preview -> integrity-pinned install flow.
-export const LINEAR_PLUGIN_SOURCE =
-  "useopencompany/opencompany-experimental/plugins/linear#feat/plugins-v2";
+// The loader intentionally supports public, unauthenticated sources only. Keep installation gated
+// until the in-tree package has a stable public home; do not ship a private or branch-lived URL.
+export const LINEAR_PLUGIN_SOURCE: string | null = null;
+export const LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE =
+  "Installation will be available when the official public Linear plugin is published.";
 
 export function PluginsSettings({
   plugins,
@@ -134,7 +135,7 @@ export function PluginsSettings({
             <span className="mt-1 block text-[11.5px] leading-4 text-ink-subtle">
               {linearPlugin
                 ? `${linearPlugin.skillCount} ${linearPlugin.skillCount === 1 ? "skill" : "skills"} · updated ${formatRelativeTime(linearPlugin.updatedAt)}`
-                : "Tools, skills, permissions, and accounts in one place"}
+                : LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE}
             </span>
           </span>
         </Link>
@@ -146,13 +147,19 @@ export function PluginsSettings({
             Manage
           </Link>
         ) : canEdit ? (
-          <Button variant="outline" size="sm" onClick={() => setInstalling(true)}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!LINEAR_PLUGIN_SOURCE}
+            title={LINEAR_PLUGIN_SOURCE ? undefined : LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE}
+            onClick={() => setInstalling(true)}
+          >
             Install
           </Button>
         ) : null}
       </div>
 
-      {installing ? (
+      {installing && LINEAR_PLUGIN_SOURCE ? (
         <InstallPluginDialog
           initialUrl={LINEAR_PLUGIN_SOURCE}
           expectedName={LINEAR_PLUGIN_NAME}

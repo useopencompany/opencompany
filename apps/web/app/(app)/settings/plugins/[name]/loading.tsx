@@ -4,7 +4,7 @@ import { SettingsContent } from "@/components/SettingsChrome";
 export default function PluginDetailLoading() {
   return (
     <SettingsContent
-      title="Linear"
+      title="Plugin"
       description="Loading plugin settings."
       backLink={{ href: "/settings/plugins", label: "Plugins" }}
     >

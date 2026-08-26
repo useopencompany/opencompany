@@ -1,7 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PluginDetail, PluginsSettings } from "./PluginSettings";
+import {
+  LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE,
+  PluginDetail,
+  PluginsSettings,
+} from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 
@@ -139,7 +143,8 @@ describe("Plugin settings", () => {
       "/settings/plugins/linear",
     );
     expect(screen.getByText("Not installed")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
+    expect(screen.getByText(LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
   });
 
   it("shows the exact MCP approval boundary without exposing environment values", () => {
