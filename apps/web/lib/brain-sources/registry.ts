@@ -13,7 +13,9 @@ import {
   Video,
 } from "lucide-react";
 
-export const JAMIE_DOCS_HREF = "/docs/integrations/jamie";
+const DOCS_ORIGIN = "https://docs.opencompany.cloud";
+
+export const JAMIE_DOCS_HREF = `${DOCS_ORIGIN}/docs/integrations/jamie`;
 
 export type BrainSourceProviderDef = {
   id: BrainSourceConfigProvider;
@@ -50,7 +52,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     connectionKind: "api_key",
     available: true,
     connectHref: "/settings/granola",
-    docsHref: "/docs/integrations/granola",
+    docsHref: `${DOCS_ORIGIN}/docs/integrations/granola`,
   },
   {
     id: "fathom",
@@ -60,7 +62,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     connectionKind: "api_key",
     available: true,
     connectHref: "/settings/fathom",
-    docsHref: "/docs/integrations/fathom",
+    docsHref: `${DOCS_ORIGIN}/docs/integrations/fathom`,
   },
   {
     id: "gmail",
@@ -124,7 +126,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     connectionKind: "api_key",
     available: true,
     connectHref: "/settings/attio",
-    docsHref: "/docs/integrations/attio",
+    docsHref: `${DOCS_ORIGIN}/docs/integrations/attio`,
   },
 ];
 

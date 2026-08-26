@@ -1,4 +1,4 @@
-# opencompany app and runner map
+# opencompany system map
 
 This document describes the current product flow. The web app presents Chat, Tasks, Workflows,
 Brain, Wiki, integrations, and settings; the canonical API owns public commands and read models;

@@ -1,4 +1,4 @@
-# Brain tools and CLI
+# Brain tools and command-line interface
 
 Brain has three tool surfaces with different trust and persistence boundaries. They share schemas and
 retrieval behavior, but they are not hosted by the web app.

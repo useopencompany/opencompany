@@ -1048,7 +1048,7 @@ function assertDocker() {
       "  runtime is required.\n\n" +
       `${action}\n\n` +
       "  One-time: also enable \x1b[1mlogical replication\x1b[0m on the Neon project\n" +
-      "  (console → Settings) so Electric can replicate. See docs/stack/electric-sync.md.\n",
+      "  (console → Settings) so Electric can replicate. See docs/electric-sync.md.\n",
   );
   exit(1);
 }

@@ -1163,6 +1163,24 @@ export function createApiApp(input: CreateApiAppInput) {
       const installations = await input.skillImports.list(actor);
       return c.json({ data: installations.map(skillInstallationListItemDto), meta }, 200);
     },
+    createWorkspaceSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.skillImports.create(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: {
+            installation: skillInstallationDto(result.installation),
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
     previewSkillImport: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);
@@ -1196,6 +1214,16 @@ export function createApiApp(input: CreateApiAppInput) {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
       const installation = await input.skillImports.inspect(actor, c.req.valid("param").slug);
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
+    },
+    updateWorkspaceSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const installation = await input.skillImports.update(
+        actor,
+        c.req.valid("param").slug,
+        c.req.valid("json"),
+      );
       return c.json({ data: skillInstallationDto(installation), meta }, 200);
     },
     archiveSkill: async (c) => {
@@ -2960,6 +2988,7 @@ function conversationDto(conversation: {
   } | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;
+  pinnedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -2968,6 +2997,7 @@ function conversationDto(conversation: {
     runtime: conversation.runtime
       ? { ...conversation.runtime, updatedAt: conversation.runtime.updatedAt.toISOString() }
       : null,
+    pinnedAt: conversation.pinnedAt?.toISOString() ?? null,
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
   };
