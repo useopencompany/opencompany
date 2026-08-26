@@ -72,20 +72,27 @@ describe("workspace automation lifecycle", () => {
     ).rejects.toBeInstanceOf(WorkflowMentionError);
   });
 
-  it("only lists and resolves active skills", async () => {
+  it("only lists and resolves enabled Skill installations", async () => {
     const catalogBuilder = createSelectBuilder([
-      { slug: "legal-review", name: "Legal review", description: "Check legal language" },
+      { id: "legal-review", name: "Legal review", description: "Check legal language" },
     ]);
     const resolveBuilder = createSelectBuilder([
       {
-        slug: "legal-review",
+        id: "legal-review",
+        bundleId: "skill_bundle_legal_v1",
         name: "Legal review",
         description: "Check legal language",
-        instructions: "Flag claims that need counsel.",
+        body: "Flag claims that need counsel.",
       },
     ]);
+    const emptyPluginBuilder = createSelectBuilder([]);
     const db = {
-      select: vi.fn().mockReturnValueOnce(catalogBuilder).mockReturnValueOnce(resolveBuilder),
+      select: vi
+        .fn()
+        .mockReturnValueOnce(catalogBuilder)
+        .mockReturnValueOnce(emptyPluginBuilder)
+        .mockReturnValueOnce(resolveBuilder)
+        .mockReturnValueOnce(emptyPluginBuilder),
     };
 
     await expect(listSkillCatalog("workspace_1", db as never)).resolves.toEqual([
@@ -100,14 +107,16 @@ describe("workspace automation lifecycle", () => {
     ).resolves.toEqual([
       {
         id: "legal-review",
+        bundleId: "skill_bundle_legal_v1",
         name: "Legal review",
         description: "Check legal language",
         instructions: "Flag claims that need counsel.",
+        sourceKind: "standalone",
       },
     ]);
 
-    expect(renderQuery(catalogBuilder.whereValue).params).toContain("active");
-    expect(renderQuery(resolveBuilder.whereValue).params).toContain("active");
+    expect(renderQuery(catalogBuilder.whereValue).params).toContain(true);
+    expect(renderQuery(resolveBuilder.whereValue).params).toContain(true);
   });
 });
 
@@ -115,6 +124,7 @@ function createSelectBuilder(rows: unknown[]) {
   const builder = {
     whereValue: undefined as SQL | undefined,
     from: vi.fn(() => builder),
+    innerJoin: vi.fn(() => builder),
     where: vi.fn((value: SQL) => {
       builder.whereValue = value;
       return builder;

@@ -15,10 +15,13 @@ import {
 } from "@opencompany/db/brain-ingest";
 import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import {
+  type LinearBrainSourceRoute,
+  type LinearWikiSourceRoute,
   linearEventTypeFor,
   linearRouteMatchesEvent,
   linearSelectedTeamIds,
   listEnabledLinearBrainSourceRoutes,
+  listEnabledLinearWikiSourceRoutes,
   newLinearIssueWindowId,
 } from "@opencompany/db/linear";
 import type {
@@ -26,6 +29,11 @@ import type {
   LinearEventAction,
   LinearEventEntityType,
 } from "@opencompany/db/product-schema";
+import {
+  attributeWikiSourceEventClaims,
+  claimWikiSourceEvents,
+} from "@opencompany/db/wiki-event-claims";
+import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
@@ -33,6 +41,7 @@ import { getDb } from "./db";
 import { fetchLinearIssueSnapshot, type LinearIssueSnapshot } from "./linear-api";
 import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
+import { wakeWikiIngestWorker } from "./wiki-ingest-worker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-linear-flush" });
 
@@ -108,6 +117,8 @@ export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
     : null;
 
   const flushedAt = new Date();
+  let brainEnqueued = false;
+  let wikiEnqueued = false;
   const result = await db.transaction(async (tx) => {
     const claimed = rowsFromExecute<BufferedLinearEventRow>(
       await tx.execute(sql`
@@ -149,22 +160,21 @@ export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
     // team or disabled the source since the events were buffered. A revoked
     // integration still flushes (persisting the window) with no jobs, so the
     // buffer never wedges on a dead token.
-    const routes =
+    const brainRoutes =
       integration.status === "connected"
         ? await listEnabledLinearBrainSourceRoutes([window.integrationId], tx)
         : [];
+    const wikiRoutes =
+      integration.status === "connected"
+        ? await listEnabledLinearWikiSourceRoutes([window.integrationId], tx)
+        : [];
     const teamId = snapshot?.teamId ?? claimed.find((row) => row.teamId)?.teamId ?? null;
-    const candidateBrainRefs = routes
-      .filter((route) => {
-        const selected = linearSelectedTeamIds(route.config);
-        if (selected.size === 0) return false;
-        if (!eventsMatchLinearRoute(route.config, claimed)) return false;
-        // Without a resolvable team (deleted issue with team-less buffered
-        // comments) the window cannot be routed confidently; persist it with
-        // no jobs rather than fan out to the wrong brain.
-        return teamId ? selected.has(teamId) : false;
-      })
-      .map((route) => route.brainRef);
+    const resolvedRoutes = resolveLinearIssueWindowRoutes({
+      brainRoutes,
+      wikiRoutes,
+      teamId,
+      events: claimed,
+    });
 
     // Cross-member dedup: one webhook delivery buffers once per integration of
     // the same Linear organization, so the delivery id is the identity shared
@@ -176,7 +186,7 @@ export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
     const brainRefs: string[] = [];
     const claimedEventKeysByBrainRef = new Map<string, string[]>();
     const newlyClaimedEventKeys = new Set<string>();
-    for (const brainRef of new Set(candidateBrainRefs)) {
+    for (const brainRef of new Set(resolvedRoutes.brainRefs)) {
       const { claimedEventKeys } = await claimBrainSourceEvents({
         brainRef,
         sourceProvider: "linear",
@@ -203,6 +213,36 @@ export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
       now: flushedAt,
       db: tx,
     });
+    brainEnqueued = upserted.enqueued;
+
+    for (const workspaceId of new Set(resolvedRoutes.wikiWorkspaceIds)) {
+      const claim = await claimWikiSourceEvents({
+        workspaceId,
+        sourceProvider: "linear",
+        eventKeys,
+        db: tx,
+      });
+      if (claim.claimedCount === 0) continue;
+
+      const wikiResult = await upsertWikiSourceItemAndEnqueue({
+        workspaceId,
+        sourceConnectionId: window.integrationId,
+        integrationId: window.integrationId,
+        item,
+        rawPayload: { eventIds: claimed.map((row) => row.id) },
+        rawEventCount: claim.claimedCount,
+        now: flushedAt,
+        db: tx,
+      });
+      await attributeWikiSourceEventClaims({
+        workspaceId,
+        sourceProvider: "linear",
+        eventKeys: claim.claimedEventKeys,
+        sourceItemId: wikiResult.sourceItemId,
+        db: tx,
+      });
+      wikiEnqueued = wikiEnqueued || wikiResult.enqueued;
+    }
 
     await tx.execute(sql`
       UPDATE goat.linear_issue_events
@@ -225,15 +265,36 @@ export async function flushLinearIssueWindow(window: LinearDueWindow): Promise<{
     return {
       sourceItemId: upserted.sourceItemId,
       eventCount: claimed.length,
-      enqueued: upserted.enqueued,
+      enqueued: upserted.enqueued || wikiEnqueued,
       skipped: upserted.skipped,
       ...(upserted.quotaUpdates ? { quotaUpdates: upserted.quotaUpdates } : {}),
     };
   });
 
   captureProductIngestionQuotaAnalytics(result?.quotaUpdates);
-  if (result?.enqueued) wakeBrainIngestWorker();
+  if (brainEnqueued) wakeBrainIngestWorker();
+  if (wikiEnqueued) wakeWikiIngestWorker();
   return result;
+}
+
+export function resolveLinearIssueWindowRoutes(input: {
+  brainRoutes: readonly LinearBrainSourceRoute[];
+  wikiRoutes: readonly LinearWikiSourceRoute[];
+  teamId: string | null;
+  events: readonly BufferedLinearEventRow[];
+}) {
+  const matches = (route: LinearBrainSourceRoute | LinearWikiSourceRoute) => {
+    const selected = linearSelectedTeamIds(route.config);
+    if (selected.size === 0) return false;
+    if (!eventsMatchLinearRoute(route.config, input.events)) return false;
+    // Without a resolvable team (deleted issue with team-less buffered
+    // comments) the window cannot be routed confidently.
+    return input.teamId ? selected.has(input.teamId) : false;
+  };
+  return {
+    brainRefs: input.brainRoutes.filter(matches).map((route) => route.brainRef),
+    wikiWorkspaceIds: input.wikiRoutes.filter(matches).map((route) => route.workspaceId),
+  };
 }
 
 export function buildLinearIssueWindowItem(input: {

@@ -4,6 +4,7 @@ import { verifyDictationTicket } from "./dictation-auth";
 import { startInfisicalAuthFlow } from "./infisical-auth";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
 import { createServer } from "./server";
+import { wakeWikiIngestWorker } from "./wiki-ingest-worker";
 
 vi.mock("./coding-workspace-runtime", async (importOriginal) => {
   const original = await importOriginal<typeof import("./coding-workspace-runtime")>();
@@ -31,6 +32,10 @@ vi.mock("./infisical-auth", () => ({
     statusReason: null,
     expiresAt: "2026-08-07T09:00:00.000Z",
   })),
+}));
+
+vi.mock("./wiki-ingest-worker", () => ({
+  wakeWikiIngestWorker: vi.fn(),
 }));
 
 const env = {
@@ -116,6 +121,37 @@ describe("runner execution transport surface", () => {
     });
 
     expect(response.statusCode).toBe(404);
+  });
+});
+
+describe("internal wiki ingest wake endpoint", () => {
+  it("wakes the wiki worker when task workers are enabled", async () => {
+    const server = createServer(workerEnv);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/wiki-ingest/wake",
+      headers: { authorization: `Bearer ${workerEnv.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ ok: true });
+    expect(wakeWikiIngestWorker).toHaveBeenCalledOnce();
+  });
+
+  it("does not wake the wiki worker when task workers are disabled", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/wiki-ingest/wake",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(wakeWikiIngestWorker).not.toHaveBeenCalled();
   });
 });
 

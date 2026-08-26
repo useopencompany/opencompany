@@ -2,9 +2,10 @@
 
 Shared opencompany Brain contracts for Markdown documents, validation, retrieval, and CLI behavior.
 
-Brain-owned skills are Markdown pages under `skills/`. `src/skills.ts` validates eligible pages and
-materializes them as standard single-file `SKILL.md` content. Default list/query retrieval excludes
-that zone unless the caller explicitly selects `skills` or one of its descendants.
+Agent Skills are immutable workspace bundles installed through Settings; Brain does not parse,
+serialize, or execute them. The historical `skills/` folder remains reserved so old Brain pages in
+that zone stay out of default list/query retrieval, but those pages are inert and cannot be
+activated or replayed as Skills.
 
 Query retrieval returns curated `kind: page` documents by default. Raw `kind: evidence` records are
 an explicit opt-in for source-level investigation; normal recall should query pages, read the

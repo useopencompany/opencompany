@@ -80,6 +80,7 @@ import {
   loadIntegrationCredential,
 } from "@opencompany/db/integrations";
 import { brainSources, integrations, users } from "@opencompany/db/product-schema";
+import { ensureWikiSourceEnabledOnConnect } from "@opencompany/db/wiki-sources";
 import { createLogger } from "@opencompany/observability";
 import type { IntegrationAccountDto } from "@opencompany/protocol";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
@@ -329,11 +330,19 @@ export function createIntegrationAccountService(input: {
       try {
         const validation = await validateGranolaApiKey(trimmed);
         if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
-        await connectGranolaIntegration({
+        const connection = await connectGranolaIntegration({
           userWorkosId: actor.userId,
           apiKey: trimmed,
           accountEmail: validation.accountEmail,
           accountName: validation.accountName,
+          db,
+        });
+        await ensureWikiSourceEnabledOnConnect({
+          workspaceId: actor.workspaceId,
+          provider: "granola",
+          integrationId: connection.integrationId,
+          userWorkosId: actor.userId,
+          createdByWorkosId: actor.userId,
           db,
         });
         return await getGranolaIntegrationState(actor.userId, db);
@@ -538,6 +547,26 @@ export function createIntegrationAccountService(input: {
         const setup = await saveJamieWebhookApiKey({
           workspaceId: actor.workspaceId,
           apiKey,
+          db,
+        });
+        const [integration] = await db
+          .select({ userWorkosId: integrations.userWorkosId })
+          .from(integrations)
+          .where(
+            and(
+              eq(integrations.id, setup.integrationId),
+              eq(integrations.workspaceId, actor.workspaceId),
+              eq(integrations.provider, "jamie"),
+            ),
+          )
+          .limit(1);
+        if (!integration) throw new Error("Could not resolve the connected Jamie integration.");
+        await ensureWikiSourceEnabledOnConnect({
+          workspaceId: actor.workspaceId,
+          provider: "jamie",
+          integrationId: setup.integrationId,
+          userWorkosId: integration.userWorkosId,
+          createdByWorkosId: actor.userId,
           db,
         });
         await captureIntegrationAddedAnalytics({

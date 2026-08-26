@@ -12,9 +12,15 @@ import { upsertBrainSourceItemAndEnqueue } from "@opencompany/db/brain-ingest";
 import {
   insertGitHubPullRequestEvents,
   listEnabledGitHubBrainSourceRoutes,
+  listEnabledGitHubWikiSourceRoutes,
   listGitHubIntegrationsForInstallation,
 } from "@opencompany/db/github";
 import { markIntegrationStatus } from "@opencompany/db/integrations";
+import {
+  attributeWikiSourceEventClaims,
+  claimWikiSourceEvents,
+} from "@opencompany/db/wiki-event-claims";
+import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
@@ -31,7 +37,17 @@ vi.mock("@opencompany/db/github", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   insertGitHubPullRequestEvents: vi.fn(),
   listEnabledGitHubBrainSourceRoutes: vi.fn(),
+  listEnabledGitHubWikiSourceRoutes: vi.fn(),
   listGitHubIntegrationsForInstallation: vi.fn(),
+}));
+vi.mock("@opencompany/db/wiki-event-claims", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  attributeWikiSourceEventClaims: vi.fn(),
+  claimWikiSourceEvents: vi.fn(),
+}));
+vi.mock("@opencompany/db/wiki-ingest", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  upsertWikiSourceItemAndEnqueue: vi.fn(),
 }));
 vi.mock("@opencompany/agent/integrations/github", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -56,7 +72,14 @@ vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   listWorkspacesForUser: vi.fn(),
 }));
 
-function ingress(overrides: { role?: string; noWorkspaces?: boolean; authError?: ApiError } = {}) {
+function ingress(
+  overrides: {
+    role?: string;
+    noWorkspaces?: boolean;
+    authError?: ApiError;
+    wakeWikiIngest?: () => Promise<unknown>;
+  } = {},
+) {
   vi.mocked(listWorkspacesForUser).mockResolvedValue(
     overrides.noWorkspaces
       ? []
@@ -79,6 +102,7 @@ function ingress(overrides: { role?: string; noWorkspaces?: boolean; authError?:
         activeBrainId: null,
       };
     },
+    ...(overrides.wakeWikiIngest ? { wakeWikiIngest: overrides.wakeWikiIngest } : {}),
   });
 }
 
@@ -112,6 +136,7 @@ describe("GitHub ingress", () => {
         },
       },
     ] as never);
+    vi.mocked(listEnabledGitHubWikiSourceRoutes).mockResolvedValue([]);
     vi.mocked(insertGitHubPullRequestEvents).mockResolvedValue(1);
     vi.mocked(upsertBrainSourceItemAndEnqueue).mockResolvedValue({
       sourceItemId: "gbsrc_1",
@@ -120,6 +145,16 @@ describe("GitHub ingress", () => {
       enqueued: true,
       skipped: false,
     } as never);
+    vi.mocked(claimWikiSourceEvents).mockResolvedValue({
+      claimedCount: 1,
+      claimedEventKeys: ["777:github:acme/api:issue:45:delivery_123"],
+    });
+    vi.mocked(upsertWikiSourceItemAndEnqueue).mockResolvedValue({
+      sourceItemId: "gwsrc_1",
+      jobId: "gwjob_1",
+      enqueued: true,
+      skipped: false,
+    });
   });
 
   afterEach(() => {
@@ -367,6 +402,27 @@ describe("GitHub ingress", () => {
       expect(captureProductIngestionQuotaAnalytics).not.toHaveBeenCalled();
     });
 
+    it("buffers pull-request activity for a wiki-only repository route", async () => {
+      vi.mocked(listEnabledGitHubBrainSourceRoutes).mockResolvedValue([]);
+      vi.mocked(listEnabledGitHubWikiSourceRoutes).mockResolvedValue([
+        {
+          integrationId: "gint_github_1",
+          workspaceId: "workspace_1",
+          config: {
+            repos: [{ id: "4242", fullName: "acme/api" }],
+            events: ["pull_request_opened"],
+          },
+        },
+      ] as never);
+
+      const response = await ingress().webhook(githubRequest("pull_request", pullRequestPayload()));
+
+      expect(await response.json()).toEqual({ ok: true, buffered: 1 });
+      expect(insertGitHubPullRequestEvents).toHaveBeenCalledOnce();
+      expect(upsertBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
+      expect(upsertWikiSourceItemAndEnqueue).not.toHaveBeenCalled();
+    });
+
     it("keeps issue activity on the immediate ingest path with the injected db", async () => {
       const response = await ingress().webhook(githubRequest("issues", issuePayload()));
       expect(response.status).toBe(200);
@@ -379,6 +435,91 @@ describe("GitHub ingress", () => {
           db: expect.objectContaining({ sentinel: "db" }),
         }),
       );
+    });
+
+    it("claims and enqueues an in-scope issue for a wiki-only route, then wakes the runner", async () => {
+      vi.mocked(listEnabledGitHubBrainSourceRoutes).mockResolvedValue([]);
+      vi.mocked(listEnabledGitHubWikiSourceRoutes).mockResolvedValue([
+        {
+          integrationId: "gint_github_1",
+          workspaceId: "workspace_1",
+          config: {
+            repos: [{ id: "4242", fullName: "acme/api" }],
+            events: ["issue_opened"],
+          },
+        },
+      ] as never);
+      const wakeWikiIngest = vi.fn(async () => undefined);
+
+      const response = await ingress({ wakeWikiIngest }).webhook(
+        githubRequest("issues", issuePayload()),
+      );
+
+      expect(await response.json()).toEqual({ ok: true, enqueued: 1 });
+      expect(upsertBrainSourceItemAndEnqueue).not.toHaveBeenCalled();
+      expect(claimWikiSourceEvents).toHaveBeenCalledWith(
+        expect.objectContaining({ workspaceId: "workspace_1", sourceProvider: "github" }),
+      );
+      expect(upsertWikiSourceItemAndEnqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: "workspace_1",
+          integrationId: "gint_github_1",
+          db: expect.objectContaining({ sentinel: "db" }),
+        }),
+      );
+      expect(attributeWikiSourceEventClaims).toHaveBeenCalledWith(
+        expect.objectContaining({ workspaceId: "workspace_1", sourceItemId: "gwsrc_1" }),
+      );
+      expect(wakeWikiIngest).toHaveBeenCalledOnce();
+    });
+
+    it("does not enqueue or wake an out-of-scope wiki issue", async () => {
+      vi.mocked(listEnabledGitHubBrainSourceRoutes).mockResolvedValue([]);
+      vi.mocked(listEnabledGitHubWikiSourceRoutes).mockResolvedValue([
+        {
+          integrationId: "gint_github_1",
+          workspaceId: "workspace_1",
+          config: {
+            repos: [{ id: "9999", fullName: "acme/other" }],
+            events: ["issue_opened"],
+          },
+        },
+      ] as never);
+      const wakeWikiIngest = vi.fn(async () => undefined);
+
+      const response = await ingress({ wakeWikiIngest }).webhook(
+        githubRequest("issues", issuePayload()),
+      );
+
+      expect(await response.json()).toEqual({ ok: true, dropped: true });
+      expect(claimWikiSourceEvents).not.toHaveBeenCalled();
+      expect(upsertWikiSourceItemAndEnqueue).not.toHaveBeenCalled();
+      expect(wakeWikiIngest).not.toHaveBeenCalled();
+    });
+
+    it("keeps a successful GitHub response when the best-effort wiki wake fails", async () => {
+      vi.mocked(listEnabledGitHubBrainSourceRoutes).mockResolvedValue([]);
+      vi.mocked(listEnabledGitHubWikiSourceRoutes).mockResolvedValue([
+        {
+          integrationId: "gint_github_1",
+          workspaceId: "workspace_1",
+          config: {
+            repos: [{ id: "4242", fullName: "acme/api" }],
+            events: ["issue_opened"],
+          },
+        },
+      ] as never);
+      const wakeWikiIngest = vi.fn(async () => {
+        throw new Error("runner unavailable");
+      });
+
+      const response = await ingress({ wakeWikiIngest }).webhook(
+        githubRequest("issues", issuePayload()),
+      );
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, enqueued: 1 });
+      expect(wakeWikiIngest).toHaveBeenCalledOnce();
     });
 
     it("returns a retryable response when pull-request buffering fails", async () => {

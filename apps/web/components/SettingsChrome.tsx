@@ -8,6 +8,7 @@ import {
   CreditCard,
   FolderGit2,
   MessageSquare,
+  PackageOpen,
   PanelLeft,
   PlugZap,
   SearchCheck,
@@ -81,6 +82,13 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         label: "Skills",
         isActive: (pathname) =>
           pathname === "/settings/skills" || pathname.startsWith("/settings/skills/"),
+      },
+      {
+        href: "/settings/plugins",
+        icon: PackageOpen,
+        label: "Plugins",
+        isActive: (pathname) =>
+          pathname === "/settings/plugins" || pathname.startsWith("/settings/plugins/"),
       },
       {
         href: "/settings/repositories",

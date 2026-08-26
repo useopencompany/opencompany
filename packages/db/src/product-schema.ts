@@ -5,6 +5,10 @@ import {
   CHAT_ATTACHMENT_FORMATS,
   type ChatAttachmentFormat,
   type ConversationRuntimeStatus,
+  type PluginInstallReport,
+  type PluginManifest,
+  type PluginStatus,
+  type PluginStdioServer,
   RUN_APPROVAL_STATUSES,
   RUN_ATTEMPT_STATUSES,
   RUN_EVENT_TYPES,
@@ -53,11 +57,25 @@ const vector = customType<{ data: string }>({
   },
 });
 
+// Immutable skill bundles retain every source file byte-for-byte. Normalize both pooled Postgres
+// Buffers and Neon HTTP hex strings at the schema boundary so repositories always receive bytes.
+const bytea = customType<{ data: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+  fromDriver(value: unknown): Buffer {
+    if (Buffer.isBuffer(value)) return value;
+    if (value instanceof Uint8Array) return Buffer.from(value);
+    if (typeof value === "string") {
+      return Buffer.from(value.startsWith("\\x") ? value.slice(2) : value, "hex");
+    }
+    throw new Error(`Unexpected bytea value from driver (${typeof value}).`);
+  },
+});
+
 export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
-// Workflows and skills share a simple draft/active lifecycle: `draft` is
-// editable-but-not-yet-usable, `active` is available to fire (workflows) or
-// attach (skills). Mirrors the frontmatter `status` the Brain docs carried.
+// Workflows retain the draft/active lifecycle from their original Brain documents.
 export type WorkflowStatus = "draft" | "active";
 export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule" | "event";
 export type WorkflowEventConfig = {
@@ -75,8 +93,6 @@ export type KnowledgeCommandOperation =
   | "brain_asset.replace"
   | "wiki_page.create"
   | "wiki_timeline.create"
-  | "skill.create"
-  | "skill.import"
   | "brain_import.start";
 export type BillingCommandOperation =
   | "credit_topup.create"
@@ -93,11 +109,9 @@ export type WorkflowStep = {
   reasoningEffort?: CodexReasoningEffort;
   instructions: string;
 };
-export type SkillStatus = "draft" | "active";
-// A skill imported from an external SKILL.md source. `null` on the row itself means
-// hand-authored in opencompany. Matches `AgentRemoteSkillSource["type"]`
-// (packages/agent-runtime/src/skill-resolver.ts) exactly — no translation layer needed.
-export type SkillSourceType = "github" | "skills.sh";
+export type ChatSessionSkillBundleSourceKind = "standalone" | "plugin";
+export type ExternalArtifactSourceType = "github" | "skills.sh";
+export type SkillSourceType = ExternalArtifactSourceType | "workspace";
 
 export type HarnessEngine = "opencompany" | "codex" | "claude_code";
 
@@ -249,6 +263,10 @@ export type BrainIngestJobKind =
   | "brain_agent_ingest"
   | "brain_pointer_hydrate";
 export type BrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
+export type WikiSourceProvider = "gmail" | "slack" | "jamie" | "granola" | "linear" | "github";
+export type WikiSourceType = "meeting" | "conversation" | "issue" | "activity" | "thread";
+export type WikiSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
+export type WikiIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 export type BrainImportStatus =
   | "discovering"
   | "awaiting_confirmation"
@@ -349,6 +367,8 @@ export type HarnessWorkflowStep = {
   systemPrompt: string;
   systemBlocks: string[];
   skillIds: string[];
+  skillBundleIds: string[];
+  pluginSkillBundleIds?: string[];
 };
 
 export type HarnessSpec = {
@@ -370,6 +390,8 @@ export type HarnessSpec = {
     id: string;
     workspaceId: string;
     skillIds: string[];
+    skillBundleIds: string[];
+    pluginIds: string[];
     steps?: HarnessWorkflowStep[];
     currentStepIndex?: number;
     completedStepCount?: number;
@@ -1954,8 +1976,9 @@ export const brainIngestJobs = productSchema.table(
   }),
 );
 
-// One reservation per normalized source item and workspace. Fan-out to several
-// brains in the same workspace therefore consumes the raw events exactly once.
+// One reservation per normalized source item and workspace. Brain and wiki
+// items use separate nullable FKs so both pipelines share admission accounting
+// without giving up source-item cascade cleanup.
 export const workspaceIngestionReservations = productSchema.table(
   "workspace_ingestion_reservations",
   {
@@ -1963,9 +1986,12 @@ export const workspaceIngestionReservations = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    sourceItemId: text("source_item_id")
-      .notNull()
-      .references(() => brainSourceItems.id, { onDelete: "cascade" }),
+    sourceItemId: text("source_item_id").references(() => brainSourceItems.id, {
+      onDelete: "cascade",
+    }),
+    wikiSourceItemId: text("wiki_source_item_id").references(() => wikiSourceItems.id, {
+      onDelete: "cascade",
+    }),
     sourceProvider: text("source_provider").$type<BrainSourceProvider>().notNull(),
     rawEventCount: integer("raw_event_count").notNull(),
     status: text("status").$type<IngestionReservationStatus>().notNull().default("pending"),
@@ -1984,6 +2010,11 @@ export const workspaceIngestionReservations = productSchema.table(
       table.workspaceId,
       table.sourceItemId,
     ),
+    workspaceWikiSourceIdx: uniqueIndex(
+      "opencompany_ingestion_reservations_workspace_wiki_source_idx",
+    )
+      .on(table.workspaceId, table.wikiSourceItemId)
+      .where(sql`${table.wikiSourceItemId} IS NOT NULL`),
     workspaceStatusCreatedIdx: index("goat_ingestion_reservations_status_created_idx").on(
       table.workspaceId,
       table.status,
@@ -2021,6 +2052,10 @@ export const workspaceIngestionReservations = productSchema.table(
     consumptionStateCheck: check(
       "goat_ingestion_reservations_consumption_state_check",
       sql`(${table.status} = 'consumed' AND ${table.consumedAt} IS NOT NULL) OR (${table.status} = 'pending' AND ${table.consumedAt} IS NULL)`,
+    ),
+    sourceKindCheck: check(
+      "opencompany_ingestion_reservations_source_kind_check",
+      sql`(${table.sourceItemId} IS NOT NULL AND ${table.wikiSourceItemId} IS NULL) OR (${table.sourceItemId} IS NULL AND ${table.wikiSourceItemId} IS NOT NULL)`,
     ),
   }),
 );
@@ -2067,6 +2102,208 @@ export const brainImportCandidates = productSchema.table(
 // table; paths are their workspace-unique identities. See packages/wiki for
 // the domain rules these tables store.
 // ---------------------------------------------------------------------------
+
+// Workspace-level source configuration for the wiki ingestion pipeline.
+export const wikiSources = productSchema.table(
+  "wiki_sources",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<WikiSourceProvider>().notNull(),
+    integrationId: text("integration_id").notNull(),
+    // The owner of the referenced integration row. Keeping this alongside the
+    // provider lets Postgres enforce that the configured integration matches
+    // the expected account and provider through the composite FK below.
+    userWorkosId: text("user_workos_id").notNull(),
+    createdByWorkosId: text("created_by_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(true),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIntegrationIdx: uniqueIndex("opencompany_wiki_sources_workspace_integration_idx").on(
+      table.workspaceId,
+      table.integrationId,
+    ),
+    integrationIdx: index("opencompany_wiki_sources_integration_idx").on(table.integrationId),
+    workspaceIdx: index("opencompany_wiki_sources_workspace_idx").on(table.workspaceId),
+    integrationUserProviderFk: foreignKey({
+      name: "opencompany_wiki_sources_integration_user_provider_fk",
+      columns: [table.integrationId, table.userWorkosId, table.provider],
+      foreignColumns: [integrations.id, integrations.userWorkosId, integrations.provider],
+    }).onDelete("cascade"),
+    providerCheck: check(
+      "opencompany_wiki_sources_provider_check",
+      sql`${table.provider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
+    ),
+  }),
+);
+
+// Normalized provider windows. The workspace replaces brain/user targeting in
+// the v1 ingestion key, so overlapping member connections deduplicate before
+// the single workspace wiki is mutated.
+export const wikiSourceItems = productSchema.table(
+  "wiki_source_items",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sourceProvider: text("source_provider").$type<WikiSourceProvider>().notNull(),
+    sourceConnectionId: text("source_connection_id").notNull(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    sourceType: text("source_type").$type<WikiSourceType>().notNull(),
+    externalId: text("external_id").notNull(),
+    sourceRef: text("source_ref").notNull(),
+    title: text("title"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+    contentHash: text("content_hash").notNull(),
+    rawPayload: jsonb("raw_payload").$type<unknown>().notNull(),
+    normalizedPayload: jsonb("normalized_payload").$type<unknown>().notNull(),
+    rawEventCount: integer("raw_event_count").notNull().default(1),
+    lastIngestJobId: text("last_ingest_job_id"),
+    lastIngestStatus: text("last_ingest_status").$type<WikiSourceItemIngestStatus>(),
+    lastIngestedAt: timestamp("last_ingested_at", { withTimezone: true }),
+    lastIngestError: text("last_ingest_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sourceConnectionExternalHashIdx: uniqueIndex(
+      "opencompany_wiki_source_items_connection_external_hash_idx",
+    ).on(
+      table.workspaceId,
+      table.sourceProvider,
+      table.sourceConnectionId,
+      table.sourceType,
+      table.externalId,
+      table.contentHash,
+    ),
+    workspaceSourceProviderOccurredIdx: index(
+      "opencompany_wiki_source_items_workspace_provider_occurred_idx",
+    ).on(table.workspaceId, table.sourceProvider, table.occurredAt),
+    workspaceUpdatedIdx: index("opencompany_wiki_source_items_workspace_updated_idx").on(
+      table.workspaceId,
+      table.updatedAt,
+    ),
+    lastIngestStatusIdx: index("opencompany_wiki_source_items_last_ingest_status_idx").on(
+      table.lastIngestStatus,
+      table.updatedAt,
+    ),
+    sourceProviderCheck: check(
+      "opencompany_wiki_source_items_source_provider_check",
+      sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
+    ),
+    sourceTypeCheck: check(
+      "opencompany_wiki_source_items_source_type_check",
+      sql`${table.sourceType} IN ('meeting', 'conversation', 'issue', 'activity', 'thread')`,
+    ),
+    lastIngestStatusCheck: check(
+      "opencompany_wiki_source_items_last_ingest_status_check",
+      sql`${table.lastIngestStatus} IS NULL OR ${table.lastIngestStatus} IN ('pending', 'succeeded', 'failed', 'skipped')`,
+    ),
+    rawEventCountCheck: check(
+      "opencompany_wiki_source_items_raw_event_count_check",
+      sql`${table.rawEventCount} > 0 AND ${table.rawEventCount} <= 200`,
+    ),
+  }),
+);
+
+export const wikiIngestJobs = productSchema.table(
+  "wiki_ingest_jobs",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sourceItemId: text("source_item_id")
+      .notNull()
+      .references(() => wikiSourceItems.id, { onDelete: "cascade" }),
+    sourceProvider: text("source_provider").$type<WikiSourceProvider>().notNull(),
+    sourceConnectionId: text("source_connection_id").notNull(),
+    integrationId: text("integration_id").notNull(),
+    contentHash: text("content_hash").notNull(),
+    status: text("status").$type<WikiIngestJobStatus>().notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    nextRetryAt: timestamp("next_retry_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseId: text("lease_id"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    skipReason: text("skip_reason"),
+    traceRef: text("trace_ref"),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sourceItemHashIdx: uniqueIndex("opencompany_wiki_ingest_jobs_item_hash_idx").on(
+      table.sourceItemId,
+      table.contentHash,
+    ),
+    workspaceRunningIdx: uniqueIndex("opencompany_wiki_ingest_jobs_workspace_running_idx")
+      .on(table.workspaceId)
+      .where(sql`${table.status} = 'running'`),
+    statusNextRetryIdx: index("opencompany_wiki_ingest_jobs_status_next_retry_idx").on(
+      table.status,
+      table.nextRetryAt,
+    ),
+    leaseExpiresAtIdx: index("opencompany_wiki_ingest_jobs_lease_expires_at_idx").on(
+      table.leaseExpiresAt,
+    ),
+    workspaceCreatedIdx: index("opencompany_wiki_ingest_jobs_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    workspaceIntegrationStatusIdx: index(
+      "opencompany_wiki_ingest_jobs_workspace_integration_status_idx",
+    ).on(table.workspaceId, table.integrationId, table.status),
+    sourceProviderCheck: check(
+      "opencompany_wiki_ingest_jobs_source_provider_check",
+      sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
+    ),
+    statusCheck: check(
+      "opencompany_wiki_ingest_jobs_status_check",
+      sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed', 'skipped')`,
+    ),
+  }),
+);
+
+// Cross-member event claims make provider-native identities workspace-global.
+export const wikiSourceEventClaims = productSchema.table(
+  "wiki_source_event_claims",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sourceProvider: text("source_provider").$type<WikiSourceProvider>().notNull(),
+    eventKey: text("event_key").notNull(),
+    sourceItemId: text("source_item_id").references(() => wikiSourceItems.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceProviderKeyIdx: uniqueIndex(
+      "opencompany_wiki_source_event_claims_workspace_provider_key_idx",
+    ).on(table.workspaceId, table.sourceProvider, table.eventKey),
+    sourceProviderCheck: check(
+      "opencompany_wiki_source_event_claims_source_provider_check",
+      sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
+    ),
+  }),
+);
 
 export const wikiPages = productSchema.table(
   "wiki_pages",
@@ -2923,60 +3160,293 @@ export const workflows = productSchema.table(
   }),
 );
 
-// Workspace-scoped, reusable agent capabilities. Formerly stored in a reserved
-// `skills/` Brain folder; extracted alongside workflows. `slug` is the handle
-// used by the `@skill/<slug>` composer mention. Attaching a skill to a chat
-// still snapshots its content immutably into `chatSessionSkills`.
-export const skills = productSchema.table(
-  "skills",
+// A validated Agent Skill version. Rows and files are immutable after insertion; the installation
+// table below is the only mutable pointer. Raw file bytes, rather than reconstructed Markdown, are
+// the storage authority.
+export const skillBundles = productSchema.table(
+  "skill_bundles",
   {
     id: text("id").primaryKey(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    slug: text("slug").notNull(),
+    integrity: text("integrity").notNull(),
     name: text("name").notNull(),
-    description: text("description").notNull().default(""),
-    instructions: text("instructions").notNull().default(""),
-    status: text("status").$type<SkillStatus>().notNull().default("draft"),
-    createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
-      onDelete: "set null",
-    }),
-    // Source provenance for imported skills. NULL sourceType = hand-authored in opencompany (the
-    // original, still-supported path). Non-NULL means the row was resolved from an external
-    // SKILL.md and is read-only — enforced by PostgresKnowledgeRepository.updateSkill.
-    sourceType: text("source_type").$type<SkillSourceType>(),
+    description: text("description").notNull(),
+    license: text("license"),
+    compatibility: text("compatibility"),
+    metadata: jsonb("metadata").$type<Record<string, string> | null>(),
+    allowedTools: text("allowed_tools"),
+    body: text("body").notNull(),
+    sourceType: text("source_type").$type<SkillSourceType>().notNull(),
     sourceUrl: text("source_url"),
-    sourceRef: text("source_ref"),
     sourcePath: text("source_path"),
+    sourceRef: text("source_ref"),
     resolvedCommit: text("resolved_commit"),
-    integrity: text("integrity"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIntegrityIdx: uniqueIndex("skill_bundles_workspace_integrity_idx").on(
+      table.workspaceId,
+      table.integrity,
+      table.sourceType,
+    ),
+    workspaceIdIdx: uniqueIndex("skill_bundles_workspace_id_idx").on(table.workspaceId, table.id),
+    workspaceNameIdx: index("skill_bundles_workspace_name_idx").on(
+      table.workspaceId,
+      table.name,
+      table.createdAt,
+    ),
+    sourceTypeCheck: check(
+      "skill_bundles_source_type_check",
+      sql`${table.sourceType} IN ('github', 'skills.sh', 'workspace')`,
+    ),
+    integrityCheck: check(
+      "skill_bundles_integrity_check",
+      sql`${table.integrity} ~ '^sha256:[0-9a-f]{64}$'`,
+    ),
+    commitCheck: check(
+      "skill_bundles_commit_check",
+      sql`(${table.sourceType} = 'workspace' AND ${table.sourceUrl} IS NULL AND ${table.sourcePath} IS NULL AND ${table.sourceRef} IS NULL AND ${table.resolvedCommit} IS NULL) OR (${table.sourceType} IN ('github', 'skills.sh') AND ${table.sourceUrl} IS NOT NULL AND ${table.sourcePath} IS NOT NULL AND ${table.sourceRef} IS NOT NULL AND ${table.resolvedCommit} ~ '^[0-9a-f]{40}$')`,
+    ),
+  }),
+);
+
+export const skillBundleFiles = productSchema.table(
+  "skill_bundle_files",
+  {
+    bundleId: text("bundle_id")
+      .notNull()
+      .references(() => skillBundles.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    content: bytea("content").notNull(),
+    executable: boolean("executable").notNull().default(false),
+    sizeBytes: integer("size_bytes").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.bundleId, table.path] }),
+    sizeCheck: check("skill_bundle_files_size_check", sql`${table.sizeBytes} >= 0`),
+    contentSizeCheck: check(
+      "skill_bundle_files_content_size_check",
+      sql`octet_length(${table.content}) = ${table.sizeBytes}`,
+    ),
+  }),
+);
+
+export const skillInstallations = productSchema.table(
+  "skill_installations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    bundleId: text("bundle_id").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
   },
   (table) => ({
-    workspaceSlugIdx: uniqueIndex("goat_skills_workspace_slug_idx")
-      .on(table.workspaceId, table.slug)
+    workspaceLiveNameIdx: uniqueIndex("skill_installations_workspace_live_name_idx")
+      .on(table.workspaceId, table.name)
       .where(sql`${table.archivedAt} IS NULL`),
-    workspaceUpdatedIdx: index("goat_skills_workspace_updated_idx").on(
+    workspaceUpdatedIdx: index("skill_installations_workspace_updated_idx").on(
       table.workspaceId,
       table.archivedAt,
       table.updatedAt,
     ),
-    // Prevents importing the same skill twice into one workspace. The canonical repository
-    // returns the existing row for a matching resolved source.
-    workspaceSourceIdx: uniqueIndex("goat_skills_workspace_source_idx")
-      .on(table.workspaceId, table.sourceUrl, table.sourceRef, table.sourcePath)
-      .where(sql`${table.sourceType} IS NOT NULL AND ${table.archivedAt} IS NULL`),
-    statusCheck: check("goat_skills_status_check", sql`${table.status} IN ('draft', 'active')`),
-    sourceTypeCheck: check(
-      "goat_skills_source_type_check",
-      sql`${table.sourceType} IS NULL OR ${table.sourceType} IN ('github', 'skills.sh')`,
+    bundleIdx: index("skill_installations_bundle_idx").on(table.bundleId),
+    workspaceBundleFk: foreignKey({
+      columns: [table.workspaceId, table.bundleId],
+      foreignColumns: [skillBundles.workspaceId, skillBundles.id],
+      name: "skill_installations_workspace_bundle_fk",
+    }).onDelete("restrict"),
+  }),
+);
+
+// One immutable Agent Plugin package. Only administrative status and the future integrity-bound
+// MCP approval can change after installation; replacing a package archives this row and inserts a
+// new one. Package bytes and parsed components remain attached to this exact ID.
+export const plugins = productSchema.table(
+  "plugins",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    status: text("status").$type<PluginStatus>().notNull().default("enabled"),
+    manifest: jsonb("manifest").$type<PluginManifest>().notNull(),
+    sourceType: text("source_type").$type<ExternalArtifactSourceType>().notNull(),
+    sourceUrl: text("source_url").notNull(),
+    sourcePath: text("source_path").notNull(),
+    sourceRef: text("source_ref").notNull(),
+    resolvedCommit: text("resolved_commit").notNull(),
+    integrity: text("integrity").notNull(),
+    stdioMcpServers: jsonb("stdio_mcp_servers")
+      .$type<PluginStdioServer[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    installReport: jsonb("install_report").$type<PluginInstallReport>().notNull(),
+    mcpApprovedIntegrity: text("mcp_approved_integrity"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => ({
+    workspaceIdIdx: uniqueIndex("plugins_workspace_id_idx").on(table.workspaceId, table.id),
+    workspaceLiveNameIdx: uniqueIndex("plugins_workspace_live_name_idx")
+      .on(table.workspaceId, table.name)
+      .where(sql`${table.status} <> 'archived'`),
+    workspaceStatusUpdatedIdx: index("plugins_workspace_status_updated_idx").on(
+      table.workspaceId,
+      table.status,
+      table.updatedAt,
     ),
-    sourceUrlRequiredCheck: check(
-      "goat_skills_source_url_required_check",
-      sql`${table.sourceType} IS NULL OR ${table.sourceUrl} IS NOT NULL`,
+    workspaceIntegrityIdx: index("plugins_workspace_integrity_idx").on(
+      table.workspaceId,
+      table.integrity,
+    ),
+    nameCheck: check(
+      "plugins_name_check",
+      sql`${table.name} ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$' AND char_length(${table.name}) <= 64 AND ${table.name} NOT LIKE '%--%' AND ${table.name} NOT LIKE '%..%'`,
+    ),
+    statusCheck: check(
+      "plugins_status_check",
+      sql`${table.status} IN ('enabled', 'disabled', 'archived')`,
+    ),
+    archiveStatusCheck: check(
+      "plugins_archive_status_check",
+      sql`(${table.status} = 'archived') = (${table.archivedAt} IS NOT NULL)`,
+    ),
+    manifestCheck: check("plugins_manifest_check", sql`jsonb_typeof(${table.manifest}) = 'object'`),
+    sourceTypeCheck: check(
+      "plugins_source_type_check",
+      sql`${table.sourceType} IN ('github', 'skills.sh')`,
+    ),
+    commitCheck: check("plugins_commit_check", sql`${table.resolvedCommit} ~ '^[0-9a-f]{40}$'`),
+    integrityCheck: check(
+      "plugins_integrity_check",
+      sql`${table.integrity} ~ '^sha256:[0-9a-f]{64}$'`,
+    ),
+    stdioMcpServersCheck: check(
+      "plugins_stdio_mcp_servers_check",
+      sql`jsonb_typeof(${table.stdioMcpServers}) = 'array'`,
+    ),
+    installReportCheck: check(
+      "plugins_install_report_check",
+      sql`jsonb_typeof(${table.installReport}) = 'object'`,
+    ),
+    mcpApprovalCheck: check(
+      "plugins_mcp_approval_check",
+      sql`${table.mcpApprovedIntegrity} IS NULL OR ${table.mcpApprovedIntegrity} = ${table.integrity}`,
+    ),
+  }),
+);
+
+export const pluginFiles = productSchema.table(
+  "plugin_files",
+  {
+    pluginId: text("plugin_id")
+      .notNull()
+      .references(() => plugins.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    content: bytea("content").notNull(),
+    executable: boolean("executable").notNull().default(false),
+    sizeBytes: integer("size_bytes").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.pluginId, table.path] }),
+    sizeCheck: check(
+      "plugin_files_size_check",
+      sql`${table.sizeBytes} >= 0 AND ${table.sizeBytes} <= 2097152`,
+    ),
+    contentSizeCheck: check(
+      "plugin_files_content_size_check",
+      sql`octet_length(${table.content}) = ${table.sizeBytes}`,
+    ),
+  }),
+);
+
+export const pluginSkills = productSchema.table(
+  "plugin_skills",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    pluginId: text("plugin_id").notNull(),
+    skillName: text("skill_name").notNull(),
+    skillPath: text("skill_path").notNull(),
+    skillBundleId: text("skill_bundle_id").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.pluginId, table.skillName] }),
+    workspaceNameIdx: index("plugin_skills_workspace_name_idx").on(
+      table.workspaceId,
+      table.skillName,
+      table.pluginId,
+    ),
+    bundleIdx: index("plugin_skills_bundle_idx").on(table.skillBundleId),
+    nameCheck: check(
+      "plugin_skills_name_check",
+      sql`${table.skillName} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND char_length(${table.skillName}) <= 64`,
+    ),
+    pathCheck: check("plugin_skills_path_check", sql`char_length(${table.skillPath}) > 0`),
+    workspacePluginFk: foreignKey({
+      columns: [table.workspaceId, table.pluginId],
+      foreignColumns: [plugins.workspaceId, plugins.id],
+      name: "plugin_skills_workspace_plugin_fk",
+    }).onDelete("cascade"),
+    workspaceBundleFk: foreignKey({
+      columns: [table.workspaceId, table.skillBundleId],
+      foreignColumns: [skillBundles.workspaceId, skillBundles.id],
+      name: "plugin_skills_workspace_bundle_fk",
+    }).onDelete("restrict"),
+  }),
+);
+
+export const workspacePluginData = productSchema.table(
+  "workspace_plugin_data",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    pluginName: text("plugin_name").notNull(),
+    blobPathname: text("blob_pathname").notNull(),
+    checksum: text("checksum").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    generation: bigint("generation", { mode: "number" }).notNull().default(0),
+    leaseId: text("lease_id"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.pluginName] }),
+    blobPathnameIdx: uniqueIndex("workspace_plugin_data_blob_pathname_idx").on(table.blobPathname),
+    leaseExpiryIdx: index("workspace_plugin_data_lease_expiry_idx")
+      .on(table.leaseExpiresAt)
+      .where(sql`${table.leaseExpiresAt} IS NOT NULL`),
+    nameCheck: check(
+      "workspace_plugin_data_name_check",
+      sql`${table.pluginName} ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$' AND char_length(${table.pluginName}) <= 64 AND ${table.pluginName} NOT LIKE '%--%' AND ${table.pluginName} NOT LIKE '%..%'`,
+    ),
+    pathnameCheck: check(
+      "workspace_plugin_data_pathname_check",
+      sql`char_length(${table.blobPathname}) > 0`,
+    ),
+    checksumCheck: check(
+      "workspace_plugin_data_checksum_check",
+      sql`${table.checksum} ~ '^sha256:[0-9a-f]{64}$'`,
+    ),
+    sizeCheck: check(
+      "workspace_plugin_data_size_check",
+      sql`${table.sizeBytes} >= 0 AND ${table.sizeBytes} <= 33554432`,
+    ),
+    generationCheck: check("workspace_plugin_data_generation_check", sql`${table.generation} >= 0`),
+    leaseCheck: check(
+      "workspace_plugin_data_lease_check",
+      sql`(${table.leaseId} IS NULL AND ${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseId} IS NOT NULL AND ${table.leaseOwner} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
     ),
   }),
 );
@@ -3952,32 +4422,61 @@ export const browserProfileSessions = productSchema.table(
   }),
 );
 
-// Immutable skill snapshots activated by an explicit @skill mention in a chat. Keeping the
-// activation message lets non-Codex chat replay the skill as part of conversation history, while
-// Codex can materialize every active snapshot and invoke only the skills selected on the turn.
-export const chatSessionSkills = productSchema.table(
-  "chat_session_skills",
+// Immutable Agent Skill bundle versions activated in a Chat. The denormalized name and unique
+// index make the first bundle with a given declared name remain fixed even when activation paths
+// race or the workspace installation is later replaced, disabled, or archived.
+export const chatSessionSkillBundles = productSchema.table(
+  "chat_session_skill_bundles",
   {
     chatSessionId: text("chat_session_id")
       .notNull()
       .references(() => chatSessions.id, { onDelete: "cascade" }),
-    skillId: text("skill_id").notNull(),
-    // Provenance only: the immutable snapshot must survive deletion of its source Brain.
-    brainRef: text("brain_ref").notNull(),
+    bundleId: text("bundle_id")
+      .notNull()
+      // Migration 0226 orders workspace cascades in a BEFORE DELETE trigger while retaining
+      // RESTRICT here so an immutable bundle cannot be deleted out from under a Chat snapshot.
+      .references(() => skillBundles.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
     activatedMessageId: text("activated_message_id")
       .notNull()
       .references(() => chatMessages.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    description: text("description").notNull(),
-    instructions: text("instructions").notNull(),
+    sourceKind: text("source_kind").$type<ChatSessionSkillBundleSourceKind>().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.chatSessionId, table.bundleId] }),
+    chatNameIdx: uniqueIndex("goat_chat_session_skill_bundles_chat_name_idx").on(
+      table.chatSessionId,
+      table.name,
+    ),
+    bundleIdx: index("goat_chat_session_skill_bundles_bundle_idx").on(table.bundleId),
+    activatedMessageIdx: index("goat_chat_session_skill_bundles_activated_message_idx").on(
+      table.activatedMessageId,
+    ),
+    sourceKindCheck: check(
+      "chat_session_skill_bundles_source_kind_check",
+      sql`${table.sourceKind} IN ('standalone', 'plugin')`,
+    ),
+  }),
+);
+
+// Immutable plugin package IDs captured by later runner work. Phase 4 introduces the durable
+// boundary but deliberately leaves snapshot orchestration to its separately owned runner slice.
+export const chatSessionPlugins = productSchema.table(
+  "chat_session_plugins",
+  {
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    pluginId: text("plugin_id")
+      .notNull()
+      // Migration 0226 orders workspace cascades in a BEFORE DELETE trigger while retaining
+      // RESTRICT here so an immutable Plugin cannot be deleted out from under a Chat snapshot.
+      .references(() => plugins.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    pk: primaryKey({ columns: [table.chatSessionId, table.skillId] }),
-    activatedMessageIdx: index("goat_chat_session_skills_activated_message_idx").on(
-      table.activatedMessageId,
-    ),
-    brainIdx: index("goat_chat_session_skills_brain_idx").on(table.brainRef),
+    pk: primaryKey({ columns: [table.chatSessionId, table.pluginId] }),
+    pluginIdx: index("chat_session_plugins_plugin_idx").on(table.pluginId),
   }),
 );
 
@@ -4264,7 +4763,7 @@ export const knowledgeCommandIdempotency = productSchema.table(
     ),
     operationCheck: check(
       "goat_knowledge_command_idempotency_operation_check",
-      sql`${table.operation} IN ('brain_document.create', 'brain_asset.create', 'brain_asset.replace', 'wiki_page.create', 'wiki_timeline.create', 'skill.create', 'skill.import')`,
+      sql`${table.operation} IN ('brain_document.create', 'brain_asset.create', 'brain_asset.replace', 'wiki_page.create', 'wiki_timeline.create', 'brain_import.start')`,
     ),
   }),
 );
@@ -5167,6 +5666,14 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   ingestionReservations: many(workspaceIngestionReservations),
   brains: many(brains),
   repoConfigs: many(repoConfigs),
+  wikiSources: many(wikiSources),
+  wikiSourceItems: many(wikiSourceItems),
+  wikiIngestJobs: many(wikiIngestJobs),
+  wikiSourceEventClaims: many(wikiSourceEventClaims),
+  skillBundles: many(skillBundles),
+  skillInstallations: many(skillInstallations),
+  plugins: many(plugins),
+  pluginData: many(workspacePluginData),
 }));
 
 export const workspaceBillingRelations = relations(workspaceBilling, ({ one }) => ({
@@ -5289,6 +5796,57 @@ export const wikiPagesRelations = relations(wikiPages, ({ one, many }) => ({
   versions: many(wikiPageVersions),
   timelineEntries: many(wikiTimelineEntries),
   links: many(wikiLinks),
+}));
+
+export const wikiSourcesRelations = relations(wikiSources, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [wikiSources.workspaceId],
+    references: [workspaces.id],
+  }),
+  integration: one(integrations, {
+    fields: [wikiSources.integrationId],
+    references: [integrations.id],
+  }),
+  createdBy: one(users, {
+    fields: [wikiSources.createdByWorkosId],
+    references: [users.workosUserId],
+  }),
+}));
+
+export const wikiSourceItemsRelations = relations(wikiSourceItems, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [wikiSourceItems.workspaceId],
+    references: [workspaces.id],
+  }),
+  integration: one(integrations, {
+    fields: [wikiSourceItems.integrationId],
+    references: [integrations.id],
+  }),
+  ingestJobs: many(wikiIngestJobs),
+  eventClaims: many(wikiSourceEventClaims),
+  workspaceReservations: many(workspaceIngestionReservations),
+}));
+
+export const wikiIngestJobsRelations = relations(wikiIngestJobs, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [wikiIngestJobs.workspaceId],
+    references: [workspaces.id],
+  }),
+  sourceItem: one(wikiSourceItems, {
+    fields: [wikiIngestJobs.sourceItemId],
+    references: [wikiSourceItems.id],
+  }),
+}));
+
+export const wikiSourceEventClaimsRelations = relations(wikiSourceEventClaims, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [wikiSourceEventClaims.workspaceId],
+    references: [workspaces.id],
+  }),
+  sourceItem: one(wikiSourceItems, {
+    fields: [wikiSourceEventClaims.sourceItemId],
+    references: [wikiSourceItems.id],
+  }),
 }));
 
 export const wikiPageVersionsRelations = relations(wikiPageVersions, ({ one }) => ({
@@ -5558,6 +6116,10 @@ export const workspaceIngestionReservationsRelations = relations(
       fields: [workspaceIngestionReservations.sourceItemId],
       references: [brainSourceItems.id],
     }),
+    wikiSourceItem: one(wikiSourceItems, {
+      fields: [workspaceIngestionReservations.wikiSourceItemId],
+      references: [wikiSourceItems.id],
+    }),
   }),
 );
 
@@ -5727,7 +6289,8 @@ export const chatSessionsRelations = relations(chatSessions, ({ one, many }) => 
   modelRoutingAttempts: many(chatModelRoutingAttempts),
   sandboxUsage: many(chatSandboxUsage),
   browserProfileSessions: many(browserProfileSessions),
-  skills: many(chatSessionSkills),
+  skillBundles: many(chatSessionSkillBundles),
+  plugins: many(chatSessionPlugins),
   brainToolRuns: many(brainToolRuns),
   capabilityRuns: many(capabilityRuns),
   artifacts: many(chatArtifacts),
@@ -5764,7 +6327,7 @@ export const chatMessagesRelations = relations(chatMessages, ({ one, many }) => 
     fields: [chatMessages.taskId],
     references: [tasks.id],
   }),
-  activatedSkills: many(chatSessionSkills),
+  activatedSkillBundles: many(chatSessionSkillBundles),
   sandboxUsage: many(chatSandboxUsage),
   modelRoutingAttempts: many(chatModelRoutingAttempts),
 }));
@@ -5830,18 +6393,93 @@ export const browserProfileSessionsRelations = relations(browserProfileSessions,
   }),
 }));
 
-export const chatSessionSkillsRelations = relations(chatSessionSkills, ({ one }) => ({
+export const chatSessionSkillBundlesRelations = relations(chatSessionSkillBundles, ({ one }) => ({
   session: one(chatSessions, {
-    fields: [chatSessionSkills.chatSessionId],
+    fields: [chatSessionSkillBundles.chatSessionId],
     references: [chatSessions.id],
   }),
-  brain: one(brains, {
-    fields: [chatSessionSkills.brainRef],
-    references: [brains.id],
+  bundle: one(skillBundles, {
+    fields: [chatSessionSkillBundles.bundleId],
+    references: [skillBundles.id],
   }),
   activatedMessage: one(chatMessages, {
-    fields: [chatSessionSkills.activatedMessageId],
+    fields: [chatSessionSkillBundles.activatedMessageId],
     references: [chatMessages.id],
+  }),
+}));
+
+export const chatSessionPluginsRelations = relations(chatSessionPlugins, ({ one }) => ({
+  session: one(chatSessions, {
+    fields: [chatSessionPlugins.chatSessionId],
+    references: [chatSessions.id],
+  }),
+  plugin: one(plugins, {
+    fields: [chatSessionPlugins.pluginId],
+    references: [plugins.id],
+  }),
+}));
+
+export const skillBundlesRelations = relations(skillBundles, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [skillBundles.workspaceId],
+    references: [workspaces.id],
+  }),
+  files: many(skillBundleFiles),
+  installations: many(skillInstallations),
+  chatSnapshots: many(chatSessionSkillBundles),
+  pluginSkills: many(pluginSkills),
+}));
+
+export const skillBundleFilesRelations = relations(skillBundleFiles, ({ one }) => ({
+  bundle: one(skillBundles, {
+    fields: [skillBundleFiles.bundleId],
+    references: [skillBundles.id],
+  }),
+}));
+
+export const skillInstallationsRelations = relations(skillInstallations, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [skillInstallations.workspaceId],
+    references: [workspaces.id],
+  }),
+  bundle: one(skillBundles, {
+    fields: [skillInstallations.bundleId],
+    references: [skillBundles.id],
+  }),
+}));
+
+export const pluginsRelations = relations(plugins, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [plugins.workspaceId],
+    references: [workspaces.id],
+  }),
+  files: many(pluginFiles),
+  skills: many(pluginSkills),
+  chatSessions: many(chatSessionPlugins),
+}));
+
+export const pluginFilesRelations = relations(pluginFiles, ({ one }) => ({
+  plugin: one(plugins, {
+    fields: [pluginFiles.pluginId],
+    references: [plugins.id],
+  }),
+}));
+
+export const pluginSkillsRelations = relations(pluginSkills, ({ one }) => ({
+  plugin: one(plugins, {
+    fields: [pluginSkills.pluginId],
+    references: [plugins.id],
+  }),
+  bundle: one(skillBundles, {
+    fields: [pluginSkills.skillBundleId],
+    references: [skillBundles.id],
+  }),
+}));
+
+export const workspacePluginDataRelations = relations(workspacePluginData, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [workspacePluginData.workspaceId],
+    references: [workspaces.id],
   }),
 }));
 
@@ -5853,6 +6491,10 @@ export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
 export type WorkspaceCapability = typeof workspaceCapabilities.$inferSelect;
 export type WorkspaceBilling = typeof workspaceBilling.$inferSelect;
 export type WorkspaceIngestionReservation = typeof workspaceIngestionReservations.$inferSelect;
+export type WikiSource = typeof wikiSources.$inferSelect;
+export type WikiSourceItem = typeof wikiSourceItems.$inferSelect;
+export type WikiIngestJob = typeof wikiIngestJobs.$inferSelect;
+export type WikiSourceEventClaim = typeof wikiSourceEventClaims.$inferSelect;
 export type WikiPage = typeof wikiPages.$inferSelect;
 export type WikiPageVersion = typeof wikiPageVersions.$inferSelect;
 export type WikiTimelineEntry = typeof wikiTimelineEntries.$inferSelect;
@@ -5904,7 +6546,14 @@ export type ChatModelRoutingAttempt = typeof chatModelRoutingAttempts.$inferSele
 export type ChatSandboxUsage = typeof chatSandboxUsage.$inferSelect;
 export type BrowserProfile = typeof browserProfiles.$inferSelect;
 export type BrowserProfileSession = typeof browserProfileSessions.$inferSelect;
-export type ChatSessionSkill = typeof chatSessionSkills.$inferSelect;
+export type ChatSessionSkillBundle = typeof chatSessionSkillBundles.$inferSelect;
+export type ChatSessionPlugin = typeof chatSessionPlugins.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;
-export type Skill = typeof skills.$inferSelect;
+export type SkillBundle = typeof skillBundles.$inferSelect;
+export type SkillBundleFile = typeof skillBundleFiles.$inferSelect;
+export type SkillInstallation = typeof skillInstallations.$inferSelect;
+export type Plugin = typeof plugins.$inferSelect;
+export type PluginFile = typeof pluginFiles.$inferSelect;
+export type PluginSkill = typeof pluginSkills.$inferSelect;
+export type WorkspacePluginData = typeof workspacePluginData.$inferSelect;
 export type RepoConfig = typeof repoConfigs.$inferSelect;

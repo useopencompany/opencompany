@@ -42,8 +42,10 @@ type GmailPollCandidate = {
   accountEmail: string | null;
 };
 
-export async function listGmailPollCandidates(): Promise<GmailPollCandidate[]> {
-  const result = await getDb().execute(sql`
+export async function listGmailPollCandidates(
+  db: Pick<ReturnType<typeof getDb>, "execute"> = getDb(),
+): Promise<GmailPollCandidate[]> {
+  const result = await db.execute(sql`
     SELECT
       i.id AS "integrationId",
       i.user_workos_id AS "userWorkosId",
@@ -51,11 +53,19 @@ export async function listGmailPollCandidates(): Promise<GmailPollCandidate[]> {
     FROM goat.integrations i
     WHERE i.provider = 'gmail'
       AND i.status = 'connected'
-      AND EXISTS (
-        SELECT 1 FROM goat.brain_sources bs
-        WHERE bs.integration_id = i.id
-          AND bs.provider = 'gmail'
-          AND bs.enabled = true
+      AND (
+        EXISTS (
+          SELECT 1 FROM goat.brain_sources bs
+          WHERE bs.integration_id = i.id
+            AND bs.provider = 'gmail'
+            AND bs.enabled = true
+        )
+        OR EXISTS (
+          SELECT 1 FROM goat.wiki_sources ws
+          WHERE ws.integration_id = i.id
+            AND ws.provider = 'gmail'
+            AND ws.enabled = true
+        )
       )
   `);
   return rowsFromExecute<GmailPollCandidate>(result);

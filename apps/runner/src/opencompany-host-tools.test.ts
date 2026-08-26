@@ -98,6 +98,19 @@ describe("loadHostTools", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
+
+  it("rejects unsafe Skill file paths before crossing the runner host boundary", async () => {
+    const execute = vi.fn(async ({ request }: { request: ChatHostToolGatewayRequest }) => ({
+      ok: true as const,
+      result: request.operation === "bootstrap" ? bootstrap : {},
+    }));
+    const tools = await loadHostTools(context(), { execute });
+
+    expect(() =>
+      tools?.skills?.readFile?.({ skill: "sales", path: "../secrets", offset: 0, maxBytes: 64 }),
+    ).toThrow();
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
 });
 
 function context() {

@@ -121,6 +121,7 @@ describe("AcpHarness", () => {
     const onPermissionRequest = vi.fn(async () => ({
       outcome: { outcome: "selected" as const, optionId: "allow-once" },
     }));
+    const onEngineStopped = vi.fn(async () => undefined);
     const input = harnessInput(transport.sandbox, {
       mcpServers: [
         {
@@ -134,6 +135,7 @@ describe("AcpHarness", () => {
         runtimeEvents.push(...events);
       }),
       onPermissionRequest,
+      onEngineStopped,
       model: "claude-sonnet-5",
       reasoningEffort: "xhigh",
       permissionMode: "default",
@@ -183,6 +185,10 @@ describe("AcpHarness", () => {
       "session/prompt_result",
     ]);
     expect(transport.kill).toHaveBeenCalledWith(41);
+    expect(onEngineStopped).toHaveBeenCalledOnce();
+    expect(transport.kill.mock.invocationCallOrder[0]).toBeLessThan(
+      onEngineStopped.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it("reattaches to the running ACP process when the E2B command watch times out", async () => {

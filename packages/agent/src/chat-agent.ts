@@ -77,6 +77,9 @@ import {
   type ListActionsToolOutput,
   type ListSkillsToolInput,
   type ListSkillsToolOutput,
+  READ_SKILL_FILE_TOOL_NAME,
+  type ReadSkillFileToolInput,
+  type ReadSkillFileToolOutput,
   SAVE_TO_BRAIN_TOOL_NAME,
   type SaveToBrainToolInput,
   type SaveToBrainToolOutput,
@@ -120,6 +123,8 @@ import {
   LIST_ACTIONS_TOOL_DESCRIPTION,
   LIST_SKILLS_QUERY_DESCRIPTION,
   LIST_SKILLS_TOOL_DESCRIPTION,
+  READ_SKILL_FILE_PATH_DESCRIPTION,
+  READ_SKILL_FILE_TOOL_DESCRIPTION,
   SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION,
   SAVE_TO_BRAIN_CONTENT_DESCRIPTION,
   SAVE_TO_BRAIN_FALLBACK_CONTENT_DESCRIPTION,
@@ -275,6 +280,7 @@ export type SkillDispatcher = {
   catalog: readonly ChatSkillCatalogItem[];
   prelistedSkillIds?: readonly string[];
   execute: (input: { skill: string }) => Promise<UseSkillToolOutput>;
+  readFile?: (input: ReadSkillFileToolInput) => Promise<ReadSkillFileToolOutput>;
 };
 
 export type WorkflowDispatcher = {
@@ -1216,6 +1222,34 @@ export function createProductChatToolContext(input: {
         return skills.execute({ skill });
       },
     });
+    if (skills.readFile) {
+      tools[READ_SKILL_FILE_TOOL_NAME] = tool<ReadSkillFileToolInput, ReadSkillFileToolOutput>({
+        description: READ_SKILL_FILE_TOOL_DESCRIPTION,
+        inputSchema: jsonSchema<ReadSkillFileToolInput>({
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            skill: {
+              type: "string",
+              enum: skillIds,
+              description: USE_SKILL_ID_DESCRIPTION,
+            },
+            path: {
+              type: "string",
+              maxLength: 1_024,
+              description: READ_SKILL_FILE_PATH_DESCRIPTION,
+            },
+            offset: { type: "integer", minimum: 0 },
+            maxBytes: { type: "integer", minimum: 4, maximum: 64 * 1_024 },
+          },
+          required: ["skill", "path"],
+        }),
+        execute: async (args) => {
+          visibleToolActivity = true;
+          return skills.readFile!(args);
+        },
+      });
+    }
   }
 
   const actions = input.actions;

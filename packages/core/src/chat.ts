@@ -81,6 +81,7 @@ export type Conversation = {
   runtime: ConversationRuntime | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;
+  pinnedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };

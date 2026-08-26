@@ -26,11 +26,13 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  DatabaseZap,
   History,
   MoreHorizontal,
   Plus,
   Trash2,
 } from "lucide-react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   type ReactNode,
@@ -543,14 +545,24 @@ export function WikiTreeSidebar({
         <span className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Wiki
         </span>
-        <button
-          type="button"
-          title="New page"
-          onClick={() => onCreate(null, "page")}
-          className="rounded p-1 text-ink-subtle hover:bg-surface-sunken hover:text-ink"
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <Link
+            href="/wiki/sources"
+            title="Wiki sources"
+            aria-label="Wiki sources"
+            className="rounded p-1 text-ink-subtle hover:bg-surface-sunken hover:text-ink"
+          >
+            <DatabaseZap className="h-3.5 w-3.5" />
+          </Link>
+          <button
+            type="button"
+            title="New page"
+            onClick={() => onCreate(null, "page")}
+            className="rounded p-1 text-ink-subtle hover:bg-surface-sunken hover:text-ink"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
       {/* biome-ignore lint/a11y/noStaticElementInteractions: right-click target only; creation is reachable via the header button */}
       <div

@@ -116,14 +116,9 @@ const automationCommandMocks = vi.hoisted(() => ({
 }));
 
 const knowledgeCommandMocks = vi.hoisted(() => ({
-  listSkillCatalog: vi.fn(async () => {
-    const response = await globalThis.fetch("/api/skills");
-    if (!response.ok) throw new Error(`Skill catalog loading failed with HTTP ${response.status}.`);
-    const payload = (await response.json()) as {
-      skills?: Array<{ id: string; name: string; description: string }>;
-    };
-    return payload.skills ?? [];
-  }),
+  listSkillCatalog: vi.fn(
+    async () => [] as Array<{ id: string; name: string; description: string }>,
+  ),
 }));
 
 const headlessChatMocks = vi.hoisted(() => ({
@@ -137,6 +132,7 @@ const headlessChatMocks = vi.hoisted(() => ({
     }) => ({
       conversationId: input.clientConversationId,
       runId: "run_background_1",
+      completion: Promise.resolve(),
     }),
   ),
 }));
@@ -461,7 +457,8 @@ describe("Surface chat streaming UI", () => {
     automationCommandMocks.archiveSchedule.mockClear();
     automationCommandMocks.runSchedule.mockClear();
     automationCommandMocks.updateSchedule.mockClear();
-    knowledgeCommandMocks.listSkillCatalog.mockClear();
+    knowledgeCommandMocks.listSkillCatalog.mockReset();
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([]);
     headlessChatMocks.startBackground.mockClear();
     attachmentUploadMock.canonicalUpload.mockReset();
     attachmentUploadMock.canonicalUpload.mockResolvedValue({ id: "attachment_1" });
@@ -730,14 +727,31 @@ describe("Surface chat streaming UI", () => {
 
   it("starts a background chat from the main composer when the message starts with ampersand", async () => {
     const user = userEvent.setup();
-    let resolveChatResponse: (() => void) | null = null;
-    const chatResponseReady = new Promise<void>((resolve) => {
-      resolveChatResponse = resolve;
+    let resolveFirstCompletion: (() => void) | null = null;
+    let resolveSecondCompletion: (() => void) | null = null;
+    let resolveFirstLaunch:
+      | ((launch: { conversationId: string; runId: string; completion: Promise<void> }) => void)
+      | null = null;
+    const firstLaunch = new Promise<{
+      conversationId: string;
+      runId: string;
+      completion: Promise<void>;
+    }>((resolve) => {
+      resolveFirstLaunch = resolve;
     });
-    headlessChatMocks.startBackground.mockImplementationOnce(async (input) => {
-      await chatResponseReady;
-      return { conversationId: input.clientConversationId, runId: "run_background_1" };
+    const firstCompletion = new Promise<void>((resolve) => {
+      resolveFirstCompletion = resolve;
     });
+    const secondCompletion = new Promise<void>((resolve) => {
+      resolveSecondCompletion = resolve;
+    });
+    headlessChatMocks.startBackground
+      .mockImplementationOnce(async () => firstLaunch)
+      .mockImplementationOnce(async (input) => ({
+        conversationId: input.clientConversationId,
+        runId: "run_background_2",
+        completion: secondCompletion,
+      }));
 
     render(
       <>
@@ -785,13 +799,91 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
+    await waitFor(() => expect(textarea).toHaveFocus());
+    expect(textarea).not.toBeDisabled();
+
+    await user.type(textarea, "& Summarize Q4");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledTimes(2));
+    const secondBody = headlessChatMocks.startBackground.mock.calls[1]![0];
+    expect(secondBody).toMatchObject({ content: "Summarize Q4", model: DEFAULT_MODEL });
+    expect(screen.getByTestId("local-chat-states")).toHaveTextContent(
+      `${body.clientConversationId}:working`,
+    );
+    expect(screen.getByTestId("local-chat-states")).toHaveTextContent(
+      `${secondBody.clientConversationId}:working`,
+    );
+    expect(textarea).toHaveValue("");
+    expect(textarea).not.toBeDisabled();
+
     await act(async () => {
-      resolveChatResponse?.();
+      resolveFirstLaunch?.({
+        conversationId: body.clientConversationId,
+        runId: "run_background_1",
+        completion: firstCompletion,
+      });
+    });
+    await act(async () => {
+      resolveFirstCompletion?.();
     });
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByTestId("local-chat-states")).not.toHaveTextContent(
+        `${body.clientConversationId}:working`,
+      ),
+    );
+    expect(screen.getByTestId("local-chat-states")).toHaveTextContent(
+      `${secondBody.clientConversationId}:working`,
+    );
+    await act(async () => {
+      resolveSecondCompletion?.();
+    });
     await waitFor(() => expect(screen.getByTestId("local-chat-states")).toHaveTextContent("none"));
     expect(textarea).toHaveValue("");
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+  });
+
+  it("keeps an accepted background chat when live completion monitoring fails", async () => {
+    const user = userEvent.setup();
+    let rejectCompletion: ((error: Error) => void) | null = null;
+    const completion = new Promise<void>((_resolve, reject) => {
+      rejectCompletion = reject;
+    });
+    headlessChatMocks.startBackground.mockImplementationOnce(async (input) => ({
+      conversationId: input.clientConversationId,
+      runId: "run_background_1",
+      completion,
+    }));
+
+    render(
+      <>
+        <Surface
+          tasks={[]}
+          defaultModel={DEFAULT_MODEL}
+          initialChat={null}
+          userWorkosId="user_1"
+          workspaceId="workspace_1"
+        />
+        <LocalChatStatesProbe />
+        <OptimisticChatSummariesProbe />
+      </>,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    await user.type(textarea, "& Research Q3");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledOnce());
+    const body = headlessChatMocks.startBackground.mock.calls[0]![0];
+    await user.type(textarea, "Keep this new draft");
+    await act(async () => rejectCompletion?.(new Error("event stream disconnected")));
+
+    await waitFor(() => expect(screen.getByTestId("local-chat-states")).toHaveTextContent("none"));
+    expect(screen.getByTestId("optimistic-chat-summaries")).toHaveTextContent(
+      `${body.clientConversationId}:Research Q3`,
+    );
+    expect(textarea).toHaveValue("Keep this new draft");
   });
 
   it("starts a bare ampersand message from Home defaults instead of the active Codex runtime", async () => {
@@ -905,7 +997,6 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") return Response.json({ skills: [] });
       if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
           {
@@ -1257,23 +1348,15 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("offers Brain skill mentions when continuing a session-backed task", async () => {
+  it("offers Skill mentions when continuing a session-backed task", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/skills") {
-        return Response.json({
-          skills: [
-            {
-              id: "product-work",
-              name: "Product work",
-              description: "Shape and ship product changes.",
-            },
-          ],
-        });
-      }
-      return Response.json({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
+      {
+        id: "product-work",
+        name: "Product work",
+        description: "Shape and ship product changes.",
+      },
+    ]);
 
     render(
       <Surface
@@ -1296,14 +1379,14 @@ describe("Surface chat streaming UI", () => {
     );
 
     const textarea = screen.getByPlaceholderText("Reply...");
-    await user.type(textarea, "@skill/prod");
+    await user.type(textarea, "/prod");
     await user.click(await screen.findByRole("option", { name: /Product work/i }));
     await user.type(textarea, "investigate the mention menu");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
       expect(chatMock.sendMessage).toHaveBeenCalledWith({
-        text: "@skill/product-work investigate the mention menu",
+        text: "/product-work investigate the mention menu",
         metadata: { mentions: [{ kind: "skill", id: "product-work" }] },
       }),
     );
@@ -2126,23 +2209,16 @@ describe("Surface chat streaming UI", () => {
     });
   });
 
-  it("submits selected Brain skills to cloud Codex", async () => {
+  it("submits selected Skills to cloud Codex", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/skills") {
-        return new Response(
-          JSON.stringify({
-            skills: [
-              {
-                id: "coding-work",
-                name: "Coding work",
-                description: "How coding work should happen.",
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "How coding work should happen.",
+      },
+    ]);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       return new Response(
         JSON.stringify({
           ok: true,
@@ -2168,13 +2244,13 @@ describe("Surface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
     const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
-    await user.type(textarea, "@skill/coding");
+    await user.type(textarea, "/coding");
     await user.click(await screen.findByRole("option", { name: /coding work/i }));
     await user.type(textarea, "implement this");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
-      text: "@skill/coding-work implement this",
+      text: "/coding-work implement this",
       metadata: {
         mentions: [{ kind: "skill", id: "coding-work" }],
       },
@@ -2862,19 +2938,15 @@ describe("Surface chat streaming UI", () => {
 
   it("starts a selected workflow in the background without creating a chat turn", async () => {
     const user = userEvent.setup();
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
+      {
+        id: "smooth-shadow-ring",
+        name: "Smooth shadow ring",
+        description: "Polish elevation styles.",
+      },
+    ]);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") {
-        return Response.json({
-          skills: [
-            {
-              id: "smooth-shadow-ring",
-              name: "Smooth shadow ring",
-              description: "Polish elevation styles.",
-            },
-          ],
-        });
-      }
       if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
           {
@@ -2928,7 +3000,7 @@ describe("Surface chat streaming UI", () => {
     expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="workflow"]')).toHaveLength(1);
     expect(overlay).toHaveTextContent("#morning-test");
     expect(textarea).toHaveClass("text-transparent");
-    await user.type(textarea, "run today's checks with @");
+    await user.type(textarea, "run today's checks with /");
     await user.click(await screen.findByRole("option", { name: /Smooth shadow ring/i }));
     await user.type(textarea, "{Enter}");
 
@@ -2936,7 +3008,7 @@ describe("Surface chat streaming UI", () => {
     expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
       "morning-test",
       {
-        description: "#morning-test run today's checks with @skill/smooth-shadow-ring",
+        description: "#morning-test run today's checks with /smooth-shadow-ring",
         skillIds: ["smooth-shadow-ring"],
       },
       { scopeKey: "workspace_1" },
@@ -2952,7 +3024,6 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") return Response.json({ skills: [] });
       if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
           {
@@ -3035,7 +3106,6 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") return Response.json({ skills: [] });
       if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
           {
@@ -3114,7 +3184,6 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") return Response.json({ skills: [] });
       if (url === "/api/workflows") return Response.json({ workflows: [] });
       void init;
       return Response.json({});
@@ -3164,16 +3233,19 @@ describe("Surface chat streaming UI", () => {
   it("does not load or offer workflow mentions when Tasks & Workflows is disabled", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/skills") return Response.json({ skills: [] });
-      return Response.json({
-        workflows: [
-          {
-            id: "morning-test",
-            name: "Morning Test",
-            description: "Run the morning checks.",
-          },
-        ],
-      });
+      return Response.json(
+        String(input) === "/api/workflows"
+          ? {
+              workflows: [
+                {
+                  id: "morning-test",
+                  name: "Morning Test",
+                  description: "Run the morning checks.",
+                },
+              ],
+            }
+          : {},
+      );
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -3182,10 +3254,9 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "#morning");
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/skills")).toBe(true),
-    );
+    await new Promise((resolve) => setTimeout(resolve, 120));
 
+    expect(knowledgeCommandMocks.listSkillCatalog).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/workflows")).toBe(false);
     expect(screen.queryByRole("option", { name: /Morning Test/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /#task/i })).not.toBeInTheDocument();
@@ -3233,51 +3304,42 @@ describe("Surface chat streaming UI", () => {
     });
   });
 
-  it("selects, highlights, and reconciles multiple Brain skill mentions", async () => {
+  it("selects, highlights, and reconciles multiple Skill mentions", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            skills: [
-              {
-                id: "coding-work",
-                name: "Coding work",
-                description: "Use focused verification for code changes.",
-              },
-              {
-                id: "writing-work",
-                name: "Writing work",
-                description: "Write clear product copy.",
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "Use focused verification for code changes.",
+      },
+      {
+        id: "writing-work",
+        name: "Writing work",
+        description: "Write clear product copy.",
+      },
+    ]);
 
     render(
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
     const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
-    await user.type(textarea, "@verification");
+    await user.type(textarea, "/verification");
     const codingOption = await screen.findByRole("option", { name: /coding work/i });
     await user.click(codingOption);
-    await user.type(textarea, "then @skill/writing");
+    await user.type(textarea, "then /writing");
     await user.click(await screen.findByRole("option", { name: /writing work/i }));
 
-    expect(textarea).toHaveValue("@skill/coding-work then @skill/writing-work ");
+    expect(textarea).toHaveValue("/coding-work then /writing-work ");
     const overlay = textarea.parentElement?.querySelector(
       '[data-testid="composer-mention-overlay"]',
     );
     expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="skill"]')).toHaveLength(2);
-    expect(overlay).toHaveTextContent("@skill/coding-work then @skill/writing-work");
+    expect(overlay).toHaveTextContent("/coding-work then /writing-work");
     expect(textarea).toHaveClass("text-transparent");
 
-    fireEvent.change(textarea, { target: { value: "@skill/coding-work then continue" } });
-    expect(textarea).toHaveValue("@skill/coding-work then continue");
+    fireEvent.change(textarea, { target: { value: "/coding-work then continue" } });
+    expect(textarea).toHaveValue("/coding-work then continue");
     const reconciledOverlay = textarea.parentElement?.querySelector(
       '[data-testid="composer-mention-overlay"]',
     );
@@ -3287,44 +3349,57 @@ describe("Surface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
-      text: "@skill/coding-work then continue",
+      text: "/coding-work then continue",
       metadata: {
         mentions: [{ kind: "skill", id: "coding-work" }],
       },
     });
   });
 
-  it("resolves exact Brain skill mentions pasted into the composer", async () => {
+  it("does not offer Skills from the @ mention menu", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            skills: [
-              {
-                id: "product-feature",
-                name: "Product feature",
-                description: "Plan and shape a product feature.",
-              },
-              {
-                id: "add-integration-to-main-chat",
-                name: "Add integration to main chat",
-                description: "Add a new integration to the main chat.",
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "Use focused verification for code changes.",
+      },
+    ]);
 
     render(
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
     const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
-    const pastedText =
-      "@skill/product-feature use @skill/add-integration-to-main-chat to add attio";
+    await user.type(textarea, "/coding");
+    await screen.findByRole("option", { name: /coding work/i });
+    await user.clear(textarea);
+    await user.type(textarea, "@coding");
+
+    expect(screen.queryByRole("option", { name: /coding work/i })).not.toBeInTheDocument();
+  });
+
+  it("resolves exact Skill mentions pasted into the composer", async () => {
+    const user = userEvent.setup();
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
+      {
+        id: "product-feature",
+        name: "Product feature",
+        description: "Plan and shape a product feature.",
+      },
+      {
+        id: "add-integration-to-main-chat",
+        name: "Add integration to main chat",
+        description: "Add a new integration to the main chat.",
+      },
+    ]);
+
+    render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const pastedText = "/product-feature use /add-integration-to-main-chat to add attio";
     fireEvent.paste(textarea, {
       clipboardData: {
         getData: (format: string) => (format === "text/plain" ? pastedText : ""),
@@ -3349,41 +3424,32 @@ describe("Surface chat streaming UI", () => {
     });
   });
 
-  it("retries the Brain skill catalog on the next mention-menu open after a failed fetch", async () => {
+  it("retries the Skill catalog on the next mention-menu open after a failed fetch", async () => {
     const user = userEvent.setup();
     let catalogCalls = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/skills") {
-        catalogCalls += 1;
-        if (catalogCalls === 1) return new Response("nope", { status: 500 });
-        return new Response(
-          JSON.stringify({
-            skills: [
-              {
-                id: "coding-work",
-                name: "Coding work",
-                description: "Use focused verification for code changes.",
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      return new Response(JSON.stringify({}), { status: 200 });
+    knowledgeCommandMocks.listSkillCatalog.mockImplementation(async () => {
+      catalogCalls += 1;
+      if (catalogCalls === 1) throw new Error("Skill catalog unavailable.");
+      return [
+        {
+          id: "coding-work",
+          name: "Coding work",
+          description: "Use focused verification for code changes.",
+        },
+      ];
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
     const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
-    await user.type(textarea, "@coding");
+    await user.type(textarea, "/coding");
     await waitFor(() => expect(catalogCalls).toBe(1));
     expect(screen.queryByRole("option", { name: /coding work/i })).not.toBeInTheDocument();
 
     await user.clear(textarea);
-    await user.type(textarea, "@coding");
+    await user.type(textarea, "/coding");
     await screen.findByRole("option", { name: /coding work/i });
     expect(catalogCalls).toBe(2);
   });
@@ -4099,7 +4165,6 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/skills") return Response.json({ skills: [] });
       if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
           {
