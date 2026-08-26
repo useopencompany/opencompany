@@ -403,14 +403,19 @@ export function isCommandTimeoutError(error: unknown) {
 
 // E2B can lose the RPC watch for a still-running background command without raising its regular
 // TimeoutError (which means the command exceeded timeoutMs and was killed). The observed provider
-// shape is an Unknown-code SandboxError. That stream loss is recoverable by fencing the old process
-// and resuming the durable engine turn; other SandboxErrors remain terminal to avoid replaying
+// shapes are Unknown-code SandboxErrors for a timed-out watch or an unexpectedly closed control
+// socket. Those stream losses are recoverable by reconnecting or fencing the old process and
+// resuming the durable engine turn; other SandboxErrors remain terminal to avoid replaying
 // arbitrary command failures.
 export function isRetryableCommandStreamError(error: unknown) {
-  return Boolean(
-    error instanceof Error &&
-      error.name === "SandboxError" &&
-      /^2:\s*\[unknown\]\s+the operation timed out\.?$/i.test(error.message.trim()),
+  if (!(error instanceof Error) || error.name !== "SandboxError") return false;
+
+  const message = error.message.trim();
+  return (
+    /^2:\s*\[unknown\]\s+the operation timed out\.?$/i.test(message) ||
+    /^2:\s*\[unknown\]\s+the socket connection was closed unexpectedly\.(?:\s+For more information, pass `verbose:\s*true` in the second argument to fetch\(\))?$/i.test(
+      message,
+    )
   );
 }
 
