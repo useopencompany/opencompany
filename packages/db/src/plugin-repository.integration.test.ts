@@ -27,6 +27,7 @@ describe("Postgres immutable Plugin repository", () => {
     for (const migrationName of [
       "0226_goat_immutable_skill_bundles.sql",
       "0228_goat_plugins.sql",
+      "0232_workspace_authored_skills.sql",
     ]) {
       const migration = await readFile(
         path.resolve(import.meta.dirname, "../../..", `drizzle/${migrationName}`),
