@@ -2,7 +2,7 @@ name: PR Gate
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "feat/**"]
 
 # Pull request code is untrusted. This caller and the reusable verifier must stay
 # free of secrets, OIDC, production environments, and deploy permissions.
