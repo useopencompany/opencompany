@@ -67,6 +67,7 @@ describe("headless Chat host tools", () => {
           lastName: "Lovelace",
           timezone: "Europe/London",
           taskToolsEnabled: true,
+          skillToolsEnabled: true,
           wikiEnabled: true,
         })),
         browserProfilesAvailable: () => true,
