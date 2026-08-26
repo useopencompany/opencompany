@@ -422,6 +422,72 @@ describe("createExternalEngineProjector", () => {
     );
   });
 
+  it("persists Codex ACP MCP arguments and results in the durable tool part", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const normalizer = createAcpEventNormalizer({ engineName: "Codex" });
+    normalizer.beginRun("codex_session_1");
+    const projector = createExternalEngineProjector({
+      target: projectorTarget(),
+      redact: (value) => value.replaceAll("sensitive-value", "[redacted]"),
+      normalizeEvent: normalizer.normalize,
+    });
+
+    await projector.push([
+      {
+        method: "session/update",
+        params: {
+          sessionId: "codex_session_1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "mcp_1",
+            kind: "execute",
+            title: "mcp.opencompany.use_action",
+            status: "completed",
+            rawInput: {
+              server: "opencompany",
+              tool: "use_action",
+              arguments: { action: "neon.query", input: "sensitive-value" },
+            },
+            rawOutput: {
+              result: { content: [{ type: "text", text: "Returned sensitive-value" }] },
+              error: null,
+            },
+            _meta: { is_mcp_tool_call: true },
+          },
+        },
+      },
+    ]);
+
+    const persistedDebugTrace = messageUpdates()
+      .flatMap((query) => queryValues(query))
+      .filter(
+        (value): value is string =>
+          typeof value === "string" && value.includes("goat.codex_chat.debug.v1"),
+      )
+      .at(-1);
+    expect(persistedDebugTrace).toBeDefined();
+    expect(JSON.parse(persistedDebugTrace ?? "{}")).toMatchObject({
+      uiMessageParts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_MCP_TOOL_NAME,
+          toolCallId: "mcp_1",
+          state: "output-available",
+          input: {
+            server: "opencompany",
+            tool: "use_action",
+            arguments: { action: "neon.query", input: "[redacted]" },
+          },
+          output: {
+            status: "completed",
+            result: expect.stringContaining("Returned [redacted]"),
+          },
+        },
+      ],
+    });
+    expect(persistedDebugTrace).not.toContain("sensitive-value");
+  });
+
   it("debounces durable chat_messages writes across rapid assistant deltas", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     let clock = 0;

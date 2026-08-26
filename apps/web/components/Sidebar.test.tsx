@@ -185,7 +185,7 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("link", { name: "Changelog" })).not.toBeInTheDocument();
   });
 
-  it("opens the account menu with settings, changelog, and sign out", async () => {
+  it("opens the account menu with settings, changelog, docs, and sign out", async () => {
     const user = userEvent.setup();
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
@@ -202,6 +202,11 @@ describe("Sidebar", () => {
       "href",
       "/changelog",
     );
+    const docs = within(menu).getByRole("link", { name: "Docs" });
+    expect(docs).toHaveAttribute("href", "https://docs.opencompany.cloud");
+    expect(docs).toHaveAttribute("target", "_blank");
+    expect(docs).toHaveAttribute("rel", "noreferrer noopener");
+    expect(docs.previousElementSibling).toHaveTextContent("Changelog");
     expect(within(menu).getByRole("link", { name: "Sign out" })).toHaveAttribute(
       "href",
       "/auth/sign-out",
