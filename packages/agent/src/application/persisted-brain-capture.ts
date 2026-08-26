@@ -1,6 +1,6 @@
 import {
-  ACTION_HOST_TOOL_CONTRACT_VERSION,
-  CHAT_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSIONS,
+  CHAT_HOST_TOOL_CONTRACT_VERSIONS,
   type CodexBrainCaptureGatewayRequest,
   type CodexBrainCaptureGatewayResponse,
 } from "@opencompany/agent-runtime";
@@ -105,8 +105,8 @@ async function loadCodexBrainCaptureContext(
       and(
         eq(codexChatSessions.id, command.sessionId),
         inArray(codexChatSessions.hostToolContractVersion, [
-          ACTION_HOST_TOOL_CONTRACT_VERSION,
-          CHAT_HOST_TOOL_CONTRACT_VERSION,
+          ...ACTION_HOST_TOOL_CONTRACT_VERSIONS,
+          ...CHAT_HOST_TOOL_CONTRACT_VERSIONS,
         ]),
         eq(codexChatTurns.status, "running"),
       ),
