@@ -132,7 +132,7 @@ export class HeadlessChatUiProjector {
         const toolCall = {
           toolCallId,
           toolName: event.payload.kind,
-          input: { action: event.payload.action ?? event.payload.kind },
+          input: event.payload.input ?? { action: event.payload.action ?? event.payload.kind },
         };
         this.activeToolCalls.set(toolCallId, toolCall);
         chunks.push(...this.endText(), {
@@ -146,6 +146,26 @@ export class HeadlessChatUiProjector {
         toolCallId,
       });
       return chunks;
+    }
+
+    if (event.type === "approval.resolved" && event.payload.toolCallId) {
+      if (!this.activeToolCalls.has(event.payload.toolCallId)) return [];
+      this.activeToolCalls.delete(event.payload.toolCallId);
+      return event.payload.resolution === "approved"
+        ? [
+            {
+              type: "tool-output-available",
+              toolCallId: event.payload.toolCallId,
+              output: { approved: true },
+            },
+          ]
+        : [
+            {
+              type: "tool-output-error",
+              toolCallId: event.payload.toolCallId,
+              errorText: "Action denied by user.",
+            },
+          ];
     }
 
     if (event.type === "run.failed") {

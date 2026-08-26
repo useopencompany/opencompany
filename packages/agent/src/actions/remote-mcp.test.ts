@@ -311,7 +311,7 @@ describe("resolveRemoteMcpActions", () => {
     );
   });
 
-  it("keeps uncurated tools on Ask unless an explicit per-tool override promotes them", async () => {
+  it("never promotes uncurated tools past Ask through per-tool overrides", async () => {
     const discoverySnapshot = [
       discoveredTool("looks_read_only", {
         inputSchema: { type: "object" },
@@ -345,7 +345,7 @@ describe("resolveRemoteMcpActions", () => {
       ["write", "ask"],
     ]);
 
-    const promoted = await resolveRemoteMcpActions(
+    const overridden = await resolveRemoteMcpActions(
       identity,
       registration({
         discoverySnapshot,
@@ -354,9 +354,9 @@ describe("resolveRemoteMcpActions", () => {
         ),
       }),
     );
-    expect(promoted?.actions[0]).toMatchObject({
+    expect(overridden?.actions[0]).toMatchObject({
       id: "plugin:linear:linear.looks_read_only",
-      permissionMode: "on",
+      permissionMode: "ask",
     });
   });
 });

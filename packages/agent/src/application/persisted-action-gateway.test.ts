@@ -7,7 +7,11 @@ import {
   type ResolvedAction,
   type ResolvedActionCatalog,
 } from "../actions/types";
-import { executeActionGateway, executeActionHostGateway } from "./persisted-action-gateway";
+import {
+  executeActionGateway,
+  executeActionHostGateway,
+  executeActionPrincipalGateway,
+} from "./persisted-action-gateway";
 
 function listRequest(source?: string): ActionGatewayRequest {
   return {
@@ -35,7 +39,7 @@ describe("executeActionGateway", () => {
     vi.unstubAllEnvs();
   });
 
-  it("lists connected integration reads and enabled managed capability reads", async () => {
+  it("lists the full interactive catalog for external engines", async () => {
     const readAction = createReadAction();
     const catalog: ResolvedActionCatalog = {
       providers: [
@@ -85,6 +89,7 @@ describe("executeActionGateway", () => {
       ok: true,
       sources: [
         { id: "gmail", kind: "integration", label: "Gmail", description: "Email" },
+        { id: "slack", kind: "integration", label: "Slack", description: "Messages" },
         { id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" },
         { id: "posthog", kind: "integration", label: "PostHog", description: "Analytics" },
       ],
@@ -185,7 +190,7 @@ describe("executeActionGateway", () => {
     );
   });
 
-  it("includes Neon row queries only after their read-only permission is On", async () => {
+  it("includes ask-mode integration actions in the external-engine catalog", async () => {
     const queryAction = createReadAction("neon.run_sql", "neon");
     queryAction.capability = "query";
     const catalog: ResolvedActionCatalog = {
@@ -217,7 +222,173 @@ describe("executeActionGateway", () => {
           resolveCatalog: vi.fn(async () => catalog),
         },
       }),
-    ).resolves.toEqual({ ok: true, sources: [] });
+    ).resolves.toEqual({
+      ok: true,
+      sources: [{ id: "neon", kind: "integration", label: "Neon", description: "Database" }],
+    });
+  });
+
+  it("persists ask approval before interactive execution and dispatches only after approval", async () => {
+    const action = createReadAction("gmail.send");
+    action.capability = "write";
+    action.effects = ACTION_EFFECTS_WRITE;
+    action.permissionMode = "ask";
+    const catalog: ResolvedActionCatalog = {
+      providers: [{ id: "gmail", kind: "integration", label: "Gmail", description: "Email" }],
+      actions: [action],
+    };
+    const registerApproval = vi
+      .fn()
+      .mockResolvedValueOnce({
+        actionId: action.id,
+        sourceId: action.provider,
+        capabilityId: action.capability,
+        inputHash: "input_hash",
+        status: "pending" as const,
+      })
+      .mockResolvedValueOnce({
+        actionId: action.id,
+        sourceId: action.provider,
+        capabilityId: action.capability,
+        inputHash: "input_hash",
+        status: "approved" as const,
+      });
+    const request = {
+      operation: "execute" as const,
+      sessionId: "session_approval",
+      turnId: "turn_approval",
+      action: action.id,
+      params: { to: "customer@example.com" },
+      invocationId: "call_approval",
+    };
+    const dependencies = {
+      loadContext: vi.fn(async () => interactiveContext),
+      resolveCatalog: vi.fn(async () => catalog),
+      registerApproval,
+      claimInvocation: admittedInvocation,
+    };
+
+    await expect(
+      executeActionGateway({ request, signal: new AbortController().signal, dependencies }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "approval_required" } });
+    expect(action.execute).not.toHaveBeenCalled();
+
+    await expect(
+      executeActionGateway({ request, signal: new AbortController().signal, dependencies }),
+    ).resolves.toMatchObject({ ok: true, action: action.id });
+    expect(action.execute).toHaveBeenCalledOnce();
+    expect(registerApproval).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not ask again when an invocation is already approved", async () => {
+    const action = createReadAction("gmail.send");
+    action.capability = "write";
+    action.effects = ACTION_EFFECTS_WRITE;
+    action.permissionMode = "ask";
+
+    await expect(
+      executeActionHostGateway({
+        request: {
+          operation: "approval",
+          sessionId: "session_approval",
+          turnId: "turn_approval",
+          action: action.id,
+          params: { to: "customer@example.com" },
+          invocationId: "call_approval",
+        },
+        signal: new AbortController().signal,
+        dependencies: {
+          loadContext: vi.fn(async () => interactiveContext),
+          resolveCatalog: vi.fn(async () => ({
+            providers: [
+              {
+                id: "gmail" as const,
+                kind: "integration" as const,
+                label: "Gmail",
+                description: "Email",
+              },
+            ],
+            actions: [action],
+          })),
+          registerApproval: vi.fn(async () => ({
+            actionId: action.id,
+            sourceId: action.provider,
+            capabilityId: action.capability,
+            inputHash: "input_hash",
+            status: "approved" as const,
+          })),
+        },
+      }),
+    ).resolves.toEqual({ ok: true, needsApproval: false });
+  });
+
+  it("auto-denies ask actions through the headless gateway and records the decision", async () => {
+    const action = createReadAction("gmail.send");
+    action.capability = "write";
+    action.effects = ACTION_EFFECTS_WRITE;
+    action.permissionMode = "ask";
+    const registerApproval = vi.fn(async () => ({
+      actionId: action.id,
+      sourceId: action.provider,
+      capabilityId: action.capability,
+      inputHash: "input_hash",
+      status: "denied" as const,
+    }));
+    const dependencies = {
+      resolveCatalog: vi.fn(async () => ({
+        providers: [
+          {
+            id: "gmail" as const,
+            kind: "integration" as const,
+            label: "Gmail",
+            description: "Email",
+          },
+        ],
+        actions: [action],
+      })),
+      registerApproval,
+    };
+    const principal = { ...context, policy: "headless" as const };
+    const request = {
+      sessionId: "task_session",
+      turnId: "task_turn",
+      action: action.id,
+      params: { to: "customer@example.com" },
+      invocationId: "task_call",
+    };
+
+    await expect(
+      executeActionPrincipalGateway({
+        request: { ...request, operation: "approval" },
+        principal,
+        signal: new AbortController().signal,
+        dependencies,
+      }),
+    ).resolves.toEqual({ ok: true, needsApproval: false });
+    await expect(
+      executeActionPrincipalGateway({
+        request: { ...request, operation: "execute" },
+        principal,
+        signal: new AbortController().signal,
+        dependencies,
+      }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "not_permitted" } });
+    expect(registerApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        run: {
+          sessionId: "task_session",
+          runId: "task_turn",
+          actorId: "user_1",
+          workspaceId: "workspace_1",
+          policy: "headless",
+        },
+        actionId: "gmail.send",
+        sourceId: "gmail",
+        capabilityId: "write",
+        decision: "denied",
+      }),
+    );
+    expect(action.execute).not.toHaveBeenCalled();
   });
 
   it("reuses the canonical executor with host-derived identity", async () => {

@@ -120,6 +120,8 @@ describe("buildCodexAcpCommandEnv", () => {
     const commandEnv = buildCodexAcpCommandEnv({
       auth,
       codexHome: "/home/user/.codex-home",
+      mcpServers: [],
+      toolTimeoutMs: 10_800_000,
     });
 
     expect(commandEnv).toMatchObject({
@@ -136,6 +138,38 @@ describe("buildCodexAcpCommandEnv", () => {
           base_url: "https://runner.example.com/broker/openai/v1",
           env_key: "LLM_BROKER_TOKEN",
           wire_api: "responses",
+        },
+      },
+    });
+  });
+
+  it("sets the ACP gateway timeout in Codex's mcp_servers config", () => {
+    const config = buildCodexJsonConfigForAuth(
+      {
+        kind: "chatgpt",
+        authJson: {},
+        credentialLastRotatedAt: null,
+        brokered: false,
+      },
+      {
+        mcpServers: [
+          {
+            name: "opencompany",
+            type: "http",
+            url: "https://runner.example.com/internal/goat/acp-tools",
+            headers: [{ name: "x-opencompany-tool-ticket", value: "gateway-ticket" }],
+          },
+        ],
+        toolTimeoutMs: 10_800_000,
+      },
+    );
+
+    expect(config).toMatchObject({
+      mcp_servers: {
+        opencompany: {
+          url: "https://runner.example.com/internal/goat/acp-tools",
+          http_headers: { "x-opencompany-tool-ticket": "gateway-ticket" },
+          tool_timeout_sec: 10_800,
         },
       },
     });

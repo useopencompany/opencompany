@@ -522,6 +522,9 @@ describe("runCodexChatTurn over ACP", () => {
     );
     const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
     expect(harnessInput.task).toContain("list_actions and use_action");
+    expect(harnessInput.task).toContain("Actions may modify connected services");
+    expect(harnessInput.task).toContain("denial is a normal outcome");
+    expect(harnessInput.task).not.toContain("cannot modify connected services");
     expect(harnessInput.task).toContain("save_to_brain");
     const [mcpServer] = harnessInput.mcpServers;
     expect(mcpServer).toMatchObject({

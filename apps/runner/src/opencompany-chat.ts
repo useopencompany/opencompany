@@ -1,7 +1,3 @@
-import { resolveActionCatalog } from "@opencompany/agent/actions/catalog";
-import { executeAction } from "@opencompany/agent/actions/execute";
-import { projectActionCatalog } from "@opencompany/agent/actions/policy";
-import type { ResolvedActionCatalog } from "@opencompany/agent/actions/types";
 import {
   CHAT_MAX_STEPS,
   CHAT_MAX_STEPS_WITH_SANDBOX,
@@ -11,7 +7,6 @@ import {
   TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
 } from "@opencompany/agent/chat-agent";
 import type {
-  ChatActionCatalog,
   ChatUiMessage,
   StoredChatMessage,
   WebFetchToolOutput,
@@ -966,58 +961,12 @@ async function resolveProductChatRuntime(input: {
     brain = brains.find((candidate) => candidate.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
   }
 
-  const resolved = await resolveActionCatalog({
-    userWorkosId: turn.userWorkosId,
-    workspaceId,
-  }).catch(() => ({ providers: [], actions: [] }) as ResolvedActionCatalog);
-  const onCatalog = projectActionCatalog(resolved, "headless");
-  const dispatcherCatalog: ChatActionCatalog = {
-    sources: onCatalog.providers.map((source) => ({
-      ...source,
-      kind: source.kind ?? "integration",
-    })),
-    actions: onCatalog.actions.map((action) => ({
-      id: action.id,
-      source: action.provider,
-      description: action.description,
-      params: action.params,
-      permissionMode: action.permissionMode,
-    })),
-  };
-  const directActionDispatcher =
-    dispatcherCatalog.actions.length > 0
-      ? {
-          catalog: dispatcherCatalog,
-          execute: (call: {
-            action: string;
-            params: Record<string, unknown>;
-            toolCallId: string;
-          }) =>
-            executeAction({
-              catalog: onCatalog,
-              actionId: call.action,
-              params: call.params,
-              userWorkosId: turn.userWorkosId,
-              workspaceId,
-              chatSessionId: session.chatSessionId,
-              toolCallId: call.toolCallId,
-              sourceTurnId: turn.id,
-              sourceMessageId: turn.assistantMessageId,
-              sourceEngine: "opencompany",
-              signal,
-              currentDate: new Date(),
-              userTimezone: "UTC",
-            }),
-        }
-      : null;
-  const actionDispatcher = taskContext
-    ? directActionDispatcher
-    : await createActionDispatcher({
-        sessionId: session.id,
-        turnId: turn.id,
-        signal,
-        approvalContinuation: Boolean(turn.settings.approvalContinuation),
-      });
+  const actionDispatcher = await createActionDispatcher({
+    sessionId: session.id,
+    turnId: turn.id,
+    signal,
+    approvalContinuation: Boolean(turn.settings.approvalContinuation),
+  });
   const hostTools = taskContext
     ? null
     : await loadHostTools({

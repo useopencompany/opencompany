@@ -825,6 +825,103 @@ describe("Postgres Chat repositories", () => {
     ]);
   });
 
+  it("resolves a gateway approval without pausing its running engine turn", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "live-gateway-approval",
+      content: "Send the customer update",
+      engine: "codex",
+      model: "provider/model",
+    });
+    await database.query(`UPDATE goat.codex_chat_turns SET status = 'running' WHERE id = $1`, [
+      created.runId,
+    ]);
+    await database.query(
+      `INSERT INTO goat.run_approvals (id, run_id, tool_call_id, kind, prompt, options)
+       VALUES (
+         'gateway_approval_1', $1, 'gateway_tool_call_1', 'use_action',
+         'Approve gmail.send?', '["approved","denied"]'
+       )`,
+      [created.runId],
+    );
+    await database.query(
+      `INSERT INTO goat.action_turns (
+         id, session_id, turn_id, user_workos_id, workspace_id, policy,
+         approval_records, expires_at
+       ) VALUES (
+         'action_turn_1', $1, $2, 'user_1', 'workspace_1', 'foregroundInteractive',
+         jsonb_build_object(
+           'gateway_tool_call_1',
+           jsonb_build_object(
+             'actionId', 'gmail.send',
+             'sourceId', 'gmail',
+             'capabilityId', 'write',
+             'inputHash', repeat('a', 64),
+             'status', 'pending',
+             'requestedAt', '2026-08-10T19:59:00.000Z'
+           )
+         ),
+         '2026-08-11T02:00:00Z'
+       )`,
+      [created.conversationId, created.runId],
+    );
+
+    const command = {
+      runId: created.runId,
+      approvalId: "gateway_approval_1",
+      resolution: "approved" as const,
+    };
+    await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
+      resolution: "approved",
+      idempotentReplay: false,
+    });
+    await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
+      idempotentReplay: true,
+    });
+
+    expect(
+      await database.query<{
+        status: string;
+        approval_status: string;
+        resolved_at: string;
+      }>(
+        `SELECT run.status,
+                action.approval_records -> 'gateway_tool_call_1' ->> 'status' AS approval_status,
+                action.approval_records -> 'gateway_tool_call_1' ->> 'resolvedAt' AS resolved_at
+         FROM goat.codex_chat_turns AS run
+         JOIN goat.action_turns AS action ON action.turn_id = run.id
+         WHERE run.id = $1`,
+        [created.runId],
+      ),
+    ).toMatchObject({
+      rows: [
+        {
+          status: "running",
+          approval_status: "approved",
+          resolved_at: "2026-08-10T20:00:00.000Z",
+        },
+      ],
+    });
+    expect(
+      await database.query<{ type: string; payload: Record<string, unknown> }>(
+        `SELECT type, payload
+         FROM goat.run_events
+         WHERE run_id = $1 AND type = 'approval.resolved'`,
+        [created.runId],
+      ),
+    ).toMatchObject({
+      rows: [
+        {
+          type: "approval.resolved",
+          payload: {
+            approvalId: "gateway_approval_1",
+            toolCallId: "gateway_tool_call_1",
+            resolution: "approved",
+          },
+        },
+      ],
+    });
+  });
+
   it("fences Attempts and allocates semantic event cursors monotonically per Run", async () => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "send-worker",
@@ -1738,6 +1835,18 @@ const BASE_SCHEMA = `
     status text NOT NULL,
     approval_expires_at timestamptz,
     approved_at timestamptz,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE goat.action_turns (
+    id text PRIMARY KEY,
+    session_id text NOT NULL,
+    turn_id text NOT NULL,
+    user_workos_id text NOT NULL,
+    workspace_id text NOT NULL,
+    policy text NOT NULL,
+    approval_records jsonb NOT NULL DEFAULT '{}',
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   );
   CREATE TABLE goat.tasks (

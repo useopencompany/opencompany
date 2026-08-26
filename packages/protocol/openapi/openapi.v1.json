@@ -9289,6 +9289,12 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "nullable": true
+                    }
+                  },
                   "options": {
                     "type": "array",
                     "items": {
@@ -9364,6 +9370,12 @@
                 "type": "object",
                 "properties": {
                   "approvalId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "toolCallId": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256,
