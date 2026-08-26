@@ -90,9 +90,16 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
   },
 };
 
+type RefreshPluginRegistrations = (input: {
+  provider: McpOAuthProvider;
+  userWorkosId: string;
+  workspaceIds: string[];
+}) => Promise<void>;
+
 export function createMcpOAuthIngress(input: {
   db: DbLike;
   identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: RefreshPluginRegistrations;
 }): McpOAuthIngressService {
   return {
     start: (provider, request) => handleStart(input, provider, request),
@@ -100,7 +107,11 @@ export function createMcpOAuthIngress(input: {
   };
 }
 
-type IngressInput = { db: DbLike; identify: ApiIdentityVerifier };
+type IngressInput = {
+  db: DbLike;
+  identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: RefreshPluginRegistrations;
+};
 
 async function handleStart(
   input: IngressInput,
@@ -120,6 +131,7 @@ async function handleStart(
       db: input.db,
     });
     if (result.status === "connected") {
+      await refreshAfterConnection(input, provider, session);
       return statusRedirect(session, flow, returnTo, "connected");
     }
     return sessionRedirect(session, result.redirectUrl);
@@ -170,6 +182,7 @@ async function handleCallback(
       state: stateValue,
       db: input.db,
     });
+    await refreshAfterConnection(input, provider, session);
     return statusRedirect(session, flow, state.returnTo, "connected");
   } catch (error) {
     logger.warn("Remote MCP OAuth completion failed", {
@@ -178,6 +191,27 @@ async function handleCallback(
       error_message: error instanceof Error ? error.message : String(error),
     });
     return statusRedirect(session, flow, state.returnTo, "error", "token_exchange_failed");
+  }
+}
+
+async function refreshAfterConnection(
+  input: IngressInput,
+  provider: McpOAuthProvider,
+  session: Extract<IngressSession, { kind: "actor" }>,
+) {
+  if (!input.refreshPluginRegistrations) return;
+  try {
+    await input.refreshPluginRegistrations({
+      provider,
+      userWorkosId: session.userId,
+      workspaceIds: session.workspaces.map((entry) => entry.workspace.id),
+    });
+  } catch (error) {
+    logger.warn("Plugin discovery refresh after MCP connection failed", {
+      event: "goat.plugin_mcp_reconnect_refresh_failed",
+      provider,
+      error_message: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

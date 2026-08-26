@@ -17,7 +17,7 @@ import {
   type IntegrationStatus,
   integrations,
 } from "@opencompany/db/product-schema";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import { captureIntegrationAddedAnalytics } from "./analytics";
 
@@ -34,6 +34,7 @@ export type RemoteMcpProviderState<TProvider extends IntegrationProvider> = {
   accountName: string | null;
   statusReason: string | null;
   capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
 };
 
 type RemoteMcpOAuthPayload = {
@@ -68,25 +69,11 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
   const callbackUrl = () =>
     `${getAppUrl()}/api/integrations/${config.provider.replaceAll("_", "-")}/callback`;
 
-  async function getState(userWorkosId: string): Promise<RemoteMcpProviderState<TProvider>> {
-    const [row] = await getDb()
-      .select({
-        id: integrations.id,
-        status: integrations.status,
-        accountName: integrations.accountName,
-        statusReason: integrations.statusReason,
-        capabilityModes: integrations.capabilityModes,
-      })
-      .from(integrations)
-      .where(
-        and(
-          eq(integrations.userWorkosId, userWorkosId),
-          eq(integrations.provider, config.provider),
-          eq(integrations.externalId, config.externalId),
-        ),
-      )
-      .orderBy(desc(integrations.updatedAt))
-      .limit(1);
+  async function getState(
+    identity: string | { userWorkosId: string; workspaceId?: string },
+  ): Promise<RemoteMcpProviderState<TProvider>> {
+    const binding = normalizedIdentity(identity);
+    const row = await loadBoundIntegration(binding);
 
     if (!row || row.status === "disconnected") {
       return {
@@ -97,6 +84,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
         accountName: null,
         statusReason: null,
         capabilityModes: {},
+        toolModes: {},
       };
     }
 
@@ -108,39 +96,30 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
       accountName: row.accountName,
       statusReason: row.statusReason,
       capabilityModes: row.capabilityModes,
+      toolModes: row.toolModes,
     };
   }
 
   async function loadWorkerConnection(input: {
     userWorkosId: string;
+    workspaceId?: string;
     onAuthorizationRequired: () => never;
   }): Promise<
     | { ok: false; reason: "not_connected" | "needs_reauth" }
     | { ok: true; integrationId: string; authProvider: OAuthClientProvider }
   > {
-    const [row] = await getDb()
-      .select({ id: integrations.id, status: integrations.status })
-      .from(integrations)
-      .where(
-        and(
-          eq(integrations.userWorkosId, input.userWorkosId),
-          eq(integrations.provider, config.provider),
-          eq(integrations.externalId, config.externalId),
-        ),
-      )
-      .orderBy(desc(integrations.updatedAt))
-      .limit(1);
+    const row = await loadBoundIntegration(input);
 
     if (!row || row.status === "disconnected") return { ok: false, reason: "not_connected" };
     if (row.status !== "connected") return { ok: false, reason: "needs_reauth" };
 
     const payload = await loadPayload({
-      userWorkosId: input.userWorkosId,
+      userWorkosId: row.userWorkosId,
       integrationId: row.id,
     });
     if (!payload.clientInformation || !payload.tokens) {
       await markNeedsReauth({
-        userWorkosId: input.userWorkosId,
+        userWorkosId: row.userWorkosId,
         integrationId: row.id,
         statusReason: `${config.displayName} needs to be reconnected before opencompany can use it.`,
       });
@@ -151,12 +130,54 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
       ok: true,
       integrationId: row.id,
       authProvider: createClientProvider({
-        userWorkosId: input.userWorkosId,
+        userWorkosId: row.userWorkosId,
         integrationId: row.id,
         payload,
         onAuthorizationUrl: () => input.onAuthorizationRequired(),
       }),
     };
+  }
+
+  async function loadBoundIntegration(input: { userWorkosId: string; workspaceId?: string }) {
+    const selection = {
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
+      capabilityModes: integrations.capabilityModes,
+      toolModes: integrations.toolModes,
+    } as const;
+    const [personal] = await getDb()
+      .select(selection)
+      .from(integrations)
+      .where(
+        and(
+          eq(integrations.userWorkosId, input.userWorkosId),
+          isNull(integrations.workspaceId),
+          eq(integrations.provider, config.provider),
+          eq(integrations.externalId, config.externalId),
+          ne(integrations.status, "disconnected"),
+        ),
+      )
+      .orderBy(desc(integrations.updatedAt))
+      .limit(1);
+    if (personal || !input.workspaceId) return personal;
+
+    const [workspace] = await getDb()
+      .select(selection)
+      .from(integrations)
+      .where(
+        and(
+          eq(integrations.workspaceId, input.workspaceId),
+          eq(integrations.provider, config.provider),
+          eq(integrations.externalId, config.externalId),
+          ne(integrations.status, "disconnected"),
+        ),
+      )
+      .orderBy(desc(integrations.updatedAt))
+      .limit(1);
+    return workspace;
   }
 
   // The web settings surface and runner workers keep resolving the shared
@@ -479,6 +500,13 @@ function omitPayload<TKey extends keyof RemoteMcpOAuthPayload>(
   const next = { ...payload };
   for (const key of keys) delete next[key];
   return next;
+}
+
+function normalizedIdentity(identity: string | { userWorkosId: string; workspaceId?: string }): {
+  userWorkosId: string;
+  workspaceId?: string;
+} {
+  return typeof identity === "string" ? { userWorkosId: identity } : identity;
 }
 
 function sanitizeReturnTo(value: string) {

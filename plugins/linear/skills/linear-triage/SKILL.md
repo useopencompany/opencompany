@@ -6,7 +6,7 @@ compatibility: Requires a connected Linear account and the opencompany Linear to
 metadata:
   author: opencompany
   version: "1.0.0"
-allowed-tools: linear.list_issues linear.get_issue linear.list_comments linear.list_users linear.list_issue_statuses linear.update_issue
+allowed-tools: plugin:linear:linear.list_issues plugin:linear:linear.get_issue plugin:linear:linear.list_comments plugin:linear:linear.list_users plugin:linear:linear.list_issue_statuses plugin:linear:linear.save_issue
 ---
 Triage the requested Linear queue using evidence from the issues, not guesses.
 

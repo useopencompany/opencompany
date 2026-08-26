@@ -11,6 +11,7 @@ import {
   type CreateTaskCommand,
   KnowledgeApplicationService,
   type KnowledgeRepository,
+  type PluginGatewayLifecycle,
   PluginImportApplicationService,
   type PluginImportResolver,
   type PluginInstallation,
@@ -899,6 +900,8 @@ describe("canonical Hono API", () => {
       totalBytes: packageBytes.length,
       skills: [],
       stdioServers: installation.stdioServers,
+      remoteServers: [],
+      capabilities: [],
       report: {
         ignoredManifestFields: [],
         skills: [],
@@ -928,10 +931,12 @@ describe("canonical Hono API", () => {
     const revokeMcp = vi.fn(async () => ({ ...installation, mcpApprovedIntegrity: null }));
     const archive = vi.fn(async () => undefined);
     const deleteData = vi.fn(async () => ({ deleted: true }));
+    const refresh = vi.fn(async () => undefined);
     const app = testApp(fakeRepository(), {
       pluginImports: fakePluginImportService(
         { install, list, get, setStatus, approveMcp, revokeMcp, archive, deleteData },
         { resolve: vi.fn(async () => resolved) },
+        { refresh },
       ),
     });
 
@@ -971,9 +976,6 @@ describe("canonical Hono API", () => {
     await expect(app.request("/v1/plugins")).resolves.toMatchObject({ status: 200 });
     await expect(app.request("/v1/plugins/quality-tools")).resolves.toMatchObject({ status: 200 });
     await expect(
-      app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
-    ).resolves.toMatchObject({ status: 200 });
-    await expect(
       app.request("/v1/plugins/quality-tools/mcp/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -982,6 +984,12 @@ describe("canonical Hono API", () => {
     ).resolves.toMatchObject({ status: 200 });
     await expect(
       app.request("/v1/plugins/quality-tools/mcp/revoke", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/mcp/refresh", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
     ).resolves.toMatchObject({ status: 200 });
     await expect(
       app.request("/v1/plugins/quality-tools/data/delete", { method: "POST" }),
@@ -997,6 +1005,11 @@ describe("canonical Hono API", () => {
       integrity: installation.integrity,
     });
     expect(revokeMcp).toHaveBeenCalledWith({ actor, name: "quality-tools" });
+    expect(refresh).toHaveBeenLastCalledWith({
+      actor,
+      pluginName: "quality-tools",
+      reason: "explicit",
+    });
     expect(deleteData).toHaveBeenCalledWith({ actor, name: "quality-tools" });
     expect(archive).toHaveBeenCalledWith({ actor, name: "quality-tools" });
   });
@@ -4846,6 +4859,7 @@ function fakeSkillImportService(
 function fakePluginImportService(
   repositoryOverrides: Partial<PluginRepository> = {},
   resolverOverrides: Partial<PluginImportResolver> = {},
+  gatewayLifecycle?: PluginGatewayLifecycle,
 ) {
   const unexpected = async (): Promise<never> => {
     throw new Error("Unexpected Plugin installation operation.");
@@ -4867,7 +4881,7 @@ function fakePluginImportService(
     },
     ...resolverOverrides,
   };
-  return new PluginImportApplicationService(repository, resolver);
+  return new PluginImportApplicationService(repository, resolver, gatewayLifecycle);
 }
 
 function knowledgeService(overrides: Partial<KnowledgeRepository>) {

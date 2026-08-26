@@ -1,3 +1,4 @@
+import { resolvePluginGatewayRegistrations } from "../plugin-gateway";
 import { resolveAttioActions } from "./attio";
 import { resolveGitHubActions } from "./github";
 import { resolveGmailActions } from "./gmail";
@@ -35,6 +36,7 @@ export type ActionCatalogDeps = {
   // Registration is server-side composition data. Plugin/account binding supplies these records;
   // no endpoint URL or credential material is copied into the returned action descriptors.
   remoteMcpRegistrations?: readonly RemoteMcpGatewayRegistration[];
+  resolveRemoteMcpRegistrations?: typeof resolvePluginGatewayRegistrations;
 };
 
 // Environment kill switch: disables chat actions for everyone without a
@@ -54,12 +56,20 @@ export async function resolveActionCatalog(
   },
   deps: ActionCatalogDeps = {},
 ): Promise<ResolvedActionCatalog> {
+  const remoteMcpRegistrations =
+    deps.remoteMcpRegistrations ??
+    (await (deps.resolveRemoteMcpRegistrations ?? resolvePluginGatewayRegistrations)(input).catch(
+      () => [],
+    ));
+  const linearPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:linear:"),
+  );
   const resolved = await Promise.all([
     resolveSlackActions(input.userWorkosId).catch(() => null),
     resolveGmailActions(input.userWorkosId).catch(() => null),
     resolveGoogleCalendarActions(input.userWorkosId).catch(() => null),
     resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
-    resolveLinearActions(input.userWorkosId).catch(() => null),
+    linearPluginInstalled ? null : resolveLinearActions(input.userWorkosId).catch(() => null),
     resolvePostHogActions(input.userWorkosId).catch(() => null),
     resolveLatitudeActions(input.userWorkosId).catch(() => null),
     resolveNeonActions(input.userWorkosId).catch(() => null),
@@ -68,8 +78,8 @@ export async function resolveActionCatalog(
     resolveStripeActions(input.workspaceId).catch(() => null),
     resolveRevolutActions(input.workspaceId).catch(() => null),
     resolveXAccountActions(input.userWorkosId).catch(() => null),
-    ...(deps.remoteMcpRegistrations ?? []).map((registration) =>
-      resolveRemoteMcpActions(input.userWorkosId, registration).catch(() => null),
+    ...remoteMcpRegistrations.map((registration) =>
+      resolveRemoteMcpActions(input, registration).catch(() => null),
     ),
   ]);
   const providers = resolved.filter(

@@ -1344,6 +1344,13 @@ export function createApiApp(input: CreateApiAppInput) {
       const plugin = await input.pluginImports.revokeMcp(actor, c.req.valid("param").name);
       return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
     },
+    refreshPluginMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const plugin = await input.pluginImports.refreshMcp(actor, c.req.valid("param").name);
+      if (!plugin) throw new CoreError("not_found", "Plugin not found.");
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
     deletePluginData: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);

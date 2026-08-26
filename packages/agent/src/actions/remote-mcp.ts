@@ -1,5 +1,6 @@
 import { createMCPClient, type OAuthClientProvider } from "@ai-sdk/mcp";
 import type { RemoteMcpServer } from "@opencompany/agent-runtime";
+import type { PluginGatewayDiscoveredTool } from "@opencompany/core";
 import { createLogger } from "@opencompany/observability";
 import type { JSONSchema7 } from "ai";
 import { type CapabilityId, type CapabilityMode, isCapabilityMode } from "./capabilities";
@@ -33,6 +34,7 @@ export type RemoteMcpConnectionState = {
   connected: boolean;
   integrationId: string | null;
   capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
 };
 
 export type RemoteMcpWorkerConnection =
@@ -46,12 +48,23 @@ export type RemoteMcpGatewayRegistration = {
   description: string;
   server: RemoteMcpServer;
   capabilities?: readonly RemoteMcpCapabilityDefinition[];
-  getState: (userWorkosId: string) => Promise<RemoteMcpConnectionState>;
+  discoverySnapshot: readonly PluginGatewayDiscoveredTool[];
+  getState: (input: {
+    userWorkosId: string;
+    workspaceId: string;
+  }) => Promise<RemoteMcpConnectionState>;
   loadConnection: (input: {
     userWorkosId: string;
+    workspaceId: string;
     onAuthorizationRequired: () => never;
   }) => Promise<RemoteMcpWorkerConnection>;
+  isEnabled: () => Promise<boolean>;
 };
+
+type RemoteMcpDiscoveryRegistration = Omit<
+  RemoteMcpGatewayRegistration,
+  "discoverySnapshot" | "isEnabled"
+>;
 
 export type RemoteMcpDispatchAudit = {
   operation: "tools/list" | "tools/call";
@@ -91,7 +104,7 @@ type RemoteMcpClient = {
   close(): Promise<void>;
 };
 
-type RemoteMcpGatewayDependencies = {
+export type RemoteMcpGatewayDependencies = {
   createClient: (input: {
     clientName: string;
     version: string;
@@ -125,47 +138,28 @@ const defaultDependencies: RemoteMcpGatewayDependencies = {
   },
 };
 
-// Resolve one registered remote MCP server into the shared action catalog. Discovery and execution
-// both happen in this server-only adapter: the returned model-facing descriptors contain neither
-// endpoint configuration nor credentials.
+// Resolve one registered remote MCP server into the shared action catalog. The catalog is built
+// only from the persisted discovery snapshot; execution remains in this server-only adapter, and
+// the returned model-facing descriptors contain neither endpoint configuration nor credentials.
 export async function resolveRemoteMcpActions(
-  userWorkosId: string,
+  identity: { userWorkosId: string; workspaceId: string },
   registration: RemoteMcpGatewayRegistration,
   dependencies: Partial<RemoteMcpGatewayDependencies> = {},
 ): Promise<ActionProviderCatalog | null> {
   const deps = { ...defaultDependencies, ...dependencies };
-  const state = await registration.getState(userWorkosId);
+  const state = await registration.getState(identity);
   if (!state.connected || !state.integrationId) return null;
   const integrationId = state.integrationId;
-
-  const connection = await registration.loadConnection({
-    userWorkosId,
-    onAuthorizationRequired: () => {
-      throw remoteAuthError(registration, "auth_expired");
-    },
-  });
-  if (!connection.ok) return null;
-  if (connection.integrationId !== integrationId) return null;
-
-  const client = await deps.createClient(
-    clientConfig(registration.server, connection.authProvider),
-  );
-  let definitions: RemoteToolDefinition[];
-  try {
-    definitions = await discoverRemoteTools({
-      client,
-      registration,
-      connection,
-      userWorkosId,
-      recordDispatch: deps.recordDispatch,
-    });
-  } finally {
-    await client.close().catch(() => {});
-  }
+  const definitions = registration.discoverySnapshot;
 
   const actions = definitions.flatMap((definition): ResolvedAction[] => {
-    const classification = classifyRemoteTool(definition, registration.capabilities);
-    const permissionMode = effectiveRemoteMcpMode(classification, state.capabilityModes);
+    const classification = storedClassification(definition.classification);
+    const permissionMode = effectiveRemoteMcpMode(
+      definition.name,
+      classification,
+      state.capabilityModes,
+      state.toolModes,
+    );
     if (permissionMode === "off") return [];
 
     const permission =
@@ -190,6 +184,7 @@ export async function resolveRemoteMcpActions(
         params: normalizeInputSchema(definition.inputSchema),
         execute: (params, context) =>
           executeRemoteMcpTool({
+            identity,
             registration,
             definition,
             classification,
@@ -210,6 +205,56 @@ export async function resolveRemoteMcpActions(
     description: registration.description,
     actions,
   };
+}
+
+// Discovery is deliberately separate from catalog resolution. Callers persist this classified
+// snapshot and every list/execute path serves the stored definitions without a tools/list call.
+export async function discoverRemoteMcpSnapshot(
+  identity: { userWorkosId: string; workspaceId: string },
+  registration: RemoteMcpDiscoveryRegistration,
+  dependencies: Partial<RemoteMcpGatewayDependencies> = {},
+): Promise<PluginGatewayDiscoveredTool[] | null> {
+  const deps = { ...defaultDependencies, ...dependencies };
+  const state = await registration.getState(identity);
+  if (!state.connected || !state.integrationId) return null;
+  const connection = await registration.loadConnection({
+    ...identity,
+    onAuthorizationRequired: () => {
+      throw remoteAuthError(registration, "auth_expired");
+    },
+  });
+  if (!connection.ok || connection.integrationId !== state.integrationId) return null;
+
+  const client = await deps.createClient(
+    clientConfig(registration.server, connection.authProvider),
+  );
+  try {
+    const definitions = await discoverRemoteTools({
+      client,
+      registration,
+      connection,
+      identity,
+      recordDispatch: deps.recordDispatch,
+    });
+    return definitions.map((definition) => {
+      const classification = classifyRemoteTool(definition, registration.capabilities);
+      return {
+        name: definition.name,
+        ...(definition.description !== undefined ? { description: definition.description } : {}),
+        ...(definition.inputSchema !== undefined ? { inputSchema: definition.inputSchema } : {}),
+        ...(definition.annotations !== undefined ? { annotations: definition.annotations } : {}),
+        classification: {
+          capabilityId: classification.capability.id as "read" | "write",
+          capabilityLabel: classification.capability.label,
+          defaultMode: classification.capability.defaultMode,
+          bucket: classification.bucket,
+          curated: classification.curated,
+        },
+      };
+    });
+  } finally {
+    await client.close().catch(() => {});
+  }
 }
 
 type ToolClassification = {
@@ -247,9 +292,18 @@ export function classifyRemoteTool(
 }
 
 function effectiveRemoteMcpMode(
+  toolName: string,
   classification: ToolClassification,
   storedModes: Record<string, unknown>,
+  storedToolModes: Record<string, unknown>,
 ): CapabilityMode {
+  const toolMode = storedToolModes[toolName];
+  if (isCapabilityMode(toolMode)) {
+    // Discovery drift is intentionally fail-closed. An uncurated tool may be hidden or kept
+    // behind approval, but a stored override must never promote it to silent execution.
+    if (!classification.curated && toolMode === "on") return "ask";
+    return toolMode;
+  }
   const stored = storedModes[classification.capability.id];
   if (!classification.curated) {
     // A newly discovered tool must not inherit an existing broad `on` override. It remains Ask
@@ -262,9 +316,9 @@ function effectiveRemoteMcpMode(
 
 async function discoverRemoteTools(input: {
   client: RemoteMcpClient;
-  registration: RemoteMcpGatewayRegistration;
+  registration: Pick<RemoteMcpGatewayRegistration, "source" | "label">;
   connection: Extract<RemoteMcpWorkerConnection, { ok: true }>;
-  userWorkosId: string;
+  identity: { userWorkosId: string; workspaceId: string };
   recordDispatch: RemoteMcpGatewayDependencies["recordDispatch"];
 }) {
   const definitions: RemoteToolDefinition[] = [];
@@ -274,11 +328,12 @@ async function discoverRemoteTools(input: {
     await input.recordDispatch({
       operation: "tools/list",
       actingAgent: "action_gateway",
-      actingUser: input.userWorkosId,
+      actingUser: input.identity.userWorkosId,
       capability: "read",
       source: input.registration.source,
       tool: null,
       integrationId: input.connection.integrationId,
+      workspaceId: input.identity.workspaceId,
     });
     const result = await input.client.listTools({
       ...(cursor ? { params: { cursor } } : {}),
@@ -310,6 +365,7 @@ function deduplicateToolDefinitions(definitions: RemoteToolDefinition[]) {
 }
 
 async function executeRemoteMcpTool(input: {
+  identity: { userWorkosId: string; workspaceId: string };
   registration: RemoteMcpGatewayRegistration;
   definition: RemoteToolDefinition;
   classification: ToolClassification;
@@ -319,7 +375,17 @@ async function executeRemoteMcpTool(input: {
   context: ActionExecuteContext;
   dependencies: RemoteMcpGatewayDependencies;
 }) {
-  const current = await input.registration.getState(input.context.userWorkosId);
+  if (!(await input.registration.isEnabled())) {
+    throw new ActionPermissionError(
+      input.registration.connectionProvider,
+      `${input.registration.label} was disabled before this action could run.`,
+    );
+  }
+  const identity = {
+    userWorkosId: input.context.userWorkosId,
+    workspaceId: input.context.workspaceId ?? input.identity.workspaceId,
+  };
+  const current = await input.registration.getState(identity);
   if (!current.connected || !current.integrationId) {
     throw remoteAuthError(input.registration, "not_connected");
   }
@@ -329,7 +395,12 @@ async function executeRemoteMcpTool(input: {
       `${input.registration.label} changed connections before this action could run. Retry with the current connection.`,
     );
   }
-  const currentMode = effectiveRemoteMcpMode(input.classification, current.capabilityModes);
+  const currentMode = effectiveRemoteMcpMode(
+    input.definition.name,
+    input.classification,
+    current.capabilityModes,
+    current.toolModes,
+  );
   if (currentMode === "off" || (input.catalogPermissionMode === "on" && currentMode === "ask")) {
     throw new ActionPermissionError(
       input.registration.connectionProvider,
@@ -338,7 +409,7 @@ async function executeRemoteMcpTool(input: {
   }
 
   const connection = await input.registration.loadConnection({
-    userWorkosId: input.context.userWorkosId,
+    ...identity,
     onAuthorizationRequired: () => {
       throw remoteAuthError(input.registration, "auth_expired");
     },
@@ -381,6 +452,21 @@ async function executeRemoteMcpTool(input: {
   } finally {
     await client.close().catch(() => {});
   }
+}
+
+function storedClassification(
+  classification: PluginGatewayDiscoveredTool["classification"],
+): ToolClassification {
+  return {
+    capability: {
+      id: classification.capabilityId,
+      label: classification.capabilityLabel,
+      defaultMode: classification.defaultMode,
+      tools: [],
+    },
+    bucket: classification.bucket,
+    curated: classification.curated,
+  };
 }
 
 function clientConfig(server: RemoteMcpServer, authProvider: OAuthClientProvider) {
@@ -429,7 +515,7 @@ function unwrapRemoteMcpResult(result: unknown, label: string): unknown {
 }
 
 function remoteAuthError(
-  registration: RemoteMcpGatewayRegistration,
+  registration: Pick<RemoteMcpGatewayRegistration, "connectionProvider" | "label">,
   code: "not_connected" | "auth_expired",
 ) {
   return new ActionAuthError(

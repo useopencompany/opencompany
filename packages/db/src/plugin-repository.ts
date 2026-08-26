@@ -4,6 +4,7 @@ import {
   computeArtifactIntegrity,
   PLUGIN_LIMITS,
   parseMcpConfig,
+  parsePluginCapabilities,
   parsePluginManifest,
 } from "@opencompany/agent-runtime";
 import {
@@ -20,6 +21,7 @@ import { del } from "@vercel/blob";
 import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 import {
   pluginFiles,
+  pluginGatewayRegistrations,
   pluginSkills,
   plugins,
   skillBundles,
@@ -133,6 +135,21 @@ export class PostgresPluginRepository implements PluginRepository {
           installReport: initialReport,
           mcpApprovedIntegrity: null,
         });
+        if (input.plugin.remoteServers.length > 0) {
+          await tx.insert(pluginGatewayRegistrations).values(
+            input.plugin.remoteServers.map((server) => ({
+              id: deterministicId("plugin_gateway", pluginId, server.name),
+              workspaceId: input.actor.workspaceId,
+              pluginId,
+              serverName: server.name,
+              connectionProvider: input.plugin.manifest.name,
+              transport: server.type,
+              serverUrl: server.url,
+              headers: server.headers,
+              capabilities: input.plugin.capabilities,
+            })),
+          );
+        }
         await tx.insert(pluginFiles).values(
           input.plugin.files.map((file) => ({
             pluginId,
@@ -279,23 +296,34 @@ export class PostgresPluginRepository implements PluginRepository {
     name: string;
   }) {
     const now = new Date();
-    const rows = await this.db
-      .update(plugins)
-      .set({
-        status: "archived",
-        archivedAt: now,
-        updatedAt: now,
-        mcpApprovedIntegrity: null,
-      })
-      .where(
+    await this.db.transaction(async (tx: DbClient) => {
+      const rows = await tx
+        .update(plugins)
+        .set({
+          status: "archived",
+          archivedAt: now,
+          updatedAt: now,
+          mcpApprovedIntegrity: null,
+        })
+        .where(
+          and(
+            eq(plugins.workspaceId, input.actor.workspaceId),
+            eq(plugins.name, input.name),
+            inArray(plugins.status, ["enabled", "disabled"]),
+          ),
+        )
+        .returning({ id: plugins.id });
+      if (rows.length === 0) throw new CoreError("not_found", "Plugin not found.");
+      await tx.delete(pluginGatewayRegistrations).where(
         and(
-          eq(plugins.workspaceId, input.actor.workspaceId),
-          eq(plugins.name, input.name),
-          inArray(plugins.status, ["enabled", "disabled"]),
+          eq(pluginGatewayRegistrations.workspaceId, input.actor.workspaceId),
+          inArray(
+            pluginGatewayRegistrations.pluginId,
+            rows.map((row: { id: string }) => row.id),
+          ),
         ),
-      )
-      .returning({ id: plugins.id });
-    if (rows.length === 0) throw new CoreError("not_found", "Plugin not found.");
+      );
+    });
   }
 
   async deleteData(input: {
@@ -508,18 +536,37 @@ async function validateResolvedPlugin(plugin: ResolvedPluginPackage) {
 
   const mcpFile = packageFiles.get("mcp.json");
   let parsedServers: ResolvedPluginPackage["stdioServers"] = [];
+  let parsedRemoteServers: ResolvedPluginPackage["remoteServers"] = [];
   if (mcpFile) {
     try {
       const parsed = parseMcpConfig(
         new TextDecoder("utf-8", { fatal: true }).decode(mcpFile.content),
       );
-      if (parsed.status === "parsed") parsedServers = parsed.servers;
+      if (parsed.status === "parsed") {
+        parsedServers = parsed.servers;
+        parsedRemoteServers = parsed.remoteServers;
+      }
     } catch {
       parsedServers = [];
+      parsedRemoteServers = [];
     }
   }
   if (JSON.stringify(parsedServers) !== JSON.stringify(plugin.stdioServers)) {
     throw new CoreError("invalid_argument", "The Plugin MCP entries do not match mcp.json.");
+  }
+  if (JSON.stringify(parsedRemoteServers) !== JSON.stringify(plugin.remoteServers)) {
+    throw new CoreError("invalid_argument", "The Plugin remote MCP entries do not match mcp.json.");
+  }
+
+  const parsedCapabilities =
+    plugin.report.capabilities?.status === "parsed"
+      ? parsePluginCapabilities(parsedManifest.extensions, { trusted: true }).definitions
+      : [];
+  if (JSON.stringify(parsedCapabilities) !== JSON.stringify(plugin.capabilities)) {
+    throw new CoreError(
+      "invalid_argument",
+      "The Plugin capability definitions do not match plugin.json.",
+    );
   }
 
   const skillNames = new Set<string>();
