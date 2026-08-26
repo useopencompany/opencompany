@@ -9289,6 +9289,12 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "nullable": true
+                    }
+                  },
                   "options": {
                     "type": "array",
                     "items": {
