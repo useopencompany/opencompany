@@ -22,8 +22,9 @@ package, its valid immediate-child Skills, and an install report. An invalid Plu
 the install; invalid child Skills are skipped and reported. Standalone Skills win name collisions,
 then the lexically smaller Plugin name wins between Plugins. Settings shows hidden collisions.
 
-Plugin Skills are passive instructions. Installing or enabling a Plugin does not launch its MCP
-servers. HTTP and SSE MCP are unsupported in this release.
+Plugin Skills are passive instructions. Installing or enabling a Plugin does not automatically
+connect an account. Remote HTTP and SSE MCP entries register with the server-side action gateway;
+their URLs and credentials are not passed to Main Chat or coding sandboxes.
 
 ## MCP approval and Plugin data
 

@@ -334,6 +334,47 @@ describe("Postgres immutable Plugin repository", () => {
     });
   });
 
+  it("keeps remote MCP endpoint configuration out of sandbox packages", async () => {
+    const installed = await repository.install({
+      actor: actor(),
+      idempotencyKey: "remote-mcp-runtime-plugin",
+      plugin: await resolvedPlugin("quality-tools", "review", "Remote MCP runtime.", {
+        mcp: true,
+        remoteMcp: true,
+      }),
+    });
+    await database.query(
+      "INSERT INTO goat.chat_session_plugins (chat_session_id, plugin_id) VALUES ($1, $2)",
+      ["chat_1", installed.plugin.id],
+    );
+    const db = drizzle(database);
+
+    const runtime = await loadChatSessionPluginRuntime(db, {
+      workspaceId: "workspace_1",
+      chatSessionId: "chat_1",
+    });
+    expect(runtime.plugins[0]?.files.map((file: { path: string }) => file.path)).not.toContain(
+      "mcp.json",
+    );
+    expect(installed.plugin.files.map((file: { path: string }) => file.path)).toContain("mcp.json");
+
+    await repository.approveMcp({
+      actor: actor(),
+      name: "quality-tools",
+      integrity: installed.plugin.integrity,
+    });
+    await expect(
+      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+    ).resolves.toMatchObject({
+      mcpPlugins: [
+        {
+          name: "quality-tools",
+          stdioServers: [{ name: "local", type: "stdio", command: "node" }],
+        },
+      ],
+    });
+  });
+
   it("archives without deleting immutable rows and makes the live name replaceable", async () => {
     const installed = await repository.install({
       actor: actor(),
@@ -403,7 +444,7 @@ async function resolvedPlugin(
   pluginName: string,
   skillName: string,
   description: string,
-  options: { skippedSkill?: boolean; mcp?: boolean } = {},
+  options: { skippedSkill?: boolean; mcp?: boolean; remoteMcp?: boolean } = {},
 ): Promise<ResolvedPluginPackage> {
   const skill = await resolvedSkill(skillName, description, `skills/${skillName}`);
   const pluginJson = new TextEncoder().encode(
@@ -424,6 +465,14 @@ async function resolvedPlugin(
           cwd: "${PLUGIN_DATA}",
           env: { CACHE_DIR: "${PLUGIN_DATA}/cache", PUBLIC_MODE: "safe" },
         },
+        ...(options.remoteMcp
+          ? {
+              remote: {
+                type: "streamable-http",
+                url: "https://mcp.example.com/private-endpoint",
+              },
+            }
+          : {}),
       },
     }),
   );
@@ -491,7 +540,18 @@ async function resolvedPlugin(
         ? {
             present: true,
             status: "parsed",
-            reports: [{ name: "local", status: "selected", transport: "stdio" }],
+            reports: [
+              { name: "local", status: "selected", transport: "stdio" },
+              ...(options.remoteMcp
+                ? [
+                    {
+                      name: "remote",
+                      status: "gateway-registered" as const,
+                      transport: "streamable-http" as const,
+                    },
+                  ]
+                : []),
+            ],
           }
         : { status: "absent" },
     },
