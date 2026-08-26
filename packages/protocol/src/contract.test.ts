@@ -102,6 +102,7 @@ describe("v1 protocol contract", () => {
       runtime,
       activityState: "working" as const,
       hasUnseen: false,
+      pinnedAt: null,
       createdAt: "2026-08-13T07:00:00.000Z",
       updatedAt: "2026-08-13T08:00:00.000Z",
     };

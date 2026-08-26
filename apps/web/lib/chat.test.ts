@@ -14,6 +14,7 @@ const conversation = {
   runtime: null,
   activityState: "idle",
   hasUnseen: true,
+  pinnedAt: "2026-08-13T08:30:00.000Z",
   createdAt: "2026-08-13T09:00:00.000Z",
   updatedAt: "2026-08-13T10:00:00.000Z",
 };
@@ -47,6 +48,7 @@ describe("canonical Chat server reads", () => {
         engine: conversation.engine,
         model: conversation.model,
         updatedAt: conversation.updatedAt,
+        pinnedAt: conversation.pinnedAt,
       }),
     ]);
     expect(new URL((upstream as unknown as Request).url).pathname).toBe("/v1/conversations");
