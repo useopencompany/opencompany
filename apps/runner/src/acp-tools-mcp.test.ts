@@ -4,7 +4,11 @@ import { createExternalEngineGatewayTicket } from "@opencompany/agent-runtime";
 import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { registerAcpToolsMcpRoute } from "./acp-tools-mcp";
+import {
+  executeExternalActionWithApproval,
+  registerAcpToolsMcpRoute,
+  sanitizeApprovalToolInput,
+} from "./acp-tools-mcp";
 import type { RunnerEnv } from "./env";
 
 const env = { internalToken: "runner-secret" } as RunnerEnv;
@@ -194,7 +198,17 @@ describe("runner ACP tools MCP", () => {
         needsApproval: true,
       }));
       const requestApproval = vi.fn(async () => "approval_1");
-      const waitForApproval = vi.fn(async () => decision);
+      const waitForApproval = vi.fn(
+        async (input: {
+          reportProgress?: (progress: { progress: number; message: string }) => Promise<void>;
+        }) => {
+          await input.reportProgress?.({
+            progress: 1,
+            message: "Waiting for user approval.",
+          });
+          return decision;
+        },
+      );
       const resolveApproval = vi.fn(async () => ({
         ok: true as const,
         duplicate: false,
@@ -230,17 +244,31 @@ describe("runner ACP tools MCP", () => {
         { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
       );
       const client = new Client({ name: "runner-test", version: "0.1.0" });
+      const onprogress = vi.fn();
 
       try {
         await client.connect(transport as Parameters<typeof client.connect>[0]);
-        const result = await client.callTool({
-          name: "use_action",
-          arguments: { action: "gmail.send", params: { to: "customer@example.com" } },
-        });
+        const result = await client.callTool(
+          {
+            name: "use_action",
+            arguments: {
+              action: "gmail.send",
+              params: { to: "customer@example.com" },
+            },
+          },
+          undefined,
+          { onprogress, resetTimeoutOnProgress: true },
+        );
 
         expect(result.isError).toBe(expectedError);
         expect(evaluateApproval).toHaveBeenCalledOnce();
         expect(requestApproval).toHaveBeenCalledOnce();
+        expect(requestApproval).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "gmail.send",
+            params: { to: "customer@example.com" },
+          }),
+        );
         expect(waitForApproval).toHaveBeenCalledWith(
           expect.objectContaining({ approvalId: "approval_1", runId: "run_1" }),
         );
@@ -248,6 +276,10 @@ describe("runner ACP tools MCP", () => {
           expect.objectContaining({ decision, invocationId: expect.stringContaining("mcp:run_1") }),
         );
         expect(executeAction).toHaveBeenCalledTimes(executes ? 1 : 0);
+        expect(onprogress).toHaveBeenCalledWith({
+          progress: 1,
+          message: "Waiting for user approval.",
+        });
         if (!executes) {
           expect(result.structuredContent).toMatchObject({
             ok: false,
@@ -259,6 +291,113 @@ describe("runner ACP tools MCP", () => {
       }
     },
   );
+
+  it("does not execute when an approval waiter outlives its MCP call", async () => {
+    const controller = new AbortController();
+    const executeAction = vi.fn(async () => ({
+      ok: true as const,
+      action: "gmail.send",
+      result: { sent: true },
+    }));
+    const resolveApproval = vi.fn();
+
+    const result = await executeExternalActionWithApproval({
+      request: {
+        operation: "execute",
+        sessionId: "session_1",
+        turnId: "run_1",
+        action: "gmail.send",
+        params: { to: "customer@example.com" },
+        invocationId: "invocation_1",
+      },
+      signal: controller.signal,
+      capability: { ...capability, v: 2, expiresAt: Date.now() + 60_000 },
+      authorizedContext: authorized,
+      authorizeOperation: vi.fn(async () => authorized),
+      dependencies: {
+        authorize: vi.fn(async () => authorized),
+        executeAction,
+        evaluateApproval: vi.fn(async () => ({
+          ok: true as const,
+          needsApproval: true,
+        })),
+        requestApproval: vi.fn(async () => "approval_1"),
+        waitForApproval: vi.fn(async () => {
+          controller.abort();
+          return "approved" as const;
+        }),
+        resolveApproval,
+        publishArtifact: vi.fn(),
+        rateLimitMax: 300,
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "canceled" } });
+    expect(executeAction).not.toHaveBeenCalled();
+    expect(resolveApproval).not.toHaveBeenCalled();
+  });
+
+  it("does not attribute a missing approval record to the user", async () => {
+    const executeAction = vi.fn();
+    const resolveApproval = vi.fn();
+    const result = await executeExternalActionWithApproval({
+      request: {
+        operation: "execute",
+        sessionId: "session_1",
+        turnId: "run_1",
+        action: "gmail.send",
+        params: {},
+        invocationId: "invocation_1",
+      },
+      signal: new AbortController().signal,
+      capability: { ...capability, v: 2, expiresAt: Date.now() + 60_000 },
+      authorizedContext: authorized,
+      authorizeOperation: vi.fn(async () => authorized),
+      dependencies: {
+        authorize: vi.fn(async () => authorized),
+        executeAction,
+        evaluateApproval: vi.fn(async () => ({
+          ok: true as const,
+          needsApproval: true,
+        })),
+        requestApproval: vi.fn(async () => "approval_1"),
+        waitForApproval: vi.fn(async () => "approval_missing" as const),
+        resolveApproval,
+        publishArtifact: vi.fn(),
+        rateLimitMax: 300,
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "internal",
+        message: "The action approval record is unavailable.",
+      },
+    });
+    expect(executeAction).not.toHaveBeenCalled();
+    expect(resolveApproval).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes sensitive and oversized parameters before approval projection", () => {
+    const input = sanitizeApprovalToolInput("gmail.send", {
+      to: "customer@example.com",
+      body: "x".repeat(4_001),
+      accessToken: "do-not-project",
+      nested: { password: "do-not-project", visible: "yes" },
+    });
+
+    expect(input).toMatchObject({
+      action: "gmail.send",
+      params: {
+        to: "customer@example.com",
+        accessToken: "[REDACTED]",
+        nested: { password: "[REDACTED]", visible: "yes" },
+      },
+    });
+    expect((input.params.body as string).endsWith("…")).toBe(true);
+    expect(JSON.stringify(input)).not.toContain("do-not-project");
+  });
 
   it("exposes actions, artifacts, Brain reads, and Brain capture to Codex", async () => {
     const authorize = vi.fn(async () => ({

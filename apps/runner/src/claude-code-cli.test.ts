@@ -53,11 +53,13 @@ describe("buildClaudeAcpCommandEnv", () => {
         auth,
         githubEnv: { GH_TOKEN: "gh-token", ANTHROPIC_API_KEY: "leaked" },
         model: "claude-sonnet-5",
+        toolTimeoutMs: 10_800_000,
       }),
     ).toEqual({
       CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test-token",
       GH_TOKEN: "gh-token",
       ANTHROPIC_MODEL: "claude-sonnet-5",
+      MCP_TOOL_TIMEOUT: "10800000",
     });
   });
 });

@@ -132,7 +132,7 @@ export class HeadlessChatUiProjector {
         const toolCall = {
           toolCallId,
           toolName: event.payload.kind,
-          input: { action: event.payload.action ?? event.payload.kind },
+          input: event.payload.input ?? { action: event.payload.action ?? event.payload.kind },
         };
         this.activeToolCalls.set(toolCallId, toolCall);
         chunks.push(...this.endText(), {

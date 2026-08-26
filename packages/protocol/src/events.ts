@@ -68,6 +68,9 @@ export const RunEventSchema = z
           kind: z.string().min(1),
           prompt: z.string(),
           action: z.string().min(1).optional(),
+          // Optional for replay compatibility. New external-engine approvals include the sanitized
+          // invocation input so users can see the exact parameters they are deciding on.
+          input: z.record(z.string(), z.unknown()).optional(),
           options: z.array(z.string()).optional(),
         })
         .strict(),

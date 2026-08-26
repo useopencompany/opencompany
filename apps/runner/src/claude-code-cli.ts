@@ -58,10 +58,14 @@ export function buildClaudeAcpCommandEnv(input: {
   auth: ClaudeCodeCliAuth;
   githubEnv?: Record<string, string>;
   model?: string | null;
+  toolTimeoutMs: number;
 }) {
   return {
     ...buildClaudeCommandEnv(input),
     ...(input.model ? { ANTHROPIC_MODEL: input.model } : {}),
+    // Claude Code's default is shorter than a normal human approval round trip. The runner's
+    // turn timeout remains the outer wall-clock bound for this value.
+    MCP_TOOL_TIMEOUT: String(input.toolTimeoutMs),
   };
 }
 

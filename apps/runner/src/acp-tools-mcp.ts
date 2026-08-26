@@ -38,6 +38,13 @@ const MAX_MCP_BODY_BYTES = 256 * 1024;
 const DEFAULT_RATE_LIMIT_MAX = 300;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const APPROVAL_POLL_INTERVAL_MS = 500;
+const APPROVAL_PROGRESS_INTERVAL_MS = 15_000;
+const APPROVAL_INPUT_MAX_DEPTH = 8;
+const APPROVAL_INPUT_MAX_ARRAY_ITEMS = 50;
+const APPROVAL_INPUT_MAX_OBJECT_KEYS = 80;
+const APPROVAL_INPUT_MAX_STRING_CHARS = 4_000;
+const APPROVAL_CREDENTIAL_KEY_PATTERN =
+  /^(?:authorization|proxy-authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|client[-_]?secret|password|passwd|secret|cookie|set-cookie|private[-_]?key|auth[-_]?token|bearer[-_]?token|csrf(?:[-_]?token)?|credentials?|session[-_]?id|sessionid)$/i;
 const logger = createLogger({
   service: "opencompany-runner",
   runtime: "goat-acp-tools-mcp",
@@ -141,7 +148,10 @@ export function registerAcpToolsMcpRoute(
         });
       }
 
-      const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
+      // Use Streamable HTTP's SSE response path. JSON response mode buffers related
+      // notifications until the final result, which would make approval progress keepalives
+      // invisible to the MCP client while the tool call is parked.
+      const transport = new StreamableHTTPServerTransport({ enableJsonResponse: false });
       try {
         // The SDK's concrete transport accessor types are wider than its Transport interface
         // under exactOptionalPropertyTypes, but this is its documented server transport.
@@ -217,9 +227,10 @@ function authorityActionError() {
   };
 }
 
-async function executeExternalActionWithApproval(input: {
+export async function executeExternalActionWithApproval(input: {
   request: ActionGatewayRequest;
   signal: AbortSignal;
+  reportProgress?: (progress: { progress: number; message: string }) => Promise<void>;
   capability: ExternalEngineGatewayTicketPayload;
   authorizedContext: NonNullable<
     Awaited<ReturnType<typeof authorizePersistedExternalEngineToolCapability>>
@@ -227,20 +238,24 @@ async function executeExternalActionWithApproval(input: {
   authorizeOperation: () => ReturnType<typeof authorizePersistedExternalEngineToolCapability>;
   dependencies: AcpToolsMcpDependencies;
 }): Promise<ActionGatewayResponse> {
+  if (input.signal.aborted) return canceledActionError(input.request);
   if (input.request.operation !== "execute") return input.dependencies.executeAction(input);
 
   const approval = await input.dependencies.evaluateApproval({
     request: { ...input.request, operation: "approval" },
     signal: input.signal,
   });
+  if (input.signal.aborted) return canceledActionError(input.request);
   if (!approval.ok || !("needsApproval" in approval)) return approval;
   if (!approval.needsApproval) return input.dependencies.executeAction(input);
 
   const approvalId = await input.dependencies.requestApproval({
     capability: input.capability,
     action: input.request.action,
+    params: input.request.params,
     invocationId: input.request.invocationId,
   });
+  if (input.signal.aborted) return canceledActionError(input.request);
   if (!approvalId) {
     return gatewayActionError(
       input.request.action,
@@ -253,8 +268,19 @@ async function executeExternalActionWithApproval(input: {
     runId: input.capability.codexChatTurnId,
     signal: input.signal,
     authorizeOperation: input.authorizeOperation,
+    ...(input.reportProgress ? { reportProgress: input.reportProgress } : {}),
   });
   if (decision === "authority_lost") return authorityActionError();
+  if (decision === "approval_missing") {
+    return gatewayActionError(
+      input.request.action,
+      "internal",
+      "The action approval record is unavailable.",
+    );
+  }
+  if (decision === "request_canceled" || input.signal.aborted) {
+    return canceledActionError(input.request);
+  }
 
   const resolved = await input.dependencies.resolveApproval({
     turn: gatewayActionTurn(input.capability, input.authorizedContext),
@@ -268,6 +294,14 @@ async function executeExternalActionWithApproval(input: {
       "This action approval was already resolved differently.",
     );
   }
+  if (!resolved.ok) {
+    return gatewayActionError(
+      input.request.action,
+      "internal",
+      "The action approval state is unavailable.",
+    );
+  }
+  if (input.signal.aborted) return canceledActionError(input.request);
   if (decision !== "approved") {
     return gatewayActionError(
       input.request.action,
@@ -276,12 +310,14 @@ async function executeExternalActionWithApproval(input: {
     );
   }
   if (!(await input.authorizeOperation())) return authorityActionError();
+  if (input.signal.aborted) return canceledActionError(input.request);
   return input.dependencies.executeAction(input);
 }
 
 async function requestGatewayActionApproval(input: {
   capability: ExternalEngineGatewayTicketPayload;
   action: string;
+  params: Record<string, unknown>;
   invocationId: string;
 }): Promise<string | null> {
   const approvalId = gatewayApprovalId(input.capability.codexChatTurnId, input.invocationId);
@@ -294,6 +330,7 @@ async function requestGatewayActionApproval(input: {
     kind: "use_action",
     prompt,
     action: input.action,
+    input: sanitizeApprovalToolInput(input.action, input.params),
     options: ["approved", "denied"],
   });
   const result = await getDb().execute(sql`
@@ -388,21 +425,84 @@ async function waitForGatewayActionApproval(input: {
   runId: string;
   signal: AbortSignal;
   authorizeOperation: () => ReturnType<typeof authorizePersistedExternalEngineToolCapability>;
-}): Promise<"approved" | "denied" | "authority_lost"> {
+  reportProgress?: (progress: { progress: number; message: string }) => Promise<void>;
+}): Promise<"approved" | "denied" | "authority_lost" | "approval_missing" | "request_canceled"> {
+  let progress = 0;
+  let nextProgressAt = 0;
   while (!input.signal.aborted) {
+    const now = Date.now();
+    if (input.reportProgress && now >= nextProgressAt) {
+      progress += 1;
+      try {
+        await input.reportProgress({
+          progress,
+          message: "Waiting for user approval.",
+        });
+      } catch {
+        // A dead MCP request cannot safely consume a later approval. Stop the waiter before it can
+        // resolve into an execution that no engine is still waiting to receive.
+        return "request_canceled";
+      }
+      nextProgressAt = now + APPROVAL_PROGRESS_INTERVAL_MS;
+    }
+    if (input.signal.aborted) return "request_canceled";
     if (!(await input.authorizeOperation())) return "authority_lost";
     const [approval] = await getDb()
       .select({ status: runApprovals.status, resolution: runApprovals.resolution })
       .from(runApprovals)
       .where(and(eq(runApprovals.id, input.approvalId), eq(runApprovals.runId, input.runId)))
       .limit(1);
-    if (!approval || approval.status === "canceled") return "denied";
+    if (!approval) return "approval_missing";
+    if (approval.status === "canceled") return "request_canceled";
     if (approval.status === "resolved") {
       return approval.resolution === "approved" ? "approved" : "denied";
     }
     await abortableDelay(APPROVAL_POLL_INTERVAL_MS, input.signal);
   }
-  return "authority_lost";
+  return "request_canceled";
+}
+
+export function sanitizeApprovalToolInput(
+  action: string,
+  params: Record<string, unknown>,
+): { action: string; params: Record<string, unknown> } {
+  return {
+    action,
+    params: sanitizeApprovalValue(params, 0) as Record<string, unknown>,
+  };
+}
+
+function sanitizeApprovalValue(value: unknown, depth: number): unknown {
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : String(value);
+  if (typeof value === "string") {
+    return value.length > APPROVAL_INPUT_MAX_STRING_CHARS
+      ? `${value.slice(0, APPROVAL_INPUT_MAX_STRING_CHARS)}…`
+      : value;
+  }
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value !== "object") return String(value);
+  if (depth >= APPROVAL_INPUT_MAX_DEPTH) return "[Maximum nesting reached]";
+  if (Array.isArray(value)) {
+    const sanitized = value
+      .slice(0, APPROVAL_INPUT_MAX_ARRAY_ITEMS)
+      .map((entry) => sanitizeApprovalValue(entry, depth + 1));
+    if (value.length > APPROVAL_INPUT_MAX_ARRAY_ITEMS) {
+      sanitized.push(`[${value.length - APPROVAL_INPUT_MAX_ARRAY_ITEMS} more items omitted]`);
+    }
+    return sanitized;
+  }
+  const result: Record<string, unknown> = {};
+  const entries = Object.entries(value as Record<string, unknown>);
+  for (const [key, entry] of entries.slice(0, APPROVAL_INPUT_MAX_OBJECT_KEYS)) {
+    result[key] = APPROVAL_CREDENTIAL_KEY_PATTERN.test(key)
+      ? "[REDACTED]"
+      : sanitizeApprovalValue(entry, depth + 1);
+  }
+  if (entries.length > APPROVAL_INPUT_MAX_OBJECT_KEYS) {
+    result._omittedKeys = entries.length - APPROVAL_INPUT_MAX_OBJECT_KEYS;
+  }
+  return result;
 }
 
 function gatewayActionTurn(
@@ -425,6 +525,14 @@ function gatewayApprovalId(runId: string, invocationId: string) {
 
 function gatewayActionError(action: string, code: string, message: string): ActionGatewayResponse {
   return { ok: false, action, error: { code, message } };
+}
+
+function canceledActionError(request: ActionGatewayRequest): ActionGatewayResponse {
+  return gatewayActionError(
+    request.operation === "execute" ? request.action : "action",
+    "canceled",
+    "The action request ended before approval completed; nothing was executed.",
+  );
 }
 
 function abortableDelay(delayMs: number, signal: AbortSignal) {

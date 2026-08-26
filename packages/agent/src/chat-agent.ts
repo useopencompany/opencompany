@@ -1334,11 +1334,7 @@ export function createProductChatToolContext(input: {
             ? executionContext.toolCallId
             : "";
         if (!toolCallId) return false;
-        try {
-          return await actions.needsApproval({ action, params, toolCallId });
-        } catch {
-          return false;
-        }
+        return actions.needsApproval({ action, params, toolCallId });
       },
       inputSchema: jsonSchema<UseActionToolInput>({
         ...ACTION_TOOL_CONTRACT.execute.inputSchema,

@@ -199,6 +199,10 @@ describe("HeadlessChatUiProjector", () => {
         kind: "use_action",
         prompt: "Approve?",
         action: "crm.update",
+        input: {
+          action: "crm.update",
+          params: { companyId: "company_1", lifecycle: "customer" },
+        },
       }),
       event(3, "message.content_updated", {
         messageId: "message_assistant_1",
@@ -221,7 +225,10 @@ describe("HeadlessChatUiProjector", () => {
       type: "tool-input-available",
       toolCallId: "approval_1",
       toolName: "use_action",
-      input: { action: "crm.update" },
+      input: {
+        action: "crm.update",
+        params: { companyId: "company_1", lifecycle: "customer" },
+      },
     });
   });
 
