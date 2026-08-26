@@ -32,7 +32,7 @@ test("the pull request path remains credential-free", async () => {
   const verifier = await readFile(verifyWorkflowUrl, "utf8");
   const combined = `${caller}\n${verifier}`;
 
-  assert.match(caller, /^on:\n\s+pull_request:\n\s+branches: \[main\]/mu);
+  assert.match(caller, /^on:\n\s+pull_request:\n\s+branches: \[main, "feat\/\*\*"\]/mu);
   assert.match(verifier, /^on:\n\s+workflow_call:/mu);
   assert.match(caller, /^permissions:\n\s+contents: read$/mu);
   assert.match(verifier, /^permissions:\n\s+contents: read$/mu);
