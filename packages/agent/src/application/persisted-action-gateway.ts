@@ -10,12 +10,14 @@ import {
   claimActionInvocation,
   getActionCapabilityTurnState,
   recordActionSourceDiscovery,
+  registerActionApproval,
   releaseActionAsyncRun,
   releaseActionCapabilityQuote,
   storeActionCapabilityQuote,
 } from "@opencompany/db/action-governance";
 import { getDb } from "@opencompany/db/client";
 import {
+  chatSessions,
   codexChatSessions,
   codexChatTurns,
   users,
@@ -56,6 +58,8 @@ const defaultDependencies: ActionGatewayServiceDependencies = {
     recordActionSourceDiscovery({ turn: actionTurnRef(run), sourceId }),
   claimInvocation: ({ run, ...input }) =>
     claimActionInvocation({ turn: actionTurnRef(run), ...input }),
+  registerApproval: ({ run, ...input }) =>
+    registerActionApproval({ turn: actionTurnRef(run), ...input }),
   evaluateApproval: evaluateActionApproval,
   now: () => new Date(),
 };
@@ -81,6 +85,23 @@ export function executeActionHostGateway(input: {
     request: actionServiceRequest(input.request),
     signal: input.signal,
     dependencies: { ...defaultDependencies, ...input.dependencies },
+  });
+}
+
+export function executeActionPrincipalGateway(input: {
+  request: ActionHostGatewayRequest;
+  principal: ActionPrincipal & { policy: "headless" };
+  signal: AbortSignal;
+  dependencies?: Partial<ActionGatewayServiceDependencies>;
+}): Promise<ActionGatewayResponse> {
+  return executeActionHostGatewayService({
+    request: actionServiceRequest(input.request),
+    signal: input.signal,
+    dependencies: {
+      ...defaultDependencies,
+      ...input.dependencies,
+      loadContext: async () => input.principal,
+    },
   });
 }
 
@@ -124,7 +145,7 @@ function getCodexActionCapabilityTurnState(
     runId: request.runId,
     actorId: context.actorId,
     workspaceId: context.workspaceId,
-    policy: context.policy ?? "cloudReadOnly",
+    policy: context.policy ?? "foregroundInteractive",
   });
   return {
     quotedTotalUsdMicros: 0,
@@ -176,6 +197,7 @@ async function loadCodexActionContext(
       userTimezone: users.timezone,
       engine: codexChatSessions.engine,
       assistantMessageId: codexChatTurns.assistantMessageId,
+      chatKind: chatSessions.kind,
     })
     .from(codexChatSessions)
     .innerJoin(
@@ -187,6 +209,7 @@ async function loadCodexActionContext(
       ),
     )
     .innerJoin(users, eq(users.workosUserId, codexChatSessions.userWorkosId))
+    .innerJoin(chatSessions, eq(chatSessions.id, codexChatSessions.chatSessionId))
     .innerJoin(
       workspaceMembers,
       and(
@@ -214,7 +237,7 @@ async function loadCodexActionContext(
     userTimezone: row.userTimezone,
     engine: row.engine,
     assistantMessageId: row.assistantMessageId,
-    policy: row.engine === "opencompany" ? "foregroundInteractive" : "cloudReadOnly",
+    policy: row.chatKind === "task" ? "headless" : "foregroundInteractive",
   };
 }
 

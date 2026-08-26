@@ -432,12 +432,16 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     });
 
     const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as {
+      task: string;
       mcpServers: Array<{
         name: string;
         url: string;
         headers: Array<{ name: string; value: string }>;
       }>;
     };
+    expect(harnessInput.task).toContain("Actions may modify connected services");
+    expect(harnessInput.task).toContain("denial is a normal outcome");
+    expect(harnessInput.task).not.toContain("cannot modify connected services");
     expect(harnessInput.mcpServers).toHaveLength(1);
     const [server] = harnessInput.mcpServers;
     expect(server).toMatchObject({

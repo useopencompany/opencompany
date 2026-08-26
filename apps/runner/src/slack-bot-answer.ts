@@ -1,14 +1,10 @@
-import { isChatActionsKilled, resolveActionCatalog } from "@opencompany/agent/actions/catalog";
-import { type ActionResult, executeAction } from "@opencompany/agent/actions/execute";
-import { projectActionCatalog } from "@opencompany/agent/actions/policy";
-import type { ResolvedActionCatalog } from "@opencompany/agent/actions/types";
+import { executeActionPrincipalGateway } from "@opencompany/agent/application/persisted-action-gateway";
 import { captureToBrainInbox } from "@opencompany/agent/brain-capture";
 import { nextAvailableBrainId } from "@opencompany/agent/brain-files";
 import {
   type BrainMultiBrainTarget,
   normalizeBrainReadToolInput,
 } from "@opencompany/agent/brain-surface";
-import { resolveManagedCapabilities } from "@opencompany/agent/capabilities/resolve";
 import { runProductChatAgent } from "@opencompany/agent/chat-agent";
 import { CHAT_FRONTIER_MODEL } from "@opencompany/agent/chat-model-router";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
@@ -46,6 +42,7 @@ import type { LanguageModelUsage } from "ai";
 import { eq } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { runTaskBrainRead } from "./codex-brain-tool";
+import { createActionDispatcher } from "./opencompany-action-gateway";
 import {
   getUserBasics,
   resolveSlackSender,
@@ -436,9 +433,10 @@ async function runSlackChatAgent(input: {
     ? await resolveSlackActionDispatcher({
         userWorkosId: input.identity.userWorkosId,
         workspaceId: input.integration.workspaceId,
+        sessionId: `slack:${input.telemetrySessionId}`,
+        turnId: input.sourceRef,
         status: input.status,
         signal,
-        currentDate,
         userTimezone,
       })
     : null;
@@ -560,65 +558,56 @@ async function runSlackChatAgent(input: {
 async function resolveSlackActionDispatcher(input: {
   userWorkosId: string;
   workspaceId: string;
+  sessionId: string;
+  turnId: string;
   status: SlackBotStatusReporter;
   signal: AbortSignal;
-  currentDate: Date;
   userTimezone: string;
 }) {
-  if (isChatActionsKilled()) return null;
-  let catalog: ResolvedActionCatalog;
-  try {
-    const resolved = await resolveActionCatalog(
-      {
-        userWorkosId: input.userWorkosId,
-        workspaceId: input.workspaceId,
-      },
-      { resolveManagedCapabilities: resolveManagedCapabilities },
-    );
-    // Slack has no tool-approval continuation UI. Keep actions the member has
-    // explicitly enabled, and omit both "ask" actions and paid managed
-    // capabilities, which require a persisted chat session for execution and
-    // may return a confirmation card Slack cannot answer.
-    catalog = projectActionCatalog(resolved, "headless");
-  } catch {
-    return null;
-  }
-  if (catalog.actions.length === 0) return null;
-
-  const providerLabelById = new Map(
-    catalog.providers.map((provider) => [provider.id, provider.label]),
+  const dispatcher = await createActionDispatcher(
+    {
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      signal: input.signal,
+      approvalContinuation: false,
+    },
+    {
+      execute: ({ request, signal }) =>
+        executeActionPrincipalGateway({
+          request,
+          signal,
+          principal: {
+            actorId: input.userWorkosId,
+            workspaceId: input.workspaceId,
+            conversationId: input.sessionId,
+            userTimezone: input.userTimezone,
+            engine: "opencompany",
+            policy: "headless",
+          },
+        }),
+    },
   );
+  if (!dispatcher || dispatcher.catalog.actions.length === 0) return null;
+  const providerLabelById = new Map(
+    dispatcher.catalog.sources.map((provider) => [provider.id, provider.label]),
+  );
+  const execute = dispatcher.execute;
   return {
-    catalog,
+    catalog: { providers: dispatcher.catalog.sources },
     dispatcher: {
-      catalog: {
-        sources: catalog.providers,
-        actions: catalog.actions.map((action) => ({
-          id: action.id,
-          source: action.provider,
-          description: action.description,
-          params: action.params,
-          permissionMode: action.permissionMode,
-        })),
-      },
+      ...dispatcher,
       execute: async (call: {
         action: string;
         params: Record<string, unknown>;
         toolCallId: string;
-      }): Promise<ActionResult> => {
-        const provider = catalog.actions.find((action) => action.id === call.action)?.provider;
+      }) => {
+        const provider = dispatcher.catalog.actions.find(
+          (action) => action.id === call.action,
+        )?.source;
         input.status.setPhase(
           `Checking ${provider ? (providerLabelById.get(provider) ?? provider) : "integrations"}…`,
         );
-        return executeAction({
-          catalog,
-          actionId: call.action,
-          params: call.params,
-          userWorkosId: input.userWorkosId,
-          signal: input.signal,
-          currentDate: input.currentDate,
-          userTimezone: input.userTimezone,
-        });
+        return execute(call);
       },
     },
   };

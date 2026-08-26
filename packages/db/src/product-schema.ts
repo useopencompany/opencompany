@@ -4026,9 +4026,7 @@ export const actionTurns = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    policy: text("policy")
-      .$type<"foregroundInteractive" | "cloudReadOnly" | "headless">()
-      .notNull(),
+    policy: text("policy").$type<"foregroundInteractive" | "headless">().notNull(),
     actionCallCount: integer("action_call_count").notNull().default(0),
     invocationIds: jsonb("invocation_ids").$type<string[]>().notNull().default([]),
     listedSourceIds: jsonb("listed_source_ids").$type<string[]>().notNull().default([]),
@@ -4037,6 +4035,10 @@ export const actionTurns = productSchema.table(
       .default(0),
     admittedInvocationIds: jsonb("admitted_invocation_ids").$type<string[]>().notNull().default([]),
     capabilityQuotes: jsonb("capability_quotes")
+      .$type<Record<string, Record<string, unknown>>>()
+      .notNull()
+      .default({}),
+    approvalRecords: jsonb("approval_records")
       .$type<Record<string, Record<string, unknown>>>()
       .notNull()
       .default({}),
@@ -4054,7 +4056,7 @@ export const actionTurns = productSchema.table(
     expiresIdx: index("goat_action_turns_expires_idx").on(table.expiresAt),
     policyCheck: check(
       "goat_action_turns_policy_check",
-      sql`${table.policy} IN ('foregroundInteractive', 'cloudReadOnly', 'headless')`,
+      sql`${table.policy} IN ('foregroundInteractive', 'headless')`,
     ),
     countersCheck: check(
       "goat_action_turns_counters_check",
