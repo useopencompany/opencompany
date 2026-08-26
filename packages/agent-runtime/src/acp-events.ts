@@ -233,12 +233,13 @@ function normalizeToolCall(
   if (!itemId) return [normalized("unknown", raw, { updateType: "tool_call" })];
   const name = acpToolName(update);
   const title = readString(update.title) ?? name;
-  const rawInput = readRecord(update.rawInput) ?? undefined;
+  const providerRawInput = readRecord(update.rawInput) ?? undefined;
   const kind = classifyTool(update, name);
+  const rawInput = normalizedToolInput(update, kind, providerRawInput);
   const acpKind = readString(update.kind) ?? undefined;
-  const command = commandFromTool(rawInput, title) ?? title;
-  const query = queryFromTool(rawInput) ?? title;
-  const changes = fileChangesFromTool(update, rawInput);
+  const command = commandFromTool(providerRawInput, title) ?? title;
+  const query = queryFromTool(providerRawInput) ?? title;
+  const changes = fileChangesFromTool(update, providerRawInput);
   const mcp = mcpToolInfo(name);
   const toolCall: AcpToolCall = {
     kind,
@@ -273,17 +274,20 @@ function normalizeToolCallUpdate(
   if (!itemId) return [normalized("unknown", raw, { updateType: "tool_call_update" })];
   const existing = toolCalls.get(itemId);
   const name = acpToolName(update, existing?.name);
-  const updatedRawInput = readRecord(update.rawInput) ?? undefined;
+  const providerRawInput = readRecord(update.rawInput) ?? undefined;
+  const classifiedKind = classifyTool(update, name);
+  const kind = isMcpToolCall(update) ? classifiedKind : (existing?.kind ?? classifiedKind);
+  const updatedRawInput = normalizedToolInput(update, kind, providerRawInput);
   const rawInput = updatedRawInput
     ? { ...existing?.rawInput, ...updatedRawInput }
     : existing?.rawInput;
-  const kind = existing?.kind ?? classifyTool(update, name);
   const acpKind = readString(update.kind) ?? existing?.acpKind;
   const title = readString(update.title) ?? existing?.title ?? name;
   const mcp = mcpToolInfo(name);
-  const updatedChanges = fileChangesFromTool(update, rawInput);
-  const command = commandFromTool(rawInput, title) ?? existing?.command ?? title;
-  const query = queryFromTool(rawInput) ?? existing?.query ?? title;
+  const updatedChanges = fileChangesFromTool(update, providerRawInput ?? rawInput);
+  const command =
+    commandFromTool(providerRawInput ?? rawInput, title) ?? existing?.command ?? title;
+  const query = queryFromTool(providerRawInput ?? rawInput) ?? existing?.query ?? title;
   const server = mcp.server ?? existing?.server;
   const tool = mcp.tool ?? existing?.tool;
   const changes = updatedChanges.length > 0 ? updatedChanges : existing?.changes;
@@ -461,11 +465,32 @@ function classifyTool(update: Record<string, unknown>, name: string): AcpToolKin
   ) {
     return "subagent";
   }
+  // Codex ACP represents MCP calls as executable tools because ACP's `kind` is a presentation
+  // hint, not canonical tool identity. Provider metadata and the validated MCP envelope must win
+  // over `kind: "execute"`, otherwise the command projection drops the call arguments and result.
+  if (isMcpToolCall(update)) return "tool";
   const kind = readString(update.kind);
   if (kind === "execute") return "command";
   if (kind === "edit" || kind === "delete" || kind === "move") return "file_change";
   if (kind === "search" || kind === "fetch") return "web_search";
   return "tool";
+}
+
+function isMcpToolCall(update: Record<string, unknown>) {
+  const meta = readRecord(update._meta);
+  if (meta?.is_mcp_tool_call === true) return true;
+  const rawInput = readRecord(update.rawInput);
+  return Boolean(readString(rawInput?.server) && readString(rawInput?.tool));
+}
+
+function normalizedToolInput(
+  update: Record<string, unknown>,
+  kind: AcpToolKind,
+  rawInput: Record<string, unknown> | undefined,
+) {
+  if (!rawInput) return undefined;
+  if (kind !== "tool" || !isMcpToolCall(update)) return rawInput;
+  return readRecord(rawInput.arguments) ?? rawInput;
 }
 
 function acpToolName(update: Record<string, unknown>, fallback?: string) {
@@ -532,6 +557,10 @@ function toolOutputText(update: Record<string, unknown>) {
       readStringAllowEmpty(rawOutput.output) ??
       readStringAllowEmpty(rawOutput.content);
     if (formatted) return formatted;
+    const result = serializeToolOutput(rawOutput.result);
+    if (result) return result;
+    const error = serializeToolOutput(rawOutput.error);
+    if (error) return error;
   }
   const meta = readRecord(update._meta);
   for (const key of ["terminal_output", "terminal_output_delta", "mcp_output_delta"]) {
@@ -539,6 +568,16 @@ function toolOutputText(update: Record<string, unknown>) {
     if (data) return data;
   }
   return "";
+}
+
+function serializeToolOutput(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "";
+  }
 }
 
 function commandExitCode(update: Record<string, unknown>) {
