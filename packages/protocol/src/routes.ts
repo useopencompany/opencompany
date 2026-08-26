@@ -3,6 +3,7 @@ import { RunStreamEventSchema } from "./events";
 import {
   ActionPermissionEnvelopeSchema,
   AddWikiTimelineEntryBodySchema,
+  ApprovePluginMcpBodySchema,
   ArchiveVersionBodySchema,
   AttachmentUploadBodySchema,
   AttachmentUploadEnvelopeSchema,
@@ -61,13 +62,13 @@ import {
   CreateBrowserProfileBodySchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
-  CreateSkillBodySchema,
   CreateTaskBodySchema,
   CreateTaskEnvelopeSchema,
   CreateTaskScheduleBodySchema,
   CreateWikiPageBodySchema,
   CreateWorkflowBodySchema,
   CreateWorkspaceBodySchema,
+  CreateWorkspaceSkillBodySchema,
   CursorSchema,
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
@@ -88,6 +89,7 @@ import {
   ImportSkillBodySchema,
   InfisicalAuthFlowEnvelopeSchema,
   InfisicalAuthStatusEnvelopeSchema,
+  InstallPluginBodySchema,
   IntegrationAccountDeleteEnvelopeSchema,
   IntegrationAccountIdSchema,
   IntegrationAccountListEnvelopeSchema,
@@ -106,6 +108,13 @@ import {
   OnboardingStateEnvelopeSchema,
   OnboardingWorkspaceEnvelopeSchema,
   OnboardingWorkspaceSlugEnvelopeSchema,
+  PluginArchiveEnvelopeSchema,
+  PluginDataDeleteEnvelopeSchema,
+  PluginImportEnvelopeSchema,
+  PluginImportPreviewBodySchema,
+  PluginImportPreviewEnvelopeSchema,
+  PluginInstallationEnvelopeSchema,
+  PluginListEnvelopeSchema,
   PresentationCursorSchema,
   PublicChatShareEnvelopeSchema,
   PublicChatShareMetadataEnvelopeSchema,
@@ -133,13 +142,15 @@ import {
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
   SetSlackBotDestinationBodySchema,
+  SetWikiSourceEnabledBodySchema,
   SetWorkspaceCapabilityBodySchema,
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
-  SkillEnvelopeSchema,
+  SkillFileChunkEnvelopeSchema,
   SkillImportEnvelopeSchema,
   SkillImportPreviewBodySchema,
   SkillImportPreviewEnvelopeSchema,
+  SkillInstallationEnvelopeSchema,
   SkillListEnvelopeSchema,
   SlackBotChannelListEnvelopeSchema,
   SlackBotDestinationEnvelopeSchema,
@@ -164,17 +175,22 @@ import {
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
   UpdateMcpSetupBodySchema,
-  UpdateSkillBodySchema,
   UpdateTaskBodySchema,
   UpdateTaskEnvelopeSchema,
   UpdateTaskScheduleCommandSchema,
   UpdateUserPreferencesBodySchema,
   UpdateWikiPageBodySchema,
   UpdateWorkflowBodySchema,
+  UpdateWorkspaceSkillBodySchema,
+  UpsertWikiSourceBodySchema,
   UserPreferencesEnvelopeSchema,
+  WikiIngestActivityListEnvelopeSchema,
   WikiPageDeleteEnvelopeSchema,
   WikiPageListEnvelopeSchema,
   WikiPageMutationEnvelopeSchema,
+  WikiSourceDeleteEnvelopeSchema,
+  WikiSourceListEnvelopeSchema,
+  WikiSourceMutationEnvelopeSchema,
   WikiTimelineMutationEnvelopeSchema,
   WorkflowArchiveEnvelopeSchema,
   WorkflowEnvelopeSchema,
@@ -187,6 +203,7 @@ import {
   WorkspaceCommandEnvelopeSchema,
   WorkspaceRenameEnvelopeSchema,
   WorkspaceSettingsEnvelopeSchema,
+  WorkspaceSkillNameSchema,
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "./version";
 
@@ -1061,6 +1078,96 @@ export const addWikiTimelineEntryRoute = createRoute({
   },
 });
 
+export const listWikiSourcesRoute = createRoute({
+  method: "get",
+  path: "/v1/wiki/sources",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Source configuration and connection state for the active workspace Wiki.",
+      content: { "application/json": { schema: WikiSourceListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listWikiIngestActivityRoute = createRoute({
+  method: "get",
+  path: "/v1/wiki/sources/activity",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+      cursor: z.string().min(1).max(1_024).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Recent ingestion outcomes for the active workspace Wiki.",
+      content: { "application/json": { schema: WikiIngestActivityListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const upsertWikiSourceRoute = createRoute({
+  method: "put",
+  path: "/v1/wiki/sources",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpsertWikiSourceBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "A Wiki source configured or updated for the active workspace.",
+      content: { "application/json": { schema: WikiSourceMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setWikiSourceEnabledRoute = createRoute({
+  method: "patch",
+  path: "/v1/wiki/sources/{sourceId}",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ sourceId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetWikiSourceEnabledBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "A Wiki source enabled state updated for the active workspace.",
+      content: { "application/json": { schema: WikiSourceMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteWikiSourceRoute = createRoute({
+  method: "delete",
+  path: "/v1/wiki/sources/{sourceId}",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ sourceId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "A Wiki source removed from the active workspace.",
+      content: { "application/json": { schema: WikiSourceDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const listSkillsRoute = createRoute({
   method: "get",
   path: "/v1/skills",
@@ -1075,19 +1182,22 @@ export const listSkillsRoute = createRoute({
   },
 });
 
-export const createSkillRoute = createRoute({
+export const createWorkspaceSkillRoute = createRoute({
   method: "post",
   path: "/v1/skills",
   tags: ["Skills"],
   security: actorSecurity,
   request: {
     headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
-    body: { required: true, content: { "application/json": { schema: CreateSkillBodySchema } } },
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateWorkspaceSkillBodySchema } },
+    },
   },
   responses: {
     201: {
-      description: "Skill draft created or replayed.",
-      content: { "application/json": { schema: SkillEnvelopeSchema } },
+      description: "Workspace-authored Skill installed as an immutable standard bundle.",
+      content: { "application/json": { schema: SkillImportEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -1106,7 +1216,7 @@ export const previewSkillImportRoute = createRoute({
   },
   responses: {
     200: {
-      description: "External Skill metadata and instructions resolved for confirmation.",
+      description: "External Skill metadata and file sizes resolved for confirmation.",
       content: { "application/json": { schema: SkillImportPreviewEnvelopeSchema } },
     },
     default: errorResponse,
@@ -1124,7 +1234,7 @@ export const importSkillRoute = createRoute({
   },
   responses: {
     201: {
-      description: "External Skill imported or replayed after confirmation.",
+      description: "Immutable Skill bundle installed or replayed after confirmation.",
       content: { "application/json": { schema: SkillImportEnvelopeSchema } },
     },
     default: errorResponse,
@@ -1154,25 +1264,28 @@ export const getSkillRoute = createRoute({
   responses: {
     200: {
       description: "Skill detail.",
-      content: { "application/json": { schema: SkillEnvelopeSchema } },
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
     },
     default: errorResponse,
   },
 });
 
-export const updateSkillRoute = createRoute({
+export const updateWorkspaceSkillRoute = createRoute({
   method: "patch",
   path: "/v1/skills/{slug}",
   tags: ["Skills"],
   security: actorSecurity,
   request: {
-    params: z.object({ slug: ResourceIdSchema }),
-    body: { required: true, content: { "application/json": { schema: UpdateSkillBodySchema } } },
+    params: z.object({ slug: WorkspaceSkillNameSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateWorkspaceSkillBodySchema } },
+    },
   },
   responses: {
     200: {
-      description: "Hand-authored skill updated.",
-      content: { "application/json": { schema: SkillEnvelopeSchema } },
+      description: "Workspace-authored Skill moved to a new immutable bundle version.",
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -1188,6 +1301,244 @@ export const archiveSkillRoute = createRoute({
     200: {
       description: "Skill archived.",
       content: { "application/json": { schema: SkillArchiveEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const enableSkillRoute = createRoute({
+  method: "post",
+  path: "/v1/skills/{slug}/enable",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: { params: z.object({ slug: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Skill installation enabled.",
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const disableSkillRoute = createRoute({
+  method: "post",
+  path: "/v1/skills/{slug}/disable",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: { params: z.object({ slug: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Skill installation disabled.",
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const replaceSkillRoute = createRoute({
+  method: "post",
+  path: "/v1/skills/{slug}/replace",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: ImportSkillBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Skill installation moved to a newly verified immutable bundle.",
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const readSkillFileRoute = createRoute({
+  method: "get",
+  path: "/v1/skills/{slug}/files/read",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: ResourceIdSchema }),
+    query: z.object({
+      path: z.string().min(1).max(1_024),
+      offset: z.coerce.number().int().min(0).optional(),
+      maxBytes: z.coerce
+        .number()
+        .int()
+        .min(4)
+        .max(64 * 1_024)
+        .optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "One bounded chunk of an authorized Skill bundle file.",
+      content: { "application/json": { schema: SkillFileChunkEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listPluginsRoute = createRoute({
+  method: "get",
+  path: "/v1/plugins",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Live immutable Plugin packages in the active workspace.",
+      content: { "application/json": { schema: PluginListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const previewPluginImportRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/imports/preview",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: PluginImportPreviewBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Plugin metadata, components, validation report, and file sizes.",
+      content: { "application/json": { schema: PluginImportPreviewEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const importPluginRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/imports",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: { required: true, content: { "application/json": { schema: InstallPluginBodySchema } } },
+  },
+  responses: {
+    201: {
+      description: "Immutable Plugin package installed or replayed after confirmation.",
+      content: { "application/json": { schema: PluginImportEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getPluginRoute = createRoute({
+  method: "get",
+  path: "/v1/plugins/{name}",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin package detail with passive Skills and executable MCP declarations.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const archivePluginRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/archive",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin archived without deleting its immutable package.",
+      content: { "application/json": { schema: PluginArchiveEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const enablePluginRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/enable",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin enabled for Skill resolution.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const disablePluginRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/disable",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin disabled for Skill resolution.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const approvePluginMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/mcp/approve",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ name: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: ApprovePluginMcpBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Plugin MCP approved for the exact installed package integrity.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const revokePluginMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/mcp/revoke",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin MCP approval revoked.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deletePluginDataRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/data/delete",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Persistent data metadata deleted as an explicit destructive action.",
+      content: { "application/json": { schema: PluginDataDeleteEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3083,14 +3434,33 @@ export type V1RouteHandlers = {
   updateWikiPage: RouteHandler<typeof updateWikiPageRoute>;
   deleteWikiPage: RouteHandler<typeof deleteWikiPageRoute>;
   addWikiTimelineEntry: RouteHandler<typeof addWikiTimelineEntryRoute>;
+  listWikiSources: RouteHandler<typeof listWikiSourcesRoute>;
+  listWikiIngestActivity: RouteHandler<typeof listWikiIngestActivityRoute>;
+  upsertWikiSource: RouteHandler<typeof upsertWikiSourceRoute>;
+  setWikiSourceEnabled: RouteHandler<typeof setWikiSourceEnabledRoute>;
+  deleteWikiSource: RouteHandler<typeof deleteWikiSourceRoute>;
   listSkills: RouteHandler<typeof listSkillsRoute>;
-  createSkill: RouteHandler<typeof createSkillRoute>;
+  createWorkspaceSkill: RouteHandler<typeof createWorkspaceSkillRoute>;
   previewSkillImport: RouteHandler<typeof previewSkillImportRoute>;
   importSkill: RouteHandler<typeof importSkillRoute>;
   listSkillCatalog: RouteHandler<typeof listSkillCatalogRoute>;
   getSkill: RouteHandler<typeof getSkillRoute>;
-  updateSkill: RouteHandler<typeof updateSkillRoute>;
+  updateWorkspaceSkill: RouteHandler<typeof updateWorkspaceSkillRoute>;
   archiveSkill: RouteHandler<typeof archiveSkillRoute>;
+  enableSkill: RouteHandler<typeof enableSkillRoute>;
+  disableSkill: RouteHandler<typeof disableSkillRoute>;
+  replaceSkill: RouteHandler<typeof replaceSkillRoute>;
+  readSkillFile: RouteHandler<typeof readSkillFileRoute>;
+  listPlugins: RouteHandler<typeof listPluginsRoute>;
+  previewPluginImport: RouteHandler<typeof previewPluginImportRoute>;
+  importPlugin: RouteHandler<typeof importPluginRoute>;
+  getPlugin: RouteHandler<typeof getPluginRoute>;
+  archivePlugin: RouteHandler<typeof archivePluginRoute>;
+  enablePlugin: RouteHandler<typeof enablePluginRoute>;
+  disablePlugin: RouteHandler<typeof disablePluginRoute>;
+  approvePluginMcp: RouteHandler<typeof approvePluginMcpRoute>;
+  revokePluginMcp: RouteHandler<typeof revokePluginMcpRoute>;
+  deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
@@ -3256,14 +3626,23 @@ export function createV1Router(
       .openapi(updateWikiPageRoute, handlers.updateWikiPage)
       .openapi(deleteWikiPageRoute, handlers.deleteWikiPage)
       .openapi(addWikiTimelineEntryRoute, handlers.addWikiTimelineEntry)
+      .openapi(listWikiSourcesRoute, handlers.listWikiSources)
+      .openapi(listWikiIngestActivityRoute, handlers.listWikiIngestActivity)
+      .openapi(upsertWikiSourceRoute, handlers.upsertWikiSource)
+      .openapi(setWikiSourceEnabledRoute, handlers.setWikiSourceEnabled)
+      .openapi(deleteWikiSourceRoute, handlers.deleteWikiSource)
       .openapi(listSkillsRoute, handlers.listSkills)
-      .openapi(createSkillRoute, handlers.createSkill)
+      .openapi(createWorkspaceSkillRoute, handlers.createWorkspaceSkill)
       .openapi(previewSkillImportRoute, handlers.previewSkillImport)
       .openapi(importSkillRoute, handlers.importSkill)
       .openapi(listSkillCatalogRoute, handlers.listSkillCatalog)
       .openapi(getSkillRoute, handlers.getSkill)
-      .openapi(updateSkillRoute, handlers.updateSkill)
+      .openapi(updateWorkspaceSkillRoute, handlers.updateWorkspaceSkill)
       .openapi(archiveSkillRoute, handlers.archiveSkill)
+      .openapi(enableSkillRoute, handlers.enableSkill)
+      .openapi(disableSkillRoute, handlers.disableSkill)
+      .openapi(replaceSkillRoute, handlers.replaceSkill)
+      .openapi(readSkillFileRoute, handlers.readSkillFile)
       .openapi(listConversationsRoute, handlers.listConversations)
       .openapi(getConversationRoute, handlers.getConversation)
       .openapi(updateConversationRoute, handlers.updateConversation)
@@ -3340,6 +3719,16 @@ export function createV1Router(
       .openapi(createBillingSubscriptionCheckoutRoute, handlers.createBillingSubscriptionCheckout)
       .openapi(createBillingPortalSessionRoute, handlers.createBillingPortalSession)
       .openapi(updateBillingAutoRefillRoute, handlers.updateBillingAutoRefill)
+      .openapi(listPluginsRoute, handlers.listPlugins)
+      .openapi(previewPluginImportRoute, handlers.previewPluginImport)
+      .openapi(importPluginRoute, handlers.importPlugin)
+      .openapi(getPluginRoute, handlers.getPlugin)
+      .openapi(archivePluginRoute, handlers.archivePlugin)
+      .openapi(enablePluginRoute, handlers.enablePlugin)
+      .openapi(disablePluginRoute, handlers.disablePlugin)
+      .openapi(approvePluginMcpRoute, handlers.approvePluginMcp)
+      .openapi(revokePluginMcpRoute, handlers.revokePluginMcp)
+      .openapi(deletePluginDataRoute, handlers.deletePluginData)
   );
 }
 
@@ -3502,16 +3891,112 @@ const placeholderWikiPage = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
 };
-const placeholderSkill = {
-  id: "skill_contract",
-  slug: "contract-skill",
-  name: "Contract skill",
+const placeholderWikiSource = {
+  id: "gwscfg_contract",
+  provider: "gmail" as const,
+  integrationId: "integration_contract",
+  enabled: true,
+  config: {},
+  integrationStatus: "connected" as const,
+  accountName: "Contract account",
+  accountEmail: "contract@example.com",
+  connectionLabel: null,
+  ownerName: "Contract owner",
+  ownerEmail: "contract@example.com",
+  ownerAvatarUrl: null,
+  ownerKind: "user" as const,
+  isOwn: true,
+  canConfigure: true,
+  canToggle: true,
+  canDelete: true,
+};
+const placeholderSkillSource = {
+  type: "github" as const,
+  url: "https://github.com/example/skills",
+  ref: "main",
+  path: "contract-skill",
+  resolvedCommit: "a".repeat(40),
+};
+const placeholderSkillBundle = {
+  id: "skill_bundle_contract",
+  integrity: `sha256:${"b".repeat(64)}`,
+  name: "contract-skill",
   description: "A contract placeholder.",
-  instructions: "Complete the contract placeholder.",
-  status: "active" as const,
-  source: null,
+  license: null,
+  compatibility: null,
+  metadata: null,
+  allowedTools: null,
+  body: "Complete the contract placeholder.",
+  source: placeholderSkillSource,
+  files: [{ path: "SKILL.md", executable: false, sizeBytes: 128 }],
+  createdAt: placeholderTime,
+};
+const placeholderSkillInstallation = {
+  id: "skill_installation_contract",
+  name: "contract-skill",
+  enabled: true,
+  archivedAt: null,
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
+  bundle: placeholderSkillBundle,
+};
+const placeholderPlugin = {
+  id: "plugin_contract",
+  name: "contract-plugin",
+  status: "enabled" as const,
+  manifest: {
+    name: "contract-plugin",
+    version: "1.0.0",
+    description: "A contract Plugin.",
+  },
+  source: { ...placeholderSkillSource, path: "contract-plugin" },
+  integrity: `sha256:${"c".repeat(64)}`,
+  files: [{ path: "plugin.json", executable: false, sizeBytes: 128 }],
+  skills: [
+    {
+      name: placeholderSkillBundle.name,
+      path: "skills/contract-skill",
+      bundleId: placeholderSkillBundle.id,
+      integrity: placeholderSkillBundle.integrity,
+      description: placeholderSkillBundle.description,
+    },
+  ],
+  stdioServers: [
+    {
+      name: "contract-server",
+      type: "stdio" as const,
+      command: "./server",
+      args: [],
+      envKeys: ["CONTRACT_TOKEN"],
+    },
+  ],
+  installReport: {
+    ignoredManifestFields: [],
+    skills: [
+      {
+        path: "skills/contract-skill",
+        name: "contract-skill",
+        status: "valid" as const,
+        integrity: placeholderSkillBundle.integrity,
+      },
+    ],
+    mcp: {
+      present: true as const,
+      status: "parsed" as const,
+      reports: [
+        {
+          name: "contract-server",
+          status: "selected" as const,
+          transport: "stdio" as const,
+        },
+      ],
+    },
+    collisions: [],
+  },
+  mcpApprovedIntegrity: null,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+  archivedAt: null,
 };
 
 function placeholderAutomationTaskEnvelope() {
@@ -4044,60 +4529,154 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       201,
     ),
+  listWikiSources: (c) => c.json({ data: [placeholderWikiSource], meta }, 200),
+  listWikiIngestActivity: (c) => c.json({ data: { items: [], nextCursor: null }, meta }, 200),
+  upsertWikiSource: (c) => c.json({ data: placeholderWikiSource, meta }, 200),
+  setWikiSourceEnabled: (c) => c.json({ data: placeholderWikiSource, meta }, 200),
+  deleteWikiSource: (c) =>
+    c.json({ data: { sourceId: placeholderWikiSource.id, deleted: true as const }, meta }, 200),
   listSkills: (c) =>
     c.json(
       {
         data: [
           {
-            id: placeholderSkill.id,
-            slug: placeholderSkill.slug,
-            name: placeholderSkill.name,
-            description: placeholderSkill.description,
-            status: placeholderSkill.status,
-            source: placeholderSkill.source,
-            updatedAt: placeholderSkill.updatedAt,
+            ...placeholderSkillInstallation,
+            bundle: {
+              ...placeholderSkillBundle,
+              body: undefined,
+              files: undefined,
+            },
           },
         ],
         meta,
       },
       200,
     ),
-  createSkill: (c) => c.json({ data: placeholderSkill, meta }, 201),
+  createWorkspaceSkill: (c) =>
+    c.json({ data: { installation: placeholderSkillInstallation, replayed: false }, meta }, 201),
   previewSkillImport: (c) =>
     c.json(
       {
         data: {
           status: "resolved",
-          proposedSlug: placeholderSkill.slug,
-          name: placeholderSkill.name,
-          description: placeholderSkill.description,
-          instructions: placeholderSkill.instructions,
-          extraFiles: [],
-          resolvedCommit: "a".repeat(40),
-          integrity: `sha256:${"b".repeat(64)}`,
+          name: placeholderSkillBundle.name,
+          description: placeholderSkillBundle.description,
+          source: placeholderSkillSource,
+          integrity: placeholderSkillBundle.integrity,
+          files: placeholderSkillBundle.files,
+          fileCount: 1,
+          totalBytes: 128,
         },
         meta,
       },
       200,
     ),
-  importSkill: (c) => c.json({ data: { skill: placeholderSkill, replayed: false }, meta }, 201),
+  importSkill: (c) =>
+    c.json({ data: { installation: placeholderSkillInstallation, replayed: false }, meta }, 201),
   listSkillCatalog: (c) =>
     c.json(
       {
         data: [
           {
-            id: placeholderSkill.slug,
-            name: placeholderSkill.name,
-            description: placeholderSkill.description,
+            id: placeholderSkillInstallation.name,
+            name: placeholderSkillBundle.name,
+            description: placeholderSkillBundle.description,
           },
         ],
         meta,
       },
       200,
     ),
-  getSkill: (c) => c.json({ data: placeholderSkill, meta }, 200),
-  updateSkill: (c) => c.json({ data: placeholderSkill, meta }, 200),
-  archiveSkill: (c) => c.json({ data: { slug: placeholderSkill.slug }, meta }, 200),
+  getSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
+  updateWorkspaceSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
+  archiveSkill: (c) => c.json({ data: { name: placeholderSkillInstallation.name }, meta }, 200),
+  enableSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
+  disableSkill: (c) =>
+    c.json({ data: { ...placeholderSkillInstallation, enabled: false }, meta }, 200),
+  replaceSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
+  readSkillFile: (c) =>
+    c.json(
+      {
+        data: {
+          path: "SKILL.md",
+          executable: false,
+          sizeBytes: 128,
+          offset: 0,
+          nextOffset: 128,
+          eof: true,
+          encoding: "utf8" as const,
+          content: placeholderSkillBundle.body,
+        },
+        meta,
+      },
+      200,
+    ),
+  listPlugins: (c) =>
+    c.json(
+      {
+        data: [
+          {
+            ...placeholderPlugin,
+            files: undefined,
+            skills: undefined,
+            stdioServers: undefined,
+            fileCount: 1,
+            skillCount: 1,
+            stdioServerCount: 1,
+          },
+        ],
+        meta,
+      },
+      200,
+    ),
+  previewPluginImport: (c) =>
+    c.json(
+      {
+        data: {
+          manifest: placeholderPlugin.manifest,
+          source: placeholderPlugin.source,
+          integrity: placeholderPlugin.integrity,
+          files: [{ path: "plugin.json", sizeBytes: 128 }],
+          fileCount: 1,
+          totalBytes: 128,
+          skills: [
+            {
+              path: "skills/contract-skill",
+              name: "contract-skill",
+              description: placeholderSkillBundle.description,
+              integrity: placeholderSkillBundle.integrity,
+              fileCount: 1,
+              totalBytes: 128,
+            },
+          ],
+          stdioServers: placeholderPlugin.stdioServers,
+          report: {
+            ignoredManifestFields: [],
+            skills: placeholderPlugin.installReport.skills,
+            mcp: placeholderPlugin.installReport.mcp,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  importPlugin: (c) => c.json({ data: { plugin: placeholderPlugin, replayed: false }, meta }, 201),
+  getPlugin: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  archivePlugin: (c) => c.json({ data: { name: placeholderPlugin.name }, meta }, 200),
+  enablePlugin: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  disablePlugin: (c) =>
+    c.json({ data: { ...placeholderPlugin, status: "disabled" as const }, meta }, 200),
+  approvePluginMcp: (c) =>
+    c.json(
+      {
+        data: { ...placeholderPlugin, mcpApprovedIntegrity: placeholderPlugin.integrity },
+        meta,
+      },
+      200,
+    ),
+  revokePluginMcp: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  deletePluginData: (c) =>
+    c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>

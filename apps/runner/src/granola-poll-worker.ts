@@ -21,6 +21,13 @@ import {
   updateGranolaSyncPage,
 } from "@opencompany/db/granola";
 import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
+import {
+  attributeWikiSourceEventClaims,
+  claimWikiSourceEvents,
+  listWikiSourceEventClaimedWorkspaceIds,
+} from "@opencompany/db/wiki-event-claims";
+import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
+import { listEnabledWikiSourcesForIntegration } from "@opencompany/db/wiki-sources";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
@@ -33,6 +40,7 @@ import {
 } from "./granola-api";
 import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
+import { wakeWikiIngestWorker } from "./wiki-ingest-worker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-granola-poll" });
 
@@ -56,19 +64,31 @@ type GranolaPollCandidate = {
   userWorkosId: string;
 };
 
-export async function listGranolaPollCandidates(): Promise<GranolaPollCandidate[]> {
-  const result = await getDb().execute(sql`
+export async function listGranolaPollCandidates(
+  db: Pick<ReturnType<typeof getDb>, "execute"> = getDb(),
+): Promise<GranolaPollCandidate[]> {
+  const result = await db.execute(sql`
     SELECT
       i.id AS "integrationId",
       i.user_workos_id AS "userWorkosId"
     FROM goat.integrations i
     WHERE i.provider = 'granola'
       AND i.status = 'connected'
-      AND EXISTS (
-        SELECT 1 FROM goat.brain_sources bs
-        WHERE bs.integration_id = i.id
-          AND bs.provider = 'granola'
-          AND bs.enabled = true
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM goat.brain_sources bs
+          WHERE bs.integration_id = i.id
+            AND bs.provider = 'granola'
+            AND bs.enabled = true
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM goat.wiki_sources ws
+          WHERE ws.integration_id = i.id
+            AND ws.provider = 'granola'
+            AND ws.enabled = true
+        )
       )
   `);
   return rowsFromExecute<GranolaPollCandidate>(result);
@@ -138,6 +158,14 @@ export async function pollGranolaIntegration(input: {
 
   const routes = await listEnabledGranolaBrainSourceRoutes([candidate.integrationId], db);
   const routedBrainRefs = [...new Set(routes.map((route) => route.brainRef))];
+  const wikiSources = await listEnabledWikiSourcesForIntegration(candidate.integrationId, db);
+  const routedWikiWorkspaceIds = [
+    ...new Set(
+      wikiSources
+        .filter((source) => source.provider === GRANOLA_PROVIDER)
+        .map((source) => source.workspaceId),
+    ),
+  ];
 
   let enqueued = 0;
   for (const note of notes) {
@@ -147,6 +175,7 @@ export async function pollGranolaIntegration(input: {
       apiKey,
       note,
       routedBrainRefs,
+      routedWikiWorkspaceIds,
       signal: input.signal,
     });
     if (result.enqueued) enqueued += 1;
@@ -232,79 +261,132 @@ function latestDate(left: Date | null, right: Date | null) {
   return left > right ? left : right;
 }
 
-async function ingestGranolaNote(input: {
+export async function ingestGranolaNote(input: {
   candidate: GranolaPollCandidate;
   apiKey: string;
   note: GranolaNoteSummary;
   routedBrainRefs: readonly string[];
+  routedWikiWorkspaceIds: readonly string[];
   signal: AbortSignal;
+  fetchNote?: typeof fetchGranolaNote;
 }): Promise<{ enqueued: boolean }> {
   const { candidate, note } = input;
   const db = getDb();
   const eventKey = granolaEventClaimKey(note.id);
 
-  // Cheap pre-check before the transcript fetch: a note every routed brain has
-  // already claimed (an earlier poll, or an edit bumping updated_at) is a no-op.
-  const alreadyClaimed = await listBrainSourceEventClaimedBrainRefs({
-    brainRefs: input.routedBrainRefs,
-    sourceProvider: GRANOLA_PROVIDER,
-    eventKey,
-    db,
-  });
+  // Cheap pre-check before the transcript fetch: a note every routed brain and
+  // wiki workspace has already claimed (an earlier poll, another member's
+  // connection, or an edit bumping updated_at) is a no-op.
+  const [alreadyClaimedBrainRefs, alreadyClaimedWikiWorkspaceIds] = await Promise.all([
+    listBrainSourceEventClaimedBrainRefs({
+      brainRefs: input.routedBrainRefs,
+      sourceProvider: GRANOLA_PROVIDER,
+      eventKey,
+      db,
+    }),
+    listWikiSourceEventClaimedWorkspaceIds({
+      workspaceIds: input.routedWikiWorkspaceIds,
+      sourceProvider: GRANOLA_PROVIDER,
+      eventKey,
+      db,
+    }),
+  ]);
   const pendingBrainRefs = input.routedBrainRefs.filter(
-    (brainRef) => !alreadyClaimed.has(brainRef),
+    (brainRef) => !alreadyClaimedBrainRefs.has(brainRef),
   );
-  if (pendingBrainRefs.length === 0) return { enqueued: false };
+  const pendingWikiWorkspaceIds = input.routedWikiWorkspaceIds.filter(
+    (workspaceId) => !alreadyClaimedWikiWorkspaceIds.has(workspaceId),
+  );
+  if (pendingBrainRefs.length === 0 && pendingWikiWorkspaceIds.length === 0) {
+    return { enqueued: false };
+  }
 
-  const payload = await fetchGranolaNote({
+  const payload = await (input.fetchNote ?? fetchGranolaNote)({
     apiKey: input.apiKey,
     noteId: note.id,
     signal: input.signal,
   });
   const item = normalizeGranolaMeetingNote(payload, { capturedAt: new Date().toISOString() });
 
-  const result = await db.transaction(async (tx: any) => {
-    const brainRefs: string[] = [];
-    const claimedEventKeysByBrainRef = new Map<string, string[]>();
-    for (const brainRef of pendingBrainRefs) {
-      const { claimedEventKeys } = await claimBrainSourceEvents({
-        brainRef,
+  let brainEnqueued = false;
+  if (pendingBrainRefs.length > 0) {
+    const result = await db.transaction(async (tx: any) => {
+      const brainRefs: string[] = [];
+      const claimedEventKeysByBrainRef = new Map<string, string[]>();
+      for (const brainRef of pendingBrainRefs) {
+        const { claimedEventKeys } = await claimBrainSourceEvents({
+          brainRef,
+          sourceProvider: GRANOLA_PROVIDER,
+          eventKeys: [eventKey],
+          db: tx,
+        });
+        if (claimedEventKeys.length === 0) continue;
+        brainRefs.push(brainRef);
+        claimedEventKeysByBrainRef.set(brainRef, claimedEventKeys);
+      }
+      if (brainRefs.length === 0) return null;
+
+      const upserted = await upsertBrainSourceItemAndEnqueue({
+        userWorkosId: candidate.userWorkosId,
+        sourceConnectionId: candidate.integrationId,
+        integrationId: candidate.integrationId,
+        item,
+        rawPayload: payload,
+        rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
+        kind: BRAIN_AGENT_INGEST_JOB_KIND,
+        brainRefs,
+        db: tx,
+      });
+      for (const brainRef of brainRefs) {
+        await attributeBrainSourceEventClaims({
+          brainRef,
+          sourceProvider: GRANOLA_PROVIDER,
+          eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
+          sourceItemId: upserted.sourceItemId,
+          db: tx,
+        });
+      }
+      return upserted;
+    });
+
+    captureProductIngestionQuotaAnalytics(result?.quotaUpdates);
+    brainEnqueued = Boolean(result?.enqueued);
+    if (brainEnqueued) wakeBrainIngestWorker();
+  }
+
+  let wikiEnqueued = false;
+  for (const workspaceId of pendingWikiWorkspaceIds) {
+    const result = await db.transaction(async (tx: any) => {
+      const claim = await claimWikiSourceEvents({
+        workspaceId,
         sourceProvider: GRANOLA_PROVIDER,
         eventKeys: [eventKey],
         db: tx,
       });
-      if (claimedEventKeys.length === 0) continue;
-      brainRefs.push(brainRef);
-      claimedEventKeysByBrainRef.set(brainRef, claimedEventKeys);
-    }
-    if (brainRefs.length === 0) return null;
+      if (claim.claimedCount === 0) return null;
 
-    const upserted = await upsertBrainSourceItemAndEnqueue({
-      userWorkosId: candidate.userWorkosId,
-      sourceConnectionId: candidate.integrationId,
-      integrationId: candidate.integrationId,
-      item,
-      rawPayload: payload,
-      rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
-      kind: BRAIN_AGENT_INGEST_JOB_KIND,
-      brainRefs,
-      db: tx,
-    });
-    for (const brainRef of brainRefs) {
-      await attributeBrainSourceEventClaims({
-        brainRef,
+      const upserted = await upsertWikiSourceItemAndEnqueue({
+        workspaceId,
+        sourceConnectionId: candidate.integrationId,
+        integrationId: candidate.integrationId,
+        item,
+        rawPayload: payload,
+        db: tx,
+      });
+      await attributeWikiSourceEventClaims({
+        workspaceId,
         sourceProvider: GRANOLA_PROVIDER,
-        eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
+        eventKeys: claim.claimedEventKeys,
         sourceItemId: upserted.sourceItemId,
         db: tx,
       });
-    }
-    return upserted;
-  });
+      return upserted;
+    });
+    wikiEnqueued = wikiEnqueued || Boolean(result?.enqueued);
+  }
+  if (wikiEnqueued) wakeWikiIngestWorker();
 
-  captureProductIngestionQuotaAnalytics(result?.quotaUpdates);
-  if (result?.enqueued) wakeBrainIngestWorker();
-  return { enqueued: Boolean(result?.enqueued) };
+  return { enqueued: brainEnqueued || wikiEnqueued };
 }
 
 async function markGranolaNeedsReauth(candidate: GranolaPollCandidate, reason: string) {

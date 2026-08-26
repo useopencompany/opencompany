@@ -40,6 +40,7 @@ import { createServer } from "./server";
 import { activeSlackBotEventCount, drainSlackBotEvents } from "./slack-bot-events";
 import { startSlackFlushWorker } from "./slack-flush-worker";
 import { startStuckWorkMonitor } from "./stuck-work-monitor";
+import { setWikiIngestWakeup, startWikiIngestWorker } from "./wiki-ingest-worker";
 import { startWorkflowEventWorker } from "./workflow-event-worker";
 
 const logger = createLogger({
@@ -93,6 +94,7 @@ const codexChatWorker = env.taskWorkerEnabled
     })
   : null;
 const brainIngestWorker = env.taskWorkerEnabled ? startBrainIngestWorker(env) : null;
+const wikiIngestWorker = env.taskWorkerEnabled ? startWikiIngestWorker(env) : null;
 const brainImportWorker = env.taskWorkerEnabled ? startBrainImportWorker(env) : null;
 const slackFlushWorker = env.taskWorkerEnabled ? startSlackFlushWorker() : null;
 const linearFlushWorker = env.taskWorkerEnabled ? startLinearFlushWorker() : null;
@@ -134,6 +136,9 @@ if (!codexChatWorker) {
 setBrainIngestWakeup(() => {
   brainIngestWorker?.notify();
 });
+setWikiIngestWakeup(() => {
+  wikiIngestWorker?.notify();
+});
 setGoogleDriveSyncWakeup(() => {
   googleDriveSyncWorker?.notify();
 });
@@ -164,6 +169,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       event: "opencompany.runner_shutdown_started",
       signal,
       active_goat_brain_ingest_count: brainIngestWorker?.activeCount() ?? 0,
+      active_goat_wiki_ingest_count: wikiIngestWorker?.activeCount() ?? 0,
       active_goat_google_drive_sync_count: googleDriveSyncWorker?.activeCount() ?? 0,
       active_goat_brain_import_count: brainImportWorker?.activeCount() ?? 0,
       active_goat_codex_chat_count: codexChatWorker?.activeCount() ?? 0,
@@ -171,6 +177,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     });
     clearInterval(llmBrokerSweepTimer);
     setBrainIngestWakeup(null);
+    setWikiIngestWakeup(null);
     setGoogleDriveSyncWakeup(null);
     setBrainImportWakeup(null);
     setCodexChatWakeup(null);
@@ -201,6 +208,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
         }
       : null,
     runnerDrainTask("brain_ingest", brainIngestWorker),
+    runnerDrainTask("wiki_ingest", wikiIngestWorker),
     runnerDrainTask("brain_import", brainImportWorker),
     runnerDrainTask("slack_flush", slackFlushWorker),
     {

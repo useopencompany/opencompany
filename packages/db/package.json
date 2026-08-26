@@ -28,6 +28,26 @@
       "types": "./src/knowledge-repository.ts",
       "default": "./src/knowledge-repository.ts"
     },
+    "./skill-bundle-repository": {
+      "types": "./src/skill-bundle-repository.ts",
+      "default": "./src/skill-bundle-repository.ts"
+    },
+    "./plugin-repository": {
+      "types": "./src/plugin-repository.ts",
+      "default": "./src/plugin-repository.ts"
+    },
+    "./plugin-runtime-repository": {
+      "types": "./src/plugin-runtime-repository.ts",
+      "default": "./src/plugin-runtime-repository.ts"
+    },
+    "./plugin-data-runtime-repository": {
+      "types": "./src/plugin-data-runtime-repository.ts",
+      "default": "./src/plugin-data-runtime-repository.ts"
+    },
+    "./skill-catalog": {
+      "types": "./src/skill-catalog.ts",
+      "default": "./src/skill-catalog.ts"
+    },
     "./wiki-command-repository": {
       "types": "./src/wiki-command-repository.ts",
       "default": "./src/wiki-command-repository.ts"
@@ -91,6 +111,18 @@
     "./wiki-backfill": {
       "types": "./src/wiki-backfill.ts",
       "default": "./src/wiki-backfill.ts"
+    },
+    "./wiki-ingest": {
+      "types": "./src/wiki-ingest.ts",
+      "default": "./src/wiki-ingest.ts"
+    },
+    "./wiki-sources": {
+      "types": "./src/wiki-sources.ts",
+      "default": "./src/wiki-sources.ts"
+    },
+    "./wiki-event-claims": {
+      "types": "./src/wiki-event-claims.ts",
+      "default": "./src/wiki-event-claims.ts"
     },
     "./brain-sources": {
       "types": "./src/brain-sources.ts",
@@ -206,13 +238,13 @@
     "@opencompany/crypto": "workspace:*",
     "@opencompany/brain": "workspace:*",
     "@opencompany/wiki": "workspace:*",
-    "@vercel/blob": "^2.4.0",
+    "@vercel/blob": "^2.8.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.23.0"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.3.11",
+    "@electric-sql/pglite": "^0.5.5",
     "@types/node": "^25.9.1",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.10",

@@ -2,6 +2,7 @@ export * from "./actor";
 export * from "./attachments";
 export * from "./chat";
 export * from "./knowledge";
+export * from "./plugin-import";
 export * from "./skill-import";
 export * from "./tasks";
 export * from "./wiki-commands";

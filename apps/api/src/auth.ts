@@ -208,6 +208,14 @@ async function resolveLocalActor(
   identity: VerifiedIdentity,
   requestedWorkspaceId: string | null,
 ): Promise<Actor> {
+  // OAuth bearer tokens carry the organization as an authorization scope, so
+  // it must match the resolved workspace exactly. Browser sessions carry it as
+  // "last selected organization" UX state; pre-refactor users can still select
+  // legacy WorkOS organizations that map to no workspace row, which must fall
+  // back to the active-workspace cookie and then the earliest membership
+  // (mirroring the identity, ingress-session, and onboarding resolvers)
+  // instead of locking sign-in behind a 403.
+  const strictOrganizationScope = identity.method === "oauth";
   const result = await execute(sql`
     SELECT
       member.workspace_id AS "workspaceId",
@@ -222,18 +230,16 @@ async function resolveLocalActor(
     WHERE actor_user.workos_user_id = ${identity.userId}
       AND actor_user.onboarded_at IS NOT NULL
       AND (
-        (${identity.organizationId}::text IS NOT NULL
+        ${strictOrganizationScope} = false
+        OR (${identity.organizationId}::text IS NOT NULL
           AND workspace.workos_organization_id = ${identity.organizationId})
-        OR
-        (${identity.organizationId}::text IS NULL
-          AND ${requestedWorkspaceId}::text IS NOT NULL
-          AND workspace.id = ${requestedWorkspaceId})
-        OR
-        (${identity.organizationId}::text IS NULL
-          AND ${requestedWorkspaceId}::text IS NULL)
       )
     ORDER BY
-      CASE WHEN workspace.workos_organization_id = ${identity.organizationId} THEN 0 ELSE 1 END,
+      CASE
+        WHEN ${identity.organizationId}::text IS NOT NULL
+          AND workspace.workos_organization_id = ${identity.organizationId}
+        THEN 0 ELSE 1
+      END,
       CASE WHEN workspace.id = ${requestedWorkspaceId} THEN 0 ELSE 1 END,
       member.created_at ASC,
       member.workspace_id ASC

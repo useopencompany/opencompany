@@ -4,6 +4,7 @@ import {
   type BufferedGitHubPullRequestEventRow,
   buildGitHubPullRequestWindowItem,
   type GitHubDueWindow,
+  resolveGitHubPullRequestWindowRoutes,
 } from "./github-flush-worker";
 
 const window: GitHubDueWindow = {
@@ -71,6 +72,71 @@ describe("buildGitHubPullRequestWindowItem", () => {
         flushedAt: new Date("2026-07-01T12:45:00.000Z"),
       }),
     ).toThrow("no longer matches its pull-request window");
+  });
+});
+
+describe("resolveGitHubPullRequestWindowRoutes", () => {
+  const brainRoute = {
+    integrationId: "gint_github_1",
+    brainRef: "gbrain_1",
+    config: {
+      repos: [{ id: "4242", fullName: "acme/api" }],
+      events: ["pull_request_merged" as const],
+    },
+  };
+  const wikiRoute = {
+    integrationId: "gint_github_1",
+    workspaceId: "workspace_1",
+    config: {
+      repos: [{ id: "4242", fullName: "acme/api" }],
+      events: ["pull_request_merged" as const],
+    },
+  };
+
+  it("matches scoped routes and leaves a brain-only result unchanged", () => {
+    expect(
+      resolveGitHubPullRequestWindowRoutes({
+        brainRoutes: [brainRoute],
+        wikiRoutes: [],
+        repositoryId: "4242",
+        eventTypes: new Set(["pull_request_merged"]),
+      }),
+    ).toEqual({ brainRefs: ["gbrain_1"], wikiWorkspaceIds: [] });
+    expect(
+      resolveGitHubPullRequestWindowRoutes({
+        brainRoutes: [brainRoute],
+        wikiRoutes: [wikiRoute],
+        repositoryId: "4242",
+        eventTypes: new Set(["pull_request_merged"]),
+      }),
+    ).toEqual({ brainRefs: ["gbrain_1"], wikiWorkspaceIds: ["workspace_1"] });
+  });
+
+  it("supports wiki-only routing and rejects repo or event mismatches", () => {
+    expect(
+      resolveGitHubPullRequestWindowRoutes({
+        brainRoutes: [],
+        wikiRoutes: [wikiRoute],
+        repositoryId: "4242",
+        eventTypes: new Set(["pull_request_merged"]),
+      }),
+    ).toEqual({ brainRefs: [], wikiWorkspaceIds: ["workspace_1"] });
+    expect(
+      resolveGitHubPullRequestWindowRoutes({
+        brainRoutes: [],
+        wikiRoutes: [wikiRoute],
+        repositoryId: "9999",
+        eventTypes: new Set(["pull_request_merged"]),
+      }),
+    ).toEqual({ brainRefs: [], wikiWorkspaceIds: [] });
+    expect(
+      resolveGitHubPullRequestWindowRoutes({
+        brainRoutes: [],
+        wikiRoutes: [wikiRoute],
+        repositoryId: "4242",
+        eventTypes: new Set(["pull_request_opened"]),
+      }),
+    ).toEqual({ brainRefs: [], wikiWorkspaceIds: [] });
   });
 });
 

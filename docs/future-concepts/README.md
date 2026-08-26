@@ -1,15 +1,17 @@
 # Future concepts
 
-This folder contains speculative research that still describes an unshipped product direction.
-Future concepts are not implementation or operational contracts. When a concept ships or its
-underlying product generation is retired, delete the research and keep durable decisions in code,
-current architecture documentation, or an ADR.
+This folder contains active proposals only. Current implementation and operational contracts live
+in code, architecture documentation, or an ADR. Remove a proposal when it is rejected; graduate its
+enduring decisions into an ADR when it is implemented.
 
 ## Current research
 
-- [Open-source readiness](./oss-readiness.md) — decisions for the public naming boundary, repository
-  layout, license and open scope, history safety, contributor model, and independently landable
-  release sequence.
+- [Coding-session preview browser](./codex-preview-browser.md) — repository-owned preview profiles,
+  stable sandbox ingress, browser control, artifacts, and human authentication takeover.
+- [Product and agent evaluations](./evaluations.md) — a native regression harness for Chat,
+  Workflow planning, and durable Task execution.
+- [Open-source release readiness](./oss-readiness.md) — remaining safety and contributor-experience
+  gates before any explicit repository visibility change.
 - [LinkedIn network in Chat](./linkedin-network-main-chat-research.md) — a user-provided LinkedIn
   connections import and a private relationship-query surface that remains separate from managed
   public LinkedIn research.

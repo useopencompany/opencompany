@@ -1,6 +1,5 @@
-// Workflows and skills used to live here as reserved folders. They were
-// extracted into their own workspace-scoped tables (goat.workflows /
-// goat.skills) so the Brain stays purely knowledge/context.
+// Workflows and legacy skills used to live in reserved Brain folders. Workflows moved to their
+// workspace table; Agent Skills now use immutable bundles outside Brain.
 export const HARD_DEFAULT_BRAIN_FOLDERS = ["inbox", "people", "companies", "evidence"] as const;
 
 export const ADJUSTABLE_DEFAULT_BRAIN_FOLDERS = [

@@ -1,6 +1,7 @@
 import {
   AGENT_MODEL_CATALOG,
   type ChatHostBootstrap,
+  type ChatHostSkillFileChunk,
   type ChatHostToolGatewayResponse,
   type ChatHostToolOperation,
   isClaudeCodeModelId,
@@ -51,9 +52,11 @@ type BrowserProfileSession = {
 
 type MentionedSkill = {
   id: string;
+  bundleId: string;
   name: string;
   description: string;
   instructions: string;
+  sourceKind: "standalone" | "plugin";
 };
 
 type ActiveSkill = {
@@ -113,6 +116,14 @@ export type ChatHostToolServiceDependencies = {
     workspaceId: string;
     skills: MentionedSkill[];
   }) => Promise<ActiveSkill[]>;
+  readSkillFile: (input: {
+    workspaceId: string;
+    conversationId: string;
+    skill: string;
+    path: string;
+    offset?: number;
+    maxBytes?: number;
+  }) => Promise<ChatHostSkillFileChunk>;
   createTask: (input: {
     actorId: string;
     workspaceId: string;
@@ -241,7 +252,35 @@ async function executeOperation(
         mentions: [{ id: skill }],
       });
       if (!resolved) throw new Error(`Skill "@skill/${skill}" is unavailable or incomplete.`);
-      return { ok: true, skill: resolved };
+      const active = await dependencies.activateAndListSkills({
+        conversationId: context.conversationId,
+        messageId: context.messageId,
+        workspaceId: context.workspaceId,
+        skills: [resolved],
+      });
+      const fixed = active.find((candidate) => candidate.skillId === skill);
+      if (!fixed) throw new Error(`Skill "@skill/${skill}" could not be activated.`);
+      return {
+        ok: true,
+        skill: {
+          id: fixed.skillId,
+          name: fixed.name,
+          description: fixed.description,
+          instructions: fixed.instructions,
+        },
+      };
+    }
+    case "read_skill_file": {
+      const offset = optionalInteger(toolInput.offset, "offset");
+      const maxBytes = optionalInteger(toolInput.maxBytes, "maxBytes");
+      return dependencies.readSkillFile({
+        workspaceId: context.workspaceId,
+        conversationId: context.conversationId,
+        skill: requiredString(toolInput.skill, "skill"),
+        path: requiredString(toolInput.path, "path"),
+        ...(offset !== undefined ? { offset } : {}),
+        ...(maxBytes !== undefined ? { maxBytes } : {}),
+      });
     }
     case "start_task": {
       assertTaskTools(context);
@@ -551,6 +590,12 @@ function requiredString(value: unknown, field: string) {
 
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalInteger(value: unknown, field: string) {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value)) throw new Error(`${field} must be an integer.`);
+  return value as number;
 }
 
 function stringArray(value: unknown) {

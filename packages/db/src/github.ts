@@ -12,6 +12,7 @@ import {
   type IntegrationStatus,
   integrationResources,
   integrations,
+  wikiSources,
 } from "./product-schema";
 
 type DbLike = any;
@@ -33,6 +34,11 @@ export type GitHubBrainSourceConfig = {
   events?: GitHubActivityEventType[];
 };
 
+export type GitHubWikiSourceConfig = {
+  repos?: GitHubRepositoryRef[];
+  events?: GitHubActivityEventType[];
+};
+
 export type GitHubIntegrationForInstallation = {
   id: string;
   userWorkosId: string;
@@ -43,6 +49,12 @@ export type GitHubBrainSourceRoute = {
   integrationId: string;
   brainRef: string;
   config: GitHubBrainSourceConfig;
+};
+
+export type GitHubWikiSourceRoute = {
+  integrationId: string;
+  workspaceId: string;
+  config: GitHubWikiSourceConfig;
 };
 
 export type GitHubPullRequestEventInsert = {
@@ -58,6 +70,14 @@ export type GitHubPullRequestEventInsert = {
 };
 
 export function parseGitHubBrainSourceConfig(value: unknown): GitHubBrainSourceConfig {
+  return parseGitHubSourceConfig(value);
+}
+
+export function parseGitHubWikiSourceConfig(value: unknown): GitHubWikiSourceConfig {
+  return parseGitHubSourceConfig(value);
+}
+
+function parseGitHubSourceConfig(value: unknown): GitHubWikiSourceConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const repos = parseRepositoryRefs(record.repos);
@@ -118,6 +138,33 @@ export async function listEnabledGitHubBrainSourceRoutes(
     integrationId: row.integrationId,
     brainRef: row.brainRef,
     config: parseGitHubBrainSourceConfig(row.config),
+  }));
+}
+
+export async function listEnabledGitHubWikiSourceRoutes(
+  integrationIds: readonly string[],
+  db: DbLike = getDb(),
+): Promise<GitHubWikiSourceRoute[]> {
+  if (integrationIds.length === 0) return [];
+  const rows = await db
+    .select({
+      integrationId: wikiSources.integrationId,
+      workspaceId: wikiSources.workspaceId,
+      config: wikiSources.config,
+    })
+    .from(wikiSources)
+    .where(
+      and(
+        eq(wikiSources.provider, "github"),
+        eq(wikiSources.enabled, true),
+        inArray(wikiSources.integrationId, [...integrationIds]),
+      ),
+    );
+
+  return rows.map((row: { integrationId: string; workspaceId: string; config: unknown }) => ({
+    integrationId: row.integrationId,
+    workspaceId: row.workspaceId,
+    config: parseGitHubWikiSourceConfig(row.config),
   }));
 }
 

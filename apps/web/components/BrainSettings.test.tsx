@@ -504,7 +504,7 @@ describe("BrainSourceCards", () => {
 
     expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
       "href",
-      "/docs/integrations/jamie",
+      "https://docs.opencompany.cloud/docs/integrations/jamie",
     );
     await user.click(screen.getByRole("button", { name: "Set up" }));
     expect(onConnect).toHaveBeenCalledOnce();

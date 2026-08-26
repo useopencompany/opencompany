@@ -19,9 +19,26 @@ opencompany is a modular monolith with three product composition roots: `web` pr
 - `apps/marketing` is released independently from the product.
 
 The detailed product flow is maintained in
-[the opencompany system map](../apps/web/docs/README.md). Operational behavior is in
+[the opencompany system map](./system-map.md). Operational behavior is in
 [Chat operations](./chat-operations.md), and the permanent ownership decision is
 [ADR 0003](./adr/0003-headless-workflow-and-schedule-foundation.md).
+
+## Technology stack
+
+| Area | Technology | Responsibility |
+| --- | --- | --- |
+| Monorepo | Bun, Turborepo | dependency management and task orchestration |
+| Presentation | Next.js, React | product UI and browser-authentication shell |
+| Product API | Bun, Hono | authenticated `/v1` resources, provider ingress, SSE, OpenAPI, and read models |
+| Durable execution | Bun, Fastify | workers, sandboxes, recovery, and internal transports |
+| Database | Neon Postgres, Drizzle | branch-isolated state and checked-in migrations |
+| Live data | Electric, TanStack DB | authorized API-owned read models |
+| Authentication | WorkOS AuthKit | browser sessions and API identity |
+| Models | Vercel AI Gateway, AI SDK | runner model access and API-owned Auto routing |
+| Sandboxes | E2B, Vercel Sandbox | cloud coding and browser-capable workspaces |
+| Hosting | Vercel, Render | web, docs, and marketing on Vercel; API and runner on Render |
+| Secrets | Infisical | development and production environment authority |
+| Observability | Better Stack, Sentry, SigNoz, Latitude | errors, logs, traces, and LLM telemetry |
 
 ## Data and client boundary
 
@@ -58,6 +75,34 @@ Conversation/Message/Run protocol.
 Brain import, Brain ingestion, Google Drive sync, polling, and schedules follow the same admission
 principle: database state is authoritative, notifications reduce latency, and fenced claims provide
 recovery. The runner never calls the public API for execution persistence.
+
+## Wiki ingestion
+
+Provider ingress validates and normalizes source events before polling providers or buffering
+conversation windows. Buffer flushes use one transaction to enqueue the existing Brain work and the
+independent Wiki ingest job, so enabling Wiki does not change Brain behavior. A leased runner worker
+then cheaply triages Slack, Gmail, and GitHub items before the librarian applies page mutations
+through the same authorized Wiki tool used by interactive agents; job results retain the outcome and
+touched page paths for ingestion activity.
+
+## Agent Skills and Plugins
+
+Agent Skills and Agent Plugins are immutable workspace artifacts. The API resolves and validates a
+public GitHub or skills.sh source, stores the exact files and resolved commit, and moves a small
+installation record when an admin replaces a standalone Skill. Plugins keep their own immutable
+package, valid immediate-child Skills, install report, and optional stdio MCP declarations.
+
+A Chat snapshots bundle and plugin IDs instead of names; a Workflow Task stores exact
+`skillBundleIds` on every step and its exact plugin IDs in the Harness spec. The runner mounts those
+versions even if workspace settings later change. Standalone Skills win name collisions with Plugin
+Skills, and Plugin collisions resolve deterministically by Plugin name. Archived artifacts remain
+available while a durable snapshot references them.
+
+Installing a Plugin never grants execution. An admin separately approves the exact package
+integrity before its stdio MCP servers can run, and MCP is available only in Codex and Claude coding
+sandboxes. Writable `PLUGIN_DATA` is archived per workspace and Plugin name so it survives sandbox
+and Plugin replacement. Brain's historical `skills/` pages and the dropped `goat.skills` tables are
+not compatibility inputs or replay sources.
 
 ## Integrations and security
 

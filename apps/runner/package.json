@@ -25,8 +25,9 @@
     "@opencompany/brain": "workspace:*",
     "@opencompany/telemetry": "workspace:*",
     "@opencompany/observability": "workspace:*",
+    "@opencompany/wiki": "workspace:*",
     "@sentry/bun": "^10.70.0",
-    "@vercel/blob": "^2.4.0",
+    "@vercel/blob": "^2.8.0",
     "ai": "^6.0.189",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
@@ -35,7 +36,7 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.3.11",
+    "@electric-sql/pglite": "^0.5.5",
     "@types/node": "^25.9.1",
     "@types/ws": "^8.18.1",
     "tsx": "^4.23.12",

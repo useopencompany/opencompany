@@ -1,20 +1,52 @@
 ---
 title: Attio
-description: Work with Attio records and ingest selected CRM changes.
+description: Connect Attio CRM activity and actions with a workspace API key.
 ---
 
-## What connecting does
+## What the connection does
 
-Attio uses a workspace API key. Current agent actions can search and update records, work with lists
-and list entries, and add comments when those actions are permitted.
+When you save an Attio key, opencompany registers a webhook and receives new people, companies, and
+deals; attribute changes; and notes. Events for one record are buffered into an activity window.
+opencompany then fetches a live record snapshot and any new notes before durable Brain ingestion.
+Routine data-entry churn can be skipped while substantive changes become durable knowledge.
 
-## Scopes and permissions
+Attio remains the canonical home of each record. Brain stores pointers, current-state summaries,
+and extracted knowledge rather than a stale copy of the CRM record.
 
-The Attio key defines the provider-side boundary. opencompany also applies action modes and a
-reviewed catalog. A complete key-permission and action table is coming soon.
+## Setup steps
 
-## Brain ingestion
+1. In Attio, open **Workspace settings → Developers** and create an integration.
+2. Generate an access token with `object_configuration:read`, `record_permission:read-write`,
+   `list_configuration:read-write`, `list_entry:read-write`, `comment:read-write`,
+   `note:read-write`, and `webhook:read-write`.
+3. Copy the token.
+4. In opencompany, open **Settings → Attio** or choose **Set up** on the source card.
+5. Paste the token and save it. opencompany validates it, registers the webhook, and stores the
+   webhook signing secret.
 
-Setup also establishes the verified webhook path used for CRM activity. Choose the people,
-companies, deals, notes, or other supported object/event scope in the destination Brain. Connecting
-the key without a Brain source selection does not start ingestion.
+Chat can search and inspect standard records, lists, fields, saved views, and list entries. With
+confirmation, it can create or update records, create supported list fields and options, add records
+to lists, update list entries, and leave plaintext comments. Writes default to **Ask** and can be
+set to **On**, **Ask**, or **Off** under **Settings → Integrations**. Chat does not delete Attio
+records or list entries.
+
+## Brain routing
+
+Enable Attio under **Sources** in a Brain's settings, then choose the record types and events to
+ingest. New sources default to **Record created** and **Note added**. **Record updated** is opt-in
+because CRM fields can change at high volume. Automation and system updates are excluded.
+
+Activity fans out to every matching enabled Brain. Disabling or removing the source stops new
+activity and cancels queued or running ingestion for that Brain; canceled events are not replayed
+when the source is enabled again.
+
+## Troubleshooting
+
+- Confirm the source is enabled and at least one record type is selected.
+- Confirm **Settings → Attio** shows **Connected**. Saving a replacement key also re-registers the
+  webhook.
+- Only activity after connecting is delivered; historical backfill is not available yet.
+- Allow the activity window to remain quiet for about fifteen minutes.
+- Custom Attio objects are not ingested yet.
+
+The Attio API is documented at [docs.attio.com](https://docs.attio.com).

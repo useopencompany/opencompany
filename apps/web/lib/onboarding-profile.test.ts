@@ -78,17 +78,15 @@ describe("parseOnboardingProfile", () => {
     });
   });
 
-  it.each([
-    "jamie",
-    "https://localhost",
-    "https://example.",
-    "https://example.123",
-  ])("rejects a value without a real domain (%s)", (companyUrl) => {
-    expect(parseOnboardingProfile({ role: "founder", companyUrl })).toEqual({
-      ok: false,
-      error: "Enter a valid company URL.",
-    });
-  });
+  it.each(["jamie", "https://localhost", "https://example.", "https://example.123"])(
+    "rejects a value without a real domain (%s)",
+    (companyUrl) => {
+      expect(parseOnboardingProfile({ role: "founder", companyUrl })).toEqual({
+        ok: false,
+        error: "Enter a valid company URL.",
+      });
+    },
+  );
 
   it("rejects credentials and values beyond the stored limit", () => {
     expect(normalizeOnboardingCompanyUrl("https://user:secret@example.com")).toBeNull();

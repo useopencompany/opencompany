@@ -7,6 +7,7 @@ import {
   integrations,
   type SlackChannelType,
   slackMessageEvents,
+  wikiSources,
 } from "./product-schema";
 
 type DbLike = any;
@@ -24,6 +25,14 @@ export type SlackBrainSourceConfig = {
   dms?: SlackConversationRef[];
 };
 
+// Wiki routing deliberately mirrors the brain config while the two ingestion
+// spines dual-run. Keeping a distinct exported type lets either side evolve
+// independently when brain ingestion is retired.
+export type SlackWikiSourceConfig = {
+  channels?: SlackConversationRef[];
+  dms?: SlackConversationRef[];
+};
+
 export type SlackIntegrationForTeam = {
   id: string;
   userWorkosId: string;
@@ -34,6 +43,12 @@ export type SlackBrainSourceRoute = {
   integrationId: string;
   brainRef: string;
   config: SlackBrainSourceConfig;
+};
+
+export type SlackWikiSourceRoute = {
+  integrationId: string;
+  workspaceId: string;
+  config: SlackWikiSourceConfig;
 };
 
 export type SlackMessageEventInsert = {
@@ -52,6 +67,14 @@ export type SlackMessageEventInsert = {
 };
 
 export function parseSlackBrainSourceConfig(value: unknown): SlackBrainSourceConfig {
+  return parseSlackSourceConfig(value);
+}
+
+export function parseSlackWikiSourceConfig(value: unknown): SlackWikiSourceConfig {
+  return parseSlackSourceConfig(value);
+}
+
+function parseSlackSourceConfig(value: unknown): SlackWikiSourceConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const record = value as Record<string, unknown>;
   const channels = parseConversationRefs(record.channels);
@@ -107,6 +130,33 @@ export async function listEnabledSlackBrainSourceRoutes(
     integrationId: row.integrationId,
     brainRef: row.brainRef,
     config: parseSlackBrainSourceConfig(row.config),
+  }));
+}
+
+export async function listEnabledSlackWikiSourceRoutes(
+  integrationIds: readonly string[],
+  db: DbLike = getDb(),
+): Promise<SlackWikiSourceRoute[]> {
+  if (integrationIds.length === 0) return [];
+  const rows = await db
+    .select({
+      integrationId: wikiSources.integrationId,
+      workspaceId: wikiSources.workspaceId,
+      config: wikiSources.config,
+    })
+    .from(wikiSources)
+    .where(
+      and(
+        eq(wikiSources.provider, "slack"),
+        eq(wikiSources.enabled, true),
+        inArray(wikiSources.integrationId, [...integrationIds]),
+      ),
+    );
+
+  return rows.map((row: { integrationId: string; workspaceId: string; config: unknown }) => ({
+    integrationId: row.integrationId,
+    workspaceId: row.workspaceId,
+    config: parseSlackWikiSourceConfig(row.config),
   }));
 }
 
