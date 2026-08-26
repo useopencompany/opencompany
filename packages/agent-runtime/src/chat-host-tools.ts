@@ -2,6 +2,7 @@ export type ChatHostToolOperation =
   | "bootstrap"
   | "use_skill"
   | "read_skill_file"
+  | "create_workspace_skill"
   | "start_task"
   | "schedule_task"
   | "edit_task_schedule"
@@ -52,6 +53,7 @@ export type ChatHostBootstrap = {
   };
   workspaceName: string;
   taskToolsEnabled: boolean;
+  skillToolsEnabled: boolean;
   wikiEnabled: boolean;
   browserToolsEnabled: boolean;
   browserProfiles: Array<{

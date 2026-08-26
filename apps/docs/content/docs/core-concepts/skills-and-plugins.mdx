@@ -12,6 +12,11 @@ opencompany generates the `SKILL.md` frontmatter from the name and description a
 instructions as its Markdown body. The slash command is always derived from the Skill name as
 `/<skill-name>` rather than stored in a separate `command` field.
 
+Workspace admins can also create one from a successful Chat. Explicitly ask Chat to “turn this
+into a Skill”; Chat synthesizes the reusable method from the conversation and immediately creates
+a standard workspace-authored Skill. This only creates new Skills—an existing name is not
+overwritten.
+
 Imported Skills are validated for official frontmatter, name and directory alignment, every
 bundled file, and the resolved commit. Unknown fields such as the retired `command` extension are
 rejected.
