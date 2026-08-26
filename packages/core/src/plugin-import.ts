@@ -44,6 +44,37 @@ export type PluginStdioServer = {
 
 export type PluginStdioServerSummary = Omit<PluginStdioServer, "env"> & { envKeys: string[] };
 
+export type PluginRemoteServer = {
+  name: string;
+  type: "streamable-http" | "sse";
+  url: string;
+  headers: Record<string, string>;
+};
+
+export type PluginCapabilityId = "read" | "write";
+export type PluginCapabilityMode = "on" | "ask" | "off";
+
+export type PluginCapabilityDefinition = {
+  id: PluginCapabilityId;
+  label: string;
+  defaultMode: PluginCapabilityMode;
+  tools: string[];
+};
+
+export type PluginGatewayDiscoveredTool = {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+  classification: {
+    capabilityId: PluginCapabilityId;
+    capabilityLabel: string;
+    defaultMode: PluginCapabilityMode;
+    bucket: PluginCapabilityId;
+    curated: boolean;
+  };
+};
+
 export type PluginMcpServerReport = {
   name: string;
   // `unsupported` is retained for reports stored by the pre-gateway loader.
@@ -95,6 +126,8 @@ export type ResolvedPluginPackage = {
   totalBytes: number;
   skills: ResolvedPluginSkill[];
   stdioServers: PluginStdioServer[];
+  remoteServers: PluginRemoteServer[];
+  capabilities: PluginCapabilityDefinition[];
   report: Omit<PluginInstallReport, "collisions">;
 };
 
@@ -157,6 +190,14 @@ export interface PluginImportResolver {
   resolve(input: { url: string; selectedPath?: string }): Promise<ResolvedPluginPackage>;
 }
 
+export interface PluginGatewayLifecycle {
+  refresh(input: {
+    actor: Actor;
+    pluginName: string;
+    reason: "install" | "enable" | "explicit";
+  }): Promise<void>;
+}
+
 export interface PluginRepository {
   install(input: {
     actor: Actor;
@@ -180,6 +221,7 @@ export class PluginImportApplicationService {
   constructor(
     private readonly repository: PluginRepository,
     private readonly resolver: PluginImportResolver,
+    private readonly gatewayLifecycle?: PluginGatewayLifecycle,
   ) {}
 
   async preview(
@@ -219,11 +261,17 @@ export class PluginImportApplicationService {
         "This plugin changed since the preview. Preview it again before installing.",
       );
     }
-    return this.repository.install({
+    const result = await this.repository.install({
       actor,
       idempotencyKey: idempotencyKey(input.idempotencyKey),
       plugin,
     });
+    await this.gatewayLifecycle?.refresh({
+      actor,
+      pluginName: result.plugin.name,
+      reason: "install",
+    });
+    return result;
   }
 
   list(actor: Actor) {
@@ -238,13 +286,32 @@ export class PluginImportApplicationService {
     return plugin;
   }
 
-  setEnabled(actor: Actor, nameValue: string, enabled: boolean) {
+  async setEnabled(actor: Actor, nameValue: string, enabled: boolean) {
     requirePluginWrite(actor);
-    return this.repository.setStatus({
+    const plugin = await this.repository.setStatus({
       actor,
       name: pluginName(nameValue),
       status: enabled ? "enabled" : "disabled",
     });
+    if (enabled) {
+      await this.gatewayLifecycle?.refresh({ actor, pluginName: plugin.name, reason: "enable" });
+    }
+    return plugin;
+  }
+
+  async refreshMcp(actor: Actor, nameValue: string) {
+    requirePluginWrite(actor);
+    const name = pluginName(nameValue);
+    const plugin = await this.repository.get({ actor, name });
+    if (!plugin) throw new CoreError("not_found", "Plugin not found.");
+    if (plugin.status !== "enabled") {
+      throw new CoreError("conflict", "Enable the Plugin before refreshing MCP discovery.");
+    }
+    if (!this.gatewayLifecycle) {
+      throw new CoreError("unavailable", "Plugin MCP discovery is not available in this runtime.");
+    }
+    await this.gatewayLifecycle.refresh({ actor, pluginName: name, reason: "explicit" });
+    return this.repository.get({ actor, name });
   }
 
   approveMcp(actor: Actor, nameValue: string, integrityValue: string) {

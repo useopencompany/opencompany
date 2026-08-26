@@ -1,16 +1,18 @@
 import type { OAuthClientProvider } from "@ai-sdk/mcp";
+import type { PluginGatewayDiscoveredTool } from "@opencompany/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   classifyRemoteTool,
+  discoverRemoteMcpSnapshot,
   type RemoteMcpGatewayRegistration,
   resolveRemoteMcpActions,
 } from "./remote-mcp";
 import { type ActionExecuteContext, ActionPermissionError } from "./types";
 
 const authProvider = {} as OAuthClientProvider;
+const identity = { userWorkosId: "user_1", workspaceId: "workspace_1" };
 const context: ActionExecuteContext = {
-  userWorkosId: "user_1",
-  workspaceId: "workspace_1",
+  ...identity,
   chatSessionId: "session_1",
   toolCallId: "tool_call_1",
   sourceTurnId: "turn_1",
@@ -20,11 +22,37 @@ const context: ActionExecuteContext = {
   userTimezone: "UTC",
 };
 
-function connectedState(capabilityModes: Record<string, unknown> = {}) {
+function connectedState(
+  capabilityModes: Record<string, unknown> = {},
+  toolModes: Record<string, unknown> = {},
+) {
   return {
     connected: true,
     integrationId: "gint_linear_1",
     capabilityModes,
+    toolModes,
+  };
+}
+
+function discoveredTool(
+  name: string,
+  input: Partial<Omit<PluginGatewayDiscoveredTool, "name" | "classification">> & {
+    classification?: Partial<PluginGatewayDiscoveredTool["classification"]>;
+  } = {},
+): PluginGatewayDiscoveredTool {
+  return {
+    name,
+    ...(input.description !== undefined ? { description: input.description } : {}),
+    ...(input.inputSchema !== undefined ? { inputSchema: input.inputSchema } : {}),
+    ...(input.annotations !== undefined ? { annotations: input.annotations } : {}),
+    classification: {
+      capabilityId: "read",
+      capabilityLabel: "Read Linear",
+      defaultMode: "on",
+      bucket: "read",
+      curated: true,
+      ...input.classification,
+    },
   };
 }
 
@@ -56,12 +84,19 @@ function registration(
         tools: ["save_issue"],
       },
     ],
+    discoverySnapshot: [
+      discoveredTool("list_issues", {
+        description: "List issues.",
+        inputSchema: { type: "object" },
+      }),
+    ],
     getState: vi.fn(async () => connectedState()),
     loadConnection: vi.fn(async () => ({
       ok: true as const,
       integrationId: "gint_linear_1",
       authProvider,
     })),
+    isEnabled: vi.fn(async () => true),
     ...overrides,
   };
 }
@@ -120,8 +155,8 @@ describe("remote MCP classification", () => {
   });
 });
 
-describe("resolveRemoteMcpActions", () => {
-  it("discovers paginated tools and catalogs drift as unmapped Ask", async () => {
+describe("remote MCP discovery snapshots", () => {
+  it("discovers paginated drift once and serves the classified snapshot from cache", async () => {
     const discovery = client({
       pages: [
         {
@@ -151,11 +186,17 @@ describe("resolveRemoteMcpActions", () => {
         },
       ],
     });
+    const createClient = vi.fn(async () => discovery);
     const recordDispatch = vi.fn(async () => {});
-    const catalog = await resolveRemoteMcpActions("user_1", registration(), {
-      createClient: vi.fn(async () => discovery),
+    const snapshot = await discoverRemoteMcpSnapshot(identity, registration(), {
+      createClient,
       recordDispatch,
     });
+    const catalog = await resolveRemoteMcpActions(
+      identity,
+      registration({ discoverySnapshot: snapshot ?? [] }),
+      { createClient, recordDispatch },
+    );
 
     expect(catalog?.actions).toEqual([
       expect.objectContaining({
@@ -176,13 +217,12 @@ describe("resolveRemoteMcpActions", () => {
         permission: expect.objectContaining({ label: "Write & other tools" }),
       }),
     ]);
-    expect(discovery.listTools).toHaveBeenNthCalledWith(1, {
-      options: { signal: expect.any(AbortSignal) },
-    });
+    expect(discovery.listTools).toHaveBeenCalledTimes(2);
     expect(discovery.listTools).toHaveBeenNthCalledWith(2, {
       params: { cursor: "page_2" },
       options: { signal: expect.any(AbortSignal) },
     });
+    expect(createClient).toHaveBeenCalledOnce();
     expect(recordDispatch).toHaveBeenCalledTimes(2);
     expect(recordDispatch).toHaveBeenNthCalledWith(
       1,
@@ -190,38 +230,27 @@ describe("resolveRemoteMcpActions", () => {
         operation: "tools/list",
         actingAgent: "action_gateway",
         actingUser: "user_1",
-        capability: "read",
+        workspaceId: "workspace_1",
       }),
     );
     expect(JSON.stringify(catalog)).not.toContain("mcp.linear.app");
     expect(JSON.stringify(catalog)).not.toContain("X-Package-Version");
   });
+});
 
-  it("loads credentials at dispatch, logs the delegation triple, and calls server-side", async () => {
-    const discovery = client({
-      pages: [
-        {
-          tools: [
-            {
-              name: "list_issues",
-              description: "List issues.",
-              inputSchema: { type: "object" },
-            },
-          ],
-        },
-      ],
-    });
+describe("resolveRemoteMcpActions", () => {
+  it("does zero tools/list calls during execute and loads credentials only at dispatch", async () => {
     const execution = client({
       result: { content: [{ type: "text", text: '{"issues":[{"id":"issue_1"}]}' }] },
     });
-    const createClient = vi.fn().mockResolvedValueOnce(discovery).mockResolvedValueOnce(execution);
+    const createClient = vi.fn(async () => execution);
     const recordDispatch = vi.fn(async () => {});
     const loadConnection = vi.fn(async () => ({
       ok: true as const,
       integrationId: "gint_linear_1",
       authProvider,
     }));
-    const catalog = await resolveRemoteMcpActions("user_1", registration({ loadConnection }), {
+    const catalog = await resolveRemoteMcpActions(identity, registration({ loadConnection }), {
       createClient,
       recordDispatch,
     });
@@ -232,23 +261,15 @@ describe("resolveRemoteMcpActions", () => {
     await expect(action?.execute({ team: "Platform" }, context)).resolves.toEqual({
       issues: [{ id: "issue_1" }],
     });
-    expect(loadConnection).toHaveBeenCalledTimes(2);
-    expect(createClient).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        transport: expect.objectContaining({
-          type: "http",
-          url: "https://mcp.linear.app/mcp",
-          authProvider,
-        }),
-      }),
-    );
+    expect(loadConnection).toHaveBeenCalledOnce();
+    expect(createClient).toHaveBeenCalledOnce();
+    expect(execution.listTools).not.toHaveBeenCalled();
     expect(execution.callTool).toHaveBeenCalledWith({
       name: "list_issues",
       arguments: { team: "Platform" },
       options: { signal: context.signal },
     });
-    expect(recordDispatch).toHaveBeenLastCalledWith({
+    expect(recordDispatch).toHaveBeenCalledWith({
       operation: "tools/call",
       actingAgent: "codex",
       actingUser: "user_1",
@@ -260,29 +281,17 @@ describe("resolveRemoteMcpActions", () => {
       turnId: "turn_1",
       toolCallId: "tool_call_1",
     });
-    expect(execution.close).toHaveBeenCalledOnce();
   });
 
-  it("rechecks capability mode before loading dispatch credentials", async () => {
+  it("rechecks capability mode and the plugin kill switch before loading credentials", async () => {
     const getState = vi
       .fn()
       .mockResolvedValueOnce(connectedState())
       .mockResolvedValueOnce(connectedState({ read: "off" }));
-    const loadConnection = vi.fn(async () => ({
-      ok: true as const,
-      integrationId: "gint_linear_1",
-      authProvider,
-    }));
-    const discovery = client({
-      pages: [
-        {
-          tools: [{ name: "list_issues", inputSchema: { type: "object" } }],
-        },
-      ],
-    });
-    const createClient = vi.fn(async () => discovery);
+    const loadConnection = vi.fn();
+    const createClient = vi.fn();
     const catalog = await resolveRemoteMcpActions(
-      "user_1",
+      identity,
       registration({ getState, loadConnection }),
       { createClient, recordDispatch: vi.fn(async () => {}) },
     );
@@ -290,37 +299,64 @@ describe("resolveRemoteMcpActions", () => {
     await expect(catalog?.actions[0]?.execute({}, context)).rejects.toBeInstanceOf(
       ActionPermissionError,
     );
-    expect(loadConnection).toHaveBeenCalledOnce();
-    expect(createClient).toHaveBeenCalledOnce();
+    expect(loadConnection).not.toHaveBeenCalled();
+    expect(createClient).not.toHaveBeenCalled();
+
+    const disabled = await resolveRemoteMcpActions(
+      identity,
+      registration({ isEnabled: vi.fn(async () => false) }),
+    );
+    await expect(disabled?.actions[0]?.execute({}, context)).rejects.toBeInstanceOf(
+      ActionPermissionError,
+    );
   });
 
-  it("defaults every uncurated server tool to Ask", async () => {
-    const discovery = client({
-      pages: [
-        {
-          tools: [
-            {
-              name: "looks_read_only",
-              inputSchema: { type: "object" },
-              annotations: { readOnlyHint: true },
-            },
-            { name: "other", inputSchema: { type: "object" } },
-          ],
+  it("keeps uncurated tools on Ask unless an explicit per-tool override promotes them", async () => {
+    const discoverySnapshot = [
+      discoveredTool("looks_read_only", {
+        inputSchema: { type: "object" },
+        annotations: { readOnlyHint: true },
+        classification: {
+          capabilityLabel: "Read tools",
+          defaultMode: "ask",
+          curated: false,
         },
-      ],
-    });
-    const uncuratedRegistration = registration({
-      getState: vi.fn(async () => connectedState({ read: "on", write: "on" })),
-    });
-    delete uncuratedRegistration.capabilities;
-    const catalog = await resolveRemoteMcpActions("user_1", uncuratedRegistration, {
-      createClient: vi.fn(async () => discovery),
-      recordDispatch: vi.fn(async () => {}),
-    });
-
+      }),
+      discoveredTool("other", {
+        inputSchema: { type: "object" },
+        classification: {
+          capabilityId: "write",
+          capabilityLabel: "Write & other tools",
+          defaultMode: "ask",
+          bucket: "write",
+          curated: false,
+        },
+      }),
+    ];
+    const catalog = await resolveRemoteMcpActions(
+      identity,
+      registration({
+        discoverySnapshot,
+        getState: vi.fn(async () => connectedState({ read: "on", write: "on" })),
+      }),
+    );
     expect(catalog?.actions.map((action) => [action.capability, action.permissionMode])).toEqual([
       ["read", "ask"],
       ["write", "ask"],
     ]);
+
+    const promoted = await resolveRemoteMcpActions(
+      identity,
+      registration({
+        discoverySnapshot,
+        getState: vi.fn(async () =>
+          connectedState({ read: "on", write: "on" }, { looks_read_only: "on" }),
+        ),
+      }),
+    );
+    expect(promoted?.actions[0]).toMatchObject({
+      id: "plugin:linear:linear.looks_read_only",
+      permissionMode: "on",
+    });
   });
 });

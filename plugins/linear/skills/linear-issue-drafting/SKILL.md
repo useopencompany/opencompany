@@ -6,7 +6,7 @@ compatibility: Requires a connected Linear account and the opencompany Linear to
 metadata:
   author: opencompany
   version: "1.0.0"
-allowed-tools: linear.list_issues linear.get_issue linear.list_projects linear.list_teams linear.list_users linear.list_issue_statuses linear.create_issue
+allowed-tools: plugin:linear:linear.list_issues plugin:linear:linear.get_issue plugin:linear:linear.list_projects plugin:linear:linear.list_teams plugin:linear:linear.list_users plugin:linear:linear.list_issue_statuses plugin:linear:linear.save_issue
 ---
 Draft a Linear issue that another teammate can act on without reconstructing the request.
 
