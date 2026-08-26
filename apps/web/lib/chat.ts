@@ -64,6 +64,6 @@ function toChatSummaryView(conversation: ConversationDto): ChatSummaryView {
     preview: "No messages yet.",
     updatedAt: conversation.updatedAt,
     lastSeenAt: null,
-    pinnedAt: null,
+    pinnedAt: conversation.pinnedAt ?? null,
   };
 }

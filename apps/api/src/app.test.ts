@@ -17,6 +17,7 @@ import {
   type PluginInstallationListItem,
   type PluginRepository,
   type ResolvedPluginPackage,
+  type SkillBundleAuthor,
   type SkillBundleRepository,
   SkillImportApplicationService,
   type SkillImportResolver,
@@ -524,6 +525,161 @@ describe("canonical Hono API", () => {
     );
   });
 
+  it("creates and edits a workspace-authored Skill through the API boundary", async () => {
+    const createdInstallation: SkillInstallation = {
+      ...fakeSkillInstallation(),
+      name: "investigate-bug",
+      bundle: {
+        ...fakeSkillInstallation().bundle,
+        name: "investigate-bug",
+        description: "Reproduce and diagnose bugs.",
+        body: "Reproduce the issue first.",
+        source: { type: "workspace" },
+      },
+    };
+    const updatedInstallation: SkillInstallation = {
+      ...createdInstallation,
+      bundle: {
+        ...createdInstallation.bundle,
+        id: "skill_bundle_2",
+        body: "Reproduce, isolate, and explain the issue.",
+      },
+    };
+    const authoredBundle = {
+      name: "investigate-bug",
+      description: "Reproduce and diagnose bugs.",
+      body: "Reproduce the issue first.",
+      source: { type: "workspace" as const },
+      integrity: `sha256:${"c".repeat(64)}`,
+      files: [
+        {
+          path: "SKILL.md",
+          content: new TextEncoder().encode("Reproduce the issue first."),
+          executable: false,
+        },
+      ],
+      fileCount: 1,
+      totalBytes: 26,
+    };
+    const install = vi.fn(async () => ({
+      installation: createdInstallation,
+      idempotentReplay: false,
+    }));
+    const replace = vi.fn(async () => updatedInstallation);
+    const create = vi.fn(async () => authoredBundle);
+    const app = testApp(fakeRepository(), {
+      skillImports: fakeSkillImportService({ install, replace }, {}, { create }),
+    });
+
+    const created = await app.request("/v1/skills", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "workspace-skill-1",
+      },
+      body: JSON.stringify({
+        name: "investigate-bug",
+        description: "Reproduce and diagnose bugs.",
+        instructions: "Reproduce the issue first.",
+      }),
+    });
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      data: {
+        installation: {
+          name: "investigate-bug",
+          bundle: { source: { type: "workspace" } },
+        },
+        replayed: false,
+      },
+    });
+
+    const updated = await app.request("/v1/skills/investigate-bug", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        description: "Reproduce and diagnose bugs.",
+        instructions: "Reproduce, isolate, and explain the issue.",
+      }),
+    });
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({
+      data: { bundle: { id: "skill_bundle_2", source: { type: "workspace" } } },
+    });
+    expect(install).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor,
+        idempotencyKey: "workspace-skill-1",
+        bundle: authoredBundle,
+      }),
+    );
+    expect(replace).toHaveBeenCalledWith({
+      actor,
+      name: "investigate-bug",
+      bundle: authoredBundle,
+    });
+    expect(create).toHaveBeenNthCalledWith(1, {
+      name: "investigate-bug",
+      description: "Reproduce and diagnose bugs.",
+      instructions: "Reproduce the issue first.",
+    });
+    expect(create).toHaveBeenNthCalledWith(2, {
+      name: "investigate-bug",
+      description: "Reproduce and diagnose bugs.",
+      instructions: "Reproduce, isolate, and explain the issue.",
+    });
+  });
+
+  it("rejects invalid workspace Skill slugs and NUL text at the API boundary", async () => {
+    const create = vi.fn(async () => {
+      throw new Error("Workspace Skill authoring should not run for invalid input.");
+    });
+    const app = testApp(fakeRepository(), {
+      skillImports: fakeSkillImportService({}, {}, { create }),
+    });
+    const updateBody = {
+      description: "Reproduce and diagnose bugs.",
+      instructions: "Reproduce the issue first.",
+    };
+
+    const invalidSlug = await app.request("/v1/skills/Invalid-Name", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updateBody),
+    });
+    const invalidDescription = await app.request("/v1/skills", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "workspace-skill-invalid-description",
+      },
+      body: JSON.stringify({
+        name: "investigate-bug",
+        ...updateBody,
+        description: "Contains a NUL: \0",
+      }),
+    });
+    const invalidInstructions = await app.request("/v1/skills/investigate-bug", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...updateBody, instructions: "Contains a NUL: \0" }),
+    });
+
+    expect([invalidSlug.status, invalidDescription.status, invalidInstructions.status]).toEqual([
+      400, 400, 400,
+    ]);
+    await expect(invalidSlug.json()).resolves.toMatchObject({
+      error: { code: "invalid_request", retryable: false },
+    });
+    await expect(invalidDescription.json()).resolves.toMatchObject({
+      error: { code: "invalid_request", retryable: false },
+    });
+    await expect(invalidInstructions.json()).resolves.toMatchObject({
+      error: { code: "invalid_request", retryable: false },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("serves and mutates workspace-scoped Wiki sources through typed routes", async () => {
     const list = vi.fn(async () => [wikiSourceView()]);
     const listActivity = vi.fn(async () => ({
@@ -617,7 +773,7 @@ describe("canonical Hono API", () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
-  it("does not expose the retired hand-authored Skill create or edit routes", async () => {
+  it("rejects the retired hand-authored Skill payload instead of reviving its data model", async () => {
     const app = testApp(fakeRepository());
 
     const create = await app.request("/v1/skills", {
@@ -636,8 +792,8 @@ describe("canonical Hono API", () => {
       }),
     });
 
-    expect(create.status).toBe(404);
-    expect(update.status).toBe(404);
+    expect(create.status).toBe(400);
+    expect(update.status).toBe(400);
   });
 
   it("lists, inspects, reads, replaces, disables, and archives Skill installations", async () => {
@@ -659,6 +815,9 @@ describe("canonical Hono API", () => {
     const setEnabled = vi.fn(async () => ({ ...installation, enabled: false }));
     const replace = vi.fn(async () => installation);
     const archive = vi.fn(async () => undefined);
+    if (bundle.source.type === "workspace") {
+      throw new Error("Expected the fixture to use an external Skill source.");
+    }
     const resolvedBundle = {
       name: installation.name,
       description: bundle.description,
@@ -4653,6 +4812,7 @@ function fakeWikiCommandsService(overrides: Partial<WikiCommandRepository> = {})
 function fakeSkillImportService(
   repositoryOverrides: Partial<SkillBundleRepository> = {},
   resolverOverrides: Partial<SkillImportResolver> = {},
+  authorOverrides: Partial<SkillBundleAuthor> = {},
 ) {
   const unexpected = async (): Promise<never> => {
     throw new Error("Unexpected Skill installation operation.");
@@ -4674,7 +4834,13 @@ function fakeSkillImportService(
     },
     ...resolverOverrides,
   };
-  return new SkillImportApplicationService(repository, resolver);
+  const author: SkillBundleAuthor = {
+    create: async () => {
+      throw new Error("Unexpected workspace Skill authoring operation.");
+    },
+    ...authorOverrides,
+  };
+  return new SkillImportApplicationService(repository, resolver, author);
 }
 
 function fakePluginImportService(
@@ -5145,6 +5311,7 @@ function fakeRepository(): FakeRepository {
           },
           activityState: "working",
           hasUnseen: false,
+          pinnedAt: null,
           createdAt,
           updatedAt: createdAt,
         },
@@ -5164,6 +5331,7 @@ function fakeRepository(): FakeRepository {
       },
       activityState: "working",
       hasUnseen: false,
+      pinnedAt: null,
       createdAt,
       updatedAt: createdAt,
     }),

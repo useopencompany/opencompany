@@ -21,3 +21,4 @@ export * from "./schedules";
 export * from "./skill-resolver";
 export * from "./skill-spec";
 export * from "./types";
+export * from "./workspace-skill";

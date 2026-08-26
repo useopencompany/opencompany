@@ -1,4 +1,3 @@
-import { createMDX } from "fumadocs-mdx/next";
 import { headlessApiRouting } from "./headless-api-routing.mjs";
 import { SENSITIVE_CALLBACK_REQUEST_PATTERN } from "./request-logging.mjs";
 
@@ -31,6 +30,15 @@ const nextConfig = {
       ignore: [SENSITIVE_CALLBACK_REQUEST_PATTERN],
     },
   },
+  async redirects() {
+    return [
+      {
+        source: "/docs/:path*",
+        destination: "https://docs.opencompany.cloud/docs/:path*",
+        permanent: false,
+      },
+    ];
+  },
   ...(headlessApi.rewrites.length > 0
     ? {
         async headers() {
@@ -52,6 +60,4 @@ const nextConfig = {
   ],
 };
 
-const withMDX = createMDX();
-
-export default withMDX(nextConfig);
+export default nextConfig;
