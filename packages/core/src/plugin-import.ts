@@ -46,10 +46,16 @@ export type PluginStdioServerSummary = Omit<PluginStdioServer, "env"> & { envKey
 
 export type PluginMcpServerReport = {
   name: string;
-  status: "selected" | "unsupported" | "invalid";
+  // `unsupported` is retained for reports stored by the pre-gateway loader.
+  status: "selected" | "gateway-registered" | "unsupported" | "invalid";
   transport?: "stdio" | "streamable-http" | "sse";
   reason?: string;
 };
+
+export type PluginCapabilitiesReport =
+  | { status: "absent" }
+  | { present: true; status: "ignored"; reason: string }
+  | { present: true; status: "parsed"; issues: string[] };
 
 export type PluginSkillReport =
   | { path: string; name: string; status: "valid"; integrity: string }
@@ -70,6 +76,8 @@ export type PluginInstallReport = {
   ignoredManifestFields: string[];
   skills: PluginSkillReport[];
   mcp: PluginMcpReport;
+  // Optional for compatibility with installations created before capability extensions shipped.
+  capabilities?: PluginCapabilitiesReport;
   collisions: PluginSkillCollision[];
 };
 

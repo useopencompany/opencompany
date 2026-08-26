@@ -1,19 +1,39 @@
 ---
 title: Granola
-description: Feed completed Granola meeting summaries into Brain.
+description: Connect Granola meeting notes to opencompany Brain ingestion with a personal API key.
 ---
 
-## What connecting does
+## What the connection does
 
-Granola connects with a personal API key created in Granola. opencompany polls the authorized
-account for completed meeting summaries.
+Granola has no webhooks, so opencompany polls its API every few minutes for notes updated since the
+last poll. A note becomes visible once Granola finishes its summary and transcript. opencompany then
+normalizes it into a Brain source item and enqueues durable ingestion, which writes a meeting page
+and a raw evidence snapshot of the summary and transcript.
 
-## Scopes and permissions
+The connection is personal: only you can manage the key or wire it into Brains. Live polling does
+not automatically import notes from before you connected. To seed recent history, run **Import
+company context** and select Granola; the scan uses a bounded 30-day window and imports only after
+you confirm the workload.
 
-This connection does not expose a general agent-action catalog. A complete guide to creating,
-rotating, and troubleshooting the Granola key is coming soon.
+## Setup steps
 
-## Brain ingestion
+1. In Granola, open **Settings → Connectors → API keys**.
+2. Create a key with access to the notes you want to ingest.
+3. Copy the `grn_...` key Granola shows once.
+4. In opencompany, open **Settings → Granola** or choose **Set up** on the source card.
+5. Paste the key and save it. opencompany validates the key before storing it.
 
-Granola has no per-meeting picker. Once the account is connected and enabled for a Brain, completed
-meeting summaries can enter the durable ingestion path.
+## Brain routing
+
+Enable Granola under **Sources** in a Brain's settings. Each new meeting note fans out to every
+Brain where your Granola source is enabled. If two members of the same Brain can access a shared
+note, it is ingested once for that Brain.
+
+## Troubleshooting
+
+- Confirm the Granola source is enabled on the target Brain.
+- Confirm **Settings → Granola** shows **Connected**. Replace a revoked or expired key.
+- Wait for Granola to finish the summary and transcript, then allow a few minutes for polling.
+- Use **Import company context** for meetings that happened before live polling began.
+
+The Granola API is documented at [docs.granola.ai](https://docs.granola.ai).

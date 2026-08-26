@@ -6815,6 +6815,24 @@
         "additionalProperties": false
       },
       "SkillSource": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ExternalSkillSource"
+          },
+          {
+            "$ref": "#/components/schemas/WorkspaceSkillSource"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "github": "#/components/schemas/ExternalSkillSource",
+            "skills.sh": "#/components/schemas/ExternalSkillSource",
+            "workspace": "#/components/schemas/WorkspaceSkillSource"
+          }
+        }
+      },
+      "ExternalSkillSource": {
         "type": "object",
         "properties": {
           "type": {
@@ -6851,215 +6869,18 @@
         ],
         "additionalProperties": false
       },
-      "SkillImportPreviewEnvelope": {
+      "WorkspaceSkillSource": {
         "type": "object",
         "properties": {
-          "data": {
-            "$ref": "#/components/schemas/SkillImportPreview"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
+          "type": {
+            "type": "string",
+            "enum": [
+              "workspace"
+            ]
           }
         },
         "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "SkillImportPreview": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "resolved"
-                ]
-              },
-              "name": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              "description": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 1024
-              },
-              "license": {
-                "type": "string"
-              },
-              "compatibility": {
-                "type": "string",
-                "maxLength": 500
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              "allowedTools": {
-                "type": "string"
-              },
-              "source": {
-                "$ref": "#/components/schemas/SkillSource"
-              },
-              "integrity": {
-                "type": "string",
-                "pattern": "^sha256:[0-9a-f]{64}$/iu"
-              },
-              "files": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/SkillImportFileMetadata"
-                },
-                "minItems": 1,
-                "maxItems": 64
-              },
-              "fileCount": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 64
-              },
-              "totalBytes": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 1048576
-              }
-            },
-            "required": [
-              "status",
-              "name",
-              "description",
-              "source",
-              "integrity",
-              "files",
-              "fileCount",
-              "totalBytes"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "ambiguous"
-                ]
-              },
-              "candidates": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/SkillImportCandidate"
-                },
-                "minItems": 1,
-                "maxItems": 25
-              },
-              "source": {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "github",
-                      "skills.sh"
-                    ]
-                  },
-                  "url": {
-                    "type": "string",
-                    "maxLength": 2048,
-                    "format": "uri"
-                  },
-                  "ref": {
-                    "type": "string",
-                    "maxLength": 256
-                  },
-                  "resolvedCommit": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{40}$/u"
-                  }
-                },
-                "required": [
-                  "type",
-                  "url",
-                  "ref",
-                  "resolvedCommit"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "status",
-              "candidates",
-              "source"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "SkillImportFileMetadata": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1024
-          },
-          "sizeBytes": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 524288
-          }
-        },
-        "required": [
-          "path",
-          "sizeBytes"
-        ],
-        "additionalProperties": false
-      },
-      "SkillImportCandidate": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "maxLength": 512
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "description": {
-            "type": "string",
-            "maxLength": 1024
-          }
-        },
-        "required": [
-          "path",
-          "name",
-          "description"
-        ],
-        "additionalProperties": false
-      },
-      "SkillImportPreviewBody": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048
-          },
-          "selectedPath": {
-            "type": "string",
-            "maxLength": 512
-          }
-        },
-        "required": [
-          "url"
+          "type"
         ],
         "additionalProperties": false
       },
@@ -7238,6 +7059,245 @@
         ],
         "additionalProperties": false
       },
+      "CreateWorkspaceSkillBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$/u"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 524288
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "instructions"
+        ],
+        "additionalProperties": false
+      },
+      "SkillImportPreviewEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillImportPreview"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SkillImportPreview": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "resolved"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "license": {
+                "type": "string"
+              },
+              "compatibility": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "metadata": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "allowedTools": {
+                "type": "string"
+              },
+              "source": {
+                "$ref": "#/components/schemas/ExternalSkillSource"
+              },
+              "integrity": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$/iu"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SkillImportFileMetadata"
+                },
+                "minItems": 1,
+                "maxItems": 64
+              },
+              "fileCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64
+              },
+              "totalBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048576
+              }
+            },
+            "required": [
+              "status",
+              "name",
+              "description",
+              "source",
+              "integrity",
+              "files",
+              "fileCount",
+              "totalBytes"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ambiguous"
+                ]
+              },
+              "candidates": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SkillImportCandidate"
+                },
+                "minItems": 1,
+                "maxItems": 25
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "github",
+                      "skills.sh"
+                    ]
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  },
+                  "ref": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "resolvedCommit": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$/u"
+                  }
+                },
+                "required": [
+                  "type",
+                  "url",
+                  "ref",
+                  "resolvedCommit"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "status",
+              "candidates",
+              "source"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "SkillImportFileMetadata": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 524288
+          }
+        },
+        "required": [
+          "path",
+          "sizeBytes"
+        ],
+        "additionalProperties": false
+      },
+      "SkillImportCandidate": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "path",
+          "name",
+          "description"
+        ],
+        "additionalProperties": false
+      },
+      "SkillImportPreviewBody": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "selectedPath": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
       "ImportSkillBody": {
         "type": "object",
         "properties": {
@@ -7323,6 +7383,26 @@
         "required": [
           "data",
           "meta"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateWorkspaceSkillBody": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 524288
+          }
+        },
+        "required": [
+          "description",
+          "instructions"
         ],
         "additionalProperties": false
       },
@@ -12475,6 +12555,80 @@
           "mcp": {
             "$ref": "#/components/schemas/PluginMcpReport"
           },
+          "capabilities": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
           "collisions": {
             "type": "array",
             "items": {
@@ -12642,6 +12796,7 @@
             "type": "string",
             "enum": [
               "selected",
+              "gateway-registered",
               "unsupported",
               "invalid"
             ]
@@ -12924,6 +13079,80 @@
           },
           "mcp": {
             "$ref": "#/components/schemas/PluginMcpReport"
+          },
+          "capabilities": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
           }
         },
         "required": [
@@ -17940,6 +18169,63 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkspaceSkillBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Workspace-authored Skill installed as an immutable standard bundle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillImportEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/skills/imports/preview": {
@@ -18114,6 +18400,64 @@
         "responses": {
           "200": {
             "description": "Skill detail.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$/u"
+            },
+            "required": true,
+            "name": "slug",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWorkspaceSkillBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace-authored Skill moved to a new immutable bundle version.",
             "content": {
               "application/json": {
                 "schema": {

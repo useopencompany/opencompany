@@ -58,7 +58,7 @@ type PluginSkillReportView =
   | { path: string; name: string; status: "skipped"; reason: string };
 type PluginMcpEntryView = {
   name: string;
-  status: "selected" | "unsupported" | "invalid";
+  status: "selected" | "gateway-registered" | "unsupported" | "invalid";
   transport?: "stdio" | "streamable-http" | "sse";
   reason?: string;
 };
@@ -74,6 +74,10 @@ type PluginReportView = {
     | { status: "absent" }
     | { present: true; status: "disabled"; reason: string }
     | { present: true; status: "parsed"; reports: PluginMcpEntryView[] };
+  capabilities?:
+    | { status: "absent" }
+    | { present: true; status: "ignored"; reason: string }
+    | { present: true; status: "parsed"; issues: string[] };
   collisions: PluginCollisionView[];
 };
 
@@ -693,13 +697,20 @@ function ValidationReport({ report }: { report: PluginReportView }) {
   );
   const mcpIssues =
     report.mcp.status === "parsed"
-      ? report.mcp.reports.filter((entry: PluginMcpEntryView) => entry.status !== "selected")
+      ? report.mcp.reports.filter(
+          (entry: PluginMcpEntryView) =>
+            entry.status !== "selected" && entry.status !== "gateway-registered",
+        )
       : [];
+  const capabilityIssues =
+    report.capabilities?.status === "parsed" ? report.capabilities.issues : [];
   const hasMessages =
     report.ignoredManifestFields.length > 0 ||
     skipped.length > 0 ||
     report.mcp.status === "disabled" ||
-    mcpIssues.length > 0;
+    mcpIssues.length > 0 ||
+    report.capabilities?.status === "ignored" ||
+    capabilityIssues.length > 0;
   return (
     <section className="flex flex-col gap-2">
       <SectionLabel>Validation report</SectionLabel>
@@ -726,6 +737,12 @@ function ValidationReport({ report }: { report: PluginReportView }) {
               key={`mcp-${entry.name}`}
               label={`${entry.name}: ${entry.reason || entry.status}`}
             />
+          ))}
+          {report.capabilities?.status === "ignored" ? (
+            <ReportRow label={`Capabilities ignored: ${report.capabilities.reason}`} />
+          ) : null}
+          {capabilityIssues.map((issue) => (
+            <ReportRow key={`capability-${issue}`} label={`Capabilities: ${issue}`} />
           ))}
         </ul>
       )}

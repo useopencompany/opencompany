@@ -8,6 +8,7 @@ import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import { createPluginImportResolver } from "@opencompany/agent/plugin-import";
 import { createSkillImportResolver } from "@opencompany/agent/skill-import";
+import { createWorkspaceSkillArtifact } from "@opencompany/agent-runtime";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import { createBillingApplicationService } from "@opencompany/billing/application-service";
 import { getStripe, getStripeWebhookSecret } from "@opencompany/billing/stripe";
@@ -125,6 +126,7 @@ const browserProfiles = new BrowserProfileApplicationService(database.db);
 const skillImports = new SkillImportApplicationService(
   new PostgresSkillBundleRepository(database.db),
   createSkillImportResolver(),
+  { create: createWorkspaceSkillArtifact },
 );
 const pluginImports = new PluginImportApplicationService(
   new PostgresPluginRepository(database.db),

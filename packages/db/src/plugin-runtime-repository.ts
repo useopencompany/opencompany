@@ -1,4 +1,4 @@
-import type { PluginStdioServer, SkillBundleFile } from "@opencompany/core";
+import type { PluginInstallReport, PluginStdioServer, SkillBundleFile } from "@opencompany/core";
 import { CoreError } from "@opencompany/core";
 import { and, eq, inArray } from "drizzle-orm";
 import { chatSessionPlugins, pluginFiles, plugins } from "./product-schema";
@@ -53,6 +53,7 @@ export async function loadEnabledPluginRuntime(
         id: plugins.id,
         name: plugins.name,
         integrity: plugins.integrity,
+        installReport: plugins.installReport,
         stdioMcpServers: plugins.stdioMcpServers,
         mcpApprovedIntegrity: plugins.mcpApprovedIntegrity,
       })
@@ -84,6 +85,22 @@ export async function loadEnabledPluginRuntime(
     resolveWorkspaceSkillCatalog(db, { workspaceId: input.workspaceId, pluginIds }),
   ]);
 
+  const typedPluginRows = pluginRows as Array<{
+    id: string;
+    name: string;
+    integrity: string;
+    installReport: PluginInstallReport;
+    stdioMcpServers: PluginStdioServer[];
+    mcpApprovedIntegrity: string | null;
+  }>;
+  const materializeMcpConfig = new Map(
+    typedPluginRows.map((plugin) => [
+      plugin.id,
+      plugin.installReport.mcp.status === "parsed" &&
+        plugin.installReport.mcp.reports.every((report) => report.transport === "stdio"),
+    ]),
+  );
+
   const filesByPlugin = new Map<string, SkillBundleFile[]>();
   for (const row of fileRows as Array<{
     pluginId: string;
@@ -92,6 +109,10 @@ export async function loadEnabledPluginRuntime(
     executable: boolean;
     sizeBytes: number;
   }>) {
+    // Remote endpoints are gateway-only configuration. Mixed and invalid MCP documents stay out of
+    // sandboxes as well; approved stdio entries still launch from the separately parsed, immutable
+    // `stdioMcpServers` record. Pure-stdio mcp.json files remain byte-for-byte unchanged.
+    if (row.path === "mcp.json" && materializeMcpConfig.get(row.pluginId) !== true) continue;
     const files = filesByPlugin.get(row.pluginId) ?? [];
     files.push({
       path: row.path,
@@ -102,13 +123,6 @@ export async function loadEnabledPluginRuntime(
     filesByPlugin.set(row.pluginId, files);
   }
 
-  const typedPluginRows = pluginRows as Array<{
-    id: string;
-    name: string;
-    integrity: string;
-    stdioMcpServers: PluginStdioServer[];
-    mcpApprovedIntegrity: string | null;
-  }>;
   const packages = typedPluginRows.map((plugin) => {
     const files = filesByPlugin.get(plugin.id);
     if (!files?.length) {
