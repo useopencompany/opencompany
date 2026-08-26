@@ -5555,8 +5555,9 @@ describe("Surface chat streaming UI", () => {
       expect(onOpenChat).toHaveBeenCalledWith(null);
     });
 
-    it("reports optimistic-to-durable resolution without moving the URL when the pane is inactive", async () => {
+    it("reports an optimistic selection before durable resolution without moving the URL when the pane is inactive", async () => {
       const user = userEvent.setup();
+      const onOpenChat = vi.fn();
       const onConversationResolved = vi.fn();
       render(
         <Surface
@@ -5565,6 +5566,7 @@ describe("Surface chat streaming UI", () => {
           initialChat={null}
           workspaceId="workspace_1"
           isActivePane={false}
+          onOpenChat={onOpenChat}
           onConversationResolved={onConversationResolved}
         />,
       );
@@ -5575,6 +5577,13 @@ describe("Surface chat streaming UI", () => {
       await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
       const optimisticSessionId = (chatMock.preparedRequestBodies[0] as { newSessionId: string })
         .newSessionId;
+
+      expect(onOpenChat).toHaveBeenCalledWith({
+        id: optimisticSessionId,
+        model: DEFAULT_MODEL,
+        engine: "opencompany",
+      });
+      expect(onConversationResolved).not.toHaveBeenCalled();
 
       acceptHeadlessConversation(optimisticSessionId);
 

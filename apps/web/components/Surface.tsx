@@ -2105,6 +2105,11 @@ export function Surface({
       setChatModelOverride(model);
       setChatSessionId(newSessionId);
       setPersistedChatSessionId(null);
+      onOpenChat?.({
+        id: newSessionId,
+        model: String(model),
+        engine: activeEngine ?? "opencompany",
+      });
     }
     if (newSessionId) {
       addOptimisticChatSummary({
