@@ -68,6 +68,7 @@ import {
   CreateWikiPageBodySchema,
   CreateWorkflowBodySchema,
   CreateWorkspaceBodySchema,
+  CreateWorkspaceSkillBodySchema,
   CursorSchema,
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
@@ -141,6 +142,7 @@ import {
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
   SetSlackBotDestinationBodySchema,
+  SetWikiSourceEnabledBodySchema,
   SetWorkspaceCapabilityBodySchema,
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
@@ -179,10 +181,16 @@ import {
   UpdateUserPreferencesBodySchema,
   UpdateWikiPageBodySchema,
   UpdateWorkflowBodySchema,
+  UpdateWorkspaceSkillBodySchema,
+  UpsertWikiSourceBodySchema,
   UserPreferencesEnvelopeSchema,
+  WikiIngestActivityListEnvelopeSchema,
   WikiPageDeleteEnvelopeSchema,
   WikiPageListEnvelopeSchema,
   WikiPageMutationEnvelopeSchema,
+  WikiSourceDeleteEnvelopeSchema,
+  WikiSourceListEnvelopeSchema,
+  WikiSourceMutationEnvelopeSchema,
   WikiTimelineMutationEnvelopeSchema,
   WorkflowArchiveEnvelopeSchema,
   WorkflowEnvelopeSchema,
@@ -195,6 +203,7 @@ import {
   WorkspaceCommandEnvelopeSchema,
   WorkspaceRenameEnvelopeSchema,
   WorkspaceSettingsEnvelopeSchema,
+  WorkspaceSkillNameSchema,
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "./version";
 
@@ -1069,6 +1078,96 @@ export const addWikiTimelineEntryRoute = createRoute({
   },
 });
 
+export const listWikiSourcesRoute = createRoute({
+  method: "get",
+  path: "/v1/wiki/sources",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Source configuration and connection state for the active workspace Wiki.",
+      content: { "application/json": { schema: WikiSourceListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listWikiIngestActivityRoute = createRoute({
+  method: "get",
+  path: "/v1/wiki/sources/activity",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+      cursor: z.string().min(1).max(1_024).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Recent ingestion outcomes for the active workspace Wiki.",
+      content: { "application/json": { schema: WikiIngestActivityListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const upsertWikiSourceRoute = createRoute({
+  method: "put",
+  path: "/v1/wiki/sources",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpsertWikiSourceBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "A Wiki source configured or updated for the active workspace.",
+      content: { "application/json": { schema: WikiSourceMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setWikiSourceEnabledRoute = createRoute({
+  method: "patch",
+  path: "/v1/wiki/sources/{sourceId}",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ sourceId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetWikiSourceEnabledBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "A Wiki source enabled state updated for the active workspace.",
+      content: { "application/json": { schema: WikiSourceMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteWikiSourceRoute = createRoute({
+  method: "delete",
+  path: "/v1/wiki/sources/{sourceId}",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ sourceId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "A Wiki source removed from the active workspace.",
+      content: { "application/json": { schema: WikiSourceDeleteEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const listSkillsRoute = createRoute({
   method: "get",
   path: "/v1/skills",
@@ -1078,6 +1177,27 @@ export const listSkillsRoute = createRoute({
     200: {
       description: "Workspace skill settings list.",
       content: { "application/json": { schema: SkillListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createWorkspaceSkillRoute = createRoute({
+  method: "post",
+  path: "/v1/skills",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateWorkspaceSkillBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Workspace-authored Skill installed as an immutable standard bundle.",
+      content: { "application/json": { schema: SkillImportEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -1144,6 +1264,27 @@ export const getSkillRoute = createRoute({
   responses: {
     200: {
       description: "Skill detail.",
+      content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateWorkspaceSkillRoute = createRoute({
+  method: "patch",
+  path: "/v1/skills/{slug}",
+  tags: ["Skills"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ slug: WorkspaceSkillNameSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateWorkspaceSkillBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Workspace-authored Skill moved to a new immutable bundle version.",
       content: { "application/json": { schema: SkillInstallationEnvelopeSchema } },
     },
     default: errorResponse,
@@ -3293,11 +3434,18 @@ export type V1RouteHandlers = {
   updateWikiPage: RouteHandler<typeof updateWikiPageRoute>;
   deleteWikiPage: RouteHandler<typeof deleteWikiPageRoute>;
   addWikiTimelineEntry: RouteHandler<typeof addWikiTimelineEntryRoute>;
+  listWikiSources: RouteHandler<typeof listWikiSourcesRoute>;
+  listWikiIngestActivity: RouteHandler<typeof listWikiIngestActivityRoute>;
+  upsertWikiSource: RouteHandler<typeof upsertWikiSourceRoute>;
+  setWikiSourceEnabled: RouteHandler<typeof setWikiSourceEnabledRoute>;
+  deleteWikiSource: RouteHandler<typeof deleteWikiSourceRoute>;
   listSkills: RouteHandler<typeof listSkillsRoute>;
+  createWorkspaceSkill: RouteHandler<typeof createWorkspaceSkillRoute>;
   previewSkillImport: RouteHandler<typeof previewSkillImportRoute>;
   importSkill: RouteHandler<typeof importSkillRoute>;
   listSkillCatalog: RouteHandler<typeof listSkillCatalogRoute>;
   getSkill: RouteHandler<typeof getSkillRoute>;
+  updateWorkspaceSkill: RouteHandler<typeof updateWorkspaceSkillRoute>;
   archiveSkill: RouteHandler<typeof archiveSkillRoute>;
   enableSkill: RouteHandler<typeof enableSkillRoute>;
   disableSkill: RouteHandler<typeof disableSkillRoute>;
@@ -3478,11 +3626,18 @@ export function createV1Router(
       .openapi(updateWikiPageRoute, handlers.updateWikiPage)
       .openapi(deleteWikiPageRoute, handlers.deleteWikiPage)
       .openapi(addWikiTimelineEntryRoute, handlers.addWikiTimelineEntry)
+      .openapi(listWikiSourcesRoute, handlers.listWikiSources)
+      .openapi(listWikiIngestActivityRoute, handlers.listWikiIngestActivity)
+      .openapi(upsertWikiSourceRoute, handlers.upsertWikiSource)
+      .openapi(setWikiSourceEnabledRoute, handlers.setWikiSourceEnabled)
+      .openapi(deleteWikiSourceRoute, handlers.deleteWikiSource)
       .openapi(listSkillsRoute, handlers.listSkills)
+      .openapi(createWorkspaceSkillRoute, handlers.createWorkspaceSkill)
       .openapi(previewSkillImportRoute, handlers.previewSkillImport)
       .openapi(importSkillRoute, handlers.importSkill)
       .openapi(listSkillCatalogRoute, handlers.listSkillCatalog)
       .openapi(getSkillRoute, handlers.getSkill)
+      .openapi(updateWorkspaceSkillRoute, handlers.updateWorkspaceSkill)
       .openapi(archiveSkillRoute, handlers.archiveSkill)
       .openapi(enableSkillRoute, handlers.enableSkill)
       .openapi(disableSkillRoute, handlers.disableSkill)
@@ -3735,6 +3890,25 @@ const placeholderWikiPage = {
   assetSizeBytes: null,
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
+};
+const placeholderWikiSource = {
+  id: "gwscfg_contract",
+  provider: "gmail" as const,
+  integrationId: "integration_contract",
+  enabled: true,
+  config: {},
+  integrationStatus: "connected" as const,
+  accountName: "Contract account",
+  accountEmail: "contract@example.com",
+  connectionLabel: null,
+  ownerName: "Contract owner",
+  ownerEmail: "contract@example.com",
+  ownerAvatarUrl: null,
+  ownerKind: "user" as const,
+  isOwn: true,
+  canConfigure: true,
+  canToggle: true,
+  canDelete: true,
 };
 const placeholderSkillSource = {
   type: "github" as const,
@@ -4355,6 +4529,12 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       201,
     ),
+  listWikiSources: (c) => c.json({ data: [placeholderWikiSource], meta }, 200),
+  listWikiIngestActivity: (c) => c.json({ data: { items: [], nextCursor: null }, meta }, 200),
+  upsertWikiSource: (c) => c.json({ data: placeholderWikiSource, meta }, 200),
+  setWikiSourceEnabled: (c) => c.json({ data: placeholderWikiSource, meta }, 200),
+  deleteWikiSource: (c) =>
+    c.json({ data: { sourceId: placeholderWikiSource.id, deleted: true as const }, meta }, 200),
   listSkills: (c) =>
     c.json(
       {
@@ -4372,6 +4552,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  createWorkspaceSkill: (c) =>
+    c.json({ data: { installation: placeholderSkillInstallation, replayed: false }, meta }, 201),
   previewSkillImport: (c) =>
     c.json(
       {
@@ -4406,6 +4588,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   getSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
+  updateWorkspaceSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   archiveSkill: (c) => c.json({ data: { name: placeholderSkillInstallation.name }, meta }, 200),
   enableSkill: (c) => c.json({ data: placeholderSkillInstallation, meta }, 200),
   disableSkill: (c) =>

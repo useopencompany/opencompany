@@ -127,6 +127,7 @@ export const ConversationSchema = z
     runtime: ConversationRuntimeSchema.nullable(),
     activityState: ConversationActivityStateSchema,
     hasUnseen: z.boolean(),
+    pinnedAt: TimestampSchema.nullable().optional(),
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
   })
@@ -1301,7 +1302,76 @@ export const WikiPageReadModelSchema = WikiPageSchema.openapi("WikiPageReadModel
 export const WikiTimelineReadModelSchema =
   WikiTimelineEntrySchema.openapi("WikiTimelineReadModelV1");
 
-export const SkillSourceSchema = z
+export const WikiSourceProviderSchema = z.enum([
+  "gmail",
+  "slack",
+  "jamie",
+  "granola",
+  "linear",
+  "github",
+]);
+
+export const WikiSourceConfigSchema = z
+  .record(z.string().min(1).max(128), z.unknown())
+  .refine((config: Record<string, unknown>) => Object.keys(config).length <= 100, {
+    message: "Wiki source configuration has too many fields.",
+  })
+  .refine((config: Record<string, unknown>) => JSON.stringify(config).length <= 64 * 1024, {
+    message: "Wiki source configuration is too large.",
+  })
+  .openapi("WikiSourceConfig");
+
+export const WikiSourceSchema = z
+  .object({
+    id: ResourceIdSchema,
+    provider: WikiSourceProviderSchema,
+    integrationId: ResourceIdSchema,
+    enabled: z.boolean(),
+    config: WikiSourceConfigSchema,
+    integrationStatus: z.enum(["connected", "needs_reauth", "sync_failed", "disconnected"]),
+    accountName: z.string().max(512).nullable(),
+    accountEmail: z.string().max(320).nullable(),
+    connectionLabel: z.string().max(512).nullable(),
+    ownerName: z.string().max(512).nullable(),
+    ownerEmail: z.string().max(320).nullable(),
+    ownerAvatarUrl: z.string().max(2_048).nullable(),
+    ownerKind: z.enum(["workspace", "user"]),
+    isOwn: z.boolean(),
+    canConfigure: z.boolean(),
+    canToggle: z.boolean(),
+    canDelete: z.boolean(),
+  })
+  .strict()
+  .openapi("WikiSource");
+
+export const WikiIngestActivityPageSchema = z
+  .object({
+    path: z.string().min(1).max(512),
+    title: z.string().min(1).max(160),
+    action: z.enum(["created", "updated", "moved", "deleted"]),
+  })
+  .strict()
+  .openapi("WikiIngestActivityPage");
+
+export const WikiIngestActivityItemSchema = z
+  .object({
+    id: ResourceIdSchema,
+    provider: WikiSourceProviderSchema,
+    sourceType: z.enum(["meeting", "conversation", "issue", "activity", "thread"]),
+    title: z.string().max(512).nullable(),
+    outcome: z.enum(["queued", "running", "succeeded", "failed", "skipped"]),
+    reason: z.string().max(2_000).nullable(),
+    pages: z.array(WikiIngestActivityPageSchema).max(100),
+    attempts: z.number().int().min(0),
+    occurredAt: TimestampSchema,
+    completedAt: TimestampSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("WikiIngestActivityItem");
+
+export const ExternalSkillSourceSchema = z
   .object({
     type: z.enum(["github", "skills.sh"]),
     url: z.url().max(2_048),
@@ -1310,6 +1380,15 @@ export const SkillSourceSchema = z
     resolvedCommit: z.string().regex(/^[0-9a-f]{40}$/u),
   })
   .strict()
+  .openapi("ExternalSkillSource");
+
+export const WorkspaceSkillSourceSchema = z
+  .object({ type: z.literal("workspace") })
+  .strict()
+  .openapi("WorkspaceSkillSource");
+
+export const SkillSourceSchema = z
+  .discriminatedUnion("type", [ExternalSkillSourceSchema, WorkspaceSkillSourceSchema])
   .openapi("SkillSource");
 
 export const SkillBundleFileMetadataSchema = z
@@ -1407,7 +1486,7 @@ export const SkillImportPreviewSchema = z
         compatibility: z.string().max(500).optional(),
         metadata: z.record(z.string(), z.string()).optional(),
         allowedTools: z.string().optional(),
-        source: SkillSourceSchema,
+        source: ExternalSkillSourceSchema,
         integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
         files: z.array(SkillImportFileMetadataSchema).min(1).max(64),
         fileCount: z.number().int().min(1).max(64),
@@ -1422,7 +1501,7 @@ export const SkillImportPreviewSchema = z
       .object({
         status: z.literal("ambiguous"),
         candidates: z.array(SkillImportCandidateSchema).min(1).max(25),
-        source: SkillSourceSchema.omit({ path: true }),
+        source: ExternalSkillSourceSchema.omit({ path: true }),
       })
       .strict(),
   ])
@@ -1450,7 +1529,7 @@ export const PluginManifestSchema = z
   .strict()
   .openapi("PluginManifest");
 
-export const PluginSourceSchema = SkillSourceSchema.openapi("PluginSource");
+export const PluginSourceSchema = ExternalSkillSourceSchema.openapi("PluginSource");
 
 export const PluginFileMetadataSchema = z
   .object({
@@ -1769,6 +1848,46 @@ export const WikiTimelineMutationEnvelopeSchema = z
   })
   .strict()
   .openapi("WikiTimelineMutationEnvelope");
+export const WikiSourceListEnvelopeSchema = z
+  .object({ data: z.array(WikiSourceSchema).max(1_000), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WikiSourceListEnvelope");
+export const WikiIngestActivityListEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        items: z.array(WikiIngestActivityItemSchema).max(100),
+        nextCursor: z.string().max(1_024).nullable(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WikiIngestActivityListEnvelope");
+export const WikiSourceMutationEnvelopeSchema = z
+  .object({ data: WikiSourceSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WikiSourceMutationEnvelope");
+export const WikiSourceDeleteEnvelopeSchema = z
+  .object({
+    data: z.object({ sourceId: ResourceIdSchema, deleted: z.literal(true) }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WikiSourceDeleteEnvelope");
+export const UpsertWikiSourceBodySchema = z
+  .object({
+    integrationId: ResourceIdSchema,
+    provider: WikiSourceProviderSchema,
+    enabled: z.boolean(),
+    config: WikiSourceConfigSchema.optional(),
+  })
+  .strict()
+  .openapi("UpsertWikiSourceBody");
+export const SetWikiSourceEnabledBodySchema = z
+  .object({ enabled: z.boolean() })
+  .strict()
+  .openapi("SetWikiSourceEnabledBody");
 export const CreateWikiPageBodySchema = z
   .object({
     clientPageId: ResourceIdSchema.optional(),
@@ -1889,6 +2008,36 @@ export const ImportSkillBodySchema = SkillImportPreviewBodySchema.extend({
 })
   .strict()
   .openapi("ImportSkillBody");
+export const WorkspaceSkillNameSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
+export const CreateWorkspaceSkillBodySchema = z
+  .object({
+    name: WorkspaceSkillNameSchema,
+    description: z
+      .string()
+      .trim()
+      .min(1)
+      .max(1_024)
+      .refine((value: string) => !value.includes("\0"), {
+        message: "Skill descriptions must not contain NUL characters.",
+      }),
+    instructions: z
+      .string()
+      .trim()
+      .min(1)
+      .max(512 * 1_024)
+      .refine((value: string) => !value.includes("\0"), {
+        message: "Skill instructions must not contain NUL characters.",
+      }),
+  })
+  .strict()
+  .openapi("CreateWorkspaceSkillBody");
+export const UpdateWorkspaceSkillBodySchema = CreateWorkspaceSkillBodySchema.omit({ name: true })
+  .strict()
+  .openapi("UpdateWorkspaceSkillBody");
 export const SkillImportEnvelopeSchema = z
   .object({
     data: z.object({ installation: SkillInstallationSchema, replayed: z.boolean() }).strict(),
@@ -3879,6 +4028,32 @@ export type DeleteBrainFolderBody = z.infer<typeof DeleteBrainFolderBodySchema>;
 export type WikiPageDto = z.infer<typeof WikiPageSchema>;
 export type WikiPageReadModel = z.infer<typeof WikiPageReadModelSchema>;
 export type WikiTimelineReadModel = z.infer<typeof WikiTimelineReadModelSchema>;
+export type WikiSourceProvider = "gmail" | "slack" | "jamie" | "granola" | "linear" | "github";
+export type WikiSourceDto = z.infer<typeof WikiSourceSchema>;
+export type WikiIngestActivityItemDto = {
+  id: string;
+  provider: WikiSourceProvider;
+  sourceType: "meeting" | "conversation" | "issue" | "activity" | "thread";
+  title: string | null;
+  outcome: "queued" | "running" | "succeeded" | "failed" | "skipped";
+  reason: string | null;
+  pages: Array<{
+    path: string;
+    title: string;
+    action: "created" | "updated" | "moved" | "deleted";
+  }>;
+  attempts: number;
+  occurredAt: string;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type WikiIngestActivityPageDto = {
+  items: WikiIngestActivityItemDto[];
+  nextCursor: string | null;
+};
+export type UpsertWikiSourceBody = z.infer<typeof UpsertWikiSourceBodySchema>;
+export type SetWikiSourceEnabledBody = z.infer<typeof SetWikiSourceEnabledBodySchema>;
 export type CreateWikiPageBody = z.infer<typeof CreateWikiPageBodySchema>;
 export type UpdateWikiPageBody = z.infer<typeof UpdateWikiPageBodySchema>;
 export type DeleteWikiPageBody = z.infer<typeof DeleteWikiPageBodySchema>;
@@ -3895,6 +4070,8 @@ export type SkillImportCandidateDto = z.infer<typeof SkillImportCandidateSchema>
 export type SkillImportPreviewDto = z.infer<typeof SkillImportPreviewSchema>;
 export type SkillImportPreviewBody = z.infer<typeof SkillImportPreviewBodySchema>;
 export type ImportSkillBody = z.infer<typeof ImportSkillBodySchema>;
+export type CreateWorkspaceSkillBody = z.infer<typeof CreateWorkspaceSkillBodySchema>;
+export type UpdateWorkspaceSkillBody = z.infer<typeof UpdateWorkspaceSkillBodySchema>;
 export type PluginManifestDto = z.infer<typeof PluginManifestSchema>;
 export type PluginSourceDto = z.infer<typeof PluginSourceSchema>;
 export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;

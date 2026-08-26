@@ -5,6 +5,7 @@ import {
   linearRouteMatchesEvent,
   linearSelectedEventTypes,
   parseLinearBrainSourceConfig,
+  parseLinearWikiSourceConfig,
 } from "./linear";
 
 describe("opencompany Linear brain source config", () => {
@@ -34,6 +35,21 @@ describe("opencompany Linear brain source config", () => {
     });
 
     expect(linearSelectedEventTypes(config)).toEqual(new Set(["issue_created", "comment_created"]));
+  });
+
+  it("parses wiki team scope with the same strict shape as brain routing", () => {
+    expect(
+      parseLinearWikiSourceConfig({
+        teams: [
+          { id: " team_1 ", key: " ENG ", name: " Engineering " },
+          { id: "", name: "Dropped" },
+        ],
+        events: [{ id: "issue_created" }, { id: "unknown" }],
+      }),
+    ).toEqual({
+      teams: [{ id: "team_1", key: "ENG", name: "Engineering" }],
+      events: [{ id: "issue_created" }],
+    });
   });
 
   it("derives issue status-change events from Linear update payloads", () => {

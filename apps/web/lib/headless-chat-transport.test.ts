@@ -764,9 +764,15 @@ describe("canonical Chat transport", () => {
     );
   });
 
-  it("waits for a background Run to settle through the shared semantic event stream", async () => {
+  it("returns an accepted background launch before its semantic event stream settles", async () => {
     const paths: string[] = [];
     let protocolVersion = "";
+    const eventsResponseDeferred: { resolve: (response: Response) => void } = {
+      resolve: () => undefined,
+    };
+    const eventsResponse = new Promise<Response>((resolve) => {
+      eventsResponseDeferred.resolve = resolve;
+    });
     const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const url = requestUrl(input);
       paths.push(url.pathname);
@@ -788,33 +794,36 @@ describe("canonical Chat transport", () => {
         );
       }
       if (url.pathname.endsWith("/events")) {
-        return sse([
-          {
-            ...event(1, "run.completed", {
-              messageId: "message_assistant_background",
-            }),
-            runId: "run_background",
-          },
-        ]);
+        return eventsResponse;
       }
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    await expect(
-      startHeadlessBackgroundChat(
-        {
-          content: "Work in the background",
-          clientConversationId: "conversation_background",
-          clientMessageId: "message_background",
-          model: "model_1",
-        },
-        {
-          baseUrl: "https://app.example.test",
-          fetch: fetchMock as typeof fetch,
-        },
-      ),
-    ).resolves.toMatchObject({ runId: "run_background" });
+    const launch = await startHeadlessBackgroundChat(
+      {
+        content: "Work in the background",
+        clientConversationId: "conversation_background",
+        clientMessageId: "message_background",
+        model: "model_1",
+      },
+      {
+        baseUrl: "https://app.example.test",
+        fetch: fetchMock as typeof fetch,
+      },
+    );
+    expect(launch).toMatchObject({ runId: "run_background" });
     expect(paths).toEqual(["/v1/messages", "/v1/runs/run_background/events"]);
+    eventsResponseDeferred.resolve(
+      sse([
+        {
+          ...event(1, "run.completed", {
+            messageId: "message_assistant_background",
+          }),
+          runId: "run_background",
+        },
+      ]),
+    );
+    await expect(launch.completion).resolves.toBeUndefined();
     expect(protocolVersion).toBe(PROTOCOL_VERSION);
   });
 
@@ -856,20 +865,20 @@ describe("canonical Chat transport", () => {
       throw new Error(`Unexpected request: ${url}`);
     });
 
-    await expect(
-      startHeadlessBackgroundChat(
-        {
-          content: "Work in the background",
-          clientConversationId: "conversation_background",
-          clientMessageId: "message_background",
-          model: "model_1",
-        },
-        {
-          baseUrl: "https://app.example.test",
-          fetch: fetchMock as typeof fetch,
-        },
-      ),
-    ).resolves.toMatchObject({ runId: "run_background" });
+    const launch = await startHeadlessBackgroundChat(
+      {
+        content: "Work in the background",
+        clientConversationId: "conversation_background",
+        clientMessageId: "message_background",
+        model: "model_1",
+      },
+      {
+        baseUrl: "https://app.example.test",
+        fetch: fetchMock as typeof fetch,
+      },
+    );
+    expect(launch).toMatchObject({ runId: "run_background" });
+    await expect(launch.completion).resolves.toBeUndefined();
 
     expect(paths).toEqual(["/v1/messages", "/v1/runs/run_background/events"]);
     await vi.waitFor(() =>

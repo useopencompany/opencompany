@@ -102,6 +102,7 @@ describe("v1 protocol contract", () => {
       runtime,
       activityState: "working" as const,
       hasUnseen: false,
+      pinnedAt: null,
       createdAt: "2026-08-13T07:00:00.000Z",
       updatedAt: "2026-08-13T08:00:00.000Z",
     };
@@ -249,6 +250,9 @@ describe("v1 protocol contract", () => {
       "/v1/wiki/pages/{id}",
       "/v1/wiki/pages/{id}/delete",
       "/v1/wiki/pages/{id}/timeline",
+      "/v1/wiki/sources",
+      "/v1/wiki/sources/activity",
+      "/v1/wiki/sources/{sourceId}",
       "/v1/skills",
       "/v1/skills/imports/preview",
       "/v1/skills/imports",
@@ -331,9 +335,9 @@ describe("v1 protocol contract", () => {
       "/v1/plugins/{name}/data/delete",
     ]);
     expect(document.paths?.["/v1/skills"]).toHaveProperty("get");
-    expect(document.paths?.["/v1/skills"]).not.toHaveProperty("post");
+    expect(document.paths?.["/v1/skills"]).toHaveProperty("post");
     expect(document.paths?.["/v1/skills/{slug}"]).toHaveProperty("get");
-    expect(document.paths?.["/v1/skills/{slug}"]).not.toHaveProperty("patch");
+    expect(document.paths?.["/v1/skills/{slug}"]).toHaveProperty("patch");
     expect(document.paths?.["/v1/messages"]?.post?.parameters).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

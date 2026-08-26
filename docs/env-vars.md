@@ -93,6 +93,24 @@ The marketing Vercel project uses `NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN` and
 `NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST` for basic page and conversion analytics in the same PostHog project
 as the product. Both variables are required in production and optional for local marketing work.
 
+## Experimental Revolut Business connector
+
+Revolut Business is an internal, env-gated runner capability rather than a generally available
+integration. Configure it only for a bounded read-only API evaluation:
+
+| Variable | Required | Purpose |
+| --- | ---: | --- |
+| `OPENCOMPANY_REVOLUT_BUSINESS_WORKSPACE_ID` | Yes | Only workspace allowed to see the action source. |
+| `OPENCOMPANY_REVOLUT_BUSINESS_API_TOKEN` | Yes | Short-lived `oa_prod_` or `oa_sand_` access token with `READ` scope only. |
+| `OPENCOMPANY_REVOLUT_BUSINESS_ACCOUNT_LABEL` | No | Friendly account label shown in Chat. |
+| `OPENCOMPANY_REVOLUT_BUSINESS_API_BASE_URL` | No | HTTPS API base; inferred from the token environment by default. |
+
+The token expires after roughly 40 minutes and must never have `PAY`, `WRITE`, or
+`READ_SENSITIVE_CARD_DATA` scope. The connector can list accounts and bounded expense results; it
+cannot upload receipts, initiate or cancel payments, exchange currency, or return card-sensitive
+data. Store production values in Infisical `prod` `/runner`. This evaluation has no public Settings
+flow and is intentionally omitted from the customer integration index.
+
 ## Local generated values
 
 `bun run setup` writes branch-specific `DATABASE_URL`, the local API listener/origin and browser

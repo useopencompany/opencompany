@@ -1,6 +1,9 @@
 import { normalizeLinearIssueWindow } from "@opencompany/brain";
 import { describe, expect, it } from "vitest";
-import { classifyLinearIssueWindowForIngest } from "./linear-flush-worker";
+import {
+  classifyLinearIssueWindowForIngest,
+  resolveLinearIssueWindowRoutes,
+} from "./linear-flush-worker";
 
 function linearIssueWindow(
   activity: Parameters<typeof normalizeLinearIssueWindow>[0]["activity"],
@@ -186,5 +189,76 @@ describe("classifyLinearIssueWindowForIngest", () => {
       action: "skip",
       reason: "routine_linear_metadata_update",
     });
+  });
+});
+
+describe("resolveLinearIssueWindowRoutes", () => {
+  const event = {
+    id: "glinevt_1",
+    deliveryId: "delivery_1",
+    teamId: "team_1",
+    entityType: "issue",
+    action: "create",
+    issueTitle: "Billing bug",
+    actorName: "Ada",
+    payload: { data: { id: "issue_1" } },
+    eventTime: "2026-07-10T10:00:00.000Z",
+  } satisfies Parameters<typeof resolveLinearIssueWindowRoutes>[0]["events"][number];
+  const brainRoute = {
+    integrationId: "gint_1",
+    brainRef: "gbrain_1",
+    config: {
+      teams: [{ id: "team_1", name: "Core" }],
+      events: [{ id: "issue_created" as const }],
+    },
+  };
+  const wikiRoute = {
+    integrationId: "gint_1",
+    workspaceId: "workspace_1",
+    config: {
+      teams: [{ id: "team_1", name: "Core" }],
+      events: [{ id: "issue_created" as const }],
+    },
+  };
+
+  it("matches scoped brain and wiki routes without changing the brain result", () => {
+    expect(
+      resolveLinearIssueWindowRoutes({
+        brainRoutes: [brainRoute],
+        wikiRoutes: [wikiRoute],
+        teamId: "team_1",
+        events: [event],
+      }),
+    ).toEqual({ brainRefs: ["gbrain_1"], wikiWorkspaceIds: ["workspace_1"] });
+  });
+
+  it("supports wiki-only and brain-only routing", () => {
+    expect(
+      resolveLinearIssueWindowRoutes({
+        brainRoutes: [],
+        wikiRoutes: [wikiRoute],
+        teamId: "team_1",
+        events: [event],
+      }),
+    ).toEqual({ brainRefs: [], wikiWorkspaceIds: ["workspace_1"] });
+    expect(
+      resolveLinearIssueWindowRoutes({
+        brainRoutes: [brainRoute],
+        wikiRoutes: [],
+        teamId: "team_1",
+        events: [event],
+      }),
+    ).toEqual({ brainRefs: ["gbrain_1"], wikiWorkspaceIds: [] });
+  });
+
+  it("rejects wiki routes outside the selected team or event scope", () => {
+    expect(
+      resolveLinearIssueWindowRoutes({
+        brainRoutes: [],
+        wikiRoutes: [wikiRoute],
+        teamId: "team_other",
+        events: [event],
+      }),
+    ).toEqual({ brainRefs: [], wikiWorkspaceIds: [] });
   });
 });

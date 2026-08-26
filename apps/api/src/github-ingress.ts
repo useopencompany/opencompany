@@ -31,9 +31,15 @@ import {
   gitHubSelectedRepoIds,
   insertGitHubPullRequestEvents,
   listEnabledGitHubBrainSourceRoutes,
+  listEnabledGitHubWikiSourceRoutes,
   listGitHubIntegrationsForInstallation,
 } from "@opencompany/db/github";
 import { markIntegrationStatus } from "@opencompany/db/integrations";
+import {
+  attributeWikiSourceEventClaims,
+  claimWikiSourceEvents,
+} from "@opencompany/db/wiki-event-claims";
+import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -54,15 +60,31 @@ export type GitHubIngressService = {
 export function createGitHubIngress(input: {
   db: DbLike;
   identify: ApiIdentityVerifier;
+  wakeWikiIngest?: () => Promise<unknown>;
 }): GitHubIngressService {
+  const wakeWikiIngest = input.wakeWikiIngest
+    ? () => {
+        input.wakeWikiIngest?.().catch((error) => {
+          logger.warn("Wiki ingest worker wake failed after GitHub enqueue", {
+            event: "opencompany.github_wiki_ingest_wake_failed",
+            error,
+          });
+        });
+      }
+    : undefined;
   return {
     start: (request) => handleStart(input, request),
     callback: (request) => handleCallback(input, request),
-    webhook: (request) => handleWebhook(input, request),
+    webhook: (request) =>
+      handleWebhook({ ...input, ...(wakeWikiIngest ? { wakeWikiIngest } : {}) }, request),
   };
 }
 
-type IngressInput = { db: DbLike; identify: ApiIdentityVerifier };
+type IngressInput = {
+  db: DbLike;
+  identify: ApiIdentityVerifier;
+  wakeWikiIngest?: () => void;
+};
 
 async function handleStart(input: IngressInput, request: Request): Promise<Response> {
   const session = await resolveIngressSession(input, request);
@@ -210,7 +232,9 @@ async function handleWebhook(input: IngressInput, request: Request): Promise<Res
     const deliveryId =
       request.headers.get("x-github-delivery")?.trim() ||
       createHash("sha256").update(rawBody).digest("hex");
-    return Response.json(await handleActivityEvent(input.db, eventName, payload, deliveryId));
+    return Response.json(
+      await handleActivityEvent(input.db, eventName, payload, deliveryId, input.wakeWikiIngest),
+    );
   } catch (error) {
     logger.error("Failed to process GitHub event", {
       event: "opencompany.github_webhook_failed",
@@ -257,6 +281,7 @@ async function handleActivityEvent(
   eventName: string,
   payload: Record<string, unknown>,
   deliveryId: string,
+  wakeWikiIngest?: () => void,
 ) {
   let item: ReturnType<typeof normalizeGitHubActivityWebhook>;
   try {
@@ -284,21 +309,32 @@ async function handleActivityEvent(
   const connected = integrations.filter((integration) => integration.status === "connected");
   if (connected.length === 0) return { ok: true, dropped: true };
 
-  const routes = await listEnabledGitHubBrainSourceRoutes(
-    connected.map((integration) => integration.id),
-    db,
-  );
+  const integrationIds = connected.map((integration) => integration.id);
+  const [brainRoutes, wikiRoutes] = await Promise.all([
+    listEnabledGitHubBrainSourceRoutes(integrationIds, db),
+    listEnabledGitHubWikiSourceRoutes(integrationIds, db),
+  ]);
   const repoId = item.content.activity.repository.id;
   const eventType = githubActivityEventType(item.content.activity);
   const brainRefsByIntegration = new Map<string, string[]>();
-  for (const route of routes) {
+  for (const route of brainRoutes) {
     if (!gitHubSelectedRepoIds(route.config).has(repoId)) continue;
     if (!gitHubEnabledEventTypes(route.config).has(eventType)) continue;
     const refs = brainRefsByIntegration.get(route.integrationId) ?? [];
     refs.push(route.brainRef);
     brainRefsByIntegration.set(route.integrationId, refs);
   }
-  if (brainRefsByIntegration.size === 0) return { ok: true, dropped: true };
+  const wikiWorkspaceIdsByIntegration = new Map<string, string[]>();
+  for (const route of wikiRoutes) {
+    if (!gitHubSelectedRepoIds(route.config).has(repoId)) continue;
+    if (!gitHubEnabledEventTypes(route.config).has(eventType)) continue;
+    const workspaceIds = wikiWorkspaceIdsByIntegration.get(route.integrationId) ?? [];
+    workspaceIds.push(route.workspaceId);
+    wikiWorkspaceIdsByIntegration.set(route.integrationId, workspaceIds);
+  }
+  if (brainRefsByIntegration.size === 0 && wikiWorkspaceIdsByIntegration.size === 0) {
+    return { ok: true, dropped: true };
+  }
 
   if (item.content.activity.kind === "pull_request") {
     const pullRequestNumber = item.content.activity.number;
@@ -313,7 +349,13 @@ async function handleActivityEvent(
     }
     const inserts: GitHubPullRequestEventInsert[] = connected.flatMap((integration) => {
       const brainRefs = brainRefsByIntegration.get(integration.id);
-      if (!brainRefs || brainRefs.length === 0) return [];
+      const wikiWorkspaceIds = wikiWorkspaceIdsByIntegration.get(integration.id);
+      if (
+        (!brainRefs || brainRefs.length === 0) &&
+        (!wikiWorkspaceIds || wikiWorkspaceIds.length === 0)
+      ) {
+        return [];
+      }
       return [
         {
           integrationId: integration.id,
@@ -350,7 +392,48 @@ async function handleActivityEvent(
     enqueued += result.jobIds.length;
   }
 
-  return { ok: true, enqueued };
+  let wikiEnqueued = 0;
+  const eventKey = `${installationId}:${item.sourceRef}:${deliveryId}`;
+  for (const integration of connected) {
+    const workspaceIds = wikiWorkspaceIdsByIntegration.get(integration.id);
+    if (!workspaceIds || workspaceIds.length === 0) continue;
+    for (const workspaceId of new Set(workspaceIds)) {
+      const persist = async (tx: DbLike) => {
+        const claim = await claimWikiSourceEvents({
+          workspaceId,
+          sourceProvider: "github",
+          eventKeys: [eventKey],
+          db: tx,
+        });
+        if (claim.claimedCount === 0) return null;
+
+        const result = await upsertWikiSourceItemAndEnqueue({
+          workspaceId,
+          sourceConnectionId: integration.id,
+          integrationId: integration.id,
+          item,
+          rawPayload: payload,
+          db: tx,
+        });
+        await attributeWikiSourceEventClaims({
+          workspaceId,
+          sourceProvider: "github",
+          eventKeys: claim.claimedEventKeys,
+          sourceItemId: result.sourceItemId,
+          db: tx,
+        });
+        return result;
+      };
+      const result =
+        typeof db.transaction === "function"
+          ? await db.transaction((tx: DbLike) => persist(tx))
+          : await persist(db);
+      if (result?.enqueued) wikiEnqueued += 1;
+    }
+  }
+  if (wikiEnqueued > 0) wakeWikiIngest?.();
+
+  return { ok: true, enqueued: enqueued + wikiEnqueued };
 }
 
 function statusRedirect(

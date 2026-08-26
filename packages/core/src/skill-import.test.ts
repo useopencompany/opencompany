@@ -2,10 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 import { CoreError } from "./chat";
 import {
   createSkillFileChunk,
+  type SkillBundleAuthor,
   type SkillBundleRepository,
   SkillImportApplicationService,
   type SkillImportResolver,
 } from "./skill-import";
+
+const unexpectedAuthor: SkillBundleAuthor = {
+  create: async () => {
+    throw new Error("Unexpected workspace Skill authoring operation.");
+  },
+};
 
 const actor = {
   userId: "user_1",
@@ -45,9 +52,61 @@ const resolved = {
 };
 
 describe("SkillImportApplicationService", () => {
+  it("authors workspace Skills through the same immutable install and replacement boundaries", async () => {
+    const install = vi.fn(async () => ({ installation: {} as never, idempotentReplay: false }));
+    const replace = vi.fn(async () => ({}) as never);
+    const create = vi.fn(
+      async (input: { name: string; description: string; instructions: string }) => ({
+        name: input.name,
+        description: input.description,
+        body: input.instructions,
+        source: { type: "workspace" as const },
+        integrity,
+        files,
+        fileCount: 1,
+        totalBytes: files[0]!.content.length,
+      }),
+    );
+    const service = new SkillImportApplicationService(
+      repository({ install, replace }),
+      { resolve: vi.fn() },
+      { create },
+    );
+
+    await service.create(actor, {
+      idempotencyKey: "workspace-skill-1",
+      name: "investigate-bug",
+      description: "Reproduce and diagnose bugs.",
+      instructions: "Reproduce first.",
+    });
+    await service.update(actor, "investigate-bug", {
+      description: "Reproduce and diagnose bugs.",
+      instructions: "Reproduce, isolate, and explain.",
+    });
+
+    expect(create).toHaveBeenNthCalledWith(1, {
+      name: "investigate-bug",
+      description: "Reproduce and diagnose bugs.",
+      instructions: "Reproduce first.",
+    });
+    expect(install).toHaveBeenCalledWith({
+      actor,
+      idempotencyKey: "workspace-skill-1",
+      bundle: expect.objectContaining({ name: "investigate-bug", source: { type: "workspace" } }),
+    });
+    expect(replace).toHaveBeenCalledWith({
+      actor,
+      name: "investigate-bug",
+      bundle: expect.objectContaining({
+        name: "investigate-bug",
+        body: "Reproduce, isolate, and explain.",
+      }),
+    });
+  });
+
   it("requires Skill write permission before resolving an external source", async () => {
     const resolver = { resolve: vi.fn() } satisfies SkillImportResolver;
-    const service = new SkillImportApplicationService(repository(), resolver);
+    const service = new SkillImportApplicationService(repository(), resolver, unexpectedAuthor);
 
     await expect(
       service.preview({ ...actor, permissions: [] }, { url: "github.com/o/r" }),
@@ -56,9 +115,11 @@ describe("SkillImportApplicationService", () => {
   });
 
   it("keeps bundle contents out of the public preview", async () => {
-    const service = new SkillImportApplicationService(repository(), {
-      resolve: vi.fn(async () => resolved),
-    });
+    const service = new SkillImportApplicationService(
+      repository(),
+      { resolve: vi.fn(async () => resolved) },
+      unexpectedAuthor,
+    );
 
     const preview = await service.preview(actor, { url: "github.com/o/r" });
 
@@ -74,9 +135,11 @@ describe("SkillImportApplicationService", () => {
 
   it("binds persistence to the exact previewed commit and integrity", async () => {
     const install = vi.fn(async () => ({ installation: {} as never, idempotentReplay: false }));
-    const service = new SkillImportApplicationService(repository({ install }), {
-      resolve: vi.fn(async () => resolved),
-    });
+    const service = new SkillImportApplicationService(
+      repository({ install }),
+      { resolve: vi.fn(async () => resolved) },
+      unexpectedAuthor,
+    );
 
     await service.install(actor, {
       idempotencyKey: "skill-install-1",
@@ -94,9 +157,11 @@ describe("SkillImportApplicationService", () => {
 
   it("rejects changed content before persistence", async () => {
     const install = vi.fn();
-    const service = new SkillImportApplicationService(repository({ install }), {
-      resolve: vi.fn(async () => resolved),
-    });
+    const service = new SkillImportApplicationService(
+      repository({ install }),
+      { resolve: vi.fn(async () => resolved) },
+      unexpectedAuthor,
+    );
 
     await expect(
       service.install(actor, {

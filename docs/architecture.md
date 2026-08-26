@@ -19,9 +19,26 @@ opencompany is a modular monolith with three product composition roots: `web` pr
 - `apps/marketing` is released independently from the product.
 
 The detailed product flow is maintained in
-[the opencompany system map](../apps/web/docs/README.md). Operational behavior is in
+[the opencompany system map](./system-map.md). Operational behavior is in
 [Chat operations](./chat-operations.md), and the permanent ownership decision is
 [ADR 0003](./adr/0003-headless-workflow-and-schedule-foundation.md).
+
+## Technology stack
+
+| Area | Technology | Responsibility |
+| --- | --- | --- |
+| Monorepo | Bun, Turborepo | dependency management and task orchestration |
+| Presentation | Next.js, React | product UI and browser-authentication shell |
+| Product API | Bun, Hono | authenticated `/v1` resources, provider ingress, SSE, OpenAPI, and read models |
+| Durable execution | Bun, Fastify | workers, sandboxes, recovery, and internal transports |
+| Database | Neon Postgres, Drizzle | branch-isolated state and checked-in migrations |
+| Live data | Electric, TanStack DB | authorized API-owned read models |
+| Authentication | WorkOS AuthKit | browser sessions and API identity |
+| Models | Vercel AI Gateway, AI SDK | runner model access and API-owned Auto routing |
+| Sandboxes | E2B, Vercel Sandbox | cloud coding and browser-capable workspaces |
+| Hosting | Vercel, Render | web, docs, and marketing on Vercel; API and runner on Render |
+| Secrets | Infisical | development and production environment authority |
+| Observability | Better Stack, Sentry, SigNoz, Latitude | errors, logs, traces, and LLM telemetry |
 
 ## Data and client boundary
 
@@ -58,6 +75,15 @@ Conversation/Message/Run protocol.
 Brain import, Brain ingestion, Google Drive sync, polling, and schedules follow the same admission
 principle: database state is authoritative, notifications reduce latency, and fenced claims provide
 recovery. The runner never calls the public API for execution persistence.
+
+## Wiki ingestion
+
+Provider ingress validates and normalizes source events before polling providers or buffering
+conversation windows. Buffer flushes use one transaction to enqueue the existing Brain work and the
+independent Wiki ingest job, so enabling Wiki does not change Brain behavior. A leased runner worker
+then cheaply triages Slack, Gmail, and GitHub items before the librarian applies page mutations
+through the same authorized Wiki tool used by interactive agents; job results retain the outcome and
+touched page paths for ingestion activity.
 
 ## Agent Skills and Plugins
 

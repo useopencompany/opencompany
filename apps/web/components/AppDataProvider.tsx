@@ -14,7 +14,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { TaskView } from "@/components/Surface";
-import { type ChatSummaryView, PINNED_CHAT_LIMIT } from "@/lib/chat-ui";
+import type { ChatSummaryView } from "@/lib/chat-ui";
 import type { FeatureFlags } from "@/lib/feature-flags";
 import {
   getHeadlessTaskSchedules,
@@ -37,7 +37,7 @@ import {
   taskReadModelToRow,
 } from "@/lib/headless-task-collections";
 import { listLegacyTaskCompatibility } from "@/lib/headless-task-commands";
-import { isRecentChatActivity, isRecentHomeActivity } from "@/lib/home-activity";
+import { isRecentHomeActivity } from "@/lib/home-activity";
 import { type IntegrationState, integrationStateFromRows } from "@/lib/integration-state";
 import type { McpClient } from "@/lib/mcp-setup";
 import {
@@ -45,6 +45,7 @@ import {
   reconcileOptimisticChatSummaries,
   useOptimisticChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
+import { selectSidebarChats } from "@/lib/sidebar-chats";
 import type { TaskRow } from "@/lib/task-collections";
 import { deriveTaskWorkflowSteps } from "@/lib/task-workflow-activity";
 
@@ -283,7 +284,7 @@ function AppLiveDataSubscriptions({
   ]);
 
   const recentChats = useMemo(() => {
-    if (chatsLoading && !chatRows?.length) return initialData.recentChats;
+    if (chatsLoading && !chatRows?.length) return selectSidebarChats(initialData.recentChats);
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
     const toSummary = (row: HeadlessChatConversationReadModel): ChatSummaryView => {
       const initial = initialById.get(row.id);
@@ -302,30 +303,9 @@ function AppLiveDataSubscriptions({
         pinnedAt: row.pinnedAt,
       };
     };
-    const openRows = ((chatRows ?? []) as HeadlessChatConversationReadModel[]).filter(
-      (row) => !row.archivedAt,
+    return selectSidebarChats((chatRows ?? []) as HeadlessChatConversationReadModel[]).map(
+      toSummary,
     );
-    const activeRuntimeChatIds = new Set(
-      openRows.filter((row) => row.activityState === "working").map((row) => row.id),
-    );
-    const pinned = openRows
-      .filter((row) => row.pinnedAt)
-      .toSorted((a, b) => new Date(b.pinnedAt ?? 0).getTime() - new Date(a.pinnedAt ?? 0).getTime())
-      .slice(0, PINNED_CHAT_LIMIT)
-      .map(toSummary);
-    const activeRuntime = openRows
-      .filter((row) => !row.pinnedAt && activeRuntimeChatIds.has(row.id))
-      .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-      .map(toSummary);
-    const recent = openRows
-      .filter(
-        (row) =>
-          !row.pinnedAt && !activeRuntimeChatIds.has(row.id) && isRecentChatActivity(row.updatedAt),
-      )
-      .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-      .slice(0, 8)
-      .map(toSummary);
-    return [...pinned, ...activeRuntime, ...recent];
   }, [chatRows, chatsLoading, initialData.recentChats]);
 
   useEffect(() => {
@@ -437,6 +417,7 @@ export function useAppDataOptional() {
 function initialAppData(initialData: AppInitialData): AppData {
   return {
     ...initialData,
+    recentChats: selectSidebarChats(initialData.recentChats),
     taskRows: [],
     tasksReady: false,
     archivedChats: [],

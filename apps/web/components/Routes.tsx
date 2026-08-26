@@ -66,11 +66,13 @@ import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
 import type { WorkflowListItem } from "@/lib/headless-automation-types";
 import {
   archiveHeadlessSkill,
+  createHeadlessWorkspaceSkill,
   disableHeadlessSkill,
   enableHeadlessSkill,
   importHeadlessSkill,
   previewHeadlessSkillImport,
   replaceHeadlessSkill,
+  updateHeadlessWorkspaceSkill,
 } from "@/lib/headless-knowledge-commands";
 import type { BrainOverviewStats, BrainSnapshot } from "@/lib/headless-knowledge-types";
 import { legacyTaskDtoToRow, taskReadModelToRow } from "@/lib/headless-task-collections";
@@ -986,15 +988,24 @@ export function SkillsSettingsRoute({
   canEdit: boolean;
 }) {
   const router = useRouter();
+  const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
 
   return (
     <SettingsContent
       title="Skills"
-      description="Immutable Agent Skill bundles installed from GitHub or skills.sh."
+      description="Portable Agent Skills created in this workspace or installed from a public source."
     >
       {canEdit ? (
         <div className="-mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-[13px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <Plus size={14} strokeWidth={2} />
+            New skill
+          </button>
           <button
             type="button"
             onClick={() => setImporting(true)}
@@ -1012,8 +1023,8 @@ export function SkillsSettingsRoute({
           title="No skills yet"
           description={
             canEdit
-              ? "Import a standard Agent Skill from a public GitHub or skills.sh source."
-              : "Workspace admins can install standard Agent Skills from public sources."
+              ? "Create a workspace Skill or import one from GitHub or skills.sh."
+              : "Workspace admins can create and install Agent Skills."
           }
         />
       ) : (
@@ -1030,6 +1041,12 @@ export function SkillsSettingsRoute({
         <ImportSkillDialog
           onClose={() => setImporting(false)}
           onInstalled={(name) => router.push(`/settings/skills/${encodeURIComponent(name)}`)}
+        />
+      ) : null}
+      {creating ? (
+        <WorkspaceSkillDialog
+          onClose={() => setCreating(false)}
+          onSaved={(name) => router.push(`/settings/skills/${encodeURIComponent(name)}`)}
         />
       ) : null}
     </SettingsContent>
@@ -1049,7 +1066,7 @@ function SkillListRow({ skill }: { skill: SkillListItemDto }) {
             {skill.bundle.name}
           </span>
           <InstallationStatusBadge enabled={skill.enabled} />
-          <ImportedBadge />
+          {skill.bundle.source.type === "workspace" ? <WorkspaceBadge /> : <ImportedBadge />}
         </span>
         {skill.bundle.description.trim() ? (
           <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
@@ -1073,6 +1090,7 @@ export function SkillBundleRoute({
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const [replacing, setReplacing] = useState(false);
   const [isMutating, startMutation] = useTransition();
   const bundle = installation.bundle;
@@ -1105,7 +1123,7 @@ export function SkillBundleRoute({
   return (
     <SettingsContent
       title={bundle.name}
-      description={`Attach this immutable bundle with @skill/${installation.name} in chat.`}
+      description={`Invoke this immutable bundle with /${installation.name} in chat.`}
       backLink={{ href: "/settings/skills", label: "Skills" }}
     >
       <SkillSourceNotice source={bundle.source} />
@@ -1169,14 +1187,25 @@ export function SkillBundleRoute({
           >
             {installation.enabled ? "Disable" : "Enable"}
           </button>
-          <button
-            type="button"
-            disabled={isMutating}
-            onClick={() => setReplacing(true)}
-            className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-60"
-          >
-            Replace bundle
-          </button>
+          {bundle.source.type === "workspace" ? (
+            <button
+              type="button"
+              disabled={isMutating}
+              onClick={() => setEditing(true)}
+              className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-60"
+            >
+              Edit skill
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={isMutating}
+              onClick={() => setReplacing(true)}
+              className="inline-flex h-9 items-center rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-60"
+            >
+              Replace bundle
+            </button>
+          )}
           <button
             type="button"
             disabled={isMutating}
@@ -1201,11 +1230,31 @@ export function SkillBundleRoute({
           }}
         />
       ) : null}
+      {editing ? (
+        <WorkspaceSkillDialog
+          skillName={installation.name}
+          initialDescription={bundle.description}
+          initialInstructions={bundle.body}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            router.refresh();
+          }}
+        />
+      ) : null}
     </SettingsContent>
   );
 }
 
 function SkillSourceNotice({ source }: { source: SkillSourceDto }) {
+  if (source.type === "workspace") {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
+        <Sparkles size={14} strokeWidth={2} className="shrink-0" />
+        Created in this workspace. Each save creates a new immutable standard Skill bundle.
+      </div>
+    );
+  }
   const shortCommit = source.resolvedCommit ? source.resolvedCommit.slice(0, 7) : null;
   return (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
@@ -1283,6 +1332,15 @@ function ImportedBadge() {
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
       <Link2 size={10} strokeWidth={2} />
       Imported
+    </span>
+  );
+}
+
+function WorkspaceBadge() {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
+      <Sparkles size={10} strokeWidth={2} />
+      Workspace
     </span>
   );
 }
@@ -1458,6 +1516,164 @@ type ImportPreviewState = {
   resolvedCommit: string;
   integrity: string;
 };
+
+function WorkspaceSkillDialog({
+  onClose,
+  onSaved,
+  skillName,
+  initialDescription = "",
+  initialInstructions = "",
+}: {
+  onClose: () => void;
+  onSaved: (name: string) => void;
+  skillName?: string;
+  initialDescription?: string;
+  initialInstructions?: string;
+}) {
+  const [name, setName] = useState(skillName ?? "");
+  const [description, setDescription] = useState(initialDescription);
+  const [instructions, setInstructions] = useState(initialInstructions.trim());
+  const [error, setError] = useState<string | null>(null);
+  const [isSaving, startSaving] = useTransition();
+  const editing = skillName !== undefined;
+
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const save = () => {
+    const normalizedName = name.trim();
+    const normalizedDescription = description.trim();
+    const normalizedInstructions = instructions.trim();
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(normalizedName)) {
+      setError("Use lowercase letters, numbers, and single hyphens for the skill name.");
+      return;
+    }
+    if (!normalizedDescription) {
+      setError("Describe what the skill does and when to use it.");
+      return;
+    }
+    if (!normalizedInstructions) {
+      setError("Add instructions for the agent.");
+      return;
+    }
+    setError(null);
+    startSaving(async () => {
+      try {
+        if (editing) {
+          await updateHeadlessWorkspaceSkill(skillName, {
+            description: normalizedDescription,
+            instructions: normalizedInstructions,
+          });
+        } else {
+          await createHeadlessWorkspaceSkill({
+            name: normalizedName,
+            description: normalizedDescription,
+            instructions: normalizedInstructions,
+          });
+        }
+        onSaved(normalizedName);
+      } catch (cause) {
+        setError(errorMessage(cause));
+      }
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute inset-0 cursor-default bg-black/40"
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={editing ? "Edit skill" : "New skill"}
+        className="shadow-ring-xl relative flex max-h-[90vh] w-full max-w-[640px] flex-col overflow-hidden rounded-xl bg-surface p-5"
+      >
+        <h2 className="text-[15px] font-semibold leading-tight text-ink">
+          {editing ? "Edit skill" : "New skill"}
+        </h2>
+        <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
+          Creates a portable Agent Skills SKILL.md. Saving an edit publishes a new immutable bundle.
+        </p>
+        <div className="mt-4 flex flex-col gap-3 overflow-y-auto">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-ink-subtle">Name</span>
+            <input
+              autoFocus={!editing}
+              value={name}
+              disabled={editing || isSaving}
+              onChange={(event) => {
+                setName(event.target.value.toLowerCase().replace(/\s+/gu, "-"));
+                if (error) setError(null);
+              }}
+              placeholder="investigate-bug"
+              className={EDITOR_INPUT_CLASS}
+            />
+            <span className="text-[11.5px] text-ink-subtle">
+              Command: <span className="font-mono text-ink">/{name || "skill-name"}</span>
+            </span>
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-ink-subtle">Description</span>
+            <textarea
+              value={description}
+              disabled={isSaving}
+              onChange={(event) => {
+                setDescription(event.target.value);
+                if (error) setError(null);
+              }}
+              placeholder="What this skill does and when the agent should use it"
+              rows={3}
+              className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+            />
+          </label>
+          <label className="flex min-h-0 flex-1 flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-ink-subtle">Instructions</span>
+            <textarea
+              value={instructions}
+              disabled={isSaving}
+              onChange={(event) => {
+                setInstructions(event.target.value);
+                if (error) setError(null);
+              }}
+              placeholder="Write the operating instructions the agent should follow..."
+              rows={12}
+              className="min-h-52 w-full resize-y rounded-lg border border-border bg-canvas px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+            />
+          </label>
+          {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSaving}
+            className="inline-flex h-8 items-center rounded-md px-3 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={isSaving}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-ink bg-ink px-3 text-[13px] font-medium text-canvas transition-colors hover:bg-ink/90 disabled:opacity-60"
+          >
+            {isSaving ? <Loader2 size={13} strokeWidth={2} className="animate-spin" /> : null}
+            {editing ? "Save new version" : "Create skill"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ImportSkillDialog({
   onClose,
@@ -1718,6 +1934,7 @@ function ImportSkillDialog({
 }
 
 function skillSourceInput(source: SkillSourceDto, name: string) {
+  if (source.type === "workspace") return "";
   const refSuffix = source.ref ? `#${source.ref}` : "";
   if (source.type === "skills.sh") {
     const repository = source.url.replace(/^https:\/\/github\.com\//u, "");

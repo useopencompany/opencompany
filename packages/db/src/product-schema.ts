@@ -110,8 +110,8 @@ export type WorkflowStep = {
   instructions: string;
 };
 export type ChatSessionSkillBundleSourceKind = "standalone" | "plugin";
-// Remote source types shared by immutable Skill bundles and Plugins.
-export type SkillSourceType = "github" | "skills.sh";
+export type ExternalArtifactSourceType = "github" | "skills.sh";
+export type SkillSourceType = ExternalArtifactSourceType | "workspace";
 
 export type HarnessEngine = "opencompany" | "codex" | "claude_code";
 
@@ -263,6 +263,10 @@ export type BrainIngestJobKind =
   | "brain_agent_ingest"
   | "brain_pointer_hydrate";
 export type BrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
+export type WikiSourceProvider = "gmail" | "slack" | "jamie" | "granola" | "linear" | "github";
+export type WikiSourceType = "meeting" | "conversation" | "issue" | "activity" | "thread";
+export type WikiSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
+export type WikiIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 export type BrainImportStatus =
   | "discovering"
   | "awaiting_confirmation"
@@ -1972,8 +1976,9 @@ export const brainIngestJobs = productSchema.table(
   }),
 );
 
-// One reservation per normalized source item and workspace. Fan-out to several
-// brains in the same workspace therefore consumes the raw events exactly once.
+// One reservation per normalized source item and workspace. Brain and wiki
+// items use separate nullable FKs so both pipelines share admission accounting
+// without giving up source-item cascade cleanup.
 export const workspaceIngestionReservations = productSchema.table(
   "workspace_ingestion_reservations",
   {
@@ -1981,9 +1986,12 @@ export const workspaceIngestionReservations = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    sourceItemId: text("source_item_id")
-      .notNull()
-      .references(() => brainSourceItems.id, { onDelete: "cascade" }),
+    sourceItemId: text("source_item_id").references(() => brainSourceItems.id, {
+      onDelete: "cascade",
+    }),
+    wikiSourceItemId: text("wiki_source_item_id").references(() => wikiSourceItems.id, {
+      onDelete: "cascade",
+    }),
     sourceProvider: text("source_provider").$type<BrainSourceProvider>().notNull(),
     rawEventCount: integer("raw_event_count").notNull(),
     status: text("status").$type<IngestionReservationStatus>().notNull().default("pending"),
@@ -2002,6 +2010,11 @@ export const workspaceIngestionReservations = productSchema.table(
       table.workspaceId,
       table.sourceItemId,
     ),
+    workspaceWikiSourceIdx: uniqueIndex(
+      "opencompany_ingestion_reservations_workspace_wiki_source_idx",
+    )
+      .on(table.workspaceId, table.wikiSourceItemId)
+      .where(sql`${table.wikiSourceItemId} IS NOT NULL`),
     workspaceStatusCreatedIdx: index("goat_ingestion_reservations_status_created_idx").on(
       table.workspaceId,
       table.status,
@@ -2039,6 +2052,10 @@ export const workspaceIngestionReservations = productSchema.table(
     consumptionStateCheck: check(
       "goat_ingestion_reservations_consumption_state_check",
       sql`(${table.status} = 'consumed' AND ${table.consumedAt} IS NOT NULL) OR (${table.status} = 'pending' AND ${table.consumedAt} IS NULL)`,
+    ),
+    sourceKindCheck: check(
+      "opencompany_ingestion_reservations_source_kind_check",
+      sql`(${table.sourceItemId} IS NOT NULL AND ${table.wikiSourceItemId} IS NULL) OR (${table.sourceItemId} IS NULL AND ${table.wikiSourceItemId} IS NOT NULL)`,
     ),
   }),
 );
@@ -2085,6 +2102,208 @@ export const brainImportCandidates = productSchema.table(
 // table; paths are their workspace-unique identities. See packages/wiki for
 // the domain rules these tables store.
 // ---------------------------------------------------------------------------
+
+// Workspace-level source configuration for the wiki ingestion pipeline.
+export const wikiSources = productSchema.table(
+  "wiki_sources",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<WikiSourceProvider>().notNull(),
+    integrationId: text("integration_id").notNull(),
+    // The owner of the referenced integration row. Keeping this alongside the
+    // provider lets Postgres enforce that the configured integration matches
+    // the expected account and provider through the composite FK below.
+    userWorkosId: text("user_workos_id").notNull(),
+    createdByWorkosId: text("created_by_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(true),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIntegrationIdx: uniqueIndex("opencompany_wiki_sources_workspace_integration_idx").on(
+      table.workspaceId,
+      table.integrationId,
+    ),
+    integrationIdx: index("opencompany_wiki_sources_integration_idx").on(table.integrationId),
+    workspaceIdx: index("opencompany_wiki_sources_workspace_idx").on(table.workspaceId),
+    integrationUserProviderFk: foreignKey({
+      name: "opencompany_wiki_sources_integration_user_provider_fk",
+      columns: [table.integrationId, table.userWorkosId, table.provider],
+      foreignColumns: [integrations.id, integrations.userWorkosId, integrations.provider],
+    }).onDelete("cascade"),
+    providerCheck: check(
+      "opencompany_wiki_sources_provider_check",
+      sql`${table.provider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
+    ),
+  }),
+);
+
+// Normalized provider windows. The workspace replaces brain/user targeting in
+// the v1 ingestion key, so overlapping member connections deduplicate before
+// the single workspace wiki is mutated.
+export const wikiSourceItems = productSchema.table(
+  "wiki_source_items",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sourceProvider: text("source_provider").$type<WikiSourceProvider>().notNull(),
+    sourceConnectionId: text("source_connection_id").notNull(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    sourceType: text("source_type").$type<WikiSourceType>().notNull(),
+    externalId: text("external_id").notNull(),
+    sourceRef: text("source_ref").notNull(),
+    title: text("title"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+    contentHash: text("content_hash").notNull(),
+    rawPayload: jsonb("raw_payload").$type<unknown>().notNull(),
+    normalizedPayload: jsonb("normalized_payload").$type<unknown>().notNull(),
+    rawEventCount: integer("raw_event_count").notNull().default(1),
+    lastIngestJobId: text("last_ingest_job_id"),
+    lastIngestStatus: text("last_ingest_status").$type<WikiSourceItemIngestStatus>(),
+    lastIngestedAt: timestamp("last_ingested_at", { withTimezone: true }),
+    lastIngestError: text("last_ingest_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sourceConnectionExternalHashIdx: uniqueIndex(
+      "opencompany_wiki_source_items_connection_external_hash_idx",
+    ).on(
+      table.workspaceId,
+      table.sourceProvider,
+      table.sourceConnectionId,
+      table.sourceType,
+      table.externalId,
+      table.contentHash,
+    ),
+    workspaceSourceProviderOccurredIdx: index(
+      "opencompany_wiki_source_items_workspace_provider_occurred_idx",
+    ).on(table.workspaceId, table.sourceProvider, table.occurredAt),
+    workspaceUpdatedIdx: index("opencompany_wiki_source_items_workspace_updated_idx").on(
+      table.workspaceId,
+      table.updatedAt,
+    ),
+    lastIngestStatusIdx: index("opencompany_wiki_source_items_last_ingest_status_idx").on(
+      table.lastIngestStatus,
+      table.updatedAt,
+    ),
+    sourceProviderCheck: check(
+      "opencompany_wiki_source_items_source_provider_check",
+      sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
+    ),
+    sourceTypeCheck: check(
+      "opencompany_wiki_source_items_source_type_check",
+      sql`${table.sourceType} IN ('meeting', 'conversation', 'issue', 'activity', 'thread')`,
+    ),
+    lastIngestStatusCheck: check(
+      "opencompany_wiki_source_items_last_ingest_status_check",
+      sql`${table.lastIngestStatus} IS NULL OR ${table.lastIngestStatus} IN ('pending', 'succeeded', 'failed', 'skipped')`,
+    ),
+    rawEventCountCheck: check(
+      "opencompany_wiki_source_items_raw_event_count_check",
+      sql`${table.rawEventCount} > 0 AND ${table.rawEventCount} <= 200`,
+    ),
+  }),
+);
+
+export const wikiIngestJobs = productSchema.table(
+  "wiki_ingest_jobs",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sourceItemId: text("source_item_id")
+      .notNull()
+      .references(() => wikiSourceItems.id, { onDelete: "cascade" }),
+    sourceProvider: text("source_provider").$type<WikiSourceProvider>().notNull(),
+    sourceConnectionId: text("source_connection_id").notNull(),
+    integrationId: text("integration_id").notNull(),
+    contentHash: text("content_hash").notNull(),
+    status: text("status").$type<WikiIngestJobStatus>().notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    nextRetryAt: timestamp("next_retry_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseId: text("lease_id"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    skipReason: text("skip_reason"),
+    traceRef: text("trace_ref"),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sourceItemHashIdx: uniqueIndex("opencompany_wiki_ingest_jobs_item_hash_idx").on(
+      table.sourceItemId,
+      table.contentHash,
+    ),
+    workspaceRunningIdx: uniqueIndex("opencompany_wiki_ingest_jobs_workspace_running_idx")
+      .on(table.workspaceId)
+      .where(sql`${table.status} = 'running'`),
+    statusNextRetryIdx: index("opencompany_wiki_ingest_jobs_status_next_retry_idx").on(
+      table.status,
+      table.nextRetryAt,
+    ),
+    leaseExpiresAtIdx: index("opencompany_wiki_ingest_jobs_lease_expires_at_idx").on(
+      table.leaseExpiresAt,
+    ),
+    workspaceCreatedIdx: index("opencompany_wiki_ingest_jobs_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    workspaceIntegrationStatusIdx: index(
+      "opencompany_wiki_ingest_jobs_workspace_integration_status_idx",
+    ).on(table.workspaceId, table.integrationId, table.status),
+    sourceProviderCheck: check(
+      "opencompany_wiki_ingest_jobs_source_provider_check",
+      sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
+    ),
+    statusCheck: check(
+      "opencompany_wiki_ingest_jobs_status_check",
+      sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed', 'skipped')`,
+    ),
+  }),
+);
+
+// Cross-member event claims make provider-native identities workspace-global.
+export const wikiSourceEventClaims = productSchema.table(
+  "wiki_source_event_claims",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sourceProvider: text("source_provider").$type<WikiSourceProvider>().notNull(),
+    eventKey: text("event_key").notNull(),
+    sourceItemId: text("source_item_id").references(() => wikiSourceItems.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceProviderKeyIdx: uniqueIndex(
+      "opencompany_wiki_source_event_claims_workspace_provider_key_idx",
+    ).on(table.workspaceId, table.sourceProvider, table.eventKey),
+    sourceProviderCheck: check(
+      "opencompany_wiki_source_event_claims_source_provider_check",
+      sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
+    ),
+  }),
+);
 
 export const wikiPages = productSchema.table(
   "wiki_pages",
@@ -2960,16 +3179,17 @@ export const skillBundles = productSchema.table(
     allowedTools: text("allowed_tools"),
     body: text("body").notNull(),
     sourceType: text("source_type").$type<SkillSourceType>().notNull(),
-    sourceUrl: text("source_url").notNull(),
-    sourcePath: text("source_path").notNull(),
-    sourceRef: text("source_ref").notNull(),
-    resolvedCommit: text("resolved_commit").notNull(),
+    sourceUrl: text("source_url"),
+    sourcePath: text("source_path"),
+    sourceRef: text("source_ref"),
+    resolvedCommit: text("resolved_commit"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
     workspaceIntegrityIdx: uniqueIndex("skill_bundles_workspace_integrity_idx").on(
       table.workspaceId,
       table.integrity,
+      table.sourceType,
     ),
     workspaceIdIdx: uniqueIndex("skill_bundles_workspace_id_idx").on(table.workspaceId, table.id),
     workspaceNameIdx: index("skill_bundles_workspace_name_idx").on(
@@ -2979,7 +3199,7 @@ export const skillBundles = productSchema.table(
     ),
     sourceTypeCheck: check(
       "skill_bundles_source_type_check",
-      sql`${table.sourceType} IN ('github', 'skills.sh')`,
+      sql`${table.sourceType} IN ('github', 'skills.sh', 'workspace')`,
     ),
     integrityCheck: check(
       "skill_bundles_integrity_check",
@@ -2987,7 +3207,7 @@ export const skillBundles = productSchema.table(
     ),
     commitCheck: check(
       "skill_bundles_commit_check",
-      sql`${table.resolvedCommit} ~ '^[0-9a-f]{40}$'`,
+      sql`(${table.sourceType} = 'workspace' AND ${table.sourceUrl} IS NULL AND ${table.sourcePath} IS NULL AND ${table.sourceRef} IS NULL AND ${table.resolvedCommit} IS NULL) OR (${table.sourceType} IN ('github', 'skills.sh') AND ${table.sourceUrl} IS NOT NULL AND ${table.sourcePath} IS NOT NULL AND ${table.sourceRef} IS NOT NULL AND ${table.resolvedCommit} ~ '^[0-9a-f]{40}$')`,
     ),
   }),
 );
@@ -3058,7 +3278,7 @@ export const plugins = productSchema.table(
     name: text("name").notNull(),
     status: text("status").$type<PluginStatus>().notNull().default("enabled"),
     manifest: jsonb("manifest").$type<PluginManifest>().notNull(),
-    sourceType: text("source_type").$type<SkillSourceType>().notNull(),
+    sourceType: text("source_type").$type<ExternalArtifactSourceType>().notNull(),
     sourceUrl: text("source_url").notNull(),
     sourcePath: text("source_path").notNull(),
     sourceRef: text("source_ref").notNull(),
@@ -5446,6 +5666,10 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   ingestionReservations: many(workspaceIngestionReservations),
   brains: many(brains),
   repoConfigs: many(repoConfigs),
+  wikiSources: many(wikiSources),
+  wikiSourceItems: many(wikiSourceItems),
+  wikiIngestJobs: many(wikiIngestJobs),
+  wikiSourceEventClaims: many(wikiSourceEventClaims),
   skillBundles: many(skillBundles),
   skillInstallations: many(skillInstallations),
   plugins: many(plugins),
@@ -5572,6 +5796,57 @@ export const wikiPagesRelations = relations(wikiPages, ({ one, many }) => ({
   versions: many(wikiPageVersions),
   timelineEntries: many(wikiTimelineEntries),
   links: many(wikiLinks),
+}));
+
+export const wikiSourcesRelations = relations(wikiSources, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [wikiSources.workspaceId],
+    references: [workspaces.id],
+  }),
+  integration: one(integrations, {
+    fields: [wikiSources.integrationId],
+    references: [integrations.id],
+  }),
+  createdBy: one(users, {
+    fields: [wikiSources.createdByWorkosId],
+    references: [users.workosUserId],
+  }),
+}));
+
+export const wikiSourceItemsRelations = relations(wikiSourceItems, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [wikiSourceItems.workspaceId],
+    references: [workspaces.id],
+  }),
+  integration: one(integrations, {
+    fields: [wikiSourceItems.integrationId],
+    references: [integrations.id],
+  }),
+  ingestJobs: many(wikiIngestJobs),
+  eventClaims: many(wikiSourceEventClaims),
+  workspaceReservations: many(workspaceIngestionReservations),
+}));
+
+export const wikiIngestJobsRelations = relations(wikiIngestJobs, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [wikiIngestJobs.workspaceId],
+    references: [workspaces.id],
+  }),
+  sourceItem: one(wikiSourceItems, {
+    fields: [wikiIngestJobs.sourceItemId],
+    references: [wikiSourceItems.id],
+  }),
+}));
+
+export const wikiSourceEventClaimsRelations = relations(wikiSourceEventClaims, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [wikiSourceEventClaims.workspaceId],
+    references: [workspaces.id],
+  }),
+  sourceItem: one(wikiSourceItems, {
+    fields: [wikiSourceEventClaims.sourceItemId],
+    references: [wikiSourceItems.id],
+  }),
 }));
 
 export const wikiPageVersionsRelations = relations(wikiPageVersions, ({ one }) => ({
@@ -5840,6 +6115,10 @@ export const workspaceIngestionReservationsRelations = relations(
     sourceItem: one(brainSourceItems, {
       fields: [workspaceIngestionReservations.sourceItemId],
       references: [brainSourceItems.id],
+    }),
+    wikiSourceItem: one(wikiSourceItems, {
+      fields: [workspaceIngestionReservations.wikiSourceItemId],
+      references: [wikiSourceItems.id],
     }),
   }),
 );
@@ -6212,6 +6491,10 @@ export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
 export type WorkspaceCapability = typeof workspaceCapabilities.$inferSelect;
 export type WorkspaceBilling = typeof workspaceBilling.$inferSelect;
 export type WorkspaceIngestionReservation = typeof workspaceIngestionReservations.$inferSelect;
+export type WikiSource = typeof wikiSources.$inferSelect;
+export type WikiSourceItem = typeof wikiSourceItems.$inferSelect;
+export type WikiIngestJob = typeof wikiIngestJobs.$inferSelect;
+export type WikiSourceEventClaim = typeof wikiSourceEventClaims.$inferSelect;
 export type WikiPage = typeof wikiPages.$inferSelect;
 export type WikiPageVersion = typeof wikiPageVersions.$inferSelect;
 export type WikiTimelineEntry = typeof wikiTimelineEntries.$inferSelect;

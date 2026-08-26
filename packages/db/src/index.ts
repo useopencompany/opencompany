@@ -19,5 +19,8 @@ export * from "./product-schema";
 export * from "./repo-configs";
 export * from "./skill-bundle-repository";
 export * from "./task-repository";
+export * from "./wiki-event-claims";
+export * from "./wiki-ingest";
+export * from "./wiki-sources";
 export * from "./worker-admission";
 export * from "./workflow-repository";

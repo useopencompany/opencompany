@@ -1,20 +1,50 @@
 ---
 title: Neon
-description: Inspect Neon projects and run permission-gated read-only SQL.
+description: Inspect Neon projects and databases through a permission-gated, read-only connection.
 ---
 
-## What connecting does
+## What the connection does
 
-Neon is a personal OAuth connection. opencompany can inspect organizations, projects, branches,
-tables, and schemas, and can run bounded read-only SQL through Neon's hosted MCP path.
+Neon is a personal OAuth connector for main Chat and persistent Codex or Claude Code sessions. It
+can list organizations and projects, describe projects and branches, inspect tables and schemas,
+and run one read-only `SELECT`, `WITH`, or `SHOW` query.
 
-## Scopes and permissions
+opencompany does not expose connection-string, transaction, migration, branch mutation, reset, or
+deletion tools. It also redacts PostgreSQL connection URLs and credential-shaped fields if a
+provider response unexpectedly contains them.
 
-The connection requests Neon's read scope and forces hosted MCP calls into read-only mode. Project
-and schema inspection defaults to **On**; querying database rows defaults to **Ask**. opencompany
-does not expose connection-string, migration, branch-mutation, reset, or deletion tools. A complete
-query guard and result-limit reference is coming soon.
+## Permission layers
 
-## Brain ingestion
+The connection is read-only at independent boundaries:
+
+1. opencompany requests only Neon's `read` OAuth scope.
+2. Hosted MCP requests force `readonly=true` and use reviewed project, branch, schema, and querying
+   categories.
+3. Newly added Neon tools remain unavailable until opencompany reviews them.
+4. SQL must begin with `SELECT`, `WITH`, or `SHOW`; known side-effecting functions are rejected.
+5. Execution time and result size are bounded.
+
+**Inspect Neon structure** defaults to **On**. **Query database data** defaults to **Ask**, so main
+Chat pauses for confirmation. Persistent coding sessions receive only permissions set to **On**.
+
+## Connect Neon
+
+1. Open **Settings → Integrations → Personal**.
+2. Choose **Connect** on Neon and authorize read access.
+3. Leave **Query database data** on **Ask** unless a trusted coding session needs autonomous reads.
+
+OAuth tokens remain encrypted and server-side. Disconnecting Neon removes the saved credential.
+
+## Production data
+
+Read-only database access can still expose customer data or credentials. Keep query access on
+**Ask** for production by default, use narrow projections and `LIMIT`, and prefer a sanitized branch
+when possible. See [Neon's MCP guide](https://neon.com/docs/ai/neon-mcp-server).
+
+## Example requests
+
+- “Show me the tables and columns in the production branch.”
+- “Count failed coding turns in the last 24 hours.”
+- “Compare queued and running Tasks without returning prompts.”
 
 Neon is not a Brain source. Query results enter Brain only through an explicit supported capture.

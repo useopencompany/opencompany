@@ -63,50 +63,98 @@ export async function* streamRunEvents(
     );
     if (cursor) url.searchParams.set("cursor", cursor);
     if (presentationCursor) url.searchParams.set("presentationCursor", presentationCursor);
-    const response = await fetchImpl(url, {
-      method: "GET",
-      headers: { Accept: "text/event-stream" },
-      credentials: "include",
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
-    if (!response.ok) throw await protocolResponseError(response);
-    if (!response.body) throw new Error("The Run event stream returned no response body.");
+    let response: Response;
+    try {
+      response = await fetchImpl(url, {
+        method: "GET",
+        headers: { Accept: "text/event-stream" },
+        credentials: "include",
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+    } catch (error) {
+      if (options.signal?.aborted) return;
+      if (!(error instanceof TypeError)) throw error;
+      reconnectAttempts = await waitForRunEventReconnect({
+        reconnectAttempts,
+        maxReconnectAttempts,
+        reconnectDelayMs: options.reconnectDelayMs,
+        signal: options.signal,
+        cause: error,
+      });
+      continue;
+    }
+    if (!response.ok) {
+      const error = await protocolResponseError(response);
+      if (!error.retryable) throw error;
+      reconnectAttempts = await waitForRunEventReconnect({
+        reconnectAttempts,
+        maxReconnectAttempts,
+        reconnectDelayMs: options.reconnectDelayMs,
+        signal: options.signal,
+        cause: error,
+      });
+      continue;
+    }
+    if (!response.body) {
+      reconnectAttempts = await waitForRunEventReconnect({
+        reconnectAttempts,
+        maxReconnectAttempts,
+        reconnectDelayMs: options.reconnectDelayMs,
+        signal: options.signal,
+        cause: new Error("The Run event stream returned no response body."),
+      });
+      continue;
+    }
     const responseRunStatus = response.headers.get("X-OpenCompany-Run-Status");
 
     let receivedEvent = false;
     let lastEventEndedStream = false;
-    for await (const data of sseDataFields(response.body, options.signal)) {
-      const event: RunStreamEventDto = parseRunStreamEvent(parseJson(data));
-      if (event.runId !== options.runId) {
-        throw new Error("The Run event stream returned an event for another Run.");
-      }
-      if (event.type === "message.presentation_delta") {
-        presentationCursor = event.presentationCursor;
+    try {
+      for await (const data of sseDataFields(response.body, options.signal)) {
+        const event: RunStreamEventDto = parseRunStreamEvent(parseJson(data));
+        if (event.runId !== options.runId) {
+          throw new Error("The Run event stream returned an event for another Run.");
+        }
+        if (event.type === "message.presentation_delta") {
+          presentationCursor = event.presentationCursor;
+          receivedEvent = true;
+          reconnectAttempts = 0;
+          options.onPresentationCursor?.(event.presentationCursor);
+          yield event;
+          continue;
+        }
+        if (cursor && decodeEventCursor(event.cursor) <= decodeEventCursor(cursor)) continue;
+        const eventCursor = event.cursor;
+        cursor = eventCursor;
         receivedEvent = true;
         reconnectAttempts = 0;
-        options.onPresentationCursor?.(event.presentationCursor);
+        options.onCursor?.(eventCursor);
         yield event;
-        continue;
+        // A replay can contain a historical pause followed by approval.resolved and the continued
+        // Attempt. Only the final event in this response describes why the server closed it.
+        lastEventEndedStream = STREAM_END_EVENT_TYPES.has(event.type);
       }
-      if (cursor && decodeEventCursor(event.cursor) <= decodeEventCursor(cursor)) continue;
-      const eventCursor = event.cursor;
-      cursor = eventCursor;
-      receivedEvent = true;
-      reconnectAttempts = 0;
-      options.onCursor?.(eventCursor);
-      yield event;
-      // A replay can contain a historical pause followed by approval.resolved and the continued
-      // Attempt. Only the final event in this response describes why the server closed it.
-      lastEventEndedStream = STREAM_END_EVENT_TYPES.has(event.type);
+    } catch (error) {
+      if (options.signal?.aborted) return;
+      if (!(error instanceof RunEventStreamReadError)) throw error;
+      reconnectAttempts = await waitForRunEventReconnect({
+        reconnectAttempts,
+        maxReconnectAttempts,
+        reconnectDelayMs: receivedEvent ? 0 : options.reconnectDelayMs,
+        signal: options.signal,
+        cause: error.cause,
+      });
+      continue;
     }
 
     if (options.signal?.aborted) return;
     if (lastEventEndedStream || isStreamEndRunStatus(responseRunStatus)) return;
-    reconnectAttempts += 1;
-    if (reconnectAttempts > maxReconnectAttempts) {
-      throw new Error("The Run event stream disconnected repeatedly before the Run finished.");
-    }
-    await abortableDelay(receivedEvent ? 0 : (options.reconnectDelayMs ?? 250), options.signal);
+    reconnectAttempts = await waitForRunEventReconnect({
+      reconnectAttempts,
+      maxReconnectAttempts,
+      reconnectDelayMs: receivedEvent ? 0 : options.reconnectDelayMs,
+      signal: options.signal,
+    });
   }
 }
 
@@ -152,6 +200,9 @@ export async function* sseDataFields(
         return;
       }
     }
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new RunEventStreamReadError(error);
   } finally {
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();
@@ -176,17 +227,58 @@ function parseJson(value: string): unknown {
   }
 }
 
+class RunEventStreamReadError extends Error {
+  constructor(cause: unknown) {
+    super("The Run event stream could not be read.", { cause });
+    this.name = "RunEventStreamReadError";
+  }
+}
+
+class RunEventStreamHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = "RunEventStreamHttpError";
+  }
+}
+
 async function protocolResponseError(response: Response) {
   const body = (await response.json().catch(() => null)) as {
-    error?: { message?: unknown; requestId?: unknown };
+    error?: { message?: unknown; requestId?: unknown; retryable?: unknown };
   } | null;
   const message = typeof body?.error?.message === "string" ? body.error.message : null;
   const requestId = typeof body?.error?.requestId === "string" ? body.error.requestId : null;
-  return new Error(
+  const retryable =
+    typeof body?.error?.retryable === "boolean"
+      ? body.error.retryable
+      : response.status === 408 || response.status === 429 || response.status >= 500;
+  return new RunEventStreamHttpError(
     `${message ?? `The Run event stream failed with HTTP ${response.status}.`}${
       requestId ? ` (request ${requestId})` : ""
     }`,
+    response.status,
+    retryable,
   );
+}
+
+async function waitForRunEventReconnect(input: {
+  reconnectAttempts: number;
+  maxReconnectAttempts: number;
+  reconnectDelayMs: number | undefined;
+  signal: AbortSignal | undefined;
+  cause?: unknown;
+}) {
+  const reconnectAttempts = input.reconnectAttempts + 1;
+  if (reconnectAttempts > input.maxReconnectAttempts) {
+    throw new Error("The Run event stream disconnected repeatedly before the Run finished.", {
+      cause: input.cause,
+    });
+  }
+  await abortableDelay(input.reconnectDelayMs ?? 250, input.signal);
+  return reconnectAttempts;
 }
 
 async function abortableDelay(delayMs: number, signal?: AbortSignal) {

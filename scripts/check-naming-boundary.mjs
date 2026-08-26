@@ -7,7 +7,6 @@ import { migratedEnvironmentName } from "./lib/env-name-migration.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const historicalRoots = ["drizzle/", "docs/adr/"];
-const historicalFiles = new Set(["docs/future-concepts/oss-readiness.md"]);
 const expectedPackages = new Map([
   ["packages/agent/package.json", "@opencompany/agent"],
   ["packages/brain/package.json", "@opencompany/brain"],
@@ -32,9 +31,6 @@ const protectedCompatibilityTokens = [
     "physical and stored quoted goat_* identifiers",
     /["'`]goat_[a-z0-9_]*["'`]/gu,
     "[\"'`]goat_[a-z0-9_]*[\"'`]",
-    // The one-way Agent Skills cutover retires the old Skill/workflow id namespaces and physical
-    // indexes while replacing the live schema with immutable bundle/plugin identifiers.
-    -12,
   ],
   [
     "quoted sandbox runtime roots",
@@ -170,7 +166,6 @@ const immutableChanges = gitLines([
   "--",
   "drizzle",
   "docs/adr",
-  "docs/future-concepts/oss-readiness.md",
 ]);
 const retiredUnjournaledMigrations = new Set(["drizzle/0102_goat_brain_folder_defaults.sql"]);
 const relocatedUnjournaledMigration = [
@@ -271,10 +266,7 @@ function gitMatchCount(pattern) {
 }
 
 function isHistorical(relativePath) {
-  return (
-    historicalFiles.has(relativePath) ||
-    historicalRoots.some((root) => relativePath.startsWith(root))
-  );
+  return historicalRoots.some((root) => relativePath.startsWith(root));
 }
 
 function envKeys(source) {
