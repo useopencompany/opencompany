@@ -1563,7 +1563,7 @@ export const PluginStdioServerSchema = z
 export const PluginMcpServerReportSchema = z
   .object({
     name: z.string(),
-    status: z.enum(["selected", "unsupported", "invalid"]),
+    status: z.enum(["selected", "gateway-registered", "unsupported", "invalid"]),
     transport: z.enum(["stdio", "streamable-http", "sse"]).optional(),
     reason: z.string().optional(),
   })
@@ -1624,6 +1624,25 @@ export const PluginValidationReportSchema = z
     ignoredManifestFields: z.array(z.string()),
     skills: z.array(PluginSkillReportSchema),
     mcp: PluginMcpReportSchema,
+    capabilities: z
+      .discriminatedUnion("status", [
+        z.object({ status: z.literal("absent") }).strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("ignored"),
+            reason: z.string(),
+          })
+          .strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("parsed"),
+            issues: z.array(z.string()),
+          })
+          .strict(),
+      ])
+      .optional(),
   })
   .strict()
   .openapi("PluginValidationReport");
