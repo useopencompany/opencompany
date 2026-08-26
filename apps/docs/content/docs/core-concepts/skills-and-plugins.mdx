@@ -1,0 +1,36 @@
+---
+title: Agent Skills and Plugins
+description: Install versioned instructions and approve coding-sandbox MCP servers.
+---
+
+## Agent Skills
+
+Workspace admins manage Agent Skills in **Settings → Skills**. Preview a supported public GitHub or
+skills.sh URL before installing it. opencompany validates the standard Agent Skills frontmatter,
+the skill name and directory, every bundled file, and the resolved commit.
+
+Installed bundles are immutable: there is no in-product Markdown editor. Replacing a Skill creates
+a new bundle and moves the workspace installation to it. Existing Chats and Tasks retain the exact
+version they already captured. Enable, disable, and archive control whether new work can select the
+Skill. Type `/` in Chat and select a Skill to invoke it.
+
+## Agent Plugins
+
+Workspace admins manage Agent Plugins in **Settings → Plugins**. A Plugin install stores the exact
+package, its valid immediate-child Skills, and an install report. An invalid Plugin manifest fails
+the install; invalid child Skills are skipped and reported. Standalone Skills win name collisions,
+then the alphabetically earlier Plugin name wins between Plugins. Settings shows hidden collisions.
+
+Plugin Skills are passive instructions. Installing or enabling a Plugin does not start its MCP
+servers. HTTP and SSE MCP servers are not supported in the current release.
+
+## MCP approval and Plugin data
+
+An admin must approve the exact installed Plugin version before its stdio MCP servers can start.
+Replacing the Plugin produces a new integrity and requires new approval. The approval UI shows the
+command, arguments, and declared environment variable names, never secret values. Main Chat does
+not start Plugin processes; approved MCP runs only in Codex and Claude coding sandboxes.
+
+Each Plugin receives a writable `PLUGIN_DATA` directory. opencompany restores and checkpoints a
+bounded workspace archive so data survives sandbox and Plugin replacement. Archiving a Plugin stops
+its Skills and MCP from entering new turns but does not implicitly erase Plugin data.

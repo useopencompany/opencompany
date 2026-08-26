@@ -2,7 +2,7 @@
 
 Start with:
 
-- [opencompany system map](../apps/web/docs/README.md) — current web, API, runner, Chat, Task,
+- [opencompany system map](./system-map.md) — current web, API, runner, Chat, Task,
   Workflow, Brain, and coding paths.
 - [Getting started](./getting-started.md) — local prerequisites, branch-isolated setup, and development.
 - [Architecture](./architecture.md) — application, runner, database, and integration boundaries.
@@ -10,6 +10,9 @@ Start with:
 - [Runner](./runner.md) — durable workers and internal endpoints.
 - [Deployment](./deployment.md) — production release and rollback flow.
 - [Chat operations](./chat-operations.md) — `/v1` topology, release verification, and recovery.
+- [Brain engineering documentation](./brain/README.md) — data model, ingestion, tools, and
+  provenance rules.
+- [Electric read models](./electric-sync.md) — authorized live-read architecture and local setup.
 - [Environment variables](./env-vars.md) and [secret management](./secret-management.md).
 
 `docs/future-concepts` contains speculative research, not current operational guidance.

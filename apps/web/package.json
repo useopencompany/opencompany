@@ -8,11 +8,10 @@
     "build": "node ../../scripts/next-web.mjs build",
     "vercel-build": "bun --cwd ../.. turbo build --filter=@opencompany/web",
     "start": "node ../../scripts/next-web.mjs start",
-    "docs:generate": "fumadocs-mdx",
     "capabilities:contract": "bun scripts/check-managed-capabilities.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "typecheck": "bun run docs:generate && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
@@ -57,8 +56,6 @@
     "cron-parser": "^5.10.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "fumadocs-core": "^16.15.0",
-    "fumadocs-mdx": "^15.3.0",
     "jose": "^5.10.0",
     "lucide-react": "1.33.0",
     "mcp-handler": "^1.1.0",
@@ -76,7 +73,6 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.5",
     "@tailwindcss/postcss": "^4.3.3",
-    "@types/mdx": "^2.0.14",
     "@types/node": "^25.9.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",

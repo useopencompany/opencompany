@@ -1,4 +1,4 @@
-# Brain engineering map
+# Brain engineering documentation
 
 Brain is opencompany's workspace knowledge store: Markdown knowledge pages, immutable evidence,
 file-backed documents, provenance, and a lightweight relation/wiki-link graph. Postgres is the
