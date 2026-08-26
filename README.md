@@ -60,7 +60,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the review and verification expecta
 
 ## Documentation
 
-- [opencompany system map](./apps/web/docs/README.md)
+- [opencompany system map](./docs/system-map.md)
 - [Getting started](./docs/getting-started.md)
 - [Architecture](./docs/architecture.md)
 - [Database and migrations](./docs/database.md)

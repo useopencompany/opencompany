@@ -45,7 +45,7 @@ The user usually keeps a dev server running. Do not start another one unless ask
 - Follow shared code into `packages/db/src/*`, `packages/brain`, and
   `packages/telemetry` as needed. Preserve the isolated legacy-billing and LLM-broker
   compatibility schemas unless a task explicitly retires those contracts.
-- Use `apps/web/docs/README.md` for the current app/runner flow and `bun run dev:web` for the
+- Use `docs/system-map.md` for the current app/runner flow and `bun run dev:web` for the
   local product stack.
 
 ## Engineering Judgment
