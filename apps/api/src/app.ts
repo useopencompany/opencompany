@@ -2959,6 +2959,7 @@ function conversationDto(conversation: {
   } | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;
+  pinnedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -2967,6 +2968,7 @@ function conversationDto(conversation: {
     runtime: conversation.runtime
       ? { ...conversation.runtime, updatedAt: conversation.runtime.updatedAt.toISOString() }
       : null,
+    pinnedAt: conversation.pinnedAt?.toISOString() ?? null,
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
   };

@@ -351,6 +351,53 @@ describe("AppDataProvider", () => {
     expect(screen.getByTestId("recent").getAttribute("data-chat-ids")).toBe("six-days-old");
   });
 
+  it("server-renders the canonical sidebar subset before live conversations hydrate", () => {
+    const now = Date.now();
+    const data = initialData();
+    data.recentChats = [
+      ...Array.from({ length: 10 }, (_, index) => ({
+        id: `recent_${index}`,
+        title: `Recent ${index}`,
+        model: "anthropic/claude-sonnet-5" as const,
+        engine: "opencompany" as const,
+        codexComposerSettings: null,
+        runtime: null,
+        activityState: "idle" as const,
+        hasUnseen: false,
+        preview: "Recent chat",
+        updatedAt: new Date(now - index * 60_000).toISOString(),
+        lastSeenAt: null,
+        pinnedAt: null,
+      })),
+      {
+        id: "old_idle",
+        title: "Old idle",
+        model: "anthropic/claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        runtime: null,
+        activityState: "idle",
+        hasUnseen: false,
+        preview: "Old chat",
+        updatedAt: new Date(now - 8 * 24 * 60 * 60 * 1_000).toISOString(),
+        lastSeenAt: null,
+        pinnedAt: null,
+      },
+    ];
+
+    const html = renderToString(
+      <AppDataProvider initialData={data}>
+        <RecentChatStateProbe />
+      </AppDataProvider>,
+    );
+
+    expect(html).toContain(
+      'data-chat-ids="recent_0,recent_1,recent_2,recent_3,recent_4,recent_5,recent_6,recent_7"',
+    );
+    expect(html).not.toContain("recent_8");
+    expect(html).not.toContain("old_idle");
+  });
+
   it("keeps same-workspace live data during a server data refresh", () => {
     const now = new Date().toISOString();
     const chatRow = {

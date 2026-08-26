@@ -7478,6 +7478,11 @@
           "hasUnseen": {
             "type": "boolean"
           },
+          "pinnedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
