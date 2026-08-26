@@ -5,6 +5,9 @@ import type {
   PluginInstallationDto,
   PluginListItemDto,
 } from "@opencompany/protocol";
+import { Button, buttonVariants } from "@opencompany/ui/components/button";
+import { LinearIcon } from "@opencompany/ui/icons";
+import { cn } from "@opencompany/ui/lib/utils";
 import {
   Archive,
   ExternalLink,
@@ -78,6 +81,13 @@ type PluginReportView = {
   collisions: PluginCollisionView[];
 };
 
+export const LINEAR_PLUGIN_NAME = "linear";
+// The loader intentionally supports public, unauthenticated sources only. Keep installation gated
+// until the in-tree package has a stable public home; do not ship a private or branch-lived URL.
+export const LINEAR_PLUGIN_SOURCE: string | null = null;
+export const LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE =
+  "Installation will be available when the official public Linear plugin is published.";
+
 export function PluginsSettings({
   plugins,
   canEdit,
@@ -87,75 +97,73 @@ export function PluginsSettings({
 }) {
   const router = useRouter();
   const [installing, setInstalling] = useState(false);
+  const linearPlugin = plugins.find(
+    (plugin) => plugin.name.toLocaleLowerCase() === LINEAR_PLUGIN_NAME,
+  );
 
   return (
     <SettingsContent
       title="Plugins"
       description="Immutable Agent Plugin packages installed from public GitHub sources."
     >
-      {canEdit ? (
-        <div className="-mt-2 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setInstalling(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <Link2 size={14} strokeWidth={2} />
-            Install plugin
-          </button>
-        </div>
-      ) : null}
-
-      {plugins.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-6 py-14 text-center">
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-muted text-ink-subtle">
-            <PackageOpen size={18} strokeWidth={1.75} />
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3">
+        <Link
+          href="/settings/plugins/linear"
+          prefetch
+          className="group flex min-w-0 flex-1 items-center gap-3 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[#5E6AD2] text-white">
+            <LinearIcon className="size-5" />
           </span>
-          <div className="flex flex-col gap-1">
-            <h2 className="text-[15px] font-semibold leading-tight text-ink">No plugins yet</h2>
-            <p className="mx-auto max-w-[390px] text-[12.5px] leading-5 text-ink-subtle">
-              {canEdit
-                ? "Install a standard Agent Plugin package from a public repository."
-                : "Workspace admins can install standard Agent Plugin packages."}
-            </p>
-          </div>
-        </div>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {plugins.map((plugin) => (
-            <li key={plugin.id}>
-              <Link
-                href={`/settings/plugins/${encodeURIComponent(plugin.name)}`}
-                prefetch
-                className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className="truncate text-[14px] font-medium leading-tight text-ink">
-                      {plugin.manifest.name}
-                    </span>
-                    <PluginStatus status={plugin.status} />
-                  </span>
-                  <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
-                    {plugin.manifest.description || "No description provided."}
-                  </span>
-                  <span className="mt-1 block text-[11.5px] leading-4 text-ink-subtle">
-                    {plugin.skillCount} {plugin.skillCount === 1 ? "skill" : "skills"} ·{" "}
-                    {plugin.stdioServerCount} stdio{" "}
-                    {plugin.stdioServerCount === 1 ? "server" : "servers"}
-                  </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className="truncate text-[14px] font-medium leading-tight text-ink">
+                Linear
+              </span>
+              {linearPlugin ? (
+                <PluginStatus status={linearPlugin.status} />
+              ) : (
+                <span className="inline-flex shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
+                  Not installed
                 </span>
-                <span className="shrink-0 text-[11.5px] text-ink-subtle">
-                  {formatRelativeTime(plugin.updatedAt)}
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+              )}
+            </span>
+            <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
+              {linearPlugin?.manifest.description ||
+                "Work with Linear issues, projects, comments, and team workflows."}
+            </span>
+            <span className="mt-1 block text-[11.5px] leading-4 text-ink-subtle">
+              {linearPlugin
+                ? `${linearPlugin.skillCount} ${linearPlugin.skillCount === 1 ? "skill" : "skills"} · updated ${formatRelativeTime(linearPlugin.updatedAt)}`
+                : LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE}
+            </span>
+          </span>
+        </Link>
+        {linearPlugin ? (
+          <Link
+            href="/settings/plugins/linear"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "text-ink")}
+          >
+            Manage
+          </Link>
+        ) : canEdit ? (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!LINEAR_PLUGIN_SOURCE}
+            title={LINEAR_PLUGIN_SOURCE ? undefined : LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE}
+            onClick={() => setInstalling(true)}
+          >
+            Install
+          </Button>
+        ) : null}
+      </div>
 
-      {installing ? (
+      {installing && LINEAR_PLUGIN_SOURCE ? (
         <InstallPluginDialog
+          initialUrl={LINEAR_PLUGIN_SOURCE}
+          expectedName={LINEAR_PLUGIN_NAME}
+          lockSource
           onClose={() => {
             setInstalling(false);
             router.refresh();
@@ -462,14 +470,20 @@ export function PluginDetail({
   );
 }
 
-function InstallPluginDialog({
+export function InstallPluginDialog({
   onClose,
   onComplete,
+  initialUrl = "",
+  expectedName,
+  lockSource = false,
 }: {
   onClose: () => void;
   onComplete: (name: string) => void;
+  initialUrl?: string;
+  expectedName?: string;
+  lockSource?: boolean;
 }) {
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(initialUrl);
   const [preview, setPreview] = useState<PluginImportPreviewDto | null>(null);
   const [installed, setInstalled] = useState<PluginInstallationDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -493,7 +507,15 @@ function InstallPluginDialog({
     setError(null);
     startResolving(async () => {
       try {
-        setPreview(await previewHeadlessPluginImport({ url: source }));
+        const result = await previewHeadlessPluginImport({ url: source });
+        if (expectedName && result.manifest.name.toLocaleLowerCase() !== expectedName) {
+          setPreview(null);
+          setError(
+            `Expected the ${expectedName} plugin, but this source contains ${result.manifest.name}.`,
+          );
+          return;
+        }
+        setPreview(result);
       } catch (cause) {
         setPreview(null);
         setError(errorMessage(cause));
@@ -551,6 +573,7 @@ function InstallPluginDialog({
                   autoFocus
                   value={url}
                   disabled={pending}
+                  readOnly={lockSource}
                   onChange={(event) => {
                     setUrl(event.target.value);
                     setPreview(null);

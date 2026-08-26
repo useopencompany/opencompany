@@ -1,7 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PluginDetail, PluginsSettings } from "./PluginSettings";
+import {
+  LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE,
+  PluginDetail,
+  PluginsSettings,
+} from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 
@@ -99,15 +103,15 @@ describe("Plugin settings", () => {
     router.refresh.mockReset();
   });
 
-  it("lists package component counts", () => {
+  it("shows the installed Linear card", () => {
     render(
       <PluginsSettings
         plugins={[
           {
             id: plugin.id,
-            name: plugin.name,
+            name: "linear",
             status: plugin.status,
-            manifest: plugin.manifest,
+            manifest: { name: "Linear", description: "Linear workflows." },
             source: plugin.source,
             integrity: plugin.integrity,
             installReport: plugin.installReport,
@@ -124,11 +128,23 @@ describe("Plugin settings", () => {
       />,
     );
 
-    expect(screen.getByRole("link", { name: /quality-tools/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /linear/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/quality-tools",
+      "/settings/plugins/linear",
     );
-    expect(screen.getByText(/1 skill · 1 stdio server/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 skill · updated/i)).toBeInTheDocument();
+  });
+
+  it("shows the single Linear card before installation", () => {
+    render(<PluginsSettings plugins={[]} canEdit />);
+
+    expect(screen.getByRole("link", { name: /linear/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/linear",
+    );
+    expect(screen.getByText("Not installed")).toBeInTheDocument();
+    expect(screen.getByText(LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
   });
 
   it("shows the exact MCP approval boundary without exposing environment values", () => {
