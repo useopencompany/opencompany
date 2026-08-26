@@ -1,19 +1,55 @@
 ---
 title: Jamie
-description: Send completed meeting notes to a selected Brain through a verified webhook.
+description: Connect Jamie completed-meeting webhooks to opencompany Brain ingestion.
 ---
 
-## What connecting does
+## What the connection does
 
-Jamie is a workspace-managed meeting source. Setup creates the opencompany webhook destination and
-associates Jamie's API-key-authenticated deliveries with the workspace.
+Jamie sends opencompany a `meeting.completed` webhook whenever meeting notes are ready. opencompany
+validates Jamie's `x-jamie-api-key` header, normalizes the meeting payload into a Brain source item,
+and enqueues durable ingestion.
 
-## Scopes and permissions
+The public webhook URL is stable:
 
-Jamie uses a provider API key and signed delivery path rather than a general agent-action catalog.
-A field-by-field setup and delivery troubleshooting guide is coming soon.
+```text
+/api/webhooks/jamie
+```
 
-## Brain ingestion
+The saved Jamie API key routes the delivery to the right integration. The web URL relays the raw
+delivery to API-owned verification and ingestion.
 
-Jamie has no channel or document picker. After the connection is enabled for a Brain, each completed
-meeting delivery can create a durable ingestion job for its notes and transcript material.
+## Setup steps
+
+1. From onboarding, choose **Set up** on Jamie. After onboarding, open **Settings → Jamie**.
+2. Click **Create endpoint** and copy the Endpoint URL.
+3. In Jamie, open **Settings → Integrations → Webhooks**.
+4. Create a webhook for completed meetings and paste the opencompany Endpoint URL.
+5. Set the event to `meeting.completed`.
+6. Choose **API Key** as the authentication method.
+7. Keep Jamie's default header name, `x-jamie-api-key`.
+8. Finish webhook creation and copy the generated `sk_...` API key Jamie shows once.
+9. Paste that API key back into opencompany's Jamie settings and save it.
+
+Jamie also offers signature verification, but opencompany expects the API Key method for this
+setup.
+
+## Brain routing
+
+After the key is saved, configure Jamie as a source from any Brain's settings page. If no per-Brain
+source routing has been configured yet, Jamie deliveries continue to use the user's default Brain.
+Once a Jamie source row exists on any Brain, routing is explicit: enabled sources receive the
+meeting, and disabled sources do not enqueue ingestion.
+
+## Troubleshooting
+
+If Jamie shows successful deliveries but opencompany does not ingest meetings, check:
+
+- the webhook URL is `/api/webhooks/jamie`;
+- the event is `meeting.completed`;
+- authentication is **API Key**, not signature verification;
+- the header is `x-jamie-api-key`;
+- the generated `sk_...` key is saved in opencompany; and
+- at least one target Brain source is enabled, or no explicit Jamie routing exists yet.
+
+Jamie documents webhook behavior in its
+[webhook guide](https://docs.meetjamie.ai/developers/webhooks/webhooks).

@@ -47,7 +47,7 @@ import {
   type Workflow,
   type WorkflowApplicationService,
 } from "@opencompany/core";
-import { captureException, createLogger } from "@opencompany/observability";
+import { captureException, createLogger, type LogFields } from "@opencompany/observability";
 import {
   createOpenApiDocument,
   createV1Router,
@@ -139,6 +139,7 @@ const CORS_EXPOSE_HEADERS = [
 ];
 const ONBOARDING_IDENTITY_PATH = "/v1/onboarding";
 const IDENTITY_PATH = "/v1/identity";
+const REQUEST_FAILURE_LOG_FIELDS_KEY = "requestFailureLogFields";
 
 export type CreateApiAppInput = {
   chat: ChatApplicationService;
@@ -1162,6 +1163,24 @@ export function createApiApp(input: CreateApiAppInput) {
       const installations = await input.skillImports.list(actor);
       return c.json({ data: installations.map(skillInstallationListItemDto), meta }, 200);
     },
+    createWorkspaceSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.skillImports.create(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: {
+            installation: skillInstallationDto(result.installation),
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
     previewSkillImport: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);
@@ -1195,6 +1214,16 @@ export function createApiApp(input: CreateApiAppInput) {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
       const installation = await input.skillImports.inspect(actor, c.req.valid("param").slug);
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
+    },
+    updateWorkspaceSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const installation = await input.skillImports.update(
+        actor,
+        c.req.valid("param").slug,
+        c.req.valid("json"),
+      );
       return c.json({ data: skillInstallationDto(installation), meta }, 200);
     },
     archiveSkill: async (c) => {
@@ -1408,10 +1437,23 @@ export function createApiApp(input: CreateApiAppInput) {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "message", 30);
       const body = c.req.valid("json");
+      setRequestFailureLogFields(c, {
+        operation: "message.create",
+        message_target: body.conversationId ? "existing" : "new",
+        engine: body.engine.type,
+        ...(body.conversationId ? { conversation_id: body.conversationId } : {}),
+      });
       const idempotencyKey = c.req.valid("header")["idempotency-key"];
       const existingTarget = body.conversationId
         ? await getConversationOrTask(input, actor, body.conversationId)
         : null;
+      setRequestFailureLogFields(c, {
+        target_resource: existingTarget
+          ? "conversationId" in existingTarget
+            ? "task"
+            : "chat"
+          : "new_chat",
+      });
       if (existingTarget && existingTarget.engine !== body.engine.type) {
         throw new ApiError(409, "conflict", "This conversation uses a different engine.");
       }
@@ -2325,6 +2367,7 @@ export function createApiApp(input: CreateApiAppInput) {
             } catch (error) {
               if (!(error instanceof ApiError) && !(error instanceof CoreError)) {
                 captureException(error, {
+                  ...requestFailureLogFieldsFrom(c),
                   event: "opencompany.api_request_failed",
                   request_id: requestIdFrom(c),
                   method: c.req.method,
@@ -2405,8 +2448,11 @@ export function createApiApp(input: CreateApiAppInput) {
 
   app.onError((error, c) => {
     captureException(error, {
+      ...requestFailureLogFieldsFrom(c),
       event: "opencompany.api_request_failed",
       request_id: requestIdFrom(c),
+      method: c.req.method,
+      path: c.req.path,
     });
     return apiErrorResponse(c, error);
   });
@@ -2840,6 +2886,46 @@ function getContextValue(c: Context, key: string) {
   return (c as unknown as { get(name: string): unknown }).get(key);
 }
 
+function setRequestFailureLogFields(c: Context, fields: LogFields) {
+  const existing = getContextValue(c, REQUEST_FAILURE_LOG_FIELDS_KEY);
+  setContextValue(c, REQUEST_FAILURE_LOG_FIELDS_KEY, {
+    ...(isLogFields(existing) ? existing : {}),
+    ...fields,
+  });
+}
+
+function requestFailureLogFieldsFrom(c: Context): LogFields {
+  const actor = getContextValue(c, "actor");
+  const identity = getContextValue(c, "identity");
+  const requestFields = getContextValue(c, REQUEST_FAILURE_LOG_FIELDS_KEY);
+  return {
+    ...(isActor(actor) ? { user_id: actor.userId, workspace_id: actor.workspaceId } : {}),
+    ...(!isActor(actor) && isIdentity(identity) ? { user_id: identity.userId } : {}),
+    ...(isLogFields(requestFields) ? requestFields : {}),
+  };
+}
+
+function isActor(value: unknown): value is Actor {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as { userId?: unknown }).userId === "string" &&
+      typeof (value as { workspaceId?: unknown }).workspaceId === "string",
+  );
+}
+
+function isIdentity(value: unknown): value is ApiIdentity {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as { userId?: unknown }).userId === "string",
+  );
+}
+
+function isLogFields(value: unknown): value is LogFields {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function requestIdFrom(c: Context) {
   return (getContextValue(c, "requestId") as string | undefined) ?? `request_${randomUUID()}`;
 }
@@ -2901,6 +2987,7 @@ function conversationDto(conversation: {
   } | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;
+  pinnedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -2909,6 +2996,7 @@ function conversationDto(conversation: {
     runtime: conversation.runtime
       ? { ...conversation.runtime, updatedAt: conversation.runtime.updatedAt.toISOString() }
       : null,
+    pinnedAt: conversation.pinnedAt?.toISOString() ?? null,
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
   };

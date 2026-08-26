@@ -1,0 +1,51 @@
+---
+title: Agent Skills and Plugins
+description: Install immutable Agent Skills and Plugins, pin runtime versions, and approve coding-sandbox MCP.
+---
+
+## Agent Skills
+
+Workspace admins manage Agent Skills in **Settings → Skills**. Choose **New skill** to author one
+for the workspace, or preview a supported public GitHub or skills.sh URL before importing it.
+Workspace-authored Skills use the same official Agent Skills document format as imported Skills;
+opencompany generates the `SKILL.md` frontmatter from the name and description and stores the
+instructions as its Markdown body. The slash command is always derived from the Skill name as
+`/<skill-name>` rather than stored in a separate `command` field.
+
+Imported Skills are validated for official frontmatter, name and directory alignment, every
+bundled file, and the resolved commit. Unknown fields such as the retired `command` extension are
+rejected.
+
+Installed bundles are immutable. Editing a workspace-authored Skill or replacing an imported Skill
+creates a new bundle and moves the workspace installation to it. A Skill cannot switch between
+workspace-authored and imported provenance. Enable, disable, and archive control whether new Chats
+and Tasks can select it. Existing Chats and Tasks retain the exact bundle IDs they already
+captured. Type `/` in Chat and select a Skill to invoke it as `/<skill-name>`.
+
+## Agent Plugins
+
+Workspace admins manage Agent Plugins in **Settings → Plugins**. A Plugin install stores the exact
+package, its valid immediate-child Skills, and an install report. An invalid Plugin manifest fails
+the install; invalid child Skills are skipped and reported. Standalone Skills win name collisions,
+then the alphabetically earlier Plugin name wins between Plugins. Settings shows hidden collisions.
+
+Plugin Skills are passive instructions. Installing or enabling a Plugin does not start its MCP
+servers. HTTP and SSE MCP servers are not supported in the current release.
+
+## MCP approval and Plugin data
+
+An admin must approve the exact installed Plugin version before its stdio MCP servers can start.
+Replacing the Plugin produces a new integrity and requires new approval. The approval UI shows the
+command, arguments, and declared environment variable names, never secret values. Main Chat does
+not start Plugin processes; approved MCP runs only in Codex and Claude coding sandboxes.
+
+Each Plugin receives a writable `PLUGIN_DATA` directory. opencompany restores and checkpoints a
+bounded workspace archive so data survives sandbox and Plugin replacement. Archiving a Plugin stops
+its Skills and MCP from entering new turns but does not implicitly erase Plugin data.
+
+## Historical Skills
+
+The former Brain-backed Skill editor, custom command frontmatter extension, and legacy activation
+replay have been removed. Workspace authoring now creates standard immutable Skill bundles instead
+of restoring that legacy data model. Old Chat messages remain readable, but their historical Skill
+activations are not executable and were not converted into new bundles.

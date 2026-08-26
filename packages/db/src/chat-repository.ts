@@ -200,6 +200,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.runtime_updated_at AS "runtimeUpdatedAt",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
+        conversation.pinned_at AS "pinnedAt",
         conversation.created_at AS "createdAt",
         conversation.updated_at AS "updatedAt"
       FROM goat.conversation_read_model_v1 AS conversation
@@ -249,6 +250,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.runtime_updated_at AS "runtimeUpdatedAt",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
+        conversation.pinned_at AS "pinnedAt",
         conversation.created_at AS "createdAt",
         conversation.updated_at AS "updatedAt"
       FROM goat.conversation_read_model_v1 AS conversation
@@ -2089,6 +2091,7 @@ type ConversationRow = {
   runtimeUpdatedAt: Date | string | null;
   activityState: Conversation["activityState"];
   hasUnseen: boolean;
+  pinnedAt: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -2343,6 +2346,7 @@ function mapConversation(row: ConversationRow): Conversation {
         : null,
     activityState: row.activityState,
     hasUnseen: row.hasUnseen,
+    pinnedAt: row.pinnedAt === null ? null : asDate(row.pinnedAt),
     createdAt: asDate(row.createdAt),
     updatedAt: asDate(row.updatedAt),
   };

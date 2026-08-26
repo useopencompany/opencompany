@@ -1,20 +1,42 @@
 ---
 title: Stripe
-description: Give opencompany restricted read-only access to business metrics.
+description: Give opencompany read-only access to founder metrics from a workspace Stripe account.
 ---
 
-## What connecting does
+## What the connection does
 
-Stripe is a workspace connection managed by workspace admins. It provides read-only access to
-payment activity, subscriptions, and receivables for founder and operating questions.
+Stripe is a workspace-owned, read-only connector for main Chat. It can answer bounded questions
+about:
 
-## Scopes and permissions
+- captured payment volume, refunds, disputes, Stripe fees, and net payment activity by currency;
+- available and pending balances;
+- subscription health, scheduled cancellations, and estimated monthly recurring value; and
+- open receivables, overdue invoices, failed collection attempts, and large outstanding invoices.
 
-Connect a restricted Stripe key, not a general secret key. opencompany's Stripe action surface is
-read-only. The exact restricted-key permission checklist and supported metric catalog are coming
-soon.
+Payment activity is operational reporting, not GAAP revenue. Estimated MRR excludes metered,
+tiered, transformed-quantity, and unpriced items. Stripe is excluded from automatic Brain-fill
+surveys because these metrics are live operational state.
 
-## Brain ingestion
+## Connect Stripe
 
-Stripe is not a Brain source and connecting it does not continuously copy payment or customer data
-into Brain.
+Only a workspace admin can connect or disconnect Stripe.
+
+1. In Stripe, open **Developers → API keys**.
+2. Create a restricted key named **opencompany**.
+3. Grant read access to **Balance**, **Subscriptions**, and **Invoices**. Leave every write
+   permission off.
+4. Copy the `rk_live_…` key, or an `rk_test_…` key while testing.
+5. In opencompany, open **Settings → Integrations → Stripe**, paste the key, and connect.
+
+opencompany validates each required read endpoint before saving. Unrestricted `sk_…` keys are
+rejected. The restricted key stays encrypted and server-side.
+
+## Example requests
+
+- “How much payment volume did we process last week, net of refunds and Stripe fees?”
+- “What is available in Stripe right now?”
+- “Give me subscription health and estimated MRR.”
+- “How much is outstanding, and which open invoices need attention?”
+
+Large periods are paginated and bounded; a partial result asks you to narrow the date range. Stripe
+is not a Brain source, and Chat saves results only when you explicitly ask.

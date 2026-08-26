@@ -363,17 +363,25 @@ export async function startHeadlessBackgroundChat(
   void reconcileAcceptedMessage(accepted).catch((error) =>
     reportReconciliationFailure(error, accepted),
   );
-  // Background Chat has no mounted useChat consumer, so consume semantic events until the Run
-  // settles or pauses for user interaction.
-  for await (const event of streamRunEvents({
+  // Accepting a durable Run and observing it to completion are separate lifecycle phases. Return
+  // as soon as the command is accepted so callers never hold interactive UI hostage to a
+  // potentially long-running background stream.
+  const completion = consumeBackgroundRunEvents({
     baseUrl,
     runId: data.runId,
     fetch: apiFetchImpl,
-  })) {
-    // Event projection and presentation are owned by Postgres/Electric; no transient UI overlay.
-    void event;
-  }
-  return data;
+  });
+  return { ...data, completion };
+}
+
+async function consumeBackgroundRunEvents(input: {
+  baseUrl: string;
+  runId: string;
+  fetch: typeof globalThis.fetch;
+}) {
+  // Background Chat has no mounted useChat consumer, so keep consuming semantic events until the
+  // Run settles or pauses. Projection and presentation remain owned by Postgres/Electric.
+  for await (const event of streamRunEvents(input)) void event;
 }
 
 function reconcileAcceptedMessage(accepted: HeadlessMessageAccepted) {
