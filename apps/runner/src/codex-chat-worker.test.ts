@@ -122,6 +122,25 @@ describe("claimNextCodexChatTurn", () => {
     expect(statement).toContain("chat.closed_at IS NULL");
   });
 
+  it("fences queued turns on supported host-tool contract versions, bypassing reclaims", async () => {
+    await claimNextCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 });
+
+    const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
+    expect(statement).toContain("turn.status <> 'queued'");
+    expect(statement).toContain("session.host_tool_contract_version IS NULL");
+    expect(statement).toContain("session.host_tool_contract_version IN (");
+
+    const params = sqlParamValues(dbMock.execute.mock.calls[0]?.[0]);
+    expect(params).toEqual(
+      expect.arrayContaining([
+        "goat-chat-host-tools.v1",
+        "goat-chat-host-tools.v2",
+        "goat-codex-host-tools.v2",
+        "goat-codex-host-tools.v3",
+      ]),
+    );
+  });
+
   it("returns no work when the database skips a not-yet-due turn", async () => {
     dbMock.execute.mockResolvedValueOnce({ rows: [] });
 
@@ -758,6 +777,24 @@ function claimedTurnRow() {
     created_at: "2026-07-10T09:00:00.000Z",
     updated_at: "2026-07-10T09:00:00.000Z",
   };
+}
+
+// Interpolated params live in queryChunks as bare values (StringChunk wraps the
+// static SQL text), so string chunks outside StringChunk are the bound params.
+function sqlParamValues(query: unknown): unknown[] {
+  const params: unknown[] = [];
+  const visit = (node: unknown) => {
+    if (typeof node === "string") {
+      params.push(node);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    const chunks = (node as { queryChunks?: unknown[] }).queryChunks;
+    if (Array.isArray(chunks)) for (const chunk of chunks) visit(chunk);
+  };
+  const chunks = (query as { queryChunks?: unknown[] }).queryChunks ?? [];
+  for (const chunk of chunks) visit(chunk);
+  return params;
 }
 
 function sqlText(query: unknown): string {
