@@ -1,4 +1,4 @@
-# Brain ingestion
+# Brain ingestion and curation
 
 External content enters Brain through one durable pattern: normalize a source item, commit an ingest
 job pinned to a Brain, and let the runner claim and execute the matching handler.

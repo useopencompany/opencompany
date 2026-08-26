@@ -5,6 +5,7 @@ import {
   approveHeadlessPluginMcp,
   archiveHeadlessPlugin,
   createHeadlessBrainDocument,
+  createHeadlessWorkspaceSkill,
   deleteHeadlessPluginData,
   disableHeadlessPlugin,
   disableHeadlessSkill,
@@ -18,6 +19,7 @@ import {
   readHeadlessSkillFile,
   replaceHeadlessSkill,
   revokeHeadlessPluginMcp,
+  updateHeadlessWorkspaceSkill,
 } from "./headless-knowledge-commands";
 
 vi.mock("./headless-knowledge-collections", () => ({
@@ -164,6 +166,47 @@ describe("headless knowledge commands", () => {
       ["POST /v1/skills/imports/preview", "POST /v1/skills/imports"],
     );
     expect(requests[1]?.headers.get("idempotency-key")).toMatch(/^web-skill-import:/u);
+  });
+
+  it("creates and updates workspace-authored Skills through standard Skill resources", async () => {
+    const requests: Request[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      return Response.json(
+        {
+          data:
+            request.method === "POST"
+              ? { installation: { name: "investigate-bug" }, replayed: false }
+              : { name: "investigate-bug" },
+          meta,
+        },
+        { status: request.method === "POST" ? 201 : 200 },
+      );
+    });
+    const options = { baseUrl: "https://api.example.test", fetch: fetchMock as typeof fetch };
+
+    await createHeadlessWorkspaceSkill(
+      {
+        name: "investigate-bug",
+        description: "Reproduce and diagnose reported bugs.",
+        instructions: "Reproduce the issue first.",
+      },
+      options,
+    );
+    await updateHeadlessWorkspaceSkill(
+      "investigate-bug",
+      {
+        description: "Reproduce and diagnose reported bugs.",
+        instructions: "Reproduce the issue, then identify the root cause.",
+      },
+      options,
+    );
+
+    expect(requests.map((request) => `${request.method} ${new URL(request.url).pathname}`)).toEqual(
+      ["POST /v1/skills", "PATCH /v1/skills/investigate-bug"],
+    );
+    expect(requests[0]?.headers.get("idempotency-key")).toMatch(/^web-workspace-skill:/u);
   });
 
   it("uses installation actions and bounded file reads", async () => {

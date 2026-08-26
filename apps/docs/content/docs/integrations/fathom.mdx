@@ -1,19 +1,38 @@
 ---
 title: Fathom
-description: Feed completed Fathom meeting material into Brain.
+description: Connect Fathom meeting recordings to opencompany Brain ingestion with a personal API key.
 ---
 
-## What connecting does
+## What the connection does
 
-Fathom connects with a personal API key from Fathom's user settings. opencompany uses the account to
-discover completed meeting recordings and summaries.
+opencompany polls Fathom every few minutes for new meetings and deliberately lags real time so Fathom
+can finish its summary and transcript. If generated content is unavailable, the recording stays in
+a durable pending queue and is retried. Once ready, opencompany writes a meeting page plus a raw
+evidence snapshot of the summary, action items, and transcript.
 
-## Scopes and permissions
+The connection is personal and can read meetings you recorded or that were shared with your team.
+Live polling does not automatically import meetings from before you connected. To seed recent
+history, run **Import company context** with Fathom selected and confirm the planned workload.
 
-This connection is for meeting ingestion rather than a general agent-action catalog. A complete key
-setup and troubleshooting guide is coming soon.
+## Setup steps
 
-## Brain ingestion
+1. In Fathom, open **Settings** and find **API Access**.
+2. Generate a new API key and copy the value Fathom shows once.
+3. In opencompany, open **Settings → Fathom** or choose **Set up** on the source card.
+4. Paste the key and save it. opencompany validates the key before storing it.
 
-Fathom has no per-meeting picker. Once connected and enabled for a Brain, completed meeting material
-can enter the durable ingestion path.
+## Brain routing
+
+Enable Fathom under **Sources** in a Brain's settings. Each new meeting fans out to every Brain where
+your Fathom source is enabled. If two members of the same Brain can access a team-shared meeting, it
+is ingested once for that Brain.
+
+## Troubleshooting
+
+- Confirm the Fathom source is enabled on the target Brain.
+- Confirm **Settings → Fathom** shows **Connected**. Replace a revoked key.
+- Wait at least twenty minutes after the meeting; recordings without generated content stay pending
+  and retry automatically.
+- Use **Import company context** for meetings that happened before live polling began.
+
+The Fathom API is documented at [developers.fathom.ai](https://developers.fathom.ai).

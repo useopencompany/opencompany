@@ -1,6 +1,6 @@
 # Brain data model
 
-Source of truth for the brain's enums, grammars, document anatomy, and database tables. Every
+Source of truth for Brain enums, grammars, document anatomy, and database tables. Every
 value here mirrors a constant in `packages/brain/src/schema.ts`; if this page and that file
 disagree, the code wins and this page has a bug. Update them together.
 

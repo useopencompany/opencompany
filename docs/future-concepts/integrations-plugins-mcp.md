@@ -4,7 +4,7 @@
 - Date: 2026-08-26
 - Standards: [Agent Plugins 1.0.0](https://agent-plugins.org/) and
   [Agent Skills](https://agentskills.io/specification) (loader shipped in
-  [Agent Skills and Agent Plugins 1.0.0](./agent-skills-plugins.md))
+  [ADR 0005: Agent Skills and Agent Plugins 1.0.0](../adr/0005-agent-skills-and-plugins.md))
 
 ## Summary
 
