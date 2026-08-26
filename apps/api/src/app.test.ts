@@ -630,6 +630,56 @@ describe("canonical Hono API", () => {
     });
   });
 
+  it("rejects invalid workspace Skill slugs and NUL text at the API boundary", async () => {
+    const create = vi.fn(async () => {
+      throw new Error("Workspace Skill authoring should not run for invalid input.");
+    });
+    const app = testApp(fakeRepository(), {
+      skillImports: fakeSkillImportService({}, {}, { create }),
+    });
+    const updateBody = {
+      description: "Reproduce and diagnose bugs.",
+      instructions: "Reproduce the issue first.",
+    };
+
+    const invalidSlug = await app.request("/v1/skills/Invalid-Name", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updateBody),
+    });
+    const invalidDescription = await app.request("/v1/skills", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "workspace-skill-invalid-description",
+      },
+      body: JSON.stringify({
+        name: "investigate-bug",
+        ...updateBody,
+        description: "Contains a NUL: \0",
+      }),
+    });
+    const invalidInstructions = await app.request("/v1/skills/investigate-bug", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...updateBody, instructions: "Contains a NUL: \0" }),
+    });
+
+    expect([invalidSlug.status, invalidDescription.status, invalidInstructions.status]).toEqual([
+      400, 400, 400,
+    ]);
+    await expect(invalidSlug.json()).resolves.toMatchObject({
+      error: { code: "invalid_request", retryable: false },
+    });
+    await expect(invalidDescription.json()).resolves.toMatchObject({
+      error: { code: "invalid_request", retryable: false },
+    });
+    await expect(invalidInstructions.json()).resolves.toMatchObject({
+      error: { code: "invalid_request", retryable: false },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("serves and mutates workspace-scoped Wiki sources through typed routes", async () => {
     const list = vi.fn(async () => [wikiSourceView()]);
     const listActivity = vi.fn(async () => ({

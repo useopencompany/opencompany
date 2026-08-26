@@ -3189,6 +3189,7 @@ export const skillBundles = productSchema.table(
     workspaceIntegrityIdx: uniqueIndex("skill_bundles_workspace_integrity_idx").on(
       table.workspaceId,
       table.integrity,
+      table.sourceType,
     ),
     workspaceIdIdx: uniqueIndex("skill_bundles_workspace_id_idx").on(table.workspaceId, table.id),
     workspaceNameIdx: index("skill_bundles_workspace_name_idx").on(

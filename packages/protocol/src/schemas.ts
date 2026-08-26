@@ -2016,12 +2016,22 @@ export const WorkspaceSkillNameSchema = z
 export const CreateWorkspaceSkillBodySchema = z
   .object({
     name: WorkspaceSkillNameSchema,
-    description: z.string().trim().min(1).max(1_024),
+    description: z
+      .string()
+      .trim()
+      .min(1)
+      .max(1_024)
+      .refine((value: string) => !value.includes("\0"), {
+        message: "Skill descriptions must not contain NUL characters.",
+      }),
     instructions: z
       .string()
       .trim()
       .min(1)
-      .max(512 * 1_024),
+      .max(512 * 1_024)
+      .refine((value: string) => !value.includes("\0"), {
+        message: "Skill instructions must not contain NUL characters.",
+      }),
   })
   .strict()
   .openapi("CreateWorkspaceSkillBody");

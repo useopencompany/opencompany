@@ -22,6 +22,9 @@ export async function createWorkspaceSkillArtifact(input: {
   const description = input.description.trim();
   const instructions = input.instructions.trim();
   if (!instructions) throw new SkillSpecError("Skill instructions must not be empty.");
+  if (description.includes("\0") || instructions.includes("\0")) {
+    throw new SkillSpecError("Workspace Skill text must not contain NUL characters.");
+  }
 
   // JSON strings are valid YAML scalars and make arbitrary user-authored descriptions safe without
   // maintaining a second YAML serializer policy. The parser below remains the format authority.

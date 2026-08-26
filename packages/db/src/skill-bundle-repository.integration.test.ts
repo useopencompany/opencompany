@@ -219,6 +219,44 @@ describe("Postgres immutable Skill bundle repository", () => {
     });
   });
 
+  it("keeps workspace and imported provenance distinct for identical bundle contents", async () => {
+    const workspaceBundle = await createWorkspaceSkillArtifact({
+      name: "investigate-bug",
+      description: "Reproduce and diagnose reported bugs.",
+      instructions: "Reproduce the issue first.",
+    });
+    const importedBundle: ResolvedSkillBundle = {
+      ...workspaceBundle,
+      source: {
+        type: "github",
+        url: "https://github.com/example/skills",
+        path: "investigate-bug",
+        ref: "main",
+        resolvedCommit: "a".repeat(40),
+      },
+    };
+    const imported = await repository.install({
+      actor: actor(),
+      idempotencyKey: "identical-imported",
+      bundle: importedBundle,
+    });
+    await repository.archive({ actor: actor(), name: "investigate-bug" });
+
+    const authored = await repository.install({
+      actor: actor(),
+      idempotencyKey: "identical-workspace",
+      bundle: workspaceBundle,
+    });
+
+    expect(authored.installation.bundle.id).not.toBe(imported.installation.bundle.id);
+    expect(authored.installation.bundle.source).toEqual({ type: "workspace" });
+    await expect(
+      database.query<{ source_type: string }>(
+        "SELECT source_type FROM goat.skill_bundles ORDER BY source_type",
+      ),
+    ).resolves.toMatchObject({ rows: [{ source_type: "github" }, { source_type: "workspace" }] });
+  });
+
   it("does not convert an imported Skill into a workspace-authored Skill", async () => {
     await repository.install({
       actor: actor(),

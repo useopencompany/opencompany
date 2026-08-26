@@ -33,4 +33,21 @@ describe("createWorkspaceSkillArtifact", () => {
       createWorkspaceSkillArtifact({ name: "valid", description: "Valid", instructions: "  " }),
     ).rejects.toThrow(/instructions must not be empty/u);
   });
+
+  it("rejects text that PostgreSQL cannot store", async () => {
+    await expect(
+      createWorkspaceSkillArtifact({
+        name: "valid",
+        description: "Contains a NUL: \0",
+        instructions: "Do it.",
+      }),
+    ).rejects.toThrow(/must not contain NUL/u);
+    await expect(
+      createWorkspaceSkillArtifact({
+        name: "valid",
+        description: "Valid",
+        instructions: "Contains a NUL: \0",
+      }),
+    ).rejects.toThrow(/must not contain NUL/u);
+  });
 });

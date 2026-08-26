@@ -203,6 +203,7 @@ import {
   WorkspaceCommandEnvelopeSchema,
   WorkspaceRenameEnvelopeSchema,
   WorkspaceSettingsEnvelopeSchema,
+  WorkspaceSkillNameSchema,
 } from "./schemas";
 import { OPENAPI_DOCUMENT_VERSION, PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER } from "./version";
 
@@ -1275,7 +1276,7 @@ export const updateWorkspaceSkillRoute = createRoute({
   tags: ["Skills"],
   security: actorSecurity,
   request: {
-    params: z.object({ slug: ResourceIdSchema }),
+    params: z.object({ slug: WorkspaceSkillNameSchema }),
     body: {
       required: true,
       content: { "application/json": { schema: UpdateWorkspaceSkillBodySchema } },
