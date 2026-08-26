@@ -7,6 +7,7 @@ import { resolveLatitudeActions } from "./latitude";
 import { resolveLinearActions } from "./linear";
 import { resolveNeonActions } from "./neon";
 import { resolvePostHogActions } from "./posthog";
+import { type RemoteMcpGatewayRegistration, resolveRemoteMcpActions } from "./remote-mcp";
 import { resolveRevolutActions } from "./revolut";
 import { resolveSlackActions } from "./slack";
 import { resolveStripeActions } from "./stripe";
@@ -31,6 +32,9 @@ export type ManagedCapabilitiesResolver = (
 export type ActionCatalogDeps = {
   // Omit this for background surfaces whose policy does not permit paid capabilities.
   resolveManagedCapabilities?: ManagedCapabilitiesResolver;
+  // Registration is server-side composition data. Plugin/account binding supplies these records;
+  // no endpoint URL or credential material is copied into the returned action descriptors.
+  remoteMcpRegistrations?: readonly RemoteMcpGatewayRegistration[];
 };
 
 // Environment kill switch: disables chat actions for everyone without a
@@ -64,6 +68,9 @@ export async function resolveActionCatalog(
     resolveStripeActions(input.workspaceId).catch(() => null),
     resolveRevolutActions(input.workspaceId).catch(() => null),
     resolveXAccountActions(input.userWorkosId).catch(() => null),
+    ...(deps.remoteMcpRegistrations ?? []).map((registration) =>
+      resolveRemoteMcpActions(input.userWorkosId, registration).catch(() => null),
+    ),
   ]);
   const providers = resolved.filter(
     (entry): entry is ActionProviderCatalog => entry !== null && entry.actions.length > 0,

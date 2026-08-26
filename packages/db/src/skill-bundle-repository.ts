@@ -68,11 +68,11 @@ type InstallationRow = {
   metadata: Record<string, string> | null;
   allowedTools: string | null;
   body: string;
-  sourceType: "github" | "skills.sh";
-  sourceUrl: string;
-  sourcePath: string;
-  sourceRef: string;
-  resolvedCommit: string;
+  sourceType: "github" | "skills.sh" | "workspace";
+  sourceUrl: string | null;
+  sourcePath: string | null;
+  sourceRef: string | null;
+  resolvedCommit: string | null;
   bundleCreatedAt: Date;
 };
 
@@ -178,6 +178,12 @@ export class PostgresSkillBundleRepository implements SkillBundleRepository {
       return await this.db.transaction(async (tx: DbClient) => {
         const current = await liveInstallation(tx, input.actor.workspaceId, input.name);
         if (!current) throw new CoreError("not_found", "Skill not found.");
+        if ((current.sourceType === "workspace") !== (input.bundle.source.type === "workspace")) {
+          throw new CoreError(
+            "conflict",
+            "A Skill cannot change between an imported and workspace-authored source.",
+          );
+        }
         const bundleId = await storeSkillBundle(tx, input.actor.workspaceId, input.bundle);
         const [updated] = await tx
           .update(skillInstallations)
@@ -557,10 +563,10 @@ export async function storeSkillBundle(
     );
   }
 
-  const existing = await bundleByIntegrity(db, workspaceId, bundle.integrity);
+  const existing = await bundleByIdentity(db, workspaceId, bundle.integrity, bundle.source.type);
   if (existing) return existing.id;
 
-  const id = deterministicId("skill_bundle", workspaceId, bundle.integrity);
+  const id = deterministicId("skill_bundle", workspaceId, bundle.integrity, bundle.source.type);
   const [created] = await db
     .insert(skillBundles)
     .values({
@@ -575,13 +581,13 @@ export async function storeSkillBundle(
       allowedTools: bundle.allowedTools ?? null,
       body: bundle.body,
       sourceType: bundle.source.type,
-      sourceUrl: bundle.source.url,
-      sourcePath: bundle.source.path,
-      sourceRef: bundle.source.ref,
-      resolvedCommit: bundle.source.resolvedCommit,
+      sourceUrl: bundle.source.type === "workspace" ? null : bundle.source.url,
+      sourcePath: bundle.source.type === "workspace" ? null : bundle.source.path,
+      sourceRef: bundle.source.type === "workspace" ? null : bundle.source.ref,
+      resolvedCommit: bundle.source.type === "workspace" ? null : bundle.source.resolvedCommit,
     })
     .onConflictDoNothing({
-      target: [skillBundles.workspaceId, skillBundles.integrity],
+      target: [skillBundles.workspaceId, skillBundles.integrity, skillBundles.sourceType],
     })
     .returning({ id: skillBundles.id });
 
@@ -597,7 +603,7 @@ export async function storeSkillBundle(
     );
     return created.id;
   }
-  const winner = await bundleByIntegrity(db, workspaceId, bundle.integrity);
+  const winner = await bundleByIdentity(db, workspaceId, bundle.integrity, bundle.source.type);
   if (!winner) throw new CoreError("conflict", "Could not store the Skill bundle.");
   return winner.id;
 }
@@ -708,11 +714,22 @@ async function hydratePluginSkillInstallation(
   });
 }
 
-async function bundleByIntegrity(db: DbClient, workspaceId: string, integrity: string) {
+async function bundleByIdentity(
+  db: DbClient,
+  workspaceId: string,
+  integrity: string,
+  sourceType: ResolvedSkillBundle["source"]["type"],
+) {
   const [row] = await db
     .select({ id: skillBundles.id })
     .from(skillBundles)
-    .where(and(eq(skillBundles.workspaceId, workspaceId), eq(skillBundles.integrity, integrity)))
+    .where(
+      and(
+        eq(skillBundles.workspaceId, workspaceId),
+        eq(skillBundles.integrity, integrity),
+        eq(skillBundles.sourceType, sourceType),
+      ),
+    )
     .limit(1);
   return row ?? null;
 }
@@ -764,13 +781,7 @@ function listItem(row: InstallationRow): SkillInstallationListItem {
       compatibility: row.compatibility,
       metadata: row.metadata,
       allowedTools: row.allowedTools,
-      source: {
-        type: row.sourceType,
-        url: row.sourceUrl,
-        path: row.sourcePath,
-        ref: row.sourceRef,
-        resolvedCommit: row.resolvedCommit,
-      },
+      source: bundleSource(row),
       createdAt: row.bundleCreatedAt,
     },
   };
@@ -787,13 +798,7 @@ function bundle(row: InstallationRow, files: SkillBundleFileMetadata[]): SkillBu
     metadata: row.metadata,
     allowedTools: row.allowedTools,
     body: row.body,
-    source: {
-      type: row.sourceType,
-      url: row.sourceUrl,
-      path: row.sourcePath,
-      ref: row.sourceRef,
-      resolvedCommit: row.resolvedCommit,
-    },
+    source: bundleSource(row),
     files,
     createdAt: row.bundleCreatedAt,
   };
@@ -803,10 +808,12 @@ function validateResolvedBundle(bundle: ResolvedSkillBundle) {
   if (!/^sha256:[0-9a-f]{64}$/u.test(bundle.integrity)) {
     throw new CoreError("invalid_argument", "The Skill bundle integrity is invalid.");
   }
-  if (!/^[0-9a-f]{40}$/u.test(bundle.source.resolvedCommit)) {
+  if (bundle.source.type !== "workspace" && !/^[0-9a-f]{40}$/u.test(bundle.source.resolvedCommit)) {
     throw new CoreError("invalid_argument", "The Skill source commit is invalid.");
   }
-  if (bundle.source.path) assertSafeStoredPath(bundle.source.path);
+  if (bundle.source.type !== "workspace" && bundle.source.path) {
+    assertSafeStoredPath(bundle.source.path);
+  }
   if (bundle.files.length === 0 || bundle.files.length > SKILL_LIMITS.maxFileCount) {
     throw new CoreError("invalid_argument", "The Skill bundle has an invalid file count.");
   }
@@ -867,6 +874,23 @@ function sameMetadata(
   const leftEntries = Object.entries(left ?? {}).sort(([a], [b]) => a.localeCompare(b));
   const rightEntries = Object.entries(right ?? {}).sort(([a], [b]) => a.localeCompare(b));
   return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
+}
+
+function requiredSourceValue(value: string | null): string {
+  if (value === null) throw new CoreError("conflict", "The Skill source metadata is incomplete.");
+  return value;
+}
+
+function bundleSource(row: InstallationRow): SkillBundle["source"] {
+  return row.sourceType === "workspace"
+    ? { type: "workspace" }
+    : {
+        type: row.sourceType,
+        url: requiredSourceValue(row.sourceUrl),
+        path: requiredSourceValue(row.sourcePath),
+        ref: requiredSourceValue(row.sourceRef),
+        resolvedCommit: requiredSourceValue(row.resolvedCommit),
+      };
 }
 
 function assertSafeStoredPath(path: string) {

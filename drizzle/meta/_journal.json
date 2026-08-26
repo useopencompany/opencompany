@@ -1629,8 +1629,15 @@
     {
       "idx": 232,
       "version": "7",
+      "when": 1787650000000,
+      "tag": "0232_workspace_authored_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 233,
+      "version": "7",
       "when": 1787738620244,
-      "tag": "0232_goat_gateway_approval_records",
+      "tag": "0233_goat_gateway_approval_records",
       "breakpoints": true
     }
   ]
