@@ -15,13 +15,19 @@ import {
 } from "@opencompany/ui/components/select";
 import { toast } from "@opencompany/ui/components/sonner";
 import { GitHubIcon } from "@opencompany/ui/icons";
+import { useLiveQuery } from "@tanstack/react-db";
 import { Archive, ArrowUpRight, LayoutGrid, ListTodo, Loader2, Rows3 } from "lucide-react";
 import Link from "next/link";
 import { type KeyboardEvent, type ReactNode, useMemo, useState, useTransition } from "react";
 import { taskRowToView, useAppData } from "@/components/AppDataProvider";
 import { EmptyState, formatRelativeTime, TasksWorkflowsDisabledRoute } from "@/components/Routes";
 import type { TaskView } from "@/components/Surface";
+import { useHydrated } from "@/components/useHydrated";
 import { formatUsdMicros } from "@/lib/cost-format";
+import {
+  getHeadlessTaskActivities,
+  type HeadlessTaskActivityReadModel,
+} from "@/lib/headless-task-collections";
 import { archiveHeadlessTask } from "@/lib/headless-task-commands";
 import { extractGitHubPullRequestUrl } from "@/lib/pull-request-link";
 import {
@@ -545,7 +551,16 @@ function TaskBoardSheet({
   onClose: () => void;
 }) {
   const { schedules, workspace } = useAppData();
+  const hydrated = useHydrated();
   const [isArchiving, startArchiveTransition] = useTransition();
+  const activityCollection = useMemo(
+    () => (hydrated && task.sessionId ? getHeadlessTaskActivities(task.id) : null),
+    [hydrated, task.id, task.sessionId],
+  );
+  const { data: activityRows } = useLiveQuery(
+    (query) => (activityCollection ? query.from({ activity: activityCollection }) : undefined),
+    [activityCollection],
+  );
   const schedule = task.scheduleId
     ? (schedules.find((candidate) => candidate.id === task.scheduleId) ?? null)
     : null;
@@ -559,12 +574,18 @@ function TaskBoardSheet({
       : summary
         ? formatTaskDuration(task.createdAt, task.updatedAt)
         : null;
-  const activityEntries = buildTaskActivityEntries({
+  const fallbackActivityEntries = buildTaskActivityEntries({
     task,
     terminal,
     sourceLabel: taskSourceLabel(task, workflowNames),
     durationLabel,
   });
+  const durableActivityEntries = buildDurableTaskActivityEntries(
+    (activityRows ?? []) as HeadlessTaskActivityReadModel[],
+    taskSourceLabel(task, workflowNames),
+  );
+  const activityEntries =
+    durableActivityEntries.length > 0 ? durableActivityEntries : fallbackActivityEntries;
   const pullRequestUrl = terminal
     ? extractGitHubPullRequestUrl(task.result, task.outcomeComment)
     : null;
@@ -785,6 +806,95 @@ type TaskActivityEntry = {
   meta?: string | undefined;
   body?: string | undefined;
 };
+
+function buildDurableTaskActivityEntries(
+  activities: readonly HeadlessTaskActivityReadModel[],
+  sourceLabel: string,
+): TaskActivityEntry[] {
+  const ordered = activities.toSorted((left, right) => {
+    const timestampDelta = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+    return timestampDelta || left.id.localeCompare(right.id);
+  });
+  const startedByRunId = new Map<string, HeadlessTaskActivityReadModel>();
+
+  return ordered.map((activity) => {
+    const runId = taskActivityMetadataString(activity.metadata, "runId");
+    const stepLabel = taskActivityStepLabel(activity.metadata);
+    if (activity.kind === "run_started" && runId) startedByRunId.set(runId, activity);
+    const runStarted = runId ? startedByRunId.get(runId) : undefined;
+    const duration =
+      activity.kind === "run_finished" && runStarted
+        ? formatTaskDuration(runStarted.createdAt, activity.createdAt)
+        : null;
+    const meta = [stepLabel, duration].filter(Boolean).join(" · ") || undefined;
+
+    switch (activity.kind) {
+      case "created":
+        return taskActivityEntry(activity, "Created", { meta: sourceLabel });
+      case "run_started":
+        return taskActivityEntry(activity, "Run started", { meta: stepLabel ?? undefined });
+      case "run_finished": {
+        const turnStatus = taskActivityMetadataString(activity.metadata, "turnStatus");
+        const disposition = taskActivityMetadataString(activity.metadata, "disposition");
+        if (turnStatus === "failed" || disposition === "failed") {
+          return taskActivityEntry(activity, "Run failed", { meta, tone: "danger" });
+        }
+        if (turnStatus === "interrupted" || disposition === "canceled") {
+          return taskActivityEntry(activity, "Run canceled", { meta });
+        }
+        return taskActivityEntry(
+          activity,
+          disposition === "needs_attention" ? "Run finished — needs attention" : "Run finished",
+          { meta },
+        );
+      }
+      case "status_changed": {
+        const toStatus = taskActivityMetadataString(activity.metadata, "toStatus");
+        return taskActivityEntry(activity, toStatus === "canceled" ? "Canceled" : "Status changed");
+      }
+      case "comment":
+        return taskActivityEntry(
+          activity,
+          activity.author === "orchestrator" ? "Orchestrator note" : "Comment",
+        );
+      case "retry":
+        return taskActivityEntry(activity, "Retry queued", { meta: stepLabel ?? undefined });
+    }
+    return taskActivityEntry(activity, "Activity");
+  });
+}
+
+function taskActivityEntry(
+  activity: HeadlessTaskActivityReadModel,
+  label: string,
+  options: Pick<TaskActivityEntry, "meta" | "tone"> = {},
+): TaskActivityEntry {
+  return {
+    id: activity.id,
+    label,
+    timestamp: activity.createdAt,
+    ...(activity.body?.trim() ? { body: activity.body.trim() } : {}),
+    ...options,
+  };
+}
+
+function taskActivityStepLabel(metadata: Record<string, unknown>) {
+  const stepIndex = taskActivityMetadataNumber(metadata, "stepIndex");
+  const stepCount = taskActivityMetadataNumber(metadata, "stepCount");
+  if (stepIndex === null || stepCount === null || stepCount < 1) return null;
+  const title = taskActivityMetadataString(metadata, "stepTitle");
+  return `Step ${stepIndex + 1}/${stepCount}${title ? `: ${title}` : ""}`;
+}
+
+function taskActivityMetadataString(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function taskActivityMetadataNumber(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
 
 function buildTaskActivityEntries({
   task,

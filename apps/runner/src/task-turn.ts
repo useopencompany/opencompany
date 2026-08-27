@@ -50,6 +50,7 @@ import { rowsFromExecute } from "./sql-exec";
 import { normalizeTaskToolNames } from "./task-tool-names";
 
 const TASK_OUTCOME_COMMENT_MAX_LENGTH = 200;
+const TASK_ACTIVITY_BODY_MAX_LENGTH = 2_000;
 const TASK_CLOSER_MODEL = "openai/gpt-5.4-mini";
 const CODING_ERROR_MAX_LENGTH = 2_000;
 const logger = createLogger({ service: "opencompany-runner", runtime: "task-turn" });
@@ -92,8 +93,21 @@ export async function markTaskTurnRunning(input: {
   turn: CodexChatTurn;
   stage?: "planning" | "running";
 }) {
+  const now = new Date();
+  const activityId = `task_activity_${randomUUID()}`;
+  const stepMetadata = taskRunStepMetadata(input.context.harnessSpec);
   const result = await getDb().execute(sql`
-    WITH updated_task AS (
+    WITH claimed_task AS MATERIALIZED (
+      SELECT task.id, task.stage
+      FROM goat.tasks AS task
+      WHERE task.id = ${input.context.task.id}
+        AND task.session_id = ${input.turn.chatSessionId}
+        AND task.user_workos_id = ${input.turn.userWorkosId}
+        AND task.status IN ('queued', 'running')
+        AND EXISTS (${turnLeaseSubquery(input.turn)})
+      FOR UPDATE
+    ),
+    updated_task AS (
       UPDATE goat.tasks AS task
       SET status = 'running',
           stage = ${input.stage ?? "running"},
@@ -102,16 +116,33 @@ export async function markTaskTurnRunning(input: {
           reported_outcome = NULL,
           outcome_comment = NULL,
           attempts = CASE WHEN task.status = 'queued' THEN task.attempts + 1 ELSE task.attempts END,
-          updated_at = ${new Date()}
-      WHERE task.id = ${input.context.task.id}
-        AND task.session_id = ${input.turn.chatSessionId}
-        AND task.user_workos_id = ${input.turn.userWorkosId}
-        AND task.status IN ('queued', 'running')
-        AND EXISTS (${turnLeaseSubquery(input.turn)})
-      RETURNING task.id
+          updated_at = ${now}
+      FROM claimed_task AS claimed
+      WHERE task.id = claimed.id
+      RETURNING
+        task.id,
+        task.attempts,
+        claimed.stage AS previous_stage
+    ),
+    started_activity AS MATERIALIZED (
+      INSERT INTO goat.task_activities (
+        id, task_id, author, kind, metadata, created_at
+      )
+      SELECT
+        ${activityId}, task.id, 'system', 'run_started',
+        jsonb_build_object(
+          'runId', ${input.turn.id},
+          'attempt', task.attempts
+        ) || ${JSON.stringify(stepMetadata)}::jsonb,
+        ${now}
+      FROM updated_task AS task
+      WHERE task.previous_stage = 'queued'
+      RETURNING id
     )
     SELECT 'updated'::text AS outcome
     FROM updated_task
+    WHERE updated_task.previous_stage <> 'queued'
+      OR EXISTS (SELECT 1 FROM started_activity)
     UNION ALL
     SELECT 'terminal'::text AS outcome
     FROM goat.tasks AS task
@@ -518,6 +549,27 @@ export async function settleDurableTurn(input: {
         : "failed";
   const notificationId = `goat_chat_msg_${randomUUID()}`;
   const nextRunEventId = `run_event_${randomUUID()}`;
+  const finishedActivityId = `task_activity_${randomUUID()}`;
+  const commentActivityId = `task_activity_${randomUUID()}`;
+  const activityBody = taskActivitySnippet(
+    input.turnStatus === "completed"
+      ? completion?.result
+      : input.turnStatus === "interrupted"
+        ? "Stopped by user."
+        : normalizedError,
+  );
+  const activityMetadata = {
+    runId: target.turnId,
+    turnStatus: input.turnStatus,
+    disposition:
+      completion?.reportedOutcome ??
+      (input.turnStatus === "completed"
+        ? "succeeded"
+        : input.turnStatus === "interrupted"
+          ? "canceled"
+          : "failed"),
+    ...taskFinishedStepMetadata(completion?.harnessSpec),
+  };
   const notificationContent = completion
     ? input.turnStatus === "completed"
       ? taskSucceededNotification(completion.taskDisplayId, completion.result)
@@ -691,6 +743,30 @@ export async function settleDurableTurn(input: {
         AND task.status IN ('queued', 'running')
         AND EXISTS (SELECT 1 FROM settled_turn)
       RETURNING task.*
+    ),
+    finished_task_activity AS MATERIALIZED (
+      INSERT INTO goat.task_activities (
+        id, task_id, author, kind, body, metadata, created_at
+      )
+      SELECT
+        ${finishedActivityId}, task.id, 'system', 'run_finished', ${activityBody},
+        ${JSON.stringify(activityMetadata)}::jsonb,
+        ${input.completedAt}
+      FROM projected_task AS task
+      RETURNING id
+    ),
+    orchestrator_comment_activity AS MATERIALIZED (
+      INSERT INTO goat.task_activities (
+        id, task_id, author, kind, body, metadata, created_at
+      )
+      SELECT
+        ${commentActivityId}, task.id, 'orchestrator', 'comment',
+        ${completion?.outcomeComment ?? null},
+        jsonb_build_object('runId', ${target.turnId}),
+        ${new Date(input.completedAt.getTime() + 1)}
+      FROM projected_task AS task
+      WHERE ${completion?.outcomeComment ?? null}::text IS NOT NULL
+      RETURNING id
     ),
     tagged_current_task_messages AS (
       UPDATE goat.chat_messages AS message
@@ -927,6 +1003,16 @@ export async function settleDurableTurn(input: {
           AND EXISTS (SELECT 1 FROM notified_next_queued_event)
         )
       )
+      AND (
+        NOT ${Boolean(completion)}
+        OR (
+          EXISTS (SELECT 1 FROM finished_task_activity)
+          AND (
+            ${completion?.outcomeComment ?? null}::text IS NULL
+            OR EXISTS (SELECT 1 FROM orchestrator_comment_activity)
+          )
+        )
+      )
   `);
   assertRowsChanged(result);
   await captureWorkflowHandoffChatMessageSent({ target, next });
@@ -1006,6 +1092,51 @@ function runtimeModelNameForHarness(engine: HarnessSpec["engine"], model: string
   if (engine === "codex") return codexCliModelNameForModelId(model);
   if (engine === "claude_code") return claudeCodeCliModelNameForModelId(model);
   return model;
+}
+
+function taskRunStepMetadata(harnessSpec: HarnessSpec) {
+  const workflow = harnessSpec.workflow;
+  const steps = workflow?.steps;
+  if (!workflow || !steps?.length) return {};
+  const stepIndex = Math.min(
+    Math.max(workflow.currentStepIndex ?? workflow.completedStepCount ?? 0, 0),
+    steps.length - 1,
+  );
+  return taskStepMetadata(steps[stepIndex], stepIndex, steps.length);
+}
+
+function taskFinishedStepMetadata(harnessSpec: HarnessSpec | undefined) {
+  const workflow = harnessSpec?.workflow;
+  const steps = workflow?.steps;
+  if (!workflow || !steps?.length) return {};
+  const stepIndex = Math.min(
+    Math.max(
+      workflow.completedStepCount
+        ? workflow.completedStepCount - 1
+        : (workflow.currentStepIndex ?? 0),
+      0,
+    ),
+    steps.length - 1,
+  );
+  return taskStepMetadata(steps[stepIndex], stepIndex, steps.length);
+}
+
+function taskStepMetadata(
+  step: HarnessWorkflowStep | undefined,
+  stepIndex: number,
+  stepCount: number,
+) {
+  const stepTitle = step?.title.trim();
+  return {
+    stepIndex,
+    stepCount,
+    ...(stepTitle ? { stepTitle } : {}),
+  };
+}
+
+function taskActivitySnippet(value: string | null | undefined) {
+  const body = value?.trim();
+  return body ? body.slice(0, TASK_ACTIVITY_BODY_MAX_LENGTH) : null;
 }
 
 function codexConfigForWorkflowStep(

@@ -28,6 +28,7 @@ const migrationPaths = [
   "0223_goat_task_projection_preservation.sql",
   "0226_goat_immutable_skill_bundles.sql",
   "0228_goat_plugins.sql",
+  "0233_goat_task_activities.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -464,15 +465,39 @@ describe("Postgres Task repository", () => {
           conversations: number;
           messages: number;
           runs: number;
+          activities: number;
         }>(`
           SELECT
             (SELECT COUNT(*)::int FROM goat.tasks) AS tasks,
             (SELECT COUNT(*)::int FROM goat.chat_sessions WHERE kind = 'task') AS conversations,
             (SELECT COUNT(*)::int FROM goat.chat_messages) AS messages,
-            (SELECT COUNT(*)::int FROM goat.codex_chat_turns) AS runs
+            (SELECT COUNT(*)::int FROM goat.codex_chat_turns) AS runs,
+            (SELECT COUNT(*)::int FROM goat.task_activities) AS activities
         `)
       ).rows,
-    ).toEqual([{ tasks: 1, conversations: 1, messages: 2, runs: 1 }]);
+    ).toEqual([{ tasks: 1, conversations: 1, messages: 2, runs: 1, activities: 1 }]);
+    await expect(
+      database.query<{
+        task_id: string;
+        author: string;
+        author_workos_id: string;
+        kind: string;
+        metadata: Record<string, unknown>;
+      }>(`
+        SELECT task_id, author, author_workos_id, kind, metadata
+        FROM goat.task_activities
+      `),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          task_id: first.task.id,
+          author: "user",
+          author_workos_id: "user_1",
+          kind: "created",
+          metadata: { source: "manual" },
+        },
+      ],
+    });
     expect(
       (
         await database.query<{

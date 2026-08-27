@@ -528,6 +528,16 @@ export type TaskMessageRole = "user" | "assistant" | "tool";
 export type TaskMessageStatus = "created" | "running" | "completed" | "failed";
 export type TaskModelUsagePhase = "planner" | "execution";
 
+export type TaskActivityAuthor = "user" | "orchestrator" | "system";
+export type TaskActivityKind =
+  | "created"
+  | "run_started"
+  | "run_finished"
+  | "status_changed"
+  | "comment"
+  | "retry";
+export type TaskActivityMetadata = Record<string, unknown>;
+
 export type TaskEventType =
   | "task.status"
   | "harness.planned"
@@ -3756,6 +3766,38 @@ export const taskMessages = productSchema.table(
   }),
 );
 
+export const taskActivities = productSchema.table(
+  "task_activities",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    author: text("author").$type<TaskActivityAuthor>().notNull(),
+    authorWorkosId: text("author_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").$type<TaskActivityKind>().notNull(),
+    body: text("body"),
+    metadata: jsonb("metadata").$type<TaskActivityMetadata>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    taskCreatedAtIdx: index("opencompany_task_activities_task_created_at_idx").on(
+      table.taskId,
+      table.createdAt,
+    ),
+    authorCheck: check(
+      "opencompany_task_activities_author_check",
+      sql`${table.author} IN ('user', 'orchestrator', 'system')`,
+    ),
+    kindCheck: check(
+      "opencompany_task_activities_kind_check",
+      sql`${table.kind} IN ('created', 'run_started', 'run_finished', 'status_changed', 'comment', 'retry')`,
+    ),
+  }),
+);
+
 export const taskEvents = productSchema.table(
   "task_events",
   {
@@ -6152,6 +6194,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
     references: [taskSchedules.id],
   }),
   taskMessages: many(taskMessages),
+  taskActivities: many(taskActivities),
   taskEvents: many(taskEvents),
   modelUsage: many(taskModelUsage),
   toolUsage: many(taskToolUsage),
@@ -6231,6 +6274,17 @@ export const taskEventsRelations = relations(taskEvents, ({ one }) => ({
   message: one(taskMessages, {
     fields: [taskEvents.messageId],
     references: [taskMessages.id],
+  }),
+}));
+
+export const taskActivitiesRelations = relations(taskActivities, ({ one }) => ({
+  task: one(tasks, {
+    fields: [taskActivities.taskId],
+    references: [tasks.id],
+  }),
+  authorUser: one(users, {
+    fields: [taskActivities.authorWorkosId],
+    references: [users.workosUserId],
   }),
 }));
 
@@ -6533,6 +6587,7 @@ export type TaskScheduleRun = typeof taskScheduleRuns.$inferSelect;
 export type WorkflowScheduleRun = typeof workflowScheduleRuns.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type TaskMessage = typeof taskMessages.$inferSelect;
+export type TaskActivity = typeof taskActivities.$inferSelect;
 export type TaskEvent = typeof taskEvents.$inferSelect;
 export type TaskModelUsage = typeof taskModelUsage.$inferSelect;
 export type TaskToolUsage = typeof taskToolUsage.$inferSelect;

@@ -257,6 +257,25 @@ describe("session-backed task turns", () => {
     expect(statement).toContain("EXISTS (");
   });
 
+  it("writes run_started only for the queued-to-running claim", async () => {
+    mocks.execute.mockResolvedValueOnce({ rows: [{ outcome: "updated" }] });
+
+    await markTaskTurnRunning({
+      context: context(workflowSpec()),
+      turn: durableTurn(),
+      stage: "planning",
+    });
+
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
+    expect(query.sql).toContain("claimed_task AS MATERIALIZED");
+    expect(query.sql).toContain("INSERT INTO goat.task_activities");
+    expect(query.sql).toContain("'run_started'");
+    expect(query.sql).toContain("task.previous_stage = 'queued'");
+    expect(query.sql).toContain("attempts = CASE WHEN task.status = 'queued'");
+    expect(query.params).toContain("turn_1");
+    expect(query.params).toContain('{"stepIndex":0,"stepCount":2,"stepTitle":"Audit"}');
+  });
+
   it("settles the canonical Attempt and terminal event log in the fenced turn statement", async () => {
     await settleDurableTurn({
       target: {
@@ -460,6 +479,15 @@ describe("session-backed task turns", () => {
     expect(statement).toContain("existing.debug_trace->'taskNotification'->>'taskId'");
     expect(statement).not.toContain("goat.task_messages");
     expect(statement).not.toContain("goat.task_events");
+    expect(statement).toContain("finished_task_activity AS MATERIALIZED");
+    expect(statement).toContain("orchestrator_comment_activity AS MATERIALIZED");
+    expect(statement).toContain("INSERT INTO goat.task_activities");
+    const settlementQuery = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
+    expect(settlementQuery.params).toContain("Repository audit complete.");
+    expect(settlementQuery.params).toContain("Ready.");
+    expect(settlementQuery.params).toContain(
+      '{"runId":"turn_1","turnStatus":"completed","disposition":"done","stepIndex":0,"stepCount":2,"stepTitle":"Audit"}',
+    );
     expect(analyticsMocks.captureProductServerEvent).toHaveBeenCalledWith(
       "chat_message_sent",
       "user_1",

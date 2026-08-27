@@ -2311,6 +2311,34 @@ describe("canonical Hono API", () => {
     );
   });
 
+  it("authorizes a task-scoped activity read model before contacting Electric", async () => {
+    const tasks = fakeTaskRepository();
+    const getTask = vi.fn(tasks.getTask);
+    tasks.getTask = getTask;
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(fakeRepository(), {
+      tasks: new TaskApplicationService(tasks),
+      readModels: { stream },
+    });
+
+    const response = await app.request("/v1/read-models/task-activities-v1?taskId=task_1");
+
+    expect(response.status).toBe(200);
+    expect(getTask).toHaveBeenCalledWith({ actor, taskId: "task_1" });
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({ actor, readModel: "task-activities-v1", taskId: "task_1" }),
+    );
+
+    const missing = await app.request("/v1/read-models/task-activities-v1?taskId=task_other");
+    expect(missing.status).toBe(404);
+    expect(stream).toHaveBeenCalledTimes(1);
+
+    const unscoped = await app.request("/v1/read-models/task-activities-v1");
+    expect(unscoped.status).toBe(400);
+    const misplacedScope = await app.request("/v1/read-models/tasks-v1?taskId=task_1");
+    expect(misplacedScope.status).toBe(400);
+  });
+
   it("authorizes Brain read models before forwarding the fixed Brain scope", async () => {
     const assertBrainAccess = vi.fn(async () => undefined);
     const stream = vi.fn(async () => Response.json([]));

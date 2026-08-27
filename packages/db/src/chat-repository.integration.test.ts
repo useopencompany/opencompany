@@ -38,6 +38,7 @@ const migrationPaths = [
   "0227_goat_chat_skill_bundle_snapshots.sql",
   "0228_goat_plugins.sql",
   "0229_goat_chat_skill_bundle_names.sql",
+  "0233_goat_task_activities.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -1526,6 +1527,33 @@ describe("Postgres Chat repositories", () => {
         SELECT status, error FROM goat.tasks WHERE id = 'task_1'
       `),
     ).toMatchObject({ rows: [{ status: "canceled", error: "Stopped by user." }] });
+    expect(
+      await database.query<{
+        author: string;
+        author_workos_id: string;
+        kind: string;
+        body: string;
+        metadata: Record<string, unknown>;
+      }>(`
+        SELECT author, author_workos_id, kind, body, metadata
+        FROM goat.task_activities
+        WHERE task_id = 'task_1'
+      `),
+    ).toMatchObject({
+      rows: [
+        {
+          author: "user",
+          author_workos_id: "user_3",
+          kind: "status_changed",
+          body: "Stopped by user.",
+          metadata: {
+            fromStatus: "queued",
+            toStatus: "canceled",
+            runId: created.runId,
+          },
+        },
+      ],
+    });
   });
 
   it("keeps the first Chat bundle fixed after its installation is replaced and archived", async () => {

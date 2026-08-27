@@ -17,6 +17,7 @@ import {
   MessageReadModelSchema,
   type ReadModel,
   RunReadModelSchema,
+  TaskActivityReadModelSchema,
   TaskOutcomeSchema,
   TaskReadModelSchema,
   TaskScheduleReadModelSchema,
@@ -69,6 +70,7 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "capabilityModes",
   "hasUnseen",
   "enabled",
+  "metadata",
   "planPaused",
 ]);
 
@@ -78,6 +80,7 @@ export interface ReadModelService {
     readModel: ReadModel;
     conversationId?: string;
     brainId?: string;
+    taskId?: string;
     requestUrl: URL;
   }): Promise<Response>;
 }
@@ -106,6 +109,7 @@ export class ElectricReadModelProxy implements ReadModelService {
     readModel: ReadModel;
     conversationId?: string;
     brainId?: string;
+    taskId?: string;
     requestUrl: URL;
   }) {
     const shape = readModelShape(input);
@@ -175,6 +179,7 @@ function readModelShape(input: {
   readModel: ReadModel;
   conversationId?: string;
   brainId?: string;
+  taskId?: string;
 }) {
   switch (input.readModel) {
     case "chat-conversations-v1":
@@ -293,6 +298,25 @@ function readModelShape(input: {
         ],
         where: `("workspace_id" = $2 OR (` + `"workspace_id" IS NULL AND "actor_id" = $1))`,
         params: [input.actor.userId, input.actor.workspaceId],
+      };
+    case "task-activities-v1":
+      if (!input.taskId) {
+        throw new ApiError(400, "invalid_request", "taskId is required for this read model.");
+      }
+      return {
+        table: "goat.task_activities",
+        columns: [
+          "id",
+          "task_id",
+          "author",
+          "author_workos_id",
+          "kind",
+          "body",
+          "metadata",
+          "created_at",
+        ],
+        where: `"task_id" = $1`,
+        params: [input.taskId],
       };
     case "workflows-v1":
       return {
@@ -661,6 +685,10 @@ function projectReadModelValue(
       return (partial ? TaskScheduleReadModelSchema.partial() : TaskScheduleReadModelSchema).parse(
         projected,
       );
+    case "task-activities-v1":
+      return (partial ? TaskActivityReadModelSchema.partial() : TaskActivityReadModelSchema).parse(
+        projected,
+      );
     case "integration-accounts-v1":
       return (
         partial ? IntegrationAccountReadModelSchema.partial() : IntegrationAccountReadModelSchema
@@ -729,7 +757,8 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "sourceSelection" ||
     name === "discoverySummary" ||
     name === "scopes" ||
-    name === "capabilityModes"
+    name === "capabilityModes" ||
+    name === "metadata"
   ) {
     return jsonValue(value);
   }
@@ -1038,6 +1067,16 @@ const READ_MODEL_COLUMN_NAMES = {
     archived_at: "archivedAt",
     created_at: "createdAt",
     updated_at: "updatedAt",
+  },
+  "task-activities-v1": {
+    id: "id",
+    task_id: "taskId",
+    author: "author",
+    author_workos_id: "authorWorkosId",
+    kind: "kind",
+    body: "body",
+    metadata: "metadata",
+    created_at: "createdAt",
   },
   "workflows-v1": {
     id: "id",
