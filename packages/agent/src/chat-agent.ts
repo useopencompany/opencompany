@@ -65,6 +65,9 @@ import {
   type ChatActionCatalog,
   type ChatSkillCatalogItem,
   type ChatWorkflowCatalogItem,
+  CREATE_WORKSPACE_SKILL_TOOL_NAME,
+  type CreateWorkspaceSkillToolInput,
+  type CreateWorkspaceSkillToolOutput,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
@@ -117,6 +120,10 @@ import {
   BROWSER_USE_PROFILE_PROFILE_DESCRIPTION,
   BROWSER_USE_PROFILE_REASON_DESCRIPTION,
   BROWSER_USE_PROFILE_TOOL_DESCRIPTION,
+  CREATE_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION,
+  CREATE_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION,
+  CREATE_WORKSPACE_SKILL_NAME_DESCRIPTION,
+  CREATE_WORKSPACE_SKILL_TOOL_DESCRIPTION,
   createProductChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
@@ -258,6 +265,10 @@ type EditTaskScheduleRunner = (
 type DeleteTaskScheduleRunner = (
   input: DeleteTaskScheduleToolInput,
 ) => Promise<DeleteTaskScheduleToolOutput>;
+export type CreateWorkspaceSkillRunner = (
+  input: CreateWorkspaceSkillToolInput,
+  context: { toolCallId: string },
+) => Promise<CreateWorkspaceSkillToolOutput>;
 export type ActionDispatcher = {
   // The action catalog resolved server-side from real connection state; ids
   // become the dispatch enum, so a disconnected provider's actions cannot be
@@ -347,6 +358,7 @@ export async function runProductChatAgent(input: {
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
+  createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
@@ -406,6 +418,7 @@ export async function runProductChatAgent(input: {
     ...(input.scheduleTask ? { scheduleTask: input.scheduleTask } : {}),
     ...(input.editTaskSchedule ? { editTaskSchedule: input.editTaskSchedule } : {}),
     ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
+    ...(input.createWorkspaceSkill ? { createWorkspaceSkill: input.createWorkspaceSkill } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
     ...(input.runWiki ? { runWiki: input.runWiki } : {}),
@@ -502,6 +515,7 @@ export function createProductChatToolContext(input: {
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
+  createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
@@ -547,6 +561,7 @@ export function createProductChatToolContext(input: {
   let browserCallCount = 0;
   let internalActionInvocationSequence = 0;
   let internalWikiInvocationSequence = 0;
+  let internalWorkspaceSkillInvocationSequence = 0;
   const actionTurnGovernance = createInMemoryActionTurnGovernance({
     ...(input.actions?.prelistedSourceIds
       ? { prelistedSourceIds: input.actions.prelistedSourceIds }
@@ -737,6 +752,60 @@ export function createProductChatToolContext(input: {
             ? executionContext.toolCallId
             : `ai-sdk:${++internalWikiInvocationSequence}`;
         return runWiki(args, { toolCallId });
+      },
+    });
+  }
+
+  const createWorkspaceSkill = input.createWorkspaceSkill;
+  if (createWorkspaceSkill) {
+    tools[CREATE_WORKSPACE_SKILL_TOOL_NAME] = tool<
+      CreateWorkspaceSkillToolInput,
+      CreateWorkspaceSkillToolOutput
+    >({
+      description: CREATE_WORKSPACE_SKILL_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<CreateWorkspaceSkillToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: {
+            type: "string",
+            minLength: 1,
+            maxLength: 64,
+            pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            description: CREATE_WORKSPACE_SKILL_NAME_DESCRIPTION,
+          },
+          description: {
+            type: "string",
+            minLength: 1,
+            maxLength: 1_024,
+            description: CREATE_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION,
+          },
+          instructions: {
+            type: "string",
+            minLength: 1,
+            maxLength: 512 * 1_024,
+            description: CREATE_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION,
+          },
+        },
+        required: ["name", "description", "instructions"],
+      }),
+      execute: async (args, executionContext) => {
+        visibleToolActivity = true;
+        const toolCallId =
+          executionContext &&
+          typeof executionContext === "object" &&
+          "toolCallId" in executionContext &&
+          typeof executionContext.toolCallId === "string"
+            ? executionContext.toolCallId
+            : `ai-sdk:create-workspace-skill:${++internalWorkspaceSkillInvocationSequence}`;
+        return createWorkspaceSkill(
+          {
+            name: args.name.trim(),
+            description: args.description.trim(),
+            instructions: args.instructions.trim(),
+          },
+          { toolCallId },
+        );
       },
     });
   }

@@ -75,6 +75,7 @@ function ingress(
         userId: "user_1",
         organizationId: null,
         method: "session",
+        credentialKind: "browser_cookie",
         activeWorkspaceId: null,
         activeBrainId: null,
       };

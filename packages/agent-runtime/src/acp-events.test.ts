@@ -554,6 +554,96 @@ describe("createAcpEventNormalizer", () => {
     });
   });
 
+  it("normalizes the pinned Codex ACP MCP envelope instead of treating it as a command", () => {
+    const normalizer = createAcpEventNormalizer({ engineName: "Codex" });
+    normalizer.beginRun("session_1");
+
+    const events = normalizer.normalize(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "mcp_1",
+        kind: "execute",
+        title: "mcp.opencompany.list_actions",
+        status: "completed",
+        rawInput: {
+          server: "opencompany",
+          tool: "list_actions",
+          arguments: { category: "database" },
+        },
+        rawOutput: {
+          result: {
+            content: [{ type: "text", text: "Found the Neon actions." }],
+          },
+          error: null,
+        },
+        _meta: { is_mcp_tool_call: true },
+      }),
+    );
+
+    expect(events).toMatchObject([
+      {
+        type: "mcp_tool.started",
+        payload: {
+          itemId: "mcp_1",
+          toolName: "mcp__opencompany__list_actions",
+          kind: "execute",
+          server: "opencompany",
+          tool: "list_actions",
+          rawInput: { category: "database" },
+        },
+      },
+      {
+        type: "mcp_tool.completed",
+        payload: {
+          itemId: "mcp_1",
+          server: "opencompany",
+          tool: "list_actions",
+          status: "completed",
+          rawInput: { category: "database" },
+          result: expect.stringContaining("Found the Neon actions."),
+        },
+      },
+    ]);
+    expect(events.map((event) => event.type)).not.toContain("command.started");
+  });
+
+  it("surfaces errors from the pinned Codex ACP MCP envelope", () => {
+    const normalizer = createAcpEventNormalizer({ engineName: "Codex" });
+    normalizer.beginRun("session_1");
+
+    const events = normalizer.normalize(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "mcp_failed",
+        kind: "execute",
+        title: "mcp.opencompany.use_action",
+        status: "failed",
+        rawInput: {
+          server: "opencompany",
+          tool: "use_action",
+          arguments: { action: "neon.query" },
+        },
+        rawOutput: {
+          result: null,
+          error: { message: "Connection unavailable" },
+        },
+        _meta: { is_mcp_tool_call: true },
+      }),
+    );
+
+    expect(events).toMatchObject([
+      { type: "mcp_tool.started" },
+      {
+        type: "mcp_tool.completed",
+        payload: {
+          status: "failed",
+          rawInput: { action: "neon.query" },
+          error: expect.stringContaining("Connection unavailable"),
+        },
+      },
+    ]);
+  });
+
   it("extracts safe file metadata from a completed publish_artifact call", () => {
     const normalizer = createAcpEventNormalizer();
     normalizer.beginRun("session_1");

@@ -6,7 +6,7 @@ import {
 import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import type { Actor } from "@opencompany/core";
 import { getWorkspacePlan, workspaceMemberCap } from "@opencompany/db/billing";
-import { workspaces } from "@opencompany/db/product-schema";
+import { users, workspaces } from "@opencompany/db/product-schema";
 import {
   DEFAULT_BRAIN_SLUG,
   hasOwnedHobbyWorkspace,
@@ -19,6 +19,7 @@ import {
 import { createLogger } from "@opencompany/observability";
 import type { WorkOS } from "@workos-inc/node";
 import { eq } from "drizzle-orm";
+import type { ApiIdentity } from "./auth";
 import { ApiError } from "./errors";
 
 type DbLike = any;
@@ -68,7 +69,7 @@ export type WorkspaceControlService = {
     actor: Actor,
     input: { workspaceId: string; name: string },
   ): Promise<WorkspaceActivationView>;
-  switch(actor: Actor, workspaceId: string): Promise<WorkspaceActivationView>;
+  switch(identity: ApiIdentity, workspaceId: string): Promise<WorkspaceActivationView>;
 };
 
 export function createWorkspaceControlService(input: {
@@ -228,7 +229,10 @@ export function createWorkspaceControlService(input: {
     async create(actor, command) {
       const name = validWorkspaceName(command.name);
       if (await hasOwnedHobbyWorkspace(actor.userId, { db })) {
-        const replay = await findWorkspaceActivation(actor, command.workspaceId, db);
+        const replay = await findWorkspaceActivation(actor.userId, command.workspaceId, {
+          db,
+          workos,
+        });
         if (replay) return replay;
         throw new ApiError(
           409,
@@ -272,8 +276,19 @@ export function createWorkspaceControlService(input: {
       };
     },
 
-    async switch(actor, workspaceId) {
-      const activation = await findWorkspaceActivation(actor, workspaceId, db);
+    async switch(identity, workspaceId) {
+      const [localUser] = await db
+        .select({ onboardedAt: users.onboardedAt })
+        .from(users)
+        .where(eq(users.workosUserId, identity.userId))
+        .limit(1);
+      if (!localUser?.onboardedAt) {
+        throw new ApiError(403, "forbidden", "Finish onboarding before selecting a workspace.");
+      }
+      const activation = await findWorkspaceActivation(identity.userId, workspaceId, {
+        db,
+        workos,
+      });
       if (!activation) {
         throw new ApiError(404, "not_found", "You do not have access to that workspace.");
       }
@@ -296,19 +311,21 @@ function validWorkspaceName(rawName: string) {
 }
 
 async function findWorkspaceActivation(
-  actor: Actor,
+  userId: string,
   workspaceId: string,
-  db: DbLike,
+  dependencies: { db: DbLike; workos: WorkOS },
 ): Promise<WorkspaceActivationView | null> {
-  const memberships = await listWorkspacesForUser(actor.userId, { db });
+  const { db, workos } = dependencies;
+  const memberships = await listWorkspacesForUser(userId, { db });
   const target = memberships.find((entry) => entry.workspace.id === workspaceId);
-  if (!target?.workspace.workosOrganizationId) return null;
-  const brains = await listAccessibleBrains({ userWorkosId: actor.userId, workspaceId }, { db });
+  if (!target) return null;
+  const organizationId = await ensureWorkspaceOrganization(target.workspace, { workos, db });
+  const brains = await listAccessibleBrains({ userWorkosId: userId, workspaceId }, { db });
   const activeBrain =
     brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
   return {
     workspaceId,
-    organizationId: target.workspace.workosOrganizationId,
+    organizationId,
     brainId: activeBrain?.id ?? null,
   };
 }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   AGENT_MODEL_CATALOG,
   type ChatHostBootstrap,
@@ -9,6 +10,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { isBrowserToolName } from "@opencompany/browser-tools";
+import { type Actor, SKILL_WRITE_PERMISSION } from "@opencompany/core";
 import type { DeleteTaskScheduleToolOutput, EditTaskScheduleToolOutput } from "../chat-ui";
 
 export type ChatHostContext = {
@@ -23,6 +25,7 @@ export type ChatHostContext = {
   lastName: string | null;
   timezone: string;
   taskToolsEnabled: boolean;
+  skillToolsEnabled: boolean;
   wikiEnabled: boolean;
 };
 
@@ -124,6 +127,11 @@ export type ChatHostToolServiceDependencies = {
     offset?: number;
     maxBytes?: number;
   }) => Promise<ChatHostSkillFileChunk>;
+  createWorkspaceSkill: (input: {
+    actor: Actor;
+    idempotencyKey: string;
+    skill: { name: string; description: string; instructions: string };
+  }) => Promise<{ created: true; name: string; command: string; bundleId: string }>;
   createTask: (input: {
     actorId: string;
     workspaceId: string;
@@ -280,6 +288,24 @@ async function executeOperation(
         path: requiredString(toolInput.path, "path"),
         ...(offset !== undefined ? { offset } : {}),
         ...(maxBytes !== undefined ? { maxBytes } : {}),
+      });
+    }
+    case "create_workspace_skill": {
+      assertSkillTools(context);
+      return dependencies.createWorkspaceSkill({
+        actor: {
+          userId: context.actorId,
+          workspaceId: context.workspaceId,
+          role: "admin",
+          permissions: [SKILL_WRITE_PERMISSION],
+          authenticationMethod: "service",
+        },
+        idempotencyKey: workspaceSkillIdempotencyKey(command.runId, command.toolCallId),
+        skill: {
+          name: requiredString(toolInput.name, "name"),
+          description: requiredString(toolInput.description, "description"),
+          instructions: requiredString(toolInput.instructions, "instructions"),
+        },
       });
     }
     case "start_task": {
@@ -482,6 +508,7 @@ async function bootstrap(
     },
     workspaceName: context.workspaceName,
     taskToolsEnabled: context.taskToolsEnabled,
+    skillToolsEnabled: context.skillToolsEnabled,
     wikiEnabled: context.wikiEnabled,
     browserToolsEnabled: true,
     browserProfiles: browserProfiles.map(({ id, name, siteHost }) => ({ id, name, siteHost })),
@@ -548,6 +575,19 @@ function browserProfileResult(session: BrowserProfileSession) {
 
 function assertTaskTools(context: ChatHostContext) {
   if (!context.taskToolsEnabled) throw new Error("Task creation is not enabled for this user.");
+}
+
+function assertSkillTools(context: ChatHostContext) {
+  if (!context.skillToolsEnabled) {
+    throw new Error("Only workspace admins can create Skills from Chat.");
+  }
+}
+
+export function workspaceSkillIdempotencyKey(turnId: string, toolCallId?: string) {
+  const invocationHash = createHash("sha256")
+    .update(`${turnId}:${toolCallId ?? "create-workspace-skill"}`)
+    .digest("hex");
+  return `agent-skill:${invocationHash}`;
 }
 
 function requiredModel(value: unknown): AgentModelId {
