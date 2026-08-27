@@ -482,6 +482,72 @@ describe("TasksBoardRoute", () => {
     expect(await screen.findByText("Old completed task")).toBeInTheDocument();
   });
 
+  it("filters tasks by their workflow and keeps non-workflow tasks out of the result", async () => {
+    const user = userEvent.setup();
+    const workflowNames = {
+      "ship-feature": "Ship feature",
+      "morning-briefing": "Morning briefing",
+    };
+    appDataMock.taskRows = [
+      taskRow({
+        id: "ship-feature",
+        name: "Add workflow filtering",
+        status: "running",
+        workflow_id: "ship-feature",
+      }),
+      taskRow({
+        id: "morning-briefing",
+        name: "Prepare the morning briefing",
+        status: "running",
+        workflow_id: "morning-briefing",
+      }),
+      taskRow({ id: "ad-hoc", name: "Research competitors", status: "running" }),
+    ];
+
+    const view = render(<TasksBoardRoute workflowNames={workflowNames} />);
+
+    await user.click(screen.getByRole("combobox", { name: "Filter tasks by workflow" }));
+    await user.click(await screen.findByRole("option", { name: "#Ship feature" }));
+
+    expect(screen.getByText("Add workflow filtering")).toBeInTheDocument();
+    expect(screen.queryByText("Prepare the morning briefing")).not.toBeInTheDocument();
+    expect(screen.queryByText("Research competitors")).not.toBeInTheDocument();
+
+    appDataMock.taskRows = appDataMock.taskRows.filter(
+      (task) => task.workflow_id !== "ship-feature",
+    );
+    view.rerender(<TasksBoardRoute workflowNames={workflowNames} />);
+
+    expect(screen.getByRole("combobox", { name: "Filter tasks by workflow" })).toHaveTextContent(
+      "#Ship feature",
+    );
+    expect(screen.queryByText("Prepare the morning briefing")).not.toBeInTheDocument();
+    expect(screen.queryByText("Research competitors")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: "Filter tasks by workflow" }));
+    await user.click(await screen.findByRole("option", { name: "All tasks" }));
+
+    expect(screen.getByText("Prepare the morning briefing")).toBeInTheDocument();
+    expect(screen.getByText("Research competitors")).toBeInTheDocument();
+  });
+
+  it("offers workflow slugs from task history when the workflow is no longer active", async () => {
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({
+        id: "archived-workflow-run",
+        name: "Historical workflow run",
+        status: "running",
+        workflow_id: "old-launch-flow",
+      }),
+    ];
+
+    render(<TasksBoardRoute workflowNames={{}} />);
+
+    await user.click(screen.getByRole("combobox", { name: "Filter tasks by workflow" }));
+    expect(await screen.findByRole("option", { name: "#old-launch-flow" })).toBeInTheDocument();
+  });
+
   it("shows the Tasks & Workflows beta gate when disabled", () => {
     appDataMock.featureFlags.taskSpawning = false;
 

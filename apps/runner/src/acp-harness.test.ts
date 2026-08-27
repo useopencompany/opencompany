@@ -191,85 +191,101 @@ describe("AcpHarness", () => {
     );
   });
 
-  it("reattaches to the running ACP process when the E2B command watch times out", async () => {
-    let rejectInitialWatch: ((error: Error) => void) | null = null;
-    const initialWatch = new Promise<never>((_resolve, reject) => {
-      rejectInitialWatch = reject;
-    });
-    let resolveConnected: (() => void) | null = null;
-    const connected = new Promise<void>((resolve) => {
-      resolveConnected = resolve;
-    });
-    let onStdout: ((data: string) => void | Promise<void>) | null = null;
-    const requests: JsonRpcMessage[] = [];
-    const kill = vi.fn(async () => true);
-    const disconnect = vi.fn(async () => undefined);
-    const run = vi.fn(
-      async (_command: string, options: { onStdout?: (data: string) => void | Promise<void> }) => {
-        onStdout = options.onStdout ?? null;
-        return { pid: 41, wait: () => initialWatch };
-      },
-    );
-    const connect = vi.fn(
-      async (_pid: number, options: { onStdout?: (data: string) => void | Promise<void> }) => {
-        onStdout = options.onStdout ?? null;
-        resolveConnected?.();
-        return { pid: 41, wait: () => new Promise<never>(() => {}), disconnect };
-      },
-    );
-    const sendStdin = vi.fn(async (_pid: number, data: string) => {
-      for (const line of data.split("\n").filter(Boolean)) {
-        const message = JSON.parse(line) as JsonRpcMessage;
-        requests.push(message);
-        if (message.method === "initialize") {
-          await onStdout?.(
-            `${JSON.stringify({
-              jsonrpc: "2.0",
-              id: message.id,
-              result: { agentCapabilities: { loadSession: true } },
-            })}\n`,
-          );
-        } else if (message.method === "session/new") {
-          await onStdout?.(
-            `${JSON.stringify({
-              jsonrpc: "2.0",
-              id: message.id,
-              result: { sessionId: "session_reconnected" },
-            })}\n`,
-          );
-        } else if (message.method === "session/prompt") {
-          const streamError = new Error("2: [unknown] The operation timed out.");
-          streamError.name = "SandboxError";
-          rejectInitialWatch?.(streamError);
-          await connected;
-          await onStdout?.(
-            `${JSON.stringify({
-              jsonrpc: "2.0",
-              id: message.id,
-              result: { stopReason: "end_turn" },
-            })}\n`,
-          );
+  it.each([
+    {
+      failure: "times out",
+      message: "2: [unknown] The operation timed out.",
+    },
+    {
+      failure: "loses its control socket",
+      message:
+        "2: [unknown] The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()",
+    },
+  ])(
+    "reattaches to the running ACP process when its E2B command watch $failure",
+    async ({ message: streamErrorMessage }) => {
+      let rejectInitialWatch: ((error: Error) => void) | null = null;
+      const initialWatch = new Promise<never>((_resolve, reject) => {
+        rejectInitialWatch = reject;
+      });
+      let resolveConnected: (() => void) | null = null;
+      const connected = new Promise<void>((resolve) => {
+        resolveConnected = resolve;
+      });
+      let onStdout: ((data: string) => void | Promise<void>) | null = null;
+      const requests: JsonRpcMessage[] = [];
+      const kill = vi.fn(async () => true);
+      const disconnect = vi.fn(async () => undefined);
+      const run = vi.fn(
+        async (
+          _command: string,
+          options: { onStdout?: (data: string) => void | Promise<void> },
+        ) => {
+          onStdout = options.onStdout ?? null;
+          return { pid: 41, wait: () => initialWatch };
+        },
+      );
+      const connect = vi.fn(
+        async (_pid: number, options: { onStdout?: (data: string) => void | Promise<void> }) => {
+          onStdout = options.onStdout ?? null;
+          resolveConnected?.();
+          return { pid: 41, wait: () => new Promise<never>(() => {}), disconnect };
+        },
+      );
+      const sendStdin = vi.fn(async (_pid: number, data: string) => {
+        for (const line of data.split("\n").filter(Boolean)) {
+          const message = JSON.parse(line) as JsonRpcMessage;
+          requests.push(message);
+          if (message.method === "initialize") {
+            await onStdout?.(
+              `${JSON.stringify({
+                jsonrpc: "2.0",
+                id: message.id,
+                result: { agentCapabilities: { loadSession: true } },
+              })}\n`,
+            );
+          } else if (message.method === "session/new") {
+            await onStdout?.(
+              `${JSON.stringify({
+                jsonrpc: "2.0",
+                id: message.id,
+                result: { sessionId: "session_reconnected" },
+              })}\n`,
+            );
+          } else if (message.method === "session/prompt") {
+            const streamError = new Error(streamErrorMessage);
+            streamError.name = "SandboxError";
+            rejectInitialWatch?.(streamError);
+            await connected;
+            await onStdout?.(
+              `${JSON.stringify({
+                jsonrpc: "2.0",
+                id: message.id,
+                result: { stopReason: "end_turn" },
+              })}\n`,
+            );
+          }
         }
-      }
-    });
-    const sandbox = {
-      commands: { run, connect, sendStdin, kill },
-    } as unknown as SandboxHandle;
+      });
+      const sandbox = {
+        commands: { run, connect, sendStdin, kill },
+      } as unknown as SandboxHandle;
 
-    const result = await new AcpHarness().runTurn(harnessInput(sandbox));
+      const result = await new AcpHarness().runTurn(harnessInput(sandbox));
 
-    expect(result).toMatchObject({
-      sessionId: "session_reconnected",
-      promptResponse: { stopReason: "end_turn" },
-    });
-    expect(connect).toHaveBeenCalledOnce();
-    expect(connect).toHaveBeenCalledWith(
-      41,
-      expect.objectContaining({ timeoutMs: 0, onStdout: expect.any(Function) }),
-    );
-    expect(requests.filter((request) => request.method === "session/prompt")).toHaveLength(1);
-    expect(kill).toHaveBeenCalledWith(41);
-  });
+      expect(result).toMatchObject({
+        sessionId: "session_reconnected",
+        promptResponse: { stopReason: "end_turn" },
+      });
+      expect(connect).toHaveBeenCalledOnce();
+      expect(connect).toHaveBeenCalledWith(
+        41,
+        expect.objectContaining({ timeoutMs: 0, onStdout: expect.any(Function) }),
+      );
+      expect(requests.filter((request) => request.method === "session/prompt")).toHaveLength(1);
+      expect(kill).toHaveBeenCalledWith(41);
+    },
+  );
 
   // Any application-level (JSON-RPC) session/load failure means the saved thread is unusable on
   // this process — including the sticky variants that previously escaped the message-regex allowlist

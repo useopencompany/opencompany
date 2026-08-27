@@ -5446,6 +5446,194 @@ describe("Surface chat streaming UI", () => {
       vi.useRealTimers();
     }
   });
+
+  describe("pane contract", () => {
+    it("only lets the active pane's Cmd/Ctrl+K open the command palette when two panes are mounted", async () => {
+      const user = userEvent.setup();
+      render(
+        <>
+          <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />
+          <Surface
+            tasks={[]}
+            defaultModel={DEFAULT_MODEL}
+            initialChat={null}
+            isActivePane={false}
+          />
+        </>,
+      );
+
+      await user.keyboard("{Meta>}k{/Meta}");
+
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    });
+
+    it("only lets the active pane's Escape key close its own chat when two panes are mounted", async () => {
+      const user = userEvent.setup();
+      render(
+        <>
+          <Surface
+            tasks={[]}
+            defaultModel={DEFAULT_MODEL}
+            initialChat={{
+              id: "chat_active_pane",
+              title: "Active pane chat",
+              model: DEFAULT_MODEL,
+              messages: [],
+            }}
+          />
+          <Surface
+            tasks={[]}
+            defaultModel={DEFAULT_MODEL}
+            initialChat={{
+              id: "chat_inactive_pane",
+              title: "Inactive pane chat",
+              model: DEFAULT_MODEL,
+              messages: [],
+            }}
+            isActivePane={false}
+          />
+        </>,
+      );
+
+      expect(screen.getAllByPlaceholderText("Reply...")).toHaveLength(2);
+
+      await user.keyboard("{Escape}");
+
+      await waitFor(() => expect(screen.getAllByPlaceholderText("Reply...")).toHaveLength(1));
+      expect(screen.getByPlaceholderText("Ask opencompany anything...")).toBeInTheDocument();
+    });
+
+    it("only lets the active pane consume a window-level file drop when two panes are mounted", async () => {
+      render(
+        <>
+          <Surface
+            tasks={[]}
+            defaultModel={DEFAULT_MODEL}
+            initialChat={null}
+            userWorkosId="user_1"
+          />
+          <Surface
+            tasks={[]}
+            defaultModel={DEFAULT_MODEL}
+            initialChat={null}
+            userWorkosId="user_1"
+            isActivePane={false}
+          />
+        </>,
+      );
+
+      // A CSV needs no per-model attachment capability, unlike PDFs/images.
+      const file = new File(["a,b"], "data.csv", { type: "text/csv" });
+      fireEvent.drop(window, { dataTransfer: { types: ["Files"], files: [file] } });
+
+      await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
+      expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({ file });
+    });
+
+    it("reports local chat selection changes through onOpenChat", async () => {
+      const user = userEvent.setup();
+      const onOpenChat = vi.fn();
+      render(
+        <Surface
+          tasks={[]}
+          defaultModel={DEFAULT_MODEL}
+          initialChat={{
+            id: "chat_reported",
+            title: "Reported chat",
+            model: DEFAULT_MODEL,
+            messages: [],
+          }}
+          onOpenChat={onOpenChat}
+        />,
+      );
+
+      expect(onOpenChat).not.toHaveBeenCalled();
+
+      await user.keyboard("{Escape}");
+
+      expect(onOpenChat).toHaveBeenCalledWith(null);
+    });
+
+    it("reports an optimistic selection before durable resolution without moving the URL when the pane is inactive", async () => {
+      const user = userEvent.setup();
+      const onOpenChat = vi.fn();
+      const onConversationResolved = vi.fn();
+      render(
+        <Surface
+          tasks={[]}
+          defaultModel={DEFAULT_MODEL}
+          initialChat={null}
+          workspaceId="workspace_1"
+          isActivePane={false}
+          onOpenChat={onOpenChat}
+          onConversationResolved={onConversationResolved}
+        />,
+      );
+
+      await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start now");
+      await user.click(screen.getByRole("button", { name: "Send message" }));
+
+      await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
+      const optimisticSessionId = (chatMock.preparedRequestBodies[0] as { newSessionId: string })
+        .newSessionId;
+
+      expect(onOpenChat).toHaveBeenCalledWith({
+        id: optimisticSessionId,
+        model: DEFAULT_MODEL,
+        engine: "opencompany",
+      });
+      expect(onConversationResolved).not.toHaveBeenCalled();
+
+      acceptHeadlessConversation(optimisticSessionId);
+
+      expect(onConversationResolved).toHaveBeenCalledWith({
+        optimisticId: optimisticSessionId,
+        durableId: optimisticSessionId,
+      });
+      expect(routerMock.replace).not.toHaveBeenCalled();
+    });
+
+    it("detaches a pane on close without cancelling its active durable Run", async () => {
+      const user = userEvent.setup();
+      const transportCancel = vi
+        .spyOn(HeadlessChatTransport.prototype, "cancel")
+        .mockResolvedValue(false);
+      const onClosePane = vi.fn();
+
+      render(
+        <Surface
+          tasks={[]}
+          defaultModel={DEFAULT_MODEL}
+          initialChat={{
+            id: "chat_pane_active_run",
+            title: "Active pane run",
+            model: DEFAULT_MODEL,
+            engine: "opencompany",
+            runtime: {
+              status: "running",
+              activeRunId: "run_pane_active",
+              hasError: false,
+              updatedAt: currentTimestamp(),
+            },
+            activityState: "working",
+            hasUnseen: false,
+            messages: [],
+          }}
+          onClosePane={onClosePane}
+        />,
+      );
+
+      await screen.findByRole("status", { name: "opencompany is working" });
+
+      await user.keyboard("{Escape}");
+
+      expect(onClosePane).toHaveBeenCalledOnce();
+      expect(transportCancel).not.toHaveBeenCalled();
+      expect(chatMock.stop).not.toHaveBeenCalled();
+      expect(routerMock.replace).not.toHaveBeenCalled();
+    });
+  });
 });
 
 function taskView(overrides: Partial<TaskView> = {}): TaskView {

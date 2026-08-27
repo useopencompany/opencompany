@@ -75,6 +75,9 @@ export const USE_SKILL_TOOL_NAME = "use_skill";
 export const USE_SKILL_TOOL_PART_TYPE = `tool-${USE_SKILL_TOOL_NAME}` as const;
 export const READ_SKILL_FILE_TOOL_NAME = "read_skill_file";
 export const READ_SKILL_FILE_TOOL_PART_TYPE = `tool-${READ_SKILL_FILE_TOOL_NAME}` as const;
+export const CREATE_WORKSPACE_SKILL_TOOL_NAME = "create_workspace_skill";
+export const CREATE_WORKSPACE_SKILL_TOOL_PART_TYPE =
+  `tool-${CREATE_WORKSPACE_SKILL_TOOL_NAME}` as const;
 export const BROWSER_USE_PROFILE_TOOL_NAME = "browser_use_profile";
 export const BROWSER_USE_PROFILE_TOOL_PART_TYPE = `tool-${BROWSER_USE_PROFILE_TOOL_NAME}` as const;
 export const BROWSER_OPEN_TOOL_PART_TYPE = "tool-browser_open";
@@ -508,6 +511,19 @@ export type ReadSkillFileToolOutput = {
   content: string;
 };
 
+export type CreateWorkspaceSkillToolInput = {
+  name: string;
+  description: string;
+  instructions: string;
+};
+
+export type CreateWorkspaceSkillToolOutput = {
+  created: true;
+  name: string;
+  command: string;
+  bundleId: string;
+};
+
 type BrowserChatTools = {
   [Name in BrowserToolName]: {
     input: BrowserToolInput;
@@ -575,6 +591,10 @@ export type ChatTools = {
   read_skill_file: {
     input: ReadSkillFileToolInput;
     output: ReadSkillFileToolOutput;
+  };
+  create_workspace_skill: {
+    input: CreateWorkspaceSkillToolInput;
+    output: CreateWorkspaceSkillToolOutput;
   };
   codex_command: {
     input: CodexCommandToolInput;

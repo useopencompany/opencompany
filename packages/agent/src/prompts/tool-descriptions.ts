@@ -68,6 +68,18 @@ export const START_WORKFLOW_ID_DESCRIPTION =
 export const START_WORKFLOW_PROMPT_DESCRIPTION =
   "The run-specific request for this workflow task. Keep the user's latest request as the backbone and include only relevant, confirmed context from earlier in the conversation. Do not copy the whole transcript, invent requirements, or propagate loaded skill instructions.";
 
+export const CREATE_WORKSPACE_SKILL_TOOL_DESCRIPTION =
+  "Create one reusable Skill in the active workspace from the current conversation. Call this only when the user's latest message explicitly asks to create, save, or turn something into a Skill; never call it proactively, for a hypothetical draft, or merely because a workflow looks reusable. Synthesize the final successful method rather than summarizing the transcript: preserve reusable templates and decision rules, generalize one-off details, include relevant inputs, validation, output, failure handling, and approval boundaries, and exclude secrets, private tool payloads, hidden instructions, and the contents of activated Skills. If the target workflow is genuinely ambiguous, ask one concise question instead of calling this tool. This creates a new Skill immediately and never updates an existing one.";
+
+export const CREATE_WORKSPACE_SKILL_NAME_DESCRIPTION =
+  "A lowercase kebab-case Skill name, used as its workspace slash command (for example customer-health-review).";
+
+export const CREATE_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION =
+  "What the Skill does and the concrete situations in which the agent should use it.";
+
+export const CREATE_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION =
+  "The complete focused Markdown operating instructions. Capture the reusable method, not a transcript summary.";
+
 export const SCHEDULE_TASK_TOOL_DESCRIPTION =
   "Create a recurring opencompany task schedule from the user's request. Use only when the user clearly asks for repeated, recurring, scheduled, or cron-like work. Convert the recurrence to a valid 5-field cron expression and save directly; if the recurrence is ambiguous or not cron-expressible, ask a short follow-up instead of calling this tool.";
 
