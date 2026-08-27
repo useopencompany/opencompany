@@ -1,6 +1,7 @@
 import { executePersistedChatHostTool } from "@opencompany/agent/application/persisted-host-tools";
 import type {
   BrowserToolRunner,
+  CreateWorkspaceSkillRunner,
   SkillDispatcher,
   StartedTask,
   WorkflowDispatcher,
@@ -16,6 +17,7 @@ import type {
 } from "@opencompany/agent/chat-ui";
 import {
   activateAndListChatSessionSkills,
+  createWorkspaceSkillForActor,
   listSkillCatalog,
   readChatSkillFile,
   resolveSkillMentions,
@@ -64,6 +66,7 @@ export type HostTools = {
   deleteTaskSchedule?: (
     input: DeleteTaskScheduleToolInput,
   ) => Promise<DeleteTaskScheduleToolOutput>;
+  createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   runWiki?: (input: Record<string, unknown>, context: { toolCallId: string }) => Promise<unknown>;
   skills?: SkillDispatcher;
   workflows?: WorkflowDispatcher;
@@ -113,6 +116,16 @@ export async function loadHostTools(
             call("edit_task_schedule", input) as Promise<EditTaskScheduleToolOutput>,
           deleteTaskSchedule: (input) =>
             call("delete_task_schedule", input) as Promise<DeleteTaskScheduleToolOutput>,
+        }
+      : {}),
+    ...(bootstrap.skillToolsEnabled
+      ? {
+          createWorkspaceSkill: (input, toolContext) =>
+            call(
+              "create_workspace_skill",
+              input,
+              toolContext.toolCallId,
+            ) as ReturnType<CreateWorkspaceSkillRunner>,
         }
       : {}),
     ...(bootstrap.wikiEnabled
@@ -230,6 +243,7 @@ async function callGateway(
         }),
       readSkillFile: ({ conversationId, ...input }) =>
         readChatSkillFile({ ...input, chatSessionId: conversationId, db: getDb() }),
+      createWorkspaceSkill: (input) => createWorkspaceSkillForActor({ ...input, db: getDb() }),
     },
     runtime: {
       wakeTaskWorker: wakeCodexChatWorker,
@@ -274,7 +288,8 @@ function asBootstrap(value: unknown): ChatHostBootstrap {
     !isRecord(value) ||
     !Array.isArray(value.skills) ||
     !Array.isArray(value.activeSkills) ||
-    !Array.isArray(value.browserProfiles)
+    !Array.isArray(value.browserProfiles) ||
+    typeof value.skillToolsEnabled !== "boolean"
   ) {
     throw new Error("The Chat host-tool gateway returned an invalid bootstrap response.");
   }

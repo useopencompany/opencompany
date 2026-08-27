@@ -1079,6 +1079,9 @@ async function resolveProductChatRuntime(input: {
     ...(hostTools?.scheduleTask ? { scheduleTask: hostTools.scheduleTask } : {}),
     ...(hostTools?.editTaskSchedule ? { editTaskSchedule: hostTools.editTaskSchedule } : {}),
     ...(hostTools?.deleteTaskSchedule ? { deleteTaskSchedule: hostTools.deleteTaskSchedule } : {}),
+    ...(hostTools?.createWorkspaceSkill
+      ? { createWorkspaceSkill: hostTools.createWorkspaceSkill }
+      : {}),
     ...(hostTools?.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
     ...(hostTools?.browserTools ? { browserTools: hostTools.browserTools } : {}),
     ...(hostTools?.browserProfiles ? { browserProfiles: hostTools.browserProfiles } : {}),
