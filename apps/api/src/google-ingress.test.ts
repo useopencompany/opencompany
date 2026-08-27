@@ -51,6 +51,7 @@ function ingress(overrides: { noWorkspaces?: boolean; authError?: ApiError } = {
         userId: "user_1",
         organizationId: null,
         method: "session",
+        credentialKind: "browser_cookie",
         activeWorkspaceId: null,
         activeBrainId: null,
       };

@@ -44,6 +44,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
 import type { AttachmentUploadService } from "./attachments";
+import { createWorkOsApiAuthenticator } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
 import type { ChatResourceService } from "./chat-resources";
 import { ApiError } from "./errors";
@@ -2241,6 +2242,44 @@ describe("canonical Hono API", () => {
     });
   });
 
+  it("lets an org-bound mobile AuthKit session use the existing workspace-scoped conversation list", async () => {
+    const execute = vi.fn(async () => ({
+      rows: [
+        {
+          workspaceId: actor.workspaceId,
+          role: actor.role,
+          taskSpawningEnabled: true,
+          wikiEnabled: true,
+        },
+      ],
+    }));
+    const authenticate = createWorkOsApiAuthenticator(execute, {
+      mobileClientId: "client_mobile",
+      verifyJwt: vi.fn(async () => ({
+        payload: {
+          sub: actor.userId,
+          sid: "session_mobile",
+          client_id: "client_mobile",
+          org_id: "org_workspace_1",
+        },
+        protectedHeader: { alg: "RS256" },
+      })) as never,
+    });
+    const app = testApp(fakeRepository(), { authenticate });
+
+    const response = await app.request("/v1/conversations", {
+      headers: {
+        Authorization: `Bearer ${compactJwt({ client_id: "client_mobile" })}`,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: [{ id: "conversation_1" }],
+    });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("authorizes a conversation-scoped v2 summary before contacting Electric", async () => {
     const repository = fakeRepository();
     const getConversation = vi.fn(repository.getConversation);
@@ -2601,7 +2640,11 @@ describe("canonical Hono API", () => {
       brainId: "brain_1",
       folderPath: "projects",
       idempotencyKey: "asset-create-1",
-      file,
+      file: expect.objectContaining({
+        name: "plan.pdf",
+        size: 13,
+        type: "application/pdf",
+      }),
     });
 
     const replaceForm = new FormData();
@@ -2621,7 +2664,11 @@ describe("canonical Hono API", () => {
       brainId: "brain_1",
       documentId: "document_1",
       idempotencyKey: "asset-replace-1",
-      file,
+      file: expect.objectContaining({
+        name: "plan.pdf",
+        size: 13,
+        type: "application/pdf",
+      }),
     });
   });
 
@@ -3776,7 +3823,10 @@ describe("canonical Hono API", () => {
 
     const switched = await app.request("/v1/workspaces/goat_ws_next/switch", { method: "POST" });
     expect(switched.status).toBe(200);
-    expect(switchWorkspace).toHaveBeenCalledWith(actor, "goat_ws_next");
+    expect(switchWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: actor.userId, credentialKind: "browser_cookie" }),
+      "goat_ws_next",
+    );
   });
 
   it("routes identity reads and synchronization through the pre-onboarding identity tier", async () => {
@@ -3786,6 +3836,7 @@ describe("canonical Hono API", () => {
       activeWorkspaceId: null,
       activeBrainId: null,
       method: "session" as const,
+      credentialKind: "browser_cookie" as const,
     };
     const authenticate = vi.fn(async () => {
       throw new Error("The actor tier must not run for identity.");
@@ -3803,6 +3854,50 @@ describe("canonical Hono API", () => {
     expect(authenticate).not.toHaveBeenCalled();
   });
 
+  it("routes workspace switching through verified identity and rate-limits by WorkOS user", async () => {
+    const workspaceId = "workspace_next";
+    const identity = {
+      userId: "user_mobile",
+      organizationId: null,
+      activeWorkspaceId: null,
+      activeBrainId: null,
+      method: "session" as const,
+      credentialKind: "authkit_bearer" as const,
+    };
+    const authenticate = vi.fn(async () => {
+      throw new Error("The actor tier must not run for workspace switching.");
+    });
+    const identify = vi.fn(async () => identity);
+    const switchWorkspace = vi.fn(async () => ({
+      workspaceId,
+      organizationId: "org_next",
+      brainId: "brain_general",
+    }));
+    const consume = vi.fn(async () => ({ allowed: true, retryAfterSeconds: 0 }));
+    const app = testApp(fakeRepository(), {
+      authenticate,
+      identify,
+      rateLimiter: { consume } as ApiRateLimiter,
+      workspaceControl: { ...fakeWorkspaceControl(), switch: switchWorkspace },
+    });
+
+    const response = await app.request(`/v1/workspaces/${workspaceId}/switch`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${compactJwt({ client_id: "client_mobile" })}` },
+    });
+
+    expect(response.status).toBe(200);
+    expect(switchWorkspace).toHaveBeenCalledWith(identity, workspaceId);
+    expect(consume).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: "user_mobile",
+        bucket: "workspace-switch",
+        limit: 60,
+      }),
+    );
+    expect(authenticate).not.toHaveBeenCalled();
+  });
+
   it("routes onboarding through verified identity without the onboarded actor gate", async () => {
     const identity = {
       userId: "user_mid_onboarding",
@@ -3810,6 +3905,7 @@ describe("canonical Hono API", () => {
       activeWorkspaceId: null,
       activeBrainId: null,
       method: "session" as const,
+      credentialKind: "browser_cookie" as const,
       refreshedSessionCookie: "wos-session=refreshed; Path=/; HttpOnly",
     };
     const authenticate = vi.fn(async () => {
@@ -4114,6 +4210,7 @@ function testApp(
       activeWorkspaceId: actor.workspaceId,
       activeBrainId: null,
       method: actor.authenticationMethod,
+      credentialKind: "browser_cookie" as const,
     }),
     defaultModel: "provider/default",
     ...overrides,
@@ -4122,6 +4219,11 @@ function testApp(
 
 async function responseBody(response: Response | Promise<Response>) {
   return (await response).text();
+}
+
+function compactJwt(payload: Record<string, unknown>) {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "RS256", typ: "JWT" })}.${encode(payload)}.signature`;
 }
 
 function rawHttpResponse(port: number, path: string) {

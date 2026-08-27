@@ -129,16 +129,19 @@ export function createIdentityService(input: {
       workos,
       db,
     });
+    const isOrganizationlessBearer =
+      identity.credentialKind !== "browser_cookie" && !identity.organizationId;
     const first = workspaces[0];
-    const active = first
-      ? (workspaces.find(
-          (entry) =>
-            identity.organizationId &&
-            entry.workspace.workosOrganizationId === identity.organizationId,
-        ) ??
-        workspaces.find((entry) => entry.workspace.id === identity.activeWorkspaceId) ??
-        first)
-      : null;
+    const active =
+      !isOrganizationlessBearer && first
+        ? (workspaces.find(
+            (entry) =>
+              identity.organizationId &&
+              entry.workspace.workosOrganizationId === identity.organizationId,
+          ) ??
+          workspaces.find((entry) => entry.workspace.id === identity.activeWorkspaceId) ??
+          first)
+        : null;
     const brains = active
       ? await listAccessibleBrains(
           { userWorkosId: identity.userId, workspaceId: active.workspace.id },

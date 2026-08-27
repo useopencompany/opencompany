@@ -41,7 +41,9 @@ contracts include:
   runner relay token/URL, cron relay secret, opencompany PostHog, the cached-client Blob adapter, and the
   temporary database suspect documented above; onboarding email settings remain optional. Web does
   not require Electric, model, billing, or provider-ingress credentials.
-- API: direct database, WorkOS session/OAuth and shared cookie domain, the credentialed browser
+- API: direct database, the primary WorkOS browser application, the dedicated
+  `WORKOS_MOBILE_CLIENT_ID` AuthKit session-bearer application, Connect OAuth issuer/audience, and
+  shared cookie domain, the credentialed browser
   origin allowlist, billing/Stripe, managed capabilities and cron reconciliation, Vercel AI Gateway
   for canonical Auto routing, Blob, Electric, Redis, the cron secret for the internal email
   persistence relays, the runner token/URL for the engine-auth control calls, and
@@ -60,6 +62,12 @@ Browser clients call the non-secret `NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN` directl
 authorized read models. Server Components use the server-only `OPENCOMPANY_API_ORIGIN`. Configure both
 origins, the shared `WORKOS_COOKIE_DOMAIN`, and API `API_BROWSER_ORIGINS`. Chat recovery is
 fix-forward as documented in [Chat operations](./chat-operations.md).
+
+`WORKOS_MOBILE_CLIENT_ID` is public but server-owned configuration in prod `/api`. It identifies a
+dedicated AuthKit application in the same WorkOS environment as `WORKOS_CLIENT_ID`, allowing users
+and organizations to remain shared while the API selects a fixed mobile session-token verifier.
+Future mobile builds expose the same value as `EXPO_PUBLIC_WORKOS_CLIENT_ID`; neither variable is a
+client secret. Do not copy the mobile client ID into the web runtime unless web gains a real reader.
 
 `CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.

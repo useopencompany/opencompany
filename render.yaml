@@ -19,6 +19,8 @@ services:
         sync: false
       - key: WORKOS_CLIENT_ID
         sync: false
+      - key: WORKOS_MOBILE_CLIENT_ID
+        sync: false
       - key: WORKOS_API_KEY
         sync: false
       - key: WORKOS_COOKIE_PASSWORD
