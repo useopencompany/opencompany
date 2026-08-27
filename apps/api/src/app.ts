@@ -1840,7 +1840,19 @@ export function createApiApp(input: CreateApiAppInput) {
       }
       const params = c.req.valid("param");
       const query = c.req.valid("query");
-      if (params.readModel.startsWith("brain-")) {
+      if (params.readModel !== "task-activities-v1" && query.taskId) {
+        throw new ApiError(400, "invalid_request", "taskId is not valid for this read model.");
+      }
+      if (params.readModel === "task-activities-v1") {
+        if (!query.taskId || query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "taskId is required and other resource identifiers are not valid for this read model.",
+          );
+        }
+        await input.tasks.getTask(actor, query.taskId);
+      } else if (params.readModel.startsWith("brain-")) {
         if (query.conversationId || !query.brainId) {
           throw new ApiError(
             400,
@@ -1939,6 +1951,7 @@ export function createApiApp(input: CreateApiAppInput) {
         readModel: params.readModel,
         ...(query.conversationId ? { conversationId: query.conversationId } : {}),
         ...(query.brainId ? { brainId: query.brainId } : {}),
+        ...(query.taskId ? { taskId: query.taskId } : {}),
         requestUrl: new URL(c.req.url),
       }) as never;
     },

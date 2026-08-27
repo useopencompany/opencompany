@@ -1965,6 +1965,7 @@ export const streamReadModelRoute = createRoute({
     query: z.object({
       conversationId: ResourceIdSchema.optional(),
       brainId: ResourceIdSchema.optional(),
+      taskId: ResourceIdSchema.optional(),
       offset: z.string().optional(),
       handle: z.string().optional(),
       live: z.string().optional(),

@@ -1,6 +1,27 @@
 import type { LegacyTaskDto, TaskReadModel } from "@opencompany/protocol";
-import { describe, expect, it } from "vitest";
-import { legacyTaskDtoToRow, taskReadModelToRow } from "./headless-task-collections";
+import { createCollection } from "@tanstack/react-db";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  getHeadlessTaskActivities,
+  legacyTaskDtoToRow,
+  taskReadModelToRow,
+} from "./headless-task-collections";
+
+vi.mock("@tanstack/electric-db-collection", () => ({
+  electricCollectionOptions: vi.fn((options) => options),
+}));
+
+vi.mock("@tanstack/react-db", () => ({
+  createCollection: vi.fn((options) => ({
+    options,
+    utils: { awaitTxId: vi.fn(async () => undefined) },
+  })),
+}));
+
+vi.mock("./headless-chat-api", () => ({
+  createHeadlessChatApiFetch: vi.fn(() => fetch),
+  headlessChatApiBaseUrl: vi.fn(() => "https://api.example.test"),
+}));
 
 const canonicalTask: TaskReadModel = {
   id: "task_1",
@@ -22,6 +43,28 @@ const canonicalTask: TaskReadModel = {
 };
 
 describe("headless Task presentation adapters", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("uses one versioned activity shape per Task", () => {
+    const first = getHeadlessTaskActivities("task/1");
+    const second = getHeadlessTaskActivities("task/1");
+
+    expect(first).toBe(second);
+    expect(createCollection).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        first as unknown as {
+          options: { id: string; shapeOptions: { url: string } };
+        }
+      ).options,
+    ).toMatchObject({
+      id: "headless-task-activities:v1:task%2F1",
+      shapeOptions: {
+        url: "https://api.example.test/v1/read-models/task-activities-v1?taskId=task%2F1",
+      },
+    });
+  });
+
   it("projects canonical metadata without exposing execution persistence", () => {
     expect(taskReadModelToRow(canonicalTask)).toMatchObject({
       id: "task_1",

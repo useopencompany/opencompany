@@ -1184,9 +1184,10 @@ export class PostgresChatRepository implements ChatRepository {
   async cancelRun(input: { actor: Actor; runId: string }) {
     const now = this.options.now?.() ?? new Date();
     const eventId = (this.options.ids ?? defaultIds).event();
+    const activityId = `task_activity_${randomUUID()}`;
     const [row] = await this.rows<{ status: LegacyRunStatus; replayed: boolean }>(sql`
       WITH authorized AS MATERIALIZED (
-        SELECT run.id, task.id AS task_id
+        SELECT run.id, task.id AS task_id, task.status AS task_status
         FROM goat.codex_chat_turns AS run
         JOIN goat.codex_chat_sessions AS runtime ON runtime.id = run.codex_chat_session_id
         JOIN goat.chat_sessions AS chat ON chat.id = run.chat_session_id
@@ -1290,6 +1291,23 @@ export class PostgresChatRepository implements ChatRepository {
           AND task.status IN ('queued', 'running')
         RETURNING task.id
       ),
+      status_changed_activity AS MATERIALIZED (
+        INSERT INTO goat.task_activities (
+          id, task_id, author, author_workos_id, kind, body, metadata, created_at
+        )
+        SELECT
+          ${activityId}, task.id, 'user', ${input.actor.userId}, 'status_changed',
+          'Stopped by user.',
+          jsonb_build_object(
+            'fromStatus', authorized.task_status,
+            'toStatus', 'canceled',
+            'runId', authorized.id
+          ),
+          ${now}
+        FROM canceled_task AS task
+        JOIN authorized ON authorized.task_id = task.id
+        RETURNING id
+      ),
       aborted_message AS (
         UPDATE goat.chat_messages AS message
         SET debug_trace = COALESCE(
@@ -1332,7 +1350,8 @@ export class PostgresChatRepository implements ChatRepository {
         COALESCE((SELECT changed.status FROM changed), run.status) AS status,
         NOT EXISTS (SELECT 1 FROM changed) AS replayed,
         (SELECT count(*) FROM notified) AS "notifyCount",
-        (SELECT count(*) FROM canceled_capabilities) AS "capabilityCancelCount"
+        (SELECT count(*) FROM canceled_capabilities) AS "capabilityCancelCount",
+        (SELECT count(*) FROM status_changed_activity) AS "taskActivityCount"
       FROM goat.codex_chat_turns AS run
       JOIN authorized ON authorized.id = run.id
     `);

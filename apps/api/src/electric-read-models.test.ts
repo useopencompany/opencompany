@@ -1036,6 +1036,73 @@ describe("Electric read models", () => {
     ]);
   });
 
+  it("scopes Task activities to one authorized Task and projects only timeline fields", async () => {
+    let upstreamUrl = "";
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        upstreamUrl = String(input);
+        return Response.json([
+          {
+            headers: { operation: "insert" },
+            key: '"task_activity_1"',
+            value: {
+              id: "task_activity_1",
+              task_id: "task_1",
+              author: "system",
+              author_workos_id: null,
+              kind: "run_finished",
+              body: "Launch brief ready.",
+              metadata: JSON.stringify({
+                runId: "run_1",
+                disposition: "done",
+                stepIndex: 0,
+                stepCount: 1,
+              }),
+              created_at: "2026-08-11 10:01:00+00",
+              workspace_id: "must-not-cross",
+            },
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "task-activities-v1",
+      taskId: "task_1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/task-activities-v1?taskId=task_1&table=goat.users&where=true",
+      ),
+    });
+
+    const requestedUrl = new URL(upstreamUrl);
+    expect(requestedUrl.searchParams.get("table")).toBe("goat.task_activities");
+    expect(requestedUrl.searchParams.get("where")).toBe('"task_id" = $1');
+    expect(requestedUrl.searchParams.get("params[1]")).toBe("task_1");
+    expect(await response.json()).toEqual([
+      {
+        headers: { operation: "insert" },
+        key: '"task_activity_1"',
+        value: {
+          id: "task_activity_1",
+          taskId: "task_1",
+          author: "system",
+          authorWorkosId: null,
+          kind: "run_finished",
+          body: "Launch brief ready.",
+          metadata: {
+            runId: "run_1",
+            disposition: "done",
+            stepIndex: 0,
+            stepCount: 1,
+          },
+          createdAt: "2026-08-11T10:01:00.000Z",
+        },
+      },
+    ]);
+  });
+
   it("projects Workflow and schedule shapes without leaking tenancy or physical trigger fields", async () => {
     const requestedUrls: URL[] = [];
     const rowsByTable: Record<string, Record<string, unknown>> = {

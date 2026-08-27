@@ -1,12 +1,19 @@
 "use client";
 
-import { type LegacyTaskDto, type TaskReadModel, TaskReadModelSchema } from "@opencompany/protocol";
+import {
+  type LegacyTaskDto,
+  type TaskActivityReadModel,
+  TaskActivityReadModelSchema,
+  type TaskReadModel,
+  TaskReadModelSchema,
+} from "@opencompany/protocol";
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import type { TaskRow } from "./task-collections";
 
 const tasksByScope = new Map<string, ReturnType<typeof createTasks>>();
+const activitiesByTask = new Map<string, ReturnType<typeof createTaskActivities>>();
 
 function createTasks(scopeKey: string) {
   return createCollection(
@@ -27,6 +34,28 @@ export function getHeadlessTasks(scopeKey: string) {
   if (cached) return cached;
   const collection = createTasks(scopeKey);
   tasksByScope.set(scopeKey, collection);
+  return collection;
+}
+
+function createTaskActivities(taskId: string) {
+  return createCollection(
+    electricCollectionOptions({
+      id: `headless-task-activities:v1:${encodeURIComponent(taskId)}`,
+      schema: TaskActivityReadModelSchema,
+      shapeOptions: {
+        url: `${headlessChatApiBaseUrl()}/v1/read-models/task-activities-v1?taskId=${encodeURIComponent(taskId)}`,
+        fetchClient: createHeadlessChatApiFetch(),
+      },
+      getKey: (row) => row.id,
+    }),
+  );
+}
+
+export function getHeadlessTaskActivities(taskId: string) {
+  const cached = activitiesByTask.get(taskId);
+  if (cached) return cached;
+  const collection = createTaskActivities(taskId);
+  activitiesByTask.set(taskId, collection);
   return collection;
 }
 
@@ -100,3 +129,4 @@ function canonicalUiStatus(status: TaskReadModel["status"]) {
 }
 
 export type HeadlessTaskReadModel = TaskReadModel;
+export type HeadlessTaskActivityReadModel = TaskActivityReadModel;

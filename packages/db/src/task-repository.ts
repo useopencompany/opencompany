@@ -429,6 +429,7 @@ export class PostgresTaskRepository implements TaskRepository {
     const runtimeId = ids.runtime();
     const runId = ids.run();
     const eventId = ids.event();
+    const activityId = `task_activity_${randomUUID()}`;
     const now = this.options.now?.() ?? new Date();
     const assistantCreatedAt = new Date(now.getTime() + 1);
     const initialMessageContent =
@@ -575,6 +576,22 @@ export class PostgresTaskRepository implements TaskRepository {
           JOIN created_conversation AS conversation ON conversation.id = winner.conversation_id
           RETURNING *
         ),
+        created_activity AS MATERIALIZED (
+          INSERT INTO goat.task_activities (
+            id, task_id, author, author_workos_id, kind, metadata, created_at
+          )
+          SELECT
+            ${activityId}, task.id, 'user', ${input.actor.userId}, 'created',
+            jsonb_strip_nulls(jsonb_build_object(
+              'source', task.source,
+              'workflowId', task.workflow_id,
+              'scheduleId', task.schedule_id,
+              'scheduledFor', task.scheduled_for
+            )),
+            ${now}
+          FROM created_task AS task
+          RETURNING id
+        ),
         selected_task AS MATERIALIZED (
           SELECT created.*
           FROM created_task AS created
@@ -686,7 +703,11 @@ export class PostgresTaskRepository implements TaskRepository {
           reservation.transaction_id AS "transactionId",
           reservation.command_id <> ${commandId} AS replayed,
           CASE
-            WHEN reservation.command_id <> ${commandId} OR EXISTS (SELECT 1 FROM inserted_run)
+            WHEN reservation.command_id <> ${commandId}
+              OR (
+                EXISTS (SELECT 1 FROM inserted_run)
+                AND EXISTS (SELECT 1 FROM created_activity)
+              )
               THEN true
             ELSE jsonb_array_length(jsonb_build_object('reason', 'unmaterialized')) = 0
           END AS materialized,
