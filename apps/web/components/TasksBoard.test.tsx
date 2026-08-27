@@ -364,6 +364,10 @@ describe("TasksBoardRoute", () => {
 
   it("filters tasks by their workflow and keeps non-workflow tasks out of the result", async () => {
     const user = userEvent.setup();
+    const workflowNames = {
+      "ship-feature": "Ship feature",
+      "morning-briefing": "Morning briefing",
+    };
     appDataMock.taskRows = [
       taskRow({
         id: "ship-feature",
@@ -380,19 +384,23 @@ describe("TasksBoardRoute", () => {
       taskRow({ id: "ad-hoc", name: "Research competitors", status: "running" }),
     ];
 
-    render(
-      <TasksBoardRoute
-        workflowNames={{
-          "ship-feature": "Ship feature",
-          "morning-briefing": "Morning briefing",
-        }}
-      />,
-    );
+    const view = render(<TasksBoardRoute workflowNames={workflowNames} />);
 
     await user.click(screen.getByRole("combobox", { name: "Filter tasks by workflow" }));
     await user.click(await screen.findByRole("option", { name: "#Ship feature" }));
 
     expect(screen.getByText("Add workflow filtering")).toBeInTheDocument();
+    expect(screen.queryByText("Prepare the morning briefing")).not.toBeInTheDocument();
+    expect(screen.queryByText("Research competitors")).not.toBeInTheDocument();
+
+    appDataMock.taskRows = appDataMock.taskRows.filter(
+      (task) => task.workflow_id !== "ship-feature",
+    );
+    view.rerender(<TasksBoardRoute workflowNames={workflowNames} />);
+
+    expect(screen.getByRole("combobox", { name: "Filter tasks by workflow" })).toHaveTextContent(
+      "#Ship feature",
+    );
     expect(screen.queryByText("Prepare the morning briefing")).not.toBeInTheDocument();
     expect(screen.queryByText("Research competitors")).not.toBeInTheDocument();
 

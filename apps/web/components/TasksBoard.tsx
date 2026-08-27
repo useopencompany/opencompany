@@ -106,20 +106,16 @@ export function TasksBoardRoute({
       .filter((task) => !task.archivedAt)
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   }, [taskRows]);
-  const workflowOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(activeTasks.flatMap((task) => (task.workflowId ? [task.workflowId] : []))),
-        (workflowId) => ({
-          id: workflowId,
-          label: workflowSourceLabel(workflowId, workflowNames),
-        }),
-      ).toSorted((a, b) => a.label.localeCompare(b.label)),
-    [activeTasks, workflowNames],
-  );
-  const workflowFilterId = workflowOptions.some((workflow) => workflow.id === selectedWorkflowId)
-    ? selectedWorkflowId
-    : null;
+  const workflowOptions = useMemo(() => {
+    const workflowIds = new Set(
+      activeTasks.flatMap((task) => (task.workflowId ? [task.workflowId] : [])),
+    );
+    if (selectedWorkflowId) workflowIds.add(selectedWorkflowId);
+    return Array.from(workflowIds, (workflowId) => ({
+      id: workflowId,
+      label: workflowSourceLabel(workflowId, workflowNames),
+    })).toSorted((a, b) => a.label.localeCompare(b.label));
+  }, [activeTasks, selectedWorkflowId, workflowNames]);
   const columns = useMemo(() => {
     const cutoffMs = timeRange === "all" ? null : nowMs - TASK_TIME_RANGE_MS[timeRange];
     const grouped: Record<TaskBoardColumn, TaskView[]> = {
@@ -130,7 +126,7 @@ export function TasksBoardRoute({
     };
 
     for (const task of activeTasks) {
-      if (workflowFilterId !== null && task.workflowId !== workflowFilterId) continue;
+      if (selectedWorkflowId !== null && task.workflowId !== selectedWorkflowId) continue;
       const column = taskBoardColumn(task);
       // Only the terminal columns are date-filtered so a stalled in-progress
       // or in-review task never disappears just because it's old.
@@ -141,7 +137,7 @@ export function TasksBoardRoute({
       grouped[column].push(task);
     }
     return grouped;
-  }, [activeTasks, workflowFilterId, timeRange, nowMs]);
+  }, [activeTasks, selectedWorkflowId, timeRange, nowMs]);
 
   const selectedTask = selectedTaskId
     ? (activeTasks.find((task) => task.id === selectedTaskId) ?? null)
@@ -168,8 +164,8 @@ export function TasksBoardRoute({
               {workflowOptions.length > 0 ? (
                 <Select
                   value={
-                    workflowFilterId
-                      ? `${WORKFLOW_FILTER_PREFIX}${workflowFilterId}`
+                    selectedWorkflowId
+                      ? `${WORKFLOW_FILTER_PREFIX}${selectedWorkflowId}`
                       : ALL_TASKS_FILTER_VALUE
                   }
                   onValueChange={(value) =>
@@ -185,8 +181,8 @@ export function TasksBoardRoute({
                     className="h-7 w-[160px] shrink-0 border-border-subtle bg-surface px-2 text-[11.5px] text-ink shadow-none"
                   >
                     <SelectValue>
-                      {workflowFilterId
-                        ? workflowSourceLabel(workflowFilterId, workflowNames)
+                      {selectedWorkflowId
+                        ? workflowSourceLabel(selectedWorkflowId, workflowNames)
                         : "All tasks"}
                     </SelectValue>
                   </SelectTrigger>
