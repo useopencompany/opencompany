@@ -1,11 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE,
-  PluginDetail,
-  PluginsSettings,
-} from "./PluginSettings";
+import { LINEAR_PLUGIN_SOURCE, PluginDetail, PluginsSettings } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 
@@ -18,6 +15,7 @@ vi.mock("@/lib/headless-knowledge-commands", () => ({
   enableHeadlessPlugin: vi.fn(),
   importHeadlessPlugin: vi.fn(),
   previewHeadlessPluginImport: vi.fn(),
+  refreshHeadlessPluginMcp: vi.fn(),
   revokeHeadlessPluginMcp: vi.fn(),
 }));
 
@@ -54,6 +52,7 @@ const plugin = {
       envKeys: ["PRIVATE_TOKEN"],
     },
   ],
+  remoteMcpServers: [],
   installReport: {
     ignoredManifestFields: ["futureField"],
     skills: [
@@ -135,7 +134,7 @@ describe("Plugin settings", () => {
     expect(screen.getByText(/1 skill · updated/i)).toBeInTheDocument();
   });
 
-  it("shows the single Linear card before installation", () => {
+  it("offers the immutable official Linear package before installation", async () => {
     render(<PluginsSettings plugins={[]} canEdit />);
 
     expect(screen.getByRole("link", { name: /linear/i })).toHaveAttribute(
@@ -143,8 +142,12 @@ describe("Plugin settings", () => {
       "/settings/plugins/linear",
     );
     expect(screen.getByText("Not installed")).toBeInTheDocument();
-    expect(screen.getByText(LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
+    expect(screen.getByText("Official package · ready to install")).toBeInTheDocument();
+    expect(LINEAR_PLUGIN_SOURCE).toMatch(
+      /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/linear$/u,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Install" }));
+    expect(screen.getByDisplayValue(LINEAR_PLUGIN_SOURCE)).toBeInTheDocument();
   });
 
   it("shows the exact MCP approval boundary without exposing environment values", () => {

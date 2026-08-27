@@ -911,6 +911,7 @@ describe("canonical Hono API", () => {
     const install = vi.fn(async () => ({ plugin: installation, idempotentReplay: false }));
     const {
       stdioServers: _stdioServers,
+      remoteMcpServers: _remoteMcpServers,
       files: _pluginFiles,
       skills: _pluginSkills,
       ...pluginListFields
@@ -974,7 +975,20 @@ describe("canonical Hono API", () => {
     expect(JSON.stringify(importedBody)).not.toContain("secret-value");
 
     await expect(app.request("/v1/plugins")).resolves.toMatchObject({ status: 200 });
-    await expect(app.request("/v1/plugins/quality-tools")).resolves.toMatchObject({ status: 200 });
+    const inspected = await app.request("/v1/plugins/quality-tools");
+    expect(inspected.status).toBe(200);
+    await expect(inspected.json()).resolves.toMatchObject({
+      data: {
+        remoteMcpServers: [
+          {
+            name: "remote",
+            discoveryStatus: "stale",
+            tools: [{ name: "list_issues" }],
+            lastDiscoveryError: "Provider discovery timed out.",
+          },
+        ],
+      },
+    });
     await expect(
       app.request("/v1/plugins/quality-tools/mcp/approve", {
         method: "POST",
@@ -5003,6 +5017,33 @@ function fakePluginInstallation(): PluginInstallation {
         command: "./server",
         args: [],
         env: { PRIVATE_TOKEN: "secret-value" },
+      },
+    ],
+    remoteMcpServers: [
+      {
+        name: "remote",
+        type: "streamable-http",
+        connectionProvider: "quality-tools",
+        capabilities: [
+          { id: "read", label: "Read tools", defaultMode: "on", tools: ["list_issues"] },
+        ],
+        tools: [
+          {
+            name: "list_issues",
+            description: "List issues.",
+            classification: {
+              capabilityId: "read",
+              capabilityLabel: "Read tools",
+              defaultMode: "on",
+              bucket: "read",
+              curated: true,
+            },
+          },
+        ],
+        discoveryStatus: "stale",
+        discoveredAt: createdAt,
+        refreshAfter: createdAt,
+        lastDiscoveryError: "Provider discovery timed out.",
       },
     ],
     installReport: {

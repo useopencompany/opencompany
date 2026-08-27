@@ -397,7 +397,6 @@ function countWorkspaceConnected(integrations: IntegrationState) {
   return (
     (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
-    (integrationStatus(integrations.linear) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.posthog) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
     (integrations.infisical.connected ? 1 : 0) +
@@ -449,7 +448,6 @@ function IntegrationCards({
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
-            <IntegrationCardRow integration={integrations.linear} />
             <IntegrationCardRow integration={integrations.posthog} />
             <IntegrationCardRow integration={integrations.stripe} canConnect={isWorkspaceAdmin} />
             <IntegrationProviderGroupCard

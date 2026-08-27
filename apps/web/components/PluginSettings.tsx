@@ -82,11 +82,9 @@ type PluginReportView = {
 };
 
 export const LINEAR_PLUGIN_NAME = "linear";
-// The loader intentionally supports public, unauthenticated sources only. Keep installation gated
-// until the in-tree package has a stable public home; do not ship a private or branch-lived URL.
-export const LINEAR_PLUGIN_SOURCE: string | null = null;
-export const LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE =
-  "Installation will be available when the official public Linear plugin is published.";
+// The public repository is the reviewed trust boundary. Keep this source pinned to a full commit.
+export const LINEAR_PLUGIN_SOURCE =
+  "https://github.com/useopencompany/plugins/tree/775df7a9a37f5585b9b87a26533ba6ed1035f1dc/linear";
 
 export function PluginsSettings({
   plugins,
@@ -135,7 +133,7 @@ export function PluginsSettings({
             <span className="mt-1 block text-[11.5px] leading-4 text-ink-subtle">
               {linearPlugin
                 ? `${linearPlugin.skillCount} ${linearPlugin.skillCount === 1 ? "skill" : "skills"} · updated ${formatRelativeTime(linearPlugin.updatedAt)}`
-                : LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE}
+                : "Official package · ready to install"}
             </span>
           </span>
         </Link>
@@ -147,19 +145,13 @@ export function PluginsSettings({
             Manage
           </Link>
         ) : canEdit ? (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!LINEAR_PLUGIN_SOURCE}
-            title={LINEAR_PLUGIN_SOURCE ? undefined : LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE}
-            onClick={() => setInstalling(true)}
-          >
+          <Button variant="outline" size="sm" onClick={() => setInstalling(true)}>
             Install
           </Button>
         ) : null}
       </div>
 
-      {installing && LINEAR_PLUGIN_SOURCE ? (
+      {installing ? (
         <InstallPluginDialog
           initialUrl={LINEAR_PLUGIN_SOURCE}
           expectedName={LINEAR_PLUGIN_NAME}

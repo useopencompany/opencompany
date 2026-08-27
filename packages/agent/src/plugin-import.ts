@@ -9,7 +9,7 @@ import {
   type ResolvedPluginPackage,
 } from "@opencompany/core";
 
-const TRUSTED_CAPABILITY_SOURCES = ["useopencompany/opencompany-experimental"] as const;
+const TRUSTED_CAPABILITY_SOURCES = ["useopencompany/plugins"] as const;
 
 export function createPluginImportResolver(): PluginImportResolver {
   return { resolve: resolvePluginImport };

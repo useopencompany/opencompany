@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import type { PluginInstallationDto } from "@opencompany/protocol";
+import type { PluginInstallationDto, PluginRemoteMcpServerDto } from "@opencompany/protocol";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,10 +7,11 @@ import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   type LinearAccountsState,
   LinearPluginDetailView,
+  linearToolsStateFromPlugin,
   type PluginToolsState,
   uncuratedPluginToolGroups,
 } from "./LinearPluginSettings";
-import { LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE } from "./PluginSettings";
+import { LINEAR_PLUGIN_SOURCE } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
@@ -22,6 +23,7 @@ const commands = vi.hoisted(() => ({
   enableHeadlessPlugin: vi.fn(),
   importHeadlessPlugin: vi.fn(),
   previewHeadlessPluginImport: vi.fn(),
+  refreshHeadlessPluginMcp: vi.fn(),
   revokeHeadlessPluginMcp: vi.fn(),
 }));
 const accountActions = vi.hoisted(() => ({
@@ -45,9 +47,9 @@ const plugin = {
   manifest: { name: "Linear", description: "Plan and ship work with Linear." },
   source: {
     type: "github",
-    url: "https://github.com/useopencompany/opencompany-experimental",
-    ref: "feat/plugins-v2",
-    path: "plugins/linear",
+    url: "https://github.com/useopencompany/plugins",
+    ref: "a".repeat(40),
+    path: "linear",
     resolvedCommit: "a".repeat(40),
   },
   integrity: `sha256:${"b".repeat(64)}`,
@@ -62,6 +64,44 @@ const plugin = {
     },
   ],
   stdioServers: [],
+  remoteMcpServers: [
+    {
+      name: "linear",
+      type: "streamable-http",
+      connectionProvider: "linear",
+      capabilities: [
+        { id: "read", label: "Read Linear", defaultMode: "on", tools: ["list_issues"] },
+        { id: "write", label: "Manage issues", defaultMode: "ask", tools: ["save_issue"] },
+      ],
+      tools: [
+        {
+          name: "list_issues",
+          description: "Find issues in the connected workspace.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Read Linear",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "save_issue",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Manage issues",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-08-26T12:00:00.000Z",
+      refreshAfter: "2026-08-26T13:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
   installReport: {
     ignoredManifestFields: [],
     skills: [],
@@ -125,6 +165,13 @@ const toolsState: PluginToolsState = {
       ],
     },
   ],
+  discovery: {
+    status: "ready",
+    toolCount: 2,
+    discoveredAt: "2026-08-26T12:00:00.000Z",
+    refreshAfter: "2026-08-26T13:00:00.000Z",
+    lastDiscoveryError: null,
+  },
 };
 
 describe("Linear plugin settings", () => {
@@ -134,6 +181,7 @@ describe("Linear plugin settings", () => {
     for (const command of Object.values(commands)) command.mockReset();
     commands.archiveHeadlessPlugin.mockResolvedValue(undefined);
     commands.enableHeadlessPlugin.mockResolvedValue(undefined);
+    commands.refreshHeadlessPluginMcp.mockResolvedValue(plugin);
     toasts.error.mockReset();
     toasts.success.mockReset();
     accountActions.disconnectIntegrationAccountAction.mockClear();
@@ -166,7 +214,7 @@ describe("Linear plugin settings", () => {
     expect(screen.queryByText("read write")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /view source/i })).toHaveAttribute(
       "href",
-      `https://github.com/useopencompany/opencompany-experimental/tree/${"a".repeat(40)}/plugins/linear`,
+      `https://github.com/useopencompany/plugins/tree/${"a".repeat(40)}/linear`,
     );
 
     const readModes = screen.getByRole("group", { name: "Read Linear permission" });
@@ -217,7 +265,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Install Linear to add its skills.")).toBeInTheDocument();
   });
 
-  it("gates installation until the official package has a public source", () => {
+  it("offers installation from the pinned official package", () => {
     render(
       <LinearPluginDetailView
         pluginState={{ status: "ready", plugin: null }}
@@ -231,9 +279,62 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
-    expect(screen.getByText(new RegExp(LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE))).toBeVisible();
+    expect(screen.getByRole("button", { name: "Install" })).toBeEnabled();
+    expect(LINEAR_PLUGIN_SOURCE).toContain("/useopencompany/plugins/tree/");
     expect(commands.previewHeadlessPluginImport).not.toHaveBeenCalled();
+  });
+
+  it("refreshes discovery manually and reloads the server snapshot", async () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={accountsState}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(commands.refreshHeadlessPluginMcp).toHaveBeenCalledWith("linear"));
+    expect(toasts.success).toHaveBeenCalledWith("Linear tools refreshed.");
+    expect(router.refresh).toHaveBeenCalled();
+  });
+
+  it("maps the persisted discovery snapshot and surfaces a stale refresh error", () => {
+    const stalePlugin = {
+      ...plugin,
+      remoteMcpServers: plugin.remoteMcpServers.map((server: PluginRemoteMcpServerDto) => ({
+        ...server,
+        discoveryStatus: "stale" as const,
+        lastDiscoveryError: "Linear MCP returned 503.",
+      })),
+    } satisfies PluginInstallationDto;
+    const state = linearToolsStateFromPlugin(stalePlugin);
+    expect(state).toMatchObject({
+      status: "ready",
+      discovery: {
+        status: "stale",
+        toolCount: 2,
+        lastDiscoveryError: "Linear MCP returned 503.",
+      },
+      groups: [
+        { id: "read", tools: [{ id: "linear:list_issues", name: "List issues" }] },
+        { id: "write", tools: [{ id: "linear:save_issue", name: "Save issue" }] },
+      ],
+    });
+
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin: stalePlugin }}
+        accountsState={accountsState}
+        toolsState={state}
+        canEdit
+      />,
+    );
+    expect(screen.getByText("Stale")).toBeInTheDocument();
+    expect(screen.getByText(/Linear MCP returned 503\./u)).toBeInTheDocument();
+    expect(screen.getByText(/last successful tool snapshot remains available/i)).toBeVisible();
   });
 
   it("can re-enable a disabled installation", async () => {
@@ -303,7 +404,17 @@ describe("Linear plugin settings", () => {
       <LinearPluginDetailView
         pluginState={{ status: "ready", plugin: null }}
         accountsState={{ status: "ready", accounts: [], permissionConnection: null }}
-        toolsState={{ status: "ready", groups: [] }}
+        toolsState={{
+          status: "ready",
+          groups: [],
+          discovery: {
+            status: "pending",
+            toolCount: 0,
+            discoveredAt: null,
+            refreshAfter: null,
+            lastDiscoveryError: null,
+          },
+        }}
         canEdit
       />,
     );

@@ -240,14 +240,14 @@ describe("resolvePlugin", () => {
     expect(plugin.report.capabilities).toMatchObject({ present: true, status: "ignored" });
   });
 
-  it("loads the in-tree official Linear package cleanly through the shipped resolver", async () => {
-    const fixtureRoot = fileURLToPath(new URL("../../../plugins/linear", import.meta.url));
-    const files = await fixtureFiles(fixtureRoot, "plugins/linear");
+  it("loads the official Linear package fixture cleanly through the shipped resolver", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/linear", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "linear");
     const plugin = await resolvePlugin({
-      url: "useopencompany/opencompany-experimental",
-      selectedPath: "plugins/linear",
+      url: "useopencompany/plugins",
+      selectedPath: "linear",
       fetcher: fetcher(files),
-      trustedCapabilitySources: ["useopencompany/opencompany-experimental"],
+      trustedCapabilitySources: ["useopencompany/plugins"],
     });
 
     expect(plugin.manifest).toMatchObject({ name: "linear", version: "1.0.0" });

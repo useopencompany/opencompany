@@ -1664,6 +1664,48 @@ export const PluginSkillSummarySchema = z
   .strict()
   .openapi("PluginSkillSummary");
 
+export const PluginCapabilityDefinitionSchema = z
+  .object({
+    id: z.enum(["read", "write"]),
+    label: z.string().min(1).max(128),
+    defaultMode: z.enum(["on", "ask", "off"]),
+    tools: z.array(z.string().min(1).max(256)).max(512),
+  })
+  .strict()
+  .openapi("PluginCapabilityDefinition");
+
+export const PluginDiscoveredToolSchema = z
+  .object({
+    name: z.string().min(1).max(256),
+    description: z.string().max(4_096).optional(),
+    classification: z
+      .object({
+        capabilityId: z.enum(["read", "write"]),
+        capabilityLabel: z.string().min(1).max(128),
+        defaultMode: z.enum(["on", "ask", "off"]),
+        bucket: z.enum(["read", "write"]),
+        curated: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict()
+  .openapi("PluginDiscoveredTool");
+
+export const PluginRemoteMcpServerSchema = z
+  .object({
+    name: z.string().min(1).max(128),
+    type: z.enum(["streamable-http", "sse"]),
+    connectionProvider: z.string().min(1).max(64),
+    capabilities: z.array(PluginCapabilityDefinitionSchema).max(64),
+    tools: z.array(PluginDiscoveredToolSchema).max(512),
+    discoveryStatus: z.enum(["pending", "ready", "stale", "error"]),
+    discoveredAt: TimestampSchema.nullable(),
+    refreshAfter: TimestampSchema,
+    lastDiscoveryError: z.string().max(2_000).nullable(),
+  })
+  .strict()
+  .openapi("PluginRemoteMcpServer");
+
 const PluginBaseSchema = z
   .object({
     id: ResourceIdSchema,
@@ -1695,6 +1737,7 @@ export const PluginInstallationSchema = PluginBaseSchema.extend({
   files: z.array(PluginFileMetadataSchema).min(1).max(512),
   skills: z.array(PluginSkillSummarySchema),
   stdioServers: z.array(PluginStdioServerSchema),
+  remoteMcpServers: z.array(PluginRemoteMcpServerSchema),
 })
   .strict()
   .openapi("PluginInstallation");
@@ -4093,6 +4136,7 @@ export type CreateWorkspaceSkillBody = z.infer<typeof CreateWorkspaceSkillBodySc
 export type UpdateWorkspaceSkillBody = z.infer<typeof UpdateWorkspaceSkillBodySchema>;
 export type PluginManifestDto = z.infer<typeof PluginManifestSchema>;
 export type PluginSourceDto = z.infer<typeof PluginSourceSchema>;
+export type PluginRemoteMcpServerDto = z.infer<typeof PluginRemoteMcpServerSchema>;
 export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;
 export type PluginInstallationDto = z.infer<typeof PluginInstallationSchema>;
 export type PluginImportPreviewDto = z.infer<typeof PluginImportPreviewSchema>;

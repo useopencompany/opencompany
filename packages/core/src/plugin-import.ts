@@ -75,6 +75,25 @@ export type PluginGatewayDiscoveredTool = {
   };
 };
 
+export type PluginRemoteMcpDiscoveryStatus = "pending" | "ready" | "stale" | "error";
+
+export type PluginRemoteMcpDiscoveredTool = Pick<
+  PluginGatewayDiscoveredTool,
+  "name" | "description" | "classification"
+>;
+
+export type PluginRemoteMcpServer = {
+  name: string;
+  type: "streamable-http" | "sse";
+  connectionProvider: string;
+  capabilities: PluginCapabilityDefinition[];
+  tools: PluginRemoteMcpDiscoveredTool[];
+  discoveryStatus: PluginRemoteMcpDiscoveryStatus;
+  discoveredAt: Date | null;
+  refreshAfter: Date;
+  lastDiscoveryError: string | null;
+};
+
 export type PluginMcpServerReport = {
   name: string;
   // `unsupported` is retained for reports stored by the pre-gateway loader.
@@ -151,6 +170,7 @@ export type PluginInstallation = {
   files: SkillBundleFileMetadata[];
   skills: PluginSkillSummary[];
   stdioServers: PluginStdioServer[];
+  remoteMcpServers: PluginRemoteMcpServer[];
   installReport: PluginInstallReport;
   mcpApprovedIntegrity: string | null;
   createdAt: Date;
@@ -160,7 +180,7 @@ export type PluginInstallation = {
 
 export type PluginInstallationListItem = Omit<
   PluginInstallation,
-  "files" | "skills" | "stdioServers"
+  "files" | "skills" | "stdioServers" | "remoteMcpServers"
 > & {
   fileCount: number;
   skillCount: number;

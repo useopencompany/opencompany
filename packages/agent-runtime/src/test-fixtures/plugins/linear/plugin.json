@@ -7,7 +7,7 @@
     "name": "opencompany",
     "url": "https://opencompany.com"
   },
-  "repository": "https://github.com/useopencompany/opencompany-experimental/tree/feat/plugins-v2/plugins/linear",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/linear",
   "license": "MIT",
   "keywords": ["linear", "issues", "triage", "project-management"],
   "extensions": {
