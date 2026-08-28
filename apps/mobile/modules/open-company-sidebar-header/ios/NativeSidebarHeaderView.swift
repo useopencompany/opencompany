@@ -1,7 +1,7 @@
 import ExpoModulesCore
 import UIKit
 
-final class OpenCompanySidebarHeaderView: ExpoView, UISearchControllerDelegate, UISearchResultsUpdating {
+final class NativeSidebarHeaderView: ExpoView, UISearchControllerDelegate, UISearchResultsUpdating {
   let onHeaderHeightChange = EventDispatcher()
   let onSearchActiveChange = EventDispatcher()
   let onSearchPress = EventDispatcher()

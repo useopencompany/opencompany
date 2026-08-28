@@ -1,9 +1,9 @@
 Pod::Spec.new do |s|
-  s.name           = 'OpenCompanyChatComposer'
+  s.name           = 'NativeSidebarHeader'
   s.version        = '0.1.0'
-  s.summary        = 'Native SwiftUI chat composer for OpenCompany mobile'
-  s.description    = 'A Fabric-native, auto-sizing SwiftUI chat composer exposed through the Expo Modules API.'
-  s.author         = 'OpenCompany'
+  s.summary        = 'Native sidebar header for opencompany mobile'
+  s.description    = 'A native iOS sidebar header with system navigation items and scroll-edge effects.'
+  s.author         = 'opencompany'
   s.homepage       = 'https://github.com/useopencompany/opencompany-experimental'
   s.platforms      = {
     :ios => '26.0'

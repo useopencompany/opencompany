@@ -33,7 +33,7 @@ export default function CameraScreen() {
     hasRequestedPermissionRef.current = true;
     void until(requestPermission).then(([permissionError]) => {
       if (permissionError) {
-        Alert.alert("Camera Unavailable", "OpenCompany could not request camera access.");
+        Alert.alert("Camera Unavailable", "opencompany could not request camera access.");
       }
     });
   }, [permission, requestPermission]);
@@ -49,7 +49,7 @@ export default function CameraScreen() {
 
     if (captureError) {
       setIsTakingPhoto(false);
-      Alert.alert("Unable to Take Photo", "OpenCompany could not capture this photo.");
+      Alert.alert("Unable to Take Photo", "opencompany could not capture this photo.");
       return;
     }
 

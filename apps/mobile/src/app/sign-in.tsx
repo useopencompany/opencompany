@@ -33,7 +33,7 @@ export default function SignInScreen() {
   return (
     <View className="flex-1 items-center justify-center bg-background px-6">
       <View className="items-center">
-        <View accessible accessibilityLabel="OpenCompany" className="h-8 w-[195px]">
+        <View accessible accessibilityLabel="opencompany" className="h-8 w-[195px]">
           <StyledImage
             accessible={false}
             className="absolute inset-0 h-full w-full dark:opacity-0"

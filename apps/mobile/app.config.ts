@@ -16,7 +16,7 @@ export default {
     infoPlist: {
       CADisableMinimumFrameDurationOnPhone: true,
       NSPhotoLibraryAddUsageDescription:
-        "OpenCompany needs permission to save images from chat messages to your photo library.",
+        "opencompany needs permission to save images from chat messages to your photo library.",
     },
     config: {
       usesNonExemptEncryption: false,
@@ -27,7 +27,7 @@ export default {
     [
       "expo-image-picker",
       {
-        photosPermission: "Allow OpenCompany to access photos you choose to attach to messages.",
+        photosPermission: "Allow opencompany to access photos you choose to attach to messages.",
         cameraPermission: false,
         microphonePermission: false,
       },
@@ -35,7 +35,7 @@ export default {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow OpenCompany to use your camera to attach photos to messages.",
+        cameraPermission: "Allow opencompany to use your camera to attach photos to messages.",
         microphonePermission: false,
         recordAudioAndroid: false,
         barcodeScannerEnabled: false,

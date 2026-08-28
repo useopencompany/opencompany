@@ -21,7 +21,7 @@ private enum ComposerMetrics {
   static let keyboardWidthAnimationDuration = 0.25
 }
 
-final class OpenCompanyChatComposerViewProps: ExpoSwiftUI.ViewProps {
+final class NativeChatComposerViewProps: ExpoSwiftUI.ViewProps {
   @Field var disabled = false
   @Field var bottomInset: Double = 0
   @Field var accentColor: Color = .blue
@@ -48,8 +48,8 @@ private final class ComposerModel: ObservableObject {
   }
 }
 
-struct OpenCompanyChatComposerView: ExpoSwiftUI.View {
-  @ObservedObject var props: OpenCompanyChatComposerViewProps
+struct NativeChatComposerView: ExpoSwiftUI.View {
+  @ObservedObject var props: NativeChatComposerViewProps
   @StateObject private var model = ComposerModel()
   @FocusState private var isInputFocused: Bool
   @State private var isExpanded = false

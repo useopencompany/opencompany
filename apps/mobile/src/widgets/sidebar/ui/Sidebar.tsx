@@ -20,7 +20,7 @@ import wordmarkDark from "@/assets/images/wordmark-dark.png";
 import { StyledImage } from "@/shared/ui/styled-image";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import {
-  OpenCompanySidebarHeader,
+  NativeSidebarHeader,
   SIDEBAR_HEADER_INITIAL_HEIGHT,
 } from "../../../../modules/open-company-sidebar-header";
 
@@ -105,10 +105,10 @@ export function Sidebar() {
         ))}
       </ScrollView>
 
-      <OpenCompanySidebarHeader
+      <NativeSidebarHeader
         className="absolute inset-x-0 top-0 z-10"
         leading={
-          <View accessible accessibilityLabel="Open Company" className="h-6 w-[146px] -mt-2">
+          <View accessible accessibilityLabel="opencompany" className="h-6 w-[146px] -mt-2">
             <StyledImage
               accessible={false}
               className="absolute inset-0 h-full w-full dark:opacity-0"

@@ -12,7 +12,7 @@ interface SearchValueEvent {
   value: string;
 }
 
-export interface NativeOpenCompanySidebarHeaderViewProps extends ViewProps {
+export interface NativeSidebarHeaderViewProps extends ViewProps {
   onHeaderHeightChange?: (event: NativeSyntheticEvent<HeightEvent>) => void;
   onSearchActiveChange?: (event: NativeSyntheticEvent<SearchActiveEvent>) => void;
   onSearchPress?: () => void;

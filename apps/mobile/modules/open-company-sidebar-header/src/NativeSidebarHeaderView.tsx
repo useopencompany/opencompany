@@ -6,11 +6,9 @@ import { View } from "react-native";
 import Reanimated, { Keyframe } from "react-native-reanimated";
 import { withUniwind } from "uniwind";
 
-import type { NativeOpenCompanySidebarHeaderViewProps } from "./OpenCompanySidebarHeader.types";
+import type { NativeSidebarHeaderViewProps } from "./NativeSidebarHeader.types";
 
-const NativeView = requireNativeView<NativeOpenCompanySidebarHeaderViewProps>(
-  "OpenCompanySidebarHeader",
-);
+const NativeView = requireNativeView<NativeSidebarHeaderViewProps>("NativeSidebarHeader");
 const StyledNativeView = withUniwind(NativeView);
 
 // UIKit reports the actual bar height immediately after mount. This value only
@@ -30,7 +28,7 @@ const WORDMARK_EXITING = new Keyframe({
   100: { opacity: 0 },
 }).duration(100);
 
-export function OpenCompanySidebarHeader({
+export function NativeSidebarHeader({
   leading,
   onHeightChange,
   onSearchActiveChange,

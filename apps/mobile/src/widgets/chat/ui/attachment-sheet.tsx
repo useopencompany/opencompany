@@ -43,7 +43,7 @@ export default function AttachmentSheet() {
     );
 
     if (pickerError) {
-      Alert.alert("Unable to Open Photos", "OpenCompany could not open your photo library.");
+      Alert.alert("Unable to Open Photos", "opencompany could not open your photo library.");
       return;
     }
 
@@ -76,7 +76,7 @@ export default function AttachmentSheet() {
     );
 
     if (pickerError) {
-      Alert.alert("Unable to Open Files", "OpenCompany could not open the file picker.");
+      Alert.alert("Unable to Open Files", "opencompany could not open the file picker.");
       return;
     }
 

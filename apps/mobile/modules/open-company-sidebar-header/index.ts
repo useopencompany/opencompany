@@ -1,4 +1,4 @@
 export {
-  OpenCompanySidebarHeader,
+  NativeSidebarHeader,
   SIDEBAR_HEADER_INITIAL_HEIGHT,
-} from "./src/OpenCompanySidebarHeaderView";
+} from "./src/NativeSidebarHeaderView";
