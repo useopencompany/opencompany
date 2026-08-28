@@ -300,6 +300,59 @@ describe("AcpHarness", () => {
     },
   );
 
+  it("keeps a non-zero ACP adapter exit terminal", async () => {
+    let rejectInitialWatch: ((error: Error) => void) | null = null;
+    const initialWatch = new Promise<never>((_resolve, reject) => {
+      rejectInitialWatch = reject;
+    });
+    let onStdout: ((data: string) => void | Promise<void>) | null = null;
+    const exitError = Object.assign(new Error("ACP adapter exited with code 1."), {
+      name: "CommandExitError",
+      result: { exitCode: 1, stdout: "", stderr: "adapter crashed" },
+    });
+    const connect = vi.fn(async () => {
+      throw new Error("should not reconnect");
+    });
+    const kill = vi.fn(async () => true);
+    const run = vi.fn(
+      async (_command: string, options: { onStdout?: (data: string) => void | Promise<void> }) => {
+        onStdout = options.onStdout ?? null;
+        return { pid: 41, wait: () => initialWatch };
+      },
+    );
+    const sendStdin = vi.fn(async (_pid: number, data: string) => {
+      for (const line of data.split("\n").filter(Boolean)) {
+        const message = JSON.parse(line) as JsonRpcMessage;
+        if (message.method === "initialize") {
+          await onStdout?.(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { agentCapabilities: { loadSession: true } },
+            })}\n`,
+          );
+        } else if (message.method === "session/new") {
+          await onStdout?.(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { sessionId: "session_exit" },
+            })}\n`,
+          );
+        } else if (message.method === "session/prompt") {
+          rejectInitialWatch?.(exitError);
+        }
+      }
+    });
+    const sandbox = {
+      commands: { run, connect, sendStdin, kill },
+    } as unknown as SandboxHandle;
+
+    await expect(new AcpHarness().runTurn(harnessInput(sandbox))).rejects.toBe(exitError);
+    expect(connect).not.toHaveBeenCalled();
+    expect(kill).toHaveBeenCalledWith(41);
+  });
+
   it("defers the durable turn when every command-watch reconnect attempt fails", async () => {
     let rejectInitialWatch: ((error: Error) => void) | null = null;
     const initialWatch = new Promise<never>((_resolve, reject) => {

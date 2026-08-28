@@ -1,6 +1,6 @@
 import type { Harness } from "@opencompany/agent-runtime";
 import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
-import type { SandboxHandle } from "./sandbox";
+import { commandExitResult, type SandboxHandle } from "./sandbox";
 
 const ACP_REQUEST_TIMEOUT_MS = 30_000;
 const ACP_ABORT_POLL_INTERVAL_MS = 500;
@@ -611,9 +611,15 @@ class AcpJsonRpcClient {
       },
       (error) => {
         if (this.stopping || generation !== this.watchGeneration) return;
+        const watchError = asError(error);
+        if (commandExitResult(watchError)) {
+          this.fail(watchError);
+          return;
+        }
         // Application failures arrive as JSON-RPC error responses. A rejected command watch is
-        // therefore a transport failure regardless of the SDK error class or message spelling.
-        void this.reconnect(handle, generation, asError(error));
+        // therefore a transport failure regardless of the SDK error class or message spelling,
+        // except for an explicit non-zero adapter exit reported by the command handle itself.
+        void this.reconnect(handle, generation, watchError);
       },
     );
   }
