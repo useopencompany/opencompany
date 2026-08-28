@@ -1,4 +1,7 @@
-import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/agent/chat-agent";
+import {
+  TASK_SYSTEM_BLOCK,
+  TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
+} from "@opencompany/agent/chat-agent";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   CLOUD_CODING_ENGINE_CONFIG,
@@ -110,6 +113,7 @@ import {
   buildTaskTurnCompletion,
   closeTaskTurn,
   finalizeTaskResult,
+  orchestrateTaskFailure,
   prepareCodexTaskTurn,
   type TaskTurnContext,
 } from "./task-turn";
@@ -230,8 +234,16 @@ export async function runCodexChatTurn(input: {
       ) {
         await projector.interrupted(buildTaskTerminalProjection(taskContext));
       } else {
-        await projector.fail(errorMessage(effectiveError), {
-          taskCompletion: buildTaskTerminalProjection(taskContext),
+        const message = errorMessage(effectiveError);
+        const taskCompletion = await orchestrateTaskFailure({
+          context: taskContext,
+          error: message,
+          env,
+          session,
+          turn,
+        });
+        await projector.fail(message, {
+          taskCompletion,
         });
       }
       return "settled";
@@ -242,9 +254,18 @@ export async function runCodexChatTurn(input: {
 
   const auth = await loadCodexCliAuth(turn.userWorkosId);
   if (!auth) {
+    const taskCompletion = taskContext
+      ? await orchestrateTaskFailure({
+          context: taskContext,
+          error: CODEX_CHAT_REAUTH_MESSAGE,
+          env,
+          session,
+          turn,
+        })
+      : null;
     await (await bareProjector()).fail(CODEX_CHAT_REAUTH_MESSAGE, {
       sessionStatus: "failed",
-      ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
+      ...(taskCompletion ? { taskCompletion } : {}),
     });
     return "settled";
   }
@@ -283,8 +304,15 @@ export async function runCodexChatTurn(input: {
     const message = `Codex sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`;
     const projector = await bareProjector();
     if (taskContext) {
+      const taskCompletion = await orchestrateTaskFailure({
+        context: taskContext,
+        error: message,
+        env,
+        session,
+        turn,
+      });
       await projector.fail(message, {
-        taskCompletion: buildTaskTerminalProjection(taskContext),
+        taskCompletion,
       });
     } else {
       await projector.fail(message);
@@ -766,7 +794,7 @@ export async function runCodexChatTurn(input: {
         await checkAbort();
         reported = await closeTaskTurn({
           context: taskContext,
-          finalContent: rawResult,
+          run: { status: "completed", result: rawResult },
           env,
           session,
           turn,
@@ -793,15 +821,27 @@ export async function runCodexChatTurn(input: {
           taskCompletion: buildTaskTurnCompletion({
             context: taskContext,
             result: finalResult,
-            reportedOutcome: reported?.reportedOutcome,
-            outcomeComment: reported?.outcomeComment,
+            disposition:
+              reported?.disposition === "done" ||
+              reported?.disposition === "needs_attention" ||
+              reported?.disposition === "waiting"
+                ? reported.disposition
+                : null,
+            outcomeComment: reported?.comment,
           }),
         },
       );
     } else {
       if (taskContext) {
+        const taskCompletion = await orchestrateTaskFailure({
+          context: taskContext,
+          error: summary.error?.trim() || "Codex ended without a result.",
+          env,
+          session,
+          turn,
+        });
         await turnProjector.finalize(summary, {
-          taskCompletion: buildTaskTerminalProjection(taskContext),
+          taskCompletion,
         });
       } else {
         await turnProjector.finalize(summary);
@@ -896,8 +936,15 @@ export async function runCodexChatTurn(input: {
       const diagnostic = failureDiagnostic(executionStage, effectiveError, redact);
       const currentProjector = await activeProjector();
       if (taskContext) {
+        const taskCompletion = await orchestrateTaskFailure({
+          context: taskContext,
+          error: message,
+          env,
+          session,
+          turn,
+        });
         await currentProjector.fail(message, {
-          taskCompletion: buildTaskTerminalProjection(taskContext),
+          taskCompletion,
           failureDiagnostic: diagnostic,
         });
       } else {
@@ -1820,10 +1867,8 @@ function codexBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
   const codex = context.harnessSpec.codex;
   return [
     "",
-    "<background_task_run>",
-    "You are running autonomously as a background task. There is no interactive user to answer questions or approve steps. Work to completion with the tools available, then give a concise final result.",
+    TASK_SYSTEM_BLOCK,
     TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
-    context.harnessSpec.systemPrompt.trim() || null,
     codex?.repository
       ? `The planner selected GitHub repository ${codex.repository}. Work in that repository unless the task itself clearly requires otherwise.`
       : null,
@@ -1832,7 +1877,7 @@ function codexBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
       : codex?.createPullRequest === false
         ? "Do not open a pull request unless the task explicitly asks for one."
         : null,
-    "</background_task_run>",
+    context.harnessSpec.systemPrompt.trim() || null,
   ].filter((line): line is string => line !== null);
 }
 

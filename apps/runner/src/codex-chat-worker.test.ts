@@ -120,6 +120,7 @@ describe("claimNextCodexChatTurn", () => {
     expect(statement.match(/run_after IS NULL OR (?:turn|earlier)\.run_after <=/g)).toHaveLength(2);
     expect(statement).toContain("session.status <> 'closed'");
     expect(statement).toContain("chat.closed_at IS NULL");
+    expect(statement).toContain("task.status IN ('queued', 'running')");
   });
 
   it("fences queued turns on supported host-tool contract versions, bypassing reclaims", async () => {

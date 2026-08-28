@@ -48,6 +48,12 @@ import { useTaskSummary } from "@/lib/use-task-summary";
 import { type TaskViewMode, updateTaskViewModeAction } from "@/lib/user-preferences";
 
 const TERMINAL_TASK_STATUSES = new Set<TaskView["status"]>(["succeeded", "failed", "canceled"]);
+const SETTLED_TASK_STATUSES = new Set<TaskView["status"]>([
+  "waiting",
+  "succeeded",
+  "failed",
+  "canceled",
+]);
 const CAPPED_TASK_BOARD_COLUMNS = new Set<TaskBoardColumn>(["done", "canceled"]);
 export const TASK_BOARD_COLUMN_CAP = 50;
 const ALL_TASKS_FILTER_VALUE = "all";
@@ -623,9 +629,10 @@ function TaskBoardSheet({
     ? (schedules.find((candidate) => candidate.id === task.scheduleId) ?? null)
     : null;
   const terminal = TERMINAL_TASK_STATUSES.has(task.status);
+  const settled = SETTLED_TASK_STATUSES.has(task.status);
   const archivable = terminal && Boolean(task.sessionId);
-  const { summary, error: summaryError } = useTaskSummary(task.id, terminal);
-  const durationLabel = !terminal
+  const { summary, error: summaryError } = useTaskSummary(task.id, settled);
+  const durationLabel = !settled
     ? null
     : summary?.durationMs !== null && summary?.durationMs !== undefined
       ? formatTaskDurationMs(summary.durationMs)
@@ -634,7 +641,7 @@ function TaskBoardSheet({
         : null;
   const fallbackActivityEntries = buildTaskActivityEntries({
     task,
-    terminal,
+    settled,
     sourceLabel: taskSourceLabel(task, workflowNames),
     durationLabel,
   });
@@ -644,7 +651,7 @@ function TaskBoardSheet({
   );
   const activityEntries =
     durableActivityEntries.length > 0 ? durableActivityEntries : fallbackActivityEntries;
-  const pullRequestUrl = terminal
+  const pullRequestUrl = settled
     ? extractGitHubPullRequestUrl(task.result, task.outcomeComment)
     : null;
 
@@ -902,7 +909,11 @@ function buildDurableTaskActivityEntries(
         }
         return taskActivityEntry(
           activity,
-          disposition === "needs_attention" ? "Run finished — needs attention" : "Run finished",
+          disposition === "waiting"
+            ? "Run finished — waiting for you"
+            : disposition === "needs_attention"
+              ? "Run finished — needs attention"
+              : "Run finished",
           { meta },
         );
       }
@@ -956,12 +967,12 @@ function taskActivityMetadataNumber(metadata: Record<string, unknown>, key: stri
 
 function buildTaskActivityEntries({
   task,
-  terminal,
+  settled,
   sourceLabel,
   durationLabel,
 }: {
   task: TaskView;
-  terminal: boolean;
+  settled: boolean;
   sourceLabel: string;
   durationLabel: string | null;
 }): TaskActivityEntry[] {
@@ -978,7 +989,7 @@ function buildTaskActivityEntries({
     });
   }
 
-  if (!terminal) {
+  if (!settled) {
     if (task.updatedAt !== task.createdAt) {
       entries.push({
         id: "status",
@@ -989,7 +1000,15 @@ function buildTaskActivityEntries({
     return entries;
   }
 
-  if (task.status === "succeeded") {
+  if (task.status === "waiting") {
+    entries.push({
+      id: "waiting",
+      label: "Waiting for you",
+      timestamp: task.updatedAt,
+      meta: durationLabel ?? undefined,
+      body: task.result?.trim() || undefined,
+    });
+  } else if (task.status === "succeeded") {
     entries.push({
       id: "completed",
       label:

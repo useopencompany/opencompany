@@ -92,6 +92,7 @@ import {
   buildTaskTurnCompletion,
   closeTaskTurn,
   markTaskTurnRunning,
+  orchestrateTaskFailure,
   type TaskTurnContext,
 } from "./task-turn";
 import { loadWorkflowTaskSkillBundles } from "./workflow-skill-bundles";
@@ -178,11 +179,16 @@ export async function runProductChatTurn(input: {
       const message =
         "This workspace is out of credits. Hobby usage refreshes on the first of the month; Pro admins can add credits in Settings → Billing.";
       projection = { parts: [{ type: "text", text: message }] };
-      await projector.failed(
-        message,
-        projection,
-        input.taskContext ? buildTaskTerminalProjection(input.taskContext) : null,
-      );
+      const taskCompletion = input.taskContext
+        ? await orchestrateTaskFailure({
+            context: input.taskContext,
+            error: message,
+            env,
+            session,
+            turn,
+          })
+        : null;
+      await projector.failed(message, projection, taskCompletion);
       return "settled";
     }
   }
@@ -286,7 +292,7 @@ export async function runProductChatTurn(input: {
     const taskOutcome = input.taskContext
       ? await closeTaskTurn({
           context: input.taskContext,
-          finalContent: taskResult,
+          run: { status: "completed", result: taskResult },
           env,
           session,
           turn,
@@ -301,8 +307,13 @@ export async function runProductChatTurn(input: {
         ? buildTaskTurnCompletion({
             context: input.taskContext,
             result: taskResult,
-            reportedOutcome: taskOutcome?.reportedOutcome,
-            outcomeComment: taskOutcome?.outcomeComment,
+            disposition:
+              taskOutcome?.disposition === "done" ||
+              taskOutcome?.disposition === "needs_attention" ||
+              taskOutcome?.disposition === "waiting"
+                ? taskOutcome.disposition
+                : null,
+            outcomeComment: taskOutcome?.comment,
           })
         : null,
     );
@@ -343,11 +354,16 @@ export async function runProductChatTurn(input: {
       error_name: effectiveError instanceof Error ? effectiveError.name : typeof effectiveError,
       error: message,
     });
-    await projector.failed(
-      message,
-      projection,
-      input.taskContext ? buildTaskTerminalProjection(input.taskContext) : null,
-    );
+    const taskCompletion = input.taskContext
+      ? await orchestrateTaskFailure({
+          context: input.taskContext,
+          error: message,
+          env,
+          session,
+          turn,
+        })
+      : null;
+    await projector.failed(message, projection, taskCompletion);
     return "settled";
   } finally {
     await abortWatcher.stop();
