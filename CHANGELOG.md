@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-08-27
+
+### Added
+- Skills and Plugins are here: install reusable skills and plugins into your workspace so opencompany follows your own playbooks and reaches more tools, each one sandboxed and version-pinned so an update never quietly changes what a skill does (#1416) — @louis.
+- Run a skill in chat by typing `/` and picking it, the same way you'd reach for a slash command (#1420) — @opencompany-bot.
+- Write your own skill without leaving opencompany: a new "New skill" flow in Settings takes a name, description, and instructions, and gives it its own `/` command (#1436) — @louis.
+- Turn a good conversation into a reusable skill straight from chat — just ask, and opencompany saves it for your workspace (#1449) — @opencompany-bot.
+- Your wiki can now build itself from the tools you already use: connect Gmail, Slack, Granola, Jamie, Linear, or GitHub, choose what's in scope, and a librarian keeps the right pages written and organized for you (#1419) — @louis.
+- Filter the Tasks board and list by workflow, so you can focus on the runs from one workflow at a time (#1452) — @opencompany-bot.
+- A Docs link now sits in the account menu, putting the documentation one click away (#1441) — @opencompany-bot.
+
+### Fixed
+- Signing in reliably opens your workspace again for accounts tied to older organizations, instead of dead-ending on a "We couldn't open this page" error after you pick a workspace (#1415) — @louis.
+- Launch several background chats back to back: the composer clears and refocuses the moment each one is accepted, instead of waiting on the last one to finish (#1424) — @opencompany-bot.
+- A brief network blip while a reply is streaming no longer surfaces an error — the chat reconnects and picks up where it left off (#1425) — @opencompany-bot.
+- Pinned and recent chats in the sidebar now appear immediately on load instead of shifting into place a moment later (#1427) — @opencompany-bot.
+- Coding sessions are steadier: they recover when a command stream drops mid-run, and tool calls keep showing their real input and output instead of a blank placeholder (#1445, #1417) — @opencompany-bot.
+- Starting a new chat right as we ship an update no longer occasionally fails — your first message goes through (#1421) — @louis.
+
 ## [1.18.0] - 2026-08-24
 
 ### Added

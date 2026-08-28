@@ -329,6 +329,16 @@ function SidebarAccountMenu() {
           <span className="truncate tracking-[-0.005em]">Changelog</span>
         </Link>
         <a
+          href="https://docs.opencompany.cloud"
+          target="_blank"
+          rel="noreferrer noopener"
+          onClick={() => setOpen(false)}
+          className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <BookOpen size={14} strokeWidth={1.75} className="shrink-0 text-ink/60" />
+          <span className="truncate tracking-[-0.005em]">Docs</span>
+        </a>
+        <a
           href="/auth/sign-out"
           onClick={() => setOpen(false)}
           className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"

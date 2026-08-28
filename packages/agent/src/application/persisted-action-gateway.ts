@@ -3,7 +3,7 @@ import {
   type ActionGatewayRequest,
   type ActionGatewayResponse,
   type ActionHostGatewayRequest,
-  CHAT_HOST_TOOL_CONTRACT_VERSION,
+  CHAT_HOST_TOOL_CONTRACT_VERSIONS,
 } from "@opencompany/agent-runtime";
 import {
   claimActionAsyncRun,
@@ -222,7 +222,7 @@ async function loadCodexActionContext(
         eq(codexChatSessions.id, request.sessionId),
         inArray(codexChatSessions.hostToolContractVersion, [
           ...ACTION_HOST_TOOL_CONTRACT_VERSIONS,
-          CHAT_HOST_TOOL_CONTRACT_VERSION,
+          ...CHAT_HOST_TOOL_CONTRACT_VERSIONS,
         ]),
         eq(codexChatTurns.status, "running"),
       ),

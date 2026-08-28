@@ -44,6 +44,8 @@ import { type TaskViewMode, updateTaskViewModeAction } from "@/lib/user-preferen
 const TERMINAL_TASK_STATUSES = new Set<TaskView["status"]>(["succeeded", "failed", "canceled"]);
 const CAPPED_TASK_BOARD_COLUMNS = new Set<TaskBoardColumn>(["done", "canceled"]);
 export const TASK_BOARD_COLUMN_CAP = 50;
+const ALL_TASKS_FILTER_VALUE = "all";
+const WORKFLOW_FILTER_PREFIX = "workflow:";
 
 type TaskTimeRange = "7d" | "30d" | "90d" | "all";
 
@@ -80,6 +82,7 @@ export function TasksBoardRoute({
 }) {
   const { featureFlags, taskRows, tasksReady } = useAppData();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<TaskTimeRange>("7d");
   const [viewMode, setViewModeState] = useState<TaskViewMode>(initialViewMode);
   const [, startViewModeTransition] = useTransition();
@@ -97,11 +100,23 @@ export function TasksBoardRoute({
       }
     });
   }
-  const { activeTasks, columns } = useMemo(() => {
+  const activeTasks = useMemo(() => {
     const liveTasks = taskRows.map(taskRowToView);
-    const nonArchived = liveTasks
+    return liveTasks
       .filter((task) => !task.archivedAt)
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }, [taskRows]);
+  const workflowOptions = useMemo(() => {
+    const workflowIds = new Set(
+      activeTasks.flatMap((task) => (task.workflowId ? [task.workflowId] : [])),
+    );
+    if (selectedWorkflowId) workflowIds.add(selectedWorkflowId);
+    return Array.from(workflowIds, (workflowId) => ({
+      id: workflowId,
+      label: workflowSourceLabel(workflowId, workflowNames),
+    })).toSorted((a, b) => a.label.localeCompare(b.label));
+  }, [activeTasks, selectedWorkflowId, workflowNames]);
+  const columns = useMemo(() => {
     const cutoffMs = timeRange === "all" ? null : nowMs - TASK_TIME_RANGE_MS[timeRange];
     const grouped: Record<TaskBoardColumn, TaskView[]> = {
       in_progress: [],
@@ -110,7 +125,8 @@ export function TasksBoardRoute({
       canceled: [],
     };
 
-    for (const task of nonArchived) {
+    for (const task of activeTasks) {
+      if (selectedWorkflowId !== null && task.workflowId !== selectedWorkflowId) continue;
       const column = taskBoardColumn(task);
       // Only the terminal columns are date-filtered so a stalled in-progress
       // or in-review task never disappears just because it's old.
@@ -120,8 +136,9 @@ export function TasksBoardRoute({
       }
       grouped[column].push(task);
     }
-    return { activeTasks: nonArchived, columns: grouped };
-  }, [taskRows, timeRange, nowMs]);
+    return grouped;
+  }, [activeTasks, selectedWorkflowId, timeRange, nowMs]);
+
   const selectedTask = selectedTaskId
     ? (activeTasks.find((task) => task.id === selectedTaskId) ?? null)
     : null;
@@ -133,7 +150,7 @@ export function TasksBoardRoute({
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-5 sm:px-6">
         <div className="flex w-full max-w-[1480px] flex-col gap-8 pb-24 pt-14 sm:pt-20">
-          <header className="flex items-start justify-between gap-4">
+          <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex flex-col gap-1.5">
               <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
                 Tasks
@@ -142,8 +159,49 @@ export function TasksBoardRoute({
                 Background runs from workflows, schedules, and chat.
               </p>
             </div>
-            <div className="mt-1 flex shrink-0 items-center gap-2">
+            <div className="mt-1 flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
               <TaskViewModeToggle value={viewMode} onChange={setViewMode} />
+              {workflowOptions.length > 0 ? (
+                <Select
+                  value={
+                    selectedWorkflowId
+                      ? `${WORKFLOW_FILTER_PREFIX}${selectedWorkflowId}`
+                      : ALL_TASKS_FILTER_VALUE
+                  }
+                  onValueChange={(value) =>
+                    setSelectedWorkflowId(
+                      typeof value === "string" && value.startsWith(WORKFLOW_FILTER_PREFIX)
+                        ? value.slice(WORKFLOW_FILTER_PREFIX.length)
+                        : null,
+                    )
+                  }
+                >
+                  <SelectTrigger
+                    aria-label="Filter tasks by workflow"
+                    className="h-7 w-[160px] shrink-0 border-border-subtle bg-surface px-2 text-[11.5px] text-ink shadow-none"
+                  >
+                    <SelectValue>
+                      {selectedWorkflowId
+                        ? workflowSourceLabel(selectedWorkflowId, workflowNames)
+                        : "All tasks"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="min-w-[180px]">
+                    <SelectItem value={ALL_TASKS_FILTER_VALUE} className="text-[12px]">
+                      All tasks
+                    </SelectItem>
+                    {workflowOptions.map((workflow) => (
+                      <SelectItem
+                        key={workflow.id}
+                        value={`${WORKFLOW_FILTER_PREFIX}${workflow.id}`}
+                        className="text-[12px]"
+                      >
+                        {workflow.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
               <Select
                 value={timeRange}
                 onValueChange={(value) => {
@@ -889,11 +947,13 @@ function TaskStatusDot({ task, className = "" }: { task: TaskView; className?: s
 }
 
 function taskSourceLabel(task: TaskView, workflowNames: Record<string, string>): string {
-  if (task.workflowId) {
-    const workflowName = workflowNames[task.workflowId]?.trim();
-    if (!workflowName) return `#${task.workflowId}`;
-    return workflowName.startsWith("#") ? workflowName : `#${workflowName}`;
-  }
+  if (task.workflowId) return workflowSourceLabel(task.workflowId, workflowNames);
   if (task.scheduleId) return "Scheduled";
   return "Ad-hoc";
+}
+
+function workflowSourceLabel(workflowId: string, workflowNames: Record<string, string>): string {
+  const workflowName = workflowNames[workflowId]?.trim();
+  if (!workflowName) return `#${workflowId}`;
+  return workflowName.startsWith("#") ? workflowName : `#${workflowName}`;
 }

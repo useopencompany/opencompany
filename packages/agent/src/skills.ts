@@ -1,13 +1,21 @@
-import { assertSafeRelativePath } from "@opencompany/agent-runtime";
+import { assertSafeRelativePath, createWorkspaceSkillArtifact } from "@opencompany/agent-runtime";
 import { isValidBrainId } from "@opencompany/brain";
-import { createSkillFileChunk, type SkillFileChunk } from "@opencompany/core";
+import {
+  type Actor,
+  createSkillFileChunk,
+  type SkillAuthoringInput,
+  type SkillFileChunk,
+  SkillImportApplicationService,
+} from "@opencompany/core";
 import { getDb } from "@opencompany/db/client";
 import type { PooledDb } from "@opencompany/db/pool";
 import {
   activateAndListChatSkillBundles,
+  PostgresSkillBundleRepository,
   readChatSkillBundleFile,
 } from "@opencompany/db/skill-bundle-repository";
 import { resolveWorkspaceSkillCatalog } from "@opencompany/db/skill-catalog";
+import { createSkillImportResolver } from "./skill-import";
 
 export const MAX_CHAT_SKILLS = 16;
 export const MAX_CHAT_SKILL_BYTES = 1024 * 1024;
@@ -37,6 +45,13 @@ export type ChatSessionSkillSnapshot = {
   name: string;
   description: string;
   instructions: string;
+};
+
+export type CreatedWorkspaceSkill = {
+  created: true;
+  name: string;
+  command: string;
+  bundleId: string;
 };
 
 export class SkillMentionError extends Error {
@@ -71,6 +86,29 @@ export async function listSkillCatalog(
 ): Promise<SkillCatalogItem[]> {
   const catalog = await resolveWorkspaceSkillCatalog(db, { workspaceId });
   return catalog.skills.map(({ id, name, description }) => ({ id, name, description }));
+}
+
+export async function createWorkspaceSkillForActor(input: {
+  actor: Actor;
+  idempotencyKey: string;
+  skill: SkillAuthoringInput;
+  db?: Db;
+}): Promise<CreatedWorkspaceSkill> {
+  const service = new SkillImportApplicationService(
+    new PostgresSkillBundleRepository(input.db ?? getDb()),
+    createSkillImportResolver(),
+    { create: createWorkspaceSkillArtifact },
+  );
+  const { installation } = await service.create(input.actor, {
+    ...input.skill,
+    idempotencyKey: input.idempotencyKey,
+  });
+  return {
+    created: true,
+    name: installation.name,
+    command: `/${installation.name}`,
+    bundleId: installation.bundle.id,
+  };
 }
 
 export async function resolveSkillMentions(input: {

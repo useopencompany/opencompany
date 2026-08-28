@@ -50,6 +50,14 @@ const admin: Actor = {
   authenticationMethod: "session",
 };
 const member: Actor = { ...admin, role: "member" };
+const identity = {
+  userId: "user_1",
+  organizationId: null,
+  activeWorkspaceId: null,
+  activeBrainId: null,
+  method: "session" as const,
+  credentialKind: "authkit_bearer" as const,
+};
 
 const workspace = {
   id: "goat_ws_current",
@@ -200,26 +208,43 @@ describe("workspace control service", () => {
     );
   });
 
-  it("authorizes workspace switches through the actor's memberships", async () => {
+  it("authorizes workspace switches through the verified identity's memberships", async () => {
     const service = createWorkspaceControlService({
       db: dbWithWorkspace(),
       workos: workos as never,
     });
-    await expect(service.switch(member, "goat_ws_current")).resolves.toEqual({
+    await expect(service.switch(identity, "goat_ws_current")).resolves.toEqual({
       workspaceId: "goat_ws_current",
       organizationId: "org_current",
       brainId: "brain_general",
     });
-    await expect(service.switch(member, "goat_ws_foreign")).rejects.toMatchObject({ status: 404 });
+    await expect(service.switch(identity, "goat_ws_foreign")).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
+  it.each([
+    ["missing", null],
+    ["incomplete", { onboardedAt: null }],
+  ])("rejects workspace switches for %s local accounts", async (_case, localUser) => {
+    const service = createWorkspaceControlService({
+      db: dbWithWorkspace(localUser),
+      workos: workos as never,
+    });
+
+    await expect(service.switch(identity, workspace.id)).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(listWorkspacesForUser).not.toHaveBeenCalled();
   });
 });
 
-function dbWithWorkspace() {
+function dbWithWorkspace(user: { onboardedAt: Date | null } | null = { onboardedAt: new Date() }) {
   return {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
-          limit: vi.fn(async () => [workspace]),
+          limit: vi.fn(async () => (user ? [{ ...workspace, ...user }] : [])),
         })),
       })),
     })),

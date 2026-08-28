@@ -46,6 +46,7 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   );
 
   assertExcludes([...groups.api.required, ...groups.api.optional], ["BETTER_STACK_ERRORS_DSN"]);
+  assertIncludes(groups.api.required, ["WORKOS_MOBILE_CLIENT_ID"]);
 
   assertIncludes(groups.runner.required, [
     "BLOB_READ_WRITE_TOKEN",
