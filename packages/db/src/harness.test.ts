@@ -25,6 +25,37 @@ describe("getWorkflowHarnessSkillBundleIds", () => {
     );
   });
 
+  it("allows an explicitly skill-free legacy Workflow Harness", () => {
+    const harness = workflowHarness() as HarnessSpec & {
+      workflow: Record<string, unknown>;
+    };
+    harness.workflow.skillIds = [];
+    delete (harness.workflow as { skillBundleIds?: unknown }).skillBundleIds;
+    for (const step of harness.workflow.steps as Array<Record<string, unknown>>) {
+      step.skillIds = [];
+      delete step.skillBundleIds;
+    }
+
+    expect(getWorkflowHarnessSkillBundleIds(harness)).toEqual([]);
+  });
+
+  it("rejects copied legacy Skill content even when its references are empty", () => {
+    const harness = workflowHarness() as HarnessSpec & {
+      workflow: Record<string, unknown>;
+    };
+    harness.workflow.skillIds = [];
+    delete (harness.workflow as { skillBundleIds?: unknown }).skillBundleIds;
+    harness.workflow.skillSnapshots = [{ id: "legacy", instructions: "Do legacy work." }];
+    for (const step of harness.workflow.steps as Array<Record<string, unknown>>) {
+      step.skillIds = [];
+      delete step.skillBundleIds;
+    }
+
+    expect(() => getWorkflowHarnessSkillBundleIds(harness)).toThrow(
+      "Workflow Task Harness is missing immutable Skill bundle IDs.",
+    );
+  });
+
   it("reads Plugin snapshots without enabling Plugins for legacy Harnesses", () => {
     const harness = workflowHarness();
     harness.workflow!.steps![0]!.pluginSkillBundleIds = ["skill_bundle_research_v1"];
