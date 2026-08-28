@@ -41,7 +41,12 @@ const SHARED_DATABASE_MODE =
 const PERSONAL_ENV_PATH = ".env.override.local";
 // .nvmrc pins this project to Node 22.
 const MIN_NODE = [20, 20, 0];
-const WORKOS_ENV_KEYS = ["WORKOS_CLIENT_ID", "WORKOS_API_KEY", "WORKOS_COOKIE_PASSWORD"];
+const WORKOS_ENV_KEYS = [
+  "WORKOS_CLIENT_ID",
+  "WORKOS_MOBILE_CLIENT_ID",
+  "WORKOS_API_KEY",
+  "WORKOS_COOKIE_PASSWORD",
+];
 const LINEAR_ENV_KEYS = [
   "LINEAR_API_KEY",
   "OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID",
@@ -1043,7 +1048,7 @@ function assertDocker() {
       "  runtime is required.\n\n" +
       `${action}\n\n` +
       "  One-time: also enable \x1b[1mlogical replication\x1b[0m on the Neon project\n" +
-      "  (console → Settings) so Electric can replicate. See docs/stack/electric-sync.md.\n",
+      "  (console → Settings) so Electric can replicate. See docs/electric-sync.md.\n",
   );
   exit(1);
 }

@@ -1,6 +1,7 @@
 import { executePersistedChatHostTool } from "@opencompany/agent/application/persisted-host-tools";
 import type {
   BrowserToolRunner,
+  CreateWorkspaceSkillRunner,
   SkillDispatcher,
   StartedTask,
   WorkflowDispatcher,
@@ -14,15 +15,24 @@ import type {
   ScheduleTaskToolInput,
   ScheduleTaskToolOutput,
 } from "@opencompany/agent/chat-ui";
+import {
+  activateAndListChatSessionSkills,
+  createWorkspaceSkillForActor,
+  listSkillCatalog,
+  readChatSkillFile,
+  resolveSkillMentions,
+} from "@opencompany/agent/skills";
 import type {
   ChatHostBootstrap,
   ChatHostToolGatewayRequest,
   ChatHostToolGatewayResponse,
 } from "@opencompany/agent-runtime";
+import { assertSafeRelativePath } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { HarnessEngine } from "@opencompany/db/product-schema";
 import { executeApiWikiCommand } from "./api-wiki-client";
 import { wakeCodexChatWorker } from "./codex-chat-worker";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { planHarnessForTask } from "./harness";
 import { getHarnessPlannerContextForRunner } from "./harness-planner";
@@ -56,6 +66,7 @@ export type HostTools = {
   deleteTaskSchedule?: (
     input: DeleteTaskScheduleToolInput,
   ) => Promise<DeleteTaskScheduleToolOutput>;
+  createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   runWiki?: (input: Record<string, unknown>, context: { toolCallId: string }) => Promise<unknown>;
   skills?: SkillDispatcher;
   workflows?: WorkflowDispatcher;
@@ -107,6 +118,16 @@ export async function loadHostTools(
             call("delete_task_schedule", input) as Promise<DeleteTaskScheduleToolOutput>,
         }
       : {}),
+    ...(bootstrap.skillToolsEnabled
+      ? {
+          createWorkspaceSkill: (input, toolContext) =>
+            call(
+              "create_workspace_skill",
+              input,
+              toolContext.toolCallId,
+            ) as ReturnType<CreateWorkspaceSkillRunner>,
+        }
+      : {}),
     ...(bootstrap.wikiEnabled
       ? {
           runWiki: (input: Record<string, unknown>, wikiContext: { toolCallId: string }) =>
@@ -150,6 +171,12 @@ export async function loadHostTools(
                   },
                 };
               }
+            },
+            readFile: (input) => {
+              assertSafeRelativePath(input.path);
+              return call("read_skill_file", input) as Promise<
+                Awaited<ReturnType<NonNullable<SkillDispatcher["readFile"]>>>
+              >;
             },
           },
         }
@@ -203,6 +230,21 @@ async function callGateway(
   const response = await execute({
     request,
     ...(includeTurnSignal ? { signal: context.signal } : {}),
+    dependencies: {
+      resolveSkillMentions: (input) => resolveSkillMentions({ ...input, db: getDb() }),
+      listSkillCatalog: (workspaceId) => listSkillCatalog(workspaceId, getDb()),
+      activateAndListSkills: ({ conversationId, messageId, workspaceId, skills }) =>
+        activateAndListChatSessionSkills({
+          chatSessionId: conversationId,
+          activatedMessageId: messageId,
+          workspaceId,
+          skills,
+          db: getDb(),
+        }),
+      readSkillFile: ({ conversationId, ...input }) =>
+        readChatSkillFile({ ...input, chatSessionId: conversationId, db: getDb() }),
+      createWorkspaceSkill: (input) => createWorkspaceSkillForActor({ ...input, db: getDb() }),
+    },
     runtime: {
       wakeTaskWorker: wakeCodexChatWorker,
       defer: (work) => {
@@ -246,7 +288,8 @@ function asBootstrap(value: unknown): ChatHostBootstrap {
     !isRecord(value) ||
     !Array.isArray(value.skills) ||
     !Array.isArray(value.activeSkills) ||
-    !Array.isArray(value.browserProfiles)
+    !Array.isArray(value.browserProfiles) ||
+    typeof value.skillToolsEnabled !== "boolean"
   ) {
     throw new Error("The Chat host-tool gateway returned an invalid bootstrap response.");
   }

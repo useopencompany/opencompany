@@ -243,8 +243,8 @@ type ActiveMentionToken = {
   start: number;
   end: number;
   query: string;
-  // "@" opens engine/skill mentions; "#" opens task/workflow mentions.
-  sigil: "@" | "#";
+  // "@" opens engine mentions, "/" opens Skills, and "#" opens tasks/workflows.
+  sigil: "@" | "/" | "#";
 };
 
 type PendingChatFirstOutputMeasurement = {
@@ -359,6 +359,17 @@ export type TaskConversation = {
   activeRunId?: string | null;
 };
 
+// The chat identity Surface hands to a host when its selection changes locally
+// (route adoption, sidebar/command-palette switches, going home). Mirrors the
+// shape openChat() accepts.
+export type SurfaceChatSelection = {
+  id: string;
+  model: string;
+  engine?: ChatEngine;
+  codexComposerSettings?: CodexComposerSettings | null;
+  runtime?: ConversationRuntimeView | null;
+} | null;
+
 export function Surface({
   tasks,
   schedules = [],
@@ -375,6 +386,11 @@ export function Surface({
   userWorkosId = "",
   taskConversation = null,
   readOnlyNotice = null,
+  isActivePane = true,
+  onActivate,
+  onOpenChat,
+  onClosePane,
+  onConversationResolved,
 }: {
   tasks: readonly TaskView[];
   schedules?: readonly TaskScheduleView[];
@@ -394,6 +410,29 @@ export function Surface({
   taskConversation?: TaskConversation | null;
   // Bounded compatibility views may reuse transcript rendering without enabling mutations.
   readOnlyNotice?: string | null;
+  // Pane contract: lets a multi-instance host (e.g. a split-pane workspace) mount
+  // several Surfaces safely. Defaults reproduce today's single-instance behavior
+  // exactly, so existing call sites are unaffected.
+  //
+  // Only the active pane reacts to global keyboard shortcuts (Cmd/Ctrl+K, Escape),
+  // the Home-navigation event, window-level attachment drops, and route-driven
+  // chat changes. Inactive panes ignore all of these so several mounted Surfaces
+  // never fight over global input or the browser URL.
+  isActivePane?: boolean;
+  // Called when the user interacts with this pane in a way that should make it
+  // the active one (e.g. focusing or clicking inside it).
+  onActivate?: () => void;
+  // Called whenever this Surface's chat selection changes locally, so a host can
+  // keep a pane -> chat mapping in sync.
+  onOpenChat?: (chat: SurfaceChatSelection) => void;
+  // Called instead of Surface's own "go home" navigation when the user closes
+  // this pane's chat. Detaches the view without cancelling an active durable
+  // Run; stopping work remains an explicit Stop action. When omitted, Surface
+  // falls back to its current single-instance close behavior.
+  onClosePane?: () => void;
+  // Called when an optimistic chat id resolves to its durable id, so a host can
+  // update its pane -> chat mapping and, if this pane is focused, the URL.
+  onConversationResolved?: (resolution: { optimisticId: string; durableId: string }) => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -723,16 +762,19 @@ export function Surface({
           startedAtMs:
             currentTurn?.conversationId === conversationId ? currentTurn.startedAtMs : Date.now(),
         });
-        const acceptedPendingConversation = pendingNewSessionIdRef.current === conversationId;
+        const optimisticId = pendingNewSessionIdRef.current;
         setPersistedChatSessionId(conversationId);
-        if (acceptedPendingConversation) {
+        if (optimisticId && optimisticId === conversationId) {
           pendingNewSessionIdRef.current = null;
-          router.replace(chatHref(conversationId), { scroll: false });
+          // Only the active pane owns the browser URL; a host is told about the
+          // resolution regardless so it can update its own pane -> chat mapping.
+          if (isActivePane) router.replace(chatHref(conversationId), { scroll: false });
+          onConversationResolved?.({ optimisticId, durableId: conversationId });
         }
       }
       setEngineSubmitting(false);
     },
-    [replaceActiveTurn, router],
+    [isActivePane, onConversationResolved, replaceActiveTurn, router],
   );
   const handleHeadlessReconciled = useCallback(
     ({ conversationId }: Pick<HeadlessMessageAccepted, "conversationId">) =>
@@ -867,8 +909,10 @@ export function Surface({
     modelName: String(composerChatModel),
     // The Cmd+K compose view mounts a second composer with its own window-level drop
     // listener. Keep the main composer visible behind the modal, but let only the quick
-    // composer consume dropped files while that view is showing.
+    // composer consume dropped files while that view is showing. Inactive panes never
+    // claim window-level drops, so several mounted Surfaces don't fight over a drop.
     enabled:
+      isActivePane &&
       attachmentsEnabled &&
       !engineSubmitting &&
       !(newChatCommandOpen && commandPaletteView === "compose"),
@@ -896,19 +940,26 @@ export function Surface({
   });
   const clearComposerAttachments = composerAttachments.clearAttachments;
 
-  // Refetch the skill catalog on every mention-menu open (not once per mount): skills
+  // Refetch each catalog when its command menu opens (not once per mount): entries
   // created or edited since the last open must appear, and a transient fetch failure
   // must not blank the menu for the rest of the session — keep the previous catalog
   // and let the next open retry.
-  const skillMentionMenuOpen = Boolean(userWorkosId && mentionToken && skillMentionsEnabled);
+  const skillCommandMenuOpen = Boolean(
+    userWorkosId && mentionToken?.sigil === "/" && skillMentionsEnabled,
+  );
+  const workflowMentionMenuOpen = Boolean(
+    userWorkosId && mentionToken?.sigil === "#" && workflowMentionsEnabled,
+  );
   useEffect(() => {
-    if (!skillMentionMenuOpen) return;
+    if (!skillCommandMenuOpen && !workflowMentionMenuOpen) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      void fetchBrainSkillCatalog(controller.signal)
-        .then(setSkillCatalog)
-        .catch(() => {});
-      if (workflowMentionsEnabled) {
+      if (skillCommandMenuOpen) {
+        void fetchBrainSkillCatalog(controller.signal)
+          .then(setSkillCatalog)
+          .catch(() => {});
+      }
+      if (workflowMentionMenuOpen) {
         void fetchBrainWorkflowCatalog(controller.signal)
           .then(setWorkflowCatalog)
           .catch(() => {});
@@ -918,7 +969,7 @@ export function Surface({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [skillMentionMenuOpen, workflowMentionsEnabled]);
+  }, [skillCommandMenuOpen, workflowMentionMenuOpen]);
 
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   const liveTranscriptSessionId =
@@ -1267,15 +1318,7 @@ export function Surface({
   }, []);
 
   const openChat = useCallback(
-    (
-      chat: {
-        id: string;
-        model: string;
-        engine?: ChatEngine;
-        codexComposerSettings?: CodexComposerSettings | null;
-        runtime?: ConversationRuntimeView | null;
-      } | null,
-    ) => {
+    (chat: SurfaceChatSelection) => {
       cancelChatFirstOutputMeasurement();
       if (chatSessionId && isEngineChat) {
         const currentComposerState = currentCodexComposerUiState({
@@ -1331,6 +1374,7 @@ export function Surface({
       if (chat && consumePendingChatComposerFocus(chat.id)) {
         requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
       }
+      onOpenChat?.(chat);
     },
     [
       applyCodexComposerUiState,
@@ -1347,6 +1391,7 @@ export function Surface({
       codexReasoningEffort,
       input,
       isEngineChat,
+      onOpenChat,
       releaseAllOptimisticAttachmentPreviews,
       saveComposerDraft,
       setChatModelOverride,
@@ -1366,15 +1411,19 @@ export function Surface({
   const lastInitialChatIdRef = useRef(initialChatId);
   useEffect(() => {
     if (lastInitialChatIdRef.current === initialChatId) return;
+    // Inactive panes don't own the URL, so a route change caused by focusing a
+    // different pane must not silently swap this pane's chat out from under it.
+    if (!isActivePane) return;
     const frame = requestAnimationFrame(() => {
       lastInitialChatIdRef.current = initialChatId;
       if (initialChatId === chatSessionId) return;
       openChat(initialChat ?? null);
     });
     return () => cancelAnimationFrame(frame);
-  }, [chatSessionId, initialChat, initialChatId, openChat]);
+  }, [chatSessionId, initialChat, initialChatId, isActivePane, openChat]);
 
   useEffect(() => {
+    if (!isActivePane) return;
     const handleHomeNavigation = () => {
       openChat(null);
       setInput("");
@@ -1385,9 +1434,10 @@ export function Surface({
     };
     window.addEventListener(HOME_NAVIGATION_EVENT, handleHomeNavigation);
     return () => window.removeEventListener(HOME_NAVIGATION_EVENT, handleHomeNavigation);
-  }, [clearComposerAttachments, openChat]);
+  }, [clearComposerAttachments, isActivePane, openChat]);
 
   useEffect(() => {
+    if (!isActivePane) return;
     const handleChatComposerFocusRequest = (event: Event) => {
       const sessionId =
         event instanceof CustomEvent && typeof event.detail?.sessionId === "string"
@@ -1400,7 +1450,7 @@ export function Surface({
     window.addEventListener(CHAT_COMPOSER_FOCUS_EVENT, handleChatComposerFocusRequest);
     return () =>
       window.removeEventListener(CHAT_COMPOSER_FOCUS_EVENT, handleChatComposerFocusRequest);
-  }, []);
+  }, [isActivePane]);
 
   useLayoutEffect(() => {
     if (mode !== "chat" || !chatSessionId) return;
@@ -1499,6 +1549,7 @@ export function Surface({
   }, []);
 
   useEffect(() => {
+    if (!isActivePane) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
       if (key !== "k" || (!event.metaKey && !event.ctrlKey) || event.shiftKey || event.altKey) {
@@ -1511,7 +1562,7 @@ export function Surface({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [isActivePane]);
 
   const archiveTask = (task: TaskView) => {
     setOptimisticallyArchivedIds((current) => new Set(current).add(task.id));
@@ -1705,6 +1756,10 @@ export function Surface({
         setSelectedMentions(mentions);
         composerAttachments.setAttachments(pendingAttachments);
       };
+      const restoreDraftIfComposerIsEmpty = () => {
+        if (inputRef.current?.value.trim()) return;
+        restoreDraft();
+      };
 
       if (taskSpawningEnabled && hasAdHocTaskToken(messagePrompt)) {
         const description = descriptionFromAdHocTaskPrompt(messagePrompt);
@@ -1815,8 +1870,8 @@ export function Surface({
         setMentionToken(null);
         setSelectedMentions([]);
         prepareMainComposerFocusRestoreAfterBackgroundTask();
-        setBackgroundTaskSubmitting(true);
         composerAttachments.setAttachments([]);
+        refocusMainComposerAfterBackgroundTask();
         toast("Started a new chat in the background.");
 
         const engine = backgroundEngine;
@@ -1837,25 +1892,29 @@ export function Surface({
           engine: canonicalMessageEngine(engine, settings.settings),
           ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         })
-          .then(() => {
+          .then(({ completion }) => {
             revokeAttachmentPreviews(pendingAttachments);
-            if (!mountedRef.current) return;
-            router.refresh();
-            toast.success(`${config.label} is ready.`);
+            void completion
+              .then(() => {
+                if (!mountedRef.current) return;
+                router.refresh();
+                toast.success(`${config.label} is ready.`);
+              })
+              .catch(() => {
+                if (!mountedRef.current) return;
+                router.refresh();
+                toast.error(`${config.label} started, but live status updates were interrupted.`);
+              })
+              .finally(() => clearLocalChatState(newSessionId, "working"));
           })
           .catch((error) => {
             removeOptimisticChatSummary(newSessionId);
             clearLocalChatState(newSessionId, "working");
             if (!mountedRef.current) return;
-            restoreDraft();
+            restoreDraftIfComposerIsEmpty();
             toast.error(
               error instanceof Error ? error.message : `${config.label} could not start that turn.`,
             );
-          })
-          .finally(() => {
-            if (!mountedRef.current) return;
-            setBackgroundTaskSubmitting(false);
-            refocusMainComposerAfterBackgroundTask();
           });
         return;
       }
@@ -1866,8 +1925,8 @@ export function Surface({
       setMentionToken(null);
       setSelectedMentions([]);
       prepareMainComposerFocusRestoreAfterBackgroundTask();
-      setBackgroundTaskSubmitting(true);
       composerAttachments.setAttachments([]);
+      refocusMainComposerAfterBackgroundTask();
       toast("Started a new chat in the background.");
 
       const newSessionId = newOptimisticChatSessionId();
@@ -1885,23 +1944,27 @@ export function Surface({
         newSessionId,
         ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       })
-        .then(() => {
+        .then(({ completion }) => {
           revokeAttachmentPreviews(pendingAttachments);
-          if (!mountedRef.current) return;
-          router.refresh();
-          toast.success("Background chat is ready.");
+          void completion
+            .then(() => {
+              if (!mountedRef.current) return;
+              router.refresh();
+              toast.success("Background chat is ready.");
+            })
+            .catch(() => {
+              if (!mountedRef.current) return;
+              router.refresh();
+              toast.error("Background chat started, but live status updates were interrupted.");
+            })
+            .finally(() => clearLocalChatState(newSessionId, "working"));
         })
         .catch((error) => {
           removeOptimisticChatSummary(newSessionId);
-          if (!mountedRef.current) return;
-          restoreDraft();
-          toast.error(error instanceof Error ? error.message : "Could not start that chat.");
-        })
-        .finally(() => {
           clearLocalChatState(newSessionId, "working");
           if (!mountedRef.current) return;
-          setBackgroundTaskSubmitting(false);
-          refocusMainComposerAfterBackgroundTask();
+          restoreDraftIfComposerIsEmpty();
+          toast.error(error instanceof Error ? error.message : "Could not start that chat.");
         });
       return;
     }
@@ -2042,6 +2105,11 @@ export function Surface({
       setChatModelOverride(model);
       setChatSessionId(newSessionId);
       setPersistedChatSessionId(null);
+      onOpenChat?.({
+        id: newSessionId,
+        model: String(model),
+        engine: activeEngine ?? "opencompany",
+      });
     }
     if (newSessionId) {
       addOptimisticChatSummary({
@@ -2235,6 +2303,15 @@ export function Surface({
   };
 
   const closeChat = useCallback(() => {
+    // A pane-aware host owns detaching this pane and must not have an active
+    // Run cancelled just because the pane closed; stopping stays an explicit
+    // Stop action. Without a host, this is the single-instance "go home" path,
+    // which does cancel a foreground turn since there's no other view of it.
+    if (onClosePane) {
+      onClosePane();
+      requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
     if (isForegroundTurnWorking) {
       clearLocalActiveTurnState(chatSessionId);
       void headlessTransport.cancel(chatInstanceKey).catch(() => {});
@@ -2249,6 +2326,7 @@ export function Surface({
     clearLocalActiveTurnState,
     headlessTransport,
     isForegroundTurnWorking,
+    onClosePane,
     openChat,
     router,
     stop,
@@ -2318,7 +2396,7 @@ export function Surface({
   ]);
 
   useEffect(() => {
-    if (mode !== "chat") return;
+    if (mode !== "chat" || !isActivePane) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -2328,7 +2406,7 @@ export function Surface({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [closeChat, mode]);
+  }, [closeChat, isActivePane, mode]);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (mentionToken) {
@@ -2520,7 +2598,11 @@ export function Surface({
   };
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col items-center overflow-hidden">
+    <div
+      className="relative flex min-h-0 flex-1 flex-col items-center overflow-hidden"
+      onPointerDownCapture={onActivate}
+      onFocusCapture={onActivate}
+    >
       <Dialog
         open={newChatCommandOpen}
         onOpenChange={(open, eventDetails) => {
@@ -3421,17 +3503,22 @@ function QuickChatComposer({
     inputRef.current?.focus();
   }, [open, initialPrompt]);
 
-  // Mirrors the main composer: refetch the skill/workflow catalog on every mention-menu
-  // open so recently created skills/workflows show up.
-  const skillMentionMenuOpen = Boolean(userWorkosId && mentionToken);
+  // Mirrors the main composer: refetch each catalog whenever its menu opens so
+  // recently created Skills and workflows show up.
+  const skillCommandMenuOpen = Boolean(userWorkosId && mentionToken?.sigil === "/");
+  const workflowMentionMenuOpen = Boolean(
+    userWorkosId && mentionToken?.sigil === "#" && workflowMentionsEnabled,
+  );
   useEffect(() => {
-    if (!skillMentionMenuOpen) return;
+    if (!skillCommandMenuOpen && !workflowMentionMenuOpen) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      void fetchBrainSkillCatalog(controller.signal)
-        .then(setSkillCatalog)
-        .catch(() => {});
-      if (workflowMentionsEnabled) {
+      if (skillCommandMenuOpen) {
+        void fetchBrainSkillCatalog(controller.signal)
+          .then(setSkillCatalog)
+          .catch(() => {});
+      }
+      if (workflowMentionMenuOpen) {
         void fetchBrainWorkflowCatalog(controller.signal)
           .then(setWorkflowCatalog)
           .catch(() => {});
@@ -3441,7 +3528,7 @@ function QuickChatComposer({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [skillMentionMenuOpen, workflowMentionsEnabled]);
+  }, [skillCommandMenuOpen, workflowMentionMenuOpen]);
 
   useEffect(() => {
     const el = inputRef.current;
@@ -3829,10 +3916,19 @@ function QuickChatComposer({
           ...(mentions.some(isSkillMention) ? { mentions: mentions.filter(isSkillMention) } : {}),
         },
       })
-        .then(() => {
-          // Not gated on mountedRef: see the workflow branch above.
-          router.refresh();
-          toast.success(`${config.label} is ready.`);
+        .then(({ completion }) => {
+          if (mountedRef.current) setIsSubmitting(false);
+          void completion
+            .then(() => {
+              // Not gated on mountedRef: see the workflow branch above.
+              router.refresh();
+              toast.success(`${config.label} is ready.`);
+            })
+            .catch(() => {
+              router.refresh();
+              toast.error(`${config.label} started, but live status updates were interrupted.`);
+            })
+            .finally(() => clearLocalChatState(newSessionId, "working"));
         })
         .catch((error) => {
           removeOptimisticChatSummary(newSessionId);
@@ -3840,8 +3936,6 @@ function QuickChatComposer({
           toast.error(
             error instanceof Error ? error.message : `${config.label} could not start that turn.`,
           );
-        })
-        .finally(() => {
           if (mountedRef.current) setIsSubmitting(false);
         });
       return;
@@ -3874,17 +3968,24 @@ function QuickChatComposer({
       newSessionId,
       ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     })
-      .then(() => {
-        // Not gated on mountedRef: see the workflow branch above.
-        router.refresh();
-        toast.success("Background chat is ready.");
+      .then(({ completion }) => {
+        if (mountedRef.current) setIsSubmitting(false);
+        void completion
+          .then(() => {
+            // Not gated on mountedRef: see the workflow branch above.
+            router.refresh();
+            toast.success("Background chat is ready.");
+          })
+          .catch(() => {
+            router.refresh();
+            toast.error("Background chat started, but live status updates were interrupted.");
+          })
+          .finally(() => clearLocalChatState(newSessionId, "working"));
       })
       .catch((error) => {
         removeOptimisticChatSummary(newSessionId);
-        toast.error(error instanceof Error ? error.message : "Could not start that chat.");
-      })
-      .finally(() => {
         clearLocalChatState(newSessionId, "working");
+        toast.error(error instanceof Error ? error.message : "Could not start that chat.");
         if (mountedRef.current) setIsSubmitting(false);
       });
   };
@@ -4776,20 +4877,20 @@ function findActiveMentionToken(value: string, caret: number): ActiveMentionToke
   const nextWhitespace = suffix.search(/\s/);
   const end = nextWhitespace === -1 ? value.length : caret + nextWhitespace;
   const token = value.slice(start, end);
-  if (!token.startsWith("@") && !token.startsWith("#")) return null;
+  if (!token.startsWith("@") && !token.startsWith("/") && !token.startsWith("#")) return null;
 
   return {
     start,
     end,
     query: token.slice(1).toLowerCase(),
-    sigil: token.startsWith("#") ? ("#" as const) : ("@" as const),
+    sigil: token[0] as ActiveMentionToken["sigil"],
   };
 }
 
 function chatMentionToken(mention: ChatMention) {
   if (mention.kind === "engine") return mention.id === "claude" ? "@claude" : "@codex";
   if (mention.kind === "workflow") return `#${mention.id}`;
-  return `@skill/${mention.id}`;
+  return `/${mention.id}`;
 }
 
 function chatMentionIsVisible(value: string, mention: ChatMention) {
@@ -4949,7 +5050,7 @@ function composerInputHighlightRanges(
 
 function skillMentionIdsFromText(value: string) {
   const ids = new Set<string>();
-  for (const match of value.matchAll(/(^|\s)@skill\/([a-z0-9][a-z0-9-]{0,79})(?=\s|$)/gi)) {
+  for (const match of value.matchAll(/(^|\s)\/([a-z0-9][a-z0-9-]{0,79})(?=\s|$)/gi)) {
     const id = match[2];
     if (id) ids.add(id.toLowerCase());
   }
@@ -5063,6 +5164,27 @@ function buildMentionOptions(input: {
     return options;
   }
 
+  if (input.token.sigil === "/") {
+    if (!input.skillsEnabled) return [];
+    const selectedSkillIds = new Set(
+      input.selectedMentions.flatMap((mention) => (mention.kind === "skill" ? [mention.id] : [])),
+    );
+    const options: MentionOption[] = [];
+    for (const skill of input.skills) {
+      if (selectedSkillIds.has(skill.id)) continue;
+      const haystack = `${skill.id} ${skill.name} ${skill.description}`.toLowerCase();
+      if (query && !haystack.includes(query)) continue;
+      options.push({
+        kind: "skill",
+        token: `/${skill.id}`,
+        label: skill.name,
+        description: skill.description,
+        mention: { kind: "skill", id: skill.id },
+      });
+    }
+    return options;
+  }
+
   const options: MentionOption[] = [];
   if (input.codexConnected && (!query || "codex".startsWith(query))) {
     options.push({ kind: "engine", token: "@codex", label: "Codex", mention: CODEX_MENTION });
@@ -5073,23 +5195,6 @@ function buildMentionOptions(input: {
       token: "@claude",
       label: "Claude Code",
       mention: CLAUDE_MENTION,
-    });
-  }
-  if (!input.skillsEnabled) return options;
-
-  const selectedSkillIds = new Set(
-    input.selectedMentions.flatMap((mention) => (mention.kind === "skill" ? [mention.id] : [])),
-  );
-  for (const skill of input.skills) {
-    if (selectedSkillIds.has(skill.id)) continue;
-    const haystack = `skill/${skill.id} ${skill.name} ${skill.description}`.toLowerCase();
-    if (query && !haystack.includes(query)) continue;
-    options.push({
-      kind: "skill",
-      token: `@skill/${skill.id}`,
-      label: skill.name,
-      description: skill.description,
-      mention: { kind: "skill", id: skill.id },
     });
   }
   return options;
@@ -6422,7 +6527,7 @@ async function runBackgroundChatTurn(input: {
   metadata?: ChatMessageMetadata;
 }) {
   const clientMessageId = newBackgroundChatMessageId();
-  await startHeadlessBackgroundChat({
+  return startHeadlessBackgroundChat({
     content: input.prompt,
     clientConversationId: input.newSessionId,
     clientMessageId,

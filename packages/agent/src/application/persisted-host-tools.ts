@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  CHAT_HOST_TOOL_CONTRACT_VERSION,
+  CHAT_HOST_TOOL_CONTRACT_VERSIONS,
   type ChatHostToolGatewayRequest,
   type ChatHostToolGatewayResponse,
 } from "@opencompany/agent-runtime";
@@ -15,7 +15,7 @@ import {
 } from "@opencompany/db/product-schema";
 import { DEFAULT_BRAIN_SLUG, listAccessibleBrains } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   browserProfilesAvailable,
   createAgentSession,
@@ -26,7 +26,9 @@ import {
 import { createChatBrowserToolSession } from "../browser-tools-runtime";
 import {
   activateAndListChatSessionSkills,
+  createWorkspaceSkillForActor,
   listSkillCatalog,
+  readChatSkillFile,
   resolveSkillMentions,
 } from "../skills";
 import {
@@ -97,9 +99,12 @@ export function executePersistedChatHostTool(input: {
       activateAndListChatSessionSkills({
         chatSessionId: conversationId,
         activatedMessageId: messageId,
-        workspaceRef: workspaceId,
+        workspaceId,
         skills,
       }),
+    readSkillFile: ({ conversationId, ...skillFile }) =>
+      readChatSkillFile({ chatSessionId: conversationId, ...skillFile }),
+    createWorkspaceSkill: createWorkspaceSkillForActor,
     createTask: (task) =>
       createTaskForActor(
         {
@@ -240,7 +245,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       and(
         eq(codexChatSessions.id, command.sessionId),
         eq(codexChatSessions.engine, "opencompany"),
-        eq(codexChatSessions.hostToolContractVersion, CHAT_HOST_TOOL_CONTRACT_VERSION),
+        inArray(codexChatSessions.hostToolContractVersion, [...CHAT_HOST_TOOL_CONTRACT_VERSIONS]),
         runningTurn,
       ),
     )
@@ -258,6 +263,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     lastName: row.lastName,
     timezone: row.timezone,
     taskToolsEnabled: row.taskSpawningEnabled && row.workspaceRole === "admin",
+    skillToolsEnabled: row.workspaceRole === "admin",
     wikiEnabled: row.wikiEnabled,
   };
 }

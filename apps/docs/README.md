@@ -23,5 +23,19 @@ reviewed API definition.
 
 ## Hosting
 
-The app is included in the monorepo CI build but is not provisioned. Hosting and domain wiring are a
-separate owner decision.
+The canonical site is [docs.opencompany.cloud](https://docs.opencompany.cloud). Vercel project
+`acta-9a62816e/opencompany-docs` deploys this app from
+`useopencompany/opencompany-experimental` with:
+
+- production branch: `main`;
+- root directory: `apps/docs`;
+- install command: `bun install --frozen-lockfile`; and
+- build command: `bun run build`.
+
+Vercel Git integration creates a preview for pull requests that affect this app and deploys `main`
+independently of the product release workflow. The same commands are checked into `vercel.json` so
+the deployment contract does not depend only on dashboard state.
+
+After a production deployment, verify the homepage, search, and at least one generated endpoint
+under `/docs/api-reference/endpoints/`. The generated endpoint filenames come from the protocol
+contract and are intentionally not hand-maintained.

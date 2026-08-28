@@ -4,6 +4,7 @@ import {
   enqueueLinearWorkflowEventRuns,
   insertLinearIssueEvents,
   listEnabledLinearBrainSourceRoutes,
+  listEnabledLinearWikiSourceRoutes,
   listLinearIntegrationsForOrganization,
   listLinearWorkflowTriggerRoutes,
 } from "@opencompany/db/linear";
@@ -19,6 +20,7 @@ vi.mock("@opencompany/db/linear", async (importOriginal) => {
     enqueueLinearWorkflowEventRuns: vi.fn(),
     insertLinearIssueEvents: vi.fn(),
     listEnabledLinearBrainSourceRoutes: vi.fn(),
+    listEnabledLinearWikiSourceRoutes: vi.fn(),
     listLinearIntegrationsForOrganization: vi.fn(),
     listLinearWorkflowTriggerRoutes: vi.fn(),
   };
@@ -43,6 +45,7 @@ function ingress(overrides: { authError?: ApiError } = {}) {
         userId: "user_1",
         organizationId: null,
         method: "session",
+        credentialKind: "browser_cookie",
         activeWorkspaceId: null,
         activeBrainId: null,
       };
@@ -99,6 +102,7 @@ describe("Linear ingress", () => {
         },
       },
     ] as never);
+    vi.mocked(listEnabledLinearWikiSourceRoutes).mockResolvedValue([]);
     vi.mocked(insertLinearIssueEvents).mockResolvedValue(1);
     vi.mocked(listLinearWorkflowTriggerRoutes).mockResolvedValue([]);
     vi.mocked(enqueueLinearWorkflowEventRuns).mockResolvedValue(0);
@@ -170,6 +174,25 @@ describe("Linear ingress", () => {
         ],
         expect.objectContaining({ sentinel: "db" }),
       );
+    });
+
+    it("buffers a selected-team issue for a wiki-only route", async () => {
+      vi.mocked(listEnabledLinearBrainSourceRoutes).mockResolvedValue([]);
+      vi.mocked(listEnabledLinearWikiSourceRoutes).mockResolvedValue([
+        {
+          integrationId: "gint_1",
+          workspaceId: "workspace_1",
+          config: {
+            teams: [{ id: "team_1", name: "Core" }],
+            events: [{ id: "issue_created" }],
+          },
+        },
+      ] as never);
+
+      const response = await ingress().webhook(signedRequest(issueEnvelope()));
+
+      expect(await response.json()).toMatchObject({ ok: true, buffered: 1 });
+      expect(insertLinearIssueEvents).toHaveBeenCalledOnce();
     });
 
     it("drops board-reordering noise updates", async () => {

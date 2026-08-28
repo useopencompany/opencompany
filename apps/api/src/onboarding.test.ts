@@ -47,6 +47,7 @@ const identity: ApiIdentity = {
   activeWorkspaceId: null,
   activeBrainId: null,
   method: "session",
+  credentialKind: "browser_cookie",
 };
 
 const workspace = {

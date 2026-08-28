@@ -31,10 +31,12 @@ import {
   type KnowledgeApplicationService,
   type LegacyTask,
   type LegacyTaskHistory,
+  type PluginImportApplicationService,
+  publicPluginInstallation,
   type RunEvent,
-  type Skill,
   type SkillImportApplicationService,
-  type SkillListItem,
+  type SkillInstallation,
+  type SkillInstallationListItem,
   type Task,
   type TaskApplicationService,
   type TaskSchedule,
@@ -45,7 +47,7 @@ import {
   type Workflow,
   type WorkflowApplicationService,
 } from "@opencompany/core";
-import { captureException, createLogger } from "@opencompany/observability";
+import { captureException, createLogger, type LogFields } from "@opencompany/observability";
 import {
   createOpenApiDocument,
   createV1Router,
@@ -101,6 +103,7 @@ import type { SlackBotSettingsService } from "./slack-bot-settings";
 import type { SlackIngressService } from "./slack-ingress";
 import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
+import type { WikiSourceService } from "./wiki-sources";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { WorkspaceControlService } from "./workspace-control";
 import type { XAccountIngressService } from "./x-account-ingress";
@@ -136,6 +139,7 @@ const CORS_EXPOSE_HEADERS = [
 ];
 const ONBOARDING_IDENTITY_PATH = "/v1/onboarding";
 const IDENTITY_PATH = "/v1/identity";
+const REQUEST_FAILURE_LOG_FIELDS_KEY = "requestFailureLogFields";
 
 export type CreateApiAppInput = {
   chat: ChatApplicationService;
@@ -152,6 +156,7 @@ export type CreateApiAppInput = {
   // Bearer secret for POST /internal/wiki/commands (runner→API). Distinct from
   // the runner's own internal token so the two directions rotate independently.
   wikiCommandsInternalSecret?: string;
+  wikiSources: WikiSourceService;
   brainSources: Pick<BrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
   brainImports: Pick<BrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
   browserProfiles: Pick<
@@ -164,6 +169,7 @@ export type CreateApiAppInput = {
     | "resolveLiveViewUrl"
   >;
   skillImports: SkillImportApplicationService;
+  pluginImports: PluginImportApplicationService;
   brainAssets: BrainAssetService;
   chatResources?: ChatResourceService;
   chatTitles?: ChatTitleService;
@@ -796,10 +802,10 @@ export function createApiApp(input: CreateApiAppInput) {
       return c.json({ data: activation, meta }, 201);
     },
     switchWorkspace: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "workspace-switch", 60);
       const activation = await input.workspaceControl.switch(
-        actor,
+        identity,
         c.req.valid("param").workspaceId,
       );
       return c.json({ data: activation, meta }, 200);
@@ -1112,58 +1118,88 @@ export function createApiApp(input: CreateApiAppInput) {
         201,
       );
     },
+    listWikiSources: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const sources = await input.wikiSources.list(actor);
+      return c.json({ data: sources, meta }, 200);
+    },
+    listWikiIngestActivity: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const query = c.req.valid("query");
+      const activity = await input.wikiSources.listActivity(actor, {
+        limit: query.limit,
+        ...(query.cursor ? { cursor: query.cursor } : {}),
+      });
+      return c.json({ data: activity, meta }, 200);
+    },
+    upsertWikiSource: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const source = await input.wikiSources.upsert(actor, c.req.valid("json"));
+      return c.json({ data: source, meta }, 200);
+    },
+    setWikiSourceEnabled: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const source = await input.wikiSources.setEnabled(
+        actor,
+        c.req.valid("param").sourceId,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: source, meta }, 200);
+    },
+    deleteWikiSource: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { sourceId } = c.req.valid("param");
+      await input.wikiSources.remove(actor, sourceId);
+      return c.json({ data: { sourceId, deleted: true }, meta }, 200);
+    },
     listSkills: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const skills = await input.knowledge.listSkills(actor);
-      return c.json({ data: skills.map(skillListItemDto), meta }, 200);
+      const installations = await input.skillImports.list(actor);
+      return c.json({ data: installations.map(skillInstallationListItemDto), meta }, 200);
     },
-    createSkill: async (c) => {
+    createWorkspaceSkill: async (c) => {
       const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const skill = await input.knowledge.createSkill(actor, {
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.skillImports.create(actor, {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         ...c.req.valid("json"),
       });
-      return c.json({ data: skillDto(skill), meta }, 201);
+      return c.json(
+        {
+          data: {
+            installation: skillInstallationDto(result.installation),
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
     },
     previewSkillImport: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);
       const preview = await input.skillImports.preview(actor, c.req.valid("json"));
-      return c.json(
-        {
-          data:
-            preview.status === "resolved"
-              ? {
-                  status: preview.status,
-                  proposedSlug: preview.proposedSlug,
-                  name: preview.name,
-                  description: preview.description,
-                  instructions: preview.instructions,
-                  extraFiles: preview.extraFiles,
-                  resolvedCommit: preview.resolvedCommit,
-                  integrity: preview.integrity,
-                }
-              : {
-                  status: preview.status,
-                  candidates: preview.candidates,
-                },
-          meta,
-        },
-        200,
-      );
+      return c.json({ data: preview, meta }, 200);
     },
     importSkill: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);
-      const result = await input.skillImports.import(actor, {
+      const result = await input.skillImports.install(actor, {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         ...c.req.valid("json"),
       });
       return c.json(
         {
-          data: { skill: skillDto(result.skill), replayed: result.idempotentReplay },
+          data: {
+            installation: skillInstallationDto(result.installation),
+            replayed: result.idempotentReplay,
+          },
           meta,
         },
         201,
@@ -1172,30 +1208,148 @@ export function createApiApp(input: CreateApiAppInput) {
     listSkillCatalog: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
-      return c.json({ data: await input.knowledge.listSkillCatalog(actor), meta }, 200);
+      return c.json({ data: await input.skillImports.listCatalog(actor), meta }, 200);
     },
     getSkill: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const skill = await input.knowledge.getSkill(actor, c.req.valid("param").slug);
-      return c.json({ data: skillDto(skill), meta }, 200);
+      const installation = await input.skillImports.inspect(actor, c.req.valid("param").slug);
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
     },
-    updateSkill: async (c) => {
+    updateWorkspaceSkill: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const skill = await input.knowledge.updateSkill(
+      const installation = await input.skillImports.update(
         actor,
         c.req.valid("param").slug,
         c.req.valid("json"),
       );
-      return c.json({ data: skillDto(skill), meta }, 200);
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
     },
     archiveSkill: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const slug = c.req.valid("param").slug;
-      await input.knowledge.archiveSkill(actor, slug);
-      return c.json({ data: { slug }, meta }, 200);
+      const name = c.req.valid("param").slug;
+      await input.skillImports.archive(actor, name);
+      return c.json({ data: { name }, meta }, 200);
+    },
+    enableSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const installation = await input.skillImports.setEnabled(
+        actor,
+        c.req.valid("param").slug,
+        true,
+      );
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
+    },
+    disableSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const installation = await input.skillImports.setEnabled(
+        actor,
+        c.req.valid("param").slug,
+        false,
+      );
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
+    },
+    replaceSkill: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const installation = await input.skillImports.replace(
+        actor,
+        c.req.valid("param").slug,
+        c.req.valid("json"),
+      );
+      return c.json({ data: skillInstallationDto(installation), meta }, 200);
+    },
+    readSkillFile: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const query = c.req.valid("query");
+      const chunk = await input.skillImports.readFile(actor, c.req.valid("param").slug, {
+        path: query.path,
+        ...(query.offset !== undefined ? { offset: query.offset } : {}),
+        ...(query.maxBytes !== undefined ? { maxBytes: query.maxBytes } : {}),
+      });
+      return c.json({ data: chunk, meta }, 200);
+    },
+    listPlugins: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.pluginImports.list(actor), meta }, 200);
+    },
+    previewPluginImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const preview = await input.pluginImports.preview(actor, c.req.valid("json"));
+      return c.json({ data: preview, meta }, 200);
+    },
+    importPlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.pluginImports.install(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json(
+        {
+          data: {
+            plugin: publicPluginInstallation(result.plugin),
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    getPlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const plugin = await input.pluginImports.inspect(actor, c.req.valid("param").name);
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
+    archivePlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const name = c.req.valid("param").name;
+      await input.pluginImports.archive(actor, name);
+      return c.json({ data: { name }, meta }, 200);
+    },
+    enablePlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const plugin = await input.pluginImports.setEnabled(actor, c.req.valid("param").name, true);
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
+    disablePlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const plugin = await input.pluginImports.setEnabled(actor, c.req.valid("param").name, false);
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
+    approvePluginMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const plugin = await input.pluginImports.approveMcp(
+        actor,
+        c.req.valid("param").name,
+        c.req.valid("json").integrity,
+      );
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
+    revokePluginMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const plugin = await input.pluginImports.revokeMcp(actor, c.req.valid("param").name);
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
+    deletePluginData: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const name = c.req.valid("param").name;
+      const result = await input.pluginImports.deleteData(actor, name);
+      return c.json({ data: { name, deleted: result.deleted }, meta }, 200);
     },
     listConversations: async (c) => {
       const actor = actorFrom(c);
@@ -1283,10 +1437,23 @@ export function createApiApp(input: CreateApiAppInput) {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "message", 30);
       const body = c.req.valid("json");
+      setRequestFailureLogFields(c, {
+        operation: "message.create",
+        message_target: body.conversationId ? "existing" : "new",
+        engine: body.engine.type,
+        ...(body.conversationId ? { conversation_id: body.conversationId } : {}),
+      });
       const idempotencyKey = c.req.valid("header")["idempotency-key"];
       const existingTarget = body.conversationId
         ? await getConversationOrTask(input, actor, body.conversationId)
         : null;
+      setRequestFailureLogFields(c, {
+        target_resource: existingTarget
+          ? "conversationId" in existingTarget
+            ? "task"
+            : "chat"
+          : "new_chat",
+      });
       if (existingTarget && existingTarget.engine !== body.engine.type) {
         throw new ApiError(409, "conflict", "This conversation uses a different engine.");
       }
@@ -2200,6 +2367,7 @@ export function createApiApp(input: CreateApiAppInput) {
             } catch (error) {
               if (!(error instanceof ApiError) && !(error instanceof CoreError)) {
                 captureException(error, {
+                  ...requestFailureLogFieldsFrom(c),
                   event: "opencompany.api_request_failed",
                   request_id: requestIdFrom(c),
                   method: c.req.method,
@@ -2280,8 +2448,11 @@ export function createApiApp(input: CreateApiAppInput) {
 
   app.onError((error, c) => {
     captureException(error, {
+      ...requestFailureLogFieldsFrom(c),
       event: "opencompany.api_request_failed",
       request_id: requestIdFrom(c),
+      method: c.req.method,
+      path: c.req.path,
     });
     return apiErrorResponse(c, error);
   });
@@ -2587,7 +2758,8 @@ function isIdentityTierPath(path: string) {
     path === IDENTITY_PATH ||
     path.startsWith(`${IDENTITY_PATH}/`) ||
     path === ONBOARDING_IDENTITY_PATH ||
-    path.startsWith(`${ONBOARDING_IDENTITY_PATH}/`)
+    path.startsWith(`${ONBOARDING_IDENTITY_PATH}/`) ||
+    /^\/v1\/workspaces\/[^/]+\/switch$/u.test(path)
   );
 }
 
@@ -2715,6 +2887,46 @@ function getContextValue(c: Context, key: string) {
   return (c as unknown as { get(name: string): unknown }).get(key);
 }
 
+function setRequestFailureLogFields(c: Context, fields: LogFields) {
+  const existing = getContextValue(c, REQUEST_FAILURE_LOG_FIELDS_KEY);
+  setContextValue(c, REQUEST_FAILURE_LOG_FIELDS_KEY, {
+    ...(isLogFields(existing) ? existing : {}),
+    ...fields,
+  });
+}
+
+function requestFailureLogFieldsFrom(c: Context): LogFields {
+  const actor = getContextValue(c, "actor");
+  const identity = getContextValue(c, "identity");
+  const requestFields = getContextValue(c, REQUEST_FAILURE_LOG_FIELDS_KEY);
+  return {
+    ...(isActor(actor) ? { user_id: actor.userId, workspace_id: actor.workspaceId } : {}),
+    ...(!isActor(actor) && isIdentity(identity) ? { user_id: identity.userId } : {}),
+    ...(isLogFields(requestFields) ? requestFields : {}),
+  };
+}
+
+function isActor(value: unknown): value is Actor {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as { userId?: unknown }).userId === "string" &&
+      typeof (value as { workspaceId?: unknown }).workspaceId === "string",
+  );
+}
+
+function isIdentity(value: unknown): value is ApiIdentity {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as { userId?: unknown }).userId === "string",
+  );
+}
+
+function isLogFields(value: unknown): value is LogFields {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function requestIdFrom(c: Context) {
   return (getContextValue(c, "requestId") as string | undefined) ?? `request_${randomUUID()}`;
 }
@@ -2776,6 +2988,7 @@ function conversationDto(conversation: {
   } | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;
+  pinnedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -2784,6 +2997,7 @@ function conversationDto(conversation: {
     runtime: conversation.runtime
       ? { ...conversation.runtime, updatedAt: conversation.runtime.updatedAt.toISOString() }
       : null,
+    pinnedAt: conversation.pinnedAt?.toISOString() ?? null,
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
   };
@@ -2892,16 +3106,29 @@ function wikiTimelineEntryDto(entry: WikiTimelineEntry) {
   };
 }
 
-function skillDto(skill: Skill) {
+function skillInstallationListItemDto(installation: SkillInstallationListItem) {
   return {
-    ...skill,
-    createdAt: skill.createdAt.toISOString(),
-    updatedAt: skill.updatedAt.toISOString(),
+    ...installation,
+    archivedAt: installation.archivedAt?.toISOString() ?? null,
+    updatedAt: installation.updatedAt.toISOString(),
+    bundle: {
+      ...installation.bundle,
+      createdAt: installation.bundle.createdAt.toISOString(),
+    },
   };
 }
 
-function skillListItemDto(skill: SkillListItem) {
-  return { ...skill, updatedAt: skill.updatedAt.toISOString() };
+function skillInstallationDto(installation: SkillInstallation) {
+  return {
+    ...installation,
+    archivedAt: installation.archivedAt?.toISOString() ?? null,
+    createdAt: installation.createdAt.toISOString(),
+    updatedAt: installation.updatedAt.toISOString(),
+    bundle: {
+      ...installation.bundle,
+      createdAt: installation.bundle.createdAt.toISOString(),
+    },
+  };
 }
 
 function legacyTaskDto(task: LegacyTask) {

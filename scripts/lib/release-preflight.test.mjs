@@ -16,6 +16,12 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   ]);
   const groups = readGroups(source);
 
+  assert.match(
+    source,
+    /requested\.length > 0 \? requested : \["web", "api", "runner", "release"\]/u,
+    "the documented default preflight must include the release-only cutover gate",
+  );
+
   assertIncludes(groups.web.required, [
     "DATABASE_URL",
     "BLOB_READ_WRITE_TOKEN",
@@ -40,6 +46,7 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   );
 
   assertExcludes([...groups.api.required, ...groups.api.optional], ["BETTER_STACK_ERRORS_DSN"]);
+  assertIncludes(groups.api.required, ["WORKOS_MOBILE_CLIENT_ID"]);
 
   assertIncludes(groups.runner.required, [
     "BLOB_READ_WRITE_TOKEN",

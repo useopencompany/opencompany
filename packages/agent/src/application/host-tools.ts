@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import {
   AGENT_MODEL_CATALOG,
   type ChatHostBootstrap,
+  type ChatHostSkillFileChunk,
   type ChatHostToolGatewayResponse,
   type ChatHostToolOperation,
   isClaudeCodeModelId,
@@ -8,6 +10,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { isBrowserToolName } from "@opencompany/browser-tools";
+import { type Actor, SKILL_WRITE_PERMISSION } from "@opencompany/core";
 import type { DeleteTaskScheduleToolOutput, EditTaskScheduleToolOutput } from "../chat-ui";
 
 export type ChatHostContext = {
@@ -22,6 +25,7 @@ export type ChatHostContext = {
   lastName: string | null;
   timezone: string;
   taskToolsEnabled: boolean;
+  skillToolsEnabled: boolean;
   wikiEnabled: boolean;
 };
 
@@ -51,9 +55,11 @@ type BrowserProfileSession = {
 
 type MentionedSkill = {
   id: string;
+  bundleId: string;
   name: string;
   description: string;
   instructions: string;
+  sourceKind: "standalone" | "plugin";
 };
 
 type ActiveSkill = {
@@ -113,6 +119,19 @@ export type ChatHostToolServiceDependencies = {
     workspaceId: string;
     skills: MentionedSkill[];
   }) => Promise<ActiveSkill[]>;
+  readSkillFile: (input: {
+    workspaceId: string;
+    conversationId: string;
+    skill: string;
+    path: string;
+    offset?: number;
+    maxBytes?: number;
+  }) => Promise<ChatHostSkillFileChunk>;
+  createWorkspaceSkill: (input: {
+    actor: Actor;
+    idempotencyKey: string;
+    skill: { name: string; description: string; instructions: string };
+  }) => Promise<{ created: true; name: string; command: string; bundleId: string }>;
   createTask: (input: {
     actorId: string;
     workspaceId: string;
@@ -241,7 +260,53 @@ async function executeOperation(
         mentions: [{ id: skill }],
       });
       if (!resolved) throw new Error(`Skill "@skill/${skill}" is unavailable or incomplete.`);
-      return { ok: true, skill: resolved };
+      const active = await dependencies.activateAndListSkills({
+        conversationId: context.conversationId,
+        messageId: context.messageId,
+        workspaceId: context.workspaceId,
+        skills: [resolved],
+      });
+      const fixed = active.find((candidate) => candidate.skillId === skill);
+      if (!fixed) throw new Error(`Skill "@skill/${skill}" could not be activated.`);
+      return {
+        ok: true,
+        skill: {
+          id: fixed.skillId,
+          name: fixed.name,
+          description: fixed.description,
+          instructions: fixed.instructions,
+        },
+      };
+    }
+    case "read_skill_file": {
+      const offset = optionalInteger(toolInput.offset, "offset");
+      const maxBytes = optionalInteger(toolInput.maxBytes, "maxBytes");
+      return dependencies.readSkillFile({
+        workspaceId: context.workspaceId,
+        conversationId: context.conversationId,
+        skill: requiredString(toolInput.skill, "skill"),
+        path: requiredString(toolInput.path, "path"),
+        ...(offset !== undefined ? { offset } : {}),
+        ...(maxBytes !== undefined ? { maxBytes } : {}),
+      });
+    }
+    case "create_workspace_skill": {
+      assertSkillTools(context);
+      return dependencies.createWorkspaceSkill({
+        actor: {
+          userId: context.actorId,
+          workspaceId: context.workspaceId,
+          role: "admin",
+          permissions: [SKILL_WRITE_PERMISSION],
+          authenticationMethod: "service",
+        },
+        idempotencyKey: workspaceSkillIdempotencyKey(command.runId, command.toolCallId),
+        skill: {
+          name: requiredString(toolInput.name, "name"),
+          description: requiredString(toolInput.description, "description"),
+          instructions: requiredString(toolInput.instructions, "instructions"),
+        },
+      });
     }
     case "start_task": {
       assertTaskTools(context);
@@ -443,6 +508,7 @@ async function bootstrap(
     },
     workspaceName: context.workspaceName,
     taskToolsEnabled: context.taskToolsEnabled,
+    skillToolsEnabled: context.skillToolsEnabled,
     wikiEnabled: context.wikiEnabled,
     browserToolsEnabled: true,
     browserProfiles: browserProfiles.map(({ id, name, siteHost }) => ({ id, name, siteHost })),
@@ -511,6 +577,19 @@ function assertTaskTools(context: ChatHostContext) {
   if (!context.taskToolsEnabled) throw new Error("Task creation is not enabled for this user.");
 }
 
+function assertSkillTools(context: ChatHostContext) {
+  if (!context.skillToolsEnabled) {
+    throw new Error("Only workspace admins can create Skills from Chat.");
+  }
+}
+
+export function workspaceSkillIdempotencyKey(turnId: string, toolCallId?: string) {
+  const invocationHash = createHash("sha256")
+    .update(`${turnId}:${toolCallId ?? "create-workspace-skill"}`)
+    .digest("hex");
+  return `agent-skill:${invocationHash}`;
+}
+
 function requiredModel(value: unknown): AgentModelId {
   const model = requiredString(value, "model");
   if (!AGENT_MODEL_CATALOG.some((candidate) => candidate.id === model)) {
@@ -551,6 +630,12 @@ function requiredString(value: unknown, field: string) {
 
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalInteger(value: unknown, field: string) {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value)) throw new Error(`${field} must be an integer.`);
+  return value as number;
 }
 
 function stringArray(value: unknown) {

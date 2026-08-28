@@ -7,7 +7,6 @@ import { migratedEnvironmentName } from "./lib/env-name-migration.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const historicalRoots = ["drizzle/", "docs/adr/"];
-const historicalFiles = new Set(["docs/future-concepts/oss-readiness.md"]);
 const expectedPackages = new Map([
   ["packages/agent/package.json", "@opencompany/agent"],
   ["packages/brain/package.json", "@opencompany/brain"],
@@ -138,11 +137,18 @@ for (const [relativePath, fragments] of requiredCompatibilityFragments) {
   }
 }
 
-for (const [label, currentPattern, gitPattern] of protectedCompatibilityTokens) {
+for (const [
+  label,
+  currentPattern,
+  gitPattern,
+  acceptedCutoverDelta = 0,
+] of protectedCompatibilityTokens) {
   const currentCount = currentCompatibilityCorpus.match(currentPattern)?.length ?? 0;
-  const baseCount = gitMatchCount(gitPattern);
-  if (currentCount !== baseCount) {
-    failures.push(`${label}: expected ${baseCount} retained occurrences, found ${currentCount}`);
+  const expectedCount = gitMatchCount(gitPattern) + acceptedCutoverDelta;
+  if (currentCount !== expectedCount) {
+    failures.push(
+      `${label}: expected ${expectedCount} retained occurrences, found ${currentCount}`,
+    );
   }
 }
 
@@ -160,7 +166,6 @@ const immutableChanges = gitLines([
   "--",
   "drizzle",
   "docs/adr",
-  "docs/future-concepts/oss-readiness.md",
 ]);
 const retiredUnjournaledMigrations = new Set(["drizzle/0102_goat_brain_folder_defaults.sql"]);
 const relocatedUnjournaledMigration = [
@@ -196,6 +201,7 @@ const addedEnvKeys = [
   "API_INTERNAL_TOKEN",
   "OPENCOMPANY_DESKTOP_AUTH_SECRET",
   "RUNNER_CODEX_CHAT_SELF_HEAL_ENABLED",
+  "WORKOS_MOBILE_CLIENT_ID",
 ];
 const retiredEnvKeys = new Set([["RUNNER", "CLAUDE", "CODE", "ACP", "ENABLED"].join("_")]);
 const expectedEnvKeys = [
@@ -261,10 +267,7 @@ function gitMatchCount(pattern) {
 }
 
 function isHistorical(relativePath) {
-  return (
-    historicalFiles.has(relativePath) ||
-    historicalRoots.some((root) => relativePath.startsWith(root))
-  );
+  return historicalRoots.some((root) => relativePath.startsWith(root));
 }
 
 function envKeys(source) {

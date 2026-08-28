@@ -9,6 +9,12 @@ import {
   hasAnyBrainSourceForIntegration,
   listEnabledBrainRefsForIntegration,
 } from "@opencompany/db/brain-sources";
+import {
+  attributeWikiSourceEventClaims,
+  claimWikiSourceEvents,
+} from "@opencompany/db/wiki-event-claims";
+import { upsertWikiSourceItemAndEnqueue } from "@opencompany/db/wiki-ingest";
+import { listEnabledWikiSourcesForIntegration } from "@opencompany/db/wiki-sources";
 import { getDefaultBrainForUser } from "@opencompany/db/workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createJamieIngress } from "./jamie-ingress";
@@ -32,11 +38,24 @@ vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getDefaultBrainForUser: vi.fn(),
 }));
+vi.mock("@opencompany/db/wiki-event-claims", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  attributeWikiSourceEventClaims: vi.fn(),
+  claimWikiSourceEvents: vi.fn(),
+}));
+vi.mock("@opencompany/db/wiki-ingest", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  upsertWikiSourceItemAndEnqueue: vi.fn(),
+}));
+vi.mock("@opencompany/db/wiki-sources", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listEnabledWikiSourcesForIntegration: vi.fn(),
+}));
 
 const sentinelDb = { sentinel: "db" };
 
-function ingress() {
-  return createJamieIngress({ db: sentinelDb });
+function ingress(wakeWikiIngest?: () => Promise<unknown>) {
+  return createJamieIngress({ db: sentinelDb, ...(wakeWikiIngest ? { wakeWikiIngest } : {}) });
 }
 
 describe("Jamie ingress", () => {
@@ -55,6 +74,18 @@ describe("Jamie ingress", () => {
     vi.mocked(hasAnyBrainSourceForIntegration).mockResolvedValue(false);
     vi.mocked(getDefaultBrainForUser).mockResolvedValue({ id: "gbrain_123" } as never);
     vi.mocked(markJamieWebhookConnected).mockResolvedValue(undefined);
+    vi.mocked(listEnabledWikiSourcesForIntegration).mockResolvedValue([]);
+    vi.mocked(claimWikiSourceEvents).mockResolvedValue({
+      claimedCount: 1,
+      claimedEventKeys: ["meeting:calendar_event_123"],
+    });
+    vi.mocked(upsertWikiSourceItemAndEnqueue).mockResolvedValue({
+      sourceItemId: "gwsrc_123",
+      jobId: "gwjob_123",
+      enqueued: true,
+      skipped: false,
+    });
+    vi.mocked(attributeWikiSourceEventClaims).mockResolvedValue(undefined);
   });
 
   it("resolves the global path by API key and enqueues through the injected db", async () => {
@@ -86,6 +117,88 @@ describe("Jamie ingress", () => {
       expect.objectContaining({ integrationId: "gint_123", userWorkosId: "user_123" }),
       sentinelDb,
     );
+    expect(claimWikiSourceEvents).not.toHaveBeenCalled();
+    expect(upsertWikiSourceItemAndEnqueue).not.toHaveBeenCalled();
+  });
+
+  it("claims and enqueues an enabled Jamie wiki source with the brain-normalized payload", async () => {
+    vi.mocked(listEnabledWikiSourcesForIntegration).mockResolvedValue([
+      {
+        workspaceId: "workspace_1",
+        provider: "jamie",
+        integrationId: "gint_123",
+      },
+    ] as never);
+    const wakeWikiIngest = vi.fn(async () => undefined);
+
+    const response = await ingress(wakeWikiIngest).webhook(jamieRequest(jamiePayload()));
+
+    expect(response.status).toBe(200);
+    expect(claimWikiSourceEvents).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      sourceProvider: "jamie",
+      eventKeys: ["meeting:calendar_event_123"],
+      db: sentinelDb,
+    });
+    const brainItem = vi.mocked(upsertBrainSourceItemAndEnqueue).mock.calls[0]?.[0].item;
+    expect(upsertWikiSourceItemAndEnqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace_1",
+        sourceConnectionId: "gint_123",
+        integrationId: "gint_123",
+        item: brainItem,
+        rawPayload: jamiePayload(),
+        db: sentinelDb,
+      }),
+    );
+    expect(attributeWikiSourceEventClaims).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace_1",
+        eventKeys: ["meeting:calendar_event_123"],
+        sourceItemId: "gwsrc_123",
+      }),
+    );
+    expect(wakeWikiIngest).toHaveBeenCalledOnce();
+  });
+
+  it("does not enqueue or wake when the workspace already claimed the Jamie meeting", async () => {
+    vi.mocked(listEnabledWikiSourcesForIntegration).mockResolvedValue([
+      {
+        workspaceId: "workspace_1",
+        provider: "jamie",
+        integrationId: "gint_123",
+      },
+    ] as never);
+    vi.mocked(claimWikiSourceEvents).mockResolvedValue({
+      claimedCount: 0,
+      claimedEventKeys: [],
+    });
+    const wakeWikiIngest = vi.fn(async () => undefined);
+
+    const response = await ingress(wakeWikiIngest).webhook(jamieRequest(jamiePayload()));
+
+    expect(response.status).toBe(200);
+    expect(upsertWikiSourceItemAndEnqueue).not.toHaveBeenCalled();
+    expect(wakeWikiIngest).not.toHaveBeenCalled();
+    expect(upsertBrainSourceItemAndEnqueue).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the successful webhook response when the best-effort runner wake fails", async () => {
+    vi.mocked(listEnabledWikiSourcesForIntegration).mockResolvedValue([
+      {
+        workspaceId: "workspace_1",
+        provider: "jamie",
+        integrationId: "gint_123",
+      },
+    ] as never);
+    const wakeWikiIngest = vi.fn(async () => {
+      throw new Error("runner unavailable");
+    });
+
+    const response = await ingress(wakeWikiIngest).webhook(jamieRequest(jamiePayload()));
+
+    expect(response.status).toBe(200);
+    expect(wakeWikiIngest).toHaveBeenCalledOnce();
   });
 
   it("fans out to every enabled brain source and skips the default-brain lookup", async () => {

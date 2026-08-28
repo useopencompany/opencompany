@@ -11,6 +11,7 @@ const bootstrap: ChatHostBootstrap = {
   },
   workspaceName: "Analytical Engines",
   taskToolsEnabled: true,
+  skillToolsEnabled: true,
   wikiEnabled: true,
   browserToolsEnabled: true,
   browserProfiles: [{ id: "profile_1", name: "GitHub", siteHost: "github.com" }],
@@ -68,6 +69,14 @@ describe("loadHostTools", () => {
       },
       { toolCallId: "call_task_1" },
     );
+    await tools?.createWorkspaceSkill?.(
+      {
+        name: "customer-health-review",
+        description: "Review customer health.",
+        instructions: "Review the account signals.",
+      },
+      { toolCallId: "call_skill_1" },
+    );
     await tools?.close();
 
     expect(requests.map((request) => request.operation)).toEqual([
@@ -75,6 +84,7 @@ describe("loadHostTools", () => {
       "browser_use_profile",
       "browser",
       "start_task",
+      "create_workspace_skill",
       "browser_end_profile",
     ]);
     expect(requests[3]).toMatchObject({
@@ -85,7 +95,12 @@ describe("loadHostTools", () => {
         engine: "codex",
       },
     });
-    expect(execute).toHaveBeenCalledTimes(5);
+    expect(requests[4]).toMatchObject({
+      operation: "create_workspace_skill",
+      toolCallId: "call_skill_1",
+      input: { name: "customer-health-review" },
+    });
+    expect(execute).toHaveBeenCalledTimes(6);
   });
 
   it("does not call the web origin", async () => {
@@ -97,6 +112,19 @@ describe("loadHostTools", () => {
     expect(tools?.bootstrap).toEqual(bootstrap);
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it("rejects unsafe Skill file paths before crossing the runner host boundary", async () => {
+    const execute = vi.fn(async ({ request }: { request: ChatHostToolGatewayRequest }) => ({
+      ok: true as const,
+      result: request.operation === "bootstrap" ? bootstrap : {},
+    }));
+    const tools = await loadHostTools(context(), { execute });
+
+    expect(() =>
+      tools?.skills?.readFile?.({ skill: "sales", path: "../secrets", offset: 0, maxBytes: 64 }),
+    ).toThrow();
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 });
 

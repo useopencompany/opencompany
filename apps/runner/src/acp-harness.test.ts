@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { CLAUDE_ACP_ENGINE_ADAPTER, CODEX_ACP_ENGINE_ADAPTER } from "./acp-engine-adapters";
 import { AcpHarness, type AcpHarnessTurnInput } from "./acp-harness";
+import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
 import type { SandboxHandle } from "./sandbox";
 
 type JsonRpcMessage = Record<string, unknown>;
@@ -121,6 +122,7 @@ describe("AcpHarness", () => {
     const onPermissionRequest = vi.fn(async () => ({
       outcome: { outcome: "selected" as const, optionId: "allow-once" },
     }));
+    const onEngineStopped = vi.fn(async () => undefined);
     const input = harnessInput(transport.sandbox, {
       mcpServers: [
         {
@@ -134,6 +136,7 @@ describe("AcpHarness", () => {
         runtimeEvents.push(...events);
       }),
       onPermissionRequest,
+      onEngineStopped,
       model: "claude-sonnet-5",
       reasoningEffort: "xhigh",
       permissionMode: "default",
@@ -183,38 +186,143 @@ describe("AcpHarness", () => {
       "session/prompt_result",
     ]);
     expect(transport.kill).toHaveBeenCalledWith(41);
+    expect(onEngineStopped).toHaveBeenCalledOnce();
+    expect(transport.kill.mock.invocationCallOrder[0]).toBeLessThan(
+      onEngineStopped.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
-  it("reattaches to the running ACP process when the E2B command watch times out", async () => {
+  it.each([
+    {
+      failure: "times out",
+      errorName: "SandboxError",
+      message: "2: [unknown] The operation timed out.",
+    },
+    {
+      failure: "loses its control socket",
+      errorName: "SandboxError",
+      message:
+        "2: [unknown] The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()",
+    },
+    {
+      failure: "receives an incomplete envelope",
+      errorName: "InvalidArgumentError",
+      message: "3: [invalid_argument] protocol error: incomplete envelope",
+    },
+    {
+      failure: "rejects with a new SDK error shape",
+      errorName: "UnexpectedDecoderError",
+      message: "The command stream decoder rejected a frame.",
+    },
+  ])(
+    "reattaches to the running ACP process when its E2B command watch $failure",
+    async ({ errorName, message: streamErrorMessage }) => {
+      let rejectInitialWatch: ((error: Error) => void) | null = null;
+      const initialWatch = new Promise<never>((_resolve, reject) => {
+        rejectInitialWatch = reject;
+      });
+      let resolveConnected: (() => void) | null = null;
+      const connected = new Promise<void>((resolve) => {
+        resolveConnected = resolve;
+      });
+      let onStdout: ((data: string) => void | Promise<void>) | null = null;
+      const requests: JsonRpcMessage[] = [];
+      const kill = vi.fn(async () => true);
+      const disconnect = vi.fn(async () => undefined);
+      const run = vi.fn(
+        async (
+          _command: string,
+          options: { onStdout?: (data: string) => void | Promise<void> },
+        ) => {
+          onStdout = options.onStdout ?? null;
+          return { pid: 41, wait: () => initialWatch };
+        },
+      );
+      const connect = vi.fn(
+        async (_pid: number, options: { onStdout?: (data: string) => void | Promise<void> }) => {
+          onStdout = options.onStdout ?? null;
+          resolveConnected?.();
+          return { pid: 41, wait: () => new Promise<never>(() => {}), disconnect };
+        },
+      );
+      const sendStdin = vi.fn(async (_pid: number, data: string) => {
+        for (const line of data.split("\n").filter(Boolean)) {
+          const message = JSON.parse(line) as JsonRpcMessage;
+          requests.push(message);
+          if (message.method === "initialize") {
+            await onStdout?.(
+              `${JSON.stringify({
+                jsonrpc: "2.0",
+                id: message.id,
+                result: { agentCapabilities: { loadSession: true } },
+              })}\n`,
+            );
+          } else if (message.method === "session/new") {
+            await onStdout?.(
+              `${JSON.stringify({
+                jsonrpc: "2.0",
+                id: message.id,
+                result: { sessionId: "session_reconnected" },
+              })}\n`,
+            );
+          } else if (message.method === "session/prompt") {
+            const streamError = new Error(streamErrorMessage);
+            streamError.name = errorName;
+            rejectInitialWatch?.(streamError);
+            await connected;
+            await onStdout?.(
+              `${JSON.stringify({
+                jsonrpc: "2.0",
+                id: message.id,
+                result: { stopReason: "end_turn" },
+              })}\n`,
+            );
+          }
+        }
+      });
+      const sandbox = {
+        commands: { run, connect, sendStdin, kill },
+      } as unknown as SandboxHandle;
+
+      const result = await new AcpHarness().runTurn(harnessInput(sandbox));
+
+      expect(result).toMatchObject({
+        sessionId: "session_reconnected",
+        promptResponse: { stopReason: "end_turn" },
+      });
+      expect(connect).toHaveBeenCalledOnce();
+      expect(connect).toHaveBeenCalledWith(
+        41,
+        expect.objectContaining({ timeoutMs: 0, onStdout: expect.any(Function) }),
+      );
+      expect(requests.filter((request) => request.method === "session/prompt")).toHaveLength(1);
+      expect(kill).toHaveBeenCalledWith(41);
+    },
+  );
+
+  it("keeps a non-zero ACP adapter exit terminal", async () => {
     let rejectInitialWatch: ((error: Error) => void) | null = null;
     const initialWatch = new Promise<never>((_resolve, reject) => {
       rejectInitialWatch = reject;
     });
-    let resolveConnected: (() => void) | null = null;
-    const connected = new Promise<void>((resolve) => {
-      resolveConnected = resolve;
-    });
     let onStdout: ((data: string) => void | Promise<void>) | null = null;
-    const requests: JsonRpcMessage[] = [];
+    const exitError = Object.assign(new Error("ACP adapter exited with code 1."), {
+      name: "CommandExitError",
+      result: { exitCode: 1, stdout: "", stderr: "adapter crashed" },
+    });
+    const connect = vi.fn(async () => {
+      throw new Error("should not reconnect");
+    });
     const kill = vi.fn(async () => true);
-    const disconnect = vi.fn(async () => undefined);
     const run = vi.fn(
       async (_command: string, options: { onStdout?: (data: string) => void | Promise<void> }) => {
         onStdout = options.onStdout ?? null;
         return { pid: 41, wait: () => initialWatch };
       },
     );
-    const connect = vi.fn(
-      async (_pid: number, options: { onStdout?: (data: string) => void | Promise<void> }) => {
-        onStdout = options.onStdout ?? null;
-        resolveConnected?.();
-        return { pid: 41, wait: () => new Promise<never>(() => {}), disconnect };
-      },
-    );
     const sendStdin = vi.fn(async (_pid: number, data: string) => {
       for (const line of data.split("\n").filter(Boolean)) {
         const message = JSON.parse(line) as JsonRpcMessage;
-        requests.push(message);
         if (message.method === "initialize") {
           await onStdout?.(
             `${JSON.stringify({
@@ -228,21 +336,11 @@ describe("AcpHarness", () => {
             `${JSON.stringify({
               jsonrpc: "2.0",
               id: message.id,
-              result: { sessionId: "session_reconnected" },
+              result: { sessionId: "session_exit" },
             })}\n`,
           );
         } else if (message.method === "session/prompt") {
-          const streamError = new Error("2: [unknown] The operation timed out.");
-          streamError.name = "SandboxError";
-          rejectInitialWatch?.(streamError);
-          await connected;
-          await onStdout?.(
-            `${JSON.stringify({
-              jsonrpc: "2.0",
-              id: message.id,
-              result: { stopReason: "end_turn" },
-            })}\n`,
-          );
+          rejectInitialWatch?.(exitError);
         }
       }
     });
@@ -250,18 +348,71 @@ describe("AcpHarness", () => {
       commands: { run, connect, sendStdin, kill },
     } as unknown as SandboxHandle;
 
-    const result = await new AcpHarness().runTurn(harnessInput(sandbox));
+    await expect(new AcpHarness().runTurn(harnessInput(sandbox))).rejects.toBe(exitError);
+    expect(connect).not.toHaveBeenCalled();
+    expect(kill).toHaveBeenCalledWith(41);
+  });
 
-    expect(result).toMatchObject({
-      sessionId: "session_reconnected",
-      promptResponse: { stopReason: "end_turn" },
+  it("defers the durable turn when every command-watch reconnect attempt fails", async () => {
+    let rejectInitialWatch: ((error: Error) => void) | null = null;
+    const initialWatch = new Promise<never>((_resolve, reject) => {
+      rejectInitialWatch = reject;
     });
-    expect(connect).toHaveBeenCalledOnce();
-    expect(connect).toHaveBeenCalledWith(
-      41,
-      expect.objectContaining({ timeoutMs: 0, onStdout: expect.any(Function) }),
+    let onStdout: ((data: string) => void | Promise<void>) | null = null;
+    const streamError = new Error("The command stream decoder rejected a frame.");
+    streamError.name = "UnexpectedDecoderError";
+    const connectError = new Error("The process could not be reattached.");
+    const connect = vi.fn(async () => {
+      throw connectError;
+    });
+    const kill = vi.fn(async () => true);
+    const run = vi.fn(
+      async (_command: string, options: { onStdout?: (data: string) => void | Promise<void> }) => {
+        onStdout = options.onStdout ?? null;
+        return { pid: 41, wait: () => initialWatch };
+      },
     );
-    expect(requests.filter((request) => request.method === "session/prompt")).toHaveLength(1);
+    const sendStdin = vi.fn(async (_pid: number, data: string) => {
+      for (const line of data.split("\n").filter(Boolean)) {
+        const message = JSON.parse(line) as JsonRpcMessage;
+        if (message.method === "initialize") {
+          await onStdout?.(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { agentCapabilities: { loadSession: true } },
+            })}\n`,
+          );
+        } else if (message.method === "session/new") {
+          await onStdout?.(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { sessionId: "session_disconnect" },
+            })}\n`,
+          );
+        } else if (message.method === "session/prompt") {
+          rejectInitialWatch?.(streamError);
+        }
+      }
+    });
+    const sandbox = {
+      commands: { run, connect, sendStdin, kill },
+    } as unknown as SandboxHandle;
+
+    await expect(
+      new AcpHarness().runTurn(
+        harnessInput(sandbox, {
+          redact: (value) => value.replaceAll("decoder", "[redacted]"),
+        }),
+      ),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: streamError,
+      diagnosticMessage:
+        "[run_turn] UnexpectedDecoderError: The command stream [redacted] rejected a frame.",
+    });
+    expect(connect).toHaveBeenCalledTimes(3);
     expect(kill).toHaveBeenCalledWith(41);
   });
 
@@ -276,50 +427,50 @@ describe("AcpHarness", () => {
       errorText: "no rollout found for thread id 9b5fee11",
       label: "a non-matching error message",
     },
-  ])("invalidates the stored session and starts fresh when session/load fails with $label", async ({
-    errorCode,
-    errorText,
-  }) => {
-    const transport = fakeAcpSandbox(async (message, emit) => {
-      if (message.method === "initialize") {
-        await emit({
-          jsonrpc: "2.0",
-          id: message.id,
-          result: { agentCapabilities: { loadSession: true } },
-        });
-      } else if (message.method === "session/load") {
-        await emit({
-          jsonrpc: "2.0",
-          id: message.id,
-          error: { code: errorCode, message: errorText },
-        });
-      } else if (message.method === "session/new") {
-        await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "session_fresh" } });
-      } else if (message.method === "session/prompt") {
-        await emit({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
-      }
-    });
-    const prepareFreshTask = vi.fn(async () => "Recover with full history.");
-    const onExistingSessionInvalidated = vi.fn(async () => {});
-    const input = harnessInput(transport.sandbox, {
-      existingSessionId: "session_stale",
-      prepareFreshTask,
-      onExistingSessionInvalidated,
-    });
+  ])(
+    "invalidates the stored session and starts fresh when session/load fails with $label",
+    async ({ errorCode, errorText }) => {
+      const transport = fakeAcpSandbox(async (message, emit) => {
+        if (message.method === "initialize") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { agentCapabilities: { loadSession: true } },
+          });
+        } else if (message.method === "session/load") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: errorCode, message: errorText },
+          });
+        } else if (message.method === "session/new") {
+          await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "session_fresh" } });
+        } else if (message.method === "session/prompt") {
+          await emit({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+        }
+      });
+      const prepareFreshTask = vi.fn(async () => "Recover with full history.");
+      const onExistingSessionInvalidated = vi.fn(async () => {});
+      const input = harnessInput(transport.sandbox, {
+        existingSessionId: "session_stale",
+        prepareFreshTask,
+        onExistingSessionInvalidated,
+      });
 
-    const result = await new AcpHarness().runTurn(input);
+      const result = await new AcpHarness().runTurn(input);
 
-    expect(result).toMatchObject({ sessionId: "session_fresh", loadedSession: false });
-    expect(onExistingSessionInvalidated).toHaveBeenCalledOnce();
-    expect(prepareFreshTask).toHaveBeenCalledOnce();
-    const prompt = transport.requests.find((request) => request.method === "session/prompt");
-    expect(prompt).toMatchObject({
-      params: {
-        sessionId: "session_fresh",
-        prompt: [{ type: "text", text: "Recover with full history." }],
-      },
-    });
-  });
+      expect(result).toMatchObject({ sessionId: "session_fresh", loadedSession: false });
+      expect(onExistingSessionInvalidated).toHaveBeenCalledOnce();
+      expect(prepareFreshTask).toHaveBeenCalledOnce();
+      const prompt = transport.requests.find((request) => request.method === "session/prompt");
+      expect(prompt).toMatchObject({
+        params: {
+          sessionId: "session_fresh",
+          prompt: [{ type: "text", text: "Recover with full history." }],
+        },
+      });
+    },
+  );
 
   it("aborts the turn without invalidating the thread when session/load fails at the transport level", async () => {
     let resolveExit: (() => void) | null = null;

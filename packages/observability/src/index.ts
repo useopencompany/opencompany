@@ -60,6 +60,20 @@ const LOG_LEVELS: Record<LogLevel, number> = {
 const MAX_DEPTH = 5;
 const MAX_ARRAY_ITEMS = 20;
 const MAX_STRING_LENGTH = 2_000;
+const ERROR_DIAGNOSTIC_FIELDS = [
+  ["code", "code"],
+  ["severity", "severity"],
+  ["schema", "schema"],
+  ["table", "table"],
+  ["column", "column"],
+  ["dataType", "data_type"],
+  ["constraint", "constraint"],
+  ["position", "position"],
+  ["internalPosition", "internal_position"],
+  ["file", "file"],
+  ["line", "line"],
+  ["routine", "routine"],
+] as const;
 
 const defaultTimingLogger = createLogger({ service: "opencompany" });
 const observabilityLogger = createLogger({ service: "opencompany-observability" });
@@ -341,11 +355,7 @@ function sanitizeValue(value: unknown, depth: number, seen: WeakSet<object>): un
   if (typeof value === "symbol" || typeof value === "function") return String(value);
 
   if (value instanceof Error) {
-    return {
-      name: value.name,
-      message: truncateString(value.message),
-      ...(value.stack ? { stack: truncateString(value.stack) } : {}),
-    };
+    return sanitizeError(value, depth, seen);
   }
 
   if (value instanceof Date) {
@@ -379,6 +389,80 @@ function sanitizeValue(value: unknown, depth: number, seen: WeakSet<object>): un
   }
 
   return String(value);
+}
+
+function sanitizeError(error: Error, depth: number, seen: WeakSet<object>): unknown {
+  if (seen.has(error)) return "[circular]";
+  if (depth >= MAX_DEPTH) return "[truncated]";
+  seen.add(error);
+
+  const message = sanitizeErrorMessage(error);
+  const output: LogFields = {
+    name: error.name,
+    message,
+    ...(error.stack ? { stack: truncateString(error.stack.replace(error.message, message)) } : {}),
+  };
+  appendErrorDiagnostics(output, error);
+
+  const cause = readObjectField(error, "cause");
+  if (cause !== undefined) {
+    output.cause = sanitizeErrorCause(cause, depth + 1, seen);
+  }
+
+  seen.delete(error);
+  return output;
+}
+
+function sanitizeErrorMessage(error: Error) {
+  const cause = readObjectField(error, "cause");
+  const databaseCode =
+    cause && typeof cause === "object" ? readObjectField(cause, "code") : undefined;
+  if (error.message.startsWith("Failed query:") && typeof databaseCode === "string") {
+    return "Database query failed";
+  }
+  return truncateString(error.message);
+}
+
+function sanitizeErrorCause(value: unknown, depth: number, seen: WeakSet<object>): unknown {
+  if (value instanceof Error) return sanitizeError(value, depth, seen);
+  if (!value || typeof value !== "object") return sanitizeValue(value, depth, seen);
+  if (seen.has(value)) return "[circular]";
+  if (depth >= MAX_DEPTH) return "[truncated]";
+  seen.add(value);
+
+  const output: LogFields = {};
+  for (const key of ["name", "message", "stack"] as const) {
+    const fieldValue = readObjectField(value, key);
+    if (typeof fieldValue === "string") output[key] = truncateString(fieldValue);
+  }
+  appendErrorDiagnostics(output, value);
+
+  const cause = readObjectField(value, "cause");
+  if (cause !== undefined) {
+    output.cause = sanitizeErrorCause(cause, depth + 1, seen);
+  }
+
+  seen.delete(value);
+  return Object.keys(output).length > 0 ? output : { name: value.constructor?.name ?? "Object" };
+}
+
+function appendErrorDiagnostics(output: LogFields, value: object) {
+  for (const [sourceKey, outputKey] of ERROR_DIAGNOSTIC_FIELDS) {
+    const fieldValue = readObjectField(value, sourceKey);
+    if (typeof fieldValue === "string") {
+      output[outputKey] = truncateString(fieldValue);
+    } else if (typeof fieldValue === "number" || typeof fieldValue === "boolean") {
+      output[outputKey] = fieldValue;
+    }
+  }
+}
+
+function readObjectField(value: object, key: string): unknown {
+  try {
+    return (value as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
 }
 
 function isPlainRecord(value: unknown): value is LogFields {

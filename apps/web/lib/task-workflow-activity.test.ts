@@ -66,6 +66,8 @@ function workflowSpec(input: {
       id: "workflow",
       workspaceId: "workspace_1",
       skillIds: [],
+      skillBundleIds: [],
+      pluginIds: [],
       steps: Array.from({ length: input.stepCount }, (_, index) => ({
         index,
         title: titles[index] ?? `Step ${index + 1}`,
@@ -74,6 +76,7 @@ function workflowSpec(input: {
         systemPrompt: `System ${index + 1}`,
         systemBlocks: [`System ${index + 1}`],
         skillIds: [],
+        skillBundleIds: [],
       })),
       currentStepIndex: input.currentStepIndex ?? 0,
       completedStepCount: input.completedStepCount ?? 0,

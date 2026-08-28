@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import {
+  ACTION_HOST_TOOL_CONTRACT_VERSIONS,
+  CHAT_HOST_TOOL_CONTRACT_VERSIONS,
+} from "@opencompany/agent-runtime";
 import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
 import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
 import {
@@ -42,6 +46,15 @@ const CODEX_CHAT_UNEXPECTED_FAILURE_MESSAGE =
 const CODEX_CHAT_INFRASTRUCTURE_RETRY_EXHAUSTED_MESSAGE =
   "This chat run could not start after several infrastructure retries. Send your message again to retry.";
 
+// Host-tool contract versions this worker binary can serve. Sessions are stamped
+// by the API release that enqueued the turn, so a draining pre-deploy worker must
+// leave newer-stamped turns for the new release's workers instead of claiming and
+// terminally failing them (host-tool context load rejects unknown versions).
+const SUPPORTED_HOST_TOOL_CONTRACT_VERSIONS = [
+  ...CHAT_HOST_TOOL_CONTRACT_VERSIONS,
+  ...ACTION_HOST_TOOL_CONTRACT_VERSIONS,
+];
+
 let registeredWakeup: (() => void) | null = null;
 
 export function setCodexChatWakeup(wake: (() => void) | null) {
@@ -79,10 +92,14 @@ type ClaimedTurnRow = {
   updated_at: Date | string;
 };
 
-// Claims the next runnable codex chat turn. Three predicates shape the queue:
+// Claims the next runnable codex chat turn. Four predicates shape the queue:
 //  - claimable: freshly queued, or a running turn whose lease expired (worker crash);
 //  - one active turn per session: skip while a sibling holds a live running lease;
-//  - per-session FIFO: an earlier queued sibling always goes first.
+//  - per-session FIFO: an earlier queued sibling always goes first;
+//  - contract fence: queued turns stamped with a host-tool contract this binary
+//    does not support are left for workers of the matching release. Expired-lease
+//    reclaims bypass the fence: the original claimer is gone, and a degraded
+//    host-tool failure beats stranding the turn forever.
 export async function claimNextCodexChatTurn(input: {
   leaseOwner: string;
   leaseTtlMs: number;
@@ -109,6 +126,14 @@ export async function claimNextCodexChatTurn(input: {
             AND session.user_workos_id = turn.user_workos_id
             AND session.status <> 'closed'
             AND chat.closed_at IS NULL
+            AND (
+              turn.status <> 'queued'
+              OR session.host_tool_contract_version IS NULL
+              OR session.host_tool_contract_version IN (${sql.join(
+                SUPPORTED_HOST_TOOL_CONTRACT_VERSIONS.map((version) => sql`${version}`),
+                sql`, `,
+              )})
+            )
         )
         AND NOT EXISTS (
           SELECT 1 FROM goat.codex_chat_turns AS sibling

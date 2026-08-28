@@ -142,43 +142,44 @@ describe("toChatUiMessage", () => {
     ]);
   });
 
-  it.each([
-    "Tasks",
-    "Results",
-  ])("places legacy task cards before the Added to %s continuation", (destination) => {
-    const message = storedAssistantMessage({
-      content: `This needs live Linear access, so I'm spinning up a task to pull the opencompany team's current issues and give you a prioritized "what's next" recommendation.Added to ${destination} as TASK-26. It'll pull the opencompany team's Linear board.`,
-      taskId: "task_26",
-      taskDisplayId: "TASK-26",
-      taskName: "Linear opencompany team status + next steps",
-      taskPrompt: "Pull the opencompany team's Linear board and recommend what to work on next.",
-      debugTrace: {
-        schemaVersion: "opencompany.chat.debug.v1",
-        model: DEFAULT_MODEL,
-        toolResults: [
-          {
-            taskId: "task_26",
-            taskDisplayId: "TASK-26",
-            taskName: "Linear opencompany team status + next steps",
-            status: "queued",
-            prompt: "Pull the opencompany team's Linear board and recommend what to work on next.",
-          },
-        ],
-      },
-    });
+  it.each(["Tasks", "Results"])(
+    "places legacy task cards before the Added to %s continuation",
+    (destination) => {
+      const message = storedAssistantMessage({
+        content: `This needs live Linear access, so I'm spinning up a task to pull the opencompany team's current issues and give you a prioritized "what's next" recommendation.Added to ${destination} as TASK-26. It'll pull the opencompany team's Linear board.`,
+        taskId: "task_26",
+        taskDisplayId: "TASK-26",
+        taskName: "Linear opencompany team status + next steps",
+        taskPrompt: "Pull the opencompany team's Linear board and recommend what to work on next.",
+        debugTrace: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          model: DEFAULT_MODEL,
+          toolResults: [
+            {
+              taskId: "task_26",
+              taskDisplayId: "TASK-26",
+              taskName: "Linear opencompany team status + next steps",
+              status: "queued",
+              prompt:
+                "Pull the opencompany team's Linear board and recommend what to work on next.",
+            },
+          ],
+        },
+      });
 
-    const parts = toChatUiMessage(message).parts;
+      const parts = toChatUiMessage(message).parts;
 
-    expect(parts.map((part) => part.type)).toEqual(["text", START_TASK_TOOL_PART_TYPE, "text"]);
-    expect(parts[0]).toEqual({
-      type: "text",
-      text: "This needs live Linear access, so I'm spinning up a task to pull the opencompany team's current issues and give you a prioritized \"what's next\" recommendation.",
-    });
-    expect(parts[2]).toEqual({
-      type: "text",
-      text: `Added to ${destination} as TASK-26. It'll pull the opencompany team's Linear board.`,
-    });
-  });
+      expect(parts.map((part) => part.type)).toEqual(["text", START_TASK_TOOL_PART_TYPE, "text"]);
+      expect(parts[0]).toEqual({
+        type: "text",
+        text: "This needs live Linear access, so I'm spinning up a task to pull the opencompany team's current issues and give you a prioritized \"what's next\" recommendation.",
+      });
+      expect(parts[2]).toEqual({
+        type: "text",
+        text: `Added to ${destination} as TASK-26. It'll pull the opencompany team's Linear board.`,
+      });
+    },
+  );
 
   it("replays persisted codex turns with reasoning and command parts", () => {
     const message = storedAssistantMessage({

@@ -6,47 +6,97 @@ import {
   prepareProductChatStep,
   UPDATE_TASK_STATUS_TOOL_NAME,
 } from "./chat-agent";
-import { START_TASK_TOOL_NAME, START_WORKFLOW_TOOL_NAME } from "./chat-ui";
+import {
+  CREATE_WORKSPACE_SKILL_TOOL_NAME,
+  START_TASK_TOOL_NAME,
+  START_WORKFLOW_TOOL_NAME,
+} from "./chat-ui";
 
 const model = "moonshotai/kimi-k2.6" as never;
 
-describe("start_task tool", () => {
-  it.each([
-    "moonshotai/kimi-k3",
-    "xai/grok-4.3",
-    "anthropic/claude-sonnet-5",
-  ])("normalizes a Codex task from %s main chat to the default Codex model", async (mainModel) => {
-    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
-      id: "task_1",
-      displayId: "TASK-1",
-      name: task.name ?? "Test repo access",
-      prompt: task.prompt,
+describe("create_workspace_skill tool", () => {
+  it("is available only when the authenticated host injects its runner", () => {
+    expect(CREATE_WORKSPACE_SKILL_TOOL_NAME in createProductChatToolContext({ model }).tools).toBe(
+      false,
+    );
+    expect(
+      CREATE_WORKSPACE_SKILL_TOOL_NAME in
+        createProductChatToolContext({ model, createWorkspaceSkill: vi.fn() }).tools,
+    ).toBe(true);
+  });
+
+  it("passes the synthesized Skill and stable SDK tool-call id to the host", async () => {
+    const createWorkspaceSkill = vi.fn(async () => ({
+      created: true as const,
+      name: "customer-health-review",
+      command: "/customer-health-review",
+      bundleId: "skill_bundle_1",
     }));
-    const context = createProductChatToolContext({
-      model: mainModel as never,
-      requestedEngine: "codex",
-      startTask,
-    });
-    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
-      execute: (args: unknown) => Promise<unknown>;
+    const context = createProductChatToolContext({ model, createWorkspaceSkill });
+    const skillTool = context.tools[CREATE_WORKSPACE_SKILL_TOOL_NAME] as {
+      description: string;
+      execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown>;
     };
 
-    await startTaskTool.execute({
-      name: "Test repo access",
-      prompt: "Check repo access and report whether development work can start.",
-      reason: "Requires connected source-control access.",
-    });
+    await expect(
+      skillTool.execute(
+        {
+          name: " customer-health-review ",
+          description: " Review customer health. ",
+          instructions: " Review the account signals. ",
+        },
+        { toolCallId: "call_skill_1" },
+      ),
+    ).resolves.toMatchObject({ created: true, command: "/customer-health-review" });
 
-    expect(startTask).toHaveBeenCalledWith(
+    expect(skillTool.description).toContain("latest message explicitly asks");
+    expect(createWorkspaceSkill).toHaveBeenCalledWith(
       {
-        name: "Test repo access",
-        prompt: "Check repo access and report whether development work can start.",
-        model: CODEX_DEFAULT_MODEL_ID,
-        engine: "codex",
+        name: "customer-health-review",
+        description: "Review customer health.",
+        instructions: "Review the account signals.",
       },
-      { toolCallId: expect.any(String) },
+      { toolCallId: "call_skill_1" },
     );
   });
+});
+
+describe("start_task tool", () => {
+  it.each(["moonshotai/kimi-k3", "xai/grok-4.3", "anthropic/claude-sonnet-5"])(
+    "normalizes a Codex task from %s main chat to the default Codex model",
+    async (mainModel) => {
+      const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+        id: "task_1",
+        displayId: "TASK-1",
+        name: task.name ?? "Test repo access",
+        prompt: task.prompt,
+      }));
+      const context = createProductChatToolContext({
+        model: mainModel as never,
+        requestedEngine: "codex",
+        startTask,
+      });
+      const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+        execute: (args: unknown) => Promise<unknown>;
+      };
+
+      await startTaskTool.execute({
+        name: "Test repo access",
+        prompt: "Check repo access and report whether development work can start.",
+        reason: "Requires connected source-control access.",
+      });
+
+      expect(startTask).toHaveBeenCalledWith(
+        {
+          name: "Test repo access",
+          prompt: "Check repo access and report whether development work can start.",
+          model: CODEX_DEFAULT_MODEL_ID,
+          engine: "codex",
+        },
+        { toolCallId: expect.any(String) },
+      );
+    },
+  );
 
   it("preserves an already Codex-compatible task model", async () => {
     const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({

@@ -477,6 +477,12 @@ export class PostgresTaskRepository implements TaskRepository {
           WHERE "user".workos_user_id = ${input.actor.userId}
           FOR UPDATE OF "user"
         ),
+        enabled_task_plugins AS MATERIALIZED (
+          SELECT COALESCE(jsonb_agg(plugin.id ORDER BY plugin.id), '[]'::jsonb) AS plugin_ids
+          FROM goat.plugins AS plugin
+          WHERE plugin.workspace_id = ${input.actor.workspaceId}
+            AND plugin.status = 'enabled'
+        ),
         prior AS MATERIALIZED (
           SELECT *
           FROM goat.task_command_idempotency
@@ -554,7 +560,17 @@ export class PostgresTaskRepository implements TaskRepository {
             ${input.command.model}, conversation.id, ${input.command.scheduleId ?? null},
             ${input.command.scheduledFor ?? null}, ${input.command.workflowId ?? null},
             ${this.options.compatibility?.workflowBrainRef ?? null},
-            'queued', 'queued', ${now}, ${JSON.stringify(harness)}::jsonb, ${now}, ${now}
+            'queued', 'queued', ${now},
+            CASE WHEN ${JSON.stringify(harness)}::jsonb ? 'workflow'
+              THEN jsonb_set(
+                ${JSON.stringify(harness)}::jsonb,
+                '{workflow,pluginIds}',
+                (SELECT plugin_ids FROM enabled_task_plugins),
+                true
+              )
+              ELSE ${JSON.stringify(harness)}::jsonb
+            END,
+            ${now}, ${now}
           FROM winner
           JOIN created_conversation AS conversation ON conversation.id = winner.conversation_id
           RETURNING *

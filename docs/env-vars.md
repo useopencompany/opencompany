@@ -22,21 +22,28 @@ mirror an API-owned secret into `/web` unless a current thin relay actually cons
 
 The names-only production audit is recorded in [#1243](https://github.com/useopencompany/opencompany-experimental/issues/1243).
 Two web exceptions remain deliberately classified as suspects rather than prune candidates:
-`BLOB_READ_WRITE_TOKEN` backs the cached-client Brain upload adapter, and `DATABASE_URL` is still
-reached indirectly by `AppShell` integration-state loaders composed from shared packages. The
-latter violates the intended pure-client boundary and must be removed from code before the web
-database value can be deleted.
+`BLOB_READ_WRITE_TOKEN` backs the cached-client Brain upload adapter. The runner also uses its
+`/runner` value for private, bounded durable Plugin data archives; it never places that token in a
+Plugin process environment. `DATABASE_URL` is still reached indirectly by `AppShell`
+integration-state loaders composed from shared packages. The latter violates the intended
+pure-client boundary and must be removed from code before the web database value can be deleted.
 
 ## Required groups
 
 `scripts/release-preflight.mjs` is the executable source of truth for required web, API, runner, and
-release variables. Important contracts include:
+release variables. When the release group is selected, it also reads the production database and
+reports row counts for the retired `goat.skills` and `goat.chat_session_skills` tables plus counts
+of queued/running Workflow Tasks that contain legacy `skillSnapshots` or lack per-step
+`skillBundleIds` arrays. Any such active Task, or an inspection error, fails preflight. Important
+contracts include:
 
 - Web: WorkOS/AuthKit, canonical URL, shared cookie domain, first-party API origins, the narrow
   runner relay token/URL, cron relay secret, opencompany PostHog, the cached-client Blob adapter, and the
   temporary database suspect documented above; onboarding email settings remain optional. Web does
   not require Electric, model, billing, or provider-ingress credentials.
-- API: direct database, WorkOS session/OAuth and shared cookie domain, the credentialed browser
+- API: direct database, the primary WorkOS browser application, the dedicated
+  `WORKOS_MOBILE_CLIENT_ID` AuthKit session-bearer application, Connect OAuth issuer/audience, and
+  shared cookie domain, the credentialed browser
   origin allowlist, billing/Stripe, managed capabilities and cron reconciliation, Vercel AI Gateway
   for canonical Auto routing, Blob, Electric, Redis, the cron secret for the internal email
   persistence relays, the runner token/URL for the engine-auth control calls, and
@@ -45,9 +52,9 @@ release variables. Important contracts include:
 - Runner: database, internal/stream tokens, `OPENCOMPANY_API_ORIGIN` and `API_INTERNAL_TOKEN` for
   the internal wiki command endpoint (agent wiki writes cross the canonical API, never the wiki
   database directly), opencompany origin, allowed origins, integration encryption, an explicitly
-  enabled task-worker gate, E2B, Blob, model providers, GitHub/Google/X integration credentials,
-  opencompany PostHog, and Redis values; capability controls and provider-specific tuning remain
-  optional.
+  enabled task-worker gate, E2B, Blob (including Plugin data archives), model providers,
+  GitHub/Google/X integration credentials, opencompany PostHog, and Redis values; capability
+  controls and provider-specific tuning remain optional.
 - Release: production DB URL, Vercel/Render credentials and project/service IDs, opencompany/API/runner
   URLs.
 
@@ -56,8 +63,18 @@ authorized read models. Server Components use the server-only `OPENCOMPANY_API_O
 origins, the shared `WORKOS_COOKIE_DOMAIN`, and API `API_BROWSER_ORIGINS`. Chat recovery is
 fix-forward as documented in [Chat operations](./chat-operations.md).
 
+`WORKOS_MOBILE_CLIENT_ID` is public but server-owned configuration in prod `/api`. It identifies a
+dedicated AuthKit application in the same WorkOS environment as `WORKOS_CLIENT_ID`, allowing users
+and organizations to remain shared while the API selects a fixed mobile session-token verifier.
+Future mobile builds expose the same value as `EXPO_PUBLIC_WORKOS_CLIENT_ID`; neither variable is a
+client secret. Do not copy the mobile client ID into the web runtime unless web gains a real reader.
+
 `CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
+
+`BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
+The runner uses it for bounded, durable `PLUGIN_DATA` archives and never injects it into Plugin
+processes.
 
 `OPENCOMPANY_DESKTOP_AUTH_SECRET` is a web-only base64 32-byte key (same convention as
 `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`) that seals the macOS desktop app's Google sign-in handoff
@@ -83,6 +100,24 @@ owning runtimes.
 The marketing Vercel project uses `NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN` and
 `NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST` for basic page and conversion analytics in the same PostHog project
 as the product. Both variables are required in production and optional for local marketing work.
+
+## Experimental Revolut Business connector
+
+Revolut Business is an internal, env-gated runner capability rather than a generally available
+integration. Configure it only for a bounded read-only API evaluation:
+
+| Variable | Required | Purpose |
+| --- | ---: | --- |
+| `OPENCOMPANY_REVOLUT_BUSINESS_WORKSPACE_ID` | Yes | Only workspace allowed to see the action source. |
+| `OPENCOMPANY_REVOLUT_BUSINESS_API_TOKEN` | Yes | Short-lived `oa_prod_` or `oa_sand_` access token with `READ` scope only. |
+| `OPENCOMPANY_REVOLUT_BUSINESS_ACCOUNT_LABEL` | No | Friendly account label shown in Chat. |
+| `OPENCOMPANY_REVOLUT_BUSINESS_API_BASE_URL` | No | HTTPS API base; inferred from the token environment by default. |
+
+The token expires after roughly 40 minutes and must never have `PAY`, `WRITE`, or
+`READ_SENSITIVE_CARD_DATA` scope. The connector can list accounts and bounded expense results; it
+cannot upload receipts, initiate or cancel payments, exchange currency, or return card-sensitive
+data. Store production values in Infisical `prod` `/runner`. This evaluation has no public Settings
+flow and is intentionally omitted from the customer integration index.
 
 ## Local generated values
 

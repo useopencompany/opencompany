@@ -10,15 +10,17 @@ import {
   type BrainSourceItemDto,
   type CreateBrainDocumentBody,
   type CreateBrainFolderBody,
-  type CreateSkillBody,
+  type CreateWorkspaceSkillBody,
   createApiClient,
   type DeleteBrainFolderBody,
   type ImportSkillBody,
+  type InstallPluginBody,
+  type PluginImportPreviewBody,
   type RenameBrainDocumentBody,
   type RenameBrainFolderBody,
   type SkillImportPreviewBody,
   type UpdateBrainDocumentBody,
-  type UpdateSkillBody,
+  type UpdateWorkspaceSkillBody,
 } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import { awaitHeadlessWikiTransactions } from "./headless-knowledge-collections";
@@ -175,14 +177,6 @@ export async function addHeadlessWikiTimelineEntry(
   return data.entry;
 }
 
-export async function createHeadlessSkill(command: CreateSkillBody, options: ClientOptions = {}) {
-  const response = await knowledgeClient(options).v1.skills.$post({
-    header: { "idempotency-key": `web-skill:${crypto.randomUUID()}` },
-    json: command,
-  });
-  return responseData(response, "Skill creation failed");
-}
-
 export async function previewHeadlessSkillImport(
   command: SkillImportPreviewBody,
   options: ClientOptions = {},
@@ -201,9 +195,20 @@ export async function importHeadlessSkill(command: ImportSkillBody, options: Cli
   return responseData(response, "Skill import failed");
 }
 
-export async function updateHeadlessSkill(
+export async function createHeadlessWorkspaceSkill(
+  command: CreateWorkspaceSkillBody,
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.skills.$post({
+    header: { "idempotency-key": `web-workspace-skill:${crypto.randomUUID()}` },
+    json: command,
+  });
+  return responseData(response, "Skill creation failed");
+}
+
+export async function updateHeadlessWorkspaceSkill(
   slug: string,
-  command: UpdateSkillBody,
+  command: UpdateWorkspaceSkillBody,
   options: ClientOptions = {},
 ) {
   const response = await knowledgeClient(options).v1.skills[":slug"].$patch({
@@ -220,9 +225,119 @@ export async function archiveHeadlessSkill(slug: string, options: ClientOptions 
   return responseData(response, "Skill archive failed");
 }
 
+export async function enableHeadlessSkill(slug: string, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.skills[":slug"].enable.$post({
+    param: { slug },
+  });
+  return responseData(response, "Skill enable failed");
+}
+
+export async function disableHeadlessSkill(slug: string, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.skills[":slug"].disable.$post({
+    param: { slug },
+  });
+  return responseData(response, "Skill disable failed");
+}
+
+export async function replaceHeadlessSkill(
+  slug: string,
+  command: ImportSkillBody,
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.skills[":slug"].replace.$post({
+    param: { slug },
+    json: command,
+  });
+  return responseData(response, "Skill replacement failed");
+}
+
+export async function readHeadlessSkillFile(
+  slug: string,
+  query: { path: string; offset?: number; maxBytes?: number },
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.skills[":slug"].files.read.$get({
+    param: { slug },
+    query: {
+      path: query.path,
+      ...(query.offset !== undefined ? { offset: String(query.offset) } : {}),
+      ...(query.maxBytes !== undefined ? { maxBytes: String(query.maxBytes) } : {}),
+    },
+  });
+  return responseData(response, "Skill file loading failed");
+}
+
 export async function listHeadlessSkillCatalog(options: ClientOptions = {}) {
   const response = await knowledgeClient(options).v1.skills.catalog.$get();
   return responseData(response, "Skill catalog loading failed");
+}
+
+export async function previewHeadlessPluginImport(
+  command: PluginImportPreviewBody,
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.plugins.imports.preview.$post({
+    json: command,
+  });
+  return responseData(response, "Plugin import preview failed");
+}
+
+export async function importHeadlessPlugin(
+  command: InstallPluginBody,
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.plugins.imports.$post({
+    header: { "idempotency-key": `web-plugin-import:${crypto.randomUUID()}` },
+    json: command,
+  });
+  return responseData(response, "Plugin import failed");
+}
+
+export async function archiveHeadlessPlugin(name: string, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.plugins[":name"].archive.$post({
+    param: { name },
+  });
+  return responseData(response, "Plugin archive failed");
+}
+
+export async function enableHeadlessPlugin(name: string, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.plugins[":name"].enable.$post({
+    param: { name },
+  });
+  return responseData(response, "Plugin enable failed");
+}
+
+export async function disableHeadlessPlugin(name: string, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.plugins[":name"].disable.$post({
+    param: { name },
+  });
+  return responseData(response, "Plugin disable failed");
+}
+
+export async function approveHeadlessPluginMcp(
+  name: string,
+  integrity: string,
+  options: ClientOptions = {},
+) {
+  const response = await knowledgeClient(options).v1.plugins[":name"].mcp.approve.$post({
+    param: { name },
+    json: { integrity },
+  });
+  return responseData(response, "Plugin MCP approval failed");
+}
+
+export async function revokeHeadlessPluginMcp(name: string, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.plugins[":name"].mcp.revoke.$post({
+    param: { name },
+  });
+  return responseData(response, "Plugin MCP revocation failed");
+}
+
+export async function deleteHeadlessPluginData(name: string, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.plugins[":name"].data.delete.$post({
+    param: { name },
+  });
+  return responseData(response, "Plugin data deletion failed");
 }
 
 function knowledgeClient(options: ClientOptions) {

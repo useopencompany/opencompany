@@ -1,5 +1,4 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import { serializeBrainSkillMarkdown } from "@opencompany/brain";
 import type { WorkflowHarnessSpec } from "@opencompany/db/harness";
 import type {
   ChatMessageAttachment,
@@ -136,10 +135,6 @@ export function compileWorkflowHarnessSpec(input: {
     const stepSkills = [...stepSkillIds]
       .map((skillId) => skillById.get(skillId))
       .filter((skill): skill is WorkspaceSkill => Boolean(skill));
-    const skillBlocks =
-      selection.engine === "opencompany"
-        ? stepSkills.map((skill) => serializeBrainSkillMarkdown(skill))
-        : [];
     const title = step.title.trim() || `Step ${index + 1}`;
     const systemPrompt = [
       `You are executing step ${index + 1} of ${input.workflow.steps.length} ("${title}") of the user-authored workflow "${input.workflow.name}" as a background task.`,
@@ -151,16 +146,6 @@ export function compileWorkflowHarnessSpec(input: {
       "<workflow_step_instructions>",
       step.instructions,
       "</workflow_step_instructions>",
-      ...(skillBlocks.length > 0
-        ? [
-            "",
-            "This step references these user-authored skills. Apply them where relevant:",
-            "",
-            "<workflow_skills>",
-            skillBlocks.join("\n\n"),
-            "</workflow_skills>",
-          ]
-        : []),
     ].join("\n");
 
     return {
@@ -172,16 +157,16 @@ export function compileWorkflowHarnessSpec(input: {
       systemPrompt,
       systemBlocks: [systemPrompt],
       skillIds: stepSkills.map((skill) => skill.id),
+      skillBundleIds: stepSkills.map((skill) => skill.bundleId),
+      pluginSkillBundleIds: stepSkills.flatMap((skill) =>
+        skill.sourceKind === "plugin" ? [skill.bundleId] : [],
+      ),
     };
   });
   const firstStep = steps[0];
   if (!firstStep) {
     throw new WorkflowMentionError("This workflow has no steps to run.");
   }
-  const hasSandboxStep = steps.some(
-    (step) => step.engine === "codex" || step.engine === "claude_code",
-  );
-
   return {
     schemaVersion: "goat.harness.v1",
     // Mirror step 0 so an older runner degrades to executing the first step.
@@ -199,19 +184,12 @@ export function compileWorkflowHarnessSpec(input: {
       id: input.workflow.id,
       workspaceId: input.workspaceId,
       skillIds: input.skills.map((skill) => skill.id),
+      skillBundleIds: input.skills.map((skill) => skill.bundleId),
+      // Task creation replaces this placeholder with the currently enabled immutable Plugin IDs.
+      pluginIds: [],
       steps,
       currentStepIndex: 0,
       completedStepCount: 0,
-      ...(hasSandboxStep
-        ? {
-            skillSnapshots: input.skills.map((skill) => ({
-              id: skill.id,
-              name: skill.name,
-              description: skill.description,
-              instructions: skill.instructions,
-            })),
-          }
-        : {}),
     },
   };
 }

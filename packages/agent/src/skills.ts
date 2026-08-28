@@ -1,71 +1,58 @@
-import { type BrainSkill, isValidBrainId, serializeBrainSkillMarkdown } from "@opencompany/brain";
-import { getDb } from "@opencompany/db/client";
+import { assertSafeRelativePath, createWorkspaceSkillArtifact } from "@opencompany/agent-runtime";
+import { isValidBrainId } from "@opencompany/brain";
 import {
-  type ChatSessionSkill,
-  chatSessionSkills,
-  type SkillSourceType,
-  type SkillStatus,
-  skills,
-} from "@opencompany/db/product-schema";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
-
-// Skills are workspace-scoped, reusable agent capabilities. They used to live as
-// markdown documents in a reserved `skills/` Brain folder; they now have their
-// own `goat.skills` table so "what the agent can do" is a first-class primitive
-// rather than Brain (knowledge) content. The `@skill/<slug>` composer mention
-// attaches a skill to a chat message, which snapshots its content immutably into
-// `chatSessionSkills`.
+  type Actor,
+  createSkillFileChunk,
+  type SkillAuthoringInput,
+  type SkillFileChunk,
+  SkillImportApplicationService,
+} from "@opencompany/core";
+import { getDb } from "@opencompany/db/client";
+import type { PooledDb } from "@opencompany/db/pool";
+import {
+  activateAndListChatSkillBundles,
+  PostgresSkillBundleRepository,
+  readChatSkillBundleFile,
+} from "@opencompany/db/skill-bundle-repository";
+import { resolveWorkspaceSkillCatalog } from "@opencompany/db/skill-catalog";
+import { createSkillImportResolver } from "./skill-import";
 
 export const MAX_CHAT_SKILLS = 16;
-export const MAX_CHAT_SKILL_BYTES = 256 * 1024;
+export const MAX_CHAT_SKILL_BYTES = 1024 * 1024;
 
-type Db = ReturnType<typeof getDb>;
+type Db = ReturnType<typeof getDb> | PooledDb;
 
-// The content shape carried through mentions, session snapshots, and prompt
-// injection. `id` holds the workspace-unique slug (the `@skill/<id>` handle) —
-// kept named `id` so snapshot/prompt consumers stay drop-in with the former
-// Brain-doc shape (`BrainSkill`).
-export type WorkspaceSkill = BrainSkill;
-
-// Provenance for a skill imported from an external SKILL.md. `null` on a skill means
-// hand-authored in opencompany, still fully editable.
-export type SkillSource = {
-  type: SkillSourceType;
-  url: string;
-  ref: string;
-  path: string;
-  resolvedCommit: string;
-};
-
-export type SkillListItem = {
-  slug: string;
+// The installation name is the public @skill handle. The bundle ID is the immutable version used
+// by Chat and Workflow Task snapshots.
+export type WorkspaceSkill = {
+  id: string;
+  bundleId: string;
   name: string;
   description: string;
-  status: SkillStatus;
-  updatedAt: Date;
-  source: SkillSource | null;
+  instructions: string;
+  sourceKind: "standalone" | "plugin";
 };
 
 export type SkillCatalogItem = Pick<WorkspaceSkill, "id" | "name" | "description">;
-
-export type SkillDetail = WorkspaceSkill & {
-  status: SkillStatus;
-  source: SkillSource | null;
-};
-
 export type SkillMentionRef = { id: string };
 
-export type ChatSessionSkillSnapshot = Pick<
-  ChatSessionSkill,
-  | "chatSessionId"
-  | "skillId"
-  | "brainRef"
-  | "activatedMessageId"
-  | "name"
-  | "description"
-  | "instructions"
-  | "createdAt"
->;
+export type ChatSessionSkillSnapshot = {
+  chatSessionId: string;
+  bundleId: string;
+  skillId: string;
+  activatedMessageId: string;
+  sourceKind: "standalone" | "plugin";
+  name: string;
+  description: string;
+  instructions: string;
+};
+
+export type CreatedWorkspaceSkill = {
+  created: true;
+  name: string;
+  command: string;
+  bundleId: string;
+};
 
 export class SkillMentionError extends Error {
   constructor(message: string) {
@@ -97,100 +84,30 @@ export async function listSkillCatalog(
   workspaceId: string,
   db: Db = getDb(),
 ): Promise<SkillCatalogItem[]> {
-  const rows = await db
-    .select({
-      slug: skills.slug,
-      name: skills.name,
-      description: skills.description,
-    })
-    .from(skills)
-    .where(
-      and(
-        eq(skills.workspaceId, workspaceId),
-        eq(skills.status, "active"),
-        isNull(skills.archivedAt),
-      ),
-    )
-    .orderBy(asc(skills.name));
-
-  return rows.map((row) => ({ id: row.slug, name: row.name, description: row.description }));
+  const catalog = await resolveWorkspaceSkillCatalog(db, { workspaceId });
+  return catalog.skills.map(({ id, name, description }) => ({ id, name, description }));
 }
 
-export async function listSkills(workspaceId: string, db: Db = getDb()): Promise<SkillListItem[]> {
-  const rows = await db
-    .select({
-      slug: skills.slug,
-      name: skills.name,
-      description: skills.description,
-      status: skills.status,
-      updatedAt: skills.updatedAt,
-      sourceType: skills.sourceType,
-      sourceUrl: skills.sourceUrl,
-      sourceRef: skills.sourceRef,
-      sourcePath: skills.sourcePath,
-      resolvedCommit: skills.resolvedCommit,
-    })
-    .from(skills)
-    .where(and(eq(skills.workspaceId, workspaceId), isNull(skills.archivedAt)))
-    .orderBy(desc(skills.updatedAt));
-  return rows.map((row) => ({
-    slug: row.slug,
-    name: row.name,
-    description: row.description,
-    status: row.status,
-    updatedAt: row.updatedAt,
-    source: toSkillSource(row),
-  }));
-}
-
-export async function getSkill(
-  workspaceId: string,
-  slug: string,
-  db: Db = getDb(),
-): Promise<SkillDetail | null> {
-  const [row] = await db
-    .select({
-      slug: skills.slug,
-      name: skills.name,
-      description: skills.description,
-      instructions: skills.instructions,
-      status: skills.status,
-      sourceType: skills.sourceType,
-      sourceUrl: skills.sourceUrl,
-      sourceRef: skills.sourceRef,
-      sourcePath: skills.sourcePath,
-      resolvedCommit: skills.resolvedCommit,
-    })
-    .from(skills)
-    .where(
-      and(eq(skills.workspaceId, workspaceId), eq(skills.slug, slug), isNull(skills.archivedAt)),
-    )
-    .limit(1);
-  if (!row) return null;
+export async function createWorkspaceSkillForActor(input: {
+  actor: Actor;
+  idempotencyKey: string;
+  skill: SkillAuthoringInput;
+  db?: Db;
+}): Promise<CreatedWorkspaceSkill> {
+  const service = new SkillImportApplicationService(
+    new PostgresSkillBundleRepository(input.db ?? getDb()),
+    createSkillImportResolver(),
+    { create: createWorkspaceSkillArtifact },
+  );
+  const { installation } = await service.create(input.actor, {
+    ...input.skill,
+    idempotencyKey: input.idempotencyKey,
+  });
   return {
-    id: row.slug,
-    name: row.name,
-    description: row.description,
-    instructions: row.instructions,
-    status: row.status,
-    source: toSkillSource(row),
-  };
-}
-
-function toSkillSource(row: {
-  sourceType: SkillSourceType | null;
-  sourceUrl: string | null;
-  sourceRef: string | null;
-  sourcePath: string | null;
-  resolvedCommit: string | null;
-}): SkillSource | null {
-  if (!row.sourceType || !row.sourceUrl) return null;
-  return {
-    type: row.sourceType,
-    url: row.sourceUrl,
-    ref: row.sourceRef ?? "",
-    path: row.sourcePath ?? "",
-    resolvedCommit: row.resolvedCommit ?? "",
+    created: true,
+    name: installation.name,
+    command: `/${installation.name}`,
+    bundleId: installation.bundle.id,
   };
 }
 
@@ -204,109 +121,113 @@ export async function resolveSkillMentions(input: {
     throw new SkillMentionError("No active workspace is available for skill mentions.");
   }
 
-  const unique = [...new Map(input.mentions.map((m) => [m.id, m])).values()];
+  const unique = [...new Map(input.mentions.map((mention) => [mention.id, mention])).values()];
   if (unique.length > MAX_CHAT_SKILLS) {
     throw new SkillMentionError(`Attach at most ${MAX_CHAT_SKILLS} skills to one message.`);
   }
 
-  const rows = await (input.db ?? getDb())
-    .select({
-      slug: skills.slug,
-      name: skills.name,
-      description: skills.description,
-      instructions: skills.instructions,
-    })
-    .from(skills)
-    .where(
-      and(
-        eq(skills.workspaceId, input.workspaceId),
-        eq(skills.status, "active"),
-        inArray(
-          skills.slug,
-          unique.map((mention) => mention.id),
-        ),
-        isNull(skills.archivedAt),
-      ),
-    );
+  const catalog = await resolveWorkspaceSkillCatalog(input.db ?? getDb(), {
+    workspaceId: input.workspaceId,
+  });
   const byId = new Map(
-    rows.map((row) => [
-      row.slug,
+    catalog.skills.map((skill) => [
+      skill.id,
       {
-        id: row.slug,
-        name: row.name,
-        description: row.description,
-        instructions: row.instructions,
-      } satisfies WorkspaceSkill,
+        id: skill.id,
+        bundleId: skill.bundleId,
+        name: skill.name,
+        description: skill.description,
+        instructions: skill.body,
+        sourceKind: skill.sourceKind,
+      },
     ]),
   );
   const resolvedSkills = unique.map((mention) => {
     const skill = byId.get(mention.id);
-    if (!skill || !skill.instructions.trim()) {
-      throw new SkillMentionError(`Skill "@skill/${mention.id}" is unavailable or incomplete.`);
+    if (!skill) {
+      throw new SkillMentionError(`Skill "@skill/${mention.id}" is unavailable.`);
     }
     return skill;
   });
 
-  const totalBytes = skillsByteLength(resolvedSkills);
-  if (totalBytes > MAX_CHAT_SKILL_BYTES) {
+  if (skillsByteLength(resolvedSkills) > MAX_CHAT_SKILL_BYTES) {
     throw new SkillMentionError("The selected skills are too large to attach together.");
   }
   return resolvedSkills;
 }
 
 export function skillsByteLength(skills: readonly WorkspaceSkill[]): number {
-  return skills.reduce(
-    (total, skill) => total + Buffer.byteLength(serializeBrainSkillMarkdown(skill), "utf8"),
-    0,
-  );
+  return skills.reduce((total, skill) => total + Buffer.byteLength(skill.instructions, "utf8"), 0);
 }
 
 export async function activateAndListChatSessionSkills(input: {
   chatSessionId: string;
   activatedMessageId: string;
-  // Provenance for the immutable snapshot (stored in the `brain_ref` column,
-  // which predates the Brain extraction). Skills are now workspace-scoped, so
-  // this is the workspace id.
-  workspaceRef: string;
+  workspaceId: string;
   skills: WorkspaceSkill[];
   db?: Db;
 }): Promise<ChatSessionSkillSnapshot[]> {
   const db = input.db ?? getDb();
-  if (input.skills.length > 0) {
-    await db
-      .insert(chatSessionSkills)
-      .values(
-        input.skills.map((skill) => ({
-          chatSessionId: input.chatSessionId,
-          skillId: skill.id,
-          brainRef: input.workspaceRef,
-          activatedMessageId: input.activatedMessageId,
-          name: skill.name,
-          description: skill.description,
-          instructions: skill.instructions,
-        })),
-      )
-      // A skill is an immutable session snapshot. Re-mentioning it keeps the version and original
-      // activation point already in this chat; start a new chat to pick up a newer revision.
-      .onConflictDoNothing({
-        target: [chatSessionSkills.chatSessionId, chatSessionSkills.skillId],
-      });
-  }
+  const activations = await activateAndListChatSkillBundles(db, {
+    workspaceId: input.workspaceId,
+    chatSessionId: input.chatSessionId,
+    activatedMessageId: input.activatedMessageId,
+    bundles: input.skills.map((skill) => ({
+      bundleId: skill.bundleId,
+      sourceKind: skill.sourceKind,
+    })),
+  });
+  return activations.map((activation) => ({
+    chatSessionId: activation.chatSessionId,
+    bundleId: activation.bundleId,
+    skillId: activation.name,
+    activatedMessageId: activation.activatedMessageId,
+    sourceKind: activation.sourceKind,
+    name: activation.name,
+    description: activation.description,
+    instructions: activation.body,
+  }));
+}
 
-  return db
-    .select({
-      chatSessionId: chatSessionSkills.chatSessionId,
-      skillId: chatSessionSkills.skillId,
-      brainRef: chatSessionSkills.brainRef,
-      activatedMessageId: chatSessionSkills.activatedMessageId,
-      name: chatSessionSkills.name,
-      description: chatSessionSkills.description,
-      instructions: chatSessionSkills.instructions,
-      createdAt: chatSessionSkills.createdAt,
-    })
-    .from(chatSessionSkills)
-    .where(eq(chatSessionSkills.chatSessionId, input.chatSessionId))
-    .orderBy(asc(chatSessionSkills.createdAt), asc(chatSessionSkills.skillId));
+export async function readChatSkillFile(input: {
+  workspaceId: string;
+  chatSessionId: string;
+  skill: string;
+  path: string;
+  offset?: number;
+  maxBytes?: number;
+  db?: Db;
+}): Promise<SkillFileChunk> {
+  try {
+    assertSafeRelativePath(input.path);
+  } catch (error) {
+    throw new SkillMentionError(
+      error instanceof Error ? error.message : "The Skill file path is invalid.",
+    );
+  }
+  const row = await readChatSkillBundleFile(input.db ?? getDb(), {
+    workspaceId: input.workspaceId,
+    chatSessionId: input.chatSessionId,
+    skillName: input.skill,
+    path: input.path,
+  });
+  if (!row) {
+    throw new SkillMentionError(
+      `Skill file ${JSON.stringify(input.path)} is unavailable. Activate the skill first.`,
+    );
+  }
+  return createSkillFileChunk(
+    {
+      path: row.path,
+      content: new Uint8Array(row.content),
+      executable: row.executable,
+      sizeBytes: row.sizeBytes,
+    },
+    {
+      ...(input.offset !== undefined ? { offset: input.offset } : {}),
+      ...(input.maxBytes !== undefined ? { maxBytes: input.maxBytes } : {}),
+    },
+  );
 }
 
 export function attachSkillsToPrompt(prompt: string, skills: WorkspaceSkill[]): string {

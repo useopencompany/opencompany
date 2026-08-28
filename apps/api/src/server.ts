@@ -6,7 +6,9 @@ import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources"
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createMcpService } from "@opencompany/agent/mcp-http";
+import { createPluginImportResolver } from "@opencompany/agent/plugin-import";
 import { createSkillImportResolver } from "@opencompany/agent/skill-import";
+import { createWorkspaceSkillArtifact } from "@opencompany/agent-runtime";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import { createBillingApplicationService } from "@opencompany/billing/application-service";
 import { getStripe, getStripeWebhookSecret } from "@opencompany/billing/stripe";
@@ -14,6 +16,7 @@ import { RedisChatPresentationStream } from "@opencompany/chat-presentation";
 import {
   ChatApplicationService,
   KnowledgeApplicationService,
+  PluginImportApplicationService,
   SkillImportApplicationService,
   TaskApplicationService,
   WikiCommandApplicationService,
@@ -23,7 +26,9 @@ import {
   PostgresChatRepository,
 } from "@opencompany/db/chat-repository";
 import { PostgresKnowledgeRepository } from "@opencompany/db/knowledge-repository";
+import { PostgresPluginRepository } from "@opencompany/db/plugin-repository";
 import { createPooledDb } from "@opencompany/db/pool";
+import { PostgresSkillBundleRepository } from "@opencompany/db/skill-bundle-repository";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { getWikiAccessForUser } from "@opencompany/db/wiki";
 import { PostgresWikiCommandRepository } from "@opencompany/db/wiki-command-repository";
@@ -69,6 +74,7 @@ import { createSlackBotSettingsService } from "./slack-bot-settings";
 import { createSlackIngress } from "./slack-ingress";
 import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
+import { createWikiSourceService } from "./wiki-sources";
 import { createWorkspaceCapabilityService } from "./workspace-capabilities";
 import { createWorkspaceControlService } from "./workspace-control";
 import { createXAccountIngress } from "./x-account-ingress";
@@ -113,12 +119,18 @@ const knowledge = new KnowledgeApplicationService(knowledgeRepository);
 const wikiCommands = new WikiCommandApplicationService(
   new PostgresWikiCommandRepository(database.db),
 );
+const wikiSources = createWikiSourceService({ db: database.db });
 const brainSources = new BrainSourceApplicationService(database.db);
 const brainImports = new BrainImportApplicationService(database.db, brainSources);
 const browserProfiles = new BrowserProfileApplicationService(database.db);
 const skillImports = new SkillImportApplicationService(
-  knowledgeRepository,
+  new PostgresSkillBundleRepository(database.db),
   createSkillImportResolver(),
+  { create: createWorkspaceSkillArtifact },
+);
+const pluginImports = new PluginImportApplicationService(
+  new PostgresPluginRepository(database.db),
+  createPluginImportResolver(),
 );
 const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
@@ -139,10 +151,12 @@ const app = createApiApp({
   ...(process.env.API_INTERNAL_TOKEN?.trim()
     ? { wikiCommandsInternalSecret: process.env.API_INTERNAL_TOKEN.trim() }
     : {}),
+  wikiSources,
   brainSources,
   brainImports,
   browserProfiles,
   skillImports,
+  pluginImports,
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   chatResources: createChatResourceService({ db: database.db }),
   chatTitles: createChatTitleService({
@@ -216,13 +230,30 @@ const app = createApiApp({
   identify: identityVerifier,
   ...(process.env.CRON_SECRET ? { emailLifecycleInternalSecret: process.env.CRON_SECRET } : {}),
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
-  githubIngress: createGitHubIngress({ db: database.db, identify: identityVerifier }),
+  githubIngress: createGitHubIngress({
+    db: database.db,
+    identify: identityVerifier,
+    wakeWikiIngest: () =>
+      runnerClient.postJson(
+        "/internal/goat/wiki-ingest/wake",
+        {},
+        { errorFormat: "error-message" },
+      ),
+  }),
   googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
   slackIngress: createSlackIngress({ db: database.db, identify: identityVerifier }),
   linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
   hubspotIngress: createHubspotIngress({ db: database.db, identify: identityVerifier }),
   attioIngress: createAttioIngress({ db: database.db }),
-  jamieIngress: createJamieIngress({ db: database.db }),
+  jamieIngress: createJamieIngress({
+    db: database.db,
+    wakeWikiIngest: () =>
+      runnerClient.postJson(
+        "/internal/goat/wiki-ingest/wake",
+        {},
+        { errorFormat: "error-message" },
+      ),
+  }),
   mcpOAuthIngress: createMcpOAuthIngress({ db: database.db, identify: identityVerifier }),
   xAccountIngress: createXAccountIngress({ db: database.db, identify: identityVerifier }),
   slackBotIngress: createSlackBotIngress({

@@ -10,14 +10,18 @@ import {
   isCodexReasoningEffort,
   shellQuote,
 } from "@opencompany/agent-runtime";
-import { type BrainSkill, serializeBrainSkillMarkdown } from "@opencompany/brain";
 import {
   loadClaudeCodeCredential,
   markClaudeCodeCredentialNeedsReauth,
   markClaudeCodeCredentialValidated,
 } from "@opencompany/db/claude-code-auth";
-import { getWorkflowHarnessSkillSnapshots } from "@opencompany/db/harness";
+import { getWorkflowHarnessPluginSkillBundleIds } from "@opencompany/db/harness";
+import {
+  loadChatSessionPluginRuntime,
+  loadEnabledPluginSkillBundleIds,
+} from "@opencompany/db/plugin-runtime-repository";
 import { type CodexChatSession, type CodexChatTurn } from "@opencompany/db/product-schema";
+import type { ImmutableSkillBundle } from "@opencompany/db/skill-bundle-repository";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { ACP_ENGINE_ADAPTERS } from "./acp-engine-adapters";
@@ -80,6 +84,13 @@ import {
   combineSandboxPromptFragments,
   reconcileInfisicalSandboxAuth,
 } from "./infisical-sandbox-auth";
+import { materializePluginPackagesForSession } from "./managed-plugins";
+import { type PluginDataRuntime, preparePluginDataRuntime } from "./plugin-data-runtime";
+import {
+  materializeTrustedPluginMcpLaunchers,
+  type PluginMcpLauncherRuntime,
+  stopPluginMcpProcesses,
+} from "./plugin-mcp-launcher";
 import { loadRepositoryBootstrap, stageRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
@@ -97,6 +108,10 @@ import {
   markTaskTurnRunning,
   type TaskTurnContext,
 } from "./task-turn";
+import {
+  loadWorkflowTaskPluginRuntime,
+  loadWorkflowTaskSkillBundles,
+} from "./workflow-skill-bundles";
 
 const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory;
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
@@ -334,6 +349,11 @@ export async function runClaudeCodeChatTurn(input: {
 
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
+  let pluginDataRuntime: PluginDataRuntime | null = null;
+  let pluginMcpRuntime: PluginMcpLauncherRuntime | null = null;
+  // A recovery run may not replay the raw assistant event that requested this wakeup, so restore
+  // the request persisted by the previous worker before resuming the Claude session.
+  let scheduledWakeup = scheduledWakeupFromTurnSettings(turn.settings);
   let executionStage = "fence_previous_turn";
   try {
     // Fence the old adapter before any fallible preflight awaits. Otherwise repository, auth, or
@@ -450,26 +470,84 @@ export async function runClaudeCodeChatTurn(input: {
     await ensureClaudeAcpAdapterInstalled(sandbox);
     await checkAbort();
     executionStage = "load_skills";
-    const sessionSkills = await loadCodexChatSessionSkills(turn);
+    const [sessionSkills, workflowSkills, pluginRuntime] = await Promise.all([
+      loadCodexChatSessionSkills(turn),
+      taskContext ? loadWorkflowTaskSkillBundles(taskContext.harnessSpec) : Promise.resolve([]),
+      taskContext
+        ? loadWorkflowTaskPluginRuntime(taskContext.harnessSpec)
+        : session.workspaceId
+          ? loadChatSessionPluginRuntime(getDb(), {
+              workspaceId: session.workspaceId,
+              chatSessionId: session.chatSessionId,
+            })
+          : Promise.resolve({ plugins: [], skills: [], mcpPlugins: [] }),
+    ]);
+    const workflowPluginSkillBundleIds = taskContext
+      ? getWorkflowHarnessPluginSkillBundleIds(taskContext.harnessSpec)
+      : [];
+    const activatedPluginBundleIds = [
+      ...sessionSkills.flatMap((skill) => (skill.sourceKind === "plugin" ? [skill.id] : [])),
+      ...workflowPluginSkillBundleIds,
+    ];
+    const skillWorkspaceId = taskContext?.harnessSpec.workflow?.workspaceId ?? session.workspaceId;
+    if (activatedPluginBundleIds.length > 0 && !skillWorkspaceId) {
+      throw new Error("Activated Plugin Skills require a workspace ID.");
+    }
+    const enabledPluginSkillBundleIds = skillWorkspaceId
+      ? await loadEnabledPluginSkillBundleIds(getDb(), {
+          workspaceId: skillWorkspaceId,
+          bundleIds: activatedPluginBundleIds,
+        })
+      : new Set<string>();
     const turnSkills = resolveClaudeTurnSkills({
       sessionSkills,
       userMessageId: turn.userMessageId,
-      ...(taskContext ? { taskContext } : {}),
+      workflowSkills,
+      workflowPluginSkillBundleIds,
+      pluginSkills: pluginRuntime.skills,
+      enabledPluginSkillBundleIds,
+    });
+    await checkAbort();
+    executionStage = "materialize_plugins";
+    await materializePluginPackagesForSession({
+      sandbox,
+      workRoot: CLAUDE_CHAT_WORKDIR,
+      plugins: pluginRuntime.plugins,
     });
     await checkAbort();
     executionStage = "materialize_skills";
     await materializeClaudeSkillSnapshotsForSession({
       sandbox,
       claudeWorkRoot: CLAUDE_CHAT_WORKDIR,
-      skills: turnSkills.snapshots.map((skill) => ({
-        id: skill.id,
-        files: [
-          {
-            path: "SKILL.md",
-            content: serializeBrainSkillMarkdown(skill),
-          },
-        ],
+      skills: turnSkills.bundles.map((bundle) => ({
+        name: bundle.name,
+        files: bundle.files.map((file) => ({
+          path: file.path,
+          content: file.content,
+          executable: file.executable,
+        })),
       })),
+    });
+    await checkAbort();
+    if (pluginRuntime.mcpPlugins.length > 0) {
+      if (!skillWorkspaceId) throw new Error("Approved Plugin MCP requires a workspace ID.");
+      executionStage = "restore_plugin_data";
+      pluginDataRuntime = await preparePluginDataRuntime({
+        sandbox,
+        workRoot: CLAUDE_CHAT_WORKDIR,
+        workspaceId: skillWorkspaceId,
+        leaseOwner: `coding-session:${session.id}`,
+        mcpPlugins: pluginRuntime.mcpPlugins,
+        blobToken: env.blobReadWriteToken,
+        checkAbort,
+      });
+    }
+    executionStage = "configure_plugin_mcp";
+    pluginMcpRuntime = await materializeTrustedPluginMcpLaunchers({
+      sandbox,
+      workRoot: CLAUDE_CHAT_WORKDIR,
+      mcpPlugins: pluginRuntime.mcpPlugins,
+      dataRoots: pluginDataRuntime?.dataRoots ?? new Map(),
     });
     await checkAbort();
     const invokedSkillPaths = turnSkills.invokedSkillIds.map(
@@ -540,12 +618,15 @@ export async function runClaudeCodeChatTurn(input: {
       ? buildTask(emptyCodingChatHistory())
       : await prepareBootstrapTask();
     executionStage = "configure_mcp";
-    const acpMcpServers = actionGatewayTicket
-      ? buildAcpToolsMcpServers({
-          runnerPublicUrl: env.runnerPublicUrl,
-          ticket: actionGatewayTicket,
-        })
-      : [];
+    const acpMcpServers = [
+      ...(actionGatewayTicket
+        ? buildAcpToolsMcpServers({
+            runnerPublicUrl: env.runnerPublicUrl,
+            ticket: actionGatewayTicket,
+          })
+        : []),
+      ...pluginMcpRuntime.servers,
+    ];
     await checkAbort();
     let sessionIdPersisted = false;
     const persistEngineSessionId = async () => {
@@ -597,7 +678,10 @@ export async function runClaudeCodeChatTurn(input: {
         permissionMode: "bypassPermissions",
         timeoutMs: env.codexTimeoutMs,
         redact,
-        checkAbort,
+        checkAbort: async () => {
+          pluginDataRuntime?.assertHealthy();
+          await checkAbort();
+        },
         onEngineSessionId: async (sessionId) => {
           acpNormalizer.beginRun(sessionId);
           await persistEngineSessionId();
@@ -635,6 +719,12 @@ export async function runClaudeCodeChatTurn(input: {
     };
 
     const acpResult = await runAcpOnce(resumeSessionId, task);
+    if (pluginDataRuntime && pluginMcpRuntime) {
+      executionStage = "checkpoint_plugin_data";
+      await stopPluginMcpProcesses(sandbox, pluginMcpRuntime.pluginUsers);
+      await pluginDataRuntime.checkpoint({ releaseLease: true });
+      pluginDataRuntime = null;
+    }
     const stderrTail = acpResult.stderrTail;
     let summary: AcpTurnSummary | null = acpNormalizer.summary();
     const missingSummaryReason = "Claude Code ended without a result.";
@@ -779,12 +869,40 @@ export async function runClaudeCodeChatTurn(input: {
       }
     }
   } catch (error) {
-    const effectiveError =
+    let effectiveError =
       error instanceof CodexChatHandoffError ||
       error instanceof CodexChatInterruptedError ||
       error instanceof CodexChatLeaseLostError
         ? error
         : (shouldAbort?.() ?? error);
+    if (pluginDataRuntime && pluginMcpRuntime) {
+      const dataRuntime = pluginDataRuntime;
+      const mcpRuntime = pluginMcpRuntime;
+      const handedOff = effectiveError instanceof CodexChatHandoffError;
+      try {
+        executionStage = "checkpoint_plugin_data";
+        await stopPluginMcpProcesses(sandbox, mcpRuntime.pluginUsers);
+        await dataRuntime.checkpoint({ releaseLease: true });
+        pluginDataRuntime = null;
+      } catch (checkpointError) {
+        captureException(checkpointError, {
+          event: "opencompany.goat_plugin_data_checkpoint_failed",
+          turn_id: turn.id,
+        });
+        logger.warn("Failed to checkpoint Plugin data", {
+          event: "opencompany.goat_plugin_data_checkpoint_failed",
+          turn_id: turn.id,
+          error: redact(errorMessage(checkpointError)),
+        });
+        await dataRuntime.release().catch(() => undefined);
+        pluginDataRuntime = null;
+        if (!handedOff) {
+          effectiveError = new Error(
+            `The coding turn ended, but Plugin data checkpointing failed: ${errorMessage(checkpointError)}`,
+          );
+        }
+      }
+    }
     if (effectiveError instanceof CodexChatHandoffError) {
       // In-flight ACP prompts cannot be reattached; the replacement runner reclaims the turn and
       // loads the persisted session with the recovery prompt against the persisted sandbox.
@@ -830,6 +948,15 @@ export async function runClaudeCodeChatTurn(input: {
       });
     }
   } finally {
+    if (pluginDataRuntime) {
+      await pluginDataRuntime.release().catch((error) => {
+        captureException(error, {
+          event: "opencompany.goat_plugin_data_lease_release_failed",
+          turn_id: turn.id,
+        });
+      });
+      pluginDataRuntime = null;
+    }
     // The sandbox outlives the turn so the next message reuses warm files and the
     // persisted ~/.claude session store.
     const idleTimeoutMs =
@@ -1035,30 +1162,31 @@ type CodexChatSessionSkill = Awaited<ReturnType<typeof loadCodexChatSessionSkill
 function resolveClaudeTurnSkills(input: {
   sessionSkills: readonly CodexChatSessionSkill[];
   userMessageId: string;
-  taskContext?: TaskTurnContext | undefined;
-}): { snapshots: BrainSkill[]; invokedSkillIds: string[] } {
-  const snapshots = new Map<string, BrainSkill>();
+  workflowSkills: readonly ImmutableSkillBundle[];
+  workflowPluginSkillBundleIds: readonly string[];
+  pluginSkills: readonly ImmutableSkillBundle[];
+  enabledPluginSkillBundleIds: ReadonlySet<string>;
+}): { bundles: ImmutableSkillBundle[]; invokedSkillIds: string[] } {
+  const bundles = new Map<string, ImmutableSkillBundle>();
   const invokedSkillIds = new Set<string>();
+  const workflowPluginBundleIds = new Set(input.workflowPluginSkillBundleIds);
+  for (const skill of input.pluginSkills) bundles.set(skill.name, skill);
   for (const skill of input.sessionSkills) {
-    snapshots.set(skill.skillId, {
-      id: skill.skillId,
-      name: skill.name,
-      description: skill.description,
-      instructions: skill.instructions,
-    });
+    if (skill.sourceKind === "plugin" && !input.enabledPluginSkillBundleIds.has(skill.id)) continue;
+    bundles.set(skill.name, skill);
     if (skill.activatedMessageId === input.userMessageId) {
-      invokedSkillIds.add(skill.skillId);
+      invokedSkillIds.add(skill.name);
     }
   }
 
-  const workflowSkills = input.taskContext
-    ? (getWorkflowHarnessSkillSnapshots(input.taskContext.harnessSpec) ?? [])
-    : [];
-  for (const skill of workflowSkills) {
-    snapshots.set(skill.id, skill);
-    invokedSkillIds.add(skill.id);
+  for (const skill of input.workflowSkills) {
+    if (workflowPluginBundleIds.has(skill.id) && !input.enabledPluginSkillBundleIds.has(skill.id)) {
+      continue;
+    }
+    bundles.set(skill.name, skill);
+    invokedSkillIds.add(skill.name);
   }
-  return { snapshots: [...snapshots.values()], invokedSkillIds: [...invokedSkillIds] };
+  return { bundles: [...bundles.values()], invokedSkillIds: [...invokedSkillIds] };
 }
 
 function claudeBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
