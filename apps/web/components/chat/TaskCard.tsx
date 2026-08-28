@@ -81,6 +81,14 @@ export function getChatTaskCardMeta(status: TaskStatus | null): {
       spin: false,
     };
   }
+  if (status === "waiting") {
+    return {
+      icon: AlertCircle,
+      className: "text-warning",
+      label: STATUS_COPY.waiting,
+      spin: false,
+    };
+  }
   if (status === "running") {
     return {
       icon: CircleDotDashed,

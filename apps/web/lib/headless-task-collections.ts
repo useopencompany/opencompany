@@ -103,7 +103,7 @@ function taskDtoToRow(task: LegacyTaskDto, conversationId: string | null): TaskR
         ? "queued"
         : status === "running"
           ? "running"
-          : status === "succeeded"
+          : status === "succeeded" || status === "waiting"
             ? "completed"
             : status,
     result: task.outcome.result,
@@ -125,7 +125,7 @@ function taskDtoToRow(task: LegacyTaskDto, conversationId: string | null): TaskR
 }
 
 function canonicalUiStatus(status: TaskReadModel["status"]) {
-  return status === "waiting" || status === "blocked" ? "running" : status;
+  return status === "blocked" ? "running" : status;
 }
 
 export type HeadlessTaskReadModel = TaskReadModel;

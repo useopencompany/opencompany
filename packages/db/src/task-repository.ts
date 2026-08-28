@@ -232,7 +232,8 @@ export class PostgresTaskRepository implements TaskRepository {
     if (!row) return null;
 
     const terminal =
-      row.archivedAt !== null || ["succeeded", "failed", "canceled"].includes(row.status);
+      row.archivedAt !== null ||
+      ["waiting", "succeeded", "failed", "canceled"].includes(row.status);
     const recordedDurationMs = nullableNumber(row.runDurationMs);
     const startedAt = nullableTimestamp(row.runStartedAt);
     const completedAt = nullableTimestamp(row.runCompletedAt);
@@ -875,7 +876,7 @@ export class PostgresTaskRepository implements TaskRepository {
   }
 }
 
-type PhysicalTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+type PhysicalTaskStatus = "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled";
 
 type TaskRow = {
   id: string;

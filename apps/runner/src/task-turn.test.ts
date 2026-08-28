@@ -4,6 +4,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskTurnTerminalError } from "./codex-chat-errors";
 import {
+  buildTaskFailureCompletion,
   buildTaskTurnCompletion,
   markTaskTurnRunning,
   settleDurableTurn,
@@ -155,6 +156,48 @@ describe("session-backed task turns", () => {
     });
   });
 
+  it("pauses a workflow when the orchestrator disposition is waiting", () => {
+    const completion = buildTaskTurnCompletion({
+      context: context(workflowSpec()),
+      result: "Here is the proposed plan. Should I proceed?",
+      disposition: "waiting",
+      outcomeComment: "Approve the plan to continue.",
+    });
+
+    expect(completion).toMatchObject({
+      disposition: "waiting",
+      reportedOutcome: "needs_attention",
+      nextTurn: null,
+      outcomeComment: "Step 1 (Audit): Approve the plan to continue.",
+    });
+  });
+
+  it("builds one deterministic product retry and refuses another after the attempt guard", () => {
+    const retry = buildTaskFailureCompletion({
+      context: context(workflowSpec()),
+      error: "Sandbox disconnected",
+      decision: { disposition: "retry", comment: "The sandbox disconnected unexpectedly." },
+    });
+    expect(retry).toMatchObject({
+      disposition: "retry",
+      reportedOutcome: null,
+      outcomeComment: "The sandbox disconnected unexpectedly.",
+      nextTurn: {
+        prompt: "The previous attempt failed: Sandbox disconnected. Continue the task.",
+      },
+    });
+
+    const exhaustedContext = context(workflowSpec());
+    exhaustedContext.task.attempts = 2;
+    expect(
+      buildTaskFailureCompletion({
+        context: exhaustedContext,
+        error: "Sandbox disconnected",
+        decision: { disposition: "retry", comment: "The retry budget is exhausted." },
+      }),
+    ).toMatchObject({ disposition: "fail", nextTurn: null });
+  });
+
   it("continues a successful workflow turn when no outcome was reported", () => {
     const completion = buildTaskTurnCompletion({
       context: context(workflowSpec()),
@@ -253,7 +296,7 @@ describe("session-backed task turns", () => {
     ).rejects.toBeInstanceOf(TaskTurnTerminalError);
 
     const statement = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]).sql;
-    expect(statement).toContain("task.status IN ('succeeded', 'failed', 'canceled')");
+    expect(statement).toContain("task.status IN ('waiting', 'succeeded', 'failed', 'canceled')");
     expect(statement).toContain("EXISTS (");
   });
 
@@ -312,7 +355,7 @@ describe("session-backed task turns", () => {
     expect(query.params).toContainEqual(expect.stringContaining('"type":"run.completed"'));
     expect(canonicalEventTypes(query.params)).toEqual(["message.content_updated", "run.completed"]);
     expect(query.sql).toMatch(
-      /codex_thread_id = CASE\s+WHEN \$\d+::boolean\s+AND \$\d+::text IS DISTINCT FROM runtime\.engine/u,
+      /codex_thread_id = CASE\s+WHEN EXISTS \(SELECT 1 FROM next_turn\)\s+AND \$\d+::text IS DISTINCT FROM runtime\.engine/u,
     );
     expect(query.params).toContain(false);
   });
@@ -470,7 +513,7 @@ describe("session-backed task turns", () => {
     expect(statement).toContain("notified_next_queued_event AS");
     expect(statement).toContain("UPDATE goat.codex_chat_sessions AS runtime");
     expect(statement).toMatch(
-      /codex_thread_id = CASE\s+WHEN \$\d+::boolean\s+AND \$\d+::text IS DISTINCT FROM runtime\.engine/u,
+      /codex_thread_id = CASE\s+WHEN EXISTS \(SELECT 1 FROM next_turn\)\s+AND \$\d+::text IS DISTINCT FROM runtime\.engine/u,
     );
     expect(statement).toContain("task.status IN ('queued', 'running')");
     expect(statement).toContain("SELECT next.id");
@@ -500,6 +543,75 @@ describe("session-backed task turns", () => {
         model: completion.nextTurn?.chatModel,
         message_length: completion.nextTurn?.prompt.length,
       },
+    );
+  });
+
+  it("settles waiting as a physical status without queueing another Run", async () => {
+    const completion = buildTaskTurnCompletion({
+      context: context(workflowSpec()),
+      result: "Here is the plan. Approve it before implementation.",
+      disposition: "waiting",
+      outcomeComment: "Approve the plan to continue.",
+    });
+
+    await settleDurableTurn({
+      target: {
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        codexChatSessionId: "runtime_1",
+        chatSessionId: "goat_chat_task_1",
+        turnId: "turn_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+      turnStatus: "completed",
+      sessionStatus: "idle",
+      error: null,
+      completedAt: new Date("2026-07-30T09:30:00.000Z"),
+      taskCompletion: completion,
+    });
+
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
+    expect(query.params).toContain("waiting");
+    expect(query.params).toContain(
+      '{"runId":"turn_1","turnStatus":"completed","disposition":"waiting","stepIndex":0,"stepCount":2,"stepTitle":"Audit"}',
+    );
+    expect(completion.nextTurn).toBeNull();
+  });
+
+  it("queues an allowed retry and its activity in the fenced settlement statement", async () => {
+    const completion = buildTaskFailureCompletion({
+      context: context(workflowSpec()),
+      error: "Sandbox disconnected",
+      decision: { disposition: "retry", comment: "Retrying after a transient disconnect." },
+    });
+
+    await settleDurableTurn({
+      target: {
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        codexChatSessionId: "runtime_1",
+        chatSessionId: "goat_chat_task_1",
+        turnId: "turn_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+      turnStatus: "failed",
+      sessionStatus: "idle",
+      error: "Sandbox disconnected",
+      completedAt: new Date("2026-07-30T09:30:00.000Z"),
+      taskCompletion: completion,
+    });
+
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
+    expect(query.sql).toContain("retry_task_activity AS MATERIALIZED");
+    expect(query.sql).toContain("task.attempts < 2");
+    expect(query.sql).toContain("'retry'");
+    expect(query.params).toContain(
+      "The previous attempt failed: Sandbox disconnected. Continue the task.",
+    );
+    expect(query.params).toContain(
+      '{"runId":"turn_1","turnStatus":"failed","disposition":"retry","stepIndex":0,"stepCount":2,"stepTitle":"Audit"}',
     );
   });
 });

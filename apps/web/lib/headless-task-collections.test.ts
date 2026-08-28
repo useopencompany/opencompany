@@ -79,6 +79,13 @@ describe("headless Task presentation adapters", () => {
     });
   });
 
+  it("preserves waiting as a settled, resumable presentation status", () => {
+    expect(taskReadModelToRow({ ...canonicalTask, status: "waiting" })).toMatchObject({
+      status: "waiting",
+      stage: "completed",
+    });
+  });
+
   it("marks compatibility history as sessionless and immutable presentation data", () => {
     const { conversationId, ...legacyTask } = canonicalTask;
     expect(conversationId).toBe("conversation_1");

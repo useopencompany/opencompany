@@ -4,7 +4,7 @@ import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runt
 // contracts, not Drizzle row types; browser adapters and the runner can share them
 // without importing the database package.
 export type HarnessEngine = "opencompany" | "codex" | "claude_code";
-export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+export type TaskStatus = "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled";
 export type TaskStage =
   | "queued"
   | "planning"

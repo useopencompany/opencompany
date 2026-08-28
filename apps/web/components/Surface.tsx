@@ -6583,6 +6583,14 @@ function getTaskMeta(task: TaskView): {
       spin: false,
     };
   }
+  if (task.status === "waiting") {
+    return {
+      icon: AlertCircle,
+      className: "text-warning",
+      detail: `${recurringPrefix}${task.outcomeComment ?? STATUS_COPY.waiting}`,
+      spin: false,
+    };
+  }
   if (task.status === "succeeded") {
     return {
       icon: CheckCircle2,

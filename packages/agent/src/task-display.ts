@@ -24,6 +24,7 @@ export const STAGE_COPY: Record<TaskStage, string> = {
 export const STATUS_COPY: Record<TaskStatus, string> = {
   queued: "Queued",
   running: "Running",
+  waiting: "Waiting for you",
   succeeded: "Done",
   failed: "Failed",
   canceled: "Canceled",
@@ -50,6 +51,7 @@ export function taskBoardColumn(task: {
   reportedOutcome?: TaskReportedOutcome | null;
 }): TaskBoardColumn {
   if (task.status === "queued" || task.status === "running") return "in_progress";
+  if (task.status === "waiting") return "in_review";
   if (task.status === "canceled") return "canceled";
   if (task.status === "failed" || task.reportedOutcome === "needs_attention") {
     return "in_review";
@@ -61,6 +63,7 @@ export function taskBoardColumn(task: {
 // post-run report decides done vs needs-attention on top of a succeeded run.
 export type WorkflowTaskDisplayStatus =
   | "running"
+  | "waiting"
   | "failed"
   | "done"
   | "canceled"
@@ -68,6 +71,7 @@ export type WorkflowTaskDisplayStatus =
 
 export const WORKFLOW_TASK_STATUS_COPY: Record<WorkflowTaskDisplayStatus, string> = {
   running: "Running",
+  waiting: "Waiting for you",
   failed: "Failed",
   done: "Done",
   canceled: "Canceled",
@@ -76,6 +80,7 @@ export const WORKFLOW_TASK_STATUS_COPY: Record<WorkflowTaskDisplayStatus, string
 
 export const WORKFLOW_TASK_STATUS_DOT_CLASS: Record<WorkflowTaskDisplayStatus, string> = {
   running: "bg-ink/40 animate-pulse",
+  waiting: "bg-warning",
   failed: "bg-danger",
   done: "bg-success",
   canceled: "bg-ink/30",
@@ -87,6 +92,7 @@ export function workflowTaskDisplayStatus(task: {
   reportedOutcome?: TaskReportedOutcome | null;
 }): WorkflowTaskDisplayStatus {
   if (task.status === "queued" || task.status === "running") return "running";
+  if (task.status === "waiting") return "waiting";
   if (task.status === "failed") return "failed";
   if (task.status === "canceled") return "canceled";
   return task.reportedOutcome === "needs_attention" ? "needs-attention" : "done";

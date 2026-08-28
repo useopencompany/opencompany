@@ -991,8 +991,8 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     const turn = claudeTurn({ settings: { reasoningEffort: "high" } });
     const completion = { taskId: "goat_task_1", nextTurn: { id: "next_turn" } };
     taskMocks.closeTaskTurn.mockResolvedValueOnce({
-      reportedOutcome: "needs_attention",
-      outcomeComment: "Waiting for CI.",
+      disposition: "needs_attention",
+      comment: "Waiting for CI.",
     });
     taskMocks.finalizeTaskResult.mockResolvedValueOnce("PR opened; CI is running.");
     taskMocks.buildTaskTurnCompletion.mockReturnValueOnce(completion);

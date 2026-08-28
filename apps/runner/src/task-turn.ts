@@ -1,9 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  UPDATE_TASK_STATUS_TOOL_DESCRIPTION,
-  UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA,
-} from "@opencompany/agent/chat-agent";
-import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
@@ -66,9 +62,17 @@ export type TaskTurnCompletion = {
   taskName: string;
   harnessSpec: HarnessSpec;
   result: string;
+  disposition: TaskRunDisposition | null;
   reportedOutcome: TaskReportedOutcome | null;
   outcomeComment: string | null;
   nextTurn: TaskNextTurn | null;
+};
+
+export type TaskRunDisposition = "done" | "needs_attention" | "waiting" | "retry" | "fail";
+
+export type TaskRunDecision = {
+  disposition: TaskRunDisposition;
+  comment: string;
 };
 
 type TaskNextTurn = {
@@ -149,7 +153,7 @@ export async function markTaskTurnRunning(input: {
     WHERE task.id = ${input.context.task.id}
       AND task.session_id = ${input.turn.chatSessionId}
       AND task.user_workos_id = ${input.turn.userWorkosId}
-      AND task.status IN ('succeeded', 'failed', 'canceled')
+      AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
       AND EXISTS (${turnLeaseSubquery(input.turn)})
     LIMIT 1
   `);
@@ -243,7 +247,7 @@ export async function prepareCodexTaskTurn(input: {
     WHERE task.id = ${task.id}
       AND task.session_id = ${input.turn.chatSessionId}
       AND task.user_workos_id = ${input.turn.userWorkosId}
-      AND task.status IN ('succeeded', 'failed', 'canceled')
+      AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
       AND EXISTS (${turnLeaseSubquery(input.turn)})
     LIMIT 1
   `);
@@ -264,27 +268,33 @@ export async function prepareCodexTaskTurn(input: {
 
 export async function closeTaskTurn(input: {
   context: TaskTurnContext;
-  finalContent: string;
+  run:
+    | { status: "completed"; result: string }
+    | { status: "failed"; error: string; retryAvailable: boolean };
   env: RunnerEnv;
   session: CodexChatSession;
   turn: CodexChatTurn;
   signal: AbortSignal;
-}): Promise<{
-  reportedOutcome: TaskReportedOutcome;
-  outcomeComment: string;
-} | null> {
+}): Promise<TaskRunDecision | null> {
   try {
     const workflow = input.context.harnessSpec.workflow;
     const currentStepIndex = workflow?.currentStepIndex ?? 0;
     const currentStep = workflow?.steps?.[currentStepIndex];
+    const completed = input.run.status === "completed";
+    const retryAvailable = input.run.status === "failed" && input.run.retryAvailable;
+    const runOutput = input.run.status === "completed" ? input.run.result : input.run.error;
     const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
     const { getBraintrustAISDK } = await import("@opencompany/observability/braintrust");
     const { generateText } = getBraintrustAISDK(ai);
     const result = await generateText({
       model: gateway(TASK_CLOSER_MODEL),
-      system: currentStep
-        ? 'You close one finished step in a sequential background workflow. Judge whether this step\'s own instructions were completed ("done") or the user should look at it ("needs_attention"). Do not penalize it because later workflow steps remain. Always call update_task_status exactly once.'
-        : 'You close a finished autonomous background task. Decide whether it is complete ("done") or the user should look at it ("needs_attention": partial results, blockers, errors, questions, or requested review). Always call update_task_status exactly once.',
+      system: completed
+        ? currentStep
+          ? 'Judge one settled step in a sequential background workflow. Choose "done" when this step\'s instructions were completed, "waiting" only when the result explicitly asks the user for input, a decision, or approval before work can continue, or "needs_attention" for any other partial result, blocker, error, or requested review. Do not penalize this step because later workflow steps remain. Make only this disposition judgment and write one short human-facing comment. Always call settle_task_run exactly once.'
+          : 'Judge one settled autonomous background task. Choose "done" when the request was completed, "waiting" only when the result explicitly asks the user for input, a decision, or approval before work can continue, or "needs_attention" for any other partial result, blocker, error, or requested review. Make only this disposition judgment and write one short human-facing comment. Always call settle_task_run exactly once.'
+        : retryAvailable
+          ? 'Judge one failed autonomous background task run. Choose "retry" only when one immediate retry can plausibly continue without user action; choose "fail" for missing access, credentials, required user input, deterministic errors, or failures another attempt is unlikely to fix. Make only this disposition judgment and write one short human-facing comment. Never write task instructions. Always call settle_task_run exactly once.'
+          : 'Judge one failed autonomous background task run. No product retry remains, so choose "fail" and write one short human-facing comment explaining what the user should look at. Make only this disposition judgment and never write task instructions. Always call settle_task_run exactly once.',
       prompt: [
         `Task: ${input.context.task.name}`,
         "",
@@ -300,18 +310,34 @@ export async function closeTaskTurn(input: {
             ]
           : []),
         "",
-        "Result:",
-        input.finalContent.slice(0, 12_000),
+        completed ? "Result:" : "Run error:",
+        runOutput.slice(0, 12_000),
         "",
-        "Call update_task_status now with a short, one-sentence plain-text comment.",
+        "Call settle_task_run now with a short, one-sentence plain-text comment.",
       ].join("\n"),
       tools: {
-        update_task_status: ai.tool({
-          description: UPDATE_TASK_STATUS_TOOL_DESCRIPTION,
+        settle_task_run: ai.tool({
+          description:
+            "Record the disposition of this settled background task run and a short user-facing note.",
           inputSchema: jsonSchema<{
-            status: TaskReportedOutcome;
+            disposition: TaskRunDisposition;
             comment: string;
-          }>(UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA),
+          }>({
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              disposition: {
+                type: "string",
+                enum: completed
+                  ? ["done", "needs_attention", "waiting"]
+                  : retryAvailable
+                    ? ["retry", "fail"]
+                    : ["fail"],
+              },
+              comment: { type: "string" },
+            },
+            required: ["disposition", "comment"],
+          }),
         }),
       },
       toolChoice: "required",
@@ -324,7 +350,7 @@ export async function closeTaskTurn(input: {
         }),
       ),
     });
-    const call = result.toolCalls.find((toolCall) => toolCall.toolName === "update_task_status");
+    const call = result.toolCalls.find((toolCall) => toolCall.toolName === "settle_task_run");
     await recordTaskGatewayUsage({
       context: input.context,
       session: input.session,
@@ -333,7 +359,7 @@ export async function closeTaskTurn(input: {
       usage: result.usage,
       phase: "closer",
     });
-    return readTaskOutcome(call?.input);
+    return readTaskDecision(call?.input, input.run);
   } catch (error) {
     if (input.signal.aborted) {
       throw input.signal.reason instanceof Error ? input.signal.reason : error;
@@ -371,6 +397,7 @@ export async function finalizeTaskResult(input: {
 export function buildTaskTurnCompletion(input: {
   context: TaskTurnContext;
   result: string;
+  disposition?: Extract<TaskRunDisposition, "done" | "needs_attention" | "waiting"> | null;
   reportedOutcome?: TaskReportedOutcome | null | undefined;
   outcomeComment?: string | null | undefined;
   scheduledWakeup?:
@@ -382,7 +409,13 @@ export function buildTaskTurnCompletion(input: {
     | undefined;
 }): TaskTurnCompletion {
   const workflow = input.context.harnessSpec.workflow;
-  const reportedOutcome = input.reportedOutcome ?? null;
+  const disposition = input.disposition ?? input.reportedOutcome ?? null;
+  const reportedOutcome =
+    disposition === "waiting"
+      ? "needs_attention"
+      : disposition === "done" || disposition === "needs_attention"
+        ? disposition
+        : null;
   const preparedScheduledWakeup = input.scheduledWakeup
     ? prepareCodexChatScheduledWakeup({
         parentSettings: input.scheduledWakeup.parentSettings,
@@ -424,7 +457,12 @@ export function buildTaskTurnCompletion(input: {
     // Match the legacy workflow runner: only an explicit needs_attention
     // outcome blocks the sequence. A missing closer/tool outcome must not
     // strand a multi-step workflow after an otherwise successful turn.
-    if (reportedOutcome !== "needs_attention" && nextStep && !preparedScheduledWakeup) {
+    if (
+      reportedOutcome !== "needs_attention" &&
+      disposition !== "waiting" &&
+      nextStep &&
+      !preparedScheduledWakeup
+    ) {
       const { codex: _previousCodexConfig, ...harnessSpecWithoutCodex } = harnessSpec;
       const nextStepCodexConfig = codexConfigForWorkflowStep(harnessSpec.codex, nextStep);
       const nextHarnessSpec: HarnessSpec = {
@@ -469,10 +507,61 @@ export function buildTaskTurnCompletion(input: {
     taskName: input.context.task.name,
     harnessSpec,
     result: input.result.trim(),
+    disposition: disposition as TaskRunDisposition,
     reportedOutcome,
     outcomeComment,
     nextTurn,
   };
+}
+
+export function buildTaskFailureCompletion(input: {
+  context: TaskTurnContext;
+  error: string;
+  decision?: TaskRunDecision | null;
+}): TaskTurnCompletion {
+  const error = input.error.trim().slice(0, CODING_ERROR_MAX_LENGTH);
+  const retry = input.decision?.disposition === "retry" && input.context.task.attempts < 2;
+  return {
+    taskId: input.context.task.id,
+    taskDisplayId: input.context.task.displayId,
+    taskName: input.context.task.name,
+    harnessSpec: input.context.harnessSpec,
+    result: "",
+    disposition: input.decision ? (retry ? "retry" : "fail") : null,
+    reportedOutcome: null,
+    outcomeComment:
+      input.decision?.comment.trim().slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH) || null,
+    nextTurn: retry
+      ? createNextTaskTurn({
+          harnessSpec: input.context.harnessSpec,
+          prompt: taskRetryPrompt(error),
+        })
+      : null,
+  };
+}
+
+export async function orchestrateTaskFailure(input: {
+  context: TaskTurnContext;
+  error: string;
+  env: RunnerEnv;
+  session: CodexChatSession;
+  turn: CodexChatTurn;
+}) {
+  const retryAvailable = input.context.task.attempts < 2;
+  const decision = await closeTaskTurn({
+    context: input.context,
+    run: { status: "failed", error: input.error, retryAvailable },
+    env: input.env,
+    session: input.session,
+    turn: input.turn,
+    signal: new AbortController().signal,
+  });
+  return buildTaskFailureCompletion({
+    context: input.context,
+    error: input.error,
+    decision:
+      decision?.disposition === "retry" || decision?.disposition === "fail" ? decision : null,
+  });
 }
 
 export function buildTaskTerminalProjection(context: TaskTurnContext): TaskTurnCompletion {
@@ -482,6 +571,7 @@ export function buildTaskTerminalProjection(context: TaskTurnContext): TaskTurnC
     taskName: context.task.name,
     harnessSpec: context.harnessSpec,
     result: "",
+    disposition: null,
     reportedOutcome: null,
     outcomeComment: null,
     nextTurn: null,
@@ -535,9 +625,12 @@ export async function settleDurableTurn(input: {
   }
   const completion = input.taskCompletion ?? null;
   const next = completion?.nextTurn ?? null;
+  const requestedRetry = completion?.disposition === "retry" && Boolean(next);
   const terminalTaskStatus =
     input.turnStatus === "completed"
-      ? "succeeded"
+      ? completion?.disposition === "waiting"
+        ? "waiting"
+        : "succeeded"
       : input.turnStatus === "interrupted"
         ? "canceled"
         : "failed";
@@ -551,6 +644,7 @@ export async function settleDurableTurn(input: {
   const nextRunEventId = `run_event_${randomUUID()}`;
   const finishedActivityId = `task_activity_${randomUUID()}`;
   const commentActivityId = `task_activity_${randomUUID()}`;
+  const retryActivityId = `task_activity_${randomUUID()}`;
   const activityBody = taskActivitySnippet(
     input.turnStatus === "completed"
       ? completion?.result
@@ -562,6 +656,7 @@ export async function settleDurableTurn(input: {
     runId: target.turnId,
     turnStatus: input.turnStatus,
     disposition:
+      completion?.disposition ??
       completion?.reportedOutcome ??
       (input.turnStatus === "completed"
         ? "succeeded"
@@ -572,7 +667,9 @@ export async function settleDurableTurn(input: {
   };
   const notificationContent = completion
     ? input.turnStatus === "completed"
-      ? taskSucceededNotification(completion.taskDisplayId, completion.result)
+      ? completion.disposition === "waiting"
+        ? taskWaitingNotification(completion.taskDisplayId, completion.result)
+        : taskSucceededNotification(completion.taskDisplayId, completion.result)
       : input.turnStatus === "failed"
         ? taskFailedNotification(completion.taskDisplayId, normalizedError ?? "")
         : null
@@ -708,41 +805,62 @@ export async function settleDurableTurn(input: {
       END AS materialized
       FROM settled_turn
     ),
+    settlement_task AS MATERIALIZED (
+      SELECT
+        task.id,
+        task.status AS previous_status,
+        task.attempts,
+        (
+          ${Boolean(next)}::boolean
+          AND (NOT ${requestedRetry}::boolean OR task.attempts < 2)
+        ) AS queue_next
+      FROM goat.tasks AS task
+      WHERE task.id = ${completion?.taskId ?? null}
+        AND task.session_id = ${target.chatSessionId}
+        AND task.user_workos_id = ${target.userWorkosId}
+        AND task.status IN ('queued', 'running')
+        AND EXISTS (SELECT 1 FROM settled_turn)
+      FOR UPDATE
+    ),
     projected_task AS (
       UPDATE goat.tasks AS task
-      SET status = CASE WHEN ${Boolean(next)} THEN 'running' ELSE ${terminalTaskStatus} END,
-          stage = CASE WHEN ${Boolean(next)} THEN 'queued' ELSE ${terminalTaskStage} END,
+      SET status = CASE
+            WHEN settlement.queue_next THEN 'running'
+            ELSE ${terminalTaskStatus}
+          END,
+          stage = CASE WHEN settlement.queue_next THEN 'queued' ELSE ${terminalTaskStage} END,
           model = COALESCE(${completion?.harnessSpec.model ?? null}, task.model),
           result = CASE
-            WHEN ${Boolean(next)} THEN task.result
+            WHEN settlement.queue_next THEN task.result
             WHEN ${input.turnStatus} = 'completed' THEN ${completion?.result ?? null}
             ELSE task.result
           END,
           error = CASE
-            WHEN ${Boolean(next)} THEN NULL
+            WHEN settlement.queue_next THEN NULL
             WHEN ${input.turnStatus} = 'completed' THEN NULL
             WHEN ${input.turnStatus} = 'interrupted' THEN 'Stopped by user.'
             ELSE ${normalizedError}
           END,
-          reported_outcome = CASE WHEN ${Boolean(next)}
+          reported_outcome = CASE WHEN settlement.queue_next
             THEN NULL
             ELSE ${completion?.reportedOutcome ?? null}
           END,
-          outcome_comment = CASE WHEN ${Boolean(next)}
+          outcome_comment = CASE WHEN settlement.queue_next
             THEN NULL
             ELSE ${completion?.outcomeComment ?? null}
+          END,
+          attempts = CASE
+            WHEN ${requestedRetry}::boolean AND settlement.queue_next THEN 2
+            ELSE task.attempts
           END,
           harness_spec = COALESCE(
             ${completion ? JSON.stringify(completion.harnessSpec) : null}::jsonb,
             task.harness_spec
           ),
           updated_at = ${input.completedAt}
-      WHERE task.id = ${completion?.taskId ?? null}
-        AND task.session_id = ${target.chatSessionId}
-        AND task.user_workos_id = ${target.userWorkosId}
-        AND task.status IN ('queued', 'running')
-        AND EXISTS (SELECT 1 FROM settled_turn)
-      RETURNING task.*
+      FROM settlement_task AS settlement
+      WHERE task.id = settlement.id
+      RETURNING task.*, settlement.previous_status, settlement.queue_next
     ),
     finished_task_activity AS MATERIALIZED (
       INSERT INTO goat.task_activities (
@@ -766,6 +884,23 @@ export async function settleDurableTurn(input: {
         ${new Date(input.completedAt.getTime() + 1)}
       FROM projected_task AS task
       WHERE ${completion?.outcomeComment ?? null}::text IS NOT NULL
+      RETURNING id
+    ),
+    retry_task_activity AS MATERIALIZED (
+      INSERT INTO goat.task_activities (
+        id, task_id, author, kind, body, metadata, created_at
+      )
+      SELECT
+        ${retryActivityId}, task.id, 'system', 'retry', ${next?.prompt ?? null},
+        jsonb_build_object(
+          'runId', ${target.turnId},
+          'nextRunId', ${next?.id ?? null},
+          'attempt', task.attempts
+        ),
+        ${new Date(input.completedAt.getTime() + 2)}
+      FROM projected_task AS task
+      WHERE ${requestedRetry}::boolean
+        AND task.queue_next
       RETURNING id
     ),
     tagged_current_task_messages AS (
@@ -803,6 +938,7 @@ export async function settleDurableTurn(input: {
         ${input.completedAt}
       FROM projected_task AS task
       WHERE ${Boolean(next)}
+        AND task.queue_next
       RETURNING id
     ),
     next_assistant_message AS (
@@ -820,6 +956,7 @@ export async function settleDurableTurn(input: {
         ${new Date(input.completedAt.getTime() + 1)}
       FROM projected_task AS task
       WHERE ${Boolean(next)}
+        AND task.queue_next
       RETURNING id
     ),
     next_turn AS (
@@ -854,6 +991,7 @@ export async function settleDurableTurn(input: {
         ${new Date(input.completedAt.getTime() + 2)}
       FROM projected_task AS task
       WHERE ${Boolean(next)}
+        AND task.queue_next
         AND EXISTS (SELECT 1 FROM next_user_message)
         AND EXISTS (SELECT 1 FROM next_assistant_message)
       RETURNING id, chat_session_id, user_message_id
@@ -904,19 +1042,28 @@ export async function settleDurableTurn(input: {
               THEN 'queued'
             ELSE ${input.sessionStatus}
           END,
-          engine = COALESCE(${next?.engine ?? null}, runtime.engine),
-          model = COALESCE(${next?.runtimeModel ?? null}, runtime.model),
+          engine = CASE
+            WHEN EXISTS (SELECT 1 FROM next_turn) THEN ${next?.engine ?? null}
+            ELSE runtime.engine
+          END,
+          model = CASE
+            WHEN EXISTS (SELECT 1 FROM next_turn) THEN ${next?.runtimeModel ?? null}
+            ELSE runtime.model
+          END,
           codex_thread_id = CASE
-            WHEN ${Boolean(next)}::boolean
+            WHEN EXISTS (SELECT 1 FROM next_turn)
               AND ${next?.engine ?? null}::text IS DISTINCT FROM runtime.engine
               THEN NULL
             ELSE runtime.codex_thread_id
           END,
           host_tool_contract_version = CASE
-            WHEN ${Boolean(next)} THEN ${next?.hostToolContractVersion ?? null}
+            WHEN EXISTS (SELECT 1 FROM next_turn) THEN ${next?.hostToolContractVersion ?? null}
             ELSE runtime.host_tool_contract_version
           END,
-          error = ${normalizedError},
+          error = CASE
+            WHEN EXISTS (SELECT 1 FROM next_turn) THEN NULL
+            ELSE ${normalizedError}
+          END,
           updated_at = ${input.completedAt}
       WHERE runtime.id = ${target.codexChatSessionId}
         AND runtime.user_workos_id = ${target.userWorkosId}
@@ -926,8 +1073,14 @@ export async function settleDurableTurn(input: {
     ),
     updated_task_chat AS (
       UPDATE goat.chat_sessions AS chat
-      SET engine = COALESCE(${next?.engine ?? null}, chat.engine),
-          model = COALESCE(${next?.chatModel ?? null}, chat.model),
+      SET engine = CASE
+            WHEN EXISTS (SELECT 1 FROM next_turn) THEN ${next?.engine ?? null}
+            ELSE chat.engine
+          END,
+          model = CASE
+            WHEN EXISTS (SELECT 1 FROM next_turn) THEN ${next?.chatModel ?? null}
+            ELSE chat.model
+          END,
           has_unseen = CASE
             WHEN runtime.status = 'queued' THEN chat.has_unseen
             ELSE true
@@ -948,7 +1101,7 @@ export async function settleDurableTurn(input: {
       INNER JOIN projected_task AS task
         ON task.id = origin.task_id
       WHERE ${notificationContent}::text IS NOT NULL
-        AND NOT ${Boolean(next)}
+        AND NOT task.queue_next
       ORDER BY origin.created_at ASC
       LIMIT 1
     ),
@@ -990,13 +1143,15 @@ export async function settleDurableTurn(input: {
       WHERE chat.id = notification.session_id
       RETURNING chat.id
     )
-    SELECT runtime.id
+    SELECT
+      runtime.id,
+      EXISTS (SELECT 1 FROM next_turn) AS "nextQueued"
     FROM updated_runtime AS runtime
     CROSS JOIN canonical_settlement_guard AS canonical_guard
     WHERE EXISTS (SELECT 1 FROM updated_task_chat)
       AND canonical_guard.materialized = 1
       AND (
-        NOT ${Boolean(next)}
+        NOT EXISTS (SELECT 1 FROM projected_task AS task WHERE task.queue_next)
         OR (
           EXISTS (SELECT 1 FROM next_turn)
           AND EXISTS (SELECT 1 FROM next_queued_event)
@@ -1011,11 +1166,20 @@ export async function settleDurableTurn(input: {
             ${completion?.outcomeComment ?? null}::text IS NULL
             OR EXISTS (SELECT 1 FROM orchestrator_comment_activity)
           )
+          AND (
+            NOT ${requestedRetry}::boolean
+            OR NOT EXISTS (SELECT 1 FROM projected_task AS task WHERE task.queue_next)
+            OR EXISTS (SELECT 1 FROM retry_task_activity)
+          )
         )
       )
   `);
-  assertRowsChanged(result);
-  await captureWorkflowHandoffChatMessageSent({ target, next });
+  const settled = rowsFromExecute<{ id: string; nextQueued?: boolean }>(result)[0];
+  if (!settled) throw new CodexChatLeaseLostError();
+  await captureWorkflowHandoffChatMessageSent({
+    target,
+    next: settled.nextQueued === false ? null : next,
+  });
 }
 
 async function captureWorkflowHandoffChatMessageSent(input: {
@@ -1180,19 +1344,29 @@ function hasPreplannedHarnessSpec(value: HarnessSpec) {
   );
 }
 
-function readTaskOutcome(value: unknown): {
-  reportedOutcome: TaskReportedOutcome;
-  outcomeComment: string;
-} | null {
+function readTaskDecision(
+  value: unknown,
+  run:
+    | { status: "completed"; result: string }
+    | { status: "failed"; error: string; retryAvailable: boolean },
+): TaskRunDecision | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Record<string, unknown>;
-  const reportedOutcome = candidate.status;
-  if (reportedOutcome !== "done" && reportedOutcome !== "needs_attention") return null;
+  const disposition = candidate.disposition;
+  const allowed =
+    run.status === "completed"
+      ? disposition === "done" || disposition === "needs_attention" || disposition === "waiting"
+      : disposition === "fail" || (run.retryAvailable && disposition === "retry");
+  if (!allowed) return null;
   const comment = typeof candidate.comment === "string" ? candidate.comment.trim() : "";
   return {
-    reportedOutcome,
-    outcomeComment: comment.slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH),
+    disposition: disposition as TaskRunDisposition,
+    comment: comment.slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH),
   };
+}
+
+function taskRetryPrompt(error: string) {
+  return `The previous attempt failed: ${error || "Unknown error"}. Continue the task.`;
 }
 
 async function recordTaskGatewayUsage(input: {
@@ -1317,6 +1491,13 @@ function taskSucceededNotification(displayId: string, result: string) {
   return result.trim()
     ? `Task ${taskLink} finished.\n\n${result.trim()}`
     : `Task ${taskLink} finished.`;
+}
+
+function taskWaitingNotification(displayId: string, result: string) {
+  const taskLink = `[${displayId}](/tasks/${encodeURIComponent(displayId)})`;
+  return result.trim()
+    ? `Task ${taskLink} is waiting for you.\n\n${result.trim()}`
+    : `Task ${taskLink} is waiting for you.`;
 }
 
 function taskFailedNotification(displayId: string, error: string) {

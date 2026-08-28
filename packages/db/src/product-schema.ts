@@ -73,7 +73,7 @@ const bytea = customType<{ data: Buffer }>({
   },
 });
 
-export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+export type TaskStatus = "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled";
 
 // Workflows retain the draft/active lifecycle from their original Brain documents.
 export type WorkflowStatus = "draft" | "active";
@@ -3568,7 +3568,7 @@ export const tasks = productSchema.table(
       .where(sql`${table.sessionId} IS NOT NULL`),
     statusCheck: check(
       "goat_tasks_status_check",
-      sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed', 'canceled')`,
+      sql`${table.status} IN ('queued', 'running', 'waiting', 'succeeded', 'failed', 'canceled')`,
     ),
     sourceCheck: check(
       "goat_tasks_source_check",

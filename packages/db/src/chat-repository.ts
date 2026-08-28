@@ -594,6 +594,7 @@ export class PostgresChatRepository implements ChatRepository {
     const runtimeId = ids.runtime();
     const runId = ids.run();
     const eventId = ids.event();
+    const activityId = `task_activity_${randomUUID()}`;
     const now = this.options.now?.() ?? new Date();
     const attachmentIds = input.command.attachmentIds ?? [];
     const resolvedAttachments = await this.resolveAttachments(input.actor, attachmentIds);
@@ -653,7 +654,7 @@ export class PostgresChatRepository implements ChatRepository {
       authorized_existing AS MATERIALIZED (
         SELECT
           chat.id, chat.model, chat.kind, chat.user_workos_id AS owner_user_workos_id,
-          task.id AS task_id
+          task.id AS task_id, task.status AS task_status
         FROM goat.chat_sessions AS chat
         LEFT JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = chat.id
         LEFT JOIN goat.tasks AS task
@@ -672,7 +673,7 @@ export class PostgresChatRepository implements ChatRepository {
                 )
               )
               AND task.archived_at IS NULL
-              AND task.status IN ('succeeded', 'failed', 'canceled')
+              AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
             )
           )
           AND chat.engine = ${input.command.engine}
@@ -689,7 +690,7 @@ export class PostgresChatRepository implements ChatRepository {
       ),
       continued_task AS MATERIALIZED (
         UPDATE goat.tasks AS task
-        SET status = 'queued',
+        SET status = 'running',
             stage = 'queued',
             result = NULL,
             error = NULL,
@@ -699,19 +700,36 @@ export class PostgresChatRepository implements ChatRepository {
             lease_id = NULL,
             lease_owner = NULL,
             lease_expires_at = NULL,
+            attempts = task.attempts + 1,
             updated_at = ${now}
         FROM authorized_existing AS existing
         WHERE existing.kind = 'task'
           AND task.id = existing.task_id
-          AND task.status IN ('succeeded', 'failed', 'canceled')
-        RETURNING task.id
+          AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
+        RETURNING task.id, existing.task_status AS previous_status
+      ),
+      resumed_task_activity AS MATERIALIZED (
+        INSERT INTO goat.task_activities (
+          id, task_id, author, author_workos_id, kind, body, metadata, created_at
+        )
+        SELECT
+          ${activityId}, task.id, 'user', ${input.actor.userId}, 'status_changed',
+          'Resumed by user.',
+          jsonb_build_object(
+            'fromStatus', task.previous_status,
+            'toStatus', 'running',
+            'runId', ${runId}::text
+          ),
+          ${now}
+        FROM continued_task AS task
+        RETURNING task_id
       ),
       admitted_existing AS MATERIALIZED (
         SELECT
           existing.id, existing.model, existing.owner_user_workos_id, existing.task_id
         FROM authorized_existing AS existing
         WHERE existing.kind = 'chat'
-           OR existing.task_id IN (SELECT id FROM continued_task)
+           OR existing.task_id IN (SELECT task_id FROM resumed_task_activity)
       ),
       eligible_attachments AS MATERIALIZED (
         SELECT upload.id
