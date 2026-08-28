@@ -28,6 +28,7 @@ The app supports dark mode. Theme is switched automatically based on the system 
 
 We prefer using native UI components where possible to achieve the best performance and native feel. Use `expo-native-ui` skill to learn about this approach, and `expo-ui` skill to understand how `@expo/ui` library works.
 
+Use the `apple-design` when implementing iOS UI to get recent Apple design guidelines. Use `write-swift` skill to write performant native Swift code.
 ## Routing
 
 We use Expo Router with file-based navigation. The API is similar to React Navigation, but recently started diverging from it, so always use `expo-router` skill when working with routing and linking.
@@ -35,7 +36,7 @@ We use Expo Router with file-based navigation. The API is similar to React Navig
 ## Animations
 
 We use Reanimated 4 for animations. Never use `Animated` from RN, only `import Reanimated from "react-native-reanimated"`. Always offload animations to UI thread using Reanimated or Worklets.
-
+Use `animate-expo` skill to find appropriate animation opportunities and craft delightful animations.
 ## React Compiler
 
 React Compiler is enabled is the mobile app. Don't use `useMemo`, `useCallback`, or `memo` unless the compiler doesn't do so (rare) - only after debugging performance issues.
