@@ -51,6 +51,7 @@ React Compiler is enabled in the mobile app. Don't use `useMemo`, `useCallback`,
 - Do not create separate interfaces for props, just inline the type definition in the function component
 - Do not use nested function declarations, only use arrow functions inside other functions
 - Use `Boolean()` instead of `!!`, and for boolean-type conversions
+- No testing is done in the mobile app for now. Don't write tests unless explicitly asked to by the user.
 
 ## Device Testing
 
