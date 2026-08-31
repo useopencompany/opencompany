@@ -38,7 +38,7 @@
     "@opencompany/wiki": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@vercel/blob": "^2.8.0",
-    "@vercel/sandbox": "^2.9.0",
+    "@vercel/sandbox": "^3.2.0",
     "ai": "^6.0.189",
     "ajv": "8.20.0",
     "drizzle-orm": "^0.45.2",
