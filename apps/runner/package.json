@@ -28,7 +28,7 @@
     "@opencompany/wiki": "workspace:*",
     "@sentry/bun": "^10.70.0",
     "@vercel/blob": "^2.8.0",
-    "ai": "^6.0.189",
+    "ai": "^7.0.83",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "e2b": "^2.46.1",
