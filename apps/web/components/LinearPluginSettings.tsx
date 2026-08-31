@@ -16,7 +16,6 @@ import {
 import { Skeleton } from "@opencompany/ui/components/skeleton";
 import { toast } from "@opencompany/ui/components/sonner";
 import { LinearIcon } from "@opencompany/ui/icons";
-import { useLiveQuery } from "@tanstack/react-db";
 import {
   AlertCircle,
   ChevronDown,
@@ -52,20 +51,12 @@ import {
   providerCapabilities,
 } from "@/lib/actions/capabilities";
 import {
-  getHeadlessIntegrationAccounts,
-  type HeadlessIntegrationAccountReadModel,
-} from "@/lib/headless-integration-collections";
-import {
   archiveHeadlessPlugin,
   enableHeadlessPlugin,
   refreshHeadlessPluginMcp,
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
-import {
-  type IntegrationAccountView,
-  type IntegrationState,
-  integrationStateFromRows,
-} from "@/lib/integration-state";
+import { type IntegrationAccountView, type IntegrationState } from "@/lib/integration-state";
 
 const LINEAR_DESCRIPTION = "Work with Linear issues, projects, comments, and team workflows.";
 const LINEAR_TOOLS_CONNECT_HREF =
@@ -139,30 +130,11 @@ export function LinearPluginDetail({
   canEdit: boolean;
   toolsState?: PluginToolsState;
 }) {
-  const { integrations, workspace } = useAppData();
-  const collection = useMemo(() => getHeadlessIntegrationAccounts(workspace.id), [workspace.id]);
-  const {
-    data: rows,
-    isError,
-    isLoading,
-  } = useLiveQuery((q) => q.from({ integration: collection }), [collection]);
-
-  const initialValue = useMemo(() => linearAccountsFromState(integrations), [integrations]);
-  const accountsState = useMemo<LinearAccountsState>(() => {
-    if (isError && initialValue.accounts.length === 0) {
-      return { status: "error", message: "Linear accounts could not be loaded." };
-    }
-    if (isLoading && !rows?.length && initialValue.accounts.length === 0) {
-      return { status: "loading" };
-    }
-    if (!rows?.length) return { status: "ready", ...initialValue };
-    return {
-      status: "ready",
-      ...linearAccountsFromState(
-        integrationStateFromRows(rows as HeadlessIntegrationAccountReadModel[]),
-      ),
-    };
-  }, [initialValue, isError, isLoading, rows]);
+  const { integrations } = useAppData();
+  const accountsState = useMemo<LinearAccountsState>(
+    () => ({ status: "ready", ...linearAccountsFromState(integrations) }),
+    [integrations],
+  );
   const effectiveToolsState =
     toolsState ??
     (pluginState.status === "loading"

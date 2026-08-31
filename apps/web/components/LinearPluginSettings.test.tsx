@@ -2,10 +2,12 @@ import "@testing-library/jest-dom/vitest";
 import type { PluginInstallationDto, PluginRemoteMcpServerDto } from "@opencompany/protocol";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   type LinearAccountsState,
+  LinearPluginDetail,
   LinearPluginDetailView,
   linearToolsStateFromPlugin,
   type PluginToolsState,
@@ -34,9 +36,28 @@ const accountActions = vi.hoisted(() => ({
   })),
   setIntegrationCapabilityModeAction: vi.fn(async () => ({ ok: true as const })),
 }));
+const appData = vi.hoisted(() => ({
+  integrations: {
+    linear: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Linear tool access",
+      integrationId: "gint_linear_tools",
+      capabilityModes: { read: "on", write: "ask" },
+    },
+    personalAccounts: { linear: [] },
+  },
+}));
+const useLiveQuery = vi.hoisted(() => vi.fn(() => ({ data: [], isLoading: false })));
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 vi.mock("@opencompany/ui/components/sonner", () => ({ toast: toasts }));
+vi.mock("@tanstack/react-db", () => ({ useLiveQuery }));
+vi.mock("@/components/AppDataProvider", () => ({
+  useAppData: () => appData,
+  useAppDataOptional: () => null,
+}));
 vi.mock("@/lib/headless-knowledge-commands", () => commands);
 vi.mock("@/lib/integration-account-actions", () => accountActions);
 
@@ -188,7 +209,21 @@ describe("Linear plugin settings", () => {
     accountActions.getIntegrationAccountUsageAction.mockClear();
     accountActions.setIntegrationCapabilityModeAction.mockReset();
     accountActions.setIntegrationCapabilityModeAction.mockResolvedValue({ ok: true });
+    useLiveQuery.mockClear();
     window.history.replaceState({}, "", "/settings/plugins/linear");
+  });
+
+  it("server-renders account data without starting another live query", () => {
+    const html = renderToString(
+      <LinearPluginDetail
+        pluginState={{ status: "ready", plugin }}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Linear tool access");
+    expect(useLiveQuery).not.toHaveBeenCalled();
   });
 
   it("shows provenance, accounts, discovered tools, and read-only skills", async () => {
