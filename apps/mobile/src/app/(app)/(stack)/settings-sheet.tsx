@@ -3,9 +3,11 @@ import { Button } from "@expo/ui/swift-ui";
 import { buttonStyle, controlSize } from "@expo/ui/swift-ui/modifiers";
 import { router } from "expo-router";
 import { Alert, ScrollView, Text, View } from "react-native";
+import { until } from "until-async";
 import { useAuth } from "@/features/auth";
 import { PressableScale } from "@/shared/ui/pressable-scale";
 import { StyledImage } from "@/shared/ui/styled-image";
+import { useToast } from "@/shared/ui/toast";
 
 const getInitials = (firstName: string | null, lastName: string | null, email: string): string => {
   const initials = [firstName, lastName]
@@ -18,7 +20,8 @@ const getInitials = (firstName: string | null, lastName: string | null, email: s
 };
 
 export default function SettingsSheet() {
-  const { profile, signOut } = useAuth();
+  const { isSigningOut, profile, signOut } = useAuth();
+  const { showToast } = useToast();
   const name = [profile?.firstName, profile?.lastName]
     .map((part) => part?.trim())
     .filter(Boolean)
@@ -77,16 +80,17 @@ export default function SettingsSheet() {
 
       <Host matchContents>
         <Button
-          label="Sign Out"
+          label={isSigningOut ? "Signing Out..." : "Sign Out"}
           onPress={() => {
             Alert.alert("Sign Out", "Are you sure you want to sign out?", [
               { text: "Cancel", style: "cancel" },
               {
                 text: "Sign Out",
                 style: "destructive",
-                onPress: () => {
+                onPress: async () => {
                   router.dismiss();
-                  void signOut();
+                  const [error] = await until(signOut);
+                  if (error) showToast(error.message);
                 },
               },
             ]);

@@ -1,30 +1,25 @@
 import { Button, Host } from "@expo/ui/swift-ui";
 import { buttonStyle, controlSize } from "@expo/ui/swift-ui/modifiers";
-import { useState } from "react";
 import { ScrollView, Text, View } from "react-native";
+import { until } from "until-async";
 import { useAuth } from "@/features/auth";
 import { useToast } from "@/shared/ui/toast";
 
 export function AccountUnavailableScreen() {
-  const { accountUnavailableReason, initializationError, refreshIdentity, signOut } = useAuth();
+  const auth = useAuth();
   const { showToast } = useToast();
-  const [activeAction, setActiveAction] = useState<"refresh" | "sign-out" | null>(null);
-  const isIncomplete = accountUnavailableReason === "incomplete-onboarding";
+  const isIncomplete = auth.accountUnavailableReason === "incomplete-onboarding";
 
   const handleRefresh = async () => {
-    if (activeAction) return;
-    setActiveAction("refresh");
-    const result = await refreshIdentity();
-    if (!result.success && result.error) showToast(result.error);
-    setActiveAction(null);
+    if (auth.isRefreshingIdentity || auth.isSigningOut) return;
+    const [error] = await until(auth.refreshIdentity);
+    if (error) showToast(error.message);
   };
 
   const handleSignOut = async () => {
-    if (activeAction) return;
-    setActiveAction("sign-out");
-    const result = await signOut();
-    if (!result.success && result.error) showToast(result.error);
-    setActiveAction(null);
+    if (auth.isRefreshingIdentity || auth.isSigningOut) return;
+    const [error] = await until(auth.signOut);
+    if (error) showToast(error.message);
   };
 
   return (
@@ -42,9 +37,9 @@ export function AccountUnavailableScreen() {
             ? "Complete onboarding in the opencompany web app, then refresh here."
             : "Your account does not have access to a workspace. Ask a workspace admin for access, then refresh here."}
         </Text>
-        {initializationError ? (
+        {auth.errorMessage ? (
           <Text selectable className="text-[15px] leading-5 text-red-600 dark:text-red-400">
-            {initializationError}
+            {auth.errorMessage}
           </Text>
         ) : null}
       </View>
@@ -52,14 +47,14 @@ export function AccountUnavailableScreen() {
       <View className="gap-3">
         <Host matchContents={{ horizontal: true, vertical: false }} style={{ height: 44 }}>
           <Button
-            label={activeAction === "refresh" ? "Refreshing..." : "Refresh"}
+            label={auth.isRefreshingIdentity ? "Refreshing..." : "Refresh"}
             onPress={() => void handleRefresh()}
             modifiers={[buttonStyle("glassProminent"), controlSize("large")]}
           />
         </Host>
         <Host matchContents={{ horizontal: true, vertical: false }} style={{ height: 44 }}>
           <Button
-            label={activeAction === "sign-out" ? "Signing out..." : "Sign out"}
+            label={auth.isSigningOut ? "Signing out..." : "Sign out"}
             onPress={() => void handleSignOut()}
             modifiers={[buttonStyle("glass"), controlSize("large")]}
           />

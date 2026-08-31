@@ -1,7 +1,8 @@
 import type { IdentityUserDto, IdentityWorkspaceDto } from "@opencompany/protocol/schemas";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
-import { createContext, type ReactNode, use, useEffect, useRef, useState } from "react";
+import { createContext, type ReactNode, use, useEffect, useRef } from "react";
 import { until } from "until-async";
 import {
   type AuthenticatedApi,
@@ -9,6 +10,7 @@ import {
   createAuthenticatedApi,
   isUnauthorizedApiError,
 } from "@/shared/api/opencompany-api";
+import { queryClient } from "@/shared/lib/query-client";
 import {
   clearSession,
   getAccessToken,
@@ -25,11 +27,6 @@ import {
 
 WebBrowser.maybeCompleteAuthSession();
 
-export interface AuthActionResult {
-  success: boolean;
-  error?: string;
-}
-
 export type AccountUnavailableReason = "incomplete-onboarding" | "no-workspaces";
 
 export interface AuthContextValue {
@@ -40,19 +37,36 @@ export interface AuthContextValue {
   accountUnavailableReason: AccountUnavailableReason | null;
   api: AuthenticatedApi;
   isLoading: boolean;
-  initializationError: string | null;
-  refreshIdentity: () => Promise<AuthActionResult>;
-  selectWorkspace: (workspaceId: string) => Promise<AuthActionResult>;
-  signIn: () => Promise<AuthActionResult>;
-  signOut: () => Promise<AuthActionResult>;
+  errorMessage: string | null;
+  isSigningIn: boolean;
+  isSigningOut: boolean;
+  isRefreshingIdentity: boolean;
+  selectingWorkspaceId: string | null;
+  refreshIdentity: () => Promise<void>;
+  selectWorkspace: (workspaceId: string) => Promise<void>;
+  signIn: () => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+type AuthAction =
+  | { type: "sign-in" }
+  | { type: "callback"; code: string }
+  | { type: "refresh-identity" }
+  | { type: "select-workspace"; workspaceId: string }
+  | { type: "clear-session" };
 
-const formatAuthError = (error: unknown): string => {
+const AuthContext = createContext<AuthContextValue | null>(null);
+const SESSION_QUERY_KEY = ["auth", "session"] as const;
+
+class AuthCancellationError extends Error {}
+class UnexpectedWorkspaceActivationError extends Error {}
+
+const identityQueryKey = (userId: string | undefined) => ["auth", "identity", userId] as const;
+
+const normalizeAuthError = (error: unknown): Error => {
   return error instanceof Error
-    ? error.message
-    : "Authentication could not be completed. Please try again.";
+    ? error
+    : new Error("Authentication could not be completed. Please try again.");
 };
 
 const matchesRedirectUri = (url: string, redirectUri: string): boolean => {
@@ -66,249 +80,228 @@ const matchesRedirectUri = (url: string, redirectUri: string): boolean => {
   );
 };
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<IdentityUserDto | null>(null);
-  const [workspaces, setWorkspaces] = useState<IdentityWorkspaceDto[]>([]);
-  const [workspace, setWorkspace] = useState<IdentityWorkspaceDto | null>(null);
-  const [accountUnavailableReason, setAccountUnavailableReason] =
-    useState<AccountUnavailableReason | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [initializationError, setInitializationError] = useState<string | null>(null);
-  const authorizationRef = useRef<{ code: string; promise: Promise<void> } | null>(null);
+const clearAuthentication = async (): Promise<void> => {
+  const [clearError] = await until(clearSession);
+  if (clearError) console.error("Failed to clear the stored session:", clearError);
 
-  const clearAuthState = async (): Promise<void> => {
-    const [clearError] = await until(clearSession);
-    if (clearError) console.error("Failed to clear the stored session:", clearError);
-    setUser(null);
-    setProfile(null);
-    setWorkspaces([]);
-    setWorkspace(null);
-    setAccountUnavailableReason(null);
-    setInitializationError(null);
-  };
+  queryClient.setQueryData(SESSION_QUERY_KEY, null);
+  await queryClient.cancelQueries();
+  queryClient.removeQueries({
+    predicate: (query) =>
+      query.queryKey.length !== SESSION_QUERY_KEY.length ||
+      query.queryKey[0] !== SESSION_QUERY_KEY[0] ||
+      query.queryKey[1] !== SESSION_QUERY_KEY[1],
+  });
+};
 
-  const [api] = useState<AuthenticatedApi>(() =>
-    createAuthenticatedApi({
-      getAccessToken,
-      onUnauthorized: clearAuthState,
-    }),
+const api = createAuthenticatedApi({
+  getAccessToken,
+  onUnauthorized: clearAuthentication,
+});
+
+const cacheIdentity = (userId: string, identity: AuthenticatedIdentity, user?: User): void => {
+  queryClient.setQueryData(identityQueryKey(userId), identity);
+  if (user) queryClient.setQueryData(SESSION_QUERY_KEY, user);
+};
+
+const activateWorkspace = async (
+  userId: string,
+  workspaceId: string,
+): Promise<AuthenticatedIdentity> => {
+  const activation = await api.switchWorkspace(workspaceId);
+  const refreshedUser = await selectOrganization(activation.organizationId);
+  const identity = await api.getIdentity();
+  const activeWorkspace = identity.workspaces.find((item) => item.id === workspaceId);
+
+  if (identity.activeWorkspaceId !== workspaceId || !activeWorkspace) {
+    cacheIdentity(userId, { ...identity, activeWorkspaceId: null }, refreshedUser);
+    throw new UnexpectedWorkspaceActivationError(
+      "The selected workspace did not become active. Please try again.",
+    );
+  }
+
+  cacheIdentity(userId, identity, refreshedUser);
+  return identity;
+};
+
+const loadIdentity = async (
+  userId: string,
+  mode: "read" | "sync",
+  user?: User,
+): Promise<AuthenticatedIdentity> => {
+  const identity = mode === "sync" ? await api.syncIdentity() : await api.getIdentity();
+  const hasActiveWorkspace = Boolean(
+    identity.activeWorkspaceId &&
+      identity.workspaces.some((workspace) => workspace.id === identity.activeWorkspaceId),
   );
 
-  const storeIdentityState = (identity: AuthenticatedIdentity): IdentityWorkspaceDto | null => {
-    setProfile(identity.user);
-    setWorkspaces(identity.workspaces);
+  if (hasActiveWorkspace || !identity.user.onboardedAt || identity.workspaces.length !== 1) {
+    cacheIdentity(userId, identity, user);
+    return identity;
+  }
 
-    if (!identity.user.onboardedAt) {
-      setWorkspace(null);
-      setAccountUnavailableReason("incomplete-onboarding");
-      return null;
+  try {
+    return await activateWorkspace(userId, identity.workspaces[0].id);
+  } catch (error) {
+    if (!(error instanceof UnexpectedWorkspaceActivationError) && !isUnauthorizedApiError(error)) {
+      cacheIdentity(userId, identity);
     }
+    throw normalizeAuthError(error);
+  }
+};
 
-    if (identity.workspaces.length === 0) {
-      setWorkspace(null);
-      setAccountUnavailableReason("no-workspaces");
-      return null;
-    }
-
-    setAccountUnavailableReason(null);
-    const activeWorkspace = identity.activeWorkspaceId
-      ? (identity.workspaces.find((item) => item.id === identity.activeWorkspaceId) ?? null)
-      : null;
-    setWorkspace(activeWorkspace);
-    return activeWorkspace;
-  };
-
-  const activateWorkspace = async (workspaceId: string): Promise<void> => {
-    const activation = await api.switchWorkspace(workspaceId);
-    const refreshedUser = await selectOrganization(activation.organizationId);
-    setUser(refreshedUser);
-
-    const identity = await api.getIdentity();
-    const activeWorkspace = identity.workspaces.find((item) => item.id === workspaceId) ?? null;
-    if (identity.activeWorkspaceId !== workspaceId || !activeWorkspace) {
-      storeIdentityState(identity);
-      setWorkspace(null);
-      throw new Error("The selected workspace did not become active. Please try again.");
-    }
-
-    storeIdentityState(identity);
-    setWorkspace(activeWorkspace);
-  };
-
-  const resolveIdentity = async (
-    identity: AuthenticatedIdentity,
-    autoActivate: boolean,
-  ): Promise<void> => {
-    const activeWorkspace = storeIdentityState(identity);
-    if (activeWorkspace || !identity.user.onboardedAt || identity.workspaces.length === 0) {
-      return;
-    }
-
-    if (autoActivate && identity.workspaces.length === 1) {
-      await activateWorkspace(identity.workspaces[0].id);
-    }
-  };
-
-  const loadIdentity = async (mode: "read" | "sync", autoActivate: boolean): Promise<void> => {
-    const identity = mode === "sync" ? await api.syncIdentity() : await api.getIdentity();
-    await resolveIdentity(identity, autoActivate);
-  };
-
-  useEffect(() => {
-    const bootstrap = async () => {
-      const [storedUserError, storedUser] = await until(getStoredUser);
-      if (storedUserError) {
-        console.error("Failed to read the stored session:", storedUserError);
-        setInitializationError(formatAuthError(storedUserError));
-        setIsLoading(false);
-        return;
-      }
-      if (!storedUser) {
-        setIsLoading(false);
-        return;
-      }
-
-      setUser(storedUser);
-      const [identityError] = await until(() => loadIdentity("read", true));
-      if (identityError && !isUnauthorizedApiError(identityError)) {
-        console.error("Failed to restore backend identity:", identityError);
-        setInitializationError(formatAuthError(identityError));
-      }
-      setIsLoading(false);
-    };
-
-    void bootstrap();
-  }, []);
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const authorizationRef = useRef<{ code: string; promise: Promise<void> } | null>(null);
+  const processUrlRef = useRef<(url: string) => Promise<void>>(async () => {});
+  const sessionQuery = useQuery({
+    queryKey: SESSION_QUERY_KEY,
+    queryFn: getStoredUser,
+    retry: false,
+    staleTime: Infinity,
+  });
+  const user = sessionQuery.data ?? null;
+  const identityQuery = useQuery({
+    queryKey: identityQueryKey(user?.id),
+    queryFn: () => loadIdentity(user!.id, "read"),
+    enabled: Boolean(user),
+    retry: false,
+    staleTime: Infinity,
+  });
 
   const completeSignIn = async (code: string): Promise<void> => {
     const newUser = await handleCallback(code);
-    setUser(newUser);
-    await loadIdentity("sync", true);
+    const [identityError] = await until(() => loadIdentity(newUser.id, "sync", newUser));
+
+    if (identityError && !isUnauthorizedApiError(identityError)) {
+      queryClient.setQueryData(SESSION_QUERY_KEY, newUser);
+    }
+    if (identityError) throw normalizeAuthError(identityError);
   };
 
   const completeSignInOnce = (code: string): Promise<void> => {
     if (authorizationRef.current?.code === code) return authorizationRef.current.promise;
-
     const promise = completeSignIn(code);
     authorizationRef.current = { code, promise };
     return promise;
   };
 
+  const authMutation = useMutation({
+    scope: { id: "auth" },
+    mutationFn: async (action: AuthAction): Promise<void> => {
+      try {
+        if (action.type === "clear-session") return clearAuthentication();
+        if (action.type === "callback") return completeSignInOnce(action.code);
+
+        if (action.type === "sign-in") {
+          const url = await getSignInUrl();
+          const result = await WebBrowser.openAuthSessionAsync(url, REDIRECT_URI);
+          if (result.type !== "success" || !result.url) {
+            throw new AuthCancellationError("Authentication was cancelled");
+          }
+
+          const parsed = Linking.parse(result.url);
+          const oauthError = parsed.queryParams?.error as string | undefined;
+          if (oauthError) {
+            const description = parsed.queryParams?.error_description as string | undefined;
+            throw new Error(description || oauthError);
+          }
+
+          const code = parsed.queryParams?.code as string | undefined;
+          if (!code) throw new Error("No authorization code received");
+          return completeSignInOnce(code);
+        }
+
+        if (!user) throw new Error("No active session found");
+
+        if (action.type === "refresh-identity") {
+          await loadIdentity(user.id, "sync");
+          return;
+        }
+
+        const identity = queryClient.getQueryData<AuthenticatedIdentity>(identityQueryKey(user.id));
+        if (!identity?.workspaces.some((workspace) => workspace.id === action.workspaceId)) {
+          throw new Error("That workspace is no longer available.");
+        }
+
+        await activateWorkspace(user.id, action.workspaceId);
+      } catch (error) {
+        throw normalizeAuthError(error);
+      }
+    },
+  });
+
+  const signOutMutation = useMutation({
+    mutationFn: async (): Promise<void> => {
+      try {
+        const sessionId = await getSessionId();
+        if (!sessionId) throw new Error("No active session found");
+        await WebBrowser.openBrowserAsync(getLogoutUrl(sessionId));
+      } catch (error) {
+        throw normalizeAuthError(error);
+      }
+    },
+  });
+
+  processUrlRef.current = async (url: string): Promise<void> => {
+    if (matchesRedirectUri(url, SIGN_OUT_REDIRECT_URI)) {
+      await authMutation.mutateAsync({ type: "clear-session" });
+      return;
+    }
+
+    if (!matchesRedirectUri(url, REDIRECT_URI)) return;
+    const parsed = Linking.parse(url);
+    const oauthError = parsed.queryParams?.error as string | undefined;
+    if (oauthError) {
+      console.error("OAuth error:", oauthError, parsed.queryParams?.error_description);
+      return;
+    }
+
+    const code = parsed.queryParams?.code as string | undefined;
+    if (!code) {
+      console.error("No authorization code in callback");
+      return;
+    }
+
+    const [callbackError] = await until(() => authMutation.mutateAsync({ type: "callback", code }));
+    if (callbackError && !isUnauthorizedApiError(callbackError)) {
+      console.error("Auth callback failed:", callbackError);
+    }
+  };
+
   useEffect(() => {
-    const handleUrl = async ({ url }: { url: string }) => {
-      if (matchesRedirectUri(url, SIGN_OUT_REDIRECT_URI)) {
-        setIsLoading(true);
-        await clearAuthState();
-        setIsLoading(false);
-        return;
-      }
-
-      const parsed = Linking.parse(url);
-      if (!matchesRedirectUri(url, REDIRECT_URI)) return;
-
-      const error = parsed.queryParams?.error as string | undefined;
-      if (error) {
-        console.error("OAuth error:", error, parsed.queryParams?.error_description);
-        return;
-      }
-
-      const code = parsed.queryParams?.code as string | undefined;
-      if (!code) {
-        console.error("No authorization code in callback");
-        return;
-      }
-
-      setIsLoading(true);
-      setInitializationError(null);
-      const [callbackError] = await until(() => completeSignInOnce(code));
-      if (callbackError && !isUnauthorizedApiError(callbackError)) {
-        console.error("Auth callback failed:", callbackError);
-        setInitializationError(formatAuthError(callbackError));
-      }
-      setIsLoading(false);
-    };
-
+    const handleUrl = ({ url }: { url: string }) => void processUrlRef.current(url);
     const subscription = Linking.addEventListener("url", handleUrl);
     void Linking.getInitialURL().then((url) => {
-      if (url) void handleUrl({ url });
+      if (url) void processUrlRef.current(url);
     });
 
     return () => subscription.remove();
   }, []);
 
-  const refreshIdentity = async (): Promise<AuthActionResult> => {
-    setInitializationError(null);
-    const [error] = await until(() => loadIdentity("sync", true));
-    if (error) {
-      if (!isUnauthorizedApiError(error)) setInitializationError(formatAuthError(error));
-      return { success: false, error: formatAuthError(error) };
-    }
-    return { success: true };
-  };
-
-  const selectWorkspace = async (workspaceId: string): Promise<AuthActionResult> => {
-    if (!workspaces.some((item) => item.id === workspaceId)) {
-      return { success: false, error: "That workspace is no longer available." };
-    }
-
-    setInitializationError(null);
-    const [error] = await until(() => activateWorkspace(workspaceId));
-    if (error) {
-      if (!isUnauthorizedApiError(error)) setInitializationError(formatAuthError(error));
-      return { success: false, error: formatAuthError(error) };
-    }
-    return { success: true };
-  };
-
-  const signIn = async (): Promise<AuthActionResult> => {
-    try {
-      setIsLoading(true);
-      setInitializationError(null);
-      const url = await getSignInUrl();
-      const result = await WebBrowser.openAuthSessionAsync(url, REDIRECT_URI);
-
-      if (result.type !== "success" || !result.url) {
-        return { success: false, error: "Authentication was cancelled" };
-      }
-
-      const parsed = Linking.parse(result.url);
-      const error = parsed.queryParams?.error as string | undefined;
-      if (error) {
-        const errorDescription = parsed.queryParams?.error_description as string;
-        return { success: false, error: errorDescription || error };
-      }
-
-      const code = parsed.queryParams?.code as string | undefined;
-      if (!code) return { success: false, error: "No authorization code received" };
-
-      await completeSignInOnce(code);
-      return { success: true };
-    } catch (error) {
-      console.error("[Auth] Sign in failed:", error);
-      if (!isUnauthorizedApiError(error)) setInitializationError(formatAuthError(error));
-      return { success: false, error: formatAuthError(error) };
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const signOut = async (): Promise<AuthActionResult> => {
-    const [sessionIdError, sessionId] = await until(getSessionId);
-    if (sessionIdError) {
-      return { success: false, error: formatAuthError(sessionIdError) };
-    }
-    if (!sessionId) return { success: false, error: "No active session found" };
-
-    const [openBrowserError] = await until(() =>
-      WebBrowser.openBrowserAsync(getLogoutUrl(sessionId)),
-    );
-    if (openBrowserError) {
-      return { success: false, error: formatAuthError(openBrowserError) };
-    }
-
-    return { success: true };
-  };
+  const identity = identityQuery.data;
+  const pendingAction = authMutation.isPending ? authMutation.variables : null;
+  const profile = identity?.user ?? null;
+  const workspaces = identity?.workspaces ?? [];
+  const workspace =
+    identity?.activeWorkspaceId && identity.user.onboardedAt
+      ? (workspaces.find((item) => item.id === identity.activeWorkspaceId) ?? null)
+      : null;
+  const isSigningIn = pendingAction?.type === "sign-in" || pendingAction?.type === "callback";
+  const isClearingSession = pendingAction?.type === "clear-session";
+  const queryError = sessionQuery.error ?? identityQuery.error;
+  const mutationError = authMutation.error;
+  const errorMessage =
+    (mutationError &&
+    !(mutationError instanceof AuthCancellationError) &&
+    !isUnauthorizedApiError(mutationError)
+      ? mutationError.message
+      : null) ??
+    (queryError && !isUnauthorizedApiError(queryError)
+      ? normalizeAuthError(queryError).message
+      : null);
+  let accountUnavailableReason: AccountUnavailableReason | null = null;
+  if (identity && !identity.user.onboardedAt) accountUnavailableReason = "incomplete-onboarding";
+  else if (identity?.workspaces.length === 0) accountUnavailableReason = "no-workspaces";
 
   return (
     <AuthContext.Provider
@@ -319,12 +312,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         workspace,
         accountUnavailableReason,
         api,
-        isLoading,
-        initializationError,
-        refreshIdentity,
-        selectWorkspace,
-        signIn,
-        signOut,
+        isLoading:
+          sessionQuery.isPending ||
+          (Boolean(user) && identityQuery.isPending) ||
+          isSigningIn ||
+          isClearingSession,
+        errorMessage,
+        isSigningIn,
+        isSigningOut: signOutMutation.isPending,
+        isRefreshingIdentity: pendingAction?.type === "refresh-identity",
+        selectingWorkspaceId:
+          pendingAction?.type === "select-workspace" ? pendingAction.workspaceId : null,
+        refreshIdentity: () => authMutation.mutateAsync({ type: "refresh-identity" }),
+        selectWorkspace: (workspaceId) =>
+          authMutation.mutateAsync({ type: "select-workspace", workspaceId }),
+        signIn: () => authMutation.mutateAsync({ type: "sign-in" }),
+        signOut: () => signOutMutation.mutateAsync(),
       }}
     >
       {children}

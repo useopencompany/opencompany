@@ -2,6 +2,7 @@ import { Button, Host, ProgressView } from "@expo/ui/swift-ui";
 import { buttonStyle, controlSize } from "@expo/ui/swift-ui/modifiers";
 import { useEffect, useRef } from "react";
 import { View } from "react-native";
+import { until } from "until-async";
 import wordmark from "@/assets/images/wordmark.png";
 import wordmarkDark from "@/assets/images/wordmark-dark.png";
 import { useAuth } from "@/features/auth";
@@ -9,25 +10,22 @@ import { StyledImage } from "@/shared/ui/styled-image";
 import { useToast } from "@/shared/ui/toast";
 
 export default function SignInScreen() {
-  const { initializationError, isLoading, signIn } = useAuth();
+  const { errorMessage, isSigningIn, signIn } = useAuth();
   const { showToast } = useToast();
   const shownInitializationErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!initializationError || shownInitializationErrorRef.current === initializationError) {
+    if (!errorMessage || shownInitializationErrorRef.current === errorMessage) {
       return;
     }
 
-    shownInitializationErrorRef.current = initializationError;
-    showToast(initializationError);
-  }, [initializationError, showToast]);
+    shownInitializationErrorRef.current = errorMessage;
+    showToast(errorMessage);
+  }, [errorMessage, showToast]);
 
   const handleSignIn = async () => {
-    const result = await signIn();
-    const error = result.error;
-    if (!result.success && error) {
-      showToast(error);
-    }
+    const [error] = await until(signIn);
+    if (error) showToast(error.message);
   };
 
   return (
@@ -50,7 +48,7 @@ export default function SignInScreen() {
 
         <View className="mt-10">
           <Host matchContents={{ horizontal: true, vertical: false }} style={{ height: 48 }}>
-            {isLoading ? (
+            {isSigningIn ? (
               <ProgressView />
             ) : (
               <Button
