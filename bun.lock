@@ -231,7 +231,7 @@
         "@tiptap/starter-kit": "3.30.5",
         "@tiptap/suggestion": "3.30.5",
         "@vercel/blob": "^2.8.0",
-        "@vercel/sandbox": "^2.9.0",
+        "@vercel/sandbox": "^3.2.0",
         "@workos-inc/authkit-nextjs": "^4.3.1",
         "@workos-inc/node": "^10.12.0",
         "@xterm/addon-fit": "^0.11.0",
@@ -288,7 +288,7 @@
         "@opencompany/telemetry": "workspace:*",
         "@opencompany/wiki": "workspace:*",
         "@vercel/blob": "^2.8.0",
-        "@vercel/sandbox": "^2.9.0",
+        "@vercel/sandbox": "^3.2.0",
         "ai": "^6.0.189",
         "ajv": "8.20.0",
         "drizzle-orm": "^0.45.2",
@@ -1955,7 +1955,7 @@
 
     "@vercel/rust": ["@vercel/rust@1.3.0", "", { "dependencies": { "execa": "5", "smol-toml": "1.5.2" } }, "sha512-z1X0z1NM+ISunm/scgRpuENNwcKlh7DjXn0QvKE0n10DcaYqxkBQVK8iRA9X05xSK9AzPlnB9DHdGKiXZO5buw=="],
 
-    "@vercel/sandbox": ["@vercel/sandbox@2.9.0", "", { "dependencies": { "@vercel/oidc": "3.2.0", "@workflow/serde": "4.1.0-beta.2", "async-retry": "1.3.3", "jose": "6.2.3", "jsonlines": "0.1.1", "ms": "2.1.3", "picocolors": "^1.1.1", "tar-stream": "3.1.7", "undici": "^7.27.1", "xdg-app-paths": "5.1.0", "zod": "^4.1.1" } }, "sha512-AMnzmOUG765PJnNyrj12Ed4XD+M2ns8C+o9UTBERuZeUQxbRo2izJTKPezaeDCl+KEpyw+JXepRCKIxSsylsMQ=="],
+    "@vercel/sandbox": ["@vercel/sandbox@3.2.0", "", { "dependencies": { "@vercel/oidc": "3.2.0", "@workflow/serde": "4.1.0-beta.2", "async-retry": "1.3.3", "jose": "6.2.3", "jsonlines": "0.1.1", "lru-cache": "^10.4.3", "ms": "2.1.3", "picocolors": "^1.1.1", "tar-stream": "3.1.7", "undici": "^7.27.1", "xdg-app-paths": "5.1.0", "zod": "^4.1.1" } }, "sha512-aIOd8Z+NgpdS8k4Y1EEvVoEml4+mtBmJVtfw4rJpL5j5K2gS70YfR6LbnT7/bfHbsRsFZhp/JSTB3TeOw/pgsw=="],
 
     "@vercel/static-build": ["@vercel/static-build@2.9.31", "", { "dependencies": { "@vercel/gatsby-plugin-vercel-analytics": "1.0.11", "@vercel/gatsby-plugin-vercel-builder": "2.2.8", "@vercel/static-config": "3.3.0", "ts-morph": "12.0.0" } }, "sha512-alC4tglwsksalNt/Pd0C5oCupK660nUhh0k9en39yQBa+7vRZx4//IDAkAxFB5AmDzsPLIHZVmLwM57bQaL9Rw=="],
 
@@ -4552,6 +4552,8 @@
     "@vercel/sandbox/@vercel/oidc": ["@vercel/oidc@3.2.0", "", {}, "sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug=="],
 
     "@vercel/sandbox/jose": ["jose@6.2.3", "", {}, "sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw=="],
+
+    "@vercel/sandbox/lru-cache": ["lru-cache@10.4.3", "", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 
     "@vercel/sandbox/undici": ["undici@7.29.0", "", {}, "sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw=="],
 

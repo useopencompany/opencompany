@@ -47,7 +47,7 @@
     "@tiptap/starter-kit": "3.30.5",
     "@tiptap/suggestion": "3.30.5",
     "@vercel/blob": "^2.8.0",
-    "@vercel/sandbox": "^2.9.0",
+    "@vercel/sandbox": "^3.2.0",
     "@workos-inc/authkit-nextjs": "^4.3.1",
     "@workos-inc/node": "^10.12.0",
     "@xterm/addon-fit": "^0.11.0",
