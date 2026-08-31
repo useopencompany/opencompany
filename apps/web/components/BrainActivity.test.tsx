@@ -63,8 +63,8 @@ describe("BrainActivity", () => {
 
     const html = renderToString(
       <>
-        <BrainActivity brainRef="goat_brain_1" />
-        <BrainRecentActivity brainRef="goat_brain_1" />
+        <BrainActivity brainRef="gbrain_1" />
+        <BrainRecentActivity brainRef="gbrain_1" />
       </>,
     );
 
