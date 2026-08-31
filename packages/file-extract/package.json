@@ -14,7 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@firecrawl/anydoc": "0.2.4"
+    "@firecrawl/anydoc": "0.2.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
