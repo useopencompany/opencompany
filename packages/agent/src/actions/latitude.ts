@@ -189,7 +189,12 @@ async function executeLatitudeAction(input: {
 
     const rawTools = client.toolsFromDefinitions(definitions) as ToolSet;
     const remote = rawTools[input.remoteName] as
-      | { execute?: (value: unknown, options: ToolExecutionOptions) => Promise<unknown> }
+      | {
+          execute?: (
+            value: unknown,
+            options: ToolExecutionOptions<Record<string, unknown>>,
+          ) => Promise<unknown>;
+        }
       | undefined;
     const execute = remote?.execute?.bind(remote);
     if (!execute) {
@@ -201,6 +206,7 @@ async function executeLatitudeAction(input: {
       toolCallId: `goat-action-latitude-${input.remoteName}`,
       messages: [],
       abortSignal: input.context.signal,
+      context: {},
     });
     return unwrapLatitudeMcpResult(result);
   } finally {
