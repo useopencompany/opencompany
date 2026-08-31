@@ -579,7 +579,7 @@ export function createProductChatToolContext(input: {
     : BRAIN_READ_TOOL_AI_SCHEMA;
 
   const tools: ToolSet = {
-    [BRAIN_TOOL_NAME]: tool<BrainToolInput, BrainToolOutput>({
+    [BRAIN_TOOL_NAME]: tool<BrainToolInput, BrainToolOutput, Record<string, unknown>>({
       description: BRAIN_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<BrainToolInput>(brainSchema),
       execute: async (args, executionContext?: unknown) => {
@@ -617,7 +617,11 @@ export function createProductChatToolContext(input: {
 
   const startTask = input.startTask;
   if (startTask) {
-    tools[START_TASK_TOOL_NAME] = tool<StartTaskToolInput, StartTaskToolOutput>({
+    tools[START_TASK_TOOL_NAME] = tool<
+      StartTaskToolInput,
+      StartTaskToolOutput,
+      Record<string, unknown>
+    >({
       description: START_TASK_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<StartTaskToolInput>({
         type: "object",
@@ -700,7 +704,11 @@ export function createProductChatToolContext(input: {
   const workflows = input.workflows;
   if (workflows && workflows.catalog.length > 0) {
     const workflowIds = workflows.catalog.map((workflow) => workflow.id);
-    tools[START_WORKFLOW_TOOL_NAME] = tool<StartWorkflowToolInput, StartWorkflowToolOutput>({
+    tools[START_WORKFLOW_TOOL_NAME] = tool<
+      StartWorkflowToolInput,
+      StartWorkflowToolOutput,
+      Record<string, unknown>
+    >({
       description: START_WORKFLOW_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<StartWorkflowToolInput>({
         type: "object",
@@ -737,7 +745,7 @@ export function createProductChatToolContext(input: {
 
   const runWiki = input.runWiki;
   if (runWiki) {
-    tools[WIKI_TOOL_NAME] = tool<WikiToolInput, WikiToolOutput>({
+    tools[WIKI_TOOL_NAME] = tool<WikiToolInput, WikiToolOutput, Record<string, unknown>>({
       description: WIKI_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<WikiToolInput>(
         WIKI_TOOL_INPUT_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0],
@@ -760,7 +768,8 @@ export function createProductChatToolContext(input: {
   if (createWorkspaceSkill) {
     tools[CREATE_WORKSPACE_SKILL_TOOL_NAME] = tool<
       CreateWorkspaceSkillToolInput,
-      CreateWorkspaceSkillToolOutput
+      CreateWorkspaceSkillToolOutput,
+      Record<string, unknown>
     >({
       description: CREATE_WORKSPACE_SKILL_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<CreateWorkspaceSkillToolInput>({
@@ -813,7 +822,11 @@ export function createProductChatToolContext(input: {
   const saveToBrain = input.saveToBrain;
   if (saveToBrain) {
     const capturedByKey = new Map<string, SaveToBrainToolOutput>();
-    tools[SAVE_TO_BRAIN_TOOL_NAME] = tool<SaveToBrainToolInput, SaveToBrainToolOutput>({
+    tools[SAVE_TO_BRAIN_TOOL_NAME] = tool<
+      SaveToBrainToolInput,
+      SaveToBrainToolOutput,
+      Record<string, unknown>
+    >({
       description: SAVE_TO_BRAIN_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<SaveToBrainToolInput>({
         type: "object",
@@ -900,7 +913,11 @@ export function createProductChatToolContext(input: {
   const sendUserMessage = input.sendUserMessage;
   if (sendUserMessage) {
     let sendUserMessageCallCount = 0;
-    tools[SEND_USER_MESSAGE_TOOL_NAME] = tool<SendUserMessageToolInput, SendUserMessageToolOutput>({
+    tools[SEND_USER_MESSAGE_TOOL_NAME] = tool<
+      SendUserMessageToolInput,
+      SendUserMessageToolOutput,
+      Record<string, unknown>
+    >({
       description: SEND_USER_MESSAGE_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<SendUserMessageToolInput>({
         type: "object",
@@ -932,7 +949,11 @@ export function createProductChatToolContext(input: {
   }
 
   if (input.scheduleTask) {
-    tools[SCHEDULE_TASK_TOOL_NAME] = tool<ScheduleTaskToolInput, ScheduleTaskToolOutput>({
+    tools[SCHEDULE_TASK_TOOL_NAME] = tool<
+      ScheduleTaskToolInput,
+      ScheduleTaskToolOutput,
+      Record<string, unknown>
+    >({
       description: SCHEDULE_TASK_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<ScheduleTaskToolInput>({
         type: "object",
@@ -987,7 +1008,8 @@ export function createProductChatToolContext(input: {
   if (input.editTaskSchedule) {
     tools[EDIT_TASK_SCHEDULE_TOOL_NAME] = tool<
       EditTaskScheduleToolInput,
-      EditTaskScheduleToolOutput
+      EditTaskScheduleToolOutput,
+      Record<string, unknown>
     >({
       description: EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<EditTaskScheduleToolInput>({
@@ -1039,7 +1061,8 @@ export function createProductChatToolContext(input: {
   if (input.deleteTaskSchedule) {
     tools[DELETE_TASK_SCHEDULE_TOOL_NAME] = tool<
       DeleteTaskScheduleToolInput,
-      DeleteTaskScheduleToolOutput
+      DeleteTaskScheduleToolOutput,
+      Record<string, unknown>
     >({
       description: DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<DeleteTaskScheduleToolInput>({
@@ -1070,7 +1093,11 @@ export function createProductChatToolContext(input: {
 
   const webFetch = input.webFetch;
   if (webFetch) {
-    tools[WEB_FETCH_TOOL_NAME] = tool<WebFetchToolInput, WebFetchToolOutput>({
+    tools[WEB_FETCH_TOOL_NAME] = tool<
+      WebFetchToolInput,
+      WebFetchToolOutput,
+      Record<string, unknown>
+    >({
       description: WEB_FETCH_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<WebFetchToolInput>({
         type: "object",
@@ -1108,7 +1135,11 @@ export function createProductChatToolContext(input: {
 
   const webSearch = input.webSearch;
   if (webSearch) {
-    tools[WEB_SEARCH_TOOL_NAME] = tool<WebSearchToolInput, WebSearchToolOutput>({
+    tools[WEB_SEARCH_TOOL_NAME] = tool<
+      WebSearchToolInput,
+      WebSearchToolOutput,
+      Record<string, unknown>
+    >({
       description: WEB_SEARCH_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<WebSearchToolInput>({
         type: "object",
@@ -1158,7 +1189,8 @@ export function createProductChatToolContext(input: {
       const profileNames = browserProfiles.profiles.map((profile) => profile.name);
       tools[BROWSER_USE_PROFILE_TOOL_NAME] = tool<
         BrowserUseProfileToolInput,
-        BrowserUseProfileToolOutput
+        BrowserUseProfileToolOutput,
+        Record<string, unknown>
       >({
         description: BROWSER_USE_PROFILE_TOOL_DESCRIPTION,
         needsApproval: async () => true,
@@ -1186,7 +1218,7 @@ export function createProductChatToolContext(input: {
     }
 
     for (const name of BROWSER_TOOL_NAMES) {
-      tools[name] = tool<BrowserToolInput, BrowserToolOutput>({
+      tools[name] = tool<BrowserToolInput, BrowserToolOutput, Record<string, unknown>>({
         description: `${BROWSER_CHAT_TOOL_DESCRIPTIONS[name]} ${BROWSER_CHAT_CALL_LIMIT_DESCRIPTION}`,
         needsApproval: async (args) => {
           if (name !== "browser_click" && name !== "browser_find") return false;
@@ -1218,7 +1250,11 @@ export function createProductChatToolContext(input: {
   const skills = input.skills;
   if (skills && skills.catalog.length > 0) {
     const skillIds = skills.catalog.map((skill) => skill.id);
-    tools[LIST_SKILLS_TOOL_NAME] = tool<ListSkillsToolInput, ListSkillsToolOutput>({
+    tools[LIST_SKILLS_TOOL_NAME] = tool<
+      ListSkillsToolInput,
+      ListSkillsToolOutput,
+      Record<string, unknown>
+    >({
       description: LIST_SKILLS_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<ListSkillsToolInput>({
         type: "object",
@@ -1249,7 +1285,11 @@ export function createProductChatToolContext(input: {
         };
       },
     });
-    tools[USE_SKILL_TOOL_NAME] = tool<UseSkillToolInput, UseSkillToolOutput>({
+    tools[USE_SKILL_TOOL_NAME] = tool<
+      UseSkillToolInput,
+      UseSkillToolOutput,
+      Record<string, unknown>
+    >({
       description: USE_SKILL_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<UseSkillToolInput>({
         type: "object",
@@ -1292,7 +1332,11 @@ export function createProductChatToolContext(input: {
       },
     });
     if (skills.readFile) {
-      tools[READ_SKILL_FILE_TOOL_NAME] = tool<ReadSkillFileToolInput, ReadSkillFileToolOutput>({
+      tools[READ_SKILL_FILE_TOOL_NAME] = tool<
+        ReadSkillFileToolInput,
+        ReadSkillFileToolOutput,
+        Record<string, unknown>
+      >({
         description: READ_SKILL_FILE_TOOL_DESCRIPTION,
         inputSchema: jsonSchema<ReadSkillFileToolInput>({
           type: "object",
@@ -1347,7 +1391,11 @@ export function createProductChatToolContext(input: {
         }),
       };
     };
-    tools[LIST_ACTIONS_TOOL_NAME] = tool<ListActionsToolInput, ListActionsToolOutput>({
+    tools[LIST_ACTIONS_TOOL_NAME] = tool<
+      ListActionsToolInput,
+      ListActionsToolOutput,
+      Record<string, unknown>
+    >({
       description: LIST_ACTIONS_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<ListActionsToolInput>({
         ...ACTION_TOOL_CONTRACT.list.inputSchema,
@@ -1378,7 +1426,11 @@ export function createProductChatToolContext(input: {
         }) as Promise<ListActionsToolOutput>;
       },
     });
-    tools[USE_ACTION_TOOL_NAME] = tool<UseActionToolInput, UseActionToolOutput>({
+    tools[USE_ACTION_TOOL_NAME] = tool<
+      UseActionToolInput,
+      UseActionToolOutput,
+      Record<string, unknown>
+    >({
       description: USE_ACTION_TOOL_DESCRIPTION,
       needsApproval: async (args, executionContext) => {
         const action = typeof args.action === "string" ? args.action : "";
@@ -1470,7 +1522,8 @@ export function createProductChatToolContext(input: {
   if (updateTaskStatus) {
     tools[UPDATE_TASK_STATUS_TOOL_NAME] = tool<
       UpdateTaskStatusToolInput,
-      UpdateTaskStatusToolOutput
+      UpdateTaskStatusToolOutput,
+      Record<string, unknown>
     >({
       description: UPDATE_TASK_STATUS_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<UpdateTaskStatusToolInput>(UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA),
