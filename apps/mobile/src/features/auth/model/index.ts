@@ -1,2 +1,8 @@
 export type { User } from "./auth";
-export { type AuthActionResult, AuthProvider, useAuth } from "./auth-provider";
+export {
+  type AccountUnavailableReason,
+  type AuthActionResult,
+  type AuthContextValue,
+  AuthProvider,
+  useAuth,
+} from "./auth-provider";

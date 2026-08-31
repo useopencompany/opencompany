@@ -8,15 +8,18 @@ import {
   labelStyle,
   scaleEffect,
 } from "@expo/ui/swift-ui/modifiers";
-import { Href, Link, router } from "expo-router";
+import type { ConversationDto } from "@opencompany/protocol/schemas";
+import { type Href, Link, router } from "expo-router";
 import { useDrawerProgress } from "expo-router/drawer";
 import type { SFSymbol } from "expo-symbols";
-import { useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import Reanimated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { until } from "until-async";
 import wordmark from "@/assets/images/wordmark.png";
 import wordmarkDark from "@/assets/images/wordmark-dark.png";
+import { useAuth } from "@/features/auth";
 import { StyledImage } from "@/shared/ui/styled-image";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import {
@@ -35,24 +38,52 @@ const NAV_ITEMS: { label: string; icon: SFSymbol; href: Href }[] = [
   { label: "Brains", icon: "brain", href: "/brains" },
 ];
 
-const RECENT_CHATS = [
-  "Drawer layout polish",
-  "Pricing page copy",
-  "Runner auth at usage limit",
-  "Sidebar background chats",
-  "Onboarding email sequence",
-  "Postgres index review",
-  "Mobile app icon ideas",
-  "Q3 hiring plan",
-  "Refactor billing webhooks",
-  "Landing page hero rewrite",
-  "Support macros cleanup",
-  "Analytics event naming",
-];
-
 export function Sidebar() {
+  const { api, workspace } = useAuth();
   const insets = useSafeAreaInsets();
   const [headerHeight, setHeaderHeight] = useState(insets.top + SIDEBAR_HEADER_INITIAL_HEIGHT);
+  const [conversations, setConversations] = useState<ConversationDto[]>([]);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [conversationsError, setConversationsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsInitialLoading(true);
+    setConversations([]);
+    setConversationsError(null);
+
+    void until(api.listConversations).then(([error, data]) => {
+      if (cancelled) return;
+      if (error) {
+        setConversationsError(
+          error instanceof Error ? error.message : "Recent chats could not be loaded.",
+        );
+      } else {
+        setConversations(data);
+      }
+      setIsInitialLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api, workspace?.id]);
+
+  const refreshConversations = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    const [error, data] = await until(api.listConversations);
+    if (error) {
+      setConversationsError(
+        error instanceof Error ? error.message : "Recent chats could not be refreshed.",
+      );
+    } else {
+      setConversations(data);
+      setConversationsError(null);
+    }
+    setIsRefreshing(false);
+  };
 
   // 0 while closed, 1 while fully open, tracking the gesture in between. Driven
   // by the same value that translates the screen content, so the sidebar eases
@@ -68,10 +99,18 @@ export function Sidebar() {
       <ScrollView
         testID={SIDEBAR_SCROLL_VIEW_TEST_ID}
         className="flex-1"
+        alwaysBounceVertical
         contentContainerStyle={{
           paddingTop: headerHeight,
           paddingBottom: insets.bottom + 24,
         }}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => void refreshConversations()}
+            tintColorClassName="accent-sidebar-foreground"
+          />
+        }
         scrollIndicatorInsets={{ top: headerHeight }}
         showsVerticalScrollIndicator={false}
       >
@@ -92,17 +131,47 @@ export function Sidebar() {
           Recents
         </Text>
 
-        {RECENT_CHATS.map((chat) => (
-          <Pressable
-            key={chat}
-            onPress={() => {}}
-            className="px-3 py-2.5 active:bg-secondary rounded-xl border-continuous"
-          >
-            <Text numberOfLines={1} className="text-[15px] text-sidebar-foreground">
-              {chat}
+        {conversationsError ? (
+          <View className="mx-3 mb-2 gap-2 rounded-xl bg-secondary px-3 py-3 border-continuous">
+            <Text selectable className="text-[13px] leading-5 text-muted-foreground">
+              {conversationsError}
             </Text>
-          </Pressable>
-        ))}
+            {conversations.length === 0 ? (
+              <Pressable
+                accessibilityRole="button"
+                className="self-start rounded-lg px-2 py-1 active:bg-background border-continuous"
+                onPress={() => void refreshConversations()}
+              >
+                <Text className="text-[14px] font-semibold text-link">Retry</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
+        {isInitialLoading ? (
+          <View className="flex-row items-center gap-2 px-3 py-3">
+            <ActivityIndicator size="small" colorClassName="accent-muted-foreground" />
+            <Text className="text-[14px] text-muted-foreground">Loading recent chats...</Text>
+          </View>
+        ) : conversations.length === 0 && !conversationsError ? (
+          <Text className="px-3 py-3 text-[14px] leading-5 text-muted-foreground">
+            No recent chats yet.
+          </Text>
+        ) : (
+          conversations.map((conversation) => (
+            <Link
+              key={conversation.id}
+              href={{ pathname: "/chats/[chatId]", params: { chatId: conversation.id } }}
+              asChild
+            >
+              <Pressable className="px-3 py-2.5 active:bg-secondary rounded-xl border-continuous">
+                <Text numberOfLines={1} className="text-[15px] text-sidebar-foreground">
+                  {conversation.title}
+                </Text>
+              </Pressable>
+            </Link>
+          ))
+        )}
       </ScrollView>
 
       <NativeSidebarHeader
@@ -132,6 +201,7 @@ export function Sidebar() {
         <Host matchContents={{ vertical: true }}>
           <HStack>
             <Button
+              onPress={() => router.navigate("/")}
               modifiers={[
                 buttonStyle("glassProminent"),
                 controlSize("large"),

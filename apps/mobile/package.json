@@ -5,6 +5,8 @@
   "dependencies": {
     "@expo/ui": "~57.0.9",
     "@legendapp/list": "3.3.3",
+    "@opencompany/protocol": "workspace:*",
+    "@tanstack/react-query": "^5.102.8",
     "@workos-inc/node": "^10.10.0",
     "expo": "~57.0.11",
     "expo-auth-session": "~57.0.7",

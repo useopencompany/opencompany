@@ -199,6 +199,7 @@ const baseEnvKeys = envKeys(
 // variables are declared here so the check accepts them.
 const addedEnvKeys = [
   "API_INTERNAL_TOKEN",
+  "EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN",
   "EXPO_PUBLIC_WORKOS_CLIENT_ID",
   "OPENCOMPANY_DESKTOP_AUTH_SECRET",
   "RUNNER_CODEX_CHAT_SELF_HEAL_ENABLED",

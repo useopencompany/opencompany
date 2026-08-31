@@ -33,6 +33,7 @@ export default function StackLayout() {
         }}
       >
         <Stack.Screen name="index" />
+        <Stack.Screen name="chats/[chatId]" />
         <Stack.Screen
           name="camera"
           options={{

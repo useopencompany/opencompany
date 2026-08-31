@@ -69,6 +69,11 @@ and organizations to remain shared while the API selects a fixed mobile session-
 Future mobile builds expose the same value as `EXPO_PUBLIC_WORKOS_CLIENT_ID`; neither variable is a
 client secret. Do not copy the mobile client ID into the web runtime unless web gains a real reader.
 
+Mobile builds also require `EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`, a fully qualified `http` or `https`
+origin for the canonical API. Local Expo builds normally use `http://localhost:3001`; hosted builds
+use `https://api.opencompany.chat`. The value is public and must not contain credentials, a path,
+query parameters, or a fragment.
+
 `CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
 
