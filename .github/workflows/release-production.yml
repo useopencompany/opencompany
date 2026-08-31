@@ -151,7 +151,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Fetch release secrets from Infisical
-        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
@@ -165,7 +165,7 @@ jobs:
 
       - name: Fetch API secrets from Infisical
         if: ${{ needs.plan.outputs.api == 'true' }}
-        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
@@ -180,7 +180,7 @@ jobs:
 
       - name: Fetch runner secrets from Infisical
         if: ${{ needs.plan.outputs.runner == 'true' }}
-        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
