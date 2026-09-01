@@ -1813,6 +1813,8 @@ function integrationConnectHref(
   }
   if (provider === "github")
     return "/api/integrations/github/start?returnTo=/settings/integrations";
+  if (provider === "github_user")
+    return "/api/integrations/github-user/start?returnTo=/settings/plugins/github";
   if (provider === "jamie") return "/settings/jamie";
   if (provider === "imessage") return "/settings/imessage";
   if (provider === "granola") return "/settings/granola";

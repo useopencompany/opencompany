@@ -315,14 +315,11 @@ export function personalAccountsFromRows(
       }
       continue;
     }
-    if (row.provider === "github_user") {
-      personalAccounts.github_user.push(accountViewFromRow("github_user", row));
-      continue;
-    }
     if (
       row.provider === "gmail" ||
       row.provider === "google_calendar" ||
       row.provider === "google_drive" ||
+      row.provider === "github_user" ||
       row.provider === "slack" ||
       row.provider === "hubspot" ||
       row.provider === "granola" ||

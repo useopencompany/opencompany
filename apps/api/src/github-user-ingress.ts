@@ -4,9 +4,10 @@ import {
   appendGitHubUserIntegrationStatus,
   buildGitHubUserInstallUrl,
   createGitHubUserIntegrationState,
-  exchangeGitHubUserCode,
+  exchangeGitHubAppUserCode,
   fetchGitHubUserIdentity,
   isGitHubUserIntegrationConfigured,
+  verifyGitHubAppUserInstallation,
   verifyGitHubUserIntegrationState,
 } from "@opencompany/agent/integrations/github-user";
 import { connectGitHubUserIntegration } from "@opencompany/db/integrations";
@@ -28,24 +29,20 @@ type RefreshPluginRegistrations = (input: {
   workspaceIds: string[];
 }) => Promise<void>;
 
-export function createGitHubUserIngress(input: {
+type GitHubUserIngressInput = {
   db: DbLike;
   identify: ApiIdentityVerifier;
   refreshPluginRegistrations?: RefreshPluginRegistrations;
-}): GitHubUserIngressService {
+};
+
+export function createGitHubUserIngress(input: GitHubUserIngressInput): GitHubUserIngressService {
   return {
     start: (request) => handleStart(input, request),
     callback: (request) => handleCallback(input, request),
   };
 }
 
-type IngressInput = {
-  db: DbLike;
-  identify: ApiIdentityVerifier;
-  refreshPluginRegistrations?: RefreshPluginRegistrations;
-};
-
-async function handleStart(input: IngressInput, request: Request): Promise<Response> {
+async function handleStart(input: GitHubUserIngressInput, request: Request): Promise<Response> {
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
@@ -62,7 +59,7 @@ async function handleStart(input: IngressInput, request: Request): Promise<Respo
   return sessionRedirect(session, buildGitHubUserInstallUrl(state));
 }
 
-async function handleCallback(input: IngressInput, request: Request): Promise<Response> {
+async function handleCallback(input: GitHubUserIngressInput, request: Request): Promise<Response> {
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
@@ -91,9 +88,29 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   if (!code) {
     return statusRedirect(session, state.returnTo, "error", "missing_code");
   }
+  const installationId = url.searchParams.get("installation_id")?.trim();
+  if (!installationId) {
+    return statusRedirect(session, state.returnTo, "error", "missing_installation_id");
+  }
+  const setupAction = url.searchParams.get("setup_action");
+  if (setupAction !== "install" && setupAction !== "update") {
+    return statusRedirect(session, state.returnTo, "error", "invalid_installation_action");
+  }
 
   try {
-    const tokens = await exchangeGitHubUserCode(code);
+    const tokens = await exchangeGitHubAppUserCode(code);
+    try {
+      await verifyGitHubAppUserInstallation({
+        accessToken: tokens.accessToken,
+        installationId,
+      });
+    } catch (error) {
+      logger.warn("GitHub App installation was not available to the authorized user", {
+        event: "opencompany.github_user_installation_not_authorized",
+        error_message: error instanceof Error ? error.message : String(error),
+      });
+      return statusRedirect(session, state.returnTo, "error", "installation_not_authorized");
+    }
     const identity = await fetchGitHubUserIdentity(tokens.accessToken);
     await connectGitHubUserIntegration({
       userWorkosId: session.userId,
@@ -101,6 +118,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
       login: identity.login,
       name: identity.name,
       email: identity.email,
+      installationId,
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       accessTokenExpiresAt: tokens.accessTokenExpiresAt,
@@ -125,7 +143,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
 }
 
 async function refreshAfterConnection(
-  input: IngressInput,
+  input: GitHubUserIngressInput,
   session: Extract<IngressSession, { kind: "actor" }>,
 ) {
   if (!input.refreshPluginRegistrations) return;

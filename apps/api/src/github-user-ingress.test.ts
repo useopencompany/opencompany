@@ -1,7 +1,8 @@
 import {
   createGitHubUserIntegrationState,
-  exchangeGitHubUserCode,
+  exchangeGitHubAppUserCode,
   fetchGitHubUserIdentity,
+  verifyGitHubAppUserInstallation,
 } from "@opencompany/agent/integrations/github-user";
 import { connectGitHubUserIntegration } from "@opencompany/db/integrations";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
@@ -11,8 +12,9 @@ import { createGitHubUserIngress } from "./github-user-ingress";
 
 vi.mock("@opencompany/agent/integrations/github-user", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  exchangeGitHubUserCode: vi.fn(),
+  exchangeGitHubAppUserCode: vi.fn(),
   fetchGitHubUserIdentity: vi.fn(),
+  verifyGitHubAppUserInstallation: vi.fn(async () => ({ id: 123 })),
 }));
 vi.mock("@opencompany/agent/integrations/analytics", () => ({
   captureIntegrationAddedAnalytics: vi.fn(async () => undefined),
@@ -66,7 +68,7 @@ describe("GitHub user ingress", () => {
     vi.stubEnv("GITHUB_USER_APP_CLIENT_SECRET", "client-secret");
     vi.stubEnv("GITHUB_USER_APP_STATE_SECRET", "state-secret-state-secret-state-secret");
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 9).toString("base64"));
-    vi.mocked(exchangeGitHubUserCode).mockResolvedValue({
+    vi.mocked(exchangeGitHubAppUserCode).mockResolvedValue({
       accessToken: "ghu_access",
       refreshToken: "ghr_refresh",
       tokenType: "bearer",
@@ -116,7 +118,7 @@ describe("GitHub user ingress", () => {
     });
     const response = await ingress({ refresh }).callback(
       new Request(
-        `https://api.example.com/integrations/github-user/callback?state=${encodeURIComponent(state)}&code=authorization-code&installation_id=123`,
+        `https://api.example.com/integrations/github-user/callback?state=${encodeURIComponent(state)}&code=authorization-code&installation_id=123&setup_action=install`,
       ),
     );
 
@@ -126,6 +128,7 @@ describe("GitHub user ingress", () => {
       login: "octocat",
       name: "The Octocat",
       email: null,
+      installationId: "123",
       accessToken: "ghu_access",
       refreshToken: "ghr_refresh",
       tokenType: "bearer",
@@ -141,6 +144,44 @@ describe("GitHub user ingress", () => {
     expect(location.pathname).toBe("/settings/plugins/github");
     expect(location.searchParams.get("integration")).toBe("github_user");
     expect(location.searchParams.get("setup")).toBe("connected");
+    expect(verifyGitHubAppUserInstallation).toHaveBeenCalledWith({
+      accessToken: "ghu_access",
+      installationId: "123",
+    });
+  });
+
+  it("rejects an installation that is not associated with the authorized GitHub user", async () => {
+    vi.mocked(verifyGitHubAppUserInstallation).mockRejectedValueOnce(new Error("not available"));
+    const state = createGitHubUserIntegrationState({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/github",
+    });
+    const response = await ingress().callback(
+      new Request(
+        `https://api.example.com/integrations/github-user/callback?state=${encodeURIComponent(state)}&code=authorization-code&installation_id=123&setup_action=install`,
+      ),
+    );
+
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.searchParams.get("reason")).toBe("installation_not_authorized");
+    expect(connectGitHubUserIntegration).not.toHaveBeenCalled();
+  });
+
+  it("requires the combined install callback grant before exchanging the code", async () => {
+    const state = createGitHubUserIntegrationState({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/github",
+    });
+    const response = await ingress().callback(
+      new Request(
+        `https://api.example.com/integrations/github-user/callback?state=${encodeURIComponent(state)}&code=authorization-code`,
+      ),
+    );
+
+    expect(new URL(response.headers.get("location") ?? "").searchParams.get("reason")).toBe(
+      "missing_installation_id",
+    );
+    expect(exchangeGitHubAppUserCode).not.toHaveBeenCalled();
   });
 
   it("rejects state for another opencompany user before exchanging the code", async () => {
@@ -157,6 +198,6 @@ describe("GitHub user ingress", () => {
     expect(new URL(response.headers.get("location") ?? "").searchParams.get("reason")).toBe(
       "session_mismatch",
     );
-    expect(exchangeGitHubUserCode).not.toHaveBeenCalled();
+    expect(exchangeGitHubAppUserCode).not.toHaveBeenCalled();
   });
 });

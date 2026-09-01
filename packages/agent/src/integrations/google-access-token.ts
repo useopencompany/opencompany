@@ -1,13 +1,12 @@
 import { getDb } from "@opencompany/db/client";
-import {
-  loadIntegrationCredential,
-  markIntegrationStatus,
-  refreshIntegrationCredential,
-} from "@opencompany/db/integrations";
+import { markIntegrationStatus } from "@opencompany/db/integrations";
 import type { IntegrationProvider } from "@opencompany/db/product-schema";
+import {
+  ExpiringOAuthReauthRequired,
+  getExpiringOAuthAccessToken,
+} from "./expiring-oauth-access-token";
 
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
-const REFRESH_SKEW_MS = 60_000;
 const MAX_GOOGLE_ERROR_DETAIL_CHARS = 200;
 
 type StoredGoogleTokens = {
@@ -160,45 +159,71 @@ export async function getGoogleAccessToken(
   connection: GoogleAccessConnection,
   options?: { signal?: AbortSignal; forceRefresh?: boolean },
 ): Promise<string> {
-  const credential = await loadIntegrationCredential({
-    userWorkosId: connection.userWorkosId,
-    integrationId: connection.integrationId,
-    provider: connection.provider,
-    kind: "oauth_token",
-    db: getDb(),
+  return getExpiringOAuthAccessToken({
+    connection,
+    displayName: "Google",
+    parseCredential: parseGoogleCredential,
+    refresh: refreshGoogleCredential,
+    createAuthError: (message) => new GoogleAccessAuthError(message),
+    missingCredential: {
+      message: "No stored Google credentials for this account.",
+      statusReason: "Stored Google credentials are missing.",
+    },
+    invalidCredential: {
+      message: "Stored Google credentials are invalid.",
+      statusReason: "Stored Google credentials are invalid.",
+    },
+    ...(options ? { options } : {}),
   });
-  if (!credential) {
-    throw new GoogleAccessAuthError("No stored Google credentials for this account.");
-  }
-  const tokens = credential.payload as StoredGoogleTokens;
-  const expired = credential.expiresAt
-    ? credential.expiresAt.getTime() - REFRESH_SKEW_MS <= Date.now()
-    : true;
-  if (!options?.forceRefresh && !expired && tokens.access_token) return tokens.access_token;
-  if (!tokens.refresh_token) {
-    await markGoogleNeedsReauth(connection, "Stored Google credentials have no refresh token.");
-    throw new GoogleAccessAuthError("Stored Google credentials have no refresh token.");
-  }
+}
 
+function parseGoogleCredential(payload: Record<string, unknown>) {
+  const accessToken = typeof payload.access_token === "string" ? payload.access_token.trim() : "";
+  if (!accessToken) return null;
+  const tokens = payload as StoredGoogleTokens;
+  return {
+    accessToken,
+    refreshToken: tokens.refresh_token?.trim() || null,
+    payload: tokens,
+  };
+}
+
+async function refreshGoogleCredential(
+  credential: {
+    accessToken: string;
+    refreshToken: string | null;
+    payload: StoredGoogleTokens;
+  },
+  context: { now: Date; signal?: AbortSignal },
+) {
+  const refreshToken = credential.refreshToken;
+  if (!refreshToken) {
+    throw new ExpiringOAuthReauthRequired(
+      "Stored Google credentials have no refresh token.",
+      "Stored Google credentials have no refresh token.",
+    );
+  }
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim();
   const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim();
   if (!clientId || !clientSecret) throw new Error("Google OAuth is not configured.");
   const response = await fetch(GOOGLE_TOKEN_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    signal: options?.signal ?? null,
+    signal: context.signal ?? null,
     body: new URLSearchParams({
       client_id: clientId,
       client_secret: clientSecret,
       grant_type: "refresh_token",
-      refresh_token: tokens.refresh_token,
+      refresh_token: refreshToken,
     }),
   });
   if (!response.ok) {
     const detail = await response.text();
     if (response.status === 400 && detail.includes("invalid_grant")) {
-      await markGoogleNeedsReauth(connection, "Google refused the refresh token.");
-      throw new GoogleAccessAuthError("Google refused the refresh token.");
+      throw new ExpiringOAuthReauthRequired(
+        "Google refused the refresh token.",
+        "Google refused the refresh token.",
+      );
     }
     throw new Error(`Google token refresh failed with ${response.status}.`);
   }
@@ -206,27 +231,24 @@ export async function getGoogleAccessToken(
   if (!refreshed.access_token) throw new Error("Google token refresh returned no access token.");
   const nextTokens: StoredGoogleTokens = {
     access_token: refreshed.access_token,
-    refresh_token: refreshed.refresh_token ?? tokens.refresh_token,
-    ...((refreshed.scope ?? tokens.scope) ? { scope: refreshed.scope ?? tokens.scope } : {}),
-    ...((refreshed.token_type ?? tokens.token_type)
-      ? { token_type: refreshed.token_type ?? tokens.token_type }
+    refresh_token: refreshed.refresh_token ?? refreshToken,
+    ...((refreshed.scope ?? credential.payload.scope)
+      ? { scope: refreshed.scope ?? credential.payload.scope }
+      : {}),
+    ...((refreshed.token_type ?? credential.payload.token_type)
+      ? { token_type: refreshed.token_type ?? credential.payload.token_type }
       : {}),
   };
-  await refreshIntegrationCredential({
-    userWorkosId: connection.userWorkosId,
-    integrationId: connection.integrationId,
-    provider: connection.provider,
-    kind: "oauth_token",
+  return {
+    accessToken: refreshed.access_token,
     payload: Object.fromEntries(
       Object.entries(nextTokens).filter(([, value]) => value !== undefined),
     ),
     expiresAt:
       typeof refreshed.expires_in === "number"
-        ? new Date(Date.now() + refreshed.expires_in * 1_000)
+        ? new Date(context.now.getTime() + refreshed.expires_in * 1_000)
         : null,
-    db: getDb(),
-  });
-  return refreshed.access_token;
+  };
 }
 
 async function markGoogleNeedsReauth(connection: GoogleAccessConnection, reason: string) {
