@@ -26,16 +26,11 @@ export function assertManagedCapabilityInspection(
     );
   }
   const inspectionInput = inspectedProviderInput(spec, inspection.input);
-  const inputContract = collectInspectionInputContract(inspectionInput);
-  const schemaKeys = new Set(inputContract.fields.keys());
   const mappedKeys = Object.keys(mapped.providerInput);
+  const inputContracts = collectInspectionInputContracts(inspectionInput);
   if (
-    (mappedKeys.length > 0 && schemaKeys.size === 0) ||
-    mappedKeys.some((key) => !schemaKeys.has(key)) ||
-    [...inputContract.required].some((key) => !(key in mapped.providerInput)) ||
-    mappedKeys.some(
-      (key) =>
-        !inspectionValueMatchesSchema(mapped.providerInput[key], inputContract.fields.get(key)),
+    !inputContracts.some((contract) =>
+      inspectionInputMatches(mapped.providerInput, mappedKeys, contract),
     )
   ) {
     throw new ActionExecutionError(
@@ -56,19 +51,33 @@ function inspectedProviderInput(spec: ManagedCapabilityMonidActionSpec, input: u
   return input[spec.inputLocation];
 }
 
-function collectInspectionInputContract(value: unknown) {
-  const fields = new Map<string, unknown>();
-  const required = new Set<string>();
-  collectInspectionObject(value, fields, required);
-  return { fields, required };
+type InspectionInputContract = {
+  fields: Map<string, unknown>;
+  required: Set<string>;
+};
+
+function collectInspectionInputContracts(value: unknown): InspectionInputContract[] {
+  if (!isPlainRecord(value)) return [];
+
+  let contracts = [collectInspectionObject(value)];
+  for (const key of INSPECTION_SCHEMA_WRAPPER_KEYS) {
+    const nested = collectInspectionInputContracts(value[key]);
+    if (nested.length > 0) contracts = mergeInspectionContractSets(contracts, nested);
+  }
+
+  if (Array.isArray(value.anyOf)) {
+    const alternatives = value.anyOf.flatMap((schema) => collectInspectionInputContracts(schema));
+    if (alternatives.length > 0) {
+      contracts = mergeInspectionContractSets(contracts, alternatives);
+    }
+  }
+
+  return contracts;
 }
 
-function collectInspectionObject(
-  value: unknown,
-  fields: Map<string, unknown>,
-  required: Set<string>,
-) {
-  if (!isPlainRecord(value)) return;
+function collectInspectionObject(value: Record<string, unknown>): InspectionInputContract {
+  const fields = new Map<string, unknown>();
+  const required = new Set<string>();
   if (isPlainRecord(value.properties)) {
     const requiredFields = Array.isArray(value.required)
       ? new Set(value.required.filter((key): key is string => typeof key === "string"))
@@ -90,17 +99,35 @@ function collectInspectionObject(
         required.add(key);
       }
     }
-    if (
-      key === "schema" ||
-      key === "body" ||
-      key === "query" ||
-      key === "queryParams" ||
-      key === "pathParams" ||
-      key === "parameters"
-    ) {
-      collectInspectionObject(descriptor, fields, required);
-    }
   }
+  return { fields, required };
+}
+
+function inspectionInputMatches(
+  providerInput: Record<string, unknown>,
+  mappedKeys: string[],
+  contract: InspectionInputContract,
+) {
+  return (
+    (mappedKeys.length === 0 || contract.fields.size > 0) &&
+    mappedKeys.every((key) => contract.fields.has(key)) &&
+    [...contract.required].every((key) => key in providerInput) &&
+    mappedKeys.every((key) =>
+      inspectionValueMatchesSchema(providerInput[key], contract.fields.get(key)),
+    )
+  );
+}
+
+function mergeInspectionContractSets(
+  left: InspectionInputContract[],
+  right: InspectionInputContract[],
+) {
+  return left.flatMap((leftContract) =>
+    right.map((rightContract) => ({
+      fields: new Map([...leftContract.fields, ...rightContract.fields]),
+      required: new Set([...leftContract.required, ...rightContract.required]),
+    })),
+  );
 }
 
 function looksLikeInspectionField(value: unknown) {
@@ -181,3 +208,11 @@ const INSPECTION_SCHEMA_METADATA_KEYS = new Set([
   "title",
   "type",
 ]);
+const INSPECTION_SCHEMA_WRAPPER_KEYS = [
+  "schema",
+  "body",
+  "query",
+  "queryParams",
+  "pathParams",
+  "parameters",
+] as const;
