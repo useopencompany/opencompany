@@ -35,6 +35,10 @@ import {
   isRecord,
   type ToolCallView,
 } from "./assistant-items";
+import {
+  type HistoricalPresentationDetailController,
+  HistoricalPresentationDetailStatus,
+} from "./HistoricalPresentationDetail";
 
 export type CodexToolAction =
   | { type: "implement-plan" }
@@ -61,6 +65,7 @@ export function ToolCallItem({
   onActionApproval,
   allowActionApproval = false,
   readOnly = false,
+  detail,
 }: {
   tool: ToolCallView;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
@@ -68,14 +73,16 @@ export function ToolCallItem({
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
   allowActionApproval?: boolean;
   readOnly?: boolean;
+  detail?: HistoricalPresentationDetailController;
 }) {
-  if (readOnly) return <ToolCallRow tool={tool} />;
+  if (detail && detail.state !== "loaded") return <ToolCallRow tool={tool} detail={detail} />;
+  if (readOnly) return <ToolCallRow tool={tool} {...(detail ? { detail } : {})} />;
 
   if (tool.name === BRAIN_TOOL_NAME) {
-    return <BrainToolCallRow tool={tool} />;
+    return <BrainToolCallRow tool={tool} initiallyExpanded={Boolean(detail)} />;
   }
   if (tool.name === CODEX_COMMAND_TOOL_NAME) {
-    return <CodexCommandRow tool={tool} />;
+    return <CodexCommandRow tool={tool} initiallyExpanded={Boolean(detail)} />;
   }
   if (tool.name === CODEX_PLAN_TOOL_NAME && planImplementationAvailable(tool)) {
     return (
@@ -111,7 +118,7 @@ export function ToolCallItem({
       return <ActionApprovalCard tool={tool} onDecision={onActionApproval} />;
     }
   }
-  return <ToolCallRow tool={tool} />;
+  return <ToolCallRow tool={tool} {...(detail ? { detail } : {})} />;
 }
 
 function LegacyCapabilityApprovalRow({ tool }: { tool: ToolCallView }) {
@@ -853,7 +860,13 @@ function codexQuestionInput(
     : null;
 }
 
-function ToolCallRow({ tool }: { tool: ToolCallView }) {
+function ToolCallRow({
+  tool,
+  detail,
+}: {
+  tool: ToolCallView;
+  detail?: HistoricalPresentationDetailController;
+}) {
   const [expanded, setExpanded] = useState(false);
   const meta = getToolCallMeta(tool);
   const Icon = meta.icon;
@@ -870,7 +883,11 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => {
+            const next = !expanded;
+            setExpanded(next);
+            if (next && detail?.state !== "loaded") void detail?.load();
+          }}
           className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <ChevronRight
@@ -900,16 +917,25 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
       </div>
       {expanded ? (
         <div className="ml-6 mt-1 border-l border-border pl-3">
-          <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input) || "No input"} />
-          {hasOutput ? (
-            <ToolPreviewBlock label="Output" value={formatDebugValue(tool.output) || "No output"} />
-          ) : null}
-          {tool.errorText?.trim() ? (
-            <ToolPreviewBlock label="Error" value={tool.errorText} />
-          ) : null}
-          {!hasOutput && !tool.errorText ? (
-            <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
-          ) : null}
+          {detail && detail.state !== "loaded" ? (
+            <HistoricalPresentationDetailStatus detail={detail} />
+          ) : (
+            <>
+              <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input) || "No input"} />
+              {hasOutput ? (
+                <ToolPreviewBlock
+                  label="Output"
+                  value={formatDebugValue(tool.output) || "No output"}
+                />
+              ) : null}
+              {tool.errorText?.trim() ? (
+                <ToolPreviewBlock label="Error" value={tool.errorText} />
+              ) : null}
+              {!hasOutput && !tool.errorText ? (
+                <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
+              ) : null}
+            </>
+          )}
         </div>
       ) : null}
       {screenshotUrl ? (
@@ -931,10 +957,12 @@ export function SubagentRow({
   tool,
   childCount,
   children,
+  detail,
 }: {
   tool: ToolCallView;
   childCount: number;
   children: ReactNode;
+  detail?: HistoricalPresentationDetailController;
 }) {
   // Expanded while the subagent is still working so its live trace is visible; collapsed once it
   // finishes to keep the transcript tidy (the user can re-open it).
@@ -954,7 +982,11 @@ export function SubagentRow({
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => {
+            const next = !expanded;
+            setExpanded(next);
+            if (next && detail?.state !== "loaded") void detail?.load();
+          }}
           className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <ChevronRight
@@ -992,24 +1024,32 @@ export function SubagentRow({
       </div>
       {expanded ? (
         <div className="ml-[13px] mt-1 flex flex-col gap-2 border-l border-border pl-3">
-          {childCount > 0 ? (
-            children
+          {detail && detail.state !== "loaded" ? (
+            <HistoricalPresentationDetailStatus detail={detail} />
           ) : (
-            <div className="py-1 text-[11px] text-ink-subtle">
-              {tool.status === "running" ? "Subagent working..." : "No steps recorded"}
-            </div>
+            <>
+              {childCount > 0 ? (
+                children
+              ) : (
+                <div className="py-1 text-[11px] text-ink-subtle">
+                  {tool.status === "running" ? "Subagent working..." : "No steps recorded"}
+                </div>
+              )}
+              {result ? (
+                <div className="border-t border-border/60 pt-1.5">
+                  <div className="mb-0.5 text-[10px] font-medium uppercase text-ink-subtle">
+                    Result
+                  </div>
+                  <div className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-[11.5px] leading-5 text-ink/70">
+                    {result}
+                  </div>
+                </div>
+              ) : null}
+              {tool.errorText?.trim() ? (
+                <ToolPreviewBlock label="Error" value={tool.errorText} />
+              ) : null}
+            </>
           )}
-          {result ? (
-            <div className="border-t border-border/60 pt-1.5">
-              <div className="mb-0.5 text-[10px] font-medium uppercase text-ink-subtle">Result</div>
-              <div className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-[11.5px] leading-5 text-ink/70">
-                {result}
-              </div>
-            </div>
-          ) : null}
-          {tool.errorText?.trim() ? (
-            <ToolPreviewBlock label="Error" value={tool.errorText} />
-          ) : null}
         </div>
       ) : null}
     </div>
@@ -1024,8 +1064,14 @@ function browserScreenshotUrl(value: unknown) {
     : null;
 }
 
-function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
-  const [expanded, setExpanded] = useState(false);
+function BrainToolCallRow({
+  tool,
+  initiallyExpanded = false,
+}: {
+  tool: ToolCallView;
+  initiallyExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const detail = tool.detail ?? "goat_brain";
   const commandPreview = brainOutputCommand(tool.output);
   const stdoutPreview = brainOutputStdout(tool.output);
@@ -1079,8 +1125,14 @@ function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
   );
 }
 
-function CodexCommandRow({ tool }: { tool: ToolCallView }) {
-  const [expanded, setExpanded] = useState(false);
+function CodexCommandRow({
+  tool,
+  initiallyExpanded = false,
+}: {
+  tool: ToolCallView;
+  initiallyExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const command = tool.detailChips[0] ?? tool.detail;
   const output = isCodexCommandToolOutput(tool.output) ? tool.output : null;
   const outputPreview = output?.outputPreview?.trim() ? output.outputPreview : null;
