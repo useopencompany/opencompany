@@ -11,6 +11,7 @@ export type ActionProviderId =
   | "posthog"
   | "attio"
   | "github"
+  | "github_user"
   | "stripe"
   | "revolut"
   | "latitude"

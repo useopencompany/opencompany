@@ -16,6 +16,11 @@ import {
 } from "./actions/remote-mcp";
 import type { ActionProviderId } from "./actions/types";
 import {
+  GITHUB_USER_MCP_ENDPOINT_URL,
+  getGitHubUserMcpIntegrationState,
+  loadGitHubUserMcpWorkerConnection,
+} from "./integrations/github-user-mcp";
+import {
   getLatitudeIntegrationState,
   LATITUDE_MCP_ENDPOINT_URL,
   loadLatitudeMcpWorkerConnection,
@@ -45,6 +50,11 @@ type Identity = { userWorkosId: string; workspaceId: string };
 const logger = createLogger({ service: "opencompany-agent", runtime: "plugin-gateway" });
 
 const providerBindings = {
+  github_user: {
+    endpointUrl: GITHUB_USER_MCP_ENDPOINT_URL,
+    getState: getGitHubUserMcpIntegrationState,
+    loadConnection: loadGitHubUserMcpWorkerConnection,
+  },
   linear: {
     endpointUrl: LINEAR_MCP_ENDPOINT_URL,
     getState: getLinearIntegrationState,
@@ -246,8 +256,9 @@ function bindRegistration(
 ): RemoteMcpGatewayRegistration | null {
   if (!isBoundProvider(record.connectionProvider)) return null;
   const binding = providerBindings[record.connectionProvider];
-  // OAuth tokens are audience-bound to the provider endpoint. A package that merely reuses a
-  // provider name must never redirect those credentials to another remote server.
+  // Credentials are provider-bound. A package that merely reuses a provider
+  // name must never redirect either OAuth or static bearer credentials to
+  // another remote server.
   if (record.server.url !== binding.endpointUrl) return null;
   return {
     source: `plugin:${record.pluginName}:${record.server.name}`,

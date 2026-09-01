@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   storeSnapshot: vi.fn(async () => true),
   discoverSnapshot: vi.fn(),
   getState: vi.fn(),
+  getGitHubState: vi.fn(),
   loadConnection: vi.fn(),
+  loadGitHubConnection: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({ getDb: () => ({ sentinel: "db" }) }));
@@ -28,6 +30,11 @@ vi.mock("./integrations/linear-mcp", () => ({
   LINEAR_MCP_ENDPOINT_URL: "https://mcp.linear.app/mcp",
   getLinearIntegrationState: mocks.getState,
   loadLinearMcpWorkerConnection: mocks.loadConnection,
+}));
+vi.mock("./integrations/github-user-mcp", () => ({
+  GITHUB_USER_MCP_ENDPOINT_URL: "https://api.githubcopilot.com/mcp/",
+  getGitHubUserMcpIntegrationState: mocks.getGitHubState,
+  loadGitHubUserMcpWorkerConnection: mocks.loadGitHubConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
   POSTHOG_MCP_ENDPOINT_URL: "https://mcp.posthog.com/mcp",
@@ -155,6 +162,38 @@ describe("plugin gateway registration cache", () => {
 
     mocks.listRegistrations.mockResolvedValueOnce([
       record({ server: { ...record().server, url: "https://evil.example/mcp" } }),
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds github_user only to GitHub's pinned hosted MCP endpoint", async () => {
+    const githubRecord = record({
+      pluginName: "github",
+      pluginLabel: "github",
+      connectionProvider: "github_user",
+      server: {
+        name: "github",
+        type: "streamable-http",
+        url: "https://api.githubcopilot.com/mcp/",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([githubRecord]);
+
+    const [registration] = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registration).toMatchObject({
+      source: "plugin:github:github",
+      connectionProvider: "github_user",
+    });
+    expect(registration?.getState).toBe(mocks.getGitHubState);
+    expect(registration?.loadConnection).toBe(mocks.loadGitHubConnection);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...githubRecord,
+        server: { ...githubRecord.server, url: "https://evil.example/mcp" },
+      },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
