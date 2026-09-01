@@ -38,6 +38,7 @@ const migrationPaths = [
   "0227_goat_chat_skill_bundle_snapshots.sql",
   "0228_goat_plugins.sql",
   "0229_goat_chat_skill_bundle_names.sql",
+  "0235_goat_chat_message_shape_epochs.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -139,6 +140,70 @@ describe("Postgres Chat repositories", () => {
   it("keeps pre-existing durable rows while adding the canonical event cursor", () => {
     expect(legacySurvivedMigration).toBe(true);
     expect(legacyRuntimeSurvivedMigration).toBe(true);
+  });
+
+  it("accounts projected Message bytes and rotates the shape epoch only after a Run settles", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "message-shape-epoch",
+      content: "Grow the durable transcript.",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', updated_at = '2026-08-10T20:01:00Z'
+       WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.conversation_read_model_v1
+       SET message_shape_bytes_since_epoch = 16 * 1024 * 1024 - 1
+       WHERE id = $1`,
+      [created.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.chat_messages
+       SET content = $2, updated_at = '2026-08-10T20:02:00Z'
+       WHERE id = $1`,
+      [created.assistantMessageId, "x".repeat(1_024)],
+    );
+
+    await expect(
+      database.query<{ message_shape_epoch: number; message_shape_bytes_since_epoch: number }>(
+        `SELECT message_shape_epoch, message_shape_bytes_since_epoch
+         FROM goat.conversation_read_model_v1
+         WHERE id = $1`,
+        [created.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          message_shape_epoch: 0,
+          message_shape_bytes_since_epoch: expect.any(Number),
+        },
+      ],
+    });
+
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'completed', completed_at = '2026-08-10T20:03:00Z',
+           updated_at = '2026-08-10T20:03:00Z'
+       WHERE id = $1`,
+      [created.runId],
+    );
+    expect(
+      (
+        await database.query<{
+          message_shape_epoch: number;
+          message_shape_bytes_since_epoch: number;
+        }>(
+          `SELECT message_shape_epoch, message_shape_bytes_since_epoch
+           FROM goat.conversation_read_model_v1
+           WHERE id = $1`,
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([{ message_shape_epoch: 1, message_shape_bytes_since_epoch: 0 }]);
   });
 
   it.each(["opencompany", "codex", "claude_code"] as const)(

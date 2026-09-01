@@ -79,6 +79,7 @@ describe("Electric read models", () => {
                 active_run_id: "run_1",
                 runtime_has_error: "false",
                 runtime_updated_at: "2026-08-10 20:00:30+00",
+                message_shape_epoch: "3",
                 error: "must-not-cross",
                 created_at: "2026-08-10 19:00:00+00",
                 updated_at: "2026-08-10 20:01:00+00",
@@ -109,6 +110,7 @@ describe("Electric read models", () => {
     expect(requestedUrl?.searchParams.get("columns")).toContain("activity_state");
     expect(requestedUrl?.searchParams.get("columns")).toContain("has_unseen");
     expect(requestedUrl?.searchParams.get("columns")).toContain("runtime_status");
+    expect(requestedUrl?.searchParams.get("columns")).toContain("message_shape_epoch");
     expect(requestedUrl?.searchParams.get("columns")?.split(",")).not.toContain("error");
     expect(response.headers.get("electric-schema")).toBe(JSON.stringify({ id: { type: "text" } }));
     expect(await response.json()).toEqual([
@@ -125,6 +127,7 @@ describe("Electric read models", () => {
           lastSeenAt: "2026-08-10T20:00:00.000Z",
           activityState: "working",
           hasUnseen: true,
+          messageShapeEpoch: 3,
           runtime: {
             status: "running",
             activeRunId: "run_1",
@@ -354,6 +357,7 @@ describe("Electric read models", () => {
       actor,
       readModel: "chat-messages-v1",
       conversationId: "conversation_1",
+      messageShapeEpoch: 7,
       requestUrl: new URL(
         "https://api.example.test/v1/read-models/chat-messages-v1?conversationId=conversation_1&table=goat.users&where=true&offset=cursor_1&log=full&expired_handle=old_1&cache-buster=recovery_1",
       ),
@@ -364,6 +368,8 @@ describe("Electric read models", () => {
     expect(requestedUrl.searchParams.get("where")).toContain('"actor_id" = $2');
     expect(requestedUrl.searchParams.get("params[2]")).toBe("user_1");
     expect(requestedUrl.searchParams.get("params[3]")).toBe("workspace_1");
+    expect(requestedUrl.searchParams.get("params[4]")).toBe("7");
+    expect(requestedUrl.searchParams.get("where")).toContain("CAST($4 AS text) = CAST($4 AS text)");
     expect(requestedUrl.searchParams.get("offset")).toBe("cursor_1");
     expect(requestedUrl.searchParams.get("log")).toBe("full");
     expect(requestedUrl.searchParams.get("expired_handle")).toBe("old_1");

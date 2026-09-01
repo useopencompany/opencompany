@@ -1646,6 +1646,13 @@
       "when": 1787750000000,
       "tag": "0234_goat_plugin_gateway_registrations",
       "breakpoints": true
+    },
+    {
+      "idx": 235,
+      "version": "7",
+      "when": 1788278400000,
+      "tag": "0235_goat_chat_message_shape_epochs",
+      "breakpoints": true
     }
   ]
 }
