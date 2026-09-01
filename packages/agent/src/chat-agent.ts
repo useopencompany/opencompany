@@ -34,6 +34,7 @@ import {
   jsonSchema,
   type LanguageModelUsage,
   stepCountIs,
+  streamText,
   type ToolCallRepairFunction,
   type ToolSet,
   tool,
@@ -113,6 +114,7 @@ import {
 } from "./chat-ui";
 import { normalizePublicWebUrl } from "./chat-web-fetch";
 import type { SendUserMessageRunner } from "./imessage/send-user-message";
+import { type ProductLanguageModelResolution, resolveProductLanguageModel } from "./language-model";
 import {
   BRAIN_TOOL_DESCRIPTION,
   BROWSER_CHAT_CALL_LIMIT_DESCRIPTION,
@@ -243,6 +245,10 @@ export type StartedTask = {
 };
 
 type GenerateTextLike = typeof generateText;
+type ProductGenerationResult = Pick<
+  Awaited<ReturnType<GenerateTextLike>>,
+  "text" | "steps" | "finishReason" | "totalUsage"
+>;
 type BrainCliRunner = (
   input: BrainToolInput,
   executionContext?: unknown,
@@ -332,6 +338,8 @@ export type ProductChatAgentResult = {
   // last step only as a context-fullness proxy). Headless surfaces need this
   // for credit debits.
   totalUsage: LanguageModelUsage | undefined;
+  billing: "metered_gateway" | "subscription_covered";
+  provider: "gateway" | "codex-backend";
 };
 
 type ProductChatSystemPromptInput = NonNullable<
@@ -353,6 +361,8 @@ export async function runProductChatAgent(input: {
   messages: readonly ProductChatAgentMessage[];
   model: AgentModelId;
   gatewayApiKey: string;
+  workspaceId?: string;
+  modelResolution?: ProductLanguageModelResolution;
   startTask?: (task: StartTaskRequest, context: StartTaskExecutionContext) => Promise<StartedTask>;
   requestedEngine?: HarnessEngine;
   scheduleTask?: ScheduleTaskRunner;
@@ -396,13 +406,7 @@ export async function runProductChatAgent(input: {
   generateTextImpl?: GenerateTextLike;
   maxSteps?: number;
 }): Promise<ProductChatAgentResult> {
-  const gatewayApiKey = input.gatewayApiKey.trim();
-  if (!gatewayApiKey) {
-    throw new Error("VERCEL_AI_GATEWAY_API_KEY is required for opencompany chat.");
-  }
-
   const generate = input.generateTextImpl ?? generateText;
-  const gateway = createGateway({ apiKey: gatewayApiKey });
   const attribution = createGatewayAttribution({
     userWorkosId: input.userWorkosId,
     feature: input.feature ?? "chat",
@@ -456,35 +460,67 @@ export async function runProductChatAgent(input: {
   ].join("\n\n");
 
   const feature = input.feature ?? "chat";
+  const modelResolution: ProductLanguageModelResolution =
+    input.modelResolution ??
+    (input.workspaceId
+      ? await resolveProductLanguageModel({
+          workspaceId: input.workspaceId,
+          modelId: input.model,
+          feature: feature === "task" || feature === "slack-bot" ? feature : "chat",
+          gatewayApiKey: input.gatewayApiKey,
+        })
+      : {
+          model: createGateway({ apiKey: input.gatewayApiKey })(input.model),
+          provider: "gateway" as const,
+          billing: "metered_gateway" as const,
+        });
+  if (modelResolution.provider === "gateway" && !input.gatewayApiKey.trim()) {
+    throw new Error("VERCEL_AI_GATEWAY_API_KEY is required for opencompany chat.");
+  }
   const maxSteps = input.maxSteps ?? CHAT_MAX_STEPS;
-  let result: Awaited<ReturnType<GenerateTextLike>>;
+  const generationOptions = {
+    model: modelResolution.model,
+    system,
+    messages: input.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+    stopWhen: stepCountIs(maxSteps),
+    prepareStep: ({ stepNumber }: { stepNumber: number }) =>
+      prepareProductChatStep({ stepNumber, maxSteps }),
+    tools: toolContext.tools,
+    ...(toolContext.repairToolCall
+      ? { experimental_repairToolCall: toolContext.repairToolCall }
+      : {}),
+    providerOptions:
+      modelResolution.providerOptions ??
+      gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
+    ...latitudeTelemetry({
+      name: feature === "slack-bot" ? "slack-answer" : "chat-agent",
+      feature,
+      userId: input.userWorkosId,
+      sessionId: input.chatSessionId ?? input.telemetrySessionId,
+      metadata: {
+        model: input.model,
+        ...(input.brainRef ? { brainRef: input.brainRef } : {}),
+      },
+    }),
+    ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+  };
+  let result: ProductGenerationResult;
   try {
-    result = await generate({
-      model: gateway(input.model),
-      system,
-      messages: input.messages.map((message) => ({
-        role: message.role,
-        content: message.content,
-      })),
-      stopWhen: stepCountIs(maxSteps),
-      prepareStep: ({ stepNumber }) => prepareProductChatStep({ stepNumber, maxSteps }),
-      tools: toolContext.tools,
-      ...(toolContext.repairToolCall
-        ? { experimental_repairToolCall: toolContext.repairToolCall }
-        : {}),
-      providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
-      ...latitudeTelemetry({
-        name: feature === "slack-bot" ? "slack-answer" : "chat-agent",
-        feature,
-        userId: input.userWorkosId,
-        sessionId: input.chatSessionId ?? input.telemetrySessionId,
-        metadata: {
-          model: input.model,
-          ...(input.brainRef ? { brainRef: input.brainRef } : {}),
-        },
-      }),
-      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
-    });
+    if (modelResolution.provider === "codex-backend" && !input.generateTextImpl) {
+      const streamed = streamText(generationOptions);
+      const [text, steps, finishReason, totalUsage] = await Promise.all([
+        streamed.text,
+        streamed.steps,
+        streamed.finishReason,
+        streamed.totalUsage,
+      ]);
+      result = { text, steps, finishReason, totalUsage };
+    } else {
+      result = await generate(generationOptions);
+    }
   } finally {
     // Headless callers (Slack bot, schedulers) have no response lifecycle to
     // hook a flush onto, so export before returning. No-op when disabled.
@@ -504,6 +540,8 @@ export async function runProductChatAgent(input: {
       ...(finishReason ? { finishReason } : {}),
     }),
     totalUsage: result.totalUsage,
+    billing: modelResolution.billing,
+    provider: modelResolution.provider,
   };
 }
 

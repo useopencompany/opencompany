@@ -196,6 +196,35 @@ export async function recordCreditDebit(input: CreditDebitInput) {
   };
 }
 
+export async function recordSubscriptionCoveredUsage(input: {
+  workspaceId: string;
+  userWorkosId: string;
+  idempotencyKey: string;
+  chatSessionId?: string | null;
+  metadata?: Record<string, unknown>;
+  db?: DbLike;
+}) {
+  const db = input.db ?? getDb();
+  const result = await db
+    .insert(creditLedger)
+    .values({
+      workspaceId: input.workspaceId,
+      userWorkosId: input.userWorkosId,
+      amountCents: 0,
+      amountUsdMicros: 0,
+      source: "subscription_covered",
+      idempotencyKey: input.idempotencyKey,
+      chatSessionId: input.chatSessionId ?? null,
+      providerCostUsdMicros: 0,
+      platformFeeUsdMicros: 0,
+      costBasis: { kind: "chatgpt_subscription" },
+      metadata: input.metadata ?? {},
+    })
+    .onConflictDoNothing()
+    .returning({ id: creditLedger.id });
+  return result[0] ? { ok: true as const, ledgerId: Number(result[0].id) } : { ok: false as const };
+}
+
 // Rotates the expiring included pool on the first of each UTC month. Within a
 // month the allowance only moves upward, so a Pro seat added mid-month gets
 // its full $20 immediately while removing and re-adding a seat cannot mint the

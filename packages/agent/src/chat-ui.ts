@@ -794,13 +794,16 @@ export function replaceChatUiMessageText(message: ChatUiMessage, text: string): 
   };
 }
 
-export function toChatUiMessage(message: StoredChatMessage): ChatUiMessage {
+export function toChatUiMessage(
+  message: StoredChatMessage,
+  options?: { preserveProviderMetadata?: boolean },
+): ChatUiMessage {
   const metadata = toChatMessageMetadata(message);
   return {
     id: message.id,
     role: message.role === "user" ? "user" : "assistant",
     ...(metadata ? { metadata } : {}),
-    parts: toChatUiMessageParts(message, metadata),
+    parts: toChatUiMessageParts(message, metadata, options),
   };
 }
 
@@ -917,10 +920,11 @@ function serializeChatMessageTimestamp(value: Date | string) {
 function toChatUiMessageParts(
   message: StoredChatMessage,
   metadata: ChatMessageMetadata | undefined,
+  options?: { preserveProviderMetadata?: boolean },
 ): ChatUiMessage["parts"] {
   if (message.role !== "assistant") return textParts(message.content);
 
-  const persistedParts = parseDebugTraceUiMessageParts(message.debugTrace?.uiMessageParts);
+  const persistedParts = parseDebugTraceUiMessageParts(message.debugTrace?.uiMessageParts, options);
   if (persistedParts) return withStoredContentFallback(persistedParts, message.content);
 
   const legacyTaskParts = legacyTaskOrderedParts(message, metadata?.task ?? null);
@@ -941,18 +945,30 @@ function withStoredContentFallback(
   return [...parts, { type: "text", text: content }];
 }
 
-function parseDebugTraceUiMessageParts(value: unknown): ChatUiMessage["parts"] | null {
+function parseDebugTraceUiMessageParts(
+  value: unknown,
+  options?: { preserveProviderMetadata?: boolean },
+): ChatUiMessage["parts"] | null {
   if (!Array.isArray(value)) return null;
 
   const parts: ChatUiMessage["parts"] = [];
   for (const part of value) {
     if (!isRecord(part)) continue;
     if (part.type === "text" && typeof part.text === "string") {
-      parts.push({ type: "text", text: part.text });
+      parts.push({
+        type: "text",
+        text: part.text,
+        ...persistedProviderMetadata(part, options),
+      } as ChatUiMessage["parts"][number]);
       continue;
     }
     if (part.type === "reasoning" && typeof part.text === "string") {
-      parts.push({ type: "reasoning", text: part.text, state: "done" });
+      parts.push({
+        type: "reasoning",
+        text: part.text,
+        state: "done",
+        ...persistedProviderMetadata(part, options),
+      } as ChatUiMessage["parts"][number]);
       continue;
     }
     if (part.type === CHAT_ARTIFACT_DATA_PART_TYPE) {
@@ -961,11 +977,23 @@ function parseDebugTraceUiMessageParts(value: unknown): ChatUiMessage["parts"] |
       continue;
     }
     if (isPersistedToolPart(part)) {
-      parts.push(normalizePersistedToolPart(part));
+      const normalized = normalizePersistedToolPart(part);
+      parts.push({
+        ...normalized,
+        ...persistedProviderMetadata(part, options),
+      } as ChatUiMessage["parts"][number]);
     }
   }
 
   return parts.length > 0 ? parts : null;
+}
+
+function persistedProviderMetadata(
+  part: Record<string, unknown>,
+  options?: { preserveProviderMetadata?: boolean },
+) {
+  if (!options?.preserveProviderMetadata || !isRecord(part.providerMetadata)) return {};
+  return { providerMetadata: structuredClone(part.providerMetadata) };
 }
 
 function isPersistedToolPart(value: Record<string, unknown>) {

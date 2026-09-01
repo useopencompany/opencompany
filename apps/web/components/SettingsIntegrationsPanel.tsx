@@ -38,6 +38,7 @@ import {
   type CodexDeviceAuthFlow,
   disconnectCodexAuth,
   pollCodexDeviceAuth,
+  setCodexWorkspaceEngineEnabled,
   startCodexDeviceAuth,
 } from "@/lib/codex-auth";
 import {
@@ -400,6 +401,7 @@ function countWorkspaceConnected(integrations: IntegrationState) {
     (integrationStatus(integrations.posthog) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
     (integrations.infisical.connected ? 1 : 0) +
+    (integrations.codex.workspaceEngine?.enabled ? 1 : 0) +
     countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
   );
 }
@@ -442,6 +444,10 @@ function IntegrationCards({
             }`}
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <CodexWorkspaceEngineCard
+              integration={integrations.codex}
+              canManage={isWorkspaceAdmin}
+            />
             <InfisicalIntegrationCard
               integration={integrations.infisical}
               canManage={isWorkspaceAdmin}
@@ -512,6 +518,76 @@ function IntegrationCards({
         </section>
       )}
     </div>
+  );
+}
+
+function CodexWorkspaceEngineCard({
+  integration,
+  canManage,
+}: {
+  integration: CodexProviderState;
+  canManage: boolean;
+}) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const account = integration.workspaceEngine;
+  const enabled = account?.enabled === true;
+  const canEnable = integration.connected;
+
+  const update = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await setCodexWorkspaceEngineEnabled(!enabled);
+      if (result.ok) router.refresh();
+      else setError(result.error);
+    });
+  };
+
+  return (
+    <IntegrationCard
+      meta={{
+        label: "Subscription-backed models",
+        description:
+          "Route GPT-5.6 Sol and Terra through a workspace admin's ChatGPT subscription.",
+        Icon: OpenAIIcon,
+        tileClass: "bg-black text-white",
+      }}
+      body={
+        <div className="flex flex-col gap-1 text-[12px] leading-4 text-ink-subtle">
+          {account ? (
+            <p>
+              {enabled ? "Enabled" : "Disabled"} · {account.providerDisplayName} (
+              {account.providerEmail})
+            </p>
+          ) : (
+            <p>Uses metered workspace credits until an admin enables this connection.</p>
+          )}
+          {account?.credentialStatus === "needs_reauth" ? (
+            <p className="text-warning">
+              {account.credentialStatusReason ?? "The provider must reconnect Codex."}
+            </p>
+          ) : null}
+          {!enabled && canManage && !canEnable ? (
+            <p>Connect your personal Codex account first, then enable workspace routing.</p>
+          ) : null}
+          {error ? <p className="text-warning">{error}</p> : null}
+        </div>
+      }
+      footer={
+        canManage ? (
+          <button
+            type="button"
+            onClick={update}
+            disabled={isPending || (!enabled && !canEnable)}
+            aria-busy={isPending}
+            className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover disabled:opacity-60"
+          >
+            {isPending ? "Updating" : enabled ? "Disable" : "Enable with my account"}
+          </button>
+        ) : null
+      }
+    />
   );
 }
 

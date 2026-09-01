@@ -2222,6 +2222,15 @@ export function createApiApp(input: CreateApiAppInput) {
       const status = await input.engineAuth.getCodexStatus(actor);
       return c.json({ data: status, meta }, 200);
     },
+    updateCodexWorkspaceEngine: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const status = await input.engineAuth.setCodexWorkspaceEngine(
+        actor,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: status, meta }, 200);
+    },
     startCodexDeviceAuth: async (c) => {
       const actor = actorFrom(c);
       // Flow starts open device/browser authorizations against external auth

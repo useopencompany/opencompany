@@ -11,6 +11,7 @@ import {
   disconnectCodexAuth,
   isCodexConnectedForUser,
   pollCodexDeviceAuth,
+  setCodexWorkspaceEngineEnabled,
   startCodexDeviceAuth,
 } from "./codex-auth";
 import {
@@ -199,6 +200,26 @@ describe("engine auth command adapters", () => {
     await expect(disconnectCodexAuth()).resolves.toEqual({ ok: true });
     expect(requests[0]?.method).toBe("DELETE");
     expect(new URL(requests[0]?.url ?? "").pathname).toBe("/v1/engine-auth/codex");
+    expect(revalidatePath).toHaveBeenCalledWith("/settings");
+  });
+
+  it("updates workspace subscription routing through PUT", async () => {
+    const requests = stubApi(() =>
+      Response.json({
+        data: {
+          status: "connected",
+          statusReason: null,
+          lastValidatedAt: null,
+          lastRotatedAt: null,
+          workspaceEngine: null,
+        },
+        meta,
+      }),
+    );
+    await expect(setCodexWorkspaceEngineEnabled(true)).resolves.toEqual({ ok: true });
+    expect(requests[0]?.method).toBe("PUT");
+    expect(new URL(requests[0]?.url ?? "").pathname).toBe("/v1/engine-auth/codex/workspace");
+    await expect(requests[0]?.json()).resolves.toEqual({ enabled: true });
     expect(revalidatePath).toHaveBeenCalledWith("/settings");
   });
 
