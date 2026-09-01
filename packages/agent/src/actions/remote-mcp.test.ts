@@ -311,7 +311,7 @@ describe("resolveRemoteMcpActions", () => {
     );
   });
 
-  it("never promotes uncurated tools past Ask through per-tool overrides", async () => {
+  it("honors explicit per-tool promotion without broadly promoting uncurated tools", async () => {
     const discoverySnapshot = [
       discoveredTool("looks_read_only", {
         inputSchema: { type: "object" },
@@ -345,18 +345,44 @@ describe("resolveRemoteMcpActions", () => {
       ["write", "ask"],
     ]);
 
+    const getState = vi.fn(async () =>
+      connectedState({ read: "on", write: "on" }, { looks_read_only: "on" }),
+    );
+    const execution = client({ result: { content: [{ type: "text", text: "{}" }] } });
     const overridden = await resolveRemoteMcpActions(
       identity,
       registration({
         discoverySnapshot,
+        getState,
+      }),
+      { createClient: vi.fn(async () => execution) },
+    );
+    expect(overridden?.actions.map((action) => [action.capability, action.permissionMode])).toEqual(
+      [
+        ["read", "on"],
+        ["write", "ask"],
+      ],
+    );
+
+    await expect(overridden?.actions[0]?.execute({}, context)).resolves.toEqual({});
+    expect(getState).toHaveBeenCalledTimes(2);
+    expect(execution.callTool).toHaveBeenCalledWith({
+      name: "looks_read_only",
+      arguments: {},
+      options: { signal: context.signal },
+    });
+
+    const withToolDisabled = await resolveRemoteMcpActions(
+      identity,
+      registration({
+        discoverySnapshot,
         getState: vi.fn(async () =>
-          connectedState({ read: "on", write: "on" }, { looks_read_only: "on" }),
+          connectedState({ read: "on", write: "on" }, { looks_read_only: "off" }),
         ),
       }),
     );
-    expect(overridden?.actions[0]).toMatchObject({
-      id: "plugin:linear:linear.looks_read_only",
-      permissionMode: "ask",
-    });
+    expect(withToolDisabled?.actions.map((action) => action.id)).toEqual([
+      "plugin:linear:linear.other",
+    ]);
   });
 });
