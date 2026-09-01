@@ -380,6 +380,7 @@ export const ChatReadModelSchema = z.enum([
   "chat-conversations-v1",
   "chat-conversations-v2",
   "chat-messages-v1",
+  "chat-messages-v2",
   "chat-runs-v1",
   "engine-sessions-v1",
 ]);
@@ -499,6 +500,23 @@ export const MessageReadModelSchema = z
   })
   .strict()
   .openapi("MessageReadModelV1");
+
+export const MessageSummaryReadModelSchema = MessageReadModelSchema.omit({
+  presentation: true,
+})
+  .extend({
+    presentationSummary: z.record(z.string(), z.unknown()).nullable(),
+  })
+  .strict()
+  .openapi("MessageReadModelV2");
+
+export const MessagePresentationSchema = z
+  .object({
+    presentation: z.record(z.string(), z.unknown()).nullable(),
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("MessagePresentation");
 
 export const RunReadModelSchema = z
   .object({
@@ -2758,6 +2776,11 @@ export const ChatArtifactDeleteEnvelopeSchema = z
   .strict()
   .openapi("ChatArtifactDeleteEnvelopeV1");
 
+export const MessagePresentationEnvelopeSchema = z
+  .object({ data: MessagePresentationSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("MessagePresentationEnvelopeV1");
+
 export const MessagePageSchema = z
   .object({
     data: z.array(MessageSchema),
@@ -4164,6 +4187,8 @@ export type SetTaskScheduleEnabledBody = z.infer<typeof SetTaskScheduleEnabledBo
 export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
 export type ConversationReadModelV1 = z.infer<typeof ConversationReadModelV1Schema>;
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
+export type MessageSummaryReadModel = z.infer<typeof MessageSummaryReadModelSchema>;
+export type MessagePresentation = z.infer<typeof MessagePresentationSchema>;
 export type RunReadModel = z.infer<typeof RunReadModelSchema>;
 export type EngineSessionReadModel = z.infer<typeof EngineSessionReadModelSchema>;
 export type EngineRuntimeStatus = z.infer<typeof EngineRuntimeStatusSchema>;

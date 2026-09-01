@@ -15,6 +15,7 @@ import {
   EngineSessionReadModelSchema,
   IntegrationAccountReadModelSchema,
   MessageReadModelSchema,
+  MessageSummaryReadModelSchema,
   type ReadModel,
   RunReadModelSchema,
   TaskOutcomeSchema,
@@ -57,6 +58,7 @@ const ELECTRIC_RESPONSE_HEADERS = [
 // prevents @electric-sql/client from parsing the already-decoded values a second time.
 const PREDECODED_READ_MODEL_FIELDS = new Set([
   "presentation",
+  "presentationSummary",
   "attachments",
   "steps",
   "trigger",
@@ -227,6 +229,23 @@ function readModelShape(input: {
           "content",
           "task_id",
           "presentation",
+          "attachments",
+          "created_at",
+          "updated_at",
+        ],
+        input.messageShapeEpoch ?? 0,
+      );
+    case "chat-messages-v2":
+      return conversationShape(
+        input,
+        "goat.message_read_model_v1",
+        [
+          "id",
+          "conversation_id",
+          "role",
+          "content",
+          "task_id",
+          "presentation_summary",
           "attachments",
           "created_at",
           "updated_at",
@@ -663,6 +682,10 @@ function projectReadModelValue(
       ).parse(projected);
     case "chat-messages-v1":
       return (partial ? MessageReadModelSchema.partial() : MessageReadModelSchema).parse(projected);
+    case "chat-messages-v2":
+      return (
+        partial ? MessageSummaryReadModelSchema.partial() : MessageSummaryReadModelSchema
+      ).parse(projected);
     case "chat-runs-v1":
       return (partial ? RunReadModelSchema.partial() : RunReadModelSchema).parse(projected);
     case "engine-sessions-v1":
@@ -736,6 +759,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
   }
   if (
     name === "presentation" ||
+    name === "presentationSummary" ||
     name === "steps" ||
     name === "trigger" ||
     name === "timeline" ||
@@ -1010,6 +1034,17 @@ const READ_MODEL_COLUMN_NAMES = {
     content: "content",
     task_id: "taskId",
     presentation: "presentation",
+    attachments: "attachments",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "chat-messages-v2": {
+    id: "id",
+    conversation_id: "conversationId",
+    role: "role",
+    content: "content",
+    task_id: "taskId",
+    presentation_summary: "presentationSummary",
     attachments: "attachments",
     created_at: "createdAt",
     updated_at: "updatedAt",

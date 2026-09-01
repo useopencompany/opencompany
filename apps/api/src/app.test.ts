@@ -2325,6 +2325,73 @@ describe("canonical Hono API", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("serves an authorized full Message presentation with ETag revalidation", async () => {
+    const get = vi.fn(async () => ({
+      presentation: {
+        schemaVersion: "opencompany.chat.debug.v1",
+        uiMessageParts: [
+          {
+            type: "tool-search",
+            state: "output-available",
+            input: { query: "launch" },
+            output: { detail: "Full provider result" },
+          },
+        ],
+      },
+      updatedAt: "2026-08-10T20:00:01.000Z",
+    }));
+    const app = testApp(fakeRepository(), { messagePresentations: { get } });
+
+    const response = await app.request(
+      "/v1/conversations/conversation_1/messages/message_assistant_1/presentation",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, max-age=0, must-revalidate");
+    expect(response.headers.get("etag")).toMatch(/^W\//u);
+    expect(get).toHaveBeenCalledWith({
+      actor,
+      conversationId: "conversation_1",
+      messageId: "message_assistant_1",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        presentation: {
+          uiMessageParts: [{ output: { detail: "Full provider result" } }],
+        },
+        updatedAt: "2026-08-10T20:00:01.000Z",
+      },
+    });
+
+    const notModified = await app.request(
+      "/v1/conversations/conversation_1/messages/message_assistant_1/presentation",
+      { headers: { "If-None-Match": response.headers.get("etag")! } },
+    );
+    expect(notModified.status).toBe(304);
+    await expect(notModified.text()).resolves.toBe("");
+  });
+
+  it("authorizes Task presentations through the canonical Task conversation boundary", async () => {
+    const repository = fakeRepository();
+    repository.getConversation = vi.fn(async () => null);
+    const get = vi.fn(async () => ({
+      presentation: null,
+      updatedAt: "2026-08-10T20:00:01.000Z",
+    }));
+    const app = testApp(repository, { messagePresentations: { get } });
+
+    const response = await app.request(
+      "/v1/conversations/conversation_task_1/messages/message_task_1/presentation",
+    );
+
+    expect(response.status).toBe(200);
+    expect(get).toHaveBeenCalledWith({
+      actor,
+      conversationId: "conversation_task_1",
+      messageId: "message_task_1",
+    });
+  });
+
   it("authorizes a conversation-scoped v2 summary before contacting Electric", async () => {
     const repository = fakeRepository();
     const getConversation = vi.fn(repository.getConversation);
@@ -2380,14 +2447,14 @@ describe("canonical Hono API", () => {
     const app = testApp(fakeRepository(), { readModels: { stream } });
 
     const response = await app.request(
-      "/v1/read-models/chat-messages-v1?conversationId=conversation_1&messageShapeEpoch=999",
+      "/v1/read-models/chat-messages-v2?conversationId=conversation_1&messageShapeEpoch=999",
     );
 
     expect(response.status).toBe(200);
     expect(stream).toHaveBeenCalledWith(
       expect.objectContaining({
         actor,
-        readModel: "chat-messages-v1",
+        readModel: "chat-messages-v2",
         conversationId: "conversation_1",
         messageShapeEpoch: 4,
       }),
@@ -2401,14 +2468,14 @@ describe("canonical Hono API", () => {
     const app = testApp(repository, { readModels: { stream } });
 
     const response = await app.request(
-      "/v1/read-models/chat-messages-v1?conversationId=conversation_task_1",
+      "/v1/read-models/chat-messages-v2?conversationId=conversation_task_1",
     );
 
     expect(response.status).toBe(200);
     expect(stream).toHaveBeenCalledWith(
       expect.objectContaining({
         actor,
-        readModel: "chat-messages-v1",
+        readModel: "chat-messages-v2",
         conversationId: "conversation_task_1",
       }),
     );

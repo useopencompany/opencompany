@@ -5102,6 +5102,7 @@ export const messageReadModelV1 = productSchema.table(
     content: text("content").notNull(),
     taskId: text("task_id"),
     presentation: jsonb("presentation").$type<ChatMessageDebugTrace>(),
+    presentationSummary: jsonb("presentation_summary").$type<ChatMessageDebugTrace>(),
     attachments: jsonb("attachments").$type<ChatMessageAttachment[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),

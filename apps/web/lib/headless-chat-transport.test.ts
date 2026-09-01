@@ -830,7 +830,7 @@ describe("canonical Chat transport", () => {
   it("keeps an accepted background Run alive when read-model reconciliation times out", async () => {
     const paths: string[] = [];
     const timeout = new Error(
-      "[headless-chat:messages:v1:conversation_background] Timeout waiting for txId: 42",
+      "[headless-chat:messages:v2:conversation_background] Timeout waiting for txId: 42",
     );
     vi.mocked(awaitHeadlessChatTransaction).mockRejectedValueOnce(timeout);
     const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
