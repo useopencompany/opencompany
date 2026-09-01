@@ -125,6 +125,14 @@ export async function AppShell({ children }: { children: ReactNode }) {
       statusReason: null,
       lastValidatedAt: null,
       lastRotatedAt: null,
+      workspaceEngine: {
+        enabled: false,
+        providerEmail: null,
+        providerName: null,
+        credentialStatus: null,
+        statusReason: null,
+        updatedAt: null,
+      },
     }),
     loadOptionalAppShellData("claude_code_auth", loadCurrentClaudeCodeAuthSettings, {
       status: null,
@@ -200,6 +208,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
         status: codex.status ?? "not_connected",
         statusReason: codex.statusReason,
         lastValidatedAt: codex.lastValidatedAt,
+        workspaceEngine: codex.workspaceEngine,
       },
       claudeCode: {
         provider: "claude_code",

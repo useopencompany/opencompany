@@ -8,12 +8,14 @@ const {
   completeInfisicalAuth,
   disconnectInfisicalAuth,
   startInfisicalAuth,
+  setWorkspaceCodexEngineEnabled,
   toastError,
   toastSuccess,
 } = vi.hoisted(() => ({
   completeInfisicalAuth: vi.fn(),
   disconnectInfisicalAuth: vi.fn(),
   startInfisicalAuth: vi.fn(),
+  setWorkspaceCodexEngineEnabled: vi.fn(async () => ({ ok: true as const })),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
 }));
@@ -36,6 +38,7 @@ vi.mock("@/components/useHydrated", () => ({
 vi.mock("@/lib/codex-auth", () => ({
   disconnectCodexAuth: vi.fn(),
   pollCodexDeviceAuth: vi.fn(),
+  setWorkspaceCodexEngineEnabled,
   startCodexDeviceAuth: vi.fn(),
 }));
 
@@ -68,6 +71,7 @@ describe("SettingsIntegrationsPanel", () => {
     completeInfisicalAuth.mockReset();
     disconnectInfisicalAuth.mockReset();
     startInfisicalAuth.mockReset();
+    setWorkspaceCodexEngineEnabled.mockClear();
     window.history.replaceState({}, "", "/settings/integrations");
   });
 
@@ -140,6 +144,23 @@ describe("SettingsIntegrationsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
     expect(screen.getByText("Token saved; validation pending")).toBeInTheDocument();
+  });
+
+  it("lets an admin designate their connected Codex subscription for the workspace", async () => {
+    const integrations = integrationStateFromRows([]) as IntegrationState;
+    integrations.codex = {
+      ...integrations.codex,
+      connected: true,
+      status: "connected",
+    };
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Use for workspace" }));
+
+    await waitFor(() => {
+      expect(setWorkspaceCodexEngineEnabled).toHaveBeenCalledWith(true);
+    });
   });
 
   it("switches between the workspace and personal scopes", () => {

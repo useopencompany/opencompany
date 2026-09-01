@@ -28,7 +28,6 @@ import {
   type WikiToolOutput,
 } from "@opencompany/wiki/tool";
 import {
-  createGateway,
   generateText,
   type JSONSchema7,
   jsonSchema,
@@ -113,6 +112,11 @@ import {
 } from "./chat-ui";
 import { normalizePublicWebUrl } from "./chat-web-fetch";
 import type { SendUserMessageRunner } from "./imessage/send-user-message";
+import {
+  type LanguageModelCostSource,
+  type ResolvedLanguageModel,
+  resolveLanguageModel,
+} from "./language-model";
 import {
   BRAIN_TOOL_DESCRIPTION,
   BROWSER_CHAT_CALL_LIMIT_DESCRIPTION,
@@ -332,6 +336,8 @@ export type ProductChatAgentResult = {
   // last step only as a context-fullness proxy). Headless surfaces need this
   // for credit debits.
   totalUsage: LanguageModelUsage | undefined;
+  modelProvider: "vercel-ai-gateway" | "codex-subscription";
+  costSource: LanguageModelCostSource;
 };
 
 type ProductChatSystemPromptInput = NonNullable<
@@ -387,6 +393,7 @@ export async function runProductChatAgent(input: {
   // Gateway cost attribution surface; defaults to the main chat.
   feature?: GatewayFeature;
   userWorkosId?: string | null;
+  workspaceId?: string | null;
   chatSessionId?: string | null;
   // Latitude session grouping for surfaces without a chat session (e.g. a
   // Slack thread ref); chatSessionId wins when both are set.
@@ -394,6 +401,9 @@ export async function runProductChatAgent(input: {
   brainRef?: string | null;
   abortSignal?: AbortSignal;
   generateTextImpl?: GenerateTextLike;
+  db?: any;
+  fetchImpl?: typeof fetch;
+  resolvedModel?: ResolvedLanguageModel;
   maxSteps?: number;
 }): Promise<ProductChatAgentResult> {
   const gatewayApiKey = input.gatewayApiKey.trim();
@@ -402,10 +412,20 @@ export async function runProductChatAgent(input: {
   }
 
   const generate = input.generateTextImpl ?? generateText;
-  const gateway = createGateway({ apiKey: gatewayApiKey });
+  const feature = input.feature ?? "chat";
+  const modelResolution =
+    input.resolvedModel ??
+    (await resolveLanguageModel({
+      modelId: input.model,
+      feature,
+      gatewayApiKey,
+      ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
+      ...(input.db ? { db: input.db } : {}),
+      ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+    }));
   const attribution = createGatewayAttribution({
     userWorkosId: input.userWorkosId,
-    feature: input.feature ?? "chat",
+    feature,
     ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
     ...(input.brainRef ? { brainRef: input.brainRef } : {}),
   });
@@ -455,12 +475,11 @@ export async function runProductChatAgent(input: {
     ...(input.extraSystemBlocks ?? []),
   ].join("\n\n");
 
-  const feature = input.feature ?? "chat";
   const maxSteps = input.maxSteps ?? CHAT_MAX_STEPS;
   let result: Awaited<ReturnType<GenerateTextLike>>;
   try {
     result = await generate({
-      model: gateway(input.model),
+      model: modelResolution.languageModel,
       system,
       messages: input.messages.map((message) => ({
         role: message.role,
@@ -472,7 +491,14 @@ export async function runProductChatAgent(input: {
       ...(toolContext.repairToolCall
         ? { experimental_repairToolCall: toolContext.repairToolCall }
         : {}),
-      providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
+      ...(modelResolution.costSource === "metered_gateway"
+        ? {
+            providerOptions: gatewayProviderOptions(
+              attribution,
+              GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
+            ),
+          }
+        : {}),
       ...latitudeTelemetry({
         name: feature === "slack-bot" ? "slack-answer" : "chat-agent",
         feature,
@@ -504,6 +530,8 @@ export async function runProductChatAgent(input: {
       ...(finishReason ? { finishReason } : {}),
     }),
     totalUsage: result.totalUsage,
+    modelProvider: modelResolution.modelProvider,
+    costSource: modelResolution.costSource,
   };
 }
 

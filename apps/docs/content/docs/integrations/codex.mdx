@@ -1,18 +1,34 @@
 ---
 title: Codex
-description: Connect a Codex subscription for persistent cloud coding Chats.
+description: Connect Codex and optionally use an admin's ChatGPT subscription for workspace Chat.
 ---
 
 ## What connecting does
 
-The Codex connection authorizes the Codex engine used by cloud coding Chats. A successful connection
-is validated and stored for the signed-in person; it is not shared as a workspace API key.
+The personal Codex connection authorizes the Codex engine used by cloud coding Chats. A successful
+connection is validated and stored for the signed-in person; raw tokens are encrypted and are never
+shared as a workspace API key.
+
+Workspace admins can also choose **Use for workspace** on their Codex integration. When enabled,
+opencompany routes the exact `GPT-5.6 Sol` and `GPT-5.6 Terra` models in Chat, Tasks, and the Slack
+bot through that admin's ChatGPT subscription. Other models continue through the metered model
+gateway. Subscription-backed turns appear as **ChatGPT subscription** at `$0` in billing activity
+and do not consume workspace credits.
+
+The workspace setting is visible to all members but only admins can change it. Removing the
+designated admin from the workspace, disconnecting their Codex account, or disabling the setting
+removes the route automatically.
 
 ## Scopes and permissions
 
-Codex uses its own subscription authentication flow. Detailed login, expiration, and reauthorization
-troubleshooting is coming soon. Repository and secret access still comes from the separate tools and
-connections available to the coding workspace.
+Codex uses its own subscription authentication flow. If the designated account expires, opencompany
+shows a reconnect error and does not silently charge workspace credits through another provider.
+Reconnect Codex in **Settings → Integrations**, or ask another workspace admin to connect and select
+**Use for workspace**. A ChatGPT usage-limit error likewise stays on the subscription route; wait for
+the limit to reset or switch to a model that is not subscription-routed.
+
+Repository and secret access still comes from the separate tools and connections available to the
+coding workspace.
 
 ## Brain ingestion
 

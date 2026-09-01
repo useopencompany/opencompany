@@ -11,6 +11,11 @@ import {
   isInfisicalHost,
   loadInfisicalConnectionMetadata,
 } from "@opencompany/db/infisical-auth";
+import {
+  clearWorkspaceCodexEngineAccount,
+  designateWorkspaceCodexEngineAccount,
+  loadWorkspaceCodexEngineAccount,
+} from "@opencompany/db/workspace-codex-engine";
 import { createLogger } from "@opencompany/observability";
 import { ApiError } from "./errors";
 import type { RunnerClient } from "./runner-client";
@@ -22,12 +27,25 @@ const logger = createLogger({ service: "opencompany-api", runtime: "engine-auth"
 type DbLike = any;
 
 const INFISICAL_ADMIN_ONLY_MESSAGE = "Only workspace admins can manage Infisical.";
+const CODEX_WORKSPACE_ADMIN_ONLY_MESSAGE =
+  "Only workspace admins can manage the workspace Codex engine.";
 
 export type EngineAuthConnectionStatus = {
   status: "connected" | "needs_reauth" | null;
   statusReason: string | null;
   lastValidatedAt: string | null;
   lastRotatedAt: string | null;
+};
+
+export type CodexAuthStatus = EngineAuthConnectionStatus & {
+  workspaceEngine: {
+    enabled: boolean;
+    providerEmail: string | null;
+    providerName: string | null;
+    credentialStatus: "connected" | "needs_reauth" | null;
+    statusReason: string | null;
+    updatedAt: string | null;
+  };
 };
 
 export type InfisicalAuthStatus = {
@@ -61,7 +79,8 @@ export type EngineAuthService = {
   getClaudeCodeStatus(actor: Actor): Promise<EngineAuthConnectionStatus>;
   saveClaudeCodeToken(actor: Actor, token: string): Promise<EngineAuthConnectionStatus>;
   disconnectClaudeCode(actor: Actor): Promise<void>;
-  getCodexStatus(actor: Actor): Promise<EngineAuthConnectionStatus>;
+  getCodexStatus(actor: Actor): Promise<CodexAuthStatus>;
+  setWorkspaceCodexEngine(actor: Actor, enabled: boolean): Promise<CodexAuthStatus>;
   startCodexDeviceAuth(actor: Actor): Promise<CodexDeviceAuthFlow>;
   pollCodexDeviceAuth(actor: Actor, flowId: string): Promise<CodexDeviceAuthFlow>;
   disconnectCodex(actor: Actor): Promise<void>;
@@ -87,13 +106,56 @@ export function createEngineAuthService(input: {
   }
 
   async function getCodexStatus(actor: Actor) {
-    const row = await loadCodexAuthStatus({ db, userWorkosId: actor.userId });
-    return connectionStatusDto(row);
+    const [row, workspaceEngine] = await Promise.all([
+      loadCodexAuthStatus({ db, userWorkosId: actor.userId }),
+      loadWorkspaceCodexEngineAccount({ db, workspaceId: actor.workspaceId }),
+    ]);
+    return {
+      ...connectionStatusDto(row),
+      workspaceEngine: {
+        enabled: workspaceEngine?.enabled ?? false,
+        providerEmail: workspaceEngine?.providerEmail ?? null,
+        providerName: workspaceEngine?.providerName ?? null,
+        credentialStatus: workspaceEngine?.credentialStatus ?? null,
+        statusReason: workspaceEngine?.credentialStatusReason ?? null,
+        updatedAt: workspaceEngine?.updatedAt.toISOString() ?? null,
+      },
+    };
   }
 
   return {
     getClaudeCodeStatus,
     getCodexStatus,
+
+    async setWorkspaceCodexEngine(actor, enabled) {
+      requireAdmin(actor, CODEX_WORKSPACE_ADMIN_ONLY_MESSAGE);
+      if (enabled) {
+        const result = await designateWorkspaceCodexEngineAccount({
+          db,
+          workspaceId: actor.workspaceId,
+          providerUserWorkosId: actor.userId,
+        });
+        if (!result.ok) {
+          throw new ApiError(
+            409,
+            "conflict",
+            result.reason === "codex_reauth_required"
+              ? "Reconnect Codex before using your ChatGPT subscription for this workspace."
+              : CODEX_WORKSPACE_ADMIN_ONLY_MESSAGE,
+          );
+        }
+      } else {
+        const result = await clearWorkspaceCodexEngineAccount({
+          db,
+          workspaceId: actor.workspaceId,
+          requestedByWorkosId: actor.userId,
+        });
+        if (!result.ok) {
+          throw new ApiError(403, "forbidden", CODEX_WORKSPACE_ADMIN_ONLY_MESSAGE);
+        }
+      }
+      return getCodexStatus(actor);
+    },
 
     async saveClaudeCodeToken(actor, token) {
       const validated = validateClaudeCodeToken(token);

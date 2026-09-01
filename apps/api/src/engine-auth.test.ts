@@ -9,6 +9,11 @@ import {
   disconnectInfisicalConnection,
   loadInfisicalConnectionMetadata,
 } from "@opencompany/db/infisical-auth";
+import {
+  clearWorkspaceCodexEngineAccount,
+  designateWorkspaceCodexEngineAccount,
+  loadWorkspaceCodexEngineAccount,
+} from "@opencompany/db/workspace-codex-engine";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createEngineAuthService } from "./engine-auth";
 import type { RunnerClient } from "./runner-client";
@@ -34,6 +39,13 @@ vi.mock("@opencompany/db/infisical-auth", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   loadInfisicalConnectionMetadata: vi.fn(async () => null),
   disconnectInfisicalConnection: vi.fn(async () => undefined),
+}));
+
+vi.mock("@opencompany/db/workspace-codex-engine", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  loadWorkspaceCodexEngineAccount: vi.fn(async () => null),
+  designateWorkspaceCodexEngineAccount: vi.fn(async () => ({ ok: true as const })),
+  clearWorkspaceCodexEngineAccount: vi.fn(async () => ({ ok: true as const })),
 }));
 
 const admin: Actor = {
@@ -91,6 +103,17 @@ const infisicalFlow = {
   expiresAt: "2026-08-13T09:15:00.000Z",
 };
 
+function disconnectedWorkspaceCodexEngine() {
+  return {
+    enabled: false,
+    providerEmail: null,
+    providerName: null,
+    credentialStatus: null,
+    statusReason: null,
+    updatedAt: null,
+  };
+}
+
 describe("engine auth service", () => {
   it("maps missing credentials to the retired null status DTO", async () => {
     await expect(service().getClaudeCodeStatus(member)).resolves.toEqual({
@@ -117,10 +140,47 @@ describe("engine auth service", () => {
       statusReason: "Token expired.",
       lastValidatedAt: "2026-08-01T00:00:00.000Z",
       lastRotatedAt: null,
+      workspaceEngine: disconnectedWorkspaceCodexEngine(),
     });
     expect(loadCodexAuthStatus).toHaveBeenCalledWith({
       db: dbSentinel,
       userWorkosId: "user_1",
+    });
+  });
+
+  it("lets an admin designate and clear their connected Codex account", async () => {
+    await service().setWorkspaceCodexEngine(admin, true);
+    expect(designateWorkspaceCodexEngineAccount).toHaveBeenCalledWith({
+      db: dbSentinel,
+      workspaceId: "workspace_1",
+      providerUserWorkosId: "user_1",
+    });
+
+    await service().setWorkspaceCodexEngine(admin, false);
+    expect(clearWorkspaceCodexEngineAccount).toHaveBeenCalledWith({
+      db: dbSentinel,
+      workspaceId: "workspace_1",
+      requestedByWorkosId: "user_1",
+    });
+  });
+
+  it("rejects workspace Codex engine changes from members", async () => {
+    await expect(service().setWorkspaceCodexEngine(member, true)).rejects.toMatchObject({
+      status: 403,
+      message: "Only workspace admins can manage the workspace Codex engine.",
+    });
+    expect(designateWorkspaceCodexEngineAccount).not.toHaveBeenCalled();
+  });
+
+  it("requires a connected Codex credential before designation", async () => {
+    vi.mocked(designateWorkspaceCodexEngineAccount).mockResolvedValueOnce({
+      ok: false,
+      reason: "codex_reauth_required",
+    });
+
+    await expect(service().setWorkspaceCodexEngine(admin, true)).rejects.toMatchObject({
+      status: 409,
+      message: "Reconnect Codex before using your ChatGPT subscription for this workspace.",
     });
   });
 

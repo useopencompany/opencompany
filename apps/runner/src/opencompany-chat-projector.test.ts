@@ -10,6 +10,7 @@ const usageMocks = vi.hoisted(() => ({
   captureModelSpend: vi.fn(async () => undefined),
   captureLlmUsage: vi.fn(async () => undefined),
   recordCreditDebit: vi.fn(async () => ({ ok: true })),
+  recordSubscriptionCoveredUsage: vi.fn(async () => ({ ok: true })),
   recordModelCost: vi.fn(),
   recordModelUsageTokens: vi.fn(),
 }));
@@ -54,6 +55,7 @@ vi.mock("./db", () => ({
 
 vi.mock("@opencompany/db/credits", () => ({
   recordCreditDebit: usageMocks.recordCreditDebit,
+  recordSubscriptionCoveredUsage: usageMocks.recordSubscriptionCoveredUsage,
 }));
 
 vi.mock("@opencompany/analytics/product/server", () => ({
@@ -326,9 +328,53 @@ describe("createProductChatProjector", () => {
       }),
     );
   });
+
+  it("records subscription-covered usage at zero cost without debiting credits", async () => {
+    const projector = createProjector({
+      model: "openai/gpt-5.6-sol",
+      modelProvider: "codex-subscription",
+      costSource: "subscription_covered",
+    });
+    await projector.recordStepUsage({
+      stepIndex: 1,
+      usage: {
+        inputTokens: 30,
+        outputTokens: 10,
+        totalTokens: 40,
+        inputTokenDetails: { noCacheTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        outputTokenDetails: { textTokens: 10, reasoningTokens: 0 },
+      },
+    });
+
+    expect(usageMocks.recordModelCost).toHaveBeenCalledWith(
+      expect.objectContaining({ costUsdMicros: 0 }),
+    );
+    expect(usageMocks.recordSubscriptionCoveredUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace_1",
+        idempotencyKey: "chat:user_message_1:durable:turn_1:step:1",
+        metadata: expect.objectContaining({ model: "openai/gpt-5.6-sol", totalTokens: 40 }),
+      }),
+    );
+    expect(usageMocks.recordCreditDebit).not.toHaveBeenCalled();
+    expect(usageMocks.captureLlmUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelProvider: "codex-subscription",
+        costSource: "subscription_covered",
+        chargedCostUsdMicros: 0,
+        billable: false,
+      }),
+    );
+  });
 });
 
-function createProjector() {
+function createProjector(
+  overrides: Partial<{
+    model: string;
+    modelProvider: "vercel-ai-gateway" | "codex-subscription";
+    costSource: "metered_gateway" | "subscription_covered";
+  }> = {},
+) {
   return createProductChatProjector({
     target: {
       userWorkosId: "user_1",
@@ -339,6 +385,9 @@ function createProjector() {
       assistantMessageId: "assistant_message_1",
       workspaceId: "workspace_1",
       model: "anthropic/claude-sonnet-5",
+      modelProvider: "vercel-ai-gateway",
+      costSource: "metered_gateway",
+      ...overrides,
       leaseId: "lease_1",
       leaseOwner: "runner_1",
       canonicalAttemptId: "attempt_1",

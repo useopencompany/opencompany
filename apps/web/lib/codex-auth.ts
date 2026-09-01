@@ -9,6 +9,14 @@ export type CodexAuthSettings = {
   statusReason: string | null;
   lastValidatedAt: string | null;
   lastRotatedAt: string | null;
+  workspaceEngine: {
+    enabled: boolean;
+    providerEmail: string | null;
+    providerName: string | null;
+    credentialStatus: "connected" | "needs_reauth" | null;
+    statusReason: string | null;
+    updatedAt: string | null;
+  };
 };
 
 export type CodexDeviceAuthFlow = {
@@ -83,4 +91,29 @@ export async function disconnectCodexAuth() {
   }
   revalidatePath("/settings");
   return { ok: true as const };
+}
+
+export async function setWorkspaceCodexEngineEnabled(enabled: boolean) {
+  try {
+    const response = await (await serverApiClient()).v1["engine-auth"].codex.workspace.$put({
+      json: { enabled },
+    });
+    if (!response.ok) {
+      return {
+        ok: false as const,
+        error: await serverApiErrorMessage(
+          response,
+          "Could not update the workspace Codex engine.",
+        ),
+      };
+    }
+    revalidatePath("/settings");
+    return { ok: true as const, settings: (await response.json()).data as CodexAuthSettings };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error:
+        error instanceof Error ? error.message : "Could not update the workspace Codex engine.",
+    };
+  }
 }

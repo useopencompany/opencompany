@@ -77,6 +77,11 @@ while the API owns onboarding-email persistence.
 The runner uses it for bounded, durable `PLUGIN_DATA` archives and never injects it into Plugin
 processes.
 
+`INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` must have the same base64-encoded 32-byte value in prod
+`/api` and `/runner`. In addition to integration and MCP credentials, it encrypts personal Codex
+subscription tokens at rest; the API reads connection state and manages workspace designation while
+the runner persists, refreshes, and uses tokens. Both release preflights require it.
+
 `OPENCOMPANY_DESKTOP_AUTH_SECRET` is a web-only base64 32-byte key (same convention as
 `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`) that seals the macOS desktop app's Google sign-in handoff
 token. Add it to prod `/web` before enabling desktop distribution. The release preflight requires it

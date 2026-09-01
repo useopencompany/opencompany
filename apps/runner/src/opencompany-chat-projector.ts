@@ -6,7 +6,7 @@ import {
 import { calculateModelUsageCost } from "@opencompany/billing";
 import type { RunApprovalDraft, RunEventDraft, RunExecutionRepository } from "@opencompany/core";
 import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
-import { recordCreditDebit } from "@opencompany/db/credits";
+import { recordCreditDebit, recordSubscriptionCoveredUsage } from "@opencompany/db/credits";
 import type { ChatMessageDebugTrace } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { recordModelCost, recordModelUsageTokens } from "@opencompany/telemetry";
@@ -59,6 +59,8 @@ export function createProductChatProjector(input: {
     assistantMessageId: string;
     workspaceId: string | null;
     model: string;
+    modelProvider: "vercel-ai-gateway" | "codex-subscription";
+    costSource: "metered_gateway" | "subscription_covered";
     leaseId: string;
     leaseOwner: string;
     canonicalAttemptId?: string;
@@ -224,6 +226,8 @@ export function createProductChatProjector(input: {
     async recordStepUsage(input: { stepIndex: number; usage: LanguageModelUsage }) {
       await recordProductChatModelCost({
         model: target.model,
+        modelProvider: target.modelProvider,
+        costSource: target.costSource,
         usage: input.usage,
         workspaceId: target.workspaceId,
         userWorkosId: target.userWorkosId,
@@ -409,6 +413,8 @@ function toolEventsFromProjection(
 
 async function recordProductChatModelCost(input: {
   model: string;
+  modelProvider: "vercel-ai-gateway" | "codex-subscription";
+  costSource: "metered_gateway" | "subscription_covered";
   usage: LanguageModelUsage;
   workspaceId: string | null;
   userWorkosId: string;
@@ -428,8 +434,12 @@ async function recordProductChatModelCost(input: {
     inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
     outputTokens,
   });
+  const subscriptionCovered = input.costSource === "subscription_covered";
+  const providerCostUsdMicros = subscriptionCovered ? 0 : cost.providerCostUsdMicros;
+  const platformFeeUsdMicros = subscriptionCovered ? 0 : cost.platformFeeUsdMicros;
+  const chargedCostUsdMicros = subscriptionCovered ? 0 : cost.totalCostUsdMicros;
   recordModelCost({
-    costUsdMicros: cost.totalCostUsdMicros,
+    costUsdMicros: chargedCostUsdMicros,
     attributes: {
       "goat.model": input.model,
       "goat.surface": "chat",
@@ -451,8 +461,9 @@ async function recordProductChatModelCost(input: {
     taskId: input.taskId,
     turnId: input.turnId,
     stepIndex: input.stepIndex,
-    modelProvider: "vercel-ai-gateway",
+    modelProvider: input.modelProvider,
     model: input.model,
+    costSource: input.costSource,
     engine: "opencompany",
     inputTokens,
     inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
@@ -464,11 +475,43 @@ async function recordProductChatModelCost(input: {
       Math.max(0, outputTokens - readUsageNumber(input.usage.outputTokenDetails?.reasoningTokens)),
     outputReasoningTokens: readUsageNumber(input.usage.outputTokenDetails?.reasoningTokens),
     totalTokens: readUsageNumber(input.usage.totalTokens) || inputTokens + outputTokens,
-    providerCostUsdMicros: cost.providerCostUsdMicros,
-    platformFeeUsdMicros: cost.platformFeeUsdMicros,
-    chargedCostUsdMicros: cost.totalCostUsdMicros,
-    billable: cost.billable,
+    providerCostUsdMicros,
+    platformFeeUsdMicros,
+    chargedCostUsdMicros,
+    billable: subscriptionCovered ? false : cost.billable,
   });
+
+  if (subscriptionCovered) {
+    if (!input.workspaceId) return;
+    try {
+      await recordSubscriptionCoveredUsage({
+        workspaceId: input.workspaceId,
+        userWorkosId: input.userWorkosId,
+        idempotencyKey: `chat:${input.userMessageId}:durable:${input.turnId}:step:${input.stepIndex}`,
+        chatSessionId: input.chatSessionId,
+        metadata: {
+          engine: "opencompany",
+          model: input.model,
+          turnId: input.turnId,
+          stepIndex: input.stepIndex,
+          inputTokens,
+          outputTokens,
+          totalTokens: readUsageNumber(input.usage.totalTokens) || inputTokens + outputTokens,
+        },
+        db: getDb(),
+      });
+    } catch (error) {
+      logger.warn("Durable opencompany chat subscription usage recording failed", {
+        event: "opencompany.goat_opencompany_chat_subscription_usage_recording_failed",
+        workspace_id: input.workspaceId,
+        chat_session_id: input.chatSessionId,
+        turn_id: input.turnId,
+        step_index: input.stepIndex,
+        error,
+      });
+    }
+    return;
+  }
 
   if (!cost.billable || !input.workspaceId) return;
   try {

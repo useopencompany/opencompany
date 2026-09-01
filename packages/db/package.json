@@ -208,6 +208,10 @@
       "types": "./src/credits.ts",
       "default": "./src/credits.ts"
     },
+    "./workspace-codex-engine": {
+      "types": "./src/workspace-codex-engine.ts",
+      "default": "./src/workspace-codex-engine.ts"
+    },
     "./billing-constants": {
       "types": "./src/billing-constants.ts",
       "default": "./src/billing-constants.ts"

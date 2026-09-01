@@ -78,6 +78,7 @@ const groups = {
       "BLOB_READ_WRITE_TOKEN",
       "ELECTRIC_URL",
       "REDIS_URL",
+      // Shared with the runner: seals personal Codex subscription credentials.
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
       // GitHub App OAuth + webhook ingress (#1203 4a1). The API redirects back
       // to the web origin, so it also needs the canonical app URL.
@@ -206,6 +207,7 @@ const groups = {
       "API_INTERNAL_TOKEN",
       "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
       "RUNNER_STREAM_TOKEN_SECRET",
+      // Required to decrypt and refresh workspace-designated Codex subscriptions.
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
       "RUNNER_ALLOWED_ORIGINS",
       "E2B_API_KEY",

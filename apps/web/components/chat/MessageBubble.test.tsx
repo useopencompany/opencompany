@@ -204,6 +204,32 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.queryByText("boom")).not.toBeInTheDocument();
   });
 
+  it("surfaces safe Codex subscription failures without exposing unknown provider errors", () => {
+    const usageLimit: ChatUiMessage = {
+      id: "assistant_codex_limit",
+      role: "assistant",
+      metadata: { error: "ChatGPT usage limit reached — try again later or switch models." },
+      parts: [],
+    };
+    const { rerender } = render(
+      <MessageBubble message={usageLimit} taskLookup={emptyTaskLookup} />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("ChatGPT usage limit reached");
+
+    const reconnect: ChatUiMessage = {
+      id: "assistant_codex_reauth",
+      role: "assistant",
+      metadata: { error: "Reconnect Codex in Settings → Integrations to continue." },
+      parts: [],
+    };
+    rerender(<MessageBubble message={reconnect} taskLookup={emptyTaskLookup} />);
+    expect(screen.getByRole("link", { name: "Settings → Integrations" })).toHaveAttribute(
+      "href",
+      "/settings/integrations",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("did not fall back to workspace credits");
+  });
+
   it("explains content inspection failures without exposing the provider error", () => {
     const message: ChatUiMessage = {
       id: "assistant_4",

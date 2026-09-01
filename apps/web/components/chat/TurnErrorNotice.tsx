@@ -1,5 +1,6 @@
 import { Alert, AlertDescription, AlertTitle } from "@opencompany/ui/components/alert";
 import { CircleAlert } from "lucide-react";
+import type { ReactNode } from "react";
 
 const CONTENT_REJECTION_MARKERS = [
   "datainspectionfailed",
@@ -29,7 +30,7 @@ export function TurnErrorNotice({
   );
 }
 
-function turnErrorDescription(error: string, hasPartialOutput: boolean) {
+function turnErrorDescription(error: string, hasPartialOutput: boolean): ReactNode {
   const normalizedError = error.toLowerCase();
   const contentWasRejected = CONTENT_REJECTION_MARKERS.some((marker) =>
     normalizedError.includes(marker),
@@ -39,6 +40,26 @@ function turnErrorDescription(error: string, hasPartialOutput: boolean) {
     return hasPartialOutput
       ? "The selected model couldn’t process some content returned by a source. Everything completed above is still available. Try another model to continue."
       : "The selected model couldn’t process some content in this request. Try another model to continue.";
+  }
+
+  if (normalizedError.includes("chatgpt usage limit reached")) {
+    return error;
+  }
+
+  if (normalizedError.includes("reconnect codex")) {
+    return (
+      <>
+        Reconnect Codex in{` `}
+        <a className="font-medium underline underline-offset-2" href="/settings/integrations">
+          Settings → Integrations
+        </a>
+        {` `}to continue. The run did not fall back to workspace credits.
+      </>
+    );
+  }
+
+  if (normalizedError.includes("codex api error")) {
+    return "Codex API error. Try again or switch models; the run did not fall back to workspace credits.";
   }
 
   return hasPartialOutput

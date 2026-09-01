@@ -311,6 +311,7 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/{integrationId}",
       "/v1/engine-auth/claude-code",
       "/v1/engine-auth/codex",
+      "/v1/engine-auth/codex/workspace",
       "/v1/engine-auth/codex/device",
       "/v1/engine-auth/codex/device/{flowId}/poll",
       "/v1/engine-auth/infisical",

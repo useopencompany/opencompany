@@ -458,6 +458,7 @@ function billingActivityLabel(
   isAutoRefill: boolean,
 ) {
   if (source === "chat_model_usage") return "Chat";
+  if (source === "subscription_covered") return "ChatGPT subscription";
   if (
     source === "ingest_model_usage" ||
     source === "ingest_fee" ||

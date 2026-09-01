@@ -1769,6 +1769,7 @@ describe("canonical Hono API", () => {
       statusReason: null,
       lastValidatedAt: null,
       lastRotatedAt: null,
+      workspaceEngine: disconnectedWorkspaceCodexEngine(),
     }));
     const app = testApp(repository, {
       engineAuth: engineAuthService({ getCodexStatus }),
@@ -3296,6 +3297,7 @@ describe("canonical Hono API", () => {
       statusReason: null,
       lastValidatedAt: null,
       lastRotatedAt: null,
+      workspaceEngine: disconnectedWorkspaceCodexEngine(),
     }));
     const getInfisicalStatus = vi.fn(async () => ({
       status: "needs_reauth" as const,
@@ -3416,6 +3418,43 @@ describe("canonical Hono API", () => {
     expect(codexRemoved.status).toBe(200);
     await expect(codexRemoved.json()).resolves.toMatchObject({ data: { deleted: true } });
     expect(disconnectCodex).toHaveBeenCalledWith(actor);
+  });
+
+  it("updates the workspace Codex engine through the admin settings route", async () => {
+    const setWorkspaceCodexEngine = vi.fn(async () => ({
+      status: "connected" as const,
+      statusReason: null,
+      lastValidatedAt: null,
+      lastRotatedAt: null,
+      workspaceEngine: {
+        enabled: true,
+        providerEmail: "user@example.com",
+        providerName: "Example User",
+        credentialStatus: "connected" as const,
+        statusReason: null,
+        updatedAt: "2026-09-01T10:00:00.000Z",
+      },
+    }));
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ setWorkspaceCodexEngine }),
+    });
+
+    const response = await app.request("/v1/engine-auth/codex/workspace", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        workspaceEngine: {
+          enabled: true,
+          credentialStatus: "connected",
+        },
+      },
+    });
+    expect(setWorkspaceCodexEngine).toHaveBeenCalledWith(actor, true);
   });
 
   it("gives engine auth flow starts their own small rate bucket", async () => {
@@ -4642,6 +4681,9 @@ function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
     getCodexStatus: async () => {
       throw new Error("Unexpected Codex status read.");
     },
+    setWorkspaceCodexEngine: async () => {
+      throw new Error("Unexpected workspace Codex engine mutation.");
+    },
     startCodexDeviceAuth: async () => {
       throw new Error("Unexpected Codex device auth start.");
     },
@@ -4670,6 +4712,17 @@ function engineAuthService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["engineAuth"]>,
 ): Parameters<typeof createApiApp>[0]["engineAuth"] {
   return { ...fakeEngineAuth(), ...overrides };
+}
+
+function disconnectedWorkspaceCodexEngine() {
+  return {
+    enabled: false,
+    providerEmail: null,
+    providerName: null,
+    credentialStatus: null,
+    statusReason: null,
+    updatedAt: null,
+  };
 }
 
 function fakeEngineSessions(): Parameters<typeof createApiApp>[0]["engineSessions"] {

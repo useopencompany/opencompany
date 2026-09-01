@@ -196,6 +196,53 @@ export async function recordCreditDebit(input: CreditDebitInput) {
   };
 }
 
+// Covered subscription usage belongs in the same recent-activity ledger as
+// metered usage, but a zero-value row must never touch the workspace balance.
+export async function recordSubscriptionCoveredUsage(input: {
+  workspaceId: string;
+  userWorkosId?: string | null;
+  idempotencyKey: string;
+  chatSessionId?: string | null;
+  metadata: Record<string, unknown>;
+  db?: DbLike;
+}) {
+  const db = input.db ?? getDb();
+  const result = await db.execute(sql`
+    INSERT INTO goat.credit_ledger (
+      workspace_id,
+      user_workos_id,
+      amount_cents,
+      amount_usd_micros,
+      source,
+      idempotency_key,
+      chat_session_id,
+      provider_cost_usd_micros,
+      platform_fee_usd_micros,
+      cost_basis,
+      metadata
+    )
+    VALUES (
+      ${input.workspaceId},
+      ${input.userWorkosId ?? null},
+      0,
+      0,
+      'subscription_covered',
+      ${input.idempotencyKey},
+      ${input.chatSessionId ?? null},
+      0,
+      0,
+      ${JSON.stringify({ source: "chatgpt_subscription" })}::jsonb,
+      ${JSON.stringify(input.metadata)}::jsonb
+    )
+    ON CONFLICT DO NOTHING
+    RETURNING id
+  `);
+  const row = rowsFromExecute<{ id: number }>(result)[0];
+  return row
+    ? { ok: true as const, ledgerId: Number(row.id) }
+    : { ok: false as const, reason: "duplicate" as const };
+}
+
 // Rotates the expiring included pool on the first of each UTC month. Within a
 // month the allowance only moves upward, so a Pro seat added mid-month gets
 // its full $20 immediately while removing and re-adding a seat cannot mint the

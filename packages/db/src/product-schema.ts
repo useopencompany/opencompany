@@ -438,6 +438,7 @@ export type CreditLedgerSource =
   | "included_usage_grant"
   | "included_usage_expiration"
   | "stripe_topup"
+  | "subscription_covered"
   | "chat_model_usage"
   | "capability_usage"
   | "frontier_ingest"
@@ -1056,7 +1057,7 @@ export const creditLedger = productSchema.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'subscription_covered', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );
@@ -5577,6 +5578,37 @@ export const codexCredentials = productSchema.table(
   }),
 );
 
+// One workspace-wide engine designation. The composite membership FK makes
+// leaving the workspace revoke the designation, while the credential FK makes
+// an explicit Codex disconnect do the same without a second cleanup path.
+export const workspaceCodexEngineAccounts = productSchema.table(
+  "workspace_codex_engine_accounts",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    providerUserWorkosId: text("provider_user_workos_id")
+      .notNull()
+      .references(() => codexCredentials.userWorkosId, { onDelete: "cascade" }),
+    designatedByWorkosId: text("designated_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    providerIdx: index("workspace_codex_engine_accounts_provider_idx").on(
+      table.providerUserWorkosId,
+    ),
+    providerMembershipFk: foreignKey({
+      name: "workspace_codex_engine_accounts_provider_membership_fk",
+      columns: [table.workspaceId, table.providerUserWorkosId],
+      foreignColumns: [workspaceMembers.workspaceId, workspaceMembers.userWorkosId],
+    }).onDelete("cascade"),
+  }),
+);
+
 export const codexDeviceAuthFlows = productSchema.table(
   "codex_device_auth_flows",
   {
@@ -5741,6 +5773,12 @@ export const usersRelations = relations(users, ({ many }) => ({
   brainSourceItems: many(brainSourceItems),
   brainIngestJobs: many(brainIngestJobs),
   codexDeviceAuthFlows: many(codexDeviceAuthFlows),
+  providedWorkspaceCodexEngineAccounts: many(workspaceCodexEngineAccounts, {
+    relationName: "workspace_codex_engine_provider",
+  }),
+  designatedWorkspaceCodexEngineAccounts: many(workspaceCodexEngineAccounts, {
+    relationName: "workspace_codex_engine_designated_by",
+  }),
 }));
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
@@ -5749,6 +5787,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
     references: [users.workosUserId],
   }),
   members: many(workspaceMembers),
+  codexEngineAccount: one(workspaceCodexEngineAccounts),
   capabilities: many(workspaceCapabilities),
   capabilityRuns: many(capabilityRuns),
   billing: one(workspaceBilling),
@@ -5782,6 +5821,26 @@ export const workspaceMembersRelations = relations(workspaceMembers, ({ one }) =
     references: [users.workosUserId],
   }),
 }));
+
+export const workspaceCodexEngineAccountsRelations = relations(
+  workspaceCodexEngineAccounts,
+  ({ one }) => ({
+    workspace: one(workspaces, {
+      fields: [workspaceCodexEngineAccounts.workspaceId],
+      references: [workspaces.id],
+    }),
+    provider: one(users, {
+      fields: [workspaceCodexEngineAccounts.providerUserWorkosId],
+      references: [users.workosUserId],
+      relationName: "workspace_codex_engine_provider",
+    }),
+    designatedBy: one(users, {
+      fields: [workspaceCodexEngineAccounts.designatedByWorkosId],
+      references: [users.workosUserId],
+      relationName: "workspace_codex_engine_designated_by",
+    }),
+  }),
+);
 
 export const workspaceCapabilitiesRelations = relations(workspaceCapabilities, ({ one }) => ({
   workspace: one(workspaces, {
@@ -6588,6 +6647,7 @@ export type Workspace = typeof workspaces.$inferSelect;
 export type Onboarding = typeof onboarding.$inferSelect;
 export type OnboardingEmail = typeof onboardingEmails.$inferSelect;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
+export type WorkspaceCodexEngineAccount = typeof workspaceCodexEngineAccounts.$inferSelect;
 export type WorkspaceCapability = typeof workspaceCapabilities.$inferSelect;
 export type WorkspaceBilling = typeof workspaceBilling.$inferSelect;
 export type WorkspaceIngestionReservation = typeof workspaceIngestionReservations.$inferSelect;

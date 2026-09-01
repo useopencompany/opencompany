@@ -173,6 +173,7 @@ export type ProductLlmUsageRecordedAnalyticsInput = {
   stepIndex?: number | null | undefined;
   modelProvider: string;
   model: string;
+  costSource?: "metered_gateway" | "subscription_covered" | undefined;
   responseModel?: string | null | undefined;
   engine: ProductAnalyticsEngine;
   usageSource?: ProductAnalyticsUsageSource | undefined;
@@ -203,6 +204,7 @@ export function captureProductLlmUsageRecorded(input: ProductLlmUsageRecordedAna
     ...(typeof input.stepIndex === "number" ? { step_index: input.stepIndex } : {}),
     model_provider: input.modelProvider,
     model: input.model,
+    ...(input.costSource ? { cost_source: input.costSource } : {}),
     ...(input.responseModel ? { response_model: input.responseModel } : {}),
     engine: input.engine,
     usage_source: input.usageSource ?? productAnalyticsUsageSourceForEngine(input.engine),

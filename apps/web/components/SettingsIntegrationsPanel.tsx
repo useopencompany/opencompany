@@ -38,6 +38,7 @@ import {
   type CodexDeviceAuthFlow,
   disconnectCodexAuth,
   pollCodexDeviceAuth,
+  setWorkspaceCodexEngineEnabled,
   startCodexDeviceAuth,
 } from "@/lib/codex-auth";
 import {
@@ -211,7 +212,8 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   },
   codex: {
     label: "Codex",
-    description: "Connect your Codex subscription so opencompany can run coding tasks.",
+    description:
+      "Connect Codex for coding tasks and optionally power workspace GPT-5.6 Chat with your subscription.",
     Icon: OpenAIIcon,
     tileClass: "bg-black text-white",
   },
@@ -502,7 +504,10 @@ function IntegrationCards({
               provider="x_account"
               accounts={integrations.personalAccounts.x_account}
             />
-            <CodexIntegrationCard integration={integrations.codex} />
+            <CodexIntegrationCard
+              integration={integrations.codex}
+              isWorkspaceAdmin={isWorkspaceAdmin}
+            />
             <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
             {imessageEnabled ? (
               <IMessageIntegrationCard integration={integrations.imessage} />
@@ -1463,7 +1468,13 @@ function InfisicalIntegrationCard({
   );
 }
 
-function CodexIntegrationCard({ integration }: { integration: CodexProviderState }) {
+function CodexIntegrationCard({
+  integration,
+  isWorkspaceAdmin,
+}: {
+  integration: CodexProviderState;
+  isWorkspaceAdmin: boolean;
+}) {
   const router = useRouter();
   const [flow, setFlow] = useState<CodexDeviceAuthFlow | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1543,6 +1554,15 @@ function CodexIntegrationCard({ integration }: { integration: CodexProviderState
     });
   };
 
+  const setWorkspaceEngine = (enabled: boolean) => {
+    setError(null);
+    startTransition(async () => {
+      const result = await setWorkspaceCodexEngineEnabled(enabled);
+      if (result.ok) router.refresh();
+      else setError(result.error);
+    });
+  };
+
   const accountLabel =
     integration.status === "connected"
       ? integration.lastValidatedAt
@@ -1558,6 +1578,29 @@ function CodexIntegrationCard({ integration }: { integration: CodexProviderState
           {accountLabel ? (
             <p className="truncate text-[12px] leading-4 text-ink-subtle">{accountLabel}</p>
           ) : null}
+          {integration.workspaceEngine.enabled ? (
+            <div className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
+              <p>
+                Workspace chats use{` `}
+                <span className="font-medium text-ink">
+                  {integration.workspaceEngine.providerName ??
+                    integration.workspaceEngine.providerEmail ??
+                    "the designated admin"}
+                </span>
+                {`’s ChatGPT subscription for GPT-5.6 Sol and Terra.`}
+              </p>
+              {integration.workspaceEngine.credentialStatus === "needs_reauth" ? (
+                <p className="mt-1 text-warning">
+                  {integration.workspaceEngine.statusReason ??
+                    "The designated admin needs to reconnect Codex."}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-[12px] leading-4 text-ink-subtle">
+              Workspace chats currently use metered opencompany credits.
+            </p>
+          )}
           {flow?.status === "code_ready" && flow.verificationUri && flow.userCode ? (
             <div className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
               <a
@@ -1578,7 +1621,7 @@ function CodexIntegrationCard({ integration }: { integration: CodexProviderState
         </div>
       }
       footer={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={startAuth}
@@ -1596,6 +1639,25 @@ function CodexIntegrationCard({ integration }: { integration: CodexProviderState
               className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
             >
               Disconnect
+            </button>
+          ) : null}
+          {isWorkspaceAdmin && integration.workspaceEngine.enabled ? (
+            <button
+              type="button"
+              onClick={() => setWorkspaceEngine(false)}
+              disabled={isPending}
+              className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+            >
+              Stop workspace use
+            </button>
+          ) : isWorkspaceAdmin && integration.connected ? (
+            <button
+              type="button"
+              onClick={() => setWorkspaceEngine(true)}
+              disabled={isPending}
+              className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
+            >
+              Use for workspace
             </button>
           ) : null}
         </div>

@@ -24,3 +24,4 @@ export * from "./wiki-ingest";
 export * from "./wiki-sources";
 export * from "./worker-admission";
 export * from "./workflow-repository";
+export * from "./workspace-codex-engine";

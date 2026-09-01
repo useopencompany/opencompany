@@ -948,11 +948,22 @@ function parseDebugTraceUiMessageParts(value: unknown): ChatUiMessage["parts"] |
   for (const part of value) {
     if (!isRecord(part)) continue;
     if (part.type === "text" && typeof part.text === "string") {
-      parts.push({ type: "text", text: part.text });
+      const providerMetadata = persistedCodexProviderMetadata(part.providerMetadata);
+      parts.push({
+        type: "text",
+        text: part.text,
+        ...(providerMetadata ? { providerMetadata } : {}),
+      });
       continue;
     }
     if (part.type === "reasoning" && typeof part.text === "string") {
-      parts.push({ type: "reasoning", text: part.text, state: "done" });
+      const providerMetadata = persistedCodexProviderMetadata(part.providerMetadata);
+      parts.push({
+        type: "reasoning",
+        text: part.text,
+        state: "done",
+        ...(providerMetadata ? { providerMetadata } : {}),
+      });
       continue;
     }
     if (part.type === CHAT_ARTIFACT_DATA_PART_TYPE) {
@@ -966,6 +977,13 @@ function parseDebugTraceUiMessageParts(value: unknown): ChatUiMessage["parts"] |
   }
 
   return parts.length > 0 ? parts : null;
+}
+
+function persistedCodexProviderMetadata(value: unknown) {
+  if (!isRecord(value) || !isRecord(value.codex)) return null;
+  const encryptedContent = value.codex.encryptedContent;
+  if (typeof encryptedContent !== "string" || encryptedContent.length === 0) return null;
+  return { codex: { encryptedContent } };
 }
 
 function isPersistedToolPart(value: Record<string, unknown>) {

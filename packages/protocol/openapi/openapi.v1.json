@@ -11601,13 +11601,69 @@
             "type": "string",
             "nullable": true,
             "format": "date-time"
+          },
+          "workspaceEngine": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "providerEmail": {
+                "type": "string",
+                "nullable": true
+              },
+              "providerName": {
+                "type": "string",
+                "nullable": true
+              },
+              "credentialStatus": {
+                "type": "string",
+                "nullable": true,
+                "enum": [
+                  "connected",
+                  "needs_reauth",
+                  null
+                ]
+              },
+              "statusReason": {
+                "type": "string",
+                "nullable": true
+              },
+              "updatedAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "enabled",
+              "providerEmail",
+              "providerName",
+              "credentialStatus",
+              "statusReason",
+              "updatedAt"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
           "status",
           "statusReason",
           "lastValidatedAt",
-          "lastRotatedAt"
+          "lastRotatedAt",
+          "workspaceEngine"
+        ],
+        "additionalProperties": false
+      },
+      "SetWorkspaceCodexEngineBody": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "additionalProperties": false
       },
@@ -22043,6 +22099,53 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EngineAuthDisconnectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/codex/workspace": {
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWorkspaceCodexEngineBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace Codex subscription routing designation updated by a workspace admin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodexAuthStatusEnvelope"
                 }
               }
             }

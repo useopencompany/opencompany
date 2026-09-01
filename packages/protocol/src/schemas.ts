@@ -3959,6 +3959,16 @@ export const CodexAuthStatusSchema = z
     statusReason: z.string().nullable(),
     lastValidatedAt: TimestampSchema.nullable(),
     lastRotatedAt: TimestampSchema.nullable(),
+    workspaceEngine: z
+      .object({
+        enabled: z.boolean(),
+        providerEmail: z.string().nullable(),
+        providerName: z.string().nullable(),
+        credentialStatus: EngineAuthConnectionStatusSchema.nullable(),
+        statusReason: z.string().nullable(),
+        updatedAt: TimestampSchema.nullable(),
+      })
+      .strict(),
   })
   .strict()
   .openapi("CodexAuthStatus");
@@ -3967,6 +3977,11 @@ export const CodexAuthStatusEnvelopeSchema = z
   .object({ data: CodexAuthStatusSchema, meta: ProtocolMetadataSchema })
   .strict()
   .openapi("CodexAuthStatusEnvelope");
+
+export const SetWorkspaceCodexEngineBodySchema = z
+  .object({ enabled: z.boolean() })
+  .strict()
+  .openapi("SetWorkspaceCodexEngineBody");
 
 export const EngineAuthFlowIdSchema = z
   .string()
