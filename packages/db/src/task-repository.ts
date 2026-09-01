@@ -10,6 +10,8 @@ import {
   type Actor,
   CoreError,
   type CreateTaskCommand,
+  type CreateTaskCommentCommand,
+  type CreateTaskCommentResult,
   type CreateTaskResult,
   type LegacyTask,
   type LegacyTaskHistory,
@@ -757,6 +759,338 @@ export class PostgresTaskRepository implements TaskRepository {
     return taskCreateResult(row, requestHash);
   }
 
+  async createTaskCommentAndRun(input: {
+    actor: Actor;
+    taskId: string;
+    command: CreateTaskCommentCommand;
+  }): Promise<CreateTaskCommentResult | null> {
+    const ids = this.options.ids ?? defaultIds;
+    const messageId = ids.message();
+    const assistantMessageId = ids.message();
+    const runId = ids.run();
+    const eventId = ids.event();
+    const statusActivityId = `task_activity_${randomUUID()}`;
+    const now = this.options.now?.() ?? new Date();
+    const assistantCreatedAt = new Date(now.getTime() + 1);
+    const statusChangedAt = new Date(now.getTime() + 2);
+    const [row] = await this.rows<TaskCommentCreateRow>(sql`
+      WITH existing_activity AS MATERIALIZED (
+        SELECT
+          activity.id,
+          activity.task_id,
+          activity.author,
+          activity.author_workos_id,
+          activity.kind,
+          activity.body,
+          activity.metadata,
+          activity.created_at
+        FROM goat.task_activities AS activity
+        WHERE activity.id = ${input.command.id}
+      ),
+      authorized AS MATERIALIZED (
+        SELECT
+          task.id,
+          task.status,
+          task.archived_at,
+          task.session_id,
+          task.user_workos_id,
+          task.harness_spec,
+          conversation.engine,
+          runtime.id AS runtime_id,
+          runtime.model AS runtime_model,
+          runtime.status AS runtime_status
+        FROM goat.tasks AS task
+        JOIN goat.chat_sessions AS conversation
+          ON conversation.id = task.session_id
+         AND conversation.kind = 'task'
+         AND conversation.closed_at IS NULL
+        JOIN goat.codex_chat_sessions AS runtime
+          ON runtime.chat_session_id = conversation.id
+         AND runtime.user_workos_id = task.user_workos_id
+         AND runtime.engine = conversation.engine
+         AND (runtime.workspace_id = ${input.actor.workspaceId} OR runtime.workspace_id IS NULL)
+        WHERE (task.id = ${input.taskId} OR upper(task.display_id) = upper(${input.taskId}))
+          AND ${taskAccessPredicate(input.actor)}
+        FOR UPDATE OF task, runtime
+      ),
+      matching_replay AS MATERIALIZED (
+        SELECT activity.*
+        FROM existing_activity AS activity
+        JOIN authorized AS task ON task.id = activity.task_id
+        WHERE activity.author = 'user'
+          AND activity.author_workos_id = ${input.actor.userId}
+          AND activity.kind = 'comment'
+          AND activity.body = ${input.command.body}
+          AND NULLIF(activity.metadata->>'messageId', '') IS NOT NULL
+          AND NULLIF(activity.metadata->>'assistantMessageId', '') IS NOT NULL
+          AND NULLIF(activity.metadata->>'runId', '') IS NOT NULL
+      ),
+      eligible AS MATERIALIZED (
+        SELECT task.*
+        FROM authorized AS task
+        WHERE task.archived_at IS NULL
+          AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
+          AND task.runtime_status NOT IN ('queued', 'starting', 'running')
+          AND NOT EXISTS (SELECT 1 FROM existing_activity)
+      ),
+      reopened_task AS MATERIALIZED (
+        UPDATE goat.tasks AS task
+        SET status = 'running',
+            stage = 'queued',
+            result = NULL,
+            error = NULL,
+            reported_outcome = NULL,
+            outcome_comment = NULL,
+            next_run_at = ${now},
+            lease_id = NULL,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            attempts = task.attempts + 1,
+            updated_at = ${now}
+        FROM eligible
+        WHERE task.id = eligible.id
+          AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
+          AND task.archived_at IS NULL
+        RETURNING task.id, eligible.status AS previous_status
+      ),
+      created_comment AS MATERIALIZED (
+        INSERT INTO goat.task_activities (
+          id, task_id, author, author_workos_id, kind, body, metadata, created_at
+        )
+        SELECT
+          ${input.command.id}, task.id, 'user', ${input.actor.userId}, 'comment',
+          ${input.command.body},
+          jsonb_build_object(
+            'messageId', ${messageId}::text,
+            'assistantMessageId', ${assistantMessageId}::text,
+            'runId', ${runId}::text
+          ),
+          ${now}
+        FROM reopened_task AS task
+        RETURNING *
+      ),
+      resumed_task_activity AS MATERIALIZED (
+        INSERT INTO goat.task_activities (
+          id, task_id, author, author_workos_id, kind, body, metadata, created_at
+        )
+        SELECT
+          ${statusActivityId}, task.id, 'user', ${input.actor.userId}, 'status_changed',
+          'Resumed by user.',
+          jsonb_build_object(
+            'fromStatus', task.previous_status,
+            'toStatus', 'running',
+            'runId', ${runId}::text
+          ),
+          ${statusChangedAt}
+        FROM reopened_task AS task
+        JOIN created_comment AS comment ON comment.task_id = task.id
+        RETURNING task_id
+      ),
+      queued_runtime AS MATERIALIZED (
+        UPDATE goat.codex_chat_sessions AS runtime
+        SET status = 'queued',
+            active_turn_id = ${runId},
+            error = NULL,
+            updated_at = ${now}
+        FROM eligible AS task
+        JOIN reopened_task AS reopened ON reopened.id = task.id
+        WHERE runtime.id = task.runtime_id
+          AND runtime.status NOT IN ('queued', 'starting', 'running')
+          AND EXISTS (
+            SELECT 1 FROM resumed_task_activity AS activity WHERE activity.task_id = task.id
+          )
+        RETURNING runtime.id, runtime.chat_session_id
+      ),
+      inserted_user_message AS MATERIALIZED (
+        INSERT INTO goat.chat_messages (
+          id, session_id, role, content, task_id, created_at, updated_at
+        )
+        SELECT
+          ${messageId}, task.session_id, 'user', ${input.command.body}, task.id, ${now}, ${now}
+        FROM eligible AS task
+        JOIN reopened_task AS reopened ON reopened.id = task.id
+        JOIN queued_runtime AS runtime ON runtime.id = task.runtime_id
+        JOIN created_comment AS comment ON comment.task_id = task.id
+        RETURNING id
+      ),
+      inserted_assistant_message AS MATERIALIZED (
+        INSERT INTO goat.chat_messages (
+          id, session_id, role, content, task_id, debug_trace, created_at, updated_at
+        )
+        SELECT
+          ${assistantMessageId}, task.session_id, 'assistant', '', task.id,
+          CASE
+            WHEN task.engine = 'opencompany' THEN jsonb_build_object(
+              'schemaVersion', 'opencompany.chat.debug.v1',
+              'model', task.runtime_model,
+              'steps', jsonb_build_array(),
+              'uiMessageParts', jsonb_build_array()
+            )
+            ELSE jsonb_build_object(
+              'schemaVersion', 'goat.codex_chat.debug.v1',
+              'model', task.runtime_model,
+              'uiMessageParts', jsonb_build_array()
+            )
+          END,
+          ${assistantCreatedAt}, ${assistantCreatedAt}
+        FROM eligible AS task
+        JOIN reopened_task AS reopened ON reopened.id = task.id
+        JOIN queued_runtime AS runtime ON runtime.id = task.runtime_id
+        JOIN inserted_user_message AS message ON message.id = ${messageId}
+        RETURNING id
+      ),
+      inserted_run AS MATERIALIZED (
+        INSERT INTO goat.codex_chat_turns (
+          id, user_workos_id, codex_chat_session_id, chat_session_id,
+          user_message_id, assistant_message_id, status, prompt, settings, event_sequence,
+          created_at, updated_at
+        )
+        SELECT
+          ${runId}, task.user_workos_id, task.runtime_id, task.session_id,
+          ${messageId}, ${assistantMessageId}, 'queued', ${input.command.body},
+          jsonb_strip_nulls(jsonb_build_object(
+            'reasoningEffort', task.harness_spec #>> '{codex,reasoningEffort}',
+            'goalMode', task.harness_spec #> '{codex,goalMode}'
+          )),
+          1, ${now}, ${now}
+        FROM eligible AS task
+        JOIN reopened_task AS reopened ON reopened.id = task.id
+        JOIN queued_runtime AS runtime ON runtime.id = task.runtime_id
+        JOIN inserted_user_message AS user_message ON user_message.id = ${messageId}
+        JOIN inserted_assistant_message AS assistant_message
+          ON assistant_message.id = ${assistantMessageId}
+        RETURNING id
+      ),
+      inserted_event AS MATERIALIZED (
+        INSERT INTO goat.run_events (
+          id, run_id, sequence, schema_version, type, payload, created_at
+        )
+        SELECT
+          ${eventId}, run.id, 1, 1, 'run.queued',
+          jsonb_build_object(
+            'conversationId', task.session_id,
+            'triggerMessageId', ${messageId}::text
+          ),
+          ${now}
+        FROM inserted_run AS run
+        JOIN eligible AS task ON true
+        RETURNING run_id, sequence
+      ),
+      notified AS MATERIALIZED (
+        SELECT pg_notify(
+          ${RUN_EVENT_NOTIFY_CHANNEL},
+          jsonb_build_object('runId', run_id, 'sequence', sequence)::text
+        )
+        FROM inserted_event
+      ),
+      updated_conversation AS MATERIALIZED (
+        UPDATE goat.chat_sessions AS conversation
+        SET updated_at = ${now}, last_seen_at = ${now}, has_unseen = false
+        FROM eligible AS task, inserted_run
+        WHERE conversation.id = task.session_id
+        RETURNING conversation.id
+      ),
+      selected_comment AS MATERIALIZED (
+        SELECT * FROM created_comment
+        UNION ALL
+        SELECT * FROM matching_replay
+      )
+      SELECT
+        EXISTS (SELECT 1 FROM existing_activity) AS "idExists",
+        EXISTS (SELECT 1 FROM matching_replay) AS replayed,
+        authorized.status IN ('queued', 'running') AS active,
+        authorized.archived_at IS NOT NULL AS archived,
+        authorized.runtime_status IN ('queued', 'starting', 'running') AS "runtimeActive",
+        CASE
+          WHEN EXISTS (SELECT 1 FROM matching_replay) THEN (
+            EXISTS (
+              SELECT 1
+              FROM goat.chat_messages AS user_message
+              JOIN goat.chat_messages AS assistant_message
+                ON assistant_message.id = selected_comment.metadata->>'assistantMessageId'
+              JOIN goat.codex_chat_turns AS run
+                ON run.id = selected_comment.metadata->>'runId'
+              WHERE user_message.id = selected_comment.metadata->>'messageId'
+                AND run.user_message_id = user_message.id
+                AND run.assistant_message_id = assistant_message.id
+            )
+          )
+          WHEN EXISTS (SELECT 1 FROM eligible) THEN
+            CASE
+              WHEN EXISTS (SELECT 1 FROM inserted_event)
+                AND EXISTS (SELECT 1 FROM updated_conversation)
+                AND EXISTS (SELECT 1 FROM resumed_task_activity)
+                THEN true
+              ELSE jsonb_array_length(jsonb_build_object('reason', 'unmaterialized')) = 0
+            END
+          ELSE false
+        END AS materialized,
+        task.id,
+        task.display_id AS "displayId",
+        task.name,
+        task.prompt AS goal,
+        task.session_id AS "conversationId",
+        CASE
+          WHEN EXISTS (SELECT 1 FROM reopened_task) THEN 'running'
+          ELSE task.status
+        END AS status,
+        task.source,
+        conversation.engine,
+        task.model,
+        task.workflow_id AS "workflowId",
+        task.schedule_id AS "scheduleId",
+        task.scheduled_for AS "scheduledFor",
+        CASE WHEN EXISTS (SELECT 1 FROM reopened_task) THEN NULL ELSE task.result END AS result,
+        CASE WHEN EXISTS (SELECT 1 FROM reopened_task) THEN NULL ELSE task.error END AS error,
+        CASE
+          WHEN EXISTS (SELECT 1 FROM reopened_task) THEN NULL
+          ELSE task.reported_outcome
+        END AS "reportedStatus",
+        CASE
+          WHEN EXISTS (SELECT 1 FROM reopened_task) THEN NULL
+          ELSE task.outcome_comment
+        END AS "outcomeComment",
+        task.archived_at AS "archivedAt",
+        task.created_at AS "createdAt",
+        CASE
+          WHEN EXISTS (SELECT 1 FROM reopened_task) THEN ${now}
+          ELSE task.updated_at
+        END AS "updatedAt",
+        selected_comment.id AS "commentId",
+        selected_comment.task_id AS "commentTaskId",
+        selected_comment.author_workos_id AS "commentAuthorWorkosId",
+        selected_comment.body AS "commentBody",
+        selected_comment.created_at AS "commentCreatedAt",
+        selected_comment.metadata->>'messageId' AS "messageId",
+        selected_comment.metadata->>'assistantMessageId' AS "assistantMessageId",
+        selected_comment.metadata->>'runId' AS "runId",
+        pg_current_xact_id()::text AS "transactionId",
+        (SELECT count(*) FROM notified) AS "notifyCount"
+      FROM authorized
+      JOIN goat.tasks AS task ON task.id = authorized.id
+      JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
+      LEFT JOIN selected_comment ON selected_comment.task_id = task.id
+      LIMIT 1
+    `);
+    if (!row) return null;
+    if (row.idExists && !row.replayed) {
+      throw new CoreError(
+        "idempotency_conflict",
+        "The comment ID was already used for another Task comment.",
+      );
+    }
+    if (!row.replayed && row.archived) {
+      throw new CoreError("conflict", "Archived Tasks cannot receive comments.");
+    }
+    if (!row.replayed && (row.active || row.runtimeActive)) {
+      throw new CoreError("conflict", "Wait for the active Task run to finish before commenting.");
+    }
+    if (!row.materialized) {
+      throw new Error("The Task comment, Message, and Run were not materialized.");
+    }
+    return taskCommentCreateResult(row);
+  }
+
   async updateTask(input: {
     actor: Actor;
     taskId: string;
@@ -916,6 +1250,24 @@ type TaskCreateRow = Omit<TaskRow, "conversationId"> & {
   taskConversationId: string;
 };
 
+type TaskCommentCreateRow = TaskRow & {
+  idExists: boolean;
+  replayed: boolean;
+  active: boolean;
+  archived: boolean;
+  runtimeActive: boolean;
+  materialized: boolean;
+  commentId: string | null;
+  commentTaskId: string | null;
+  commentAuthorWorkosId: string | null;
+  commentBody: string | null;
+  commentCreatedAt: Date | string | null;
+  messageId: string | null;
+  assistantMessageId: string | null;
+  runId: string | null;
+  transactionId: number | string;
+};
+
 type TaskUpdateRow = TaskRow & {
   authorized: boolean;
   changed: boolean;
@@ -1044,6 +1396,37 @@ function taskCreateResult(row: TaskCreateRow, requestHash: string): CreateTaskRe
   }
   return {
     task: mapTask({ ...row, conversationId: row.taskConversationId }),
+    messageId: row.messageId,
+    assistantMessageId: row.assistantMessageId,
+    runId: row.runId,
+    transactionId: validTransactionId(row.transactionId),
+    idempotentReplay: row.replayed,
+  };
+}
+
+function taskCommentCreateResult(row: TaskCommentCreateRow): CreateTaskCommentResult {
+  if (
+    !row.commentId ||
+    !row.commentTaskId ||
+    row.commentTaskId !== row.id ||
+    !row.commentAuthorWorkosId ||
+    row.commentBody === null ||
+    !row.commentCreatedAt ||
+    !row.messageId ||
+    !row.assistantMessageId ||
+    !row.runId
+  ) {
+    throw new Error("The durable Task comment, Message, and Run references are incomplete.");
+  }
+  return {
+    task: mapTask(row),
+    comment: {
+      id: row.commentId,
+      taskId: row.commentTaskId,
+      authorWorkosId: row.commentAuthorWorkosId,
+      body: row.commentBody,
+      createdAt: asDate(row.commentCreatedAt),
+    },
     messageId: row.messageId,
     assistantMessageId: row.assistantMessageId,
     runId: row.runId,

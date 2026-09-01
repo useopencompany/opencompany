@@ -2620,6 +2620,44 @@ export const CreateTaskEnvelopeSchema = z
   .strict()
   .openapi("CreateTaskEnvelope");
 
+export const CreateTaskCommentBodySchema = z
+  .object({
+    id: ResourceIdSchema,
+    body: z.string().min(1).max(10_000),
+  })
+  .strict()
+  .openapi("CreateTaskCommentBody");
+
+export const TaskCommentSchema = z
+  .object({
+    id: ResourceIdSchema,
+    taskId: ResourceIdSchema,
+    author: z.literal("user"),
+    kind: z.literal("comment"),
+    body: z.string().min(1).max(10_000),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("TaskComment");
+
+export const CreateTaskCommentEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        task: TaskSchema,
+        comment: TaskCommentSchema,
+        messageId: ResourceIdSchema,
+        assistantMessageId: ResourceIdSchema,
+        runId: ResourceIdSchema,
+        transactionId: z.string().regex(/^[0-9]+$/u),
+        replayed: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("CreateTaskCommentEnvelope");
+
 export const UpdateTaskBodySchema = z
   .union([
     z.object({ archived: z.boolean() }).strict(),
@@ -4122,6 +4160,8 @@ export type EngineRuntimeAccess = z.infer<typeof EngineRuntimeAccessEnvelopeSche
 export type AttachmentUploadEnvelope = z.infer<typeof AttachmentUploadEnvelopeSchema>;
 export type CreateMessageBody = z.infer<typeof CreateMessageBodySchema>;
 export type CreateTaskBody = z.infer<typeof CreateTaskBodySchema>;
+export type CreateTaskCommentBody = z.infer<typeof CreateTaskCommentBodySchema>;
+export type CreateTaskCommentResult = z.infer<typeof CreateTaskCommentEnvelopeSchema>["data"];
 export type UpdateTaskBody = z.infer<typeof UpdateTaskBodySchema>;
 export type BrowserProfileDto = z.infer<typeof BrowserProfileSchema>;
 export type CreateBrowserProfileBody = z.infer<typeof CreateBrowserProfileBodySchema>;

@@ -16,9 +16,16 @@ import {
 import { toast } from "@opencompany/ui/components/sonner";
 import { GitHubIcon } from "@opencompany/ui/icons";
 import { useLiveQuery } from "@tanstack/react-db";
-import { Archive, ArrowUpRight, LayoutGrid, ListTodo, Loader2, Rows3 } from "lucide-react";
+import { Archive, ArrowUp, ArrowUpRight, LayoutGrid, ListTodo, Loader2, Rows3 } from "lucide-react";
 import Link from "next/link";
-import { type KeyboardEvent, type ReactNode, useMemo, useState, useTransition } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { taskRowToView, useAppData } from "@/components/AppDataProvider";
 import { EmptyState, formatRelativeTime, TasksWorkflowsDisabledRoute } from "@/components/Routes";
 import type { TaskView } from "@/components/Surface";
@@ -28,7 +35,11 @@ import {
   getHeadlessTaskActivities,
   type HeadlessTaskActivityReadModel,
 } from "@/lib/headless-task-collections";
-import { archiveHeadlessTask } from "@/lib/headless-task-commands";
+import {
+  archiveHeadlessTask,
+  createHeadlessTaskComment,
+  newHeadlessTaskCommentId,
+} from "@/lib/headless-task-commands";
 import { extractGitHubPullRequestUrl } from "@/lib/pull-request-link";
 import {
   formatStartedAt,
@@ -758,6 +769,13 @@ function TaskBoardSheet({
                   </li>
                 ))}
               </ol>
+              {task.sessionId ? (
+                <TaskCommentComposer
+                  taskId={task.id}
+                  workspaceId={workspace.id}
+                  active={!settled}
+                />
+              ) : null}
             </section>
           </div>
 
@@ -846,6 +864,84 @@ function TaskBoardSheet({
   );
 }
 
+function TaskCommentComposer({
+  taskId,
+  workspaceId,
+  active,
+}: {
+  taskId: string;
+  workspaceId: string;
+  active: boolean;
+}) {
+  const [body, setBody] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const pendingComment = useRef<{ id: string; body: string } | null>(null);
+  const disabled = active || submitting;
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (disabled || !body.trim()) return;
+    const command =
+      pendingComment.current?.body === body
+        ? pendingComment.current
+        : { id: newHeadlessTaskCommentId(), body };
+    pendingComment.current = command;
+    setSubmitting(true);
+    try {
+      await createHeadlessTaskComment(taskId, command, { scopeKey: workspaceId });
+      pendingComment.current = null;
+      setBody("");
+      toast.success("Comment posted. The task is running again.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not post the comment.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form className="border-t border-border pt-4" onSubmit={submit}>
+      <label htmlFor={`task-comment-${taskId}`} className="sr-only">
+        Add a comment
+      </label>
+      <div className="rounded-lg border border-border bg-canvas p-2 focus-within:border-ink/30">
+        <textarea
+          id={`task-comment-${taskId}`}
+          value={body}
+          onChange={(event) => {
+            setBody(event.target.value);
+            if (pendingComment.current?.body !== event.target.value) pendingComment.current = null;
+          }}
+          disabled={disabled}
+          maxLength={10_000}
+          rows={3}
+          placeholder="Add a comment…"
+          className="block w-full resize-none bg-transparent px-1 py-0.5 text-[12.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <span className="text-[11px] leading-4 text-ink-subtle">
+            {active
+              ? "You can comment when the current run finishes."
+              : "Posting a comment resumes this task."}
+          </span>
+          <button
+            type="submit"
+            aria-label="Post comment"
+            disabled={disabled || !body.trim()}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink text-canvas transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {submitting ? (
+              <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
+            ) : (
+              <ArrowUp size={13} strokeWidth={1.75} />
+            )}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
 function DetailLabel({ children }: { children: string }) {
   return (
     <h3 className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
@@ -924,7 +1020,7 @@ function buildDurableTaskActivityEntries(
       case "comment":
         return taskActivityEntry(
           activity,
-          activity.author === "orchestrator" ? "Orchestrator note" : "Comment",
+          activity.author === "orchestrator" ? "Orchestrator note" : "You commented",
         );
       case "retry":
         return taskActivityEntry(activity, "Retry queued", { meta: stepLabel ?? undefined });
@@ -938,11 +1034,12 @@ function taskActivityEntry(
   label: string,
   options: Pick<TaskActivityEntry, "meta" | "tone"> = {},
 ): TaskActivityEntry {
+  const body = activity.kind === "comment" ? activity.body : activity.body?.trim();
   return {
     id: activity.id,
     label,
     timestamp: activity.createdAt,
-    ...(activity.body?.trim() ? { body: activity.body.trim() } : {}),
+    ...(body?.trim() ? { body } : {}),
     ...options,
   };
 }

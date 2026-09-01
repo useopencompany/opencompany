@@ -63,6 +63,8 @@ import {
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
   CreateTaskBodySchema,
+  CreateTaskCommentBodySchema,
+  CreateTaskCommentEnvelopeSchema,
   CreateTaskEnvelopeSchema,
   CreateTaskScheduleBodySchema,
   CreateWikiPageBodySchema,
@@ -247,6 +249,27 @@ export const createTaskRoute = createRoute({
     202: {
       description: "Task accepted with its initial Message and queued Run.",
       content: { "application/json": { schema: CreateTaskEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createTaskCommentRoute = createRoute({
+  method: "post",
+  path: "/v1/tasks/{taskId}/comments",
+  tags: ["Tasks"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ taskId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateTaskCommentBodySchema } },
+    },
+  },
+  responses: {
+    202: {
+      description: "Comment recorded verbatim and Task resumed with a queued Run.",
+      content: { "application/json": { schema: CreateTaskCommentEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3358,6 +3381,7 @@ export const updateBillingAutoRefillRoute = createRoute({
 export type V1RouteHandlers = {
   listTasks: RouteHandler<typeof listTasksRoute>;
   createTask: RouteHandler<typeof createTaskRoute>;
+  createTaskComment: RouteHandler<typeof createTaskCommentRoute>;
   getTask: RouteHandler<typeof getTaskRoute>;
   updateTask: RouteHandler<typeof updateTaskRoute>;
   getTaskSummary: RouteHandler<typeof getTaskSummaryRoute>;
@@ -3548,6 +3572,7 @@ export function createV1Router(
     app
       .openapi(listTasksRoute, handlers.listTasks)
       .openapi(createTaskRoute, handlers.createTask)
+      .openapi(createTaskCommentRoute, handlers.createTaskComment)
       .openapi(getTaskRoute, handlers.getTask)
       .openapi(updateTaskRoute, handlers.updateTask)
       .openapi(getTaskSummaryRoute, handlers.getTaskSummary)
@@ -3781,6 +3806,14 @@ const placeholderTask = {
   archivedAt: null,
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
+};
+const placeholderTaskComment = {
+  id: "task_activity_comment_contract",
+  taskId: placeholderTask.id,
+  author: "user" as const,
+  kind: "comment" as const,
+  body: "Continue with this context.",
+  createdAt: placeholderTime,
 };
 const placeholderLegacyTask = {
   id: placeholderTask.id,
@@ -4024,6 +4057,22 @@ const contractDocumentHandlers: V1RouteHandlers = {
           messageId: "message_task_contract",
           assistantMessageId: "message_task_assistant_contract",
           runId: "run_task_contract",
+          transactionId: "1",
+          replayed: false,
+        },
+        meta,
+      },
+      202,
+    ),
+  createTaskComment: (c) =>
+    c.json(
+      {
+        data: {
+          task: placeholderTask,
+          comment: placeholderTaskComment,
+          messageId: "message_task_comment_contract",
+          assistantMessageId: "message_task_comment_assistant_contract",
+          runId: "run_task_comment_contract",
           transactionId: "1",
           replayed: false,
         },
