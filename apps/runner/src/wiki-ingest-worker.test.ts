@@ -1,3 +1,4 @@
+import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import type { ClaimedWikiIngestJob } from "@opencompany/db/wiki-ingest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -113,7 +114,7 @@ function result(overrides: Partial<WikiAgentIngestResult> = {}): WikiAgentIngest
     exhausted: false,
   };
   return {
-    model: "anthropic/claude-haiku-4.5",
+    model: WIKI_INGEST_MODEL,
     skipped: false,
     steps: 2,
     toolCalls: 2,
@@ -124,7 +125,7 @@ function result(overrides: Partial<WikiAgentIngestResult> = {}): WikiAgentIngest
     summary: "Updated the roadmap page.",
     trace: {
       schemaVersion: "goat.wiki_ingest_trace.v1",
-      model: "anthropic/claude-haiku-4.5",
+      model: WIKI_INGEST_MODEL,
       steps: 2,
       toolCallCount: 2,
       mutations: 1,
@@ -197,7 +198,7 @@ describe("opencompany wiki ingest worker", () => {
   it("records wiki triage separately and includes it in the debit cost basis", async () => {
     const ingestStore = store();
     const triage = {
-      model: "openai/gpt-5.4-nano",
+      model: WIKI_INGEST_MODEL,
       decision: "ingest" as const,
       reason: "The comment records a durable project decision.",
       entityHints: ["opencompany"],
