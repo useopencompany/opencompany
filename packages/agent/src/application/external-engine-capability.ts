@@ -21,6 +21,9 @@ export type ExternalEngineToolAuthorityState = {
   activeTurnId: string | null;
   hostToolContractVersion: string | null;
   workspaceId: string | null;
+  workspaceName: string;
+  workspaceSlug: string | null;
+  wikiEnabled: boolean;
   actorId: string;
   conversationId: string;
   sandboxId: string | null;
@@ -38,6 +41,9 @@ export type ExternalEngineToolAuthorityState = {
 export type ExternalEngineToolAuthorizedContext = {
   actorId: string;
   workspaceId: string;
+  workspaceName: string;
+  workspaceSlug: string | null;
+  wikiEnabled: boolean;
   conversationId: string;
   sandboxId: string;
   engine: "codex" | "claude_code";
@@ -82,6 +88,9 @@ export function authorizeExternalEngineToolCapability(input: {
   return {
     actorId: state.actorId,
     workspaceId: state.workspaceId,
+    workspaceName: state.workspaceName,
+    workspaceSlug: state.workspaceSlug,
+    wikiEnabled: state.wikiEnabled,
     conversationId: state.conversationId,
     sandboxId: state.sandboxId,
     engine: state.engine,

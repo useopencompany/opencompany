@@ -1,6 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createExternalEngineGatewayTicket } from "@opencompany/agent-runtime";
+import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
+  createExternalEngineGatewayTicket,
+} from "@opencompany/agent-runtime";
 import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,7 +14,12 @@ import {
 } from "./acp-tools-mcp";
 import type { RunnerEnv } from "./env";
 
-const env = { internalToken: "runner-secret" } as RunnerEnv;
+const env = {
+  internalToken: "runner-secret",
+  apiOrigin: "https://api.example.com",
+  apiInternalToken: "api-internal-secret",
+  vercelAiGatewayApiKey: "gateway-key",
+} as RunnerEnv;
 const capability = {
   codexChatSessionId: "session_1",
   codexChatTurnId: "run_1",
@@ -22,13 +30,16 @@ const apps: ReturnType<typeof Fastify>[] = [];
 const authorized = {
   actorId: "user_1",
   workspaceId: "workspace_1",
+  workspaceName: "Acme",
+  workspaceSlug: "acme",
+  wikiEnabled: true,
   conversationId: "conversation_1",
   sandboxId: "sandbox_1",
   engine: "claude_code" as const,
   brainRef: null,
   userMessageId: "message_user_1",
   assistantMessageId: "message_assistant_1",
-  hostToolContractVersion: "goat-codex-host-tools.v3",
+  hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
 };
 
 afterEach(async () => {
@@ -111,6 +122,7 @@ describe("runner ACP tools MCP", () => {
         "publish_artifact",
         "list_actions",
         "use_action",
+        "wiki",
       ]);
       const result = await client.callTool({ name: "list_actions", arguments: {} });
       expect(result.isError).toBe(false);
@@ -120,6 +132,93 @@ describe("runner ACP tools MCP", () => {
         }),
       );
       expect(authorize.mock.calls.length).toBeGreaterThanOrEqual(3);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("proxies the scoped wiki tool through the canonical API boundary", async () => {
+    const authorize = vi.fn(async () => authorized);
+    const executeWikiCommand = vi.fn(async () => ({
+      ok: true as const,
+      result: { action: "updated", path: "projects/launch" },
+    }));
+    const app = Fastify();
+    apps.push(app);
+    registerAcpToolsMcpRoute(app, env, { authorize, executeWikiCommand });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+    const ticket = createExternalEngineGatewayTicket({
+      ...capability,
+      secret: env.internalToken,
+    }).ticket;
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+      { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+    );
+    const client = new Client({ name: "runner-test", version: "0.1.0" });
+
+    try {
+      await client.connect(transport as Parameters<typeof client.connect>[0]);
+      const wikiTool = (await client.listTools()).tools.find((tool) => tool.name === "wiki");
+      expect(wikiTool?.inputSchema.properties).toMatchObject({
+        depth: expect.any(Object),
+        title: expect.any(Object),
+      });
+      const result = await client.callTool({
+        name: "wiki",
+        arguments: {
+          command: "write",
+          path: "projects/launch",
+          body: "# Launch",
+        },
+      });
+      expect(result.isError).toBe(false);
+      expect(executeWikiCommand).toHaveBeenCalledWith({
+        origin: env.apiOrigin,
+        token: env.apiInternalToken,
+        workspaceId: "workspace_1",
+        actorId: "user_1",
+        toolInput: {
+          command: "write",
+          path: "projects/launch",
+          body: "# Launch",
+        },
+        idempotencyKey: expect.stringMatching(/^acp-wiki:run_1:[a-f0-9]{24}$/u),
+        signal: expect.any(AbortSignal),
+      });
+      expect(authorize.mock.calls.length).toBeGreaterThanOrEqual(3);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("does not advertise wiki when the user has it disabled", async () => {
+    const authorize = vi.fn(async () => ({ ...authorized, wikiEnabled: false }));
+    const app = Fastify();
+    apps.push(app);
+    registerAcpToolsMcpRoute(app, env, { authorize });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+    const ticket = createExternalEngineGatewayTicket({
+      ...capability,
+      secret: env.internalToken,
+    }).ticket;
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+      { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+    );
+    const client = new Client({ name: "runner-test", version: "0.1.0" });
+
+    try {
+      await client.connect(transport as Parameters<typeof client.connect>[0]);
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+        "publish_artifact",
+        "list_actions",
+        "use_action",
+      ]);
     } finally {
       await client.close();
     }
@@ -315,7 +414,6 @@ describe("runner ACP tools MCP", () => {
       authorizedContext: authorized,
       authorizeOperation: vi.fn(async () => authorized),
       dependencies: {
-        authorize: vi.fn(async () => authorized),
         executeAction,
         evaluateApproval: vi.fn(async () => ({
           ok: true as const,
@@ -327,8 +425,6 @@ describe("runner ACP tools MCP", () => {
           return "approved" as const;
         }),
         resolveApproval,
-        publishArtifact: vi.fn(),
-        rateLimitMax: 300,
       },
     });
 
@@ -354,7 +450,6 @@ describe("runner ACP tools MCP", () => {
       authorizedContext: authorized,
       authorizeOperation: vi.fn(async () => authorized),
       dependencies: {
-        authorize: vi.fn(async () => authorized),
         executeAction,
         evaluateApproval: vi.fn(async () => ({
           ok: true as const,
@@ -363,8 +458,6 @@ describe("runner ACP tools MCP", () => {
         requestApproval: vi.fn(async () => "approval_1"),
         waitForApproval: vi.fn(async () => "approval_missing" as const),
         resolveApproval,
-        publishArtifact: vi.fn(),
-        rateLimitMax: 300,
       },
     });
 
@@ -427,6 +520,7 @@ describe("runner ACP tools MCP", () => {
         "publish_artifact",
         "list_actions",
         "use_action",
+        "wiki",
         "goat_brain",
         "save_to_brain",
       ]);
