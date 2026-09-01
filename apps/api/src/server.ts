@@ -254,7 +254,9 @@ const app = createApiApp({
         db: database.db,
         userWorkosId,
         workspaceIds,
-        connectionProvider: "github_user",
+        // Registrations persist the Plugin package name; the gateway binding
+        // maps package "github" to the personal github_user integration.
+        connectionProvider: "github",
       }),
   }),
   googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),

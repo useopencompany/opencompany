@@ -3,20 +3,21 @@ import { getDb } from "@opencompany/db/client";
 import {
   GITHUB_USER_INTEGRATION_EXTERNAL_ID,
   type GitHubUserOAuthCredentialPayload,
-  loadIntegrationCredential,
-  markIntegrationStatus,
-  refreshIntegrationCredential,
 } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
+import {
+  ExpiringOAuthReauthRequired,
+  getExpiringOAuthAccessToken,
+} from "./expiring-oauth-access-token";
+import { verifyGitHubUserInstallation } from "./github";
 import type { RemoteMcpProviderState } from "./remote-mcp-oauth";
 
 const GITHUB_USER_PROVIDER = "github_user" as const;
 const GITHUB_USER_TOKEN_ENDPOINT = "https://github.com/login/oauth/access_token";
 const GITHUB_API_USER_ENDPOINT = "https://api.github.com/user";
 const STATE_TTL_MS = 10 * 60 * 1_000;
-const REFRESH_SKEW_MS = 60_000;
 
 const GITHUB_USER_INTEGRATION_ENVS = [
   "GITHUB_USER_APP_CLIENT_ID",
@@ -168,7 +169,7 @@ export function buildGitHubUserInstallUrl(state: string) {
   return url.toString();
 }
 
-export async function exchangeGitHubUserCode(code: string): Promise<GitHubUserOAuthTokens> {
+export async function exchangeGitHubAppUserCode(code: string): Promise<GitHubUserOAuthTokens> {
   const response = await fetch(GITHUB_USER_TOKEN_ENDPOINT, {
     method: "POST",
     headers: {
@@ -187,6 +188,16 @@ export async function exchangeGitHubUserCode(code: string): Promise<GitHubUserOA
     throw new Error(`GitHub user authorization failed with ${response.status}.`);
   }
   return parseTokenResponse(result, new Date());
+}
+
+export async function verifyGitHubAppUserInstallation(input: {
+  accessToken: string;
+  installationId: string;
+}) {
+  return verifyGitHubUserInstallation({
+    userToken: input.accessToken,
+    installationId: input.installationId,
+  });
 }
 
 export async function fetchGitHubUserIdentity(accessToken: string): Promise<GitHubUserIdentity> {
@@ -218,40 +229,58 @@ export async function getGitHubUserAccessToken(
   connection: GitHubUserAccessConnection,
   options: { signal?: AbortSignal; forceRefresh?: boolean; db?: DbLike; now?: Date } = {},
 ): Promise<string> {
-  const db = options.db ?? getDb();
-  const now = options.now ?? new Date();
-  const credential = await loadIntegrationCredential({
-    ...connection,
-    provider: GITHUB_USER_PROVIDER,
-    kind: "oauth_token",
-    db,
+  return getExpiringOAuthAccessToken({
+    connection: { ...connection, provider: GITHUB_USER_PROVIDER },
+    displayName: "GitHub",
+    parseCredential: (payload) => {
+      const tokens = parseStoredTokens(payload);
+      return tokens
+        ? {
+            accessToken: tokens.access_token,
+            refreshToken: tokens.refresh_token,
+            payload: tokens,
+          }
+        : null;
+    },
+    validateRefresh: (credential, now) => {
+      if (
+        new Date(credential.payload.refresh_token_expires_at).getTime() - 60_000 <=
+        now.getTime()
+      ) {
+        throw new ExpiringOAuthReauthRequired(
+          "The GitHub refresh token expired.",
+          "The GitHub refresh token expired. Reconnect GitHub in Settings.",
+        );
+      }
+    },
+    refresh: refreshGitHubAppUserCredential,
+    createAuthError: (message) => new GitHubUserAccessAuthError(message),
+    missingCredential: {
+      message: "No stored GitHub credentials for this account.",
+      statusReason: "Stored GitHub credentials are missing.",
+    },
+    invalidCredential: {
+      message: "Stored GitHub credentials are invalid.",
+      statusReason: "Stored GitHub credentials are invalid.",
+    },
+    options,
   });
-  if (!credential) {
-    await markGitHubUserNeedsReauth(connection, "Stored GitHub credentials are missing.", db, now);
-    throw new GitHubUserAccessAuthError("No stored GitHub credentials for this account.");
-  }
+}
 
-  const tokens = parseStoredTokens(credential.payload);
-  if (!tokens) {
-    await markGitHubUserNeedsReauth(connection, "Stored GitHub credentials are invalid.", db, now);
-    throw new GitHubUserAccessAuthError("Stored GitHub credentials are invalid.");
-  }
-
-  const accessTokenIsFresh =
-    credential.expiresAt && credential.expiresAt.getTime() - REFRESH_SKEW_MS > now.getTime();
-  if (!options.forceRefresh && accessTokenIsFresh) return tokens.access_token;
-
-  const refreshExpiresAt = new Date(tokens.refresh_token_expires_at);
-  if (refreshExpiresAt.getTime() - REFRESH_SKEW_MS <= now.getTime()) {
-    await markGitHubUserNeedsReauth(
-      connection,
-      "The GitHub refresh token expired. Reconnect GitHub in Settings.",
-      db,
-      now,
+async function refreshGitHubAppUserCredential(
+  credential: {
+    accessToken: string;
+    refreshToken: string | null;
+    payload: GitHubUserOAuthCredentialPayload;
+  },
+  context: { now: Date; signal?: AbortSignal },
+) {
+  if (!credential.refreshToken) {
+    throw new ExpiringOAuthReauthRequired(
+      "Stored GitHub credentials have no refresh token.",
+      "Stored GitHub credentials have no refresh token. Reconnect GitHub in Settings.",
     );
-    throw new GitHubUserAccessAuthError("The GitHub refresh token expired.");
   }
-
   let response: Response;
   try {
     response = await fetch(GITHUB_USER_TOKEN_ENDPOINT, {
@@ -260,75 +289,54 @@ export async function getGitHubUserAccessToken(
         Accept: "application/json",
         "Content-Type": "application/x-www-form-urlencoded",
       },
-      signal: options.signal ?? null,
+      signal: context.signal ?? null,
       body: new URLSearchParams({
         client_id: requiredEnv("GITHUB_USER_APP_CLIENT_ID"),
         client_secret: requiredEnv("GITHUB_USER_APP_CLIENT_SECRET"),
         grant_type: "refresh_token",
-        refresh_token: tokens.refresh_token,
+        refresh_token: credential.refreshToken,
       }),
     });
   } catch (error) {
-    if (options.signal?.aborted) throw error;
+    if (context.signal?.aborted) throw error;
     throw new Error("GitHub token refresh could not reach GitHub.", { cause: error });
   }
 
   const result = await tokenResponseJson(response);
   const oauthError = readString(result.error);
   if (!response.ok || oauthError) {
-    const concurrentlyRotated = await loadConcurrentlyRotatedToken({
-      connection,
-      previousRefreshToken: tokens.refresh_token,
-      db,
-      now,
-    });
-    if (concurrentlyRotated) return concurrentlyRotated;
-
     if (oauthError === "bad_refresh_token") {
-      await markGitHubUserNeedsReauth(
-        connection,
+      throw new ExpiringOAuthReauthRequired(
+        "GitHub refused the refresh token.",
         "GitHub refused the refresh token. Reconnect GitHub in Settings.",
-        db,
-        now,
       );
-      throw new GitHubUserAccessAuthError("GitHub refused the refresh token.");
     }
     throw new Error(`GitHub token refresh failed with ${response.status}.`);
   }
 
   let refreshed: GitHubUserOAuthTokens;
   try {
-    refreshed = parseTokenResponse(result, now);
+    refreshed = parseTokenResponse(result, context.now);
   } catch (error) {
-    await markGitHubUserNeedsReauth(
-      connection,
-      "GitHub returned invalid expiring credentials. Reconnect GitHub in Settings.",
-      db,
-      now,
-    );
-    throw new GitHubUserAccessAuthError(
+    throw new ExpiringOAuthReauthRequired(
       error instanceof Error ? error.message : "GitHub returned invalid credentials.",
+      "GitHub returned invalid expiring credentials. Reconnect GitHub in Settings.",
     );
   }
 
-  const nextPayload: GitHubUserOAuthCredentialPayload = {
-    access_token: refreshed.accessToken,
-    refresh_token: refreshed.refreshToken,
-    token_type: refreshed.tokenType,
-    refresh_token_expires_at: refreshed.refreshTokenExpiresAt.toISOString(),
-    github_user_id: tokens.github_user_id,
-    github_login: tokens.github_login,
-  };
-  await refreshIntegrationCredential({
-    ...connection,
-    provider: GITHUB_USER_PROVIDER,
-    kind: "oauth_token",
-    payload: nextPayload,
+  return {
+    accessToken: refreshed.accessToken,
+    payload: {
+      access_token: refreshed.accessToken,
+      refresh_token: refreshed.refreshToken,
+      token_type: refreshed.tokenType,
+      refresh_token_expires_at: refreshed.refreshTokenExpiresAt.toISOString(),
+      github_user_id: credential.payload.github_user_id,
+      github_login: credential.payload.github_login,
+      github_installation_id: credential.payload.github_installation_id,
+    } satisfies GitHubUserOAuthCredentialPayload,
     expiresAt: refreshed.accessTokenExpiresAt,
-    db,
-    now,
-  });
-  return refreshed.accessToken;
+  };
 }
 
 export function appendGitHubUserIntegrationStatus(
@@ -345,46 +353,6 @@ export function appendGitHubUserIntegrationStatus(
 
 export function githubUserCallbackUrl() {
   return `${getAppUrl()}/api/integrations/github-user/callback`;
-}
-
-async function loadConcurrentlyRotatedToken(input: {
-  connection: GitHubUserAccessConnection;
-  previousRefreshToken: string;
-  db: DbLike;
-  now: Date;
-}) {
-  const current = await loadIntegrationCredential({
-    ...input.connection,
-    provider: GITHUB_USER_PROVIDER,
-    kind: "oauth_token",
-    db: input.db,
-  });
-  const tokens = current ? parseStoredTokens(current.payload) : null;
-  if (
-    !current?.expiresAt ||
-    !tokens ||
-    tokens.refresh_token === input.previousRefreshToken ||
-    current.expiresAt.getTime() - REFRESH_SKEW_MS <= input.now.getTime()
-  ) {
-    return null;
-  }
-  return tokens.access_token;
-}
-
-async function markGitHubUserNeedsReauth(
-  connection: GitHubUserAccessConnection,
-  statusReason: string,
-  db: DbLike,
-  now: Date,
-) {
-  await markIntegrationStatus({
-    ...connection,
-    provider: GITHUB_USER_PROVIDER,
-    status: "needs_reauth",
-    statusReason,
-    db,
-    now,
-  });
 }
 
 function parseTokenResponse(value: Record<string, unknown>, now: Date): GitHubUserOAuthTokens {
@@ -420,6 +388,7 @@ function parseStoredTokens(
   const refreshTokenExpiresAt = readString(value.refresh_token_expires_at);
   const githubUserId = readString(value.github_user_id);
   const githubLogin = readString(value.github_login);
+  const githubInstallationId = readString(value.github_installation_id);
   if (
     !accessToken?.startsWith("ghu_") ||
     !refreshToken?.startsWith("ghr_") ||
@@ -427,7 +396,8 @@ function parseStoredTokens(
     !refreshTokenExpiresAt ||
     Number.isNaN(new Date(refreshTokenExpiresAt).getTime()) ||
     !githubUserId ||
-    !githubLogin
+    !githubLogin ||
+    !githubInstallationId
   ) {
     return null;
   }
@@ -438,6 +408,7 @@ function parseStoredTokens(
     refresh_token_expires_at: refreshTokenExpiresAt,
     github_user_id: githubUserId,
     github_login: githubLogin,
+    github_installation_id: githubInstallationId,
   };
 }
 

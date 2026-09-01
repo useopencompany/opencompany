@@ -2,23 +2,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = { sentinel: "db" };
 const mocks = vi.hoisted(() => ({
+  claimRefresh: vi.fn(async () => true),
   loadCredential: vi.fn(),
   markStatus: vi.fn(async () => undefined),
-  refreshCredential: vi.fn(async () => undefined),
+  releaseRefresh: vi.fn(async () => undefined),
+  rotateCredential: vi.fn(async () => ({ id: "gcred_github_user" })),
 }));
 
 vi.mock("@opencompany/db/client", () => ({ getDb: () => db }));
 vi.mock("@opencompany/db/integrations", () => ({
   GITHUB_USER_INTEGRATION_EXTERNAL_ID: "github_user",
+  claimIntegrationCredentialRefresh: mocks.claimRefresh,
   loadIntegrationCredential: mocks.loadCredential,
   markIntegrationStatus: mocks.markStatus,
-  refreshIntegrationCredential: mocks.refreshCredential,
+  releaseIntegrationCredentialRefresh: mocks.releaseRefresh,
+  rotateIntegrationCredential: mocks.rotateCredential,
 }));
 
 import {
   buildGitHubUserInstallUrl,
   createGitHubUserIntegrationState,
-  exchangeGitHubUserCode,
+  exchangeGitHubAppUserCode,
   fetchGitHubUserIdentity,
   GitHubUserAccessAuthError,
   getGitHubUserAccessToken,
@@ -38,10 +42,12 @@ function storedCredential(overrides: Record<string, unknown> = {}) {
       refresh_token_expires_at: "2027-02-01T12:00:00.000Z",
       github_user_id: "42",
       github_login: "octocat",
+      github_installation_id: "123",
       ...overrides,
     },
     expiresAt: new Date("2026-09-01T11:00:00.000Z"),
     lastRotatedAt: new Date("2026-09-01T04:00:00.000Z"),
+    refreshLeaseUntil: null,
     updatedAt: new Date("2026-09-01T04:00:00.000Z"),
     encryptionKeyVersion: 1,
   };
@@ -100,7 +106,7 @@ describe("GitHub user integration", () => {
         Response.json({ id: 42, login: "octocat", name: "The Octocat", email: null }),
       );
 
-    const tokens = await exchangeGitHubUserCode("authorization-code");
+    const tokens = await exchangeGitHubAppUserCode("authorization-code");
     await expect(fetchGitHubUserIdentity(tokens.accessToken)).resolves.toEqual({
       id: "42",
       login: "octocat",
@@ -122,7 +128,7 @@ describe("GitHub user integration", () => {
     fetchMock.mockResolvedValueOnce(
       Response.json({ access_token: "gho_wrong_token", token_type: "bearer" }),
     );
-    await expect(exchangeGitHubUserCode("authorization-code")).rejects.toThrow(
+    await expect(exchangeGitHubAppUserCode("authorization-code")).rejects.toThrow(
       "expiring GitHub App user credentials",
     );
   });
@@ -136,7 +142,7 @@ describe("GitHub user integration", () => {
 
     await expect(getGitHubUserAccessToken(connection, { now })).resolves.toBe("ghu_access_old");
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(mocks.refreshCredential).not.toHaveBeenCalled();
+    expect(mocks.rotateCredential).not.toHaveBeenCalled();
   });
 
   it("rotates and atomically persists both expiring tokens", async () => {
@@ -152,7 +158,7 @@ describe("GitHub user integration", () => {
     );
 
     await expect(getGitHubUserAccessToken(connection, { now })).resolves.toBe("ghu_access_new");
-    expect(mocks.refreshCredential).toHaveBeenCalledWith({
+    expect(mocks.rotateCredential).toHaveBeenCalledWith({
       ...connection,
       provider: "github_user",
       kind: "oauth_token",
@@ -163,31 +169,63 @@ describe("GitHub user integration", () => {
         refresh_token_expires_at: "2027-03-04T12:00:00.000Z",
         github_user_id: "42",
         github_login: "octocat",
+        github_installation_id: "123",
       },
       expiresAt: new Date("2026-09-01T20:00:00.000Z"),
+      expectedLastRotatedAt: new Date("2026-09-01T04:00:00.000Z"),
+      expectedRefreshLeaseUntil: new Date("2026-09-01T12:00:30.000Z"),
       db,
       now,
     });
   });
 
+  it("shares one refresh within a process for concurrent consumers", async () => {
+    mocks.loadCredential.mockResolvedValue(storedCredential());
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        access_token: "ghu_access_new",
+        expires_in: 28_800,
+        refresh_token: "ghr_refresh_new",
+        refresh_token_expires_in: 15_897_600,
+        token_type: "bearer",
+      }),
+    );
+
+    await expect(
+      Promise.all([
+        getGitHubUserAccessToken(connection, { now }),
+        getGitHubUserAccessToken(connection, { now }),
+      ]),
+    ).resolves.toEqual(["ghu_access_new", "ghu_access_new"]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(mocks.claimRefresh).toHaveBeenCalledOnce();
+  });
+
   it("uses a concurrently rotated credential instead of forcing a reconnect", async () => {
-    mocks.loadCredential.mockResolvedValueOnce(storedCredential()).mockResolvedValueOnce({
+    const rotatedCredential = {
       ...storedCredential({
         access_token: "ghu_access_other_worker",
         refresh_token: "ghr_refresh_other_worker",
       }),
       expiresAt: new Date("2026-09-01T20:00:00.000Z"),
-    });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ error: "bad_refresh_token" }));
+      lastRotatedAt: new Date("2026-09-01T12:00:01.000Z"),
+    };
+    mocks.loadCredential
+      .mockResolvedValueOnce(storedCredential())
+      .mockResolvedValueOnce(storedCredential())
+      .mockResolvedValueOnce(rotatedCredential);
+    mocks.claimRefresh.mockResolvedValueOnce(false);
+    const fetchMock = vi.spyOn(globalThis, "fetch");
 
     await expect(getGitHubUserAccessToken(connection, { now })).resolves.toBe(
       "ghu_access_other_worker",
     );
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.markStatus).not.toHaveBeenCalled();
   });
 
   it("marks the connection for reauthorization when GitHub refuses its refresh token", async () => {
-    mocks.loadCredential.mockResolvedValueOnce(storedCredential()).mockResolvedValueOnce(null);
+    mocks.loadCredential.mockResolvedValue(storedCredential());
     vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ error: "bad_refresh_token" }));
 
     await expect(getGitHubUserAccessToken(connection, { now })).rejects.toBeInstanceOf(

@@ -80,8 +80,10 @@ ID and secret in prod `/runner` as well so sandbox sessions can refresh the same
 credential. The public callback remains
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/integrations/github-user/callback`, relayed by web to the
 API. The App must request Contents, Issues, and Pull requests read/write plus Metadata read, with
-expiring user tokens and user authorization during installation enabled. Do not reuse or rename
-the workspace-owned `GITHUB_INTEGRATION_*` values.
+expiring user tokens and user authorization during installation enabled. Set its Setup URL to
+`${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/settings/plugins/github` and enable redirect-on-update so App
+updates return to opencompany. Do not reuse or rename the workspace-owned
+`GITHUB_INTEGRATION_*` values.
 
 `BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
 The runner uses it for bounded, durable `PLUGIN_DATA` archives and never injects it into Plugin

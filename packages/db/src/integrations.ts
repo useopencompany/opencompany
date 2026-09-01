@@ -6,7 +6,7 @@ import {
   encryptJson,
   loadEncryptionKey,
 } from "@opencompany/crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { getDb } from "./client";
 import type * as schema from "./product-schema";
@@ -34,6 +34,7 @@ export type GitHubUserOAuthCredentialPayload = {
   refresh_token_expires_at: string;
   github_user_id: string;
   github_login: string;
+  github_installation_id: string;
 };
 
 type DbSchema = typeof schema;
@@ -66,6 +67,92 @@ export type LoadedIntegrationCredential = {
   encryptionKeyVersion: number;
 };
 
+type ConnectPersonalOAuthIntegrationInput = {
+  userWorkosId: string;
+  provider: IntegrationProvider;
+  externalId: string;
+  connectionLabel: string;
+  accountName: string | null;
+  accountEmail: string | null;
+  accountType: string;
+  scopes: string[];
+  payload: Record<string, unknown>;
+  expiresAt: Date | null;
+  displayName: string;
+  credentialFailureReason: string;
+  db?: IntegrationDb;
+  now?: Date;
+};
+
+async function connectPersonalOAuthIntegration(input: ConnectPersonalOAuthIntegrationInput) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const integrationValues = {
+    id: newIntegrationId(),
+    userWorkosId: input.userWorkosId,
+    provider: input.provider,
+    externalId: input.externalId,
+    connectionLabel: input.connectionLabel,
+    accountName: input.accountName,
+    accountEmail: input.accountEmail,
+    accountType: input.accountType,
+    status: "connected" as const,
+    statusReason: null,
+    scopes: input.scopes,
+    lastSyncedAt: now,
+    updatedAt: now,
+  };
+  const [integration] = await db
+    .insert(integrations)
+    .values(integrationValues)
+    .onConflictDoUpdate({
+      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
+      targetWhere: sql`${integrations.workspaceId} IS NULL`,
+      set: {
+        connectionLabel: input.connectionLabel,
+        accountName: input.accountName,
+        accountEmail: input.accountEmail,
+        accountType: input.accountType,
+        status: "connected",
+        statusReason: null,
+        scopes: input.scopes,
+        lastSyncedAt: now,
+        updatedAt: now,
+      },
+    })
+    .returning({ id: integrations.id });
+
+  if (!integration) {
+    throw new Error(`Could not persist opencompany ${input.displayName} integration.`);
+  }
+
+  try {
+    await saveIntegrationCredential({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: input.provider,
+      kind: "oauth_token",
+      payload: input.payload,
+      expiresAt: input.expiresAt,
+      db,
+      now,
+    });
+  } catch (error) {
+    await markIntegrationStatus({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: input.provider,
+      status: "sync_failed",
+      statusReason: input.credentialFailureReason,
+      db,
+      now: new Date(),
+    });
+    throw error;
+  }
+
+  return { integrationId: integration.id };
+}
+
 export async function connectGoogleIntegration(input: {
   provider: IntegrationProvider;
   userWorkosId: string;
@@ -78,74 +165,15 @@ export async function connectGoogleIntegration(input: {
   db?: IntegrationDb;
   now?: Date;
 }) {
-  const db = input.db ?? getDb();
-  const now = input.now ?? new Date();
   const connectionLabel = input.accountEmail?.trim() || input.accountName?.trim() || "Google";
-
-  const [integration] = await db
-    .insert(integrations)
-    .values({
-      id: newIntegrationId(),
-      userWorkosId: input.userWorkosId,
-      provider: input.provider,
-      externalId: input.externalId,
-      connectionLabel,
-      accountName: input.accountName,
-      accountEmail: input.accountEmail,
-      accountType: "google_account",
-      status: "connected",
-      statusReason: null,
-      scopes: input.scopes,
-      lastSyncedAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
-      // The personal-uniqueness index is partial; the arbiter must match it.
-      targetWhere: sql`${integrations.workspaceId} IS NULL`,
-      set: {
-        connectionLabel,
-        accountName: input.accountName,
-        accountEmail: input.accountEmail,
-        accountType: "google_account",
-        status: "connected",
-        statusReason: null,
-        scopes: input.scopes,
-        lastSyncedAt: now,
-        updatedAt: now,
-      },
-    })
-    .returning({ id: integrations.id });
-
-  if (!integration) {
-    throw new Error("Could not persist opencompany Google integration.");
-  }
-
-  try {
-    await saveIntegrationCredential({
-      userWorkosId: input.userWorkosId,
-      integrationId: integration.id,
-      provider: input.provider,
-      kind: "oauth_token",
-      payload: { ...input.tokens },
-      expiresAt: input.expiresAt,
-      db,
-      now,
-    });
-  } catch (error) {
-    await markIntegrationStatus({
-      userWorkosId: input.userWorkosId,
-      integrationId: integration.id,
-      provider: input.provider,
-      status: "sync_failed",
-      statusReason: "Failed to persist Google integration credentials.",
-      db,
-      now: new Date(),
-    });
-    throw error;
-  }
-
-  return { integrationId: integration.id };
+  return connectPersonalOAuthIntegration({
+    ...input,
+    connectionLabel,
+    accountType: "google_account",
+    payload: { ...input.tokens },
+    displayName: "Google",
+    credentialFailureReason: "Failed to persist Google integration credentials.",
+  });
 }
 
 export type XAccountOAuthCredentialPayload = {
@@ -169,80 +197,29 @@ export async function connectXAccountIntegration(input: {
   db?: IntegrationDb;
   now?: Date;
 }) {
-  const db = input.db ?? getDb();
-  const now = input.now ?? new Date();
   const connectionLabel = `@${input.username}`;
-
-  const [integration] = await db
-    .insert(integrations)
-    .values({
-      id: newIntegrationId(),
-      userWorkosId: input.userWorkosId,
-      provider: "x_account",
-      // The X user id is stable across username changes; it is the routing key.
-      externalId: input.xUserId,
-      connectionLabel,
-      accountName: input.name,
-      accountEmail: null,
-      accountType: "x_user",
-      status: "connected",
-      statusReason: null,
-      scopes: input.scopes,
-      lastSyncedAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
-      // The personal-uniqueness index is partial; the arbiter must match it.
-      targetWhere: sql`${integrations.workspaceId} IS NULL`,
-      set: {
-        connectionLabel,
-        accountName: input.name,
-        accountType: "x_user",
-        status: "connected",
-        statusReason: null,
-        scopes: input.scopes,
-        lastSyncedAt: now,
-        updatedAt: now,
-      },
-    })
-    .returning({ id: integrations.id });
-
-  if (!integration) {
-    throw new Error("Could not persist opencompany X integration.");
-  }
-
   const payload: XAccountOAuthCredentialPayload = {
     access_token: input.accessToken,
     ...(input.refreshToken ? { refresh_token: input.refreshToken } : {}),
     ...(input.scopes.length > 0 ? { scope: input.scopes.join(" ") } : {}),
   };
 
-  try {
-    await saveIntegrationCredential({
-      userWorkosId: input.userWorkosId,
-      integrationId: integration.id,
-      provider: "x_account",
-      kind: "oauth_token",
-      payload,
-      expiresAt: input.expiresAt,
-      db,
-      now,
-    });
-  } catch (error) {
-    await markIntegrationStatus({
-      userWorkosId: input.userWorkosId,
-      integrationId: integration.id,
-      provider: "x_account",
-      status: "sync_failed",
-      statusReason: "Failed to persist X integration credentials.",
-      db,
-      now: new Date(),
-    });
-    throw error;
-  }
-
-  return { integrationId: integration.id };
+  return connectPersonalOAuthIntegration({
+    userWorkosId: input.userWorkosId,
+    provider: "x_account",
+    externalId: input.xUserId,
+    connectionLabel,
+    accountName: input.name,
+    accountEmail: null,
+    accountType: "x_user",
+    scopes: input.scopes,
+    payload,
+    expiresAt: input.expiresAt,
+    displayName: "X",
+    credentialFailureReason: "Failed to persist X integration credentials.",
+    ...(input.db ? { db: input.db } : {}),
+    ...(input.now ? { now: input.now } : {}),
+  });
 }
 
 // Personal acting-as-the-user GitHub connection for the official Plugin. This
@@ -254,6 +231,7 @@ export async function connectGitHubUserIntegration(input: {
   login: string;
   name: string | null;
   email: string | null;
+  installationId: string;
   accessToken: string;
   refreshToken: string;
   accessTokenExpiresAt: Date;
@@ -262,51 +240,7 @@ export async function connectGitHubUserIntegration(input: {
   db?: IntegrationDb;
   now?: Date;
 }) {
-  const db = input.db ?? getDb();
-  const now = input.now ?? new Date();
   const connectionLabel = `@${input.login}`;
-
-  const [integration] = await db
-    .insert(integrations)
-    .values({
-      id: newIntegrationId(),
-      userWorkosId: input.userWorkosId,
-      provider: "github_user",
-      // The official Plugin exposes one personal GitHub identity at a time.
-      // A stable sentinel makes reconnecting with another GitHub account
-      // replace the credential instead of leaving an unselectable second row.
-      externalId: GITHUB_USER_INTEGRATION_EXTERNAL_ID,
-      connectionLabel,
-      accountName: input.name?.trim() || input.login,
-      accountEmail: input.email,
-      accountType: "github_user",
-      status: "connected",
-      statusReason: null,
-      scopes: [],
-      lastSyncedAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
-      targetWhere: sql`${integrations.workspaceId} IS NULL`,
-      set: {
-        connectionLabel,
-        accountName: input.name?.trim() || input.login,
-        accountEmail: input.email,
-        accountType: "github_user",
-        status: "connected",
-        statusReason: null,
-        scopes: [],
-        lastSyncedAt: now,
-        updatedAt: now,
-      },
-    })
-    .returning({ id: integrations.id });
-
-  if (!integration) {
-    throw new Error("Could not persist opencompany GitHub user integration.");
-  }
-
   const payload: GitHubUserOAuthCredentialPayload = {
     access_token: input.accessToken,
     refresh_token: input.refreshToken,
@@ -314,33 +248,27 @@ export async function connectGitHubUserIntegration(input: {
     refresh_token_expires_at: input.refreshTokenExpiresAt.toISOString(),
     github_user_id: input.githubUserId,
     github_login: input.login,
+    github_installation_id: input.installationId,
   };
 
-  try {
-    await saveIntegrationCredential({
-      userWorkosId: input.userWorkosId,
-      integrationId: integration.id,
-      provider: "github_user",
-      kind: "oauth_token",
-      payload,
-      expiresAt: input.accessTokenExpiresAt,
-      db,
-      now,
-    });
-  } catch (error) {
-    await markIntegrationStatus({
-      userWorkosId: input.userWorkosId,
-      integrationId: integration.id,
-      provider: "github_user",
-      status: "sync_failed",
-      statusReason: "Failed to persist GitHub user credentials.",
-      db,
-      now: new Date(),
-    });
-    throw error;
-  }
-
-  return { integrationId: integration.id };
+  return connectPersonalOAuthIntegration({
+    userWorkosId: input.userWorkosId,
+    provider: "github_user",
+    // The Plugin supports one personal GitHub identity at a time; the stable
+    // sentinel makes reconnecting replace the previous credential.
+    externalId: GITHUB_USER_INTEGRATION_EXTERNAL_ID,
+    connectionLabel,
+    accountName: input.name?.trim() || input.login,
+    accountEmail: input.email,
+    accountType: "github_user",
+    scopes: [],
+    payload,
+    expiresAt: input.accessTokenExpiresAt,
+    displayName: "GitHub user",
+    credentialFailureReason: "Failed to persist GitHub user credentials.",
+    ...(input.db ? { db: input.db } : {}),
+    ...(input.now ? { now: input.now } : {}),
+  });
 }
 
 export type SlackOAuthCredentialPayload = {
@@ -892,6 +820,103 @@ export async function refreshIntegrationCredential(
   });
 }
 
+// Cross-process refresh coordination for rotating OAuth credentials. A short
+// lease prevents two runtimes from spending the same refresh token; the
+// expected rotation timestamp prevents a stale claimant from overwriting a
+// credential another runtime already replaced.
+export async function claimIntegrationCredentialRefresh(
+  input: IntegrationCredentialContext & {
+    expectedLastRotatedAt: Date | null;
+    leaseUntil: Date;
+    db: Pick<IntegrationDb, "update">;
+    now?: Date;
+  },
+) {
+  const now = input.now ?? new Date();
+  const [credential] = await input.db
+    .update(integrationCredentials)
+    .set({ refreshLeaseUntil: input.leaseUntil })
+    .where(
+      and(
+        eq(integrationCredentials.userWorkosId, input.userWorkosId),
+        eq(integrationCredentials.integrationId, input.integrationId),
+        eq(integrationCredentials.provider, input.provider),
+        eq(integrationCredentials.kind, input.kind),
+        input.expectedLastRotatedAt
+          ? eq(integrationCredentials.lastRotatedAt, input.expectedLastRotatedAt)
+          : isNull(integrationCredentials.lastRotatedAt),
+        or(
+          isNull(integrationCredentials.refreshLeaseUntil),
+          lte(integrationCredentials.refreshLeaseUntil, now),
+        ),
+      ),
+    )
+    .returning({ id: integrationCredentials.id });
+  return Boolean(credential);
+}
+
+export async function rotateIntegrationCredential(
+  input: IntegrationCredentialContext & {
+    payload: Record<string, unknown>;
+    expiresAt?: Date | null;
+    expectedLastRotatedAt: Date | null;
+    expectedRefreshLeaseUntil: Date;
+    db: Pick<IntegrationDb, "update">;
+    now?: Date;
+  },
+) {
+  const now = input.now ?? new Date();
+  const write = prepareIntegrationCredentialWrite(input, now);
+  const [credential] = await input.db
+    .update(integrationCredentials)
+    .set(write.conflictSet)
+    .where(
+      and(
+        eq(integrationCredentials.userWorkosId, input.userWorkosId),
+        eq(integrationCredentials.integrationId, input.integrationId),
+        eq(integrationCredentials.provider, input.provider),
+        eq(integrationCredentials.kind, input.kind),
+        input.expectedLastRotatedAt
+          ? eq(integrationCredentials.lastRotatedAt, input.expectedLastRotatedAt)
+          : isNull(integrationCredentials.lastRotatedAt),
+        eq(integrationCredentials.refreshLeaseUntil, input.expectedRefreshLeaseUntil),
+      ),
+    )
+    .returning(INTEGRATION_CREDENTIAL_WRITE_RETURNING);
+  if (!credential) return null;
+
+  await markIntegrationStatus({
+    userWorkosId: input.userWorkosId,
+    integrationId: input.integrationId,
+    provider: input.provider,
+    status: "connected",
+    statusReason: null,
+    db: input.db,
+    now,
+  });
+  return credential;
+}
+
+export async function releaseIntegrationCredentialRefresh(
+  input: IntegrationCredentialContext & {
+    expectedRefreshLeaseUntil: Date;
+    db: Pick<IntegrationDb, "update">;
+  },
+) {
+  await input.db
+    .update(integrationCredentials)
+    .set({ refreshLeaseUntil: null })
+    .where(
+      and(
+        eq(integrationCredentials.userWorkosId, input.userWorkosId),
+        eq(integrationCredentials.integrationId, input.integrationId),
+        eq(integrationCredentials.provider, input.provider),
+        eq(integrationCredentials.kind, input.kind),
+        eq(integrationCredentials.refreshLeaseUntil, input.expectedRefreshLeaseUntil),
+      ),
+    );
+}
+
 function prepareIntegrationCredentialWrite(
   input: IntegrationCredentialContext & {
     payload: Record<string, unknown>;
@@ -922,6 +947,7 @@ function prepareIntegrationCredentialWrite(
       encryptionKeyVersion: keyVersion,
       expiresAt: input.expiresAt ?? null,
       lastRotatedAt: now,
+      refreshLeaseUntil: null,
       updatedAt: now,
     },
     conflictSet: {
@@ -931,6 +957,7 @@ function prepareIntegrationCredentialWrite(
       encryptionKeyVersion: keyVersion,
       expiresAt: input.expiresAt ?? null,
       lastRotatedAt: now,
+      refreshLeaseUntil: null,
       updatedAt: now,
     },
   };

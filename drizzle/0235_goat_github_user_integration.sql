@@ -1,6 +1,7 @@
 -- Personal GitHub App user credentials for the official GitHub Plugin. This
 -- provider is deliberately distinct from the workspace-owned "github" App
 -- installations used by ingestion and webhooks.
+ALTER TABLE "goat"."integration_credentials" ADD COLUMN "refresh_lease_until" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "goat"."integrations" DROP CONSTRAINT IF EXISTS "goat_integrations_provider_check";--> statement-breakpoint
 ALTER TABLE "goat"."integrations" ADD CONSTRAINT "goat_integrations_provider_check" CHECK ("goat"."integrations"."provider" IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')) NOT VALID;--> statement-breakpoint
 ALTER TABLE "goat"."integration_credentials" DROP CONSTRAINT IF EXISTS "goat_integration_credentials_provider_check";--> statement-breakpoint

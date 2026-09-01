@@ -1622,6 +1622,7 @@ export const integrationCredentials = productSchema.table(
     encryptionKeyVersion: integer("encryption_key_version").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    refreshLeaseUntil: timestamp("refresh_lease_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
