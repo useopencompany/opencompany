@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   listActivePluginGatewayRegistrations,
+  storePluginGatewayDiscoveryFailure,
   storePluginGatewayDiscoverySnapshot,
 } from "./plugin-gateway-repository";
 import { PostgresPluginRepository } from "./plugin-repository";
@@ -459,6 +460,37 @@ describe("Postgres immutable Plugin repository", () => {
         refreshAfter,
       }),
     ]);
+    await expect(repository.get({ actor: actor(), name: "linear" })).resolves.toMatchObject({
+      remoteMcpServers: [
+        {
+          name: "remote",
+          connectionProvider: "linear",
+          discoveryStatus: "ready",
+          tools: [expect.objectContaining({ name: "new_tool" })],
+          discoveredAt,
+          refreshAfter,
+          lastDiscoveryError: null,
+        },
+      ],
+    });
+
+    const attemptedAt = new Date("2026-08-26T12:30:00.000Z");
+    await storePluginGatewayDiscoveryFailure(db, {
+      workspaceId: "workspace_1",
+      registrationId: registration!.id,
+      error: "Provider discovery timed out.",
+      attemptedAt,
+      retryAfter: new Date("2026-08-26T12:35:00.000Z"),
+    });
+    await expect(repository.get({ actor: actor(), name: "linear" })).resolves.toMatchObject({
+      remoteMcpServers: [
+        {
+          discoveryStatus: "stale",
+          tools: [expect.objectContaining({ name: "new_tool" })],
+          lastDiscoveryError: "Provider discovery timed out.",
+        },
+      ],
+    });
 
     await repository.setStatus({ actor: actor(), name: "linear", status: "disabled" });
     await expect(

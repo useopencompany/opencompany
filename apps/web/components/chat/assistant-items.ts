@@ -278,6 +278,8 @@ export function toolCallViewFromPart(
     isUseActionToolOutput(output) &&
     output.ok === false &&
     output.error.code === "approval_required";
+  const approvalDeclined =
+    state === "approval-responded" && isRecord(part.approval) && part.approval.approved === false;
   const failedPublicWebTool =
     (name === WEB_FETCH_TOOL_NAME || name === WEB_SEARCH_TOOL_NAME) &&
     state === "output-available" &&
@@ -294,23 +296,25 @@ export function toolCallViewFromPart(
     isCodexItemToolName(name) && state === "output-available" && isRecord(output)
       ? readString(output.status)
       : null;
-  const status = failedBrain
+  const status = approvalDeclined
     ? "failed"
-    : failedAction
+    : failedBrain
       ? "failed"
-      : failedSkill
+      : failedAction
         ? "failed"
-        : awaitingCapabilityApproval
-          ? "waiting"
-          : failedPublicWebTool
-            ? "failed"
-            : failedBrowserTool
+        : failedSkill
+          ? "failed"
+          : awaitingCapabilityApproval
+            ? "waiting"
+            : failedPublicWebTool
               ? "failed"
-              : codexItemOutcome === "failed"
+              : failedBrowserTool
                 ? "failed"
-                : codexItemOutcome === "interrupted"
-                  ? "stopped"
-                  : toolStatusFromState(state, stopped);
+                : codexItemOutcome === "failed"
+                  ? "failed"
+                  : codexItemOutcome === "interrupted"
+                    ? "stopped"
+                    : toolStatusFromState(state, stopped);
   const codexPromptOutcome =
     (name === CODEX_QUESTION_TOOL_NAME || name === CODEX_APPROVAL_TOOL_NAME) &&
     state === "output-available" &&
@@ -334,16 +338,24 @@ export function toolCallViewFromPart(
             ? codexPromptOutcome === "canceled"
               ? "Canceled"
               : "Unanswered"
-            : awaitingCapabilityApproval
-              ? "Approval needed"
-              : toolStatusText(status, state),
+            : approvalDeclined
+              ? "Declined"
+              : awaitingCapabilityApproval
+                ? "Approval needed"
+                : toolStatusText(status, state),
     detail: presentationOwnsDetail
       ? (presentation?.detail ?? null)
       : (presentation?.detail ?? toolDetail(name, part, status)),
     detailChips: presentation?.detailChips ?? [],
     input: part.input,
     output: part.output,
-    errorText: typeof part.errorText === "string" ? part.errorText : null,
+    errorText: approvalDeclined
+      ? isRecord(part.approval) && typeof part.approval.reason === "string"
+        ? part.approval.reason
+        : "The action was declined."
+      : typeof part.errorText === "string"
+        ? part.errorText
+        : null,
     state,
     approvalId:
       isRecord(part.approval) && typeof part.approval.id === "string" ? part.approval.id : null,
@@ -592,9 +604,13 @@ function formatActionCost(usdMicros: number) {
   }).format(usdMicros / 1_000_000);
 }
 
-function actionToolLabel(input: unknown) {
+export function actionToolLabel(input: unknown) {
   const action = isRecord(input) ? readString(input.action) : null;
   if (!action) return "Action";
+  const pluginMatch = /^plugin:([^:]+):[^.]+\.(.+)$/u.exec(action);
+  if (pluginMatch) {
+    return `${toolLabel(pluginMatch[1]!)} · ${toolLabel(pluginMatch[2]!)}`;
+  }
   return toolLabel(action.split(".").join("_"));
 }
 

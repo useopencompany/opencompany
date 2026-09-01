@@ -66,7 +66,7 @@ export async function registerActionApproval(input: {
       approvalRecords: sql`CASE
         WHEN NOT (${actionTurns.approvalRecords} ? ${input.invocationId})
           THEN ${actionTurns.approvalRecords}
-            || jsonb_build_object(${input.invocationId}, ${recordJson}::jsonb)
+            || jsonb_build_object(${input.invocationId}::text, ${recordJson}::jsonb)
         WHEN ${input.decision === "denied"}::boolean
           AND ${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'status' = 'pending'
           THEN jsonb_set(

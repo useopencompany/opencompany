@@ -321,7 +321,7 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
-  it("renders the Linear MCP connection instead of the separate brain-source accounts", () => {
+  it("keeps Linear out of the legacy Integrations panel", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_linear_mcp",
@@ -342,66 +342,10 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
-    // Linear lives under the Workspace scope, which is shown first.
-    const linearCard = screen
-      .getByText("Connect issues, projects, and comments from Linear.")
-      .closest("div.rounded-2xl");
-    expect(linearCard).not.toBeNull();
-    expect(within(linearCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
     expect(
-      within(linearCard as HTMLElement).queryByText("Source workspace"),
+      screen.queryByText("Connect issues, projects, and comments from Linear."),
     ).not.toBeInTheDocument();
-    expect(within(linearCard as HTMLElement).queryByRole("link", { name: "Connect" })).toBeNull();
-    const readPermission = within(linearCard as HTMLElement).getByRole("group", {
-      name: "Read Linear permission",
-    });
-    const writePermission = within(linearCard as HTMLElement).getByRole("group", {
-      name: "Manage issues permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-  });
-
-  it("flags a Linear MCP auth error and lets the user reconnect from integrations settings", () => {
-    const integrations = integrationStateFromRows([
-      {
-        id: "gint_linear_mcp",
-        provider: "linear",
-        externalId: "linear_mcp",
-        accountName: "Linear",
-        status: "needs_reauth",
-        statusReason: "Linear authorization expired. Reconnect Linear in Settings.",
-        capabilityModes: {},
-      },
-    ]) as IntegrationState;
-
-    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
-
-    const linearCard = screen
-      .getByText("Connect issues, projects, and comments from Linear.")
-      .closest("div.rounded-2xl");
-    expect(linearCard).not.toBeNull();
-    expect(within(linearCard as HTMLElement).getByText("Needs reconnect")).toBeInTheDocument();
-    expect(
-      within(linearCard as HTMLElement).getByText(
-        "Linear authorization expired. Reconnect Linear in Settings.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(linearCard as HTMLElement).getByRole("link", { name: "Reconnect" }),
-    ).toHaveAttribute("href", "/api/integrations/linear/start?returnTo=/settings/integrations");
-    expect(within(linearCard as HTMLElement).queryByText("Connected")).not.toBeInTheDocument();
-    expect(
-      within(linearCard as HTMLElement).queryByRole("group", {
-        name: "Read Linear permission",
-      }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Source workspace")).not.toBeInTheDocument();
   });
 
   it("shows PostHog with read-on and create-insights-ask permissions", () => {

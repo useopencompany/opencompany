@@ -1,6 +1,10 @@
 "use client";
 
-import type { PluginInstallationDto } from "@opencompany/protocol";
+import type {
+  PluginImportPreviewDto,
+  PluginInstallationDto,
+  PluginRemoteMcpServerDto,
+} from "@opencompany/protocol";
 import { Alert, AlertDescription, AlertTitle } from "@opencompany/ui/components/alert";
 import { Badge } from "@opencompany/ui/components/badge";
 import { Button, buttonVariants } from "@opencompany/ui/components/button";
@@ -16,7 +20,6 @@ import {
 import { Skeleton } from "@opencompany/ui/components/skeleton";
 import { toast } from "@opencompany/ui/components/sonner";
 import { LinearIcon } from "@opencompany/ui/icons";
-import { useLiveQuery } from "@tanstack/react-db";
 import {
   AlertCircle,
   ChevronDown,
@@ -24,6 +27,7 @@ import {
   Loader2,
   PackageCheck,
   PlugZap,
+  RefreshCw,
   Sparkles,
   Unplug,
   Users,
@@ -31,15 +35,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
-import {
-  InstallPluginDialog,
-  LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE,
-  LINEAR_PLUGIN_NAME,
-  LINEAR_PLUGIN_SOURCE,
-} from "@/components/PluginSettings";
+import { installOfficialLinearPlugin, LINEAR_PLUGIN_SOURCE } from "@/components/PluginSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
   IntegrationAccountRow,
@@ -52,22 +51,19 @@ import {
   providerCapabilities,
 } from "@/lib/actions/capabilities";
 import {
-  getHeadlessIntegrationAccounts,
-  type HeadlessIntegrationAccountReadModel,
-} from "@/lib/headless-integration-collections";
-import { archiveHeadlessPlugin, enableHeadlessPlugin } from "@/lib/headless-knowledge-commands";
+  archiveHeadlessPlugin,
+  enableHeadlessPlugin,
+  previewHeadlessPluginImport,
+  refreshHeadlessPluginMcp,
+} from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
-import {
-  type IntegrationAccountView,
-  type IntegrationState,
-  integrationStateFromRows,
-} from "@/lib/integration-state";
+import { type IntegrationAccountView, type IntegrationState } from "@/lib/integration-state";
 
 const LINEAR_DESCRIPTION = "Work with Linear issues, projects, comments, and team workflows.";
 const LINEAR_TOOLS_CONNECT_HREF =
   "/api/integrations/linear/start?returnTo=/settings/plugins/linear";
-const LINEAR_INGEST_CONNECT_HREF =
-  "/api/integrations/linear-ingest/start?returnTo=/settings/plugins/linear";
+const NO_CONNECTION_DISCOVERY_ERROR =
+  "No usable provider connection was available for MCP discovery.";
 
 export type PluginLoadState =
   | { status: "loading" }
@@ -94,18 +90,30 @@ export type PluginToolGroupView = {
 export type PluginToolsState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; groups: PluginToolGroupView[] };
+  | {
+      status: "ready";
+      groups: PluginToolGroupView[];
+      discovery: {
+        status: "pending" | "ready" | "stale" | "error";
+        toolCount: number;
+        discoveredAt: string | null;
+        refreshAfter: string | null;
+        lastDiscoveryError: string | null;
+      };
+    };
 
-type LinearAccount = {
-  purpose: "Tools" | "Ingestion";
-  account: IntegrationAccountView;
-};
+type LinearAccount = { account: IntegrationAccountView };
 
 type LinearPluginSkill = {
-  bundleId: string;
+  id: string;
   name: string;
   description: string;
 };
+
+type PluginPreviewState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; preview: PluginImportPreviewDto };
 
 export type LinearAccountsState =
   | { status: "loading" }
@@ -125,37 +133,18 @@ export function LinearPluginDetail({
   canEdit: boolean;
   toolsState?: PluginToolsState;
 }) {
-  const { integrations, workspace } = useAppData();
-  const collection = useMemo(() => getHeadlessIntegrationAccounts(workspace.id), [workspace.id]);
-  const {
-    data: rows,
-    isError,
-    isLoading,
-  } = useLiveQuery((q) => q.from({ integration: collection }), [collection]);
-
-  const initialValue = useMemo(() => linearAccountsFromState(integrations), [integrations]);
-  const accountsState = useMemo<LinearAccountsState>(() => {
-    if (isError && initialValue.accounts.length === 0) {
-      return { status: "error", message: "Linear accounts could not be loaded." };
-    }
-    if (isLoading && !rows?.length && initialValue.accounts.length === 0) {
-      return { status: "loading" };
-    }
-    if (!rows?.length) return { status: "ready", ...initialValue };
-    return {
-      status: "ready",
-      ...linearAccountsFromState(
-        integrationStateFromRows(rows as HeadlessIntegrationAccountReadModel[]),
-      ),
-    };
-  }, [initialValue, isError, isLoading, rows]);
+  const { integrations } = useAppData();
+  const accountsState = useMemo<LinearAccountsState>(
+    () => ({ status: "ready", ...linearAccountsFromState(integrations) }),
+    [integrations],
+  );
   const effectiveToolsState =
     toolsState ??
     (pluginState.status === "loading"
       ? { status: "loading" as const }
       : pluginState.status === "error"
         ? { status: "error" as const, message: pluginState.message }
-        : defaultLinearToolsState());
+        : linearToolsStateFromPlugin(pluginState.plugin));
 
   return (
     <LinearPluginDetailView
@@ -179,6 +168,23 @@ export function LinearPluginDetailView({
   canEdit: boolean;
 }) {
   const plugin = pluginState.status === "ready" ? pluginState.plugin : null;
+  const shouldPreview = pluginState.status === "ready" && !pluginState.plugin;
+  const [previewState, setPreviewState] = useState<PluginPreviewState>({ status: "loading" });
+
+  useEffect(() => {
+    if (!shouldPreview) return;
+    let active = true;
+    void previewHeadlessPluginImport({ url: LINEAR_PLUGIN_SOURCE })
+      .then((preview) => {
+        if (active) setPreviewState({ status: "ready", preview });
+      })
+      .catch((cause) => {
+        if (active) setPreviewState({ status: "error", message: errorMessage(cause) });
+      });
+    return () => {
+      active = false;
+    };
+  }, [shouldPreview]);
 
   return (
     <>
@@ -188,24 +194,33 @@ export function LinearPluginDetailView({
         description={plugin?.manifest.description || LINEAR_DESCRIPTION}
         backLink={{ href: "/settings/plugins", label: "Plugins" }}
       >
-        <PluginHeaderSection state={pluginState} canEdit={canEdit} />
-        <AccountsSection state={accountsState} />
+        <PluginHeaderSection state={pluginState} previewState={previewState} canEdit={canEdit} />
+        {plugin ? <AccountsSection state={accountsState} /> : null}
         <ToolsSection
           pluginState={pluginState}
+          previewState={previewState}
           state={toolsState}
+          canEdit={canEdit}
           permissionConnection={
             accountsState.status === "ready" ? accountsState.permissionConnection : null
           }
         />
-        <SkillsSection state={pluginState} />
+        <SkillsSection state={pluginState} previewState={previewState} />
       </SettingsContent>
     </>
   );
 }
 
-function PluginHeaderSection({ state, canEdit }: { state: PluginLoadState; canEdit: boolean }) {
+function PluginHeaderSection({
+  state,
+  previewState,
+  canEdit,
+}: {
+  state: PluginLoadState;
+  previewState: PluginPreviewState;
+  canEdit: boolean;
+}) {
   const router = useRouter();
-  const [installing, setInstalling] = useState(false);
   const [confirmingUninstall, setConfirmingUninstall] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -216,6 +231,20 @@ function PluginHeaderSection({ state, canEdit }: { state: PluginLoadState; canEd
   }
 
   const plugin = state.plugin;
+  const install = () => {
+    if (plugin || isPending) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        await installOfficialLinearPlugin(
+          previewState.status === "ready" ? previewState.preview : undefined,
+        );
+        router.refresh();
+      } catch (cause) {
+        setError(errorMessage(cause));
+      }
+    });
+  };
   const enable = () => {
     if (!plugin) return;
     setError(null);
@@ -294,13 +323,13 @@ function PluginHeaderSection({ state, canEdit }: { state: PluginLoadState; canEd
                 </Button>
               </>
             ) : (
-              <Button
-                size="sm"
-                disabled={!LINEAR_PLUGIN_SOURCE}
-                title={LINEAR_PLUGIN_SOURCE ? undefined : LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE}
-                onClick={() => setInstalling(true)}
-              >
-                <PlugZap className="size-3.5" /> Install
+              <Button size="sm" disabled={isPending} onClick={install}>
+                {isPending ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <PlugZap className="size-3.5" />
+                )}
+                {isPending ? "Installing…" : "Install"}
               </Button>
             )
           ) : null}
@@ -308,19 +337,23 @@ function PluginHeaderSection({ state, canEdit }: { state: PluginLoadState; canEd
       </div>
 
       {plugin ? (
-        <dl className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[11.5px] leading-4">
-          <dt className="text-ink-faint">Source</dt>
-          <dd className="break-all text-ink">{plugin.source.url}</dd>
-          <dt className="text-ink-faint">Commit</dt>
-          <dd className="break-all font-mono text-ink">{plugin.source.resolvedCommit}</dd>
-          <dt className="text-ink-faint">Integrity</dt>
-          <dd className="break-all font-mono text-ink">{plugin.integrity}</dd>
-        </dl>
+        <details className="group rounded-lg border border-border bg-surface-muted">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12px] font-medium text-ink-muted">
+            Advanced package details
+            <ChevronDown className="ml-auto size-3.5 transition-transform group-open:rotate-180" />
+          </summary>
+          <dl className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-t border-border px-3 py-2.5 text-[11.5px] leading-4">
+            <dt className="text-ink-faint">Source</dt>
+            <dd className="break-all text-ink">{plugin.source.url}</dd>
+            <dt className="text-ink-faint">Commit</dt>
+            <dd className="break-all font-mono text-ink">{plugin.source.resolvedCommit}</dd>
+            <dt className="text-ink-faint">Integrity</dt>
+            <dd className="break-all font-mono text-ink">{plugin.integrity}</dd>
+          </dl>
+        </details>
       ) : (
         <SectionEmpty icon={PackageCheck}>
-          {LINEAR_PLUGIN_SOURCE
-            ? "Install the package to add Linear tools and skills. Your Linear accounts remain separate."
-            : `${LINEAR_PLUGIN_INSTALL_UNAVAILABLE_MESSAGE} Existing Linear accounts remain connected.`}
+          Review the package tools and skills below, then install when you are ready.
         </SectionEmpty>
       )}
 
@@ -330,22 +363,6 @@ function PluginHeaderSection({ state, canEdit }: { state: PluginLoadState; canEd
         </p>
       ) : null}
       {error ? <SectionError title="Plugin update failed" message={error} /> : null}
-
-      {installing && LINEAR_PLUGIN_SOURCE ? (
-        <InstallPluginDialog
-          initialUrl={LINEAR_PLUGIN_SOURCE}
-          expectedName={LINEAR_PLUGIN_NAME}
-          lockSource
-          onClose={() => {
-            setInstalling(false);
-            router.refresh();
-          }}
-          onComplete={() => {
-            setInstalling(false);
-            router.refresh();
-          }}
-        />
-      ) : null}
 
       <Dialog open={confirmingUninstall} onOpenChange={setConfirmingUninstall}>
         <DialogContent className="max-w-[440px] gap-5">
@@ -372,47 +389,44 @@ function PluginHeaderSection({ state, canEdit }: { state: PluginLoadState; canEd
 }
 
 function AccountsSection({ state }: { state: LinearAccountsState }) {
+  const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
+
   return (
     <section aria-labelledby="linear-accounts-heading" className="flex flex-col gap-3">
       <SectionHeading
         id="linear-accounts-heading"
         icon={Users}
         title="Accounts"
-        description="Connections are separate from the plugin and remain available for ingestion after uninstall."
+        description="The account opencompany uses when you run Linear tools."
       />
       {state.status === "loading" ? (
         <SectionSkeleton label="Loading Linear accounts" rows={2} compact />
       ) : state.status === "error" ? (
         <SectionError title="Accounts unavailable" message={state.message} />
-      ) : state.accounts.length === 0 ? (
+      ) : !permissionConnection ? (
         <SectionEmpty icon={Users}>No Linear accounts are connected.</SectionEmpty>
       ) : (
         <div className="flex flex-col gap-2">
-          {state.accounts.map(({ account, purpose }) => (
-            <IntegrationAccountRow
-              key={account.integrationId}
-              account={account}
-              purposeLabel={purpose}
-              showCapabilityModes={false}
-            />
-          ))}
+          <IntegrationAccountRow
+            account={permissionConnection}
+            purposeLabel="Linear"
+            showCapabilityModes={false}
+          />
         </div>
       )}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-3">
         <a
           href={LINEAR_TOOLS_CONNECT_HREF}
           className={buttonVariants({ variant: "outline", size: "sm" })}
         >
-          {state.status === "ready" && state.permissionConnection
-            ? "Reconnect tool account"
-            : "Connect tool account"}
+          Connect Linear account
         </a>
-        <a
-          href={LINEAR_INGEST_CONNECT_HREF}
-          className={buttonVariants({ variant: "outline", size: "sm" })}
+        <Link
+          href="/wiki/sources"
+          className="text-[12px] text-ink-subtle underline decoration-border underline-offset-2 hover:text-ink"
         >
-          Add ingestion account
-        </a>
+          Configure Linear ingestion in Wiki sources
+        </Link>
       </div>
     </section>
   );
@@ -420,13 +434,51 @@ function AccountsSection({ state }: { state: LinearAccountsState }) {
 
 function ToolsSection({
   pluginState,
+  previewState,
   state,
+  canEdit,
   permissionConnection,
 }: {
   pluginState: PluginLoadState;
+  previewState: PluginPreviewState;
   state: PluginToolsState;
+  canEdit: boolean;
   permissionConnection: IntegrationAccountView | null;
 }) {
+  const router = useRouter();
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [isRefreshing, startRefresh] = useTransition();
+  const plugin = pluginState.status === "ready" ? pluginState.plugin : null;
+  const displayedState = plugin
+    ? state
+    : previewState.status === "ready"
+      ? linearToolsStateFromPreview(previewState.preview)
+      : previewState;
+
+  const refresh = () => {
+    if (!plugin || plugin.status !== "enabled" || isRefreshing) return;
+    setRefreshError(null);
+    startRefresh(async () => {
+      try {
+        const refreshed = await refreshHeadlessPluginMcp(plugin.name);
+        const discoveryError = refreshed.remoteMcpServers.find(
+          (server: PluginRemoteMcpServerDto) => server.lastDiscoveryError,
+        )?.lastDiscoveryError;
+        if (discoveryError) {
+          setRefreshError(discoveryError);
+          if (!isConnectionRequiredError(discoveryError)) {
+            toast.error("Linear tool discovery failed.");
+          }
+        } else {
+          toast.success("Linear tools refreshed.");
+        }
+        router.refresh();
+      } catch (cause) {
+        setRefreshError(errorMessage(cause));
+      }
+    });
+  };
+
   return (
     <section aria-labelledby="linear-tools-heading" className="flex flex-col gap-3">
       <SectionHeading
@@ -439,37 +491,127 @@ function ToolsSection({
         <SectionSkeleton label="Loading Linear tools" rows={2} />
       ) : pluginState.status === "error" ? (
         <SectionError title="Tools unavailable" message={pluginState.message} />
-      ) : !pluginState.plugin ? (
-        <SectionEmpty icon={Wrench}>Install Linear to make its tools available.</SectionEmpty>
-      ) : state.status === "loading" ? (
-        <SectionSkeleton label="Discovering Linear tools" rows={2} />
-      ) : state.status === "error" ? (
-        <SectionError title="Tools unavailable" message={state.message} />
+      ) : displayedState.status === "loading" ? (
+        <SectionSkeleton
+          label={plugin ? "Discovering Linear tools" : "Loading Linear tool preview"}
+          rows={2}
+        />
+      ) : displayedState.status === "error" ? (
+        <SectionError title="Tools unavailable" message={displayedState.message} />
       ) : (
         <>
-          {state.groups.every((group) => group.tools.length === 0) ? (
+          {plugin ? (
+            <DiscoveryStatus
+              discovery={displayedState.discovery}
+              needsConnection={isConnectionRequiredError(
+                refreshError ?? displayedState.discovery.lastDiscoveryError,
+              )}
+              canRefresh={canEdit && plugin.status === "enabled"}
+              isRefreshing={isRefreshing}
+              onRefresh={refresh}
+            />
+          ) : (
+            <p className="text-[12px] leading-4 text-ink-subtle">
+              Package preview · permission modes become editable after installation and account
+              connection.
+            </p>
+          )}
+          {refreshError && !isConnectionRequiredError(refreshError) ? (
+            <SectionError title="Discovery refresh failed" message={refreshError} />
+          ) : displayedState.discovery.lastDiscoveryError &&
+            !isConnectionRequiredError(displayedState.discovery.lastDiscoveryError) ? (
+            <Alert
+              variant={displayedState.discovery.status === "stale" ? "warning" : "destructive"}
+            >
+              <AlertCircle />
+              <AlertTitle>Discovery refresh failed</AlertTitle>
+              <AlertDescription>
+                {displayedState.discovery.lastDiscoveryError}
+                {displayedState.discovery.status === "stale"
+                  ? " The last successful tool snapshot remains available below."
+                  : ""}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {displayedState.groups.every((group) => group.tools.length === 0) ? (
             <SectionEmpty icon={Wrench}>
-              No tools have been discovered yet. Capability permissions are ready and will apply
-              when gateway discovery reports Linear tools.
+              {isConnectionRequiredError(
+                refreshError ?? displayedState.discovery.lastDiscoveryError,
+              )
+                ? "Connect a Linear account to activate tools."
+                : displayedState.discovery.status === "error"
+                  ? "No Linear tools are available because discovery has not succeeded yet."
+                  : "No tools have been discovered yet. Capability permissions are ready and will apply when discovery completes."}
             </SectionEmpty>
           ) : null}
           <div className="flex flex-col gap-2">
-            {state.groups.map((group) => (
+            {displayedState.groups.map((group) => (
               <ToolGroupCard
                 key={group.id}
                 group={group}
-                permissionConnection={permissionConnection}
+                permissionConnection={plugin ? permissionConnection : null}
               />
             ))}
           </div>
-          {!permissionConnection ? (
+          {plugin && !permissionConnection ? (
             <p className="text-[12px] leading-4 text-ink-subtle">
-              Connect a Linear tool account to change permission modes.
+              Connect a Linear account to change permission modes.
             </p>
           ) : null}
         </>
       )}
     </section>
+  );
+}
+
+function DiscoveryStatus({
+  discovery,
+  needsConnection,
+  canRefresh,
+  isRefreshing,
+  onRefresh,
+}: {
+  discovery: Extract<PluginToolsState, { status: "ready" }>["discovery"];
+  needsConnection: boolean;
+  canRefresh: boolean;
+  isRefreshing: boolean;
+  onRefresh: () => void;
+}) {
+  const status = needsConnection
+    ? { label: "Needs account", variant: "outline" as const }
+    : {
+        pending: { label: "Pending", variant: "outline" as const },
+        ready: { label: "Ready", variant: "success" as const },
+        stale: { label: "Stale", variant: "warning" as const },
+        error: { label: "Failed", variant: "destructive" as const },
+      }[discovery.status];
+  const summary = needsConnection
+    ? "Connect a Linear account to activate tools."
+    : discovery.discoveredAt
+      ? `${discovery.toolCount} ${discovery.toolCount === 1 ? "tool" : "tools"} discovered ${formatDateTime(discovery.discoveredAt)}`
+      : "Waiting for the first successful discovery.";
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5">
+      <Badge variant={status.variant}>{status.label}</Badge>
+      <div className="min-w-0 flex-1">
+        <p className="text-[12px] leading-4 text-ink">{summary}</p>
+        {discovery.refreshAfter ? (
+          <p className="mt-0.5 text-[11px] leading-4 text-ink-faint">
+            Next automatic attempt {formatDateTime(discovery.refreshAfter)}
+          </p>
+        ) : null}
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={!canRefresh || isRefreshing}
+        onClick={onRefresh}
+      >
+        {isRefreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+        Refresh
+      </Button>
+    </div>
   );
 }
 
@@ -493,19 +635,15 @@ function ToolGroupCard({
       </CardHeader>
       {group.tools.length > 0 ? (
         <CardContent className="px-3">
-          {group.curated ? (
-            <ToolRows tools={group.tools} />
-          ) : (
-            <details className="group rounded-md border border-border/70">
-              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-[12px] font-medium text-ink-muted">
-                Advanced · {group.tools.length} {group.tools.length === 1 ? "tool" : "tools"}
-                <ChevronDown className="ml-auto size-3.5 transition-transform group-open:rotate-180" />
-              </summary>
-              <div className="border-t border-border/70 p-2">
-                <ToolRows tools={group.tools} />
-              </div>
-            </details>
-          )}
+          <details className="group rounded-md border border-border/70">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-[12px] font-medium text-ink-muted">
+              {group.tools.length} {group.tools.length === 1 ? "tool" : "tools"}
+              <ChevronDown className="ml-auto size-3.5 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="border-t border-border/70 p-2">
+              <ToolRows tools={group.tools} />
+            </div>
+          </details>
         </CardContent>
       ) : null}
     </Card>
@@ -579,7 +717,29 @@ function ToolRows({ tools }: { tools: PluginToolView[] }) {
   );
 }
 
-function SkillsSection({ state }: { state: PluginLoadState }) {
+function SkillsSection({
+  state,
+  previewState,
+}: {
+  state: PluginLoadState;
+  previewState: PluginPreviewState;
+}) {
+  const plugin = state.status === "ready" ? state.plugin : null;
+  const skills: LinearPluginSkill[] = plugin
+    ? plugin.skills.map((skill: { bundleId: string; name: string; description: string }) => ({
+        id: skill.bundleId,
+        name: skill.name,
+        description: skill.description,
+      }))
+    : previewState.status === "ready"
+      ? previewState.preview.skills.map(
+          (skill: { integrity: string; name: string; description: string }) => ({
+            id: skill.integrity,
+            name: skill.name,
+            description: skill.description,
+          }),
+        )
+      : [];
   return (
     <section aria-labelledby="linear-skills-heading" className="flex flex-col gap-3">
       <SectionHeading
@@ -592,14 +752,16 @@ function SkillsSection({ state }: { state: PluginLoadState }) {
         <SectionSkeleton label="Loading Linear skills" rows={2} compact />
       ) : state.status === "error" ? (
         <SectionError title="Skills unavailable" message={state.message} />
-      ) : !state.plugin ? (
-        <SectionEmpty icon={Sparkles}>Install Linear to add its skills.</SectionEmpty>
-      ) : state.plugin.skills.length === 0 ? (
+      ) : !plugin && previewState.status === "loading" ? (
+        <SectionSkeleton label="Loading Linear skill preview" rows={2} compact />
+      ) : !plugin && previewState.status === "error" ? (
+        <SectionError title="Skills unavailable" message={previewState.message} />
+      ) : skills.length === 0 ? (
         <SectionEmpty icon={Sparkles}>This version of the plugin contains no skills.</SectionEmpty>
       ) : (
         <ul className="overflow-hidden rounded-lg border border-border bg-surface">
-          {state.plugin.skills.map((skill: LinearPluginSkill) => (
-            <li key={skill.bundleId} className="border-b border-border px-3 py-2.5 last:border-b-0">
+          {skills.map((skill) => (
+            <li key={skill.id} className="border-b border-border px-3 py-2.5 last:border-b-0">
               <div className="flex items-center gap-2">
                 <Sparkles className="size-3.5 shrink-0 text-ink-subtle" />
                 <span className="text-[13px] font-medium text-ink">{skill.name}</span>
@@ -696,15 +858,7 @@ function linearAccountsFromState(state: IntegrationState): {
     : null;
   return {
     permissionConnection,
-    accounts: [
-      ...(permissionConnection
-        ? [{ purpose: "Tools" as const, account: permissionConnection }]
-        : []),
-      ...state.personalAccounts.linear.map((account) => ({
-        purpose: "Ingestion" as const,
-        account,
-      })),
-    ],
+    accounts: permissionConnection ? [{ account: permissionConnection }] : [],
   };
 }
 
@@ -720,6 +874,121 @@ export function defaultLinearToolsState(): PluginToolsState {
       curated: true,
       tools: [],
     })),
+    discovery: {
+      status: "pending",
+      toolCount: 0,
+      discoveredAt: null,
+      refreshAfter: null,
+      lastDiscoveryError: null,
+    },
+  };
+}
+
+export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  if (!plugin?.remoteMcpServers.length) return defaultLinearToolsState();
+
+  const definitions = new Map<CapabilityId, PluginRemoteMcpServerDto["capabilities"][number]>();
+  const tools: Array<
+    PluginToolView & {
+      capabilityId: CapabilityId;
+      capabilityLabel: string;
+      defaultMode: CapabilityMode;
+      curated: boolean;
+    }
+  > = [];
+  for (const server of plugin.remoteMcpServers) {
+    for (const definition of server.capabilities) definitions.set(definition.id, definition);
+    for (const tool of server.tools) {
+      tools.push({
+        id: `${server.name}:${tool.name}`,
+        name: displayToolName(tool.name),
+        description: tool.description?.trim() || null,
+        readOnly: tool.classification.bucket === "read",
+        capabilityId: tool.classification.capabilityId,
+        capabilityLabel: tool.classification.capabilityLabel,
+        defaultMode: tool.classification.defaultMode,
+        curated: tool.classification.curated,
+      });
+    }
+  }
+
+  const knownCapabilities = providerCapabilities("linear");
+  const curatedGroups = [...definitions.values()].map((definition) => ({
+    id: definition.id,
+    label: definition.label,
+    description:
+      knownCapabilities.find((capability) => capability.id === definition.id)?.description ??
+      `${definition.label} tools supplied by the installed plugin.`,
+    modeKey: definition.id,
+    defaultMode: definition.defaultMode,
+    curated: true,
+    tools: tools.filter(
+      (tool) => tool.curated && tool.capabilityId === definition.id,
+    ) as PluginToolView[],
+  }));
+  const uncuratedGroups = uncuratedPluginToolGroups(tools.filter((tool) => !tool.curated)).filter(
+    (group) => group.tools.length > 0,
+  );
+  const servers = plugin.remoteMcpServers;
+  const lastDiscoveryError = servers
+    .flatMap((server: PluginRemoteMcpServerDto) =>
+      server.lastDiscoveryError ? [server.lastDiscoveryError] : [],
+    )
+    .filter((value: string, index: number, values: string[]) => values.indexOf(value) === index)
+    .join(" ");
+
+  return {
+    status: "ready",
+    groups: [...curatedGroups, ...uncuratedGroups],
+    discovery: {
+      status: aggregateDiscoveryStatus(
+        servers.map((server: PluginRemoteMcpServerDto) => server.discoveryStatus),
+      ),
+      toolCount: tools.length,
+      discoveredAt: latestTimestamp(
+        servers.map((server: PluginRemoteMcpServerDto) => server.discoveredAt),
+      ),
+      refreshAfter: earliestTimestamp(
+        servers.map((server: PluginRemoteMcpServerDto) => server.refreshAfter),
+      ),
+      lastDiscoveryError: lastDiscoveryError || null,
+    },
+  };
+}
+
+export function linearToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  const knownCapabilities = providerCapabilities("linear");
+  const definitions = new Map<CapabilityId, PluginToolGroupView>();
+  for (const server of preview.remoteMcpServers) {
+    for (const capability of server.capabilities) {
+      definitions.set(capability.id, {
+        id: capability.id,
+        label: capability.label,
+        description:
+          knownCapabilities.find((known) => known.id === capability.id)?.description ??
+          `${capability.label} tools supplied by the official package.`,
+        modeKey: capability.id,
+        defaultMode: capability.defaultMode,
+        curated: true,
+        tools: capability.tools.map((tool: string) => ({
+          id: `${server.name}:${tool}`,
+          name: displayToolName(tool),
+          description: null,
+          readOnly: capability.id === "read",
+        })),
+      });
+    }
+  }
+  return {
+    status: "ready",
+    groups: [...definitions.values()],
+    discovery: {
+      status: "pending",
+      toolCount: [...definitions.values()].reduce((total, group) => total + group.tools.length, 0),
+      discoveredAt: null,
+      refreshAfter: null,
+      lastDiscoveryError: null,
+    },
   };
 }
 
@@ -753,6 +1022,42 @@ function pinnedSourceUrl(plugin: PluginInstallationDto) {
     .map((segment: string) => encodeURIComponent(segment))
     .join("/");
   return `${plugin.source.url}/tree/${plugin.source.resolvedCommit}${path ? `/${path}` : ""}`;
+}
+
+function isConnectionRequiredError(value: string | null | undefined) {
+  return value?.trim() === NO_CONNECTION_DISCOVERY_ERROR;
+}
+
+function aggregateDiscoveryStatus(statuses: PluginRemoteMcpServerDto["discoveryStatus"][]) {
+  if (statuses.includes("error")) return "error" as const;
+  if (statuses.includes("stale")) return "stale" as const;
+  if (statuses.includes("pending")) return "pending" as const;
+  return "ready" as const;
+}
+
+function latestTimestamp(values: Array<string | null>) {
+  return (
+    values
+      .filter((value): value is string => value !== null)
+      .sort()
+      .at(-1) ?? null
+  );
+}
+
+function earliestTimestamp(values: string[]) {
+  return [...values].sort().at(0) ?? null;
+}
+
+function displayToolName(value: string) {
+  const words = value.replaceAll(/[._-]+/gu, " ").trim();
+  return words ? `${words.slice(0, 1).toLocaleUpperCase()}${words.slice(1)}` : value;
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 function errorMessage(value: unknown) {

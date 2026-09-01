@@ -12995,6 +12995,12 @@
               "$ref": "#/components/schemas/PluginStdioServer"
             }
           },
+          "remoteMcpServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginRemoteMcpPreviewServer"
+            }
+          },
           "report": {
             "$ref": "#/components/schemas/PluginValidationReport"
           }
@@ -13008,6 +13014,7 @@
           "totalBytes",
           "skills",
           "stdioServers",
+          "remoteMcpServers",
           "report"
         ],
         "additionalProperties": false
@@ -13071,6 +13078,83 @@
           "command",
           "args",
           "envKeys"
+        ],
+        "additionalProperties": false
+      },
+      "PluginRemoteMcpPreviewServer": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "streamable-http",
+              "sse"
+            ]
+          },
+          "connectionProvider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginCapabilityDefinition"
+            },
+            "maxItems": 64
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "connectionProvider",
+          "capabilities"
+        ],
+        "additionalProperties": false
+      },
+      "PluginCapabilityDefinition": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "read",
+              "write"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "defaultMode": {
+            "type": "string",
+            "enum": [
+              "on",
+              "ask",
+              "off"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "maxItems": 512
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "defaultMode",
+          "tools"
         ],
         "additionalProperties": false
       },
@@ -13293,6 +13377,12 @@
             "items": {
               "$ref": "#/components/schemas/PluginStdioServer"
             }
+          },
+          "remoteMcpServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginRemoteMcpServer"
+            }
           }
         },
         "required": [
@@ -13309,7 +13399,8 @@
           "archivedAt",
           "files",
           "skills",
-          "stdioServers"
+          "stdioServers",
+          "remoteMcpServers"
         ],
         "additionalProperties": false
       },
@@ -13372,6 +13463,139 @@
           "bundleId",
           "integrity",
           "description"
+        ],
+        "additionalProperties": false
+      },
+      "PluginRemoteMcpServer": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "streamable-http",
+              "sse"
+            ]
+          },
+          "connectionProvider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginCapabilityDefinition"
+            },
+            "maxItems": 64
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginDiscoveredTool"
+            },
+            "maxItems": 512
+          },
+          "discoveryStatus": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ready",
+              "stale",
+              "error"
+            ]
+          },
+          "discoveredAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "refreshAfter": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastDiscoveryError": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "connectionProvider",
+          "capabilities",
+          "tools",
+          "discoveryStatus",
+          "discoveredAt",
+          "refreshAfter",
+          "lastDiscoveryError"
+        ],
+        "additionalProperties": false
+      },
+      "PluginDiscoveredTool": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "classification": {
+            "type": "object",
+            "properties": {
+              "capabilityId": {
+                "type": "string",
+                "enum": [
+                  "read",
+                  "write"
+                ]
+              },
+              "capabilityLabel": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "defaultMode": {
+                "type": "string",
+                "enum": [
+                  "on",
+                  "ask",
+                  "off"
+                ]
+              },
+              "bucket": {
+                "type": "string",
+                "enum": [
+                  "read",
+                  "write"
+                ]
+              },
+              "curated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "capabilityId",
+              "capabilityLabel",
+              "defaultMode",
+              "bucket",
+              "curated"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "classification"
         ],
         "additionalProperties": false
       },

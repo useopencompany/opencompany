@@ -4,9 +4,12 @@ import type {
   ActionHostGatewayRequest,
 } from "@opencompany/agent-runtime";
 import type { CodexChatEngine } from "@opencompany/db/product-schema";
+import { createLogger } from "@opencompany/observability";
 import { type ActionCatalogPolicyName, projectActionCatalog } from "../actions/policy";
 import { type ActionInvocationClaim, serveActionRequest } from "../actions/service";
 import type { CapabilityTurnState, ResolvedActionCatalog } from "../actions/types";
+
+const logger = createLogger({ service: "opencompany-agent", runtime: "action-gateway" });
 
 export type ActionPrincipal = {
   actorId: string;
@@ -254,7 +257,14 @@ export async function executeActionHostGatewayService(input: {
           ...(context.engine ? { sourceEngine: context.engine } : {}),
         }),
     });
-  } catch {
+  } catch (error) {
+    logger.error("Action gateway service request failed", {
+      event: "opencompany.action_gateway_service_request_failed",
+      operation: input.request.operation,
+      action_id: "action" in input.request ? input.request.action : undefined,
+      invocation_id: "invocationId" in input.request ? input.request.invocationId : undefined,
+      error,
+    });
     return gatewayError("internal", "The action request could not be completed.");
   }
 }
