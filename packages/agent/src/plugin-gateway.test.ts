@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   discoverSnapshot: vi.fn(),
   getState: vi.fn(),
   loadConnection: vi.fn(),
+  getNeonState: vi.fn(),
+  loadNeonConnection: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({ getDb: () => ({ sentinel: "db" }) }));
@@ -35,9 +37,10 @@ vi.mock("./integrations/posthog-mcp", () => ({
   loadPostHogMcpWorkerConnection: vi.fn(),
 }));
 vi.mock("./integrations/neon-mcp", () => ({
-  NEON_MCP_ENDPOINT_URL: "https://mcp.neon.tech/mcp",
-  getNeonIntegrationState: vi.fn(),
-  loadNeonMcpWorkerConnection: vi.fn(),
+  NEON_MCP_ENDPOINT_URL:
+    "https://mcp.neon.tech/mcp?readonly=true&category=projects&category=branches&category=schema&category=querying",
+  getNeonIntegrationState: mocks.getNeonState,
+  loadNeonMcpWorkerConnection: mocks.loadNeonConnection,
 }));
 vi.mock("./integrations/latitude-mcp", () => ({
   LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
@@ -157,6 +160,38 @@ describe("plugin gateway registration cache", () => {
       record({ server: { ...record().server, url: "https://evil.example/mcp" } }),
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds the official Neon package only to the reviewed read-only endpoint", async () => {
+    const neonEndpoint =
+      "https://mcp.neon.tech/mcp?readonly=true&category=projects&category=branches&category=schema&category=querying";
+    mocks.listRegistrations.mockResolvedValueOnce([
+      record({
+        pluginName: "neon",
+        pluginLabel: "neon",
+        pluginDescription: "Neon plugin tools.",
+        connectionProvider: "neon",
+        server: { name: "neon", type: "streamable-http", url: neonEndpoint, headers: {} },
+        capabilities: [
+          {
+            id: "query",
+            label: "Query database data",
+            defaultMode: "ask",
+            tools: ["run_sql"],
+          },
+        ],
+        refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+      }),
+    ]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:neon:neon",
+        connectionProvider: "neon",
+        getState: mocks.getNeonState,
+        loadConnection: mocks.loadNeonConnection,
+      }),
+    ]);
   });
 
   it("forces discovery immediately after install through the lifecycle hook", async () => {

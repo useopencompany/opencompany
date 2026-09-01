@@ -51,7 +51,8 @@ export type PluginRemoteServer = {
   headers: Record<string, string>;
 };
 
-export type PluginCapabilityId = "read" | "write";
+export type PluginCapabilityId = "read" | "query" | "write";
+export type PluginCapabilityBucket = "read" | "write";
 export type PluginCapabilityMode = "on" | "ask" | "off";
 
 export type PluginCapabilityDefinition = {
@@ -70,7 +71,7 @@ export type PluginGatewayDiscoveredTool = {
     capabilityId: PluginCapabilityId;
     capabilityLabel: string;
     defaultMode: PluginCapabilityMode;
-    bucket: PluginCapabilityId;
+    bucket: PluginCapabilityBucket;
     curated: boolean;
   };
 };
