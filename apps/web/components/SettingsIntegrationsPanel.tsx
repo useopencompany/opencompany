@@ -379,7 +379,6 @@ const PERSONAL_ACCOUNT_PROVIDERS = [
   "google_drive",
   "slack",
   "latitude",
-  "neon",
 ] as const satisfies readonly PersonalAccountProvider[];
 
 function countConnectedAccounts(
@@ -493,10 +492,6 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
-            />
-            <IntegrationProviderGroupCard
-              provider="neon"
-              accounts={integrations.personalAccounts.neon}
             />
             <IntegrationProviderGroupCard
               provider="x_account"

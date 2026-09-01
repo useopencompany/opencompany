@@ -1,13 +1,18 @@
 import "@testing-library/jest-dom/vitest";
 import type { PluginImportPreviewDto } from "@opencompany/protocol";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   importHeadlessPlugin,
   previewHeadlessPluginImport,
 } from "@/lib/headless-knowledge-commands";
-import { LINEAR_PLUGIN_SOURCE, PluginDetail, PluginsSettings } from "./PluginSettings";
+import {
+  LINEAR_PLUGIN_SOURCE,
+  NEON_PLUGIN_SOURCE,
+  PluginDetail,
+  PluginsSettings,
+} from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 
@@ -165,19 +170,28 @@ describe("Plugin settings", () => {
     expect(screen.getByText(/1 skill · updated/i)).toBeInTheDocument();
   });
 
-  it("offers the immutable official Linear package before installation", async () => {
+  it("offers immutable official Linear and Neon packages before installation", async () => {
     render(<PluginsSettings plugins={[]} canEdit />);
 
-    expect(screen.getByRole("link", { name: /linear/i })).toHaveAttribute(
+    const linearLink = screen.getByRole("link", { name: /linear/i });
+    const linearCard = linearLink.closest("div.border");
+    expect(linearLink).toHaveAttribute("href", "/settings/plugins/linear");
+    expect(screen.getByRole("link", { name: /neon/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/linear",
+      "/settings/plugins/neon",
     );
-    expect(screen.getByText("Not installed")).toBeInTheDocument();
-    expect(screen.getByText("Official package · ready to install")).toBeInTheDocument();
+    expect(screen.getAllByText("Not installed")).toHaveLength(2);
+    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(2);
     expect(LINEAR_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/linear$/u,
     );
-    await userEvent.click(screen.getByRole("button", { name: "Install" }));
+    expect(NEON_PLUGIN_SOURCE).toMatch(
+      /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/neon$/u,
+    );
+    expect(linearCard).not.toBeNull();
+    await userEvent.click(
+      within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
+    );
     await waitFor(() =>
       expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: LINEAR_PLUGIN_SOURCE }),
     );

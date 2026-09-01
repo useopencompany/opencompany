@@ -13124,6 +13124,7 @@
             "type": "string",
             "enum": [
               "read",
+              "query",
               "write"
             ]
           },
@@ -13556,6 +13557,7 @@
                 "type": "string",
                 "enum": [
                   "read",
+                  "query",
                   "write"
                 ]
               },

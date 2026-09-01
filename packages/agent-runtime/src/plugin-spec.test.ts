@@ -131,6 +131,11 @@ describe("parsePluginCapabilities", () => {
             defaultMode: "ask",
             tools: ["save_issue", "save_comment"],
           },
+          query: {
+            label: "Query data",
+            defaultMode: "ask",
+            tools: ["run_sql"],
+          },
           future: { label: "Future", defaultMode: "ask", tools: [] },
         },
         "com.example.unknown": { anything: true },
@@ -150,6 +155,12 @@ describe("parsePluginCapabilities", () => {
         label: "Manage issues",
         defaultMode: "ask",
         tools: ["save_issue", "save_comment"],
+      },
+      {
+        id: "query",
+        label: "Query data",
+        defaultMode: "ask",
+        tools: ["run_sql"],
       },
     ]);
     expect(result.report).toEqual({

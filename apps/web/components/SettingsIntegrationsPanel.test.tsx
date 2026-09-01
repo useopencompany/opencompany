@@ -642,7 +642,7 @@ describe("SettingsIntegrationsPanel", () => {
     ).toHaveAttribute("href", "/api/integrations/latitude/start?returnTo=/settings/integrations");
   });
 
-  it("connects Neon personally with structure On and database queries Ask", () => {
+  it("keeps Neon out of legacy integrations now that its account lives under Plugins", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_neon",
@@ -658,28 +658,11 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const neonCard = screen
-      .getByText("Inspect Neon projects and schemas, and run permission-gated read-only SQL.")
-      .closest("div.rounded-2xl");
-    expect(neonCard).not.toBeNull();
-    expect(within(neonCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
-    const structurePermission = within(neonCard as HTMLElement).getByRole("group", {
-      name: "Inspect Neon structure permission",
-    });
-    const queryPermission = within(neonCard as HTMLElement).getByRole("group", {
-      name: "Query database data permission",
-    });
-    expect(within(structurePermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(queryPermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
     expect(
-      within(neonCard as HTMLElement).getByRole("link", { name: "Reconnect" }),
-    ).toHaveAttribute("href", "/api/integrations/neon/start?returnTo=/settings/integrations");
+      screen.queryByText(
+        "Inspect Neon projects and schemas, and run permission-gated read-only SQL.",
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it("shows two connected X identities and keeps the add-account path available", () => {

@@ -14,10 +14,12 @@ import {
   LinearPluginDetail,
   LinearPluginDetailView,
   linearToolsStateFromPlugin,
+  NeonPluginDetailView,
+  neonToolsStateFromPlugin,
   type PluginToolsState,
   uncuratedPluginToolGroups,
-} from "./LinearPluginSettings";
-import { LINEAR_PLUGIN_SOURCE } from "./PluginSettings";
+} from "./OfficialMcpPluginSettings";
+import { LINEAR_PLUGIN_SOURCE, NEON_PLUGIN_SOURCE } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
@@ -50,7 +52,7 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_linear_tools",
       capabilityModes: { read: "on", write: "ask" },
     },
-    personalAccounts: { linear: [] },
+    personalAccounts: { linear: [], neon: [] },
   },
 }));
 const useLiveQuery = vi.hoisted(() => vi.fn(() => ({ data: [], isLoading: false })));
@@ -235,6 +237,68 @@ const toolsState: PluginToolsState = {
   },
 };
 
+const neonAccount = account("gint_neon_tools", "Neon", { read: "on", query: "ask" }, "neon");
+const neonPlugin = {
+  ...plugin,
+  id: "plugin_neon",
+  name: "neon",
+  manifest: {
+    name: "neon",
+    description: "Inspect Neon projects and run permission-gated read-only SQL.",
+  },
+  source: { ...plugin.source, path: "neon" },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "neon",
+      type: "streamable-http",
+      connectionProvider: "neon",
+      capabilities: [
+        {
+          id: "read",
+          label: "Inspect Neon structure",
+          defaultMode: "on",
+          tools: ["list_projects"],
+        },
+        {
+          id: "query",
+          label: "Query database data",
+          defaultMode: "ask",
+          tools: ["run_sql"],
+        },
+      ],
+      tools: [
+        {
+          name: "list_projects",
+          description: "List Neon projects.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Inspect Neon structure",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "run_sql",
+          description: "Run provider-enforced read-only SQL.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Query database data",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-08-26T12:00:00.000Z",
+      refreshAfter: "2026-08-26T13:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
 describe("Linear plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
@@ -325,7 +389,7 @@ describe("Linear plugin settings", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Uninstall" }));
     const dialog = await screen.findByRole("dialog", { name: "Uninstall Linear?" });
-    expect(within(dialog).getByText(/ongoing ingestion will not be changed/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Connected accounts will not be changed/i)).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "Uninstall" }));
 
     await waitFor(() => expect(commands.archiveHeadlessPlugin).toHaveBeenCalledWith("linear"));
@@ -554,6 +618,54 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
   });
 
+  it("presents Neon through the same package, account, discovery, and query-permission flow", async () => {
+    const state = neonToolsStateFromPlugin(neonPlugin);
+    const neonAccountsState = {
+      status: "ready" as const,
+      accounts: [{ account: neonAccount }],
+      permissionConnection: neonAccount,
+    };
+
+    render(
+      <NeonPluginDetailView
+        pluginState={{ status: "ready", plugin: neonPlugin }}
+        accountsState={neonAccountsState}
+        toolsState={state}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Neon" })).toBeInTheDocument();
+    expect(screen.getByText("List projects")).toBeInTheDocument();
+    expect(screen.getByText("Run sql")).toBeInTheDocument();
+    expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Neon account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
+    );
+    expect(screen.queryByText(/Configure Neon ingestion/u)).not.toBeInTheDocument();
+    expect(NEON_PLUGIN_SOURCE).toMatch(
+      /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/neon$/u,
+    );
+    expect(state).toMatchObject({
+      status: "ready",
+      groups: [
+        { id: "read", tools: [{ name: "List projects", readOnly: true }] },
+        { id: "query", tools: [{ name: "Run sql", readOnly: true }] },
+      ],
+    });
+
+    const queryModes = screen.getByRole("group", { name: "Query database data permission" });
+    await userEvent.click(within(queryModes).getByRole("button", { name: "On" }));
+    await waitFor(() =>
+      expect(accountActions.setIntegrationCapabilityModeAction).toHaveBeenCalledWith(
+        "gint_neon_tools",
+        "query",
+        "on",
+      ),
+    );
+  });
+
   it("builds the two-bucket advanced fallback with ask defaults", () => {
     const groups = uncuratedPluginToolGroups([
       { id: "search", name: "Search", description: null, readOnly: true },
@@ -576,10 +688,11 @@ function account(
   integrationId: string,
   connectionLabel: string,
   capabilityModes: Record<string, unknown>,
+  provider: IntegrationAccountView["provider"] = "linear",
 ): IntegrationAccountView {
   return {
     integrationId,
-    provider: "linear",
+    provider,
     status: "connected",
     connected: true,
     accountEmail: null,
