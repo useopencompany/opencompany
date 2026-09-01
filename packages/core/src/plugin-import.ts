@@ -94,6 +94,11 @@ export type PluginRemoteMcpServer = {
   lastDiscoveryError: string | null;
 };
 
+export type PluginRemoteMcpPreviewServer = Pick<
+  PluginRemoteMcpServer,
+  "name" | "type" | "connectionProvider" | "capabilities"
+>;
+
 export type PluginMcpServerReport = {
   name: string;
   // `unsupported` is retained for reports stored by the pre-gateway loader.
@@ -203,6 +208,7 @@ export type PluginImportPreview = {
     totalBytes: number;
   }>;
   stdioServers: PluginStdioServerSummary[];
+  remoteMcpServers: PluginRemoteMcpPreviewServer[];
   report: Omit<PluginInstallReport, "collisions">;
 };
 
@@ -391,6 +397,12 @@ function publicPreview(plugin: ResolvedPluginPackage): PluginImportPreview {
       totalBytes: bundle.totalBytes,
     })),
     stdioServers: plugin.stdioServers.map(publicStdioServer),
+    remoteMcpServers: plugin.remoteServers.map((server) => ({
+      name: server.name,
+      type: server.type,
+      connectionProvider: plugin.manifest.name,
+      capabilities: plugin.capabilities,
+    })),
     report: plugin.report,
   };
 }

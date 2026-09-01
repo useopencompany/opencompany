@@ -901,8 +901,17 @@ describe("canonical Hono API", () => {
       totalBytes: packageBytes.length,
       skills: [],
       stdioServers: installation.stdioServers,
-      remoteServers: [],
-      capabilities: [],
+      remoteServers: [
+        {
+          name: "remote",
+          type: "streamable-http",
+          url: "https://mcp.example.test",
+          headers: { Authorization: "Bearer secret-value" },
+        },
+      ],
+      capabilities: [
+        { id: "read", label: "Read tools", defaultMode: "on", tools: ["list_issues"] },
+      ],
       report: {
         ignoredManifestFields: [],
         skills: [],
@@ -954,10 +963,19 @@ describe("canonical Hono API", () => {
         manifest: { name: "quality-tools" },
         files: [{ path: "plugin.json", sizeBytes: packageBytes.length }],
         stdioServers: [{ name: "local", envKeys: ["PRIVATE_TOKEN"] }],
+        remoteMcpServers: [
+          {
+            name: "remote",
+            type: "streamable-http",
+            connectionProvider: "quality-tools",
+            capabilities: [{ id: "read", tools: ["list_issues"] }],
+          },
+        ],
       },
     });
     expect(JSON.stringify(previewBody)).not.toContain("private plugin package");
     expect(JSON.stringify(previewBody)).not.toContain("secret-value");
+    expect(JSON.stringify(previewBody)).not.toContain("https://mcp.example.test");
 
     const imported = await app.request("/v1/plugins/imports", {
       method: "POST",

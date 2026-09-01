@@ -10,6 +10,7 @@ import { LinearIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
   Archive,
+  ChevronDown,
   ExternalLink,
   FileArchive,
   Link2,
@@ -86,6 +87,21 @@ export const LINEAR_PLUGIN_NAME = "linear";
 export const LINEAR_PLUGIN_SOURCE =
   "https://github.com/useopencompany/plugins/tree/775df7a9a37f5585b9b87a26533ba6ed1035f1dc/linear";
 
+export async function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
+  const confirmed = preview ?? (await previewHeadlessPluginImport({ url: LINEAR_PLUGIN_SOURCE }));
+  if (confirmed.manifest.name.toLocaleLowerCase() !== LINEAR_PLUGIN_NAME) {
+    throw new Error(
+      `Expected the ${LINEAR_PLUGIN_NAME} plugin, but this source contains ${confirmed.manifest.name}.`,
+    );
+  }
+  const result = await importHeadlessPlugin({
+    url: LINEAR_PLUGIN_SOURCE,
+    expectedResolvedCommit: confirmed.source.resolvedCommit,
+    expectedIntegrity: confirmed.integrity,
+  });
+  return result.plugin;
+}
+
 export function PluginsSettings({
   plugins,
   canEdit,
@@ -94,10 +110,23 @@ export function PluginsSettings({
   canEdit: boolean;
 }) {
   const router = useRouter();
-  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [isInstalling, startInstall] = useTransition();
   const linearPlugin = plugins.find(
     (plugin) => plugin.name.toLocaleLowerCase() === LINEAR_PLUGIN_NAME,
   );
+  const install = () => {
+    if (isInstalling) return;
+    setInstallError(null);
+    startInstall(async () => {
+      try {
+        const plugin = await installOfficialLinearPlugin();
+        router.push(`/settings/plugins/${encodeURIComponent(plugin.name)}`);
+      } catch (cause) {
+        setInstallError(errorMessage(cause));
+      }
+    });
+  };
 
   return (
     <SettingsContent
@@ -145,24 +174,13 @@ export function PluginsSettings({
             Manage
           </Link>
         ) : canEdit ? (
-          <Button variant="outline" size="sm" onClick={() => setInstalling(true)}>
-            Install
+          <Button variant="outline" size="sm" disabled={isInstalling} onClick={install}>
+            {isInstalling ? <Loader2 className="animate-spin" /> : null}
+            {isInstalling ? "Installing…" : "Install"}
           </Button>
         ) : null}
       </div>
-
-      {installing ? (
-        <InstallPluginDialog
-          initialUrl={LINEAR_PLUGIN_SOURCE}
-          expectedName={LINEAR_PLUGIN_NAME}
-          lockSource
-          onClose={() => {
-            setInstalling(false);
-            router.refresh();
-          }}
-          onComplete={(name) => router.push(`/settings/plugins/${encodeURIComponent(name)}`)}
-        />
-      ) : null}
+      {installError ? <p className="text-[12.5px] text-danger">{installError}</p> : null}
     </SettingsContent>
   );
 }
@@ -198,24 +216,6 @@ export function PluginDetail({
       description="An immutable Agent Plugin package with passive Skills and separately approved MCP servers."
       backLink={{ href: "/settings/plugins", label: "Plugins" }}
     >
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
-        <Link2 size={14} className="shrink-0" />
-        <span className="min-w-0 flex-1">
-          Installed from{" "}
-          <a
-            href={plugin.source.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-0.5 font-medium text-ink underline decoration-border underline-offset-2 hover:decoration-ink"
-          >
-            {plugin.source.url.replace(/^https:\/\//u, "")}
-            <ExternalLink size={11} />
-          </a>{" "}
-          at commit <span className="font-mono text-[11.5px]">{plugin.source.resolvedCommit}</span>.
-          Replacing this package requires archiving it and installing a new package.
-        </span>
-      </div>
-
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
           Only workspace admins can manage plugin installations.
@@ -224,11 +224,40 @@ export function PluginDetail({
 
       <section className="flex flex-col gap-2">
         <SectionLabel>Status</SectionLabel>
-        <div className="flex flex-wrap items-center gap-2">
-          <PluginStatus status={plugin.status} />
-          <span className="font-mono text-[11.5px] text-ink-subtle">{plugin.integrity}</span>
-        </div>
+        <PluginStatus status={plugin.status} />
       </section>
+
+      <details className="group rounded-lg border border-border bg-surface-muted">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12.5px] font-medium text-ink-muted">
+          <Link2 size={14} className="shrink-0" />
+          Advanced package details
+          <ChevronDown className="ml-auto size-3.5 transition-transform group-open:rotate-180" />
+        </summary>
+        <dl className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-t border-border px-3 py-2.5 text-[11.5px] leading-4">
+          <dt className="text-ink-faint">Source</dt>
+          <dd className="break-all text-ink">
+            <a
+              href={plugin.source.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 underline decoration-border underline-offset-2 hover:decoration-ink"
+            >
+              {plugin.source.url}
+              <ExternalLink size={11} />
+            </a>
+          </dd>
+          <dt className="text-ink-faint">Package path</dt>
+          <dd className="break-all font-mono text-ink">
+            {plugin.source.path || "Repository root"}
+          </dd>
+          <dt className="text-ink-faint">Requested ref</dt>
+          <dd className="break-all font-mono text-ink">{plugin.source.ref}</dd>
+          <dt className="text-ink-faint">Commit</dt>
+          <dd className="break-all font-mono text-ink">{plugin.source.resolvedCommit}</dd>
+          <dt className="text-ink-faint">Integrity</dt>
+          <dd className="break-all font-mono text-ink">{plugin.integrity}</dd>
+        </dl>
+      </details>
 
       <section className="flex flex-col gap-2">
         <SectionLabel>Passive skills ({plugin.skills.length})</SectionLabel>
@@ -299,20 +328,6 @@ export function PluginDetail({
               </button>
             ) : null}
           </div>
-          <dl className="mt-2 grid grid-cols-[76px_minmax(0,1fr)] gap-x-2 gap-y-1 border-t border-current/10 pt-2 text-[11.5px]">
-            <dt className="text-ink-faint">Source</dt>
-            <dd className="break-all font-mono text-ink">{plugin.source.url}</dd>
-            <dt className="text-ink-faint">Package path</dt>
-            <dd className="break-all font-mono text-ink">
-              {plugin.source.path || "Repository root"}
-            </dd>
-            <dt className="text-ink-faint">Requested ref</dt>
-            <dd className="break-all font-mono text-ink">{plugin.source.ref}</dd>
-            <dt className="text-ink-faint">Commit</dt>
-            <dd className="break-all font-mono text-ink">{plugin.source.resolvedCommit}</dd>
-            <dt className="text-ink-faint">Integrity</dt>
-            <dd className="break-all font-mono text-ink">{plugin.integrity}</dd>
-          </dl>
         </div>
         {plugin.stdioServers.length === 0 ? (
           <EmptyRow label="No valid stdio MCP servers were declared." />

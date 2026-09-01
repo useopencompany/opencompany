@@ -1,7 +1,12 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import type { PluginImportPreviewDto } from "@opencompany/protocol";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  importHeadlessPlugin,
+  previewHeadlessPluginImport,
+} from "@/lib/headless-knowledge-commands";
 import { LINEAR_PLUGIN_SOURCE, PluginDetail, PluginsSettings } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
@@ -96,10 +101,36 @@ const plugin = {
   archivedAt: null,
 };
 
+const officialPreview = {
+  manifest: { name: "linear", description: "Linear workflows." },
+  source: {
+    type: "github",
+    url: "https://github.com/useopencompany/plugins",
+    ref: "775df7a9a37f5585b9b87a26533ba6ed1035f1dc",
+    path: "linear",
+    resolvedCommit: "775df7a9a37f5585b9b87a26533ba6ed1035f1dc",
+  },
+  integrity: `sha256:${"d".repeat(64)}`,
+  files: [{ path: "plugin.json", sizeBytes: 128 }],
+  fileCount: 1,
+  totalBytes: 128,
+  skills: [],
+  stdioServers: [],
+  remoteMcpServers: [],
+  report: { ignoredManifestFields: [], skills: [], mcp: { status: "absent" } },
+} as const satisfies PluginImportPreviewDto;
+
 describe("Plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
     router.refresh.mockReset();
+    vi.mocked(previewHeadlessPluginImport).mockReset();
+    vi.mocked(previewHeadlessPluginImport).mockResolvedValue(officialPreview);
+    vi.mocked(importHeadlessPlugin).mockReset();
+    vi.mocked(importHeadlessPlugin).mockResolvedValue({
+      plugin: { ...plugin, name: "linear", manifest: officialPreview.manifest },
+      replayed: false,
+    });
   });
 
   it("shows the installed Linear card", () => {
@@ -147,7 +178,16 @@ describe("Plugin settings", () => {
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/linear$/u,
     );
     await userEvent.click(screen.getByRole("button", { name: "Install" }));
-    expect(screen.getByDisplayValue(LINEAR_PLUGIN_SOURCE)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: LINEAR_PLUGIN_SOURCE }),
+    );
+    expect(importHeadlessPlugin).toHaveBeenCalledWith({
+      url: LINEAR_PLUGIN_SOURCE,
+      expectedResolvedCommit: officialPreview.source.resolvedCommit,
+      expectedIntegrity: officialPreview.integrity,
+    });
+    expect(router.push).toHaveBeenCalledWith("/settings/plugins/linear");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("shows the exact MCP approval boundary without exposing environment values", () => {
@@ -158,7 +198,9 @@ describe("Plugin settings", () => {
     expect(screen.getByText("https://github.com/example/plugins")).toBeInTheDocument();
     expect(screen.getByText("plugins/quality-tools")).toBeInTheDocument();
     expect(screen.getByText("main")).toBeInTheDocument();
-    expect(screen.getAllByText("a".repeat(40))).toHaveLength(2);
+    const advancedDetails = screen.getByText("Advanced package details").closest("details");
+    expect(advancedDetails).not.toHaveAttribute("open");
+    expect(screen.getAllByText("a".repeat(40))).toHaveLength(1);
     expect(screen.getAllByText(`sha256:${"b".repeat(64)}`).length).toBeGreaterThan(0);
     expect(screen.getByText("local")).toBeInTheDocument();
     expect(screen.getByText("./server")).toBeInTheDocument();

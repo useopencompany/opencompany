@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { useAppDataOptional } from "@/components/AppDataProvider";
 import {
   BRAIN_TOOL_NAME,
   CODEX_APPROVAL_TOOL_NAME,
@@ -28,6 +29,7 @@ import {
   USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
 import {
+  actionToolLabel,
   formatDebugValue,
   isBrainToolOutput,
   isRecord,
@@ -310,6 +312,7 @@ function ActionApprovalCard({
 }) {
   const [submitting, setSubmitting] = useState<ActionApprovalDecision | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const appData = useAppDataOptional();
   const summary = actionApprovalSummary(tool.input);
   const approvalId = tool.approvalId;
   const action =
@@ -334,6 +337,9 @@ function ActionApprovalCard({
       className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
     >
       <div className="text-[12px] font-semibold text-ink">{summary.heading}</div>
+      {action.startsWith("plugin:") && appData?.user.email ? (
+        <p className="mt-1 text-[11.5px] leading-4 text-ink-subtle">as {appData.user.email}</p>
+      ) : null}
       {summary.lines.length > 0 ? (
         <dl className="mt-2 space-y-1">
           {summary.lines.map((line, index) => (
@@ -522,7 +528,7 @@ function actionApprovalSummary(input: unknown): {
 
   return {
     heading: action
-      ? `Run ${action.split(".").join(" · ").split("_").join(" ")}?`
+      ? `Run ${action.startsWith("plugin:") ? actionToolLabel(record) : action.split(".").join(" ")}?`
       : "Run this action?",
     lines: Object.entries(params).flatMap(([key, value]) => {
       if (value === undefined || value === null) return [];

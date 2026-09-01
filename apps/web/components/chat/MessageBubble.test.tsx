@@ -16,6 +16,10 @@ import { MessageBubble } from "./MessageBubble";
 
 const emptyTaskLookup: ChatTaskLookup = new Map();
 
+vi.mock("@/components/AppDataProvider", () => ({
+  useAppDataOptional: () => ({ user: { email: "louis@acta.so" } }),
+}));
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -368,6 +372,83 @@ describe("MessageBubble assistant errors", () => {
     expect(within(toolCall).getByText(/"team": "opencompany"/)).toBeInTheDocument();
     expect(within(toolCall).getByText(/"issues": \[\]/)).toBeInTheDocument();
     expect(screen.getByText("No open issues for the opencompany team.")).toBeInTheDocument();
+  });
+
+  it("presents plugin action labels and acting identity without changing the canonical id", async () => {
+    const user = userEvent.setup();
+    const onActionApproval = vi.fn(async () => undefined);
+    const message: ChatUiMessage = {
+      id: "assistant_plugin_approval",
+      role: "assistant",
+      metadata: { sessionId: "chat_session_1" },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_plugin_approval",
+          state: "approval-requested",
+          input: {
+            action: "plugin:linear:linear.save_comment",
+            params: { issueId: "PRO-185", body: "Acceptance test" },
+          },
+          approval: { id: "approval_plugin_1" },
+        },
+      ],
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onActionApproval={onActionApproval}
+        allowActionApproval
+      />,
+    );
+
+    expect(screen.getByText("Run Linear · Save Comment?")).toBeVisible();
+    expect(screen.getByText("as louis@acta.so")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Decline" }));
+    await waitFor(() =>
+      expect(onActionApproval).toHaveBeenCalledWith({
+        approvalId: "approval_plugin_1",
+        action: "plugin:linear:linear.save_comment",
+        decision: "decline",
+      }),
+    );
+  });
+
+  it("labels a persisted declined plugin action as declined", async () => {
+    const user = userEvent.setup();
+    const message: ChatUiMessage = {
+      id: "assistant_plugin_declined",
+      role: "assistant",
+      metadata: { sessionId: "chat_session_1" },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_plugin_declined",
+          state: "approval-responded",
+          input: {
+            action: "plugin:linear:linear.save_comment",
+            params: { issueId: "PRO-185", body: "Do not create" },
+          },
+          approval: {
+            id: "approval_plugin_declined",
+            approved: false,
+            reason: "The user declined this action.",
+          },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    const disclosure = screen.getByRole("button", {
+      name: /Linear · Save Comment.*Declined/u,
+    });
+    expect(disclosure).toBeVisible();
+    expect(screen.queryByText("Approved")).not.toBeInTheDocument();
+    await user.click(disclosure);
+    expect(screen.getByText("The user declined this action.")).toBeVisible();
   });
 
   it("renders browser screenshots from the authenticated transcript route", () => {

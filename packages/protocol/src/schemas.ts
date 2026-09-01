@@ -1706,6 +1706,15 @@ export const PluginRemoteMcpServerSchema = z
   .strict()
   .openapi("PluginRemoteMcpServer");
 
+export const PluginRemoteMcpPreviewServerSchema = PluginRemoteMcpServerSchema.pick({
+  name: true,
+  type: true,
+  connectionProvider: true,
+  capabilities: true,
+})
+  .strict()
+  .openapi("PluginRemoteMcpPreviewServer");
+
 const PluginBaseSchema = z
   .object({
     id: ResourceIdSchema,
@@ -1771,6 +1780,7 @@ export const PluginImportPreviewSchema = z
         .strict(),
     ),
     stdioServers: z.array(PluginStdioServerSchema),
+    remoteMcpServers: z.array(PluginRemoteMcpPreviewServerSchema),
     report: PluginValidationReportSchema,
   })
   .strict()

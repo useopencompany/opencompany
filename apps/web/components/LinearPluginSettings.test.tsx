@@ -1,5 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import type { PluginInstallationDto, PluginRemoteMcpServerDto } from "@opencompany/protocol";
+import type {
+  PluginImportPreviewDto,
+  PluginInstallationDto,
+  PluginRemoteMcpServerDto,
+} from "@opencompany/protocol";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
@@ -135,6 +139,45 @@ const plugin = {
   archivedAt: null,
 } as const satisfies PluginInstallationDto;
 
+const officialPreview = {
+  manifest: plugin.manifest,
+  source: plugin.source,
+  integrity: plugin.integrity,
+  files: [{ path: "plugin.json", sizeBytes: 128 }],
+  fileCount: 1,
+  totalBytes: 128,
+  skills: [
+    {
+      path: "skills/linear-triage",
+      name: "linear-triage",
+      description: "Triage a Linear backlog.",
+      integrity: `sha256:${"c".repeat(64)}`,
+      fileCount: 1,
+      totalBytes: 64,
+    },
+  ],
+  stdioServers: [],
+  remoteMcpServers: plugin.remoteMcpServers.map(
+    ({ name, type, connectionProvider, capabilities }: PluginRemoteMcpServerDto) => ({
+      name,
+      type,
+      connectionProvider,
+      capabilities,
+    }),
+  ),
+  report: {
+    ignoredManifestFields: [],
+    skills: [],
+    mcp: { status: "absent" },
+  },
+} as const satisfies PluginImportPreviewDto;
+
+const emptyOfficialPreview = {
+  ...officialPreview,
+  skills: [],
+  remoteMcpServers: [],
+} as const satisfies PluginImportPreviewDto;
+
 const toolAccount = account("gint_linear_tools", "Linear tool access", {
   read: "on",
   write: "ask",
@@ -143,10 +186,7 @@ const ingestAccount = account("gint_linear_ingest", "Acme", {});
 
 const accountsState: LinearAccountsState = {
   status: "ready",
-  accounts: [
-    { purpose: "Tools", account: toolAccount },
-    { purpose: "Ingestion", account: ingestAccount },
-  ],
+  accounts: [{ account: toolAccount }, { account: ingestAccount }],
   permissionConnection: toolAccount,
 };
 
@@ -202,6 +242,8 @@ describe("Linear plugin settings", () => {
     for (const command of Object.values(commands)) command.mockReset();
     commands.archiveHeadlessPlugin.mockResolvedValue(undefined);
     commands.enableHeadlessPlugin.mockResolvedValue(undefined);
+    commands.importHeadlessPlugin.mockResolvedValue({ plugin, replayed: false });
+    commands.previewHeadlessPluginImport.mockResolvedValue(officialPreview);
     commands.refreshHeadlessPluginMcp.mockResolvedValue(plugin);
     toasts.error.mockReset();
     toasts.success.mockReset();
@@ -241,7 +283,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByRole("heading", { name: "Skills" })).toBeInTheDocument();
     expect(screen.queryByText("gint_linear_tools")).not.toBeInTheDocument();
     expect(screen.getByText("Linear tool access")).toBeInTheDocument();
-    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.queryByText("Acme")).not.toBeInTheDocument();
     expect(screen.getByText("Search issues")).toBeInTheDocument();
     expect(screen.getByText("linear-triage")).toBeInTheDocument();
     expect(screen.getByText("a".repeat(40))).toBeInTheDocument();
@@ -251,6 +293,13 @@ describe("Linear plugin settings", () => {
       "href",
       `https://github.com/useopencompany/plugins/tree/${"a".repeat(40)}/linear`,
     );
+    const advancedDetails = screen.getByText("Advanced package details").closest("details");
+    expect(advancedDetails).not.toHaveAttribute("open");
+    for (const toolDetails of screen
+      .getAllByText("1 tool")
+      .map((item) => item.closest("details"))) {
+      expect(toolDetails).not.toHaveAttribute("open");
+    }
 
     const readModes = screen.getByRole("group", { name: "Read Linear permission" });
     await userEvent.click(within(readModes).getByRole("button", { name: "Ask" }));
@@ -284,7 +333,7 @@ describe("Linear plugin settings", () => {
     expect(router.refresh).toHaveBeenCalled();
   });
 
-  it("keeps existing accounts visible while the plugin is uninstalled", () => {
+  it("previews tools and skills while keeping accounts hidden before installation", async () => {
     render(
       <LinearPluginDetailView
         pluginState={{ status: "ready", plugin: null }}
@@ -294,13 +343,15 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(screen.getByText("Linear tool access")).toBeInTheDocument();
-    expect(screen.getByText("Acme")).toBeInTheDocument();
-    expect(screen.getByText("Install Linear to make its tools available.")).toBeInTheDocument();
-    expect(screen.getByText("Install Linear to add its skills.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Accounts" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Linear tool access")).not.toBeInTheDocument();
+    expect(await screen.findByText("linear-triage")).toBeInTheDocument();
+    expect(screen.getByText("Read Linear")).toBeInTheDocument();
+    expect(screen.getByText("Manage issues")).toBeInTheDocument();
+    expect(screen.queryByText("Add ingestion account")).not.toBeInTheDocument();
   });
 
-  it("offers installation from the pinned official package", () => {
+  it("installs the pinned official package without an intermediate dialog", async () => {
     render(
       <LinearPluginDetailView
         pluginState={{ status: "ready", plugin: null }}
@@ -314,9 +365,21 @@ describe("Linear plugin settings", () => {
       />,
     );
 
+    expect(await screen.findByText("linear-triage")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Install" })).toBeEnabled();
     expect(LINEAR_PLUGIN_SOURCE).toContain("/useopencompany/plugins/tree/");
-    expect(commands.previewHeadlessPluginImport).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Install" }));
+    await waitFor(() => expect(commands.importHeadlessPlugin).toHaveBeenCalledTimes(1));
+    expect(commands.previewHeadlessPluginImport).toHaveBeenCalledWith({
+      url: LINEAR_PLUGIN_SOURCE,
+    });
+    expect(commands.importHeadlessPlugin).toHaveBeenCalledWith({
+      url: LINEAR_PLUGIN_SOURCE,
+      expectedResolvedCommit: officialPreview.source.resolvedCommit,
+      expectedIntegrity: officialPreview.integrity,
+    });
+    expect(router.refresh).toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("refreshes discovery manually and reloads the server snapshot", async () => {
@@ -334,6 +397,38 @@ describe("Linear plugin settings", () => {
     await waitFor(() => expect(commands.refreshHeadlessPluginMcp).toHaveBeenCalledWith("linear"));
     expect(toasts.success).toHaveBeenCalledWith("Linear tools refreshed.");
     expect(router.refresh).toHaveBeenCalled();
+  });
+
+  it("presents a missing tool account as a neutral connection-required state", () => {
+    const connectionRequiredPlugin = {
+      ...plugin,
+      remoteMcpServers: plugin.remoteMcpServers.map((server: PluginRemoteMcpServerDto) => ({
+        ...server,
+        tools: [],
+        discoveryStatus: "error" as const,
+        lastDiscoveryError: "No usable provider connection was available for MCP discovery.",
+      })),
+    } satisfies PluginInstallationDto;
+
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin: connectionRequiredPlugin }}
+        accountsState={{ status: "ready", accounts: [], permissionConnection: null }}
+        toolsState={linearToolsStateFromPlugin(connectionRequiredPlugin)}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByText("Needs account")).toBeVisible();
+    expect(
+      screen.getAllByText("Connect a Linear account to activate tools.").length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("Discovery refresh failed")).not.toBeInTheDocument();
+    expect(toasts.error).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "Connect Linear account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/linear/start?returnTo=/settings/plugins/linear",
+    );
   });
 
   it("maps the persisted discovery snapshot and surfaces a stale refresh error", () => {
@@ -408,7 +503,7 @@ describe("Linear plugin settings", () => {
     expect(window.location.search).toBe("");
   });
 
-  it("renders loading, error, and empty states for each section", () => {
+  it("renders loading, error, and empty states for each installed-package section", async () => {
     const { rerender } = render(
       <LinearPluginDetailView
         pluginState={{ status: "loading" }}
@@ -418,7 +513,7 @@ describe("Linear plugin settings", () => {
       />,
     );
     expect(screen.getByLabelText("Loading Linear plugin")).toBeInTheDocument();
-    expect(screen.getByLabelText("Loading Linear accounts")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Accounts" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Loading Linear tools")).toBeInTheDocument();
     expect(screen.getByLabelText("Loading Linear skills")).toBeInTheDocument();
 
@@ -431,10 +526,11 @@ describe("Linear plugin settings", () => {
       />,
     );
     expect(screen.getByText("Plugin details unavailable")).toBeInTheDocument();
-    expect(screen.getByText("Accounts unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Accounts unavailable")).not.toBeInTheDocument();
     expect(screen.getByText("Tools unavailable")).toBeInTheDocument();
     expect(screen.getByText("Skills unavailable")).toBeInTheDocument();
 
+    commands.previewHeadlessPluginImport.mockResolvedValue(emptyOfficialPreview);
     rerender(
       <LinearPluginDetailView
         pluginState={{ status: "ready", plugin: null }}
@@ -453,9 +549,9 @@ describe("Linear plugin settings", () => {
         canEdit
       />,
     );
-    expect(screen.getByText("No Linear accounts are connected.")).toBeInTheDocument();
-    expect(screen.getByText("Install Linear to make its tools available.")).toBeInTheDocument();
-    expect(screen.getByText("Install Linear to add its skills.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Accounts" })).not.toBeInTheDocument();
+    expect(await screen.findByText(/No tools have been discovered yet\./u)).toBeInTheDocument();
+    expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
   });
 
   it("builds the two-bucket advanced fallback with ask defaults", () => {
