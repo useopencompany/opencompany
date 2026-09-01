@@ -19,6 +19,7 @@ import {
   ELECTRIC_LOCAL_URL,
 } from "./lib/electric-dev.mjs";
 import { environmentFileMigrationPlan, migrateEnvironmentFile } from "./lib/env-name-migration.mjs";
+import { localSandboxNamespace } from "./lib/sandbox-namespace.mjs";
 
 const CHECK_MODE = argv.includes("--check");
 const PULL_ENV_MODE = argv.includes("--pull-env");
@@ -83,6 +84,7 @@ const RUNNER_ENV_KEYS = [
   "RUNNER_WORKER_CONCURRENCY",
   "RUNNER_JOB_LEASE_TTL_MS",
   "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
+  "RUNNER_SANDBOX_NAMESPACE",
   "RUNNER_OPENCOMPANY_BROWSER_ENABLED",
   "E2B_API_KEY",
   "VERCEL_AI_GATEWAY_API_KEY",
@@ -221,6 +223,7 @@ const LOCAL_ONLY_ENV_KEYS = new Set([
   "OPENCOMPANY_HTTPS_PORT",
   "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
   "OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+  "RUNNER_SANDBOX_NAMESPACE",
 ]);
 const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   API_BROWSER_ORIGINS: LOCAL_WEB_APP_URL,
@@ -232,6 +235,7 @@ const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   OPENCOMPANY_HTTPS_PORT: webHttpsPort(process.env),
   OPENCOMPANY_NEXT_PUBLIC_APP_URL: LOCAL_WEB_APP_URL,
   OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: LOCAL_WEB_WORKOS_REDIRECT_URI,
+  RUNNER_SANDBOX_NAMESPACE: localSandboxNamespace(),
 };
 const WEB_LOCAL_ENV_KEYS = [
   "OPENCOMPANY_PORT",
@@ -627,7 +631,8 @@ function shouldReplaceLocalDefault(key, current, next) {
   if (
     key === "API_BROWSER_ORIGINS" ||
     key === "OPENCOMPANY_API_ORIGIN" ||
-    key === "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN"
+    key === "NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN" ||
+    key === "RUNNER_SANDBOX_NAMESPACE"
   ) {
     return current !== next;
   }

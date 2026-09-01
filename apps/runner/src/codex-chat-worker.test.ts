@@ -880,6 +880,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     exaApiKey: "exa",
     browserEnabled: false,
     codexE2bTemplate: undefined,
+    sandboxNamespace: "test",
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
     codexChatIdleTimeoutMs: 1_800_000,

@@ -223,6 +223,7 @@ const groups = {
       "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
       "REDIS_URL",
       "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
+      "RUNNER_SANDBOX_NAMESPACE",
     ],
     optional: [
       "EXA_API_KEY",

@@ -41,6 +41,10 @@ export type RunnerEnv = {
   hubspotOAuthClientId?: string | undefined;
   hubspotOAuthClientSecret?: string | undefined;
   codexE2bTemplate: string | undefined;
+  // Ownership boundary for managed E2B sandbox reconciliation. Every creator and reconciler in
+  // one runner deployment must use the same value; local setup generates a workspace-specific
+  // namespace so a local runner sharing the E2B project cannot select production sandboxes.
+  sandboxNamespace: string;
   blobReadWriteToken?: string | undefined;
   // Wall-clock ceiling shared by Codex and Claude Code engine turns. Timeouts surface partial
   // output but never publish a pull request.
@@ -93,6 +97,7 @@ export function loadEnv(): RunnerEnv {
     hubspotOAuthClientId: optionalEnv("OPENCOMPANY_HUBSPOT_CLIENT_ID"),
     hubspotOAuthClientSecret: optionalEnv("OPENCOMPANY_HUBSPOT_CLIENT_SECRET"),
     codexE2bTemplate: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE"),
+    sandboxNamespace: requiredEnv("RUNNER_SANDBOX_NAMESPACE"),
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     codexTimeoutMs: optionalPositiveIntegerEnv(
       "RUNNER_CODEX_TIMEOUT_MS",
