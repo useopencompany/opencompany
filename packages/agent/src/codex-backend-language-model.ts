@@ -217,20 +217,36 @@ async function refreshCodexTokens(
         client_id: CODEX_OAUTH_CLIENT_ID,
       }),
     });
-  } catch {
-    return markNeedsReauth(input, "Codex token refresh failed. Reconnect Codex in Settings.");
-  }
-  if (!response.ok) {
-    await markNeedsReauth(input, "Codex token refresh failed. Reconnect Codex in Settings.");
+  } catch (error) {
+    throw new CodexBackendError(
+      "backend_error",
+      "Codex token refresh could not reach OpenAI. Try again in a moment.",
+      503,
+    );
   }
 
   const result = (await response.json().catch(() => null)) as {
     access_token?: unknown;
     refresh_token?: unknown;
     id_token?: unknown;
+    error?: unknown;
   } | null;
+  if (!response.ok) {
+    if (stringValue(result?.error) === "invalid_grant") {
+      await markNeedsReauth(input, "Codex refresh token expired. Reconnect Codex in Settings.");
+    }
+    throw new CodexBackendError(
+      "backend_error",
+      `Codex token refresh failed (HTTP ${response.status}). Try again in a moment.`,
+      response.status >= 500 ? 502 : 503,
+    );
+  }
   if (typeof result?.access_token !== "string" || !result.access_token.trim()) {
-    await markNeedsReauth(input, "Codex token refresh returned no access token.");
+    throw new CodexBackendError(
+      "backend_error",
+      "Codex token refresh returned an invalid response. Try again in a moment.",
+      502,
+    );
   }
 
   const previousTokens = asRecord(credential.authJson.tokens);

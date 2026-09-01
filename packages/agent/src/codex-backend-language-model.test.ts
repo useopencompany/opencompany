@@ -247,6 +247,90 @@ describe("Codex backend language model", () => {
     expect(dbMocks.rotateCodexCredential).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: "network failure",
+      refresh: () => Promise.reject(new Error("temporary network failure")),
+      message: "could not reach OpenAI",
+    },
+    {
+      name: "service failure",
+      refresh: () => Response.json({ error: "server_error" }, { status: 503 }),
+      message: "HTTP 503",
+    },
+  ])(
+    "does not invalidate credentials after a transient refresh $name",
+    async ({ refresh, message }) => {
+      const stale = credential({
+        accessToken: jwt({
+          exp: Math.floor(Date.now() / 1_000) - 30,
+          "https://api.openai.com/auth": { chatgpt_account_id: "acct_workspace" },
+        }),
+        refreshToken: "old-refresh-secret",
+      });
+      dbMocks.loadCodexCredential.mockResolvedValue(stale);
+      dbMocks.tryAcquireCodexCredentialRefreshLock.mockResolvedValue({
+        lockId: "lock_transient",
+        expiresAt: new Date(Date.now() + 30_000),
+      });
+      const fetchImpl = vi.fn(async (request: RequestInfo | URL) => {
+        if (String(request) === "https://auth.openai.com/oauth/token") return refresh();
+        return responsesSuccess();
+      });
+      const model = createCodexBackendLanguageModel({
+        db: {},
+        userWorkosId: "user_provider",
+        modelId: "openai/gpt-5.6-sol",
+        fetchImpl: fetchImpl as typeof fetch,
+      });
+
+      await expect(
+        (model as any).doGenerate({
+          prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+        } as never),
+      ).rejects.toThrow(message);
+      expect(dbMocks.markCodexCredentialNeedsReauth).not.toHaveBeenCalled();
+      expect(dbMocks.releaseCodexCredentialRefreshLock).toHaveBeenCalledWith(
+        expect.objectContaining({ lockId: "lock_transient" }),
+      );
+    },
+  );
+
+  it("marks credentials for reauthorization when the refresh grant is invalid", async () => {
+    const stale = credential({
+      accessToken: jwt({
+        exp: Math.floor(Date.now() / 1_000) - 30,
+        "https://api.openai.com/auth": { chatgpt_account_id: "acct_workspace" },
+      }),
+      refreshToken: "expired-refresh-secret",
+    });
+    dbMocks.loadCodexCredential.mockResolvedValue(stale);
+    dbMocks.tryAcquireCodexCredentialRefreshLock.mockResolvedValue({
+      lockId: "lock_invalid_grant",
+      expiresAt: new Date(Date.now() + 30_000),
+    });
+    const fetchImpl = vi.fn(async (request: RequestInfo | URL) =>
+      String(request) === "https://auth.openai.com/oauth/token"
+        ? Response.json({ error: "invalid_grant" }, { status: 400 })
+        : responsesSuccess(),
+    );
+    const model = createCodexBackendLanguageModel({
+      db: {},
+      userWorkosId: "user_provider",
+      modelId: "openai/gpt-5.6-sol",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await expect(
+      (model as any).doGenerate({
+        prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+      } as never),
+    ).rejects.toThrow("reconnect Codex in Settings");
+    expect(dbMocks.markCodexCredentialNeedsReauth).toHaveBeenCalledWith(
+      expect.objectContaining({ userWorkosId: "user_provider" }),
+    );
+  });
+
   it("retries one hard 401 after refresh, marks reauth, and stops", async () => {
     dbMocks.tryAcquireCodexCredentialRefreshLock.mockResolvedValue({
       lockId: "lock_401",
