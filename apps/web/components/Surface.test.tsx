@@ -2587,7 +2587,7 @@ describe("Surface chat streaming UI", () => {
         defaultModel={DEFAULT_MODEL}
         claudeCodeConnected
         initialChat={{
-          id: "goat_chat_claude_fable",
+          id: "chat_claude_fable",
           title: "Fable session",
           model: "anthropic/claude-fable-5",
           engine: "claude_code",
@@ -2603,7 +2603,7 @@ describe("Surface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
-      sessionId: "goat_chat_claude_fable",
+      sessionId: "chat_claude_fable",
       model: "anthropic/claude-fable-5",
       engine: { type: "claude_code", schemaVersion: 1 },
     });
