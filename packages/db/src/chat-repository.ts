@@ -198,6 +198,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.active_run_id AS "activeRunId",
         conversation.runtime_has_error AS "runtimeHasError",
         conversation.runtime_updated_at AS "runtimeUpdatedAt",
+        conversation.message_shape_epoch AS "messageShapeEpoch",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
         conversation.pinned_at AS "pinnedAt",
@@ -248,6 +249,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.active_run_id AS "activeRunId",
         conversation.runtime_has_error AS "runtimeHasError",
         conversation.runtime_updated_at AS "runtimeUpdatedAt",
+        conversation.message_shape_epoch AS "messageShapeEpoch",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
         conversation.pinned_at AS "pinnedAt",
@@ -2142,6 +2144,7 @@ type ConversationRow = {
   activeRunId: string | null;
   runtimeHasError: boolean | null;
   runtimeUpdatedAt: Date | string | null;
+  messageShapeEpoch: number | string;
   activityState: Conversation["activityState"];
   hasUnseen: boolean;
   pinnedAt: Date | string | null;
@@ -2388,6 +2391,7 @@ function mapConversation(row: ConversationRow): Conversation {
     title: row.title,
     engine: row.engine,
     model: row.model,
+    messageShapeEpoch: Number(row.messageShapeEpoch),
     runtime:
       row.runtimeStatus !== null && row.runtimeHasError !== null && row.runtimeUpdatedAt !== null
         ? {

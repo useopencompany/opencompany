@@ -2375,6 +2375,25 @@ describe("canonical Hono API", () => {
     expect(stream).not.toHaveBeenCalled();
   });
 
+  it("uses the authorized Conversation epoch instead of a client-selected Message shape epoch", async () => {
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(fakeRepository(), { readModels: { stream } });
+
+    const response = await app.request(
+      "/v1/read-models/chat-messages-v1?conversationId=conversation_1&messageShapeEpoch=999",
+    );
+
+    expect(response.status).toBe(200);
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor,
+        readModel: "chat-messages-v1",
+        conversationId: "conversation_1",
+        messageShapeEpoch: 4,
+      }),
+    );
+  });
+
   it("authorizes canonical Message and Run read models through their owning Task", async () => {
     const repository = fakeRepository();
     repository.getConversation = vi.fn(async () => null);
@@ -5478,6 +5497,7 @@ function fakeRepository(): FakeRepository {
           title: "Chat",
           engine: "opencompany",
           model: "provider/default",
+          messageShapeEpoch: 4,
           runtime: {
             status: "running",
             activeRunId: "run_1",
@@ -5498,6 +5518,7 @@ function fakeRepository(): FakeRepository {
       title: "Chat",
       engine: "opencompany",
       model: "provider/default",
+      messageShapeEpoch: 4,
       runtime: {
         status: "running",
         activeRunId: "run_1",

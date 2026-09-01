@@ -1980,6 +1980,7 @@ export const streamReadModelRoute = createRoute({
     query: z.object({
       conversationId: ResourceIdSchema.optional(),
       brainId: ResourceIdSchema.optional(),
+      messageShapeEpoch: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       offset: z.string().optional(),
       handle: z.string().optional(),
       live: z.string().optional(),

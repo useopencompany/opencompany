@@ -111,6 +111,7 @@ describe("v1 protocol contract", () => {
     expect(
       ConversationReadModelSchema.parse({
         ...conversation,
+        messageShapeEpoch: 3,
         archivedAt: null,
         pinnedAt: null,
         lastSeenAt: null,

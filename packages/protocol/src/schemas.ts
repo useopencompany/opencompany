@@ -480,6 +480,7 @@ export const ConversationReadModelSchema = ConversationReadModelV1Schema.extend(
   runtime: ConversationRuntimeSchema.nullable(),
   activityState: ConversationActivityStateSchema,
   hasUnseen: z.boolean(),
+  messageShapeEpoch: z.number().int().min(0),
 })
   .strict()
   .openapi("ConversationReadModelV2");

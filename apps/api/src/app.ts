@@ -1847,6 +1847,14 @@ export function createApiApp(input: CreateApiAppInput) {
       }
       const params = c.req.valid("param");
       const query = c.req.valid("query");
+      if (query.messageShapeEpoch !== undefined && params.readModel !== "chat-messages-v1") {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "messageShapeEpoch is only valid for the Chat Message read model.",
+        );
+      }
+      let messageShapeEpoch: number | undefined;
       if (params.readModel.startsWith("brain-")) {
         if (query.conversationId || !query.brainId) {
           throw new ApiError(
@@ -1933,7 +1941,10 @@ export function createApiApp(input: CreateApiAppInput) {
             "conversationId is required for this read model.",
           );
         }
-        await authorizeConversationRead(input, actor, query.conversationId);
+        const resource = await authorizeConversationRead(input, actor, query.conversationId);
+        if (params.readModel === "chat-messages-v1" && "messageShapeEpoch" in resource) {
+          messageShapeEpoch = resource.messageShapeEpoch;
+        }
       } else if (query.conversationId || query.brainId) {
         throw new ApiError(
           400,
@@ -1946,6 +1957,7 @@ export function createApiApp(input: CreateApiAppInput) {
         readModel: params.readModel,
         ...(query.conversationId ? { conversationId: query.conversationId } : {}),
         ...(query.brainId ? { brainId: query.brainId } : {}),
+        ...(messageShapeEpoch !== undefined ? { messageShapeEpoch } : {}),
         requestUrl: new URL(c.req.url),
       }) as never;
     },
@@ -2987,6 +2999,7 @@ function conversationDto(conversation: {
   title: string;
   engine: "opencompany" | "codex" | "claude_code";
   model: string;
+  messageShapeEpoch: number;
   runtime: {
     status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
     activeRunId: string | null;
@@ -2999,8 +3012,9 @@ function conversationDto(conversation: {
   createdAt: Date;
   updatedAt: Date;
 }) {
+  const { messageShapeEpoch: _messageShapeEpoch, ...publicConversation } = conversation;
   return {
-    ...conversation,
+    ...publicConversation,
     runtime: conversation.runtime
       ? { ...conversation.runtime, updatedAt: conversation.runtime.updatedAt.toISOString() }
       : null,
@@ -3169,7 +3183,7 @@ async function authorizeConversationRead(
   actor: Actor,
   conversationId: string,
 ) {
-  await getConversationOrTask(input, actor, conversationId, { includeArchived: true });
+  return getConversationOrTask(input, actor, conversationId, { includeArchived: true });
 }
 
 async function getConversationOrTask(

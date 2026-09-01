@@ -5046,6 +5046,12 @@ export const conversationReadModelV1 = productSchema.table(
     activeRunId: text("active_run_id"),
     runtimeHasError: boolean("runtime_has_error"),
     runtimeUpdatedAt: timestamp("runtime_updated_at", { withTimezone: true }),
+    messageShapeEpoch: bigint("message_shape_epoch", { mode: "number" }).notNull().default(0),
+    messageShapeBytesSinceEpoch: bigint("message_shape_bytes_since_epoch", {
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
@@ -5073,6 +5079,14 @@ export const conversationReadModelV1 = productSchema.table(
         AND ${table.runtimeHasError} IS NOT NULL
         AND ${table.runtimeUpdatedAt} IS NOT NULL
       )`,
+    ),
+    messageShapeEpochCheck: check(
+      "opencompany_conversation_read_model_v1_message_shape_epoch_check",
+      sql`${table.messageShapeEpoch} >= 0`,
+    ),
+    messageShapeBytesCheck: check(
+      "opencompany_conversation_read_model_v1_message_shape_bytes_check",
+      sql`${table.messageShapeBytesSinceEpoch} >= 0`,
     ),
   }),
 );
