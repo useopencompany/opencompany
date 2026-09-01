@@ -298,12 +298,7 @@ function effectiveRemoteMcpMode(
   storedToolModes: Record<string, unknown>,
 ): CapabilityMode {
   const toolMode = storedToolModes[toolName];
-  if (isCapabilityMode(toolMode)) {
-    // Discovery drift is intentionally fail-closed. An uncurated tool may be hidden or kept
-    // behind approval, but a stored override must never promote it to silent execution.
-    if (!classification.curated && toolMode === "on") return "ask";
-    return toolMode;
-  }
+  if (isCapabilityMode(toolMode)) return toolMode;
   const stored = storedModes[classification.capability.id];
   if (!classification.curated) {
     // A newly discovered tool must not inherit an existing broad `on` override. It remains Ask
