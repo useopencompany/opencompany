@@ -86,6 +86,34 @@ describe("canonical Chat server reads", () => {
     });
   });
 
+  it("preserves an engine-specific model in detail and sidebar reload views", async () => {
+    const claudeConversation = {
+      ...conversation,
+      engine: "claude_code" as const,
+      model: "anthropic/claude-fable-5",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo) => {
+        const request = input instanceof Request ? input : new Request(input);
+        return new URL(request.url).pathname === "/v1/conversations"
+          ? Response.json({ data: [claudeConversation], nextCursor: null, meta })
+          : Response.json({ data: claudeConversation, meta });
+      }),
+    );
+
+    await expect(loadCurrentChatSessionById(claudeConversation.id)).resolves.toMatchObject({
+      engine: "claude_code",
+      model: "anthropic/claude-fable-5",
+    });
+    await expect(listCurrentUserRecentChats()).resolves.toEqual([
+      expect.objectContaining({
+        engine: "claude_code",
+        model: "anthropic/claude-fable-5",
+      }),
+    ]);
+  });
+
   it("returns null only for a canonical not-found response", async () => {
     vi.stubGlobal(
       "fetch",
