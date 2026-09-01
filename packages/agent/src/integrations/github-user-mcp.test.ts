@@ -3,12 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getAccessToken: vi.fn(),
   loadIntegration: vi.fn(),
-  markStatus: vi.fn(async () => undefined),
 }));
 
-vi.mock("@opencompany/db/integrations", () => ({
-  markIntegrationStatus: mocks.markStatus,
-}));
 vi.mock("./github-user", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getGitHubUserAccessToken: mocks.getAccessToken,
@@ -42,7 +38,6 @@ describe("GitHub user MCP connection", () => {
   it("loads a refreshed user token into the reusable static bearer provider", async () => {
     const connection = await loadGitHubUserMcpWorkerConnection({
       userWorkosId: "user_1",
-      workspaceId: "workspace_1",
       onAuthorizationRequired: () => {
         throw new Error("authorization required");
       },
@@ -84,8 +79,35 @@ describe("GitHub user MCP connection", () => {
     ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
   });
 
-  it("marks the connection for reauthorization when the MCP vendor rejects the bearer", async () => {
+  it("surfaces a plain error when a forced refresh proves the GitHub credential is valid", async () => {
+    const connection = await loadGitHubUserMcpWorkerConnection({
+      userWorkosId: "user_1",
+      onAuthorizationRequired: () => {
+        throw new Error("authorization required");
+      },
+    });
+    if (!connection.ok) throw new Error("Expected a connected GitHub user.");
+
+    await expect(
+      connection.authProvider.validateResourceURL?.(
+        GITHUB_USER_MCP_ENDPOINT_URL,
+        GITHUB_USER_MCP_ENDPOINT_URL,
+      ),
+    ).rejects.toThrow("GitHub MCP rejected a freshly refreshed credential.");
+    expect(mocks.getAccessToken).toHaveBeenLastCalledWith(
+      {
+        userWorkosId: "user_1",
+        integrationId: "gint_github_user",
+      },
+      { forceRefresh: true },
+    );
+  });
+
+  it("requests reauthorization only when the forced GitHub refresh also fails", async () => {
     const authorizationError = new Error("authorization required");
+    mocks.getAccessToken
+      .mockResolvedValueOnce("ghu_fresh_access")
+      .mockRejectedValueOnce(new GitHubUserAccessAuthError("expired"));
     const connection = await loadGitHubUserMcpWorkerConnection({
       userWorkosId: "user_1",
       onAuthorizationRequired: () => {
@@ -100,12 +122,5 @@ describe("GitHub user MCP connection", () => {
         GITHUB_USER_MCP_ENDPOINT_URL,
       ),
     ).rejects.toBe(authorizationError);
-    expect(mocks.markStatus).toHaveBeenCalledWith({
-      userWorkosId: "user_1",
-      integrationId: "gint_github_user",
-      provider: "github_user",
-      status: "needs_reauth",
-      statusReason: "GitHub authorization expired. Reconnect GitHub in Settings.",
-    });
   });
 });

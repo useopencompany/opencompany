@@ -1,4 +1,3 @@
-import { markIntegrationStatus } from "@opencompany/db/integrations";
 import {
   GitHubUserAccessAuthError,
   getGitHubUserAccessToken,
@@ -13,7 +12,6 @@ export const getGitHubUserMcpIntegrationState = getGitHubUserIntegrationState;
 
 export async function loadGitHubUserMcpWorkerConnection(input: {
   userWorkosId: string;
-  workspaceId?: string;
   onAuthorizationRequired: () => never;
 }) {
   const row = await loadGitHubUserIntegration({ userWorkosId: input.userWorkosId });
@@ -39,14 +37,19 @@ export async function loadGitHubUserMcpWorkerConnection(input: {
     authProvider: createRemoteMcpStaticBearerAuthProvider({
       accessToken,
       onAuthorizationRequired: async () => {
-        await markIntegrationStatus({
-          userWorkosId: row.userWorkosId,
-          integrationId: row.id,
-          provider: "github_user",
-          status: "needs_reauth",
-          statusReason: "GitHub authorization expired. Reconnect GitHub in Settings.",
-        });
-        return input.onAuthorizationRequired();
+        try {
+          await getGitHubUserAccessToken(
+            {
+              userWorkosId: row.userWorkosId,
+              integrationId: row.id,
+            },
+            { forceRefresh: true },
+          );
+        } catch (error) {
+          if (error instanceof GitHubUserAccessAuthError) return input.onAuthorizationRequired();
+          throw error;
+        }
+        throw new Error("GitHub MCP rejected a freshly refreshed credential.");
       },
     }),
   } as const;

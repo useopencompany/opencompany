@@ -166,15 +166,15 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
-  it("binds github_user only to GitHub's pinned hosted MCP endpoint", async () => {
+  it("maps a production GitHub package row to github_user at the pinned MCP endpoint", async () => {
     const githubRecord = record({
       pluginName: "github",
       pluginLabel: "github",
-      connectionProvider: "github_user",
+      connectionProvider: "github",
       server: {
         name: "github",
         type: "streamable-http",
-        url: "https://api.githubcopilot.com/mcp/",
+        url: "https://api.githubcopilot.com/mcp",
         headers: {},
       },
       refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
@@ -188,6 +188,14 @@ describe("plugin gateway registration cache", () => {
     });
     expect(registration?.getState).toBe(mocks.getGitHubState);
     expect(registration?.loadConnection).toBe(mocks.loadGitHubConnection);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...githubRecord,
+        server: { ...githubRecord.server, url: "https://api.githubcopilot.com/mcp/" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toHaveLength(1);
 
     mocks.listRegistrations.mockResolvedValueOnce([
       {

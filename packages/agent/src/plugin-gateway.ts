@@ -14,7 +14,6 @@ import {
   type RemoteMcpGatewayDependencies,
   type RemoteMcpGatewayRegistration,
 } from "./actions/remote-mcp";
-import type { ActionProviderId } from "./actions/types";
 import {
   GITHUB_USER_MCP_ENDPOINT_URL,
   getGitHubUserMcpIntegrationState,
@@ -50,34 +49,39 @@ type Identity = { userWorkosId: string; workspaceId: string };
 const logger = createLogger({ service: "opencompany-agent", runtime: "plugin-gateway" });
 
 const providerBindings = {
-  github_user: {
+  github: {
+    provider: "github_user",
     endpointUrl: GITHUB_USER_MCP_ENDPOINT_URL,
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
   },
   linear: {
+    provider: "linear",
     endpointUrl: LINEAR_MCP_ENDPOINT_URL,
     getState: getLinearIntegrationState,
     loadConnection: loadLinearMcpWorkerConnection,
   },
   posthog: {
+    provider: "posthog",
     endpointUrl: POSTHOG_MCP_ENDPOINT_URL,
     getState: getPostHogIntegrationState,
     loadConnection: loadPostHogMcpWorkerConnection,
   },
   neon: {
+    provider: "neon",
     endpointUrl: NEON_MCP_ENDPOINT_URL,
     getState: getNeonIntegrationState,
     loadConnection: loadNeonMcpWorkerConnection,
   },
   latitude: {
+    provider: "latitude",
     endpointUrl: LATITUDE_MCP_ENDPOINT_URL,
     getState: getLatitudeIntegrationState,
     loadConnection: loadLatitudeMcpWorkerConnection,
   },
 } as const;
 
-type BoundProvider = keyof typeof providerBindings;
+type BoundPluginName = keyof typeof providerBindings;
 
 export function createPluginGatewayLifecycle(input: { db: DbLike }): PluginGatewayLifecycle {
   return {
@@ -254,15 +258,34 @@ function bindRegistration(
   identity: Identity,
   record: PluginGatewayRegistrationRecord,
 ): RemoteMcpGatewayRegistration | null {
-  if (!isBoundProvider(record.connectionProvider)) return null;
-  const binding = providerBindings[record.connectionProvider];
+  if (!isBoundPluginName(record.pluginName)) return null;
+  const binding = providerBindings[record.pluginName];
+  if (record.connectionProvider !== record.pluginName) {
+    logger.warn("Plugin MCP binding rejected a mismatched package provider", {
+      event: "opencompany.plugin_mcp_binding_rejected",
+      plugin_name: record.pluginName,
+      server_name: record.server.name,
+      connection_provider: record.connectionProvider,
+      reason: "package_provider_mismatch",
+    });
+    return null;
+  }
   // Credentials are provider-bound. A package that merely reuses a provider
   // name must never redirect either OAuth or static bearer credentials to
   // another remote server.
-  if (record.server.url !== binding.endpointUrl) return null;
+  if (normalizeEndpointUrl(record.server.url) !== normalizeEndpointUrl(binding.endpointUrl)) {
+    logger.warn("Plugin MCP binding rejected an untrusted endpoint", {
+      event: "opencompany.plugin_mcp_binding_rejected",
+      plugin_name: record.pluginName,
+      server_name: record.server.name,
+      endpoint_url: record.server.url,
+      reason: "endpoint_mismatch",
+    });
+    return null;
+  }
   return {
     source: `plugin:${record.pluginName}:${record.server.name}`,
-    connectionProvider: record.connectionProvider as ActionProviderId,
+    connectionProvider: binding.provider,
     label: displayName(record.pluginName),
     description: record.pluginDescription,
     server: record.server,
@@ -278,8 +301,18 @@ function bindRegistration(
   };
 }
 
-function isBoundProvider(value: string): value is BoundProvider {
+function isBoundPluginName(value: string): value is BoundPluginName {
   return Object.hasOwn(providerBindings, value);
+}
+
+function normalizeEndpointUrl(value: string) {
+  try {
+    const url = new URL(value);
+    url.pathname = url.pathname.replace(/\/+$/u, "") || "/";
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function displayName(value: string) {
