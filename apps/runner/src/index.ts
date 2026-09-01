@@ -113,7 +113,9 @@ const stuckWorkMonitor = env.taskWorkerEnabled
   : null;
 const codexChatSelfHealSweeper =
   env.taskWorkerEnabled && env.codexChatSelfHealEnabled ? startCodexChatSelfHealSweeper() : null;
-const sandboxReconciler = env.taskWorkerEnabled ? startSandboxReconciler() : null;
+const sandboxReconciler = env.taskWorkerEnabled
+  ? startSandboxReconciler({ namespace: env.sandboxNamespace })
+  : null;
 const taskScheduleWorker = codexChatWorker
   ? startTaskScheduleWorker({
       onTaskCreated: () => {

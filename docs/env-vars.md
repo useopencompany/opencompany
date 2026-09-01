@@ -52,7 +52,8 @@ contracts include:
 - Runner: database, internal/stream tokens, `OPENCOMPANY_API_ORIGIN` and `API_INTERNAL_TOKEN` for
   the internal wiki command endpoint (agent wiki writes cross the canonical API, never the wiki
   database directly), opencompany origin, allowed origins, integration encryption, an explicitly
-  enabled task-worker gate, E2B, Blob (including Plugin data archives), model providers,
+  enabled task-worker gate, the stable `RUNNER_SANDBOX_NAMESPACE` that scopes managed E2B cleanup,
+  E2B, Blob (including Plugin data archives), model providers,
   GitHub/Google/X integration credentials, opencompany PostHog, and Redis values; capability
   controls and provider-specific tuning remain optional.
 - Release: production DB URL, Vercel/Render credentials and project/service IDs, opencompany/API/runner
@@ -122,7 +123,8 @@ flow and is intentionally omitted from the customer integration index.
 ## Local generated values
 
 `bun run setup` writes branch-specific `DATABASE_URL`, the local API listener/origin and browser
-allowlist, web ports/origins, runner tokens, and Electric configuration to `.env.local`. It mirrors
+allowlist, web ports/origins, runner tokens, a workspace-specific `RUNNER_SANDBOX_NAMESPACE`, and
+Electric configuration to `.env.local`. It mirrors
 only the web auth/proxy/compatibility and observability subset into `apps/web/.env.local`;
 API/runner provider credentials are not copied into that app-local file.
 Do not put branch database URLs or generated local tokens in Infisical. `.env.override.local` may

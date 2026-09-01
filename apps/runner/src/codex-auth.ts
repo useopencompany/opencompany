@@ -38,6 +38,7 @@ export async function startCodexDeviceAuthFlow(input: {
   const sandbox = await createCodexAuthSandbox({
     ownerLogFields: { user_workos_id: input.userWorkosId },
     metadata: managedSandboxMetadata({
+      namespace: input.env.sandboxNamespace,
       ownerKind: "codex_device_auth_flow",
       ownerId: id,
       metadata: { user_id: input.userWorkosId },

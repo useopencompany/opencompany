@@ -17,6 +17,7 @@ const env = {
   exaApiKey: undefined,
   browserEnabled: false,
   codexE2bTemplate: undefined,
+  sandboxNamespace: "test",
   codexTimeoutMs: 3_600_000,
   codexModel: "gpt-5.6-sol",
   codexChatIdleTimeoutMs: 300_000,

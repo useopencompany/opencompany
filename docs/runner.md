@@ -25,6 +25,8 @@ operation.
 
 `RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED` controls the durable task worker. Worker concurrency, DB pool,
 lease, and sandbox timeouts are documented beside their values in `.env.example` and `render.yaml`.
+Managed E2B sandboxes carry `RUNNER_SANDBOX_NAMESPACE`; reconciliation lists only its exact
+namespace, preventing a local runner that shares E2B credentials from selecting production sandboxes.
 
 ## Worker admission
 

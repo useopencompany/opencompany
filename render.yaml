@@ -291,6 +291,10 @@ services:
       # preflight requires the worker gate to be explicitly enabled.
       - key: RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED
         sync: false
+      # Managed E2B sandbox creation and reconciliation share this ownership boundary.
+      # Local setup generates a different namespace even when the E2B API key is shared.
+      - key: RUNNER_SANDBOX_NAMESPACE
+        sync: false
       - key: NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN
         sync: false
       - key: NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST

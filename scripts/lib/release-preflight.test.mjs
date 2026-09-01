@@ -54,6 +54,7 @@ test("production preflight follows the deployed runtime boundaries", async () =>
     "GOOGLE_OAUTH_CLIENT_SECRET",
     "MONID_API_KEY",
     "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
+    "RUNNER_SANDBOX_NAMESPACE",
   ]);
   assertExcludes(
     [...groups.runner.required, ...groups.runner.optional],

@@ -264,6 +264,7 @@ export async function runCodexChatTurn(input: {
       template: env.codexE2bTemplate ?? "codex",
       envs: {},
       metadata: managedSandboxMetadata({
+        namespace: env.sandboxNamespace,
         ownerKind: "codex_chat_session",
         ownerId: session.id,
         metadata: { user_id: turn.userWorkosId },

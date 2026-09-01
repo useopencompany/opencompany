@@ -7,6 +7,7 @@ import {
   killSandbox,
   type ManagedSandboxOwnerKind,
   OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY,
+  OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY,
   OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY,
   OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY,
 } from "./sandbox";
@@ -23,9 +24,14 @@ type OwnedSandboxCandidate = ManagedSandboxCandidate & {
   ownerId: string;
 };
 
-export async function listManagedSandboxes(signal: AbortSignal) {
+export async function listManagedSandboxes(signal: AbortSignal, namespace: string) {
   const paginator = Sandbox.list({
-    query: { metadata: { [OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY]: "true" } },
+    query: {
+      metadata: {
+        [OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY]: "true",
+        [OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY]: namespace,
+      },
+    },
     limit: 100,
     requestTimeoutMs: SANDBOX_LIST_REQUEST_TIMEOUT_MS,
   });
@@ -98,6 +104,7 @@ export async function findLiveOwnedSandboxIds(
 
 export async function reconcileManagedSandboxes(input: {
   signal: AbortSignal;
+  namespace: string;
   now?: Date;
   graceMs?: number;
   list?: typeof listManagedSandboxes;
@@ -106,8 +113,9 @@ export async function reconcileManagedSandboxes(input: {
 }) {
   const now = input.now ?? new Date();
   const graceCutoff = now.getTime() - (input.graceMs ?? SANDBOX_RECONCILE_GRACE_MS);
-  const listed = await (input.list ?? listManagedSandboxes)(input.signal);
+  const listed = await (input.list ?? listManagedSandboxes)(input.signal, input.namespace);
   const candidates = listed.flatMap((sandbox): OwnedSandboxCandidate[] => {
+    if (sandbox.metadata[OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY] !== input.namespace) return [];
     const ownerKind = sandbox.metadata[OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY];
     const ownerId = sandbox.metadata[OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY];
     if (!isManagedSandboxOwnerKind(ownerKind) || !ownerId) return [];
@@ -132,11 +140,11 @@ export async function reconcileManagedSandboxes(input: {
   return { listed: listed.length, checked: candidates.length, killed };
 }
 
-export function startSandboxReconciler(options: { pollIntervalMs?: number } = {}) {
+export function startSandboxReconciler(options: { namespace: string; pollIntervalMs?: number }) {
   return createPollingWorker({
     pollIntervalMs: Math.max(1_000, options.pollIntervalMs ?? SANDBOX_RECONCILE_INTERVAL_MS),
     poll: async ({ signal }) => {
-      const result = await reconcileManagedSandboxes({ signal });
+      const result = await reconcileManagedSandboxes({ signal, namespace: options.namespace });
       if (result.killed > 0) {
         logger.info("Reconciled managed sandboxes", {
           event: "opencompany.runner_sandbox_reconcile_finished",
