@@ -525,7 +525,12 @@ async function executeLinearAction(
     const definitions = await client.listTools({ options: { signal: context.signal } });
     const rawTools = client.toolsFromDefinitions(definitions) as ToolSet;
     const remote = rawTools[spec.remoteName] as
-      | { execute?: (input: unknown, options: ToolExecutionOptions) => Promise<unknown> }
+      | {
+          execute?: (
+            input: unknown,
+            options: ToolExecutionOptions<Record<string, unknown>>,
+          ) => Promise<unknown>;
+        }
       | undefined;
     const execute = remote?.execute?.bind(remote);
     if (!execute) {
@@ -537,6 +542,7 @@ async function executeLinearAction(
       toolCallId: `goat-action-${spec.remoteName}`,
       messages: [],
       abortSignal: context.signal,
+      context: {},
     });
     return addLinearSourceMetadata(unwrapMcpResult(result), spec, connection.integrationId);
   } finally {

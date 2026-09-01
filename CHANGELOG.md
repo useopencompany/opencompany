@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-08-28
+
+### Fixed
+- Coding sessions hold on through more dropped connections: when a long-running command loses its stream mid-run, the session now reconnects and keeps going instead of failing (#1459) — @louis.
+- Scheduled workflows you set up before Skills launched now run again on schedule, instead of failing to start (#1457) — @opencompany-bot.
+
 ## [1.19.0] - 2026-08-27
 
 ### Added

@@ -1,10 +1,12 @@
 import type { Harness } from "@opencompany/agent-runtime";
-import { isRetryableCommandStreamError, type SandboxHandle } from "./sandbox";
+import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
+import { commandExitResult, type SandboxHandle } from "./sandbox";
 
 const ACP_REQUEST_TIMEOUT_MS = 30_000;
 const ACP_ABORT_POLL_INTERVAL_MS = 500;
 const ACP_CANCEL_GRACE_MS = 5_000;
 const ACP_STDERR_TAIL_LIMIT = 4_000;
+const ACP_FAILURE_DIAGNOSTIC_LIMIT = 2_000;
 const ACP_COMMAND_STREAM_RECONNECT_ATTEMPTS = 3;
 
 export type AcpMcpServer =
@@ -609,12 +611,15 @@ class AcpJsonRpcClient {
       },
       (error) => {
         if (this.stopping || generation !== this.watchGeneration) return;
-        const transportError = asError(error);
-        if (!isRetryableCommandStreamError(transportError)) {
-          this.fail(transportError);
+        const watchError = asError(error);
+        if (commandExitResult(watchError)) {
+          this.fail(watchError);
           return;
         }
-        void this.reconnect(handle, generation, transportError);
+        // Application failures arrive as JSON-RPC error responses. A rejected command watch is
+        // therefore a transport failure regardless of the SDK error class or message spelling,
+        // except for an explicit non-zero adapter exit reported by the command handle itself.
+        void this.reconnect(handle, generation, watchError);
       },
     );
   }
@@ -622,7 +627,7 @@ class AcpJsonRpcClient {
   private async reconnect(handle: unknown, generation: number, streamError: Error) {
     const pid = commandHandlePid(handle);
     if (pid == null) {
-      this.fail(streamError);
+      this.fail(this.retryableStreamFailure(streamError));
       return;
     }
 
@@ -652,7 +657,20 @@ class AcpJsonRpcClient {
         // retry classification if the adapter process cannot be reattached.
       }
     }
-    if (!this.stopping && generation === this.watchGeneration) this.fail(streamError);
+    if (!this.stopping && generation === this.watchGeneration) {
+      this.fail(this.retryableStreamFailure(streamError));
+    }
+  }
+
+  private retryableStreamFailure(cause: Error) {
+    return new CodexChatRetryableInfrastructureError(
+      `${this.input.adapterName} lost contact with its sandbox command stream before the turn completed.`,
+      cause,
+      `[run_turn] ${cause.name}: ${this.input.redact(cause.message)}`.slice(
+        0,
+        ACP_FAILURE_DIAGNOSTIC_LIMIT,
+      ),
+    );
   }
 
   private fail(error: Error) {
