@@ -29,6 +29,7 @@ const migrationPaths = [
   "0226_goat_immutable_skill_bundles.sql",
   "0228_goat_plugins.sql",
   "0233_goat_task_activities.sql",
+  "0234_goat_task_waiting_status.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -673,6 +674,241 @@ describe("Postgres Task repository", () => {
     ).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("records a user comment verbatim and reopens its canonical Task run atomically", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "task-comment-resume",
+      goal: "Start with a plan and wait for approval.",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "manual",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'completed', completed_at = now()
+       WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_sessions
+       SET status = 'idle', active_turn_id = NULL
+       WHERE chat_session_id = $1`,
+      [created.task.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.tasks
+       SET status = 'waiting', stage = 'completed', result = 'Here is the plan.',
+           reported_outcome = 'needs_attention', outcome_comment = 'Approve the plan.', attempts = 1
+       WHERE id = $1`,
+      [created.task.id],
+    );
+
+    const body = "  Approved — also rename the config flag.\n";
+    const resumed = await service.createComment(actor(), created.task.displayId.toLowerCase(), {
+      id: "task_comment_1",
+      body,
+    });
+
+    expect(resumed).toMatchObject({
+      task: {
+        id: created.task.id,
+        status: "running",
+        outcome: { result: null, error: null, reportedStatus: null, comment: null },
+      },
+      comment: {
+        id: "task_comment_1",
+        taskId: created.task.id,
+        authorWorkosId: "user_1",
+        body,
+      },
+      idempotentReplay: false,
+    });
+    await expect(
+      database.query<{
+        status: string;
+        stage: string;
+        attempts: number;
+        runtime_status: string;
+        active_turn_id: string;
+        user_content: string;
+        user_task_id: string;
+        assistant_content: string;
+        run_prompt: string;
+        run_status: string;
+        run_owner: string;
+        event_type: string;
+        comment_body: string;
+        comment_author: string;
+        status_activity: string;
+      }>(
+        `SELECT
+           task.status,
+           task.stage,
+           task.attempts,
+           runtime.status AS runtime_status,
+           runtime.active_turn_id,
+           user_message.content AS user_content,
+           user_message.task_id AS user_task_id,
+           assistant_message.content AS assistant_content,
+           run.prompt AS run_prompt,
+           run.status AS run_status,
+           run.user_workos_id AS run_owner,
+           event.type AS event_type,
+           comment.body AS comment_body,
+           comment.author_workos_id AS comment_author,
+           resumed.body AS status_activity
+         FROM goat.tasks AS task
+         JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = task.session_id
+         JOIN goat.codex_chat_turns AS run ON run.id = $2
+         JOIN goat.chat_messages AS user_message ON user_message.id = run.user_message_id
+         JOIN goat.chat_messages AS assistant_message ON assistant_message.id = run.assistant_message_id
+         JOIN goat.run_events AS event ON event.run_id = run.id AND event.type = 'run.queued'
+         JOIN goat.task_activities AS comment ON comment.id = 'task_comment_1'
+         JOIN goat.task_activities AS resumed
+           ON resumed.task_id = task.id AND resumed.kind = 'status_changed'
+         WHERE task.id = $1`,
+        [created.task.id, resumed.runId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          status: "running",
+          stage: "queued",
+          attempts: 2,
+          runtime_status: "queued",
+          active_turn_id: resumed.runId,
+          user_content: body,
+          user_task_id: created.task.id,
+          assistant_content: "",
+          run_prompt: body,
+          run_status: "queued",
+          run_owner: "user_1",
+          event_type: "run.queued",
+          comment_body: body,
+          comment_author: "user_1",
+          status_activity: "Resumed by user.",
+        },
+      ],
+    });
+
+    await expect(
+      service.createComment(actor(), created.task.id, { id: "task_comment_1", body }),
+    ).resolves.toMatchObject({
+      messageId: resumed.messageId,
+      assistantMessageId: resumed.assistantMessageId,
+      runId: resumed.runId,
+      idempotentReplay: true,
+    });
+    await expect(
+      service.createComment(actor(), created.task.id, {
+        id: "task_comment_1",
+        body: "Changed after the first request.",
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(
+      service.createComment(actor(), created.task.id, {
+        id: "task_comment_2",
+        body: "A second comment while active.",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.createComment(
+        actor({ userId: "user_2", workspaceId: "workspace_2" }),
+        created.task.id,
+        { id: "task_comment_other_workspace", body: "Not authorized." },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    expect(
+      (
+        await database.query<{ messages: number; runs: number; comments: number }>(
+          `SELECT
+             (SELECT COUNT(*)::int FROM goat.chat_messages WHERE session_id = $1) AS messages,
+             (SELECT COUNT(*)::int FROM goat.codex_chat_turns WHERE chat_session_id = $1) AS runs,
+             (SELECT COUNT(*)::int FROM goat.task_activities
+               WHERE task_id = $2 AND kind = 'comment') AS comments`,
+          [created.task.conversationId, created.task.id],
+        )
+      ).rows,
+    ).toEqual([{ messages: 4, runs: 2, comments: 1 }]);
+  });
+
+  it("allows a workspace member to comment but keeps the resumed Run owned by the Task owner", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "task-member-comment",
+      goal: "Ask the workspace for review.",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "manual",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns SET status = 'completed', completed_at = now() WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_sessions SET status = 'idle', active_turn_id = NULL
+       WHERE chat_session_id = $1`,
+      [created.task.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.tasks SET status = 'succeeded', stage = 'completed' WHERE id = $1`,
+      [created.task.id],
+    );
+
+    const result = await service.createComment(
+      actor({ userId: "user_3", role: "member" }),
+      created.task.id,
+      {
+        id: "task_comment_member",
+        body: "Please add the customer quote.",
+      },
+    );
+
+    expect(result.comment.authorWorkosId).toBe("user_3");
+    await expect(
+      database.query<{ run_owner: string; comment_author: string }>(
+        `SELECT run.user_workos_id AS run_owner, activity.author_workos_id AS comment_author
+         FROM goat.codex_chat_turns AS run
+         JOIN goat.task_activities AS activity ON activity.id = 'task_comment_member'
+         WHERE run.id = $1`,
+        [result.runId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ run_owner: "user_1", comment_author: "user_3" }],
+    });
+  });
+
+  it("rejects comments on archived Tasks", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "task-archived-comment",
+      goal: "Finish and archive.",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "manual",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns SET status = 'completed', completed_at = now() WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_sessions SET status = 'idle', active_turn_id = NULL
+       WHERE chat_session_id = $1`,
+      [created.task.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.tasks
+       SET status = 'succeeded', stage = 'completed', archived_at = now()
+       WHERE id = $1`,
+      [created.task.id],
+    );
+
+    await expect(
+      service.createComment(actor(), created.task.id, {
+        id: "task_comment_archived",
+        body: "Reopen this.",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
   it("uses a stable cursor and accepts either opaque or display Task identity", async () => {
     const first = await service.createTask(actor(), {
       idempotencyKey: "task-page-1",
@@ -995,6 +1231,8 @@ const BASE_SCHEMA = `
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   );
+  ALTER TABLE goat.tasks ADD CONSTRAINT goat_tasks_status_check
+    CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'canceled'));
   CREATE UNIQUE INDEX goat_tasks_session_idx ON goat.tasks(session_id) WHERE session_id IS NOT NULL;
   CREATE TABLE goat.task_messages (
     id text PRIMARY KEY,

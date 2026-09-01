@@ -28,6 +28,7 @@ const appDataMock = vi.hoisted(() => ({
 }));
 
 const archiveTaskMock = vi.hoisted(() => vi.fn(async () => ({ ok: true as const, error: null })));
+const createCommentMock = vi.hoisted(() => vi.fn(async () => ({ replayed: false })));
 const summaryMock = vi.hoisted(() => ({
   value: {
     summary: {
@@ -92,6 +93,8 @@ vi.mock("@/components/Routes", () => ({
 
 vi.mock("@/lib/headless-task-commands", () => ({
   archiveHeadlessTask: archiveTaskMock,
+  createHeadlessTaskComment: createCommentMock,
+  newHeadlessTaskCommentId: () => "task_activity_comment_test",
 }));
 
 const updateTaskViewModeMock = vi.hoisted(() =>
@@ -288,6 +291,34 @@ describe("TasksBoardRoute", () => {
     expect(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" }),
     ).toBeDisabled();
+    expect(within(screen.getByRole("dialog")).getByLabelText("Add a comment")).toBeDisabled();
+    expect(
+      within(screen.getByRole("dialog")).getByText(
+        "You can comment when the current run finishes.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("posts a settled Task comment verbatim and resumes through the canonical command", async () => {
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({ id: "waiting", name: "Approve the launch", status: "waiting" }),
+    ];
+    render(<TasksBoardRoute workflowNames={{}} />);
+    await user.click(screen.getByRole("link", { name: "Open Approve the launch" }));
+
+    const sheet = screen.getByRole("dialog");
+    const body = "  Approved.\n  Keep the original rollout order.  ";
+    fireEvent.change(within(sheet).getByLabelText("Add a comment"), { target: { value: body } });
+    await user.click(within(sheet).getByRole("button", { name: "Post comment" }));
+
+    await waitFor(() =>
+      expect(createCommentMock).toHaveBeenCalledWith(
+        "waiting",
+        { id: "task_activity_comment_test", body },
+        { scopeKey: "workspace_1" },
+      ),
+    );
   });
 
   it("logs a failed task's error as its own activity entry", async () => {
@@ -378,6 +409,16 @@ describe("TasksBoardRoute", () => {
         metadata: { runId: "run_1" },
         createdAt: "2026-07-29T09:02:12.001Z",
       },
+      {
+        id: "activity_user_comment",
+        taskId: "workflow-task",
+        author: "user",
+        authorWorkosId: "user_1",
+        kind: "comment",
+        body: "Use the German launch date.",
+        metadata: { runId: "run_2" },
+        createdAt: "2026-07-29T09:02:13.000Z",
+      },
     ];
 
     render(<TasksBoardRoute workflowNames={{}} />);
@@ -388,10 +429,12 @@ describe("TasksBoardRoute", () => {
     expect(activity.getByText("Run started")).toBeInTheDocument();
     expect(activity.getByText("Run finished")).toBeInTheDocument();
     expect(activity.getByText("Orchestrator note")).toBeInTheDocument();
+    expect(activity.getByText("You commented")).toBeInTheDocument();
     expect(activity.getAllByText(/Step 1\/2: Research/)).toHaveLength(2);
     expect(activity.getByText(/1m 12s/)).toBeInTheDocument();
     expect(activity.getByText("Research is complete.")).toBeInTheDocument();
     expect(activity.getByText("Ready for the implementation step.")).toBeInTheDocument();
+    expect(activity.getByText("Use the German launch date.")).toBeInTheDocument();
     expect(
       activity.queryByText("This synthesized result should be hidden."),
     ).not.toBeInTheDocument();

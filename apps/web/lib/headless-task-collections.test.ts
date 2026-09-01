@@ -2,6 +2,7 @@ import type { LegacyTaskDto, TaskReadModel } from "@opencompany/protocol";
 import { createCollection } from "@tanstack/react-db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  awaitHeadlessTaskCommentTransaction,
   getHeadlessTaskActivities,
   legacyTaskDtoToRow,
   taskReadModelToRow,
@@ -63,6 +64,20 @@ describe("headless Task presentation adapters", () => {
         url: "https://api.example.test/v1/read-models/task-activities-v1?taskId=task%2F1",
       },
     });
+  });
+
+  it("waits for both Task and activity projections after a comment transaction", async () => {
+    await awaitHeadlessTaskCommentTransaction("task/comment-transaction", "42", {
+      scopeKey: "workspace_comment_transaction",
+    });
+
+    const collections = vi.mocked(createCollection).mock.results.map((result) => result.value) as {
+      utils: { awaitTxId: ReturnType<typeof vi.fn> };
+    }[];
+    expect(collections).toHaveLength(2);
+    for (const collection of collections) {
+      expect(collection.utils.awaitTxId).toHaveBeenCalledWith(42, undefined);
+    }
   });
 
   it("projects canonical metadata without exposing execution persistence", () => {

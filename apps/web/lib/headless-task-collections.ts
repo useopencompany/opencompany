@@ -63,11 +63,28 @@ export async function awaitHeadlessTaskTransaction(
   transactionIdValue: string,
   options: { scopeKey: string; timeoutMs?: number },
 ) {
+  const transactionId = electricTransactionId(transactionIdValue);
+  await getHeadlessTasks(options.scopeKey).utils.awaitTxId(transactionId, options.timeoutMs);
+}
+
+export async function awaitHeadlessTaskCommentTransaction(
+  taskId: string,
+  transactionIdValue: string,
+  options: { scopeKey: string; timeoutMs?: number },
+) {
+  const transactionId = electricTransactionId(transactionIdValue);
+  await Promise.all([
+    getHeadlessTasks(options.scopeKey).utils.awaitTxId(transactionId, options.timeoutMs),
+    getHeadlessTaskActivities(taskId).utils.awaitTxId(transactionId, options.timeoutMs),
+  ]);
+}
+
+function electricTransactionId(transactionIdValue: string) {
   const transactionId = Number(transactionIdValue);
   if (!Number.isSafeInteger(transactionId) || transactionId < 1) {
     throw new Error("The API returned an invalid Electric transaction identifier.");
   }
-  await getHeadlessTasks(options.scopeKey).utils.awaitTxId(transactionId, options.timeoutMs);
+  return transactionId;
 }
 
 // The current Task UI still consumes its established presentation row. This adapter deliberately

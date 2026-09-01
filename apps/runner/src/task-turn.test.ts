@@ -4,8 +4,10 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskTurnTerminalError } from "./codex-chat-errors";
 import {
+  buildTaskCloserPrompt,
   buildTaskFailureCompletion,
   buildTaskTurnCompletion,
+  loadRecentTaskCommentThread,
   markTaskTurnRunning,
   settleDurableTurn,
   type TaskTurnContext,
@@ -47,6 +49,34 @@ describe("session-backed task turns", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.execute.mockResolvedValue({ rows: [{ id: "runtime_1" }] });
+  });
+
+  it("includes a bounded recent comment thread in the settlement prompt", async () => {
+    mocks.execute.mockResolvedValueOnce({
+      rows: [
+        { author: "user", body: "Newest clarification" },
+        { author: "orchestrator", body: "Earlier question" },
+      ],
+    });
+
+    await expect(loadRecentTaskCommentThread("task_1")).resolves.toEqual([
+      { author: "orchestrator", body: "Earlier question" },
+      { author: "user", body: "Newest clarification" },
+    ]);
+    const prompt = buildTaskCloserPrompt({
+      taskName: "Prepare launch",
+      taskRequest: "Draft the brief",
+      commentThread: [
+        { author: "orchestrator", body: "Which market?" },
+        { author: "user", body: "Germany first." },
+      ],
+      completed: true,
+      runOutput: "Brief drafted.",
+    });
+    expect(prompt).toContain("Orchestrator: Which market?");
+    expect(prompt).toContain("User: Germany first.");
+    expect(prompt.indexOf("Orchestrator:")).toBeLessThan(prompt.indexOf("User:"));
+    expect(prompt).toContain("Result:\nBrief drafted.");
   });
 
   it("turns a completed workflow step into the next engine-specific durable turn", () => {

@@ -19,6 +19,7 @@ describe("headless protocol", () => {
     const document = createOpenApiDocument();
     expect(Object.keys(document.paths ?? {})).toEqual([
       "/v1/tasks",
+      "/v1/tasks/{taskId}/comments",
       "/v1/tasks/{taskId}",
       "/v1/tasks/{taskId}/summary",
       "/v1/compatibility/tasks",
