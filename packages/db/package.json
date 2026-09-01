@@ -36,6 +36,10 @@
       "types": "./src/plugin-repository.ts",
       "default": "./src/plugin-repository.ts"
     },
+    "./plugin-gateway-repository": {
+      "types": "./src/plugin-gateway-repository.ts",
+      "default": "./src/plugin-gateway-repository.ts"
+    },
     "./plugin-runtime-repository": {
       "types": "./src/plugin-runtime-repository.ts",
       "default": "./src/plugin-runtime-repository.ts"

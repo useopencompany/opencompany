@@ -5,6 +5,8 @@ import {
   CHAT_ATTACHMENT_FORMATS,
   type ChatAttachmentFormat,
   type ConversationRuntimeStatus,
+  type PluginCapabilityDefinition,
+  type PluginGatewayDiscoveredTool,
   type PluginInstallReport,
   type PluginManifest,
   type PluginStatus,
@@ -1537,6 +1539,12 @@ export const integrations = productSchema.table(
       .$type<Partial<Record<string, "on" | "off" | "ask">>>()
       .notNull()
       .default(sql`'{}'::jsonb`),
+    // Sparse per-tool overrides layered over capability_modes. Keeping these on the durable
+    // connection makes advanced plugin permissions survive package archive/reinstall cycles.
+    toolModes: jsonb("tool_modes")
+      .$type<Partial<Record<string, "on" | "off" | "ask">>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1589,6 +1597,10 @@ export const integrations = productSchema.table(
     statusCheck: check(
       "goat_integrations_status_check",
       sql`${table.status} IN ('connected', 'needs_reauth', 'sync_failed', 'disconnected')`,
+    ),
+    toolModesCheck: check(
+      "integrations_tool_modes_check",
+      sql`jsonb_typeof(${table.toolModes}) = 'object'`,
     ),
   }),
 );
@@ -3345,6 +3357,81 @@ export const plugins = productSchema.table(
   }),
 );
 
+// A remote mcp.json entry registered for server-side gateway discovery and dispatch. The package
+// remains immutable; discovery is a cached projection that may be refreshed as the vendor adds or
+// removes tools. Disabled Plugins are excluded by the active-registration query; archive deletes
+// these rows without touching the provider connection.
+export const pluginGatewayRegistrations = productSchema.table(
+  "plugin_gateway_registrations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    pluginId: text("plugin_id").notNull(),
+    serverName: text("server_name").notNull(),
+    connectionProvider: text("connection_provider").notNull(),
+    transport: text("transport").$type<"streamable-http" | "sse">().notNull(),
+    serverUrl: text("server_url").notNull(),
+    headers: jsonb("headers").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    capabilities: jsonb("capabilities")
+      .$type<PluginCapabilityDefinition[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    discoverySnapshot: jsonb("discovery_snapshot")
+      .$type<PluginGatewayDiscoveredTool[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    discoveredAt: timestamp("discovered_at", { withTimezone: true }),
+    refreshAfter: timestamp("refresh_after", { withTimezone: true }).notNull().defaultNow(),
+    lastDiscoveryError: text("last_discovery_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pluginServerIdx: uniqueIndex("plugin_gateway_registrations_plugin_server_idx").on(
+      table.pluginId,
+      table.serverName,
+    ),
+    workspaceProviderIdx: index("plugin_gateway_registrations_workspace_provider_idx").on(
+      table.workspaceId,
+      table.connectionProvider,
+      table.refreshAfter,
+    ),
+    workspacePluginFk: foreignKey({
+      columns: [table.workspaceId, table.pluginId],
+      foreignColumns: [plugins.workspaceId, plugins.id],
+      name: "plugin_gateway_registrations_workspace_plugin_fk",
+    }).onDelete("cascade"),
+    serverNameCheck: check(
+      "plugin_gateway_registrations_server_name_check",
+      sql`char_length(${table.serverName}) BETWEEN 1 AND 200`,
+    ),
+    connectionProviderCheck: check(
+      "plugin_gateway_registrations_connection_provider_check",
+      sql`char_length(${table.connectionProvider}) BETWEEN 1 AND 64`,
+    ),
+    transportCheck: check(
+      "plugin_gateway_registrations_transport_check",
+      sql`${table.transport} IN ('streamable-http', 'sse')`,
+    ),
+    serverUrlCheck: check(
+      "plugin_gateway_registrations_server_url_check",
+      sql`${table.serverUrl} ~ '^https?://'`,
+    ),
+    headersCheck: check(
+      "plugin_gateway_registrations_headers_check",
+      sql`jsonb_typeof(${table.headers}) = 'object'`,
+    ),
+    capabilitiesCheck: check(
+      "plugin_gateway_registrations_capabilities_check",
+      sql`jsonb_typeof(${table.capabilities}) = 'array'`,
+    ),
+    discoverySnapshotCheck: check(
+      "plugin_gateway_registrations_discovery_snapshot_check",
+      sql`jsonb_typeof(${table.discoverySnapshot}) = 'array'`,
+    ),
+  }),
+);
+
 export const pluginFiles = productSchema.table(
   "plugin_files",
   {
@@ -4026,9 +4113,7 @@ export const actionTurns = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    policy: text("policy")
-      .$type<"foregroundInteractive" | "cloudReadOnly" | "headless">()
-      .notNull(),
+    policy: text("policy").$type<"foregroundInteractive" | "headless">().notNull(),
     actionCallCount: integer("action_call_count").notNull().default(0),
     invocationIds: jsonb("invocation_ids").$type<string[]>().notNull().default([]),
     listedSourceIds: jsonb("listed_source_ids").$type<string[]>().notNull().default([]),
@@ -4037,6 +4122,10 @@ export const actionTurns = productSchema.table(
       .default(0),
     admittedInvocationIds: jsonb("admitted_invocation_ids").$type<string[]>().notNull().default([]),
     capabilityQuotes: jsonb("capability_quotes")
+      .$type<Record<string, Record<string, unknown>>>()
+      .notNull()
+      .default({}),
+    approvalRecords: jsonb("approval_records")
       .$type<Record<string, Record<string, unknown>>>()
       .notNull()
       .default({}),
@@ -4054,7 +4143,7 @@ export const actionTurns = productSchema.table(
     expiresIdx: index("goat_action_turns_expires_idx").on(table.expiresAt),
     policyCheck: check(
       "goat_action_turns_policy_check",
-      sql`${table.policy} IN ('foregroundInteractive', 'cloudReadOnly', 'headless')`,
+      sql`${table.policy} IN ('foregroundInteractive', 'headless')`,
     ),
     countersCheck: check(
       "goat_action_turns_counters_check",
@@ -6455,8 +6544,19 @@ export const pluginsRelations = relations(plugins, ({ one, many }) => ({
   }),
   files: many(pluginFiles),
   skills: many(pluginSkills),
+  gatewayRegistrations: many(pluginGatewayRegistrations),
   chatSessions: many(chatSessionPlugins),
 }));
+
+export const pluginGatewayRegistrationsRelations = relations(
+  pluginGatewayRegistrations,
+  ({ one }) => ({
+    plugin: one(plugins, {
+      fields: [pluginGatewayRegistrations.pluginId],
+      references: [plugins.id],
+    }),
+  }),
+);
 
 export const pluginFilesRelations = relations(pluginFiles, ({ one }) => ({
   plugin: one(plugins, {
@@ -6553,6 +6653,7 @@ export type SkillBundle = typeof skillBundles.$inferSelect;
 export type SkillBundleFile = typeof skillBundleFiles.$inferSelect;
 export type SkillInstallation = typeof skillInstallations.$inferSelect;
 export type Plugin = typeof plugins.$inferSelect;
+export type PluginGatewayRegistration = typeof pluginGatewayRegistrations.$inferSelect;
 export type PluginFile = typeof pluginFiles.$inferSelect;
 export type PluginSkill = typeof pluginSkills.$inferSelect;
 export type WorkspacePluginData = typeof workspacePluginData.$inferSelect;

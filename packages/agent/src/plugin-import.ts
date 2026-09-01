@@ -9,6 +9,8 @@ import {
   type ResolvedPluginPackage,
 } from "@opencompany/core";
 
+const TRUSTED_CAPABILITY_SOURCES = ["useopencompany/plugins"] as const;
+
 export function createPluginImportResolver(): PluginImportResolver {
   return { resolve: resolvePluginImport };
 }
@@ -21,6 +23,7 @@ export async function resolvePluginImport(input: {
     const plugin = await resolvePlugin({
       url: input.url,
       fetcher: createGitHubPluginFetcher(),
+      trustedCapabilitySources: TRUSTED_CAPABILITY_SOURCES,
       ...(input.selectedPath !== undefined ? { selectedPath: input.selectedPath } : {}),
     });
     return {
@@ -52,6 +55,8 @@ export async function resolvePluginImport(input: {
         },
       })),
       stdioServers: plugin.stdioServers,
+      remoteServers: plugin.remoteServers,
+      capabilities: plugin.capabilities,
       report: plugin.report,
     };
   } catch (error) {

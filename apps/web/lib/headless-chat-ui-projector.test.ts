@@ -199,6 +199,10 @@ describe("HeadlessChatUiProjector", () => {
         kind: "use_action",
         prompt: "Approve?",
         action: "crm.update",
+        input: {
+          action: "crm.update",
+          params: { companyId: "company_1", lifecycle: "customer" },
+        },
       }),
       event(3, "message.content_updated", {
         messageId: "message_assistant_1",
@@ -221,8 +225,49 @@ describe("HeadlessChatUiProjector", () => {
       type: "tool-input-available",
       toolCallId: "approval_1",
       toolName: "use_action",
-      input: { action: "crm.update" },
+      input: {
+        action: "crm.update",
+        params: { companyId: "company_1", lifecycle: "customer" },
+      },
     });
+  });
+
+  it.each([
+    {
+      resolution: "approved" as const,
+      expected: {
+        type: "tool-output-available",
+        toolCallId: "tool_1",
+        output: { approved: true },
+      },
+    },
+    {
+      resolution: "denied" as const,
+      expected: {
+        type: "tool-output-error",
+        toolCallId: "tool_1",
+        errorText: "Action denied by user.",
+      },
+    },
+  ])("settles a live gateway approval after it is $resolution", ({ resolution, expected }) => {
+    const projector = new HeadlessChatUiProjector("message_assistant_1");
+    const chunks = project(projector, [
+      event(1, "approval.requested", {
+        approvalId: "approval_1",
+        toolCallId: "tool_1",
+        kind: "use_action",
+        prompt: "Approve?",
+        action: "crm.update",
+      }),
+      event(2, "approval.resolved", {
+        approvalId: "approval_1",
+        toolCallId: "tool_1",
+        resolution,
+      }),
+    ]);
+
+    expect(chunks.at(-1)).toEqual(expected);
+    expect(projector.toolCallCheckpoint).toEqual([]);
   });
 
   it("continues with a fresh segment after reconnect and closes it before cancellation", () => {

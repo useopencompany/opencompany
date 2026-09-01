@@ -54,7 +54,16 @@ const flowMocks = {
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
 } as const;
 
-function ingress(overrides: { authError?: ApiError } = {}) {
+function ingress(
+  overrides: {
+    authError?: ApiError;
+    refreshPluginRegistrations?: (input: {
+      provider: McpOAuthProvider;
+      userWorkosId: string;
+      workspaceIds: string[];
+    }) => Promise<void>;
+  } = {},
+) {
   vi.mocked(listWorkspacesForUser).mockResolvedValue([
     { workspace: { id: "workspace_1", workosOrganizationId: null }, role: "admin" },
   ] as never);
@@ -71,6 +80,9 @@ function ingress(overrides: { authError?: ApiError } = {}) {
         activeBrainId: null,
       };
     },
+    ...(overrides.refreshPluginRegistrations
+      ? { refreshPluginRegistrations: overrides.refreshPluginRegistrations }
+      : {}),
   });
 }
 
@@ -235,6 +247,25 @@ describe("remote MCP OAuth ingress", () => {
       code: "abc",
       state,
       db: sentinelDb,
+    });
+  });
+
+  it("refreshes installed plugin discovery after a provider reconnect", async () => {
+    vi.mocked(completeLinearMcpOAuth).mockResolvedValue(undefined as never);
+    const refreshPluginRegistrations = vi.fn(async () => undefined);
+    const state = mintState("linear");
+
+    await ingress({ refreshPluginRegistrations }).callback(
+      "linear",
+      new Request(
+        `https://api.example.com/integrations/linear/callback?state=${encodeURIComponent(state)}&code=abc`,
+      ),
+    );
+
+    expect(refreshPluginRegistrations).toHaveBeenCalledWith({
+      provider: "linear",
+      userWorkosId: "user_1",
+      workspaceIds: ["workspace_1"],
     });
   });
 

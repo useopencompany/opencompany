@@ -1,0 +1,36 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "linear",
+  "version": "1.0.0",
+  "description": "Plan, triage, and report on work in Linear with server-side tools and focused workflows.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "repository": "https://github.com/useopencompany/plugins/tree/main/linear",
+  "license": "MIT",
+  "keywords": ["linear", "issues", "triage", "project-management"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Read Linear",
+        "defaultMode": "on",
+        "tools": [
+          "list_issues",
+          "get_issue",
+          "list_comments",
+          "list_projects",
+          "get_project",
+          "list_teams",
+          "list_users",
+          "list_issue_statuses"
+        ]
+      },
+      "write": {
+        "label": "Manage issues",
+        "defaultMode": "ask",
+        "tools": ["save_issue", "save_comment"]
+      }
+    }
+  }
+}

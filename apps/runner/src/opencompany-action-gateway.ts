@@ -5,6 +5,7 @@ import {
   type ActionGatewayResponse,
   type ActionHostGatewayRequest,
 } from "@opencompany/agent-runtime";
+import { createLogger } from "@opencompany/observability";
 
 type GatewayContext = {
   sessionId: string;
@@ -16,6 +17,11 @@ type GatewayContext = {
 type GatewayDependencies = { execute: typeof executeActionHostGateway };
 
 const defaultDependencies: GatewayDependencies = { execute: executeActionHostGateway };
+
+const logger = createLogger({
+  service: "opencompany-runner",
+  runtime: "goat-opencompany-action-gateway",
+});
 
 export async function createActionDispatcher(
   context: GatewayContext,
@@ -31,6 +37,7 @@ export async function createActionDispatcher(
 
   const catalog = response.catalog as ChatActionCatalog;
   const sourceByAction = new Map(catalog.actions.map((action) => [action.id, action.source]));
+  const approvalFailures = new Map<string, UseActionToolOutput>();
 
   return {
     catalog,
@@ -49,11 +56,31 @@ export async function createActionDispatcher(
         }),
       );
       if (!approval.ok || !("needsApproval" in approval)) {
-        throw new Error("Action approval could not be evaluated.");
+        const approvalError = approval.ok
+          ? { code: "invalid_gateway_response", message: "Approval response was missing." }
+          : approval.error;
+        const failure = approvalEvaluationFailure({
+          action,
+          source: sourceByAction.get(action),
+        });
+        approvalFailures.set(toolCallId, failure);
+        logger.error("Action approval could not be evaluated", {
+          event: "opencompany.action_gateway_approval_evaluation_failed",
+          operation: "approval",
+          action_id: action,
+          invocation_id: toolCallId,
+          error: approvalError,
+        });
+        return false;
       }
       return approval.needsApproval;
     },
     execute: async ({ action, params, toolCallId }) => {
+      const approvalFailure = approvalFailures.get(toolCallId);
+      if (approvalFailure) {
+        approvalFailures.delete(toolCallId);
+        return approvalFailure;
+      }
       const source = sourceByAction.get(action);
       if (!source) return invalidAction(action);
 
@@ -101,8 +128,30 @@ async function callGateway(
     return await dependencies.execute({ request, signal: context.signal });
   } catch (error) {
     if (context.signal.aborted) throw context.signal.reason ?? error;
+    logger.error("Action gateway request failed", {
+      event: "opencompany.action_gateway_request_failed",
+      operation: request.operation,
+      action_id: "action" in request ? request.action : undefined,
+      invocation_id: "invocationId" in request ? request.invocationId : undefined,
+      error,
+    });
     return gatewayError("gateway_error", "The action service could not complete the request.");
   }
+}
+
+function approvalEvaluationFailure(input: {
+  action: string;
+  source: ChatActionCatalog["sources"][number]["id"] | undefined;
+}): UseActionToolOutput {
+  return {
+    ok: false,
+    action: input.action,
+    error: {
+      code: "internal",
+      ...(input.source ? { source: input.source } : {}),
+      message: `Approval for ${JSON.stringify(input.action)} could not be evaluated, so the action was not run.`,
+    },
+  };
 }
 
 function invalidAction(action: string): UseActionToolOutput {

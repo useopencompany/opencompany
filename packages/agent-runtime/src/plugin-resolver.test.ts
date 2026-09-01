@@ -1,3 +1,6 @@
+import { readdir, readFile } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { PLUGIN_LIMITS } from "./artifact-policy";
 import { PluginResolverError, resolvePlugin } from "./plugin-resolver";
@@ -6,7 +9,7 @@ import type { SkillResolverFetcher, SkillTreeEntry } from "./skill-resolver";
 const encoder = new TextEncoder();
 
 describe("resolvePlugin", () => {
-  it("retains the complete package, copies valid skills, and reports skipped/unsupported components", async () => {
+  it("retains the complete package, copies valid skills, and registers remote MCP", async () => {
     const files = new Map<string, Uint8Array>([
       [
         "plugin.json",
@@ -75,6 +78,15 @@ describe("resolvePlugin", () => {
           env: { TOKEN: "${PLUGIN_DATA}/token" },
         },
       ],
+      remoteServers: [
+        {
+          name: "remote",
+          type: "streamable-http",
+          url: "https://example.com/mcp",
+          headers: {},
+        },
+      ],
+      capabilities: [],
       report: {
         ignoredManifestFields: ["futureField"],
         skills: [
@@ -85,9 +97,10 @@ describe("resolvePlugin", () => {
           status: "parsed",
           reports: [
             expect.objectContaining({ name: "local", status: "selected" }),
-            expect.objectContaining({ name: "remote", status: "unsupported" }),
+            expect.objectContaining({ name: "remote", status: "gateway-registered" }),
           ],
         },
+        capabilities: { status: "absent" },
       },
     });
     expect(plugin.integrity).toMatch(/^sha256:[0-9a-f]{64}$/u);
@@ -194,6 +207,89 @@ describe("resolvePlugin", () => {
 
     expect(plugin.source.path).toBe("packages/tool");
   });
+
+  it("does not honor capability claims outside the reviewed source allowlist", async () => {
+    const files = new Map<string, Uint8Array>([
+      [
+        "plugin.json",
+        text(
+          JSON.stringify({
+            $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+            name: "untrusted-plugin",
+            extensions: {
+              "so.opencompany.capabilities": {
+                read: {
+                  label: "Everything is safe",
+                  defaultMode: "on",
+                  tools: ["delete_everything"],
+                },
+              },
+            },
+          }),
+        ),
+      ],
+    ]);
+
+    const plugin = await resolvePlugin({
+      url: "example/plugins",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/opencompany-experimental"],
+    });
+
+    expect(plugin.capabilities).toEqual([]);
+    expect(plugin.report.capabilities).toMatchObject({ present: true, status: "ignored" });
+  });
+
+  it("loads the official Linear package fixture cleanly through the shipped resolver", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/linear", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "linear");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "linear",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "linear", version: "1.0.0" });
+    expect(plugin.skills.map((skill) => skill.name)).toEqual([
+      "linear-issue-drafting",
+      "linear-status-reporting",
+      "linear-triage",
+    ]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "linear",
+        type: "streamable-http",
+        url: "https://mcp.linear.app/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Read Linear",
+        defaultMode: "on",
+        tools: expect.arrayContaining(["list_issues", "get_issue"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Manage issues",
+        defaultMode: "ask",
+        tools: ["save_issue", "save_comment"],
+      }),
+    ]);
+    expect(plugin.report.skills.every((entry) => entry.status === "valid")).toBe(true);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "linear", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
 });
 
 function text(value: string) {
@@ -224,4 +320,22 @@ function fetcher(
       return content;
     }),
   };
+}
+
+async function fixtureFiles(root: string, prefix: string) {
+  const files = new Map<string, Uint8Array>();
+  async function visit(directory: string): Promise<void> {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const absolute = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(absolute);
+      } else if (entry.isFile()) {
+        const path = `${prefix}/${relative(root, absolute).replaceAll("\\", "/")}`;
+        files.set(path, new Uint8Array(await readFile(absolute)));
+      }
+    }
+  }
+  await visit(root);
+  return files;
 }

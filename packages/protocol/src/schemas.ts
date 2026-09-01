@@ -1563,7 +1563,7 @@ export const PluginStdioServerSchema = z
 export const PluginMcpServerReportSchema = z
   .object({
     name: z.string(),
-    status: z.enum(["selected", "unsupported", "invalid"]),
+    status: z.enum(["selected", "gateway-registered", "unsupported", "invalid"]),
     transport: z.enum(["stdio", "streamable-http", "sse"]).optional(),
     reason: z.string().optional(),
   })
@@ -1624,6 +1624,25 @@ export const PluginValidationReportSchema = z
     ignoredManifestFields: z.array(z.string()),
     skills: z.array(PluginSkillReportSchema),
     mcp: PluginMcpReportSchema,
+    capabilities: z
+      .discriminatedUnion("status", [
+        z.object({ status: z.literal("absent") }).strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("ignored"),
+            reason: z.string(),
+          })
+          .strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("parsed"),
+            issues: z.array(z.string()),
+          })
+          .strict(),
+      ])
+      .optional(),
   })
   .strict()
   .openapi("PluginValidationReport");
@@ -1644,6 +1663,57 @@ export const PluginSkillSummarySchema = z
   })
   .strict()
   .openapi("PluginSkillSummary");
+
+export const PluginCapabilityDefinitionSchema = z
+  .object({
+    id: z.enum(["read", "write"]),
+    label: z.string().min(1).max(128),
+    defaultMode: z.enum(["on", "ask", "off"]),
+    tools: z.array(z.string().min(1).max(256)).max(512),
+  })
+  .strict()
+  .openapi("PluginCapabilityDefinition");
+
+export const PluginDiscoveredToolSchema = z
+  .object({
+    name: z.string().min(1).max(256),
+    description: z.string().max(4_096).optional(),
+    classification: z
+      .object({
+        capabilityId: z.enum(["read", "write"]),
+        capabilityLabel: z.string().min(1).max(128),
+        defaultMode: z.enum(["on", "ask", "off"]),
+        bucket: z.enum(["read", "write"]),
+        curated: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict()
+  .openapi("PluginDiscoveredTool");
+
+export const PluginRemoteMcpServerSchema = z
+  .object({
+    name: z.string().min(1).max(128),
+    type: z.enum(["streamable-http", "sse"]),
+    connectionProvider: z.string().min(1).max(64),
+    capabilities: z.array(PluginCapabilityDefinitionSchema).max(64),
+    tools: z.array(PluginDiscoveredToolSchema).max(512),
+    discoveryStatus: z.enum(["pending", "ready", "stale", "error"]),
+    discoveredAt: TimestampSchema.nullable(),
+    refreshAfter: TimestampSchema,
+    lastDiscoveryError: z.string().max(2_000).nullable(),
+  })
+  .strict()
+  .openapi("PluginRemoteMcpServer");
+
+export const PluginRemoteMcpPreviewServerSchema = PluginRemoteMcpServerSchema.pick({
+  name: true,
+  type: true,
+  connectionProvider: true,
+  capabilities: true,
+})
+  .strict()
+  .openapi("PluginRemoteMcpPreviewServer");
 
 const PluginBaseSchema = z
   .object({
@@ -1676,6 +1746,7 @@ export const PluginInstallationSchema = PluginBaseSchema.extend({
   files: z.array(PluginFileMetadataSchema).min(1).max(512),
   skills: z.array(PluginSkillSummarySchema),
   stdioServers: z.array(PluginStdioServerSchema),
+  remoteMcpServers: z.array(PluginRemoteMcpServerSchema),
 })
   .strict()
   .openapi("PluginInstallation");
@@ -1709,6 +1780,7 @@ export const PluginImportPreviewSchema = z
         .strict(),
     ),
     stdioServers: z.array(PluginStdioServerSchema),
+    remoteMcpServers: z.array(PluginRemoteMcpPreviewServerSchema),
     report: PluginValidationReportSchema,
   })
   .strict()
@@ -4074,6 +4146,7 @@ export type CreateWorkspaceSkillBody = z.infer<typeof CreateWorkspaceSkillBodySc
 export type UpdateWorkspaceSkillBody = z.infer<typeof UpdateWorkspaceSkillBodySchema>;
 export type PluginManifestDto = z.infer<typeof PluginManifestSchema>;
 export type PluginSourceDto = z.infer<typeof PluginSourceSchema>;
+export type PluginRemoteMcpServerDto = z.infer<typeof PluginRemoteMcpServerSchema>;
 export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;
 export type PluginInstallationDto = z.infer<typeof PluginInstallationSchema>;
 export type PluginImportPreviewDto = z.infer<typeof PluginImportPreviewSchema>;

@@ -25,6 +25,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { ExternalLink, Globe2, Loader2, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { useHydrated } from "@/components/useHydrated";
 import {
   type CapabilityMode,
@@ -273,7 +274,7 @@ export function SettingsIntegrationsPanel({
   );
 }
 
-function IntegrationSetupFeedback() {
+export function IntegrationSetupFeedback() {
   const handled = useRef(false);
 
   useEffect(() => {
@@ -396,7 +397,6 @@ function countWorkspaceConnected(integrations: IntegrationState) {
   return (
     (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
-    (integrationStatus(integrations.linear) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.posthog) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
     (integrations.infisical.connected ? 1 : 0) +
@@ -448,7 +448,6 @@ function IntegrationCards({
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
-            <IntegrationCardRow integration={integrations.linear} />
             <IntegrationCardRow integration={integrations.posthog} />
             <IntegrationCardRow integration={integrations.stripe} canConnect={isWorkspaceAdmin} />
             <IntegrationProviderGroupCard
@@ -993,7 +992,15 @@ function IntegrationProviderGroupCard({
   );
 }
 
-function IntegrationAccountRow({ account }: { account: IntegrationAccountView }) {
+export function IntegrationAccountRow({
+  account,
+  purposeLabel,
+  showCapabilityModes = true,
+}: {
+  account: IntegrationAccountView;
+  purposeLabel?: string;
+  showCapabilityModes?: boolean;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState<{
@@ -1064,6 +1071,11 @@ function IntegrationAccountRow({ account }: { account: IntegrationAccountView })
           {identity}
         </span>
         <div className="flex shrink-0 items-center gap-1.5">
+          {purposeLabel ? (
+            <span className="rounded-full border border-border px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+              {purposeLabel}
+            </span>
+          ) : null}
           {account.connected ? (
             <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
               Connected
@@ -1119,7 +1131,7 @@ function IntegrationAccountRow({ account }: { account: IntegrationAccountView })
           </a>
         </div>
       ) : null}
-      {account.connected ? (
+      {account.connected && showCapabilityModes ? (
         <CapabilityModeRows
           integrationId={account.integrationId}
           provider={account.provider}
@@ -1185,15 +1197,6 @@ function CapabilityModeRows({
   );
 }
 
-const CAPABILITY_MODE_OPTIONS: Array<{
-  mode: CapabilityMode;
-  label: string;
-}> = [
-  { mode: "on", label: "On" },
-  { mode: "ask", label: "Ask" },
-  { mode: "off", label: "Off" },
-];
-
 function CapabilityModeRow({
   integrationId,
   capability,
@@ -1238,32 +1241,12 @@ function CapabilityModeRow({
           {capability.label}
         </div>
       </div>
-      <div
-        role="group"
-        aria-label={`${capability.label} permission`}
-        className="flex shrink-0 items-center rounded-full bg-surface-muted p-0.5"
-      >
-        {CAPABILITY_MODE_OPTIONS.map((option) => {
-          const active = option.mode === currentMode;
-          return (
-            <button
-              key={option.mode}
-              type="button"
-              aria-pressed={active}
-              disabled={isPending}
-              onClick={() => select(option.mode)}
-              className={cn(
-                "rounded-full px-2 py-0.5 text-[11px] font-medium leading-4 transition-colors duration-150",
-                active
-                  ? "bg-surface text-ink shadow-sm"
-                  : "text-ink-subtle hover:text-ink disabled:opacity-60",
-              )}
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
+      <CapabilityModeToggle
+        label={capability.label}
+        mode={currentMode}
+        disabled={isPending}
+        onChange={select}
+      />
     </div>
   );
 }

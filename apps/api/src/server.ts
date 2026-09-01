@@ -6,6 +6,10 @@ import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources"
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createMcpService } from "@opencompany/agent/mcp-http";
+import {
+  createPluginGatewayLifecycle,
+  refreshPluginGatewayRegistrationsForWorkspaces,
+} from "@opencompany/agent/plugin-gateway";
 import { createPluginImportResolver } from "@opencompany/agent/plugin-import";
 import { createSkillImportResolver } from "@opencompany/agent/skill-import";
 import { createWorkspaceSkillArtifact } from "@opencompany/agent-runtime";
@@ -131,6 +135,7 @@ const skillImports = new SkillImportApplicationService(
 const pluginImports = new PluginImportApplicationService(
   new PostgresPluginRepository(database.db),
   createPluginImportResolver(),
+  createPluginGatewayLifecycle({ db: database.db }),
 );
 const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
@@ -254,7 +259,17 @@ const app = createApiApp({
         { errorFormat: "error-message" },
       ),
   }),
-  mcpOAuthIngress: createMcpOAuthIngress({ db: database.db, identify: identityVerifier }),
+  mcpOAuthIngress: createMcpOAuthIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ provider, userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider: provider,
+      }),
+  }),
   xAccountIngress: createXAccountIngress({ db: database.db, identify: identityVerifier }),
   slackBotIngress: createSlackBotIngress({
     db: database.db,

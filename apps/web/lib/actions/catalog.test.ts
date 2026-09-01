@@ -1,5 +1,5 @@
 import { ACTION_EFFECTS_READ } from "@opencompany/agent/actions/types";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   resolveAttioActions: vi.fn(),
@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   resolveGitHubActions: vi.fn(),
   resolveStripeActions: vi.fn(),
   resolveRevolutActions: vi.fn(),
+  resolvePluginGatewayRegistrations: vi.fn(async () => []),
+  resolveRemoteMcpActions: vi.fn(),
   listWorkspaceCapabilities: vi.fn(),
 }));
 
@@ -57,6 +59,12 @@ vi.mock("@opencompany/agent/actions/stripe", () => ({
 vi.mock("@opencompany/agent/actions/revolut", () => ({
   resolveRevolutActions: mocks.resolveRevolutActions,
 }));
+vi.mock("@opencompany/agent/plugin-gateway", () => ({
+  resolvePluginGatewayRegistrations: mocks.resolvePluginGatewayRegistrations,
+}));
+vi.mock("@opencompany/agent/actions/remote-mcp", () => ({
+  resolveRemoteMcpActions: mocks.resolveRemoteMcpActions,
+}));
 
 import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
 import type { ActionProviderCatalog } from "@/lib/actions/types";
@@ -94,6 +102,11 @@ function providerCatalog(
     ],
   };
 }
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.resolvePluginGatewayRegistrations.mockResolvedValue([]);
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -213,6 +226,56 @@ describe("resolveActionCatalog", () => {
       workspaceId: "workspace_1",
     });
     expect(catalog).toEqual({ providers: [], actions: [] });
+  });
+
+  it("uses the installed Linear plugin catalog exactly once and falls back when absent", async () => {
+    for (const resolver of [
+      mocks.resolveSlackActions,
+      mocks.resolveGmailActions,
+      mocks.resolveGoogleCalendarActions,
+      mocks.resolveGoogleDriveActions,
+      mocks.resolvePostHogActions,
+      mocks.resolveLatitudeActions,
+      mocks.resolveNeonActions,
+      mocks.resolveAttioActions,
+      mocks.resolveGitHubActions,
+      mocks.resolveStripeActions,
+      mocks.resolveRevolutActions,
+    ]) {
+      resolver.mockResolvedValue(null);
+    }
+    const pluginAction = {
+      ...providerCatalog("linear").actions[0]!,
+      id: "plugin:linear:linear.list_issues",
+      provider: "plugin:linear:linear" as const,
+    };
+    mocks.resolveLinearActions.mockResolvedValue(providerCatalog("linear"));
+    mocks.resolvePluginGatewayRegistrations.mockResolvedValue([
+      { source: "plugin:linear:linear" },
+    ] as never);
+    mocks.resolveRemoteMcpActions.mockResolvedValue({
+      id: "plugin:linear:linear",
+      label: "Linear",
+      description: "Plugin Linear tools",
+      actions: [pluginAction],
+    });
+
+    const pluginCatalog = await resolveActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(mocks.resolveLinearActions).not.toHaveBeenCalled();
+    expect(pluginCatalog.actions.map((action) => action.id)).toEqual([
+      "plugin:linear:linear.list_issues",
+    ]);
+
+    mocks.resolvePluginGatewayRegistrations.mockResolvedValue([]);
+    const fallbackCatalog = await resolveActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(mocks.resolveLinearActions).toHaveBeenCalledWith("user_1");
+    expect(fallbackCatalog.actions.map((action) => action.id)).toEqual(["linear.read_something"]);
   });
 
   it("adds enabled managed sources to the same compact catalog", async () => {

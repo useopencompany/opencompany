@@ -5,8 +5,12 @@ import type {
   PluginInstallationDto,
   PluginListItemDto,
 } from "@opencompany/protocol";
+import { Button, buttonVariants } from "@opencompany/ui/components/button";
+import { LinearIcon } from "@opencompany/ui/icons";
+import { cn } from "@opencompany/ui/lib/utils";
 import {
   Archive,
+  ChevronDown,
   ExternalLink,
   FileArchive,
   Link2,
@@ -55,7 +59,7 @@ type PluginSkillReportView =
   | { path: string; name: string; status: "skipped"; reason: string };
 type PluginMcpEntryView = {
   name: string;
-  status: "selected" | "unsupported" | "invalid";
+  status: "selected" | "gateway-registered" | "unsupported" | "invalid";
   transport?: "stdio" | "streamable-http" | "sse";
   reason?: string;
 };
@@ -71,8 +75,32 @@ type PluginReportView = {
     | { status: "absent" }
     | { present: true; status: "disabled"; reason: string }
     | { present: true; status: "parsed"; reports: PluginMcpEntryView[] };
+  capabilities?:
+    | { status: "absent" }
+    | { present: true; status: "ignored"; reason: string }
+    | { present: true; status: "parsed"; issues: string[] };
   collisions: PluginCollisionView[];
 };
+
+export const LINEAR_PLUGIN_NAME = "linear";
+// The public repository is the reviewed trust boundary. Keep this source pinned to a full commit.
+export const LINEAR_PLUGIN_SOURCE =
+  "https://github.com/useopencompany/plugins/tree/775df7a9a37f5585b9b87a26533ba6ed1035f1dc/linear";
+
+export async function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
+  const confirmed = preview ?? (await previewHeadlessPluginImport({ url: LINEAR_PLUGIN_SOURCE }));
+  if (confirmed.manifest.name.toLocaleLowerCase() !== LINEAR_PLUGIN_NAME) {
+    throw new Error(
+      `Expected the ${LINEAR_PLUGIN_NAME} plugin, but this source contains ${confirmed.manifest.name}.`,
+    );
+  }
+  const result = await importHeadlessPlugin({
+    url: LINEAR_PLUGIN_SOURCE,
+    expectedResolvedCommit: confirmed.source.resolvedCommit,
+    expectedIntegrity: confirmed.integrity,
+  });
+  return result.plugin;
+}
 
 export function PluginsSettings({
   plugins,
@@ -82,83 +110,77 @@ export function PluginsSettings({
   canEdit: boolean;
 }) {
   const router = useRouter();
-  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [isInstalling, startInstall] = useTransition();
+  const linearPlugin = plugins.find(
+    (plugin) => plugin.name.toLocaleLowerCase() === LINEAR_PLUGIN_NAME,
+  );
+  const install = () => {
+    if (isInstalling) return;
+    setInstallError(null);
+    startInstall(async () => {
+      try {
+        const plugin = await installOfficialLinearPlugin();
+        router.push(`/settings/plugins/${encodeURIComponent(plugin.name)}`);
+      } catch (cause) {
+        setInstallError(errorMessage(cause));
+      }
+    });
+  };
 
   return (
     <SettingsContent
       title="Plugins"
       description="Immutable Agent Plugin packages installed from public GitHub sources."
     >
-      {canEdit ? (
-        <div className="-mt-2 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setInstalling(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <Link2 size={14} strokeWidth={2} />
-            Install plugin
-          </button>
-        </div>
-      ) : null}
-
-      {plugins.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-6 py-14 text-center">
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-muted text-ink-subtle">
-            <PackageOpen size={18} strokeWidth={1.75} />
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3">
+        <Link
+          href="/settings/plugins/linear"
+          prefetch
+          className="group flex min-w-0 flex-1 items-center gap-3 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[#5E6AD2] text-white">
+            <LinearIcon className="size-5" />
           </span>
-          <div className="flex flex-col gap-1">
-            <h2 className="text-[15px] font-semibold leading-tight text-ink">No plugins yet</h2>
-            <p className="mx-auto max-w-[390px] text-[12.5px] leading-5 text-ink-subtle">
-              {canEdit
-                ? "Install a standard Agent Plugin package from a public repository."
-                : "Workspace admins can install standard Agent Plugin packages."}
-            </p>
-          </div>
-        </div>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {plugins.map((plugin) => (
-            <li key={plugin.id}>
-              <Link
-                href={`/settings/plugins/${encodeURIComponent(plugin.name)}`}
-                prefetch
-                className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className="truncate text-[14px] font-medium leading-tight text-ink">
-                      {plugin.manifest.name}
-                    </span>
-                    <PluginStatus status={plugin.status} />
-                  </span>
-                  <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
-                    {plugin.manifest.description || "No description provided."}
-                  </span>
-                  <span className="mt-1 block text-[11.5px] leading-4 text-ink-subtle">
-                    {plugin.skillCount} {plugin.skillCount === 1 ? "skill" : "skills"} ·{" "}
-                    {plugin.stdioServerCount} stdio{" "}
-                    {plugin.stdioServerCount === 1 ? "server" : "servers"}
-                  </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span className="truncate text-[14px] font-medium leading-tight text-ink">
+                Linear
+              </span>
+              {linearPlugin ? (
+                <PluginStatus status={linearPlugin.status} />
+              ) : (
+                <span className="inline-flex shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
+                  Not installed
                 </span>
-                <span className="shrink-0 text-[11.5px] text-ink-subtle">
-                  {formatRelativeTime(plugin.updatedAt)}
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {installing ? (
-        <InstallPluginDialog
-          onClose={() => {
-            setInstalling(false);
-            router.refresh();
-          }}
-          onComplete={(name) => router.push(`/settings/plugins/${encodeURIComponent(name)}`)}
-        />
-      ) : null}
+              )}
+            </span>
+            <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
+              {linearPlugin?.manifest.description ||
+                "Work with Linear issues, projects, comments, and team workflows."}
+            </span>
+            <span className="mt-1 block text-[11.5px] leading-4 text-ink-subtle">
+              {linearPlugin
+                ? `${linearPlugin.skillCount} ${linearPlugin.skillCount === 1 ? "skill" : "skills"} · updated ${formatRelativeTime(linearPlugin.updatedAt)}`
+                : "Official package · ready to install"}
+            </span>
+          </span>
+        </Link>
+        {linearPlugin ? (
+          <Link
+            href="/settings/plugins/linear"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "text-ink")}
+          >
+            Manage
+          </Link>
+        ) : canEdit ? (
+          <Button variant="outline" size="sm" disabled={isInstalling} onClick={install}>
+            {isInstalling ? <Loader2 className="animate-spin" /> : null}
+            {isInstalling ? "Installing…" : "Install"}
+          </Button>
+        ) : null}
+      </div>
+      {installError ? <p className="text-[12.5px] text-danger">{installError}</p> : null}
     </SettingsContent>
   );
 }
@@ -194,24 +216,6 @@ export function PluginDetail({
       description="An immutable Agent Plugin package with passive Skills and separately approved MCP servers."
       backLink={{ href: "/settings/plugins", label: "Plugins" }}
     >
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
-        <Link2 size={14} className="shrink-0" />
-        <span className="min-w-0 flex-1">
-          Installed from{" "}
-          <a
-            href={plugin.source.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-0.5 font-medium text-ink underline decoration-border underline-offset-2 hover:decoration-ink"
-          >
-            {plugin.source.url.replace(/^https:\/\//u, "")}
-            <ExternalLink size={11} />
-          </a>{" "}
-          at commit <span className="font-mono text-[11.5px]">{plugin.source.resolvedCommit}</span>.
-          Replacing this package requires archiving it and installing a new package.
-        </span>
-      </div>
-
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
           Only workspace admins can manage plugin installations.
@@ -220,11 +224,40 @@ export function PluginDetail({
 
       <section className="flex flex-col gap-2">
         <SectionLabel>Status</SectionLabel>
-        <div className="flex flex-wrap items-center gap-2">
-          <PluginStatus status={plugin.status} />
-          <span className="font-mono text-[11.5px] text-ink-subtle">{plugin.integrity}</span>
-        </div>
+        <PluginStatus status={plugin.status} />
       </section>
+
+      <details className="group rounded-lg border border-border bg-surface-muted">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12.5px] font-medium text-ink-muted">
+          <Link2 size={14} className="shrink-0" />
+          Advanced package details
+          <ChevronDown className="ml-auto size-3.5 transition-transform group-open:rotate-180" />
+        </summary>
+        <dl className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-t border-border px-3 py-2.5 text-[11.5px] leading-4">
+          <dt className="text-ink-faint">Source</dt>
+          <dd className="break-all text-ink">
+            <a
+              href={plugin.source.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 underline decoration-border underline-offset-2 hover:decoration-ink"
+            >
+              {plugin.source.url}
+              <ExternalLink size={11} />
+            </a>
+          </dd>
+          <dt className="text-ink-faint">Package path</dt>
+          <dd className="break-all font-mono text-ink">
+            {plugin.source.path || "Repository root"}
+          </dd>
+          <dt className="text-ink-faint">Requested ref</dt>
+          <dd className="break-all font-mono text-ink">{plugin.source.ref}</dd>
+          <dt className="text-ink-faint">Commit</dt>
+          <dd className="break-all font-mono text-ink">{plugin.source.resolvedCommit}</dd>
+          <dt className="text-ink-faint">Integrity</dt>
+          <dd className="break-all font-mono text-ink">{plugin.integrity}</dd>
+        </dl>
+      </details>
 
       <section className="flex flex-col gap-2">
         <SectionLabel>Passive skills ({plugin.skills.length})</SectionLabel>
@@ -295,20 +328,6 @@ export function PluginDetail({
               </button>
             ) : null}
           </div>
-          <dl className="mt-2 grid grid-cols-[76px_minmax(0,1fr)] gap-x-2 gap-y-1 border-t border-current/10 pt-2 text-[11.5px]">
-            <dt className="text-ink-faint">Source</dt>
-            <dd className="break-all font-mono text-ink">{plugin.source.url}</dd>
-            <dt className="text-ink-faint">Package path</dt>
-            <dd className="break-all font-mono text-ink">
-              {plugin.source.path || "Repository root"}
-            </dd>
-            <dt className="text-ink-faint">Requested ref</dt>
-            <dd className="break-all font-mono text-ink">{plugin.source.ref}</dd>
-            <dt className="text-ink-faint">Commit</dt>
-            <dd className="break-all font-mono text-ink">{plugin.source.resolvedCommit}</dd>
-            <dt className="text-ink-faint">Integrity</dt>
-            <dd className="break-all font-mono text-ink">{plugin.integrity}</dd>
-          </dl>
         </div>
         {plugin.stdioServers.length === 0 ? (
           <EmptyRow label="No valid stdio MCP servers were declared." />
@@ -458,14 +477,20 @@ export function PluginDetail({
   );
 }
 
-function InstallPluginDialog({
+export function InstallPluginDialog({
   onClose,
   onComplete,
+  initialUrl = "",
+  expectedName,
+  lockSource = false,
 }: {
   onClose: () => void;
   onComplete: (name: string) => void;
+  initialUrl?: string;
+  expectedName?: string;
+  lockSource?: boolean;
 }) {
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(initialUrl);
   const [preview, setPreview] = useState<PluginImportPreviewDto | null>(null);
   const [installed, setInstalled] = useState<PluginInstallationDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -489,7 +514,15 @@ function InstallPluginDialog({
     setError(null);
     startResolving(async () => {
       try {
-        setPreview(await previewHeadlessPluginImport({ url: source }));
+        const result = await previewHeadlessPluginImport({ url: source });
+        if (expectedName && result.manifest.name.toLocaleLowerCase() !== expectedName) {
+          setPreview(null);
+          setError(
+            `Expected the ${expectedName} plugin, but this source contains ${result.manifest.name}.`,
+          );
+          return;
+        }
+        setPreview(result);
       } catch (cause) {
         setPreview(null);
         setError(errorMessage(cause));
@@ -547,6 +580,7 @@ function InstallPluginDialog({
                   autoFocus
                   value={url}
                   disabled={pending}
+                  readOnly={lockSource}
                   onChange={(event) => {
                     setUrl(event.target.value);
                     setPreview(null);
@@ -677,13 +711,20 @@ function ValidationReport({ report }: { report: PluginReportView }) {
   );
   const mcpIssues =
     report.mcp.status === "parsed"
-      ? report.mcp.reports.filter((entry: PluginMcpEntryView) => entry.status !== "selected")
+      ? report.mcp.reports.filter(
+          (entry: PluginMcpEntryView) =>
+            entry.status !== "selected" && entry.status !== "gateway-registered",
+        )
       : [];
+  const capabilityIssues =
+    report.capabilities?.status === "parsed" ? report.capabilities.issues : [];
   const hasMessages =
     report.ignoredManifestFields.length > 0 ||
     skipped.length > 0 ||
     report.mcp.status === "disabled" ||
-    mcpIssues.length > 0;
+    mcpIssues.length > 0 ||
+    report.capabilities?.status === "ignored" ||
+    capabilityIssues.length > 0;
   return (
     <section className="flex flex-col gap-2">
       <SectionLabel>Validation report</SectionLabel>
@@ -710,6 +751,12 @@ function ValidationReport({ report }: { report: PluginReportView }) {
               key={`mcp-${entry.name}`}
               label={`${entry.name}: ${entry.reason || entry.status}`}
             />
+          ))}
+          {report.capabilities?.status === "ignored" ? (
+            <ReportRow label={`Capabilities ignored: ${report.capabilities.reason}`} />
+          ) : null}
+          {capabilityIssues.map((issue) => (
+            <ReportRow key={`capability-${issue}`} label={`Capabilities: ${issue}`} />
           ))}
         </ul>
       )}

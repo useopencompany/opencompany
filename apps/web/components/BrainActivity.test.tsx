@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrainActivity, BrainRecentActivity } from "./BrainActivity";
 
@@ -10,6 +11,9 @@ const queryRows = vi.hoisted(() => ({
   items: [] as unknown[],
 }));
 const listSourceItems = vi.hoisted(() => vi.fn());
+const liveQuery = vi.hoisted(() => vi.fn());
+const getBrainCollections = vi.hoisted(() => vi.fn());
+const hydration = vi.hoisted(() => ({ value: true }));
 
 vi.mock("@opencompany/ui/components/popover", () => ({
   Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -25,26 +29,48 @@ vi.mock("@opencompany/ui/components/popover", () => ({
 }));
 
 vi.mock("@tanstack/react-db", () => ({
-  useLiveQuery: vi.fn(() => ({ data: queryRows.jobs, isLoading: false })),
+  useLiveQuery: liveQuery,
 }));
 
 vi.mock("@/lib/headless-knowledge-collections", () => ({
-  getHeadlessBrainCollections: () => ({ ingestJobs: "ingestJobs" }),
+  getHeadlessBrainCollections: getBrainCollections,
 }));
 
 vi.mock("@/lib/headless-knowledge-commands", () => ({
   listHeadlessBrainSourceItems: listSourceItems,
 }));
 
+vi.mock("@/components/useHydrated", () => ({
+  useHydrated: () => hydration.value,
+}));
+
 describe("BrainActivity", () => {
   beforeEach(() => {
     queryRows.jobs = [];
     queryRows.items = [];
+    hydration.value = true;
+    liveQuery.mockImplementation(() => ({ data: queryRows.jobs, isLoading: false }));
+    getBrainCollections.mockReturnValue({ ingestJobs: "ingestJobs" });
     listSourceItems.mockImplementation(async () => queryRows.items);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("server-renders without starting the Brain collection", () => {
+    hydration.value = false;
+
+    const html = renderToString(
+      <>
+        <BrainActivity brainRef="gbrain_1" />
+        <BrainRecentActivity brainRef="gbrain_1" />
+      </>,
+    );
+
+    expect(html).toContain("Loading activity");
+    expect(getBrainCollections).not.toHaveBeenCalled();
+    expect(liveQuery).not.toHaveBeenCalled();
   });
 
   it("renders quick links for pages on filed entries", () => {

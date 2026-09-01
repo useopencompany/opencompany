@@ -1529,6 +1529,21 @@ export const revokePluginMcpRoute = createRoute({
   },
 });
 
+export const refreshPluginMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/mcp/refresh",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin remote MCP discovery snapshot refreshed from the connected provider.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const deletePluginDataRoute = createRoute({
   method: "post",
   path: "/v1/plugins/{name}/data/delete",
@@ -3460,6 +3475,7 @@ export type V1RouteHandlers = {
   disablePlugin: RouteHandler<typeof disablePluginRoute>;
   approvePluginMcp: RouteHandler<typeof approvePluginMcpRoute>;
   revokePluginMcp: RouteHandler<typeof revokePluginMcpRoute>;
+  refreshPluginMcp: RouteHandler<typeof refreshPluginMcpRoute>;
   deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
@@ -3728,6 +3744,7 @@ export function createV1Router(
       .openapi(disablePluginRoute, handlers.disablePlugin)
       .openapi(approvePluginMcpRoute, handlers.approvePluginMcp)
       .openapi(revokePluginMcpRoute, handlers.revokePluginMcp)
+      .openapi(refreshPluginMcpRoute, handlers.refreshPluginMcp)
       .openapi(deletePluginDataRoute, handlers.deletePluginData)
   );
 }
@@ -4675,6 +4692,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   revokePluginMcp: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  refreshPluginMcp: (c) => c.json({ data: placeholderPlugin, meta }, 200),
   deletePluginData: (c) =>
     c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),

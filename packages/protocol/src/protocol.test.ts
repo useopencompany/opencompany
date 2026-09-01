@@ -165,6 +165,7 @@ describe("headless protocol", () => {
       "/v1/plugins/{name}/disable",
       "/v1/plugins/{name}/mcp/approve",
       "/v1/plugins/{name}/mcp/revoke",
+      "/v1/plugins/{name}/mcp/refresh",
       "/v1/plugins/{name}/data/delete",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");
@@ -320,6 +321,45 @@ describe("headless protocol", () => {
           detail: "bun test",
           kind: "execute",
           parentToolCallId: "subagent_1",
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts sanitized approval inputs while preserving legacy approvals", () => {
+    const base = {
+      id: "event_1",
+      runId: "run_1",
+      attemptId: "attempt_1",
+      cursor: "v1:1",
+      schemaVersion: 1 as const,
+      occurredAt: "2026-08-10T00:00:00.000Z",
+      type: "approval.requested" as const,
+    };
+
+    expect(
+      RunEventSchema.safeParse({
+        ...base,
+        payload: {
+          approvalId: "approval_1",
+          kind: "use_action",
+          prompt: "Approve?",
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      RunEventSchema.safeParse({
+        ...base,
+        payload: {
+          approvalId: "approval_2",
+          toolCallId: "tool_2",
+          kind: "use_action",
+          prompt: "Approve gmail.send?",
+          action: "gmail.send",
+          input: {
+            action: "gmail.send",
+            params: { to: "customer@example.com", subject: "Hello" },
+          },
         },
       }).success,
     ).toBe(true);

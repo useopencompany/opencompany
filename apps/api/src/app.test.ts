@@ -11,6 +11,7 @@ import {
   type CreateTaskCommand,
   KnowledgeApplicationService,
   type KnowledgeRepository,
+  type PluginGatewayLifecycle,
   PluginImportApplicationService,
   type PluginImportResolver,
   type PluginInstallation,
@@ -900,6 +901,17 @@ describe("canonical Hono API", () => {
       totalBytes: packageBytes.length,
       skills: [],
       stdioServers: installation.stdioServers,
+      remoteServers: [
+        {
+          name: "remote",
+          type: "streamable-http",
+          url: "https://mcp.example.test",
+          headers: { Authorization: "Bearer secret-value" },
+        },
+      ],
+      capabilities: [
+        { id: "read", label: "Read tools", defaultMode: "on", tools: ["list_issues"] },
+      ],
       report: {
         ignoredManifestFields: [],
         skills: [],
@@ -909,6 +921,7 @@ describe("canonical Hono API", () => {
     const install = vi.fn(async () => ({ plugin: installation, idempotentReplay: false }));
     const {
       stdioServers: _stdioServers,
+      remoteMcpServers: _remoteMcpServers,
       files: _pluginFiles,
       skills: _pluginSkills,
       ...pluginListFields
@@ -929,10 +942,12 @@ describe("canonical Hono API", () => {
     const revokeMcp = vi.fn(async () => ({ ...installation, mcpApprovedIntegrity: null }));
     const archive = vi.fn(async () => undefined);
     const deleteData = vi.fn(async () => ({ deleted: true }));
+    const refresh = vi.fn(async () => undefined);
     const app = testApp(fakeRepository(), {
       pluginImports: fakePluginImportService(
         { install, list, get, setStatus, approveMcp, revokeMcp, archive, deleteData },
         { resolve: vi.fn(async () => resolved) },
+        { refresh },
       ),
     });
 
@@ -948,10 +963,19 @@ describe("canonical Hono API", () => {
         manifest: { name: "quality-tools" },
         files: [{ path: "plugin.json", sizeBytes: packageBytes.length }],
         stdioServers: [{ name: "local", envKeys: ["PRIVATE_TOKEN"] }],
+        remoteMcpServers: [
+          {
+            name: "remote",
+            type: "streamable-http",
+            connectionProvider: "quality-tools",
+            capabilities: [{ id: "read", tools: ["list_issues"] }],
+          },
+        ],
       },
     });
     expect(JSON.stringify(previewBody)).not.toContain("private plugin package");
     expect(JSON.stringify(previewBody)).not.toContain("secret-value");
+    expect(JSON.stringify(previewBody)).not.toContain("https://mcp.example.test");
 
     const imported = await app.request("/v1/plugins/imports", {
       method: "POST",
@@ -970,10 +994,20 @@ describe("canonical Hono API", () => {
     expect(JSON.stringify(importedBody)).not.toContain("secret-value");
 
     await expect(app.request("/v1/plugins")).resolves.toMatchObject({ status: 200 });
-    await expect(app.request("/v1/plugins/quality-tools")).resolves.toMatchObject({ status: 200 });
-    await expect(
-      app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
-    ).resolves.toMatchObject({ status: 200 });
+    const inspected = await app.request("/v1/plugins/quality-tools");
+    expect(inspected.status).toBe(200);
+    await expect(inspected.json()).resolves.toMatchObject({
+      data: {
+        remoteMcpServers: [
+          {
+            name: "remote",
+            discoveryStatus: "stale",
+            tools: [{ name: "list_issues" }],
+            lastDiscoveryError: "Provider discovery timed out.",
+          },
+        ],
+      },
+    });
     await expect(
       app.request("/v1/plugins/quality-tools/mcp/approve", {
         method: "POST",
@@ -983,6 +1017,12 @@ describe("canonical Hono API", () => {
     ).resolves.toMatchObject({ status: 200 });
     await expect(
       app.request("/v1/plugins/quality-tools/mcp/revoke", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/mcp/refresh", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
     ).resolves.toMatchObject({ status: 200 });
     await expect(
       app.request("/v1/plugins/quality-tools/data/delete", { method: "POST" }),
@@ -998,6 +1038,11 @@ describe("canonical Hono API", () => {
       integrity: installation.integrity,
     });
     expect(revokeMcp).toHaveBeenCalledWith({ actor, name: "quality-tools" });
+    expect(refresh).toHaveBeenLastCalledWith({
+      actor,
+      pluginName: "quality-tools",
+      reason: "explicit",
+    });
     expect(deleteData).toHaveBeenCalledWith({ actor, name: "quality-tools" });
     expect(archive).toHaveBeenCalledWith({ actor, name: "quality-tools" });
   });
@@ -4948,6 +4993,7 @@ function fakeSkillImportService(
 function fakePluginImportService(
   repositoryOverrides: Partial<PluginRepository> = {},
   resolverOverrides: Partial<PluginImportResolver> = {},
+  gatewayLifecycle?: PluginGatewayLifecycle,
 ) {
   const unexpected = async (): Promise<never> => {
     throw new Error("Unexpected Plugin installation operation.");
@@ -4969,7 +5015,7 @@ function fakePluginImportService(
     },
     ...resolverOverrides,
   };
-  return new PluginImportApplicationService(repository, resolver);
+  return new PluginImportApplicationService(repository, resolver, gatewayLifecycle);
 }
 
 function knowledgeService(overrides: Partial<KnowledgeRepository>) {
@@ -5091,6 +5137,33 @@ function fakePluginInstallation(): PluginInstallation {
         command: "./server",
         args: [],
         env: { PRIVATE_TOKEN: "secret-value" },
+      },
+    ],
+    remoteMcpServers: [
+      {
+        name: "remote",
+        type: "streamable-http",
+        connectionProvider: "quality-tools",
+        capabilities: [
+          { id: "read", label: "Read tools", defaultMode: "on", tools: ["list_issues"] },
+        ],
+        tools: [
+          {
+            name: "list_issues",
+            description: "List issues.",
+            classification: {
+              capabilityId: "read",
+              capabilityLabel: "Read tools",
+              defaultMode: "on",
+              bucket: "read",
+              curated: true,
+            },
+          },
+        ],
+        discoveryStatus: "stale",
+        discoveredAt: createdAt,
+        refreshAfter: createdAt,
+        lastDiscoveryError: "Provider discovery timed out.",
       },
     ],
     installReport: {
