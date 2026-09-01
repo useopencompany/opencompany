@@ -226,6 +226,7 @@ export type PersonalAccountProvider =
   | "google_calendar"
   | "google_drive"
   | "linear"
+  | "github_user"
   | "slack"
   | "hubspot"
   | "granola"
@@ -295,6 +296,7 @@ export function personalAccountsFromRows(
     google_calendar: [],
     google_drive: [],
     linear: [],
+    github_user: [],
     slack: [],
     hubspot: [],
     granola: [],
@@ -311,6 +313,10 @@ export function personalAccountsFromRows(
       if ((row.externalId ?? row.external_id) !== "linear_mcp") {
         personalAccounts.linear.push(accountViewFromRow("linear", row));
       }
+      continue;
+    }
+    if (row.provider === "github_user") {
+      personalAccounts.github_user.push(accountViewFromRow("github_user", row));
       continue;
     }
     if (

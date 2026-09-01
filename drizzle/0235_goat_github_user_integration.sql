@@ -1,0 +1,12 @@
+-- Personal GitHub App user credentials for the official GitHub Plugin. This
+-- provider is deliberately distinct from the workspace-owned "github" App
+-- installations used by ingestion and webhooks.
+ALTER TABLE "goat"."integrations" DROP CONSTRAINT IF EXISTS "goat_integrations_provider_check";--> statement-breakpoint
+ALTER TABLE "goat"."integrations" ADD CONSTRAINT "goat_integrations_provider_check" CHECK ("goat"."integrations"."provider" IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')) NOT VALID;--> statement-breakpoint
+ALTER TABLE "goat"."integration_credentials" DROP CONSTRAINT IF EXISTS "goat_integration_credentials_provider_check";--> statement-breakpoint
+ALTER TABLE "goat"."integration_credentials" ADD CONSTRAINT "goat_integration_credentials_provider_check" CHECK ("goat"."integration_credentials"."provider" IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')) NOT VALID;--> statement-breakpoint
+ALTER TABLE "goat"."integration_resources" DROP CONSTRAINT IF EXISTS "goat_integration_resources_provider_check";--> statement-breakpoint
+ALTER TABLE "goat"."integration_resources" ADD CONSTRAINT "goat_integration_resources_provider_check" CHECK ("goat"."integration_resources"."provider" IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')) NOT VALID;--> statement-breakpoint
+ALTER TABLE "goat"."integrations" VALIDATE CONSTRAINT "goat_integrations_provider_check";--> statement-breakpoint
+ALTER TABLE "goat"."integration_credentials" VALIDATE CONSTRAINT "goat_integration_credentials_provider_check";--> statement-breakpoint
+ALTER TABLE "goat"."integration_resources" VALIDATE CONSTRAINT "goat_integration_resources_provider_check";

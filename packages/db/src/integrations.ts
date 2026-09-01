@@ -25,6 +25,17 @@ export type GoogleOAuthTokens = {
   id_token?: string;
 };
 
+export const GITHUB_USER_INTEGRATION_EXTERNAL_ID = "github_user";
+
+export type GitHubUserOAuthCredentialPayload = {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  refresh_token_expires_at: string;
+  github_user_id: string;
+  github_login: string;
+};
+
 type DbSchema = typeof schema;
 type IntegrationDb = Pick<PgDatabase<PgQueryResultHKT, DbSchema>, "insert" | "select" | "update">;
 type IntegrationTransactionalDb = IntegrationDb & {
@@ -225,6 +236,104 @@ export async function connectXAccountIntegration(input: {
       provider: "x_account",
       status: "sync_failed",
       statusReason: "Failed to persist X integration credentials.",
+      db,
+      now: new Date(),
+    });
+    throw error;
+  }
+
+  return { integrationId: integration.id };
+}
+
+// Personal acting-as-the-user GitHub connection for the official Plugin. This
+// is intentionally separate from provider "github", whose workspace-owned App
+// installations drive repository ingestion and webhooks.
+export async function connectGitHubUserIntegration(input: {
+  userWorkosId: string;
+  githubUserId: string;
+  login: string;
+  name: string | null;
+  email: string | null;
+  accessToken: string;
+  refreshToken: string;
+  accessTokenExpiresAt: Date;
+  refreshTokenExpiresAt: Date;
+  tokenType: string;
+  db?: IntegrationDb;
+  now?: Date;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const connectionLabel = `@${input.login}`;
+
+  const [integration] = await db
+    .insert(integrations)
+    .values({
+      id: newIntegrationId(),
+      userWorkosId: input.userWorkosId,
+      provider: "github_user",
+      // The official Plugin exposes one personal GitHub identity at a time.
+      // A stable sentinel makes reconnecting with another GitHub account
+      // replace the credential instead of leaving an unselectable second row.
+      externalId: GITHUB_USER_INTEGRATION_EXTERNAL_ID,
+      connectionLabel,
+      accountName: input.name?.trim() || input.login,
+      accountEmail: input.email,
+      accountType: "github_user",
+      status: "connected",
+      statusReason: null,
+      scopes: [],
+      lastSyncedAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
+      targetWhere: sql`${integrations.workspaceId} IS NULL`,
+      set: {
+        connectionLabel,
+        accountName: input.name?.trim() || input.login,
+        accountEmail: input.email,
+        accountType: "github_user",
+        status: "connected",
+        statusReason: null,
+        scopes: [],
+        lastSyncedAt: now,
+        updatedAt: now,
+      },
+    })
+    .returning({ id: integrations.id });
+
+  if (!integration) {
+    throw new Error("Could not persist opencompany GitHub user integration.");
+  }
+
+  const payload: GitHubUserOAuthCredentialPayload = {
+    access_token: input.accessToken,
+    refresh_token: input.refreshToken,
+    token_type: input.tokenType,
+    refresh_token_expires_at: input.refreshTokenExpiresAt.toISOString(),
+    github_user_id: input.githubUserId,
+    github_login: input.login,
+  };
+
+  try {
+    await saveIntegrationCredential({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "github_user",
+      kind: "oauth_token",
+      payload,
+      expiresAt: input.accessTokenExpiresAt,
+      db,
+      now,
+    });
+  } catch (error) {
+    await markIntegrationStatus({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "github_user",
+      status: "sync_failed",
+      statusReason: "Failed to persist GitHub user credentials.",
       db,
       now: new Date(),
     });

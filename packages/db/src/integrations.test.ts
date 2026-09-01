@@ -4,11 +4,91 @@ import { drizzle as drizzleNodePg } from "drizzle-orm/node-postgres";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyIntegrationCapabilityMode,
+  connectGitHubUserIntegration,
   connectSlackBotIntegration,
   credentialAad,
   disconnectPersonalIntegration,
   refreshIntegrationCredential,
 } from "./integrations";
+
+describe("connectGitHubUserIntegration", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("upserts one personal github_user row and encrypts the rotating token pair", async () => {
+    const encryptionKey = Buffer.alloc(32, 7);
+    vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", encryptionKey.toString("base64"));
+    const now = new Date("2026-09-01T12:00:00.000Z");
+    const accessTokenExpiresAt = new Date("2026-09-01T20:00:00.000Z");
+    const refreshTokenExpiresAt = new Date("2027-03-04T12:00:00.000Z");
+    const query = vi.fn(async (statement: string, _params: unknown[], _options: object) => ({
+      rows: statement.startsWith('insert into "goat"."integrations"')
+        ? [["gint_github_user"]]
+        : [
+            [
+              "gcred_github_user",
+              accessTokenExpiresAt.toISOString(),
+              now.toISOString(),
+              now.toISOString(),
+              1,
+            ],
+          ],
+    }));
+    const db = drizzle(query as never);
+
+    await expect(
+      connectGitHubUserIntegration({
+        userWorkosId: "user_1",
+        githubUserId: "42",
+        login: "octocat",
+        name: "The Octocat",
+        email: null,
+        accessToken: "ghu_access",
+        refreshToken: "ghr_refresh",
+        accessTokenExpiresAt,
+        refreshTokenExpiresAt,
+        tokenType: "bearer",
+        db,
+        now,
+      }),
+    ).resolves.toEqual({ integrationId: "gint_github_user" });
+
+    const [integrationStatement, integrationParams] = query.mock.calls[0]!;
+    expect(integrationStatement.replace(/\s+/g, " ")).toContain(
+      'on conflict ("user_workos_id","provider","external_id")',
+    );
+    expect(integrationParams).toEqual(
+      expect.arrayContaining(["user_1", "github_user", "@octocat", "The Octocat"]),
+    );
+
+    const [, credentialParams] = query.mock.calls[1]!;
+    const encryptedParam = credentialParams.find(
+      (value) => typeof value === "string" && value.includes('"ciphertext"'),
+    );
+    expect(encryptedParam).toBeTypeOf("string");
+    expect(encryptedParam).not.toContain("ghu_access");
+    expect(
+      decryptJson(JSON.parse(encryptedParam as string), {
+        key: encryptionKey,
+        aad: credentialAad({
+          userWorkosId: "user_1",
+          integrationId: "gint_github_user",
+          provider: "github_user",
+          kind: "oauth_token",
+          keyVersion: 1,
+        }),
+      }),
+    ).toEqual({
+      access_token: "ghu_access",
+      refresh_token: "ghr_refresh",
+      token_type: "bearer",
+      refresh_token_expires_at: refreshTokenExpiresAt.toISOString(),
+      github_user_id: "42",
+      github_login: "octocat",
+    });
+  });
+});
 
 describe("refreshIntegrationCredential", () => {
   afterEach(() => {

@@ -118,6 +118,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: GitHubIcon,
     tileClass: "bg-[#181717] text-white",
   },
+  github_user: {
+    label: "GitHub as you",
+    description: "Let opencompany work with repositories, issues, and pull requests as you.",
+    Icon: GitHubIcon,
+    tileClass: "bg-[#181717] text-white",
+  },
   jamie: {
     label: "Jamie",
     description: "Meeting notes land in opencompany after every completed meeting.",

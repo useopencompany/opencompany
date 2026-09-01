@@ -199,6 +199,10 @@ const baseEnvKeys = envKeys(
 // variables are declared here so the check accepts them.
 const addedEnvKeys = [
   "API_INTERNAL_TOKEN",
+  "GITHUB_USER_APP_CLIENT_ID",
+  "GITHUB_USER_APP_CLIENT_SECRET",
+  "GITHUB_USER_APP_SLUG",
+  "GITHUB_USER_APP_STATE_SECRET",
   "OPENCOMPANY_DESKTOP_AUTH_SECRET",
   "RUNNER_CODEX_CHAT_SELF_HEAL_ENABLED",
   "RUNNER_SANDBOX_NAMESPACE",
