@@ -29,9 +29,9 @@ import {
   buildSlackSourceContextHeader,
   buildWikiIngestUserMessage,
   buildWikiSourceContextHeader,
-  placeMovingAnthropicCacheBreakpoint,
   runWikiAgentIngest,
   WIKI_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
+  WIKI_AGENT_INGEST_MODEL,
   WIKI_AGENT_INGEST_SYSTEM_PROMPT,
   WikiAgentOutcomeError,
   WikiIngestBudgetError,
@@ -92,15 +92,19 @@ function generate(input: {
   text: string;
   toolInput?: Record<string, unknown>;
   stepUsage?: ReturnType<typeof usage>;
+  stepCount?: number;
 }) {
   aiMock.generateText.mockImplementationOnce(async (options: any) => {
     if (input.toolInput) await options.tools.wiki.execute(input.toolInput);
     const stepUsage = input.stepUsage ?? usage();
-    await options.onStepFinish({ usage: stepUsage });
+    const stepCount = input.stepCount ?? 1;
+    for (let step = 0; step < stepCount; step += 1) {
+      await options.onStepFinish({ usage: stepUsage });
+    }
     return {
       text: input.text,
-      steps: [{}],
-      totalUsage: stepUsage,
+      steps: Array.from({ length: stepCount }, () => ({})),
+      totalUsage: usage(stepUsage.inputTokens * stepCount, stepUsage.outputTokens * stepCount),
     };
   });
 }
@@ -113,7 +117,7 @@ function triageResult(
   }> = {},
 ) {
   return {
-    model: "openai/gpt-5.4-nano",
+    model: WIKI_AGENT_INGEST_MODEL,
     decision,
     reason: overrides.reason ?? (decision === "skip" ? "obvious chatter" : "durable decision"),
     entityHints: overrides.entityHints ?? (decision === "skip" ? [] : ["Acme API", "Billing"]),
@@ -184,15 +188,19 @@ describe("opencompany wiki librarian agent", () => {
     const result = await runWikiAgentIngest(input(executeCommand));
 
     expect(result).toMatchObject({
+      model: WIKI_AGENT_INGEST_MODEL,
       skipped: false,
       mutations: 1,
       toolCalls: 1,
       pages: [{ path: "meetings/roadmap-review", title: "Roadmap Review", action: "created" }],
     });
     const generation = aiMock.generateText.mock.calls[0]?.[0] as any;
+    expect(generation.model).toEqual({ model: WIKI_AGENT_INGEST_MODEL });
     expect(Object.keys(generation.tools)).toEqual(["wiki"]);
-    expect(generation.messages[0].providerOptions.anthropic.cacheControl.type).toBe("ephemeral");
-    expect(generation.messages[1].providerOptions.anthropic.cacheControl.type).toBe("ephemeral");
+    expect(generation.providerOptions.gateway.caching).toBe("auto");
+    expect(generation.messages).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ providerOptions: expect.anything() })]),
+    );
     expect(executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: "workspace_123",
@@ -251,7 +259,7 @@ describe("opencompany wiki librarian agent", () => {
   });
 
   it("raises a budget error after the soft stop without a mutation", async () => {
-    generate({ text: "No write completed.", stepUsage: usage(1_000_000, 0) });
+    generate({ text: "No write completed.", stepUsage: usage(1_000_000, 0), stepCount: 7 });
 
     await expect(runWikiAgentIngest(input(vi.fn()))).rejects.toMatchObject({
       name: "WikiIngestBudgetError",
@@ -375,7 +383,7 @@ describe("opencompany wiki librarian agent", () => {
     const runTriage = vi.fn(async () => triageResult("skip"));
 
     await expect(runWikiAgentIngest(slackInput(vi.fn()), { runTriage })).resolves.toMatchObject({
-      model: "openai/gpt-5.4-nano",
+      model: WIKI_AGENT_INGEST_MODEL,
       skipped: true,
       skipMode: "triage",
       reason: "obvious chatter",
@@ -393,7 +401,7 @@ describe("opencompany wiki librarian agent", () => {
     const runTriage = vi.fn(async () => triageResult("skip"));
 
     await expect(runWikiAgentIngest(githubInput(), { runTriage })).resolves.toMatchObject({
-      model: "openai/gpt-5.4-nano",
+      model: WIKI_AGENT_INGEST_MODEL,
       skipped: true,
       skipMode: "triage",
       toolCalls: 0,
@@ -458,24 +466,6 @@ describe("opencompany wiki librarian agent", () => {
       skipMode: "explicit",
     });
     expect(aiMock.generateText).toHaveBeenCalledOnce();
-  });
-
-  it("moves the Anthropic cache breakpoint to the newest non-static message", () => {
-    const marked = placeMovingAnthropicCacheBreakpoint([
-      { role: "system", content: "system" },
-      { role: "user", content: "source" },
-      {
-        role: "assistant",
-        content: "old",
-        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-      },
-      { role: "tool", content: [] },
-    ] as any);
-
-    expect(marked[2]?.providerOptions).not.toHaveProperty("anthropic");
-    expect(marked[3]?.providerOptions).toMatchObject({
-      anthropic: { cacheControl: { type: "ephemeral" } },
-    });
   });
 });
 

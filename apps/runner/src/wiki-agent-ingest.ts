@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
+import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import type { NormalizedGitHubActivitySourceItem } from "@opencompany/brain";
 import type { BrainIngestTriageTrace } from "@opencompany/brain/ingest-trace";
-import { BASIC_INGEST_MODEL } from "@opencompany/db/billing-constants";
+import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { parseGmailWikiSourceConfig } from "@opencompany/db/gmail";
 import type { WikiSourceProvider, WikiSourceType } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
@@ -37,7 +38,7 @@ const logger = createLogger({
   runtime: "goat-wiki-agent-ingest",
 });
 
-export const WIKI_AGENT_INGEST_MODEL = BASIC_INGEST_MODEL;
+export const WIKI_AGENT_INGEST_MODEL = WIKI_INGEST_MODEL;
 export const WIKI_AGENT_INGEST_MAX_STEPS = 32;
 export const WIKI_AGENT_INGEST_MAX_OUTPUT_TOKENS = 4_000;
 export const WIKI_AGENT_INGEST_TIMEOUT_MS = 10 * 60_000;
@@ -579,37 +580,6 @@ function githubItemForTriage(
     : null;
 }
 
-const ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS = {
-  anthropic: { cacheControl: { type: "ephemeral" as const } },
-};
-
-function withAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T): T {
-  return {
-    ...message,
-    providerOptions: {
-      ...message.providerOptions,
-      ...ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
-    },
-  };
-}
-
-function withoutAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T): T {
-  if (!message.providerOptions || !("anthropic" in message.providerOptions)) return message;
-  const { anthropic: _anthropic, ...providerOptions } = message.providerOptions;
-  return { ...message, providerOptions };
-}
-
-export function placeMovingAnthropicCacheBreakpoint(
-  messages: ai.ModelMessage[],
-): ai.ModelMessage[] {
-  if (messages.length <= 2) return messages;
-  return messages.map((message, index) => {
-    if (index < 2) return message;
-    if (index < messages.length - 1) return withoutAnthropicCacheBreakpoint(message);
-    return withAnthropicCacheBreakpoint(withoutAnthropicCacheBreakpoint(message));
-  });
-}
-
 export async function runWikiIngestAgentLoop(
   input: WikiAgentIngestInput,
   triage: WikiIngestTriageTrace | null = null,
@@ -756,12 +726,10 @@ export async function runWikiIngestAgentLoop(
         {
           role: "system",
           content: WIKI_AGENT_INGEST_SYSTEM_PROMPT,
-          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
         },
         {
           role: "user",
           content: buildWikiIngestUserMessage(input, triage),
-          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
         },
       ],
       tools,
@@ -782,10 +750,7 @@ export async function runWikiIngestAgentLoop(
         () => budgetExhausted || budgetAccountingError !== null,
       ],
       abortSignal: abort.signal,
-      providerOptions: gatewayProviderOptions(attribution),
-      prepareStep: ({ messages }) => ({
-        messages: placeMovingAnthropicCacheBreakpoint(messages),
-      }),
+      providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
       onStepFinish: ({ usage }) => {
         recordModelSpend(priceModelUsage(usage));
       },
