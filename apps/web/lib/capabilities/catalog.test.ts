@@ -22,6 +22,7 @@ describe("managed capability catalog", () => {
       "x.search_posts": "tikhub:/api/v1/twitter/web/fetch_search_timeline",
       "x.search_profiles": "tikhub:/api/v1/twitter/web/fetch_search_timeline",
       "x.list_followers": "tikhub:/api/v1/twitter/web/fetch_user_followers",
+      "linkedin.search_posts": "apify:/harvestapi/linkedin-post-search",
       "linkedin.get_person_profile": "tikhub:/api/v1/linkedin/web_v2/get_user_profile",
       "linkedin.list_comments": "tikhub:/api/v1/linkedin/web_v2/get_post_comments",
       "youtube.get_transcript": "apify:/starvibe/youtube-video-transcript",
@@ -29,6 +30,7 @@ describe("managed capability catalog", () => {
       "instagram.search_reels": "tikhub:/api/v1/instagram/v2/search_reels",
       "tiktok.get_search_trends": "tikhub:/api/v1/tiktok/web/fetch_trending_searchwords",
       "lead.find_person_email": "pdl:/v5/person/enrich",
+      "lead.get_linkedin_contact": "apify:/dev_fusion/linkedin-profile-scraper",
       "lead.search_prospects": "pdl:/v5/person/search",
       "lead.search_people_by_name": "apify:/harvestapi/linkedin-profile-search-by-name",
       "lead.list_company_employees": "apify:/harvestapi/linkedin-company-employees",
@@ -199,11 +201,17 @@ describe("managed capability catalog", () => {
       action("linkedin.search_posts").mapInput({
         query: "founding CTO",
         sort: "recent",
-      }).providerInput,
-    ).toEqual({
-      keyword: "founding CTO",
-      page: 1,
-      sort_by: "date_posted",
+        page: 3,
+        limit: 4,
+      }),
+    ).toMatchObject({
+      providerInput: {
+        searchQueries: ["founding CTO"],
+        maxPosts: 4,
+        startPage: 3,
+        sortBy: "date",
+      },
+      resultLimit: 4,
     });
     expect(
       action("linkedin.search_posts").mapInput({
@@ -211,9 +219,10 @@ describe("managed capability catalog", () => {
         sort: "relevant",
       }).providerInput,
     ).toEqual({
-      keyword: "founding CTO",
-      page: 1,
-      sort_by: "relevance",
+      searchQueries: ["founding CTO"],
+      maxPosts: 10,
+      startPage: 1,
+      sortBy: "relevance",
     });
     expect(
       (action("linkedin.search_posts").params.properties as Record<string, unknown>).cursor,
@@ -270,6 +279,21 @@ describe("managed capability catalog", () => {
       }).providerInput,
     ).toMatchObject({
       profileScraperMode: "Full + email search ($12 per 1k)",
+    });
+  });
+
+  it("maps a LinkedIn profile contact lookup to the reviewed enrichment actor", () => {
+    const url = "https://www.linkedin.com/in/ada-lovelace";
+    expect(action("lead.get_linkedin_contact")).toMatchObject({
+      provider: "apify",
+      endpoint: "/dev_fusion/linkedin-profile-scraper",
+      priceType: "PER_RESULT",
+      executionMode: "async",
+    });
+    expect(action("lead.get_linkedin_contact").mapInput({ url })).toEqual({
+      providerInput: { profileUrls: [url] },
+      resultLimit: 1,
+      canonicalLinks: [url],
     });
   });
 

@@ -1,3 +1,4 @@
+import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import {
   type NormalizedAttioObjectSourceItem,
@@ -12,6 +13,7 @@ import {
   type BrainIngestTraceUsage,
   type BrainIngestTriageTrace,
 } from "@opencompany/brain/ingest-trace";
+import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import {
   createGatewayAttribution,
@@ -22,6 +24,7 @@ import { latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import * as ai from "ai";
 
 export const BRAIN_INGEST_TRIAGE_MODEL = "openai/gpt-5.4-nano";
+export const WIKI_INGEST_TRIAGE_MODEL = WIKI_INGEST_MODEL;
 export const BRAIN_INGEST_TRIAGE_MAX_OUTPUT_TOKENS = 300;
 export const BRAIN_INGEST_TRIAGE_TIMEOUT_MS = 30_000;
 export const BRAIN_INGEST_TRIAGE_SOURCE_BYTES = 6_000;
@@ -128,7 +131,7 @@ export async function runBrainIngestTriage(
     entityHints: string[];
   };
   const usage = normalizeTriageUsage(result.usage);
-  const modelCostUsdMicros = priceTriageUsage(usage);
+  const modelCostUsdMicros = priceTriageUsage(BRAIN_INGEST_TRIAGE_MODEL, usage);
   recordBrainIngestSpend({
     costUsdMicros: modelCostUsdMicros,
     source: "model",
@@ -160,7 +163,7 @@ export async function runWikiIngestTriage(
   const timeout = AbortSignal.timeout(BRAIN_INGEST_TRIAGE_TIMEOUT_MS);
   const abortSignal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
   const result = await generateObject({
-    model: gateway(BRAIN_INGEST_TRIAGE_MODEL),
+    model: gateway(WIKI_INGEST_TRIAGE_MODEL),
     schema: ai.jsonSchema(BRAIN_INGEST_TRIAGE_SCHEMA as never),
     system: WIKI_INGEST_TRIAGE_SYSTEM_PROMPT,
     prompt: input.prompt,
@@ -172,16 +175,11 @@ export async function runWikiIngestTriage(
       userId: input.userWorkosId,
       sessionId: input.ingestJobId,
       metadata: {
-        model: BRAIN_INGEST_TRIAGE_MODEL,
+        model: WIKI_INGEST_TRIAGE_MODEL,
         workspaceId: input.workspaceId,
       },
     }),
-    providerOptions: gatewayProviderOptions(attribution, {
-      openai: {
-        reasoningEffort: "low",
-        reasoningSummary: "concise",
-      },
-    }),
+    providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
   });
   const object = result.object as {
     decision: "skip" | "ingest";
@@ -190,12 +188,12 @@ export async function runWikiIngestTriage(
   };
   const usage = normalizeTriageUsage(result.usage);
   return {
-    model: BRAIN_INGEST_TRIAGE_MODEL,
+    model: WIKI_INGEST_TRIAGE_MODEL,
     decision: object.decision,
     reason: normalizeTriageReason(object.reason),
     entityHints: normalizeEntityHints(object.entityHints),
     usage,
-    modelCostUsdMicros: priceTriageUsage(usage),
+    modelCostUsdMicros: priceTriageUsage(WIKI_INGEST_TRIAGE_MODEL, usage),
   };
 }
 
@@ -348,12 +346,12 @@ function normalizeTriageUsage(usage: ai.LanguageModelUsage): BrainIngestTraceUsa
   };
 }
 
-function priceTriageUsage(usage: BrainIngestTraceUsage) {
+function priceTriageUsage(model: string, usage: BrainIngestTraceUsage) {
   const inputTokens = usage.inputTokens ?? 0;
   const inputCacheReadTokens = usage.cacheReadInputTokens ?? 0;
   const inputCacheWriteTokens = usage.cacheWriteInputTokens ?? 0;
   return calculateModelUsageCost({
-    modelName: BRAIN_INGEST_TRIAGE_MODEL,
+    modelName: model,
     inputTokens,
     inputNoCacheTokens: Math.max(inputTokens - inputCacheReadTokens - inputCacheWriteTokens, 0),
     inputCacheReadTokens,

@@ -64,6 +64,9 @@ export async function resolveActionCatalog(
   const linearPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:linear:"),
   );
+  const neonPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:neon:"),
+  );
   const resolved = await Promise.all([
     resolveSlackActions(input.userWorkosId).catch(() => null),
     resolveGmailActions(input.userWorkosId).catch(() => null),
@@ -72,7 +75,7 @@ export async function resolveActionCatalog(
     linearPluginInstalled ? null : resolveLinearActions(input.userWorkosId).catch(() => null),
     resolvePostHogActions(input.userWorkosId).catch(() => null),
     resolveLatitudeActions(input.userWorkosId).catch(() => null),
-    resolveNeonActions(input.userWorkosId).catch(() => null),
+    neonPluginInstalled ? null : resolveNeonActions(input.userWorkosId).catch(() => null),
     resolveAttioActions(input.userWorkosId).catch(() => null),
     resolveGitHubActions(input.workspaceId).catch(() => null),
     resolveStripeActions(input.workspaceId).catch(() => null),

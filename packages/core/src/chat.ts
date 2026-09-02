@@ -78,6 +78,7 @@ export type Conversation = {
   title: string;
   engine: ChatEngine;
   model: string;
+  messageShapeEpoch: number;
   runtime: ConversationRuntime | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;

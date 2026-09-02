@@ -104,6 +104,7 @@ import {
   ManagedCapabilitySourceSchema,
   McpSetupEnvelopeSchema,
   MessagePageSchema,
+  MessagePresentationEnvelopeSchema,
   OnboardingCommandEnvelopeSchema,
   OnboardingStateEnvelopeSchema,
   OnboardingWorkspaceEnvelopeSchema,
@@ -1790,6 +1791,28 @@ export const downloadChatAttachmentRoute = createRoute({
   responses: { 200: binaryResponse, default: errorResponse },
 });
 
+export const getMessagePresentationRoute = createRoute({
+  method: "get",
+  path: "/v1/conversations/{conversationId}/messages/{messageId}/presentation",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: {
+    params: z.object({
+      conversationId: ResourceIdSchema,
+      messageId: ResourceIdSchema,
+    }),
+    headers: z.object({ "if-none-match": z.string().min(1).max(512).optional() }),
+  },
+  responses: {
+    200: {
+      description: "The full authorized Message presentation used for lazy trace expansion.",
+      content: { "application/json": { schema: MessagePresentationEnvelopeSchema } },
+    },
+    304: { description: "The Message presentation has not changed." },
+    default: errorResponse,
+  },
+});
+
 export const downloadChatScreenshotRoute = createRoute({
   method: "get",
   path: "/v1/chat-screenshots/{conversationId}/{filename}",
@@ -1980,6 +2003,7 @@ export const streamReadModelRoute = createRoute({
     query: z.object({
       conversationId: ResourceIdSchema.optional(),
       brainId: ResourceIdSchema.optional(),
+      messageShapeEpoch: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       offset: z.string().optional(),
       handle: z.string().optional(),
       live: z.string().optional(),
@@ -3490,6 +3514,7 @@ export type V1RouteHandlers = {
   deleteChatArtifact: RouteHandler<typeof deleteChatArtifactRoute>;
   downloadChatArtifact: RouteHandler<typeof downloadChatArtifactRoute>;
   downloadChatAttachment: RouteHandler<typeof downloadChatAttachmentRoute>;
+  getMessagePresentation: RouteHandler<typeof getMessagePresentationRoute>;
   downloadChatScreenshot: RouteHandler<typeof downloadChatScreenshotRoute>;
   getPublicChatShare: RouteHandler<typeof getPublicChatShareRoute>;
   getPublicChatShareMetadata: RouteHandler<typeof getPublicChatShareMetadataRoute>;
@@ -3672,6 +3697,7 @@ export function createV1Router(
       .openapi(deleteChatArtifactRoute, handlers.deleteChatArtifact)
       .openapi(downloadChatArtifactRoute, handlers.downloadChatArtifact)
       .openapi(downloadChatAttachmentRoute, handlers.downloadChatAttachment)
+      .openapi(getMessagePresentationRoute, handlers.getMessagePresentation)
       .openapi(downloadChatScreenshotRoute, handlers.downloadChatScreenshot)
       .openapi(getPublicChatShareRoute, handlers.getPublicChatShare)
       .openapi(getPublicChatShareMetadataRoute, handlers.getPublicChatShareMetadata)
@@ -4761,6 +4787,17 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   downloadChatAttachment: (c) =>
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
+  getMessagePresentation: (c) =>
+    c.json(
+      {
+        data: {
+          presentation: null,
+          updatedAt: placeholderTime,
+        },
+        meta,
+      },
+      200,
+    ),
   downloadChatScreenshot: (c) =>
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   getPublicChatShare: (c) =>

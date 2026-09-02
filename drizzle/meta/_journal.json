@@ -1650,8 +1650,22 @@
     {
       "idx": 235,
       "version": "7",
-      "when": 1788271230237,
-      "tag": "0235_goat_github_user_integration",
+      "when": 1788278400000,
+      "tag": "0235_goat_chat_message_shape_epochs",
+      "breakpoints": true
+    },
+    {
+      "idx": 236,
+      "version": "7",
+      "when": 1788282000000,
+      "tag": "0236_goat_chat_message_presentation_summaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 237,
+      "version": "7",
+      "when": 1788282001000,
+      "tag": "0237_goat_github_user_integration",
       "breakpoints": true
     }
   ]

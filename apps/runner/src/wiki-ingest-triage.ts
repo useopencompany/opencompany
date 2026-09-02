@@ -1,3 +1,4 @@
+import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import {
   isNormalizedGmailThreadSourceItem,
@@ -8,6 +9,7 @@ import {
   BRAIN_INGEST_TRIAGE_MAX_ENTITY_HINTS,
   BRAIN_INGEST_TRIAGE_REASON_LENGTH,
 } from "@opencompany/brain/ingest-trace";
+import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { parseGmailWikiSourceConfig } from "@opencompany/db/gmail";
 import type { WikiSourceProvider } from "@opencompany/db/product-schema";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
@@ -17,7 +19,7 @@ import * as ai from "ai";
 import { buildGmailIngestTriagePrompt, buildSlackIngestTriagePrompt } from "./brain-ingest-triage";
 import type { WikiIngestTraceUsage } from "./wiki-agent-ingest";
 
-export const WIKI_INGEST_TRIAGE_MODEL = "openai/gpt-5.4-nano";
+export const WIKI_INGEST_TRIAGE_MODEL = WIKI_INGEST_MODEL;
 export const WIKI_INGEST_TRIAGE_MAX_OUTPUT_TOKENS = 300;
 export const WIKI_INGEST_TRIAGE_TIMEOUT_MS = 30_000;
 
@@ -103,12 +105,7 @@ export async function runWikiIngestTriage(
         workspaceId: input.workspaceId,
       },
     }),
-    providerOptions: gatewayProviderOptions(attribution, {
-      openai: {
-        reasoningEffort: "low",
-        reasoningSummary: "concise",
-      },
-    }),
+    providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
   });
   const object = result.object as {
     decision: "skip" | "ingest";

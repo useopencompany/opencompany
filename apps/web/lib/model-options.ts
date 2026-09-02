@@ -1,10 +1,15 @@
 import {
   CLAUDE_CODE_AGENT_MODEL_IDS,
+  CLAUDE_CODE_DEFAULT_MODEL_ID,
   CODEX_AGENT_MODEL_IDS,
+  CODEX_DEFAULT_MODEL_ID,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   getAgentModelDefinition,
+  isClaudeCodeModelId,
+  isCodexModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { ChatEngine } from "@opencompany/core";
 
 const MODEL_IDS = [
   "anthropic/claude-sonnet-5",
@@ -35,6 +40,27 @@ export function normalizeModel(value: unknown): AgentModelId {
     return value as AgentModelId;
   }
   return DEFAULT_MODEL;
+}
+
+export function normalizeConversationModel(
+  engine: "codex",
+  value: unknown,
+): (typeof CODEX_AGENT_MODEL_IDS)[number];
+export function normalizeConversationModel(
+  engine: "claude_code",
+  value: unknown,
+): (typeof CLAUDE_CODE_AGENT_MODEL_IDS)[number];
+export function normalizeConversationModel(engine: ChatEngine, value: unknown): AgentModelId;
+export function normalizeConversationModel(engine: ChatEngine, value: unknown): AgentModelId {
+  if (engine === "codex") {
+    return typeof value === "string" && isCodexModelId(value) ? value : CODEX_DEFAULT_MODEL_ID;
+  }
+  if (engine === "claude_code") {
+    return typeof value === "string" && isClaudeCodeModelId(value)
+      ? value
+      : CLAUDE_CODE_DEFAULT_MODEL_ID;
+  }
+  return normalizeModel(value);
 }
 
 export function modelContextWindowTokens(modelId: string): number {

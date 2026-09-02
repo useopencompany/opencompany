@@ -24,7 +24,7 @@ const MCP_DISCOVERY_TIMEOUT_MS = 15_000;
 const logger = createLogger({ service: "opencompany-agent", runtime: "remote-mcp-gateway" });
 
 export type RemoteMcpCapabilityDefinition = {
-  id: CapabilityId;
+  id: PluginGatewayDiscoveredTool["classification"]["capabilityId"];
   label: string;
   defaultMode: CapabilityMode;
   tools: readonly string[];
@@ -244,7 +244,7 @@ export async function discoverRemoteMcpSnapshot(
         ...(definition.inputSchema !== undefined ? { inputSchema: definition.inputSchema } : {}),
         ...(definition.annotations !== undefined ? { annotations: definition.annotations } : {}),
         classification: {
-          capabilityId: classification.capability.id as "read" | "write",
+          capabilityId: classification.capability.id,
           capabilityLabel: classification.capability.label,
           defaultMode: classification.capability.defaultMode,
           bucket: classification.bucket,
@@ -272,7 +272,7 @@ export function classifyRemoteTool(
     const capability = matches[0]!;
     return {
       capability,
-      bucket: capability.id === "read" ? "read" : "write",
+      bucket: capability.id === "write" ? "write" : "read",
       curated: true,
     };
   }
