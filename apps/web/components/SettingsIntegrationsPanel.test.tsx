@@ -598,7 +598,7 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
-  it("shows one broad Slack read permission for each connected workspace", () => {
+  it("keeps the legacy Slack surface limited to its existing read permission", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_slack",
@@ -630,6 +630,34 @@ describe("SettingsIntegrationsPanel", () => {
         name: /write|send/i,
       }),
     ).not.toBeInTheDocument();
+  });
+
+  it("removes the duplicate Slack integration card after the plugin is installed", () => {
+    const integrations = integrationStateFromRows([
+      {
+        id: "gint_slack",
+        provider: "slack",
+        externalId: "T123",
+        connectionLabel: "Acme",
+        accountName: "Louis",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as IntegrationState;
+
+    render(
+      <SettingsIntegrationsPanel
+        initialIntegrations={integrations}
+        isWorkspaceAdmin
+        slackPluginInstalled
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    expect(
+      screen.queryByText("Let opencompany search and read your Slack conversations."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Personal" })).not.toHaveTextContent("1");
   });
 
   it("connects Latitude as a personal OAuth integration with guarded writes", () => {

@@ -13,6 +13,7 @@ import {
   NEON_PLUGIN_SOURCE,
   PluginDetail,
   PluginsSettings,
+  SLACK_PLUGIN_SOURCE,
 } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
@@ -181,7 +182,7 @@ describe("Plugin settings", () => {
     expect(screen.getByText(/1 skill · updated/i)).toBeInTheDocument();
   });
 
-  it("offers immutable official GitHub, Linear, and Neon packages before installation", async () => {
+  it("offers every immutable official MCP package before installation", async () => {
     render(<PluginsSettings plugins={[]} canEdit />);
 
     const linearLink = screen.getByRole("link", { name: /linear/i });
@@ -195,8 +196,12 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/github",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(3);
-    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(3);
+    expect(screen.getByRole("link", { name: /slack/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/slack",
+    );
+    expect(screen.getAllByText("Not installed")).toHaveLength(4);
+    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(4);
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
@@ -205,6 +210,9 @@ describe("Plugin settings", () => {
     );
     expect(NEON_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/neon$/u,
+    );
+    expect(SLACK_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
     );
     expect(linearCard).not.toBeNull();
     await userEvent.click(

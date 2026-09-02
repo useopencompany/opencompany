@@ -165,6 +165,48 @@ describe("remote MCP classification", () => {
       ]),
     ).toMatchObject({ curated: false, capability: { defaultMode: "ask" } });
   });
+
+  it("keeps public Slack search on while private reads, writes, and drift ask first", () => {
+    const slackCapabilities = [
+      {
+        id: "read" as const,
+        label: "Search public Slack",
+        defaultMode: "on" as const,
+        tools: ["slack_search_public"],
+      },
+      {
+        id: "query" as const,
+        label: "Read private Slack",
+        defaultMode: "ask" as const,
+        tools: ["slack_read_channel"],
+      },
+      {
+        id: "write" as const,
+        label: "Change Slack",
+        defaultMode: "ask" as const,
+        tools: ["slack_send_message"],
+      },
+    ];
+
+    expect(classifyRemoteTool({ name: "slack_search_public" }, slackCapabilities)).toMatchObject({
+      capability: { id: "read", defaultMode: "on" },
+      curated: true,
+    });
+    expect(classifyRemoteTool({ name: "slack_read_channel" }, slackCapabilities)).toMatchObject({
+      capability: { id: "query", defaultMode: "ask" },
+      curated: true,
+    });
+    expect(classifyRemoteTool({ name: "slack_send_message" }, slackCapabilities)).toMatchObject({
+      capability: { id: "write", defaultMode: "ask" },
+      curated: true,
+    });
+    expect(
+      classifyRemoteTool(
+        { name: "slack_new_read_tool", annotations: { readOnlyHint: true } },
+        slackCapabilities,
+      ),
+    ).toMatchObject({ capability: { defaultMode: "ask" }, curated: false });
+  });
 });
 
 describe("remote MCP discovery snapshots", () => {

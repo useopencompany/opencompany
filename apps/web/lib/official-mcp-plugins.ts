@@ -1,11 +1,11 @@
-export type OfficialMcpPluginName = "github" | "linear" | "neon";
+export type OfficialMcpPluginName = "github" | "linear" | "neon" | "slack";
 
 export type OfficialMcpPluginMetadata = {
   name: OfficialMcpPluginName;
   label: string;
   description: string;
   source: string;
-  connectionProvider: "github_user" | "linear" | "neon";
+  connectionProvider: "github_user" | "linear" | "neon" | "slack";
   connectHref: string;
   accountLabel?: string;
   accountDescription: string;
@@ -48,6 +48,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "neon",
     connectHref: "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
     accountDescription: "The account opencompany uses when you run Neon tools.",
+  },
+  slack: {
+    name: "slack",
+    label: "Slack",
+    description: "Search Slack and, with approval, read private content or make changes.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
+    connectionProvider: "slack",
+    connectHref: "/api/integrations/slack/start?purpose=mcp&returnTo=/settings/plugins/slack",
+    accountDescription:
+      "The most recently connected Slack account powers tools. Other accounts remain available for ingestion.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure Slack ingestion in Wiki sources",
   },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginMetadata>;
 

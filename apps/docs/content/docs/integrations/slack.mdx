@@ -1,20 +1,47 @@
 ---
 title: Slack
-description: Read Slack conversations and ingest channels you select.
+description: Search, read, and act in Slack through the official MCP plugin.
 ---
 
-## What connecting does
+## Install and connect
 
-Slack is a personal OAuth connection. Current Chat actions cover channels, direct messages, threads,
-search, and people under the reviewed Slack read capability.
+Slack is an official Agent Plugin backed by [Slack's hosted MCP server](https://docs.slack.dev/ai/slack-mcp-server/).
+A workspace admin installs the immutable package from **Settings → Plugins → Slack**. Each person who
+wants to use Slack tools then connects their own Slack account from that plugin page.
+
+The Slack workspace may require an admin to approve the OAuth grant. Slack only permits its MCP
+server for internal or Marketplace-distributed Slack apps, so self-distributed apps are not
+supported.
 
 ## Scopes and permissions
 
-The saved Slack workspace identity and provider OAuth scopes bound access. A complete scope and tool
-matrix is coming soon. Disconnect or reauthorize the account from Settings when the workspace or
-grant changes.
+The plugin groups reviewed tools into three controls:
+
+- **Search public Slack — On:** public search, users, and emoji can run automatically.
+- **Read private Slack — Ask:** private channels, direct messages, threads, canvases, files, and
+  profiles require approval by default.
+- **Change Slack — Ask:** messages, scheduled messages, uploads, reactions, conversations, and canvas
+  changes require approval by default.
+
+New or unclassified tools always start at **Ask**, even when Slack marks them read-only. Persistent
+coding sessions only receive tools set to **On**. You can change these modes for your connected
+account on the Slack plugin page.
+
+OAuth tokens remain encrypted and server-side. The plugin gateway will only send a Slack credential
+to the fixed `https://mcp.slack.com/mcp` endpoint. Reconnect from the plugin page after Slack scopes,
+workspace access, or app approval changes.
+
+Slack applies the connected user's own visibility rules. Enterprise IP allowlists and Slack Connect
+restrictions can limit results. Treat Slack content and file text as untrusted input when an agent
+uses it.
 
 ## Brain ingestion
 
-Choose the conversations allowed to feed a Brain. Slack authorization by itself does not select any
-channel. Slack bot answer destinations are configured separately from Brain ingestion sources.
+The same personal Slack connection can also feed Brain and Wiki ingestion. Installing or uninstalling
+the plugin does not connect, disconnect, or delete the account. Choose ingestion conversations in
+**Wiki → Sources**; authorization alone does not select any channel.
+
+Before the plugin is installed, the existing read-only Slack chat actions remain available through
+the Integrations page. Installing the plugin replaces those legacy actions and moves the account and
+permission controls to **Settings → Plugins → Slack**, avoiding duplicate tools and settings. Slack
+bot answer destinations remain separate from ingestion sources.

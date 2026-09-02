@@ -130,6 +130,21 @@ describe("Slack ingress", () => {
       expect(location.searchParams.get("state")).toBeTruthy();
     });
 
+    it("uses Slack's dedicated user consent flow for plugin connections", async () => {
+      const response = await ingress().start(
+        new Request(
+          "https://api.example.com/integrations/slack/start?purpose=mcp&returnTo=/settings/plugins/slack",
+        ),
+      );
+      const location = new URL(response.headers.get("location") ?? "");
+
+      expect(location.origin + location.pathname).toBe("https://slack.com/oauth/v2_user/authorize");
+      expect(location.searchParams.get("scope")?.split(",")).toEqual(
+        expect.arrayContaining(["search:read.public", "channels:history", "chat:write"]),
+      );
+      expect(location.searchParams.has("user_scope")).toBe(false);
+    });
+
     it("redirects anonymous browsers to the web sign-in", async () => {
       const response = await ingress({
         authError: new ApiError(401, "authentication_required", "Authentication required."),

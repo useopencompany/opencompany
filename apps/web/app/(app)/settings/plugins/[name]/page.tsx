@@ -3,6 +3,7 @@ import {
   LinearPluginDetail,
   NeonPluginDetail,
   type PluginLoadState,
+  SlackPluginDetail,
 } from "@/components/OfficialMcpPluginSettings";
 import { PluginDetail } from "@/components/PluginSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
@@ -22,6 +23,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       github: GitHubPluginDetail,
       linear: LinearPluginDetail,
       neon: NeonPluginDetail,
+      slack: SlackPluginDetail,
     }[normalizedName];
     return <Detail pluginState={pluginState} canEdit={context.role === "admin"} />;
   }

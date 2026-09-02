@@ -28,6 +28,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } f
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { useHydrated } from "@/components/useHydrated";
 import {
+  type CapabilityId,
   type CapabilityMode,
   effectiveCapabilityMode,
   type ProviderCapability,
@@ -246,6 +247,7 @@ export function SettingsIntegrationsPanel({
   isWorkspaceAdmin,
   imessageEnabled = false,
   browserProfilesEnabled = false,
+  slackPluginInstalled = false,
   scopeKey = "active",
 }: {
   initialIntegrations: IntegrationState;
@@ -254,6 +256,7 @@ export function SettingsIntegrationsPanel({
   // Preferences; pairing state alone must not surface it.
   imessageEnabled?: boolean;
   browserProfilesEnabled?: boolean;
+  slackPluginInstalled?: boolean;
   scopeKey?: string;
 }) {
   const hydrated = useHydrated();
@@ -266,6 +269,7 @@ export function SettingsIntegrationsPanel({
           isWorkspaceAdmin={isWorkspaceAdmin}
           imessageEnabled={imessageEnabled}
           browserProfilesEnabled={browserProfilesEnabled}
+          slackPluginInstalled={slackPluginInstalled}
         />
       ) : (
         <LiveSettingsIntegrations
@@ -273,6 +277,7 @@ export function SettingsIntegrationsPanel({
           isWorkspaceAdmin={isWorkspaceAdmin}
           imessageEnabled={imessageEnabled}
           browserProfilesEnabled={browserProfilesEnabled}
+          slackPluginInstalled={slackPluginInstalled}
           scopeKey={scopeKey}
         />
       )}
@@ -316,12 +321,14 @@ function LiveSettingsIntegrations({
   isWorkspaceAdmin,
   imessageEnabled,
   browserProfilesEnabled,
+  slackPluginInstalled,
   scopeKey,
 }: {
   initialIntegrations: IntegrationState;
   isWorkspaceAdmin: boolean;
   imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
+  slackPluginInstalled: boolean;
   scopeKey: string;
 }) {
   const integrationAccountsCollection = useMemo(
@@ -356,6 +363,7 @@ function LiveSettingsIntegrations({
       isWorkspaceAdmin={isWorkspaceAdmin}
       imessageEnabled={imessageEnabled}
       browserProfilesEnabled={browserProfilesEnabled}
+      slackPluginInstalled={slackPluginInstalled}
     />
   );
 }
@@ -409,9 +417,16 @@ function countWorkspaceConnected(integrations: IntegrationState) {
   );
 }
 
-function countPersonalConnected(integrations: IntegrationState, includeImessage: boolean) {
+function countPersonalConnected(
+  integrations: IntegrationState,
+  includeImessage: boolean,
+  slackPluginInstalled: boolean,
+) {
   return (
     countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS) +
+    (slackPluginInstalled
+      ? -integrations.personalAccounts.slack.filter((account) => account.connected).length
+      : 0) +
     (integrations.codex.connected ? 1 : 0) +
     (integrations.claude_code.connected ? 1 : 0) +
     (includeImessage && integrations.imessage.connected ? 1 : 0)
@@ -423,11 +438,13 @@ function IntegrationCards({
   isWorkspaceAdmin,
   imessageEnabled,
   browserProfilesEnabled,
+  slackPluginInstalled,
 }: {
   integrations: IntegrationState;
   isWorkspaceAdmin: boolean;
   imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
+  slackPluginInstalled: boolean;
 }) {
   const [scope, setScope] = useState<IntegrationScope>("workspace");
 
@@ -437,7 +454,7 @@ function IntegrationCards({
         scope={scope}
         onScopeChange={setScope}
         workspaceCount={countWorkspaceConnected(integrations)}
-        personalCount={countPersonalConnected(integrations, imessageEnabled)}
+        personalCount={countPersonalConnected(integrations, imessageEnabled, slackPluginInstalled)}
       />
       {scope === "workspace" ? (
         <section className="flex flex-col gap-3">
@@ -491,10 +508,20 @@ function IntegrationCards({
               provider="google_drive"
               accounts={integrations.personalAccounts.google_drive}
             />
-            <IntegrationProviderGroupCard
-              provider="slack"
-              accounts={integrations.personalAccounts.slack}
-            />
+            {!slackPluginInstalled ? (
+              <IntegrationProviderGroupCard
+                provider="slack"
+                accounts={integrations.personalAccounts.slack}
+                capabilityIds={["read"]}
+                capabilityOverrides={{
+                  read: {
+                    label: "Read Slack",
+                    description:
+                      "Search and read channels, direct messages, threads, and people in Slack.",
+                  },
+                }}
+              />
+            ) : null}
             <IntegrationProviderGroupCard
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
@@ -956,9 +983,15 @@ function IntegrationCardRow({
 function IntegrationProviderGroupCard({
   provider,
   accounts,
+  capabilityIds,
+  capabilityOverrides,
 }: {
   provider: PersonalAccountProvider;
   accounts: IntegrationAccountView[];
+  capabilityIds?: readonly CapabilityId[];
+  capabilityOverrides?: Partial<
+    Record<CapabilityId, Partial<Pick<ProviderCapability, "label" | "description">>>
+  >;
 }) {
   const meta = INTEGRATION_META[provider];
   const connectHref = integrationConnectHref(provider);
@@ -973,7 +1006,12 @@ function IntegrationProviderGroupCard({
       body={
         <div className="flex flex-col gap-1.5">
           {accounts.map((account) => (
-            <IntegrationAccountRow key={account.integrationId} account={account} />
+            <IntegrationAccountRow
+              key={account.integrationId}
+              account={account}
+              {...(capabilityIds ? { capabilityIds } : {})}
+              {...(capabilityOverrides ? { capabilityOverrides } : {})}
+            />
           ))}
         </div>
       }
@@ -996,11 +1034,19 @@ function IntegrationProviderGroupCard({
 export function IntegrationAccountRow({
   account,
   purposeLabel,
+  reconnectHref,
   showCapabilityModes = true,
+  capabilityIds,
+  capabilityOverrides,
 }: {
   account: IntegrationAccountView;
   purposeLabel?: string;
+  reconnectHref?: string;
   showCapabilityModes?: boolean;
+  capabilityIds?: readonly CapabilityId[];
+  capabilityOverrides?: Partial<
+    Record<CapabilityId, Partial<Pick<ProviderCapability, "label" | "description">>>
+  >;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -1026,6 +1072,7 @@ export function IntegrationAccountRow({
     account.connected &&
     !hasGoogleDriveWriteScope(account.scopes);
   const needsReconnect = account.status === "needs_reauth" || account.status === "sync_failed";
+  const accountConnectHref = reconnectHref ?? integrationConnectHref(account.provider);
   const gmailScopeUpgradeLabel =
     account.provider === "gmail" && account.connected && !hasGmailDraftScope(account.scopes)
       ? hasGmailSendScope(account.scopes)
@@ -1087,7 +1134,7 @@ export function IntegrationAccountRow({
             </span>
           ) : (
             <a
-              href={integrationConnectHref(account.provider)}
+              href={accountConnectHref}
               className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
             >
               Reconnect
@@ -1125,7 +1172,7 @@ export function IntegrationAccountRow({
             <p className="text-[12px] leading-4 text-warning">{account.statusReason}</p>
           ) : null}
           <a
-            href={integrationConnectHref(account.provider)}
+            href={accountConnectHref}
             className="w-fit rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
           >
             Reconnect
@@ -1137,6 +1184,8 @@ export function IntegrationAccountRow({
           integrationId={account.integrationId}
           provider={account.provider}
           capabilityModes={account.capabilityModes}
+          {...(capabilityIds ? { capabilityIds } : {})}
+          {...(capabilityOverrides ? { capabilityOverrides } : {})}
         />
       ) : null}
       {confirming ? (
@@ -1177,12 +1226,20 @@ function CapabilityModeRows({
   integrationId,
   provider,
   capabilityModes,
+  capabilityIds,
+  capabilityOverrides,
 }: {
   integrationId: string;
   provider: PersonalAccountProvider | "posthog";
   capabilityModes: Record<string, unknown>;
+  capabilityIds?: readonly CapabilityId[];
+  capabilityOverrides?: Partial<
+    Record<CapabilityId, Partial<Pick<ProviderCapability, "label" | "description">>>
+  >;
 }) {
-  const capabilities = providerCapabilities(provider);
+  const capabilities = providerCapabilities(provider)
+    .filter((capability) => !capabilityIds || capabilityIds.includes(capability.id))
+    .map((capability) => ({ ...capability, ...capabilityOverrides?.[capability.id] }));
   if (capabilities.length === 0) return null;
   return (
     <div className="flex flex-col gap-1 border-t border-border/60 pt-1.5">
