@@ -35,6 +35,9 @@ describe("SettingsSidebar", () => {
     expect(
       within(workspaceGroup as HTMLElement).getByRole("link", { name: "Plugins" }),
     ).toHaveAttribute("href", "/settings/plugins");
+    expect(
+      within(workspaceGroup as HTMLElement).getByRole("link", { name: "Inference" }),
+    ).toHaveAttribute("href", "/settings/workspace/inference");
   });
 
   it("marks workspace usage active without also marking members active", () => {
@@ -43,6 +46,15 @@ describe("SettingsSidebar", () => {
     render(<SettingsSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(screen.getByRole("link", { name: "Usage" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Members" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("marks inference active without also marking members active", () => {
+    pathnameMock.value = "/settings/workspace/inference";
+
+    render(<SettingsSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: "Inference" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Members" })).not.toHaveAttribute("aria-current");
   });
 });

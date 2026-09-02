@@ -169,14 +169,14 @@ describe("SettingsIntegrationsPanel", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("does not count an enabled workspace Codex account that needs reauthorization", () => {
+  it("keeps subscription-backed model routing out of Integrations", () => {
     const integrations = integrationStateFromRows([]) as IntegrationState;
     integrations.codex.workspaceEngine = {
       enabled: true,
       providerDisplayName: "Provider Admin",
       providerEmail: "provider@example.com",
-      credentialStatus: "needs_reauth",
-      credentialStatusReason: "Reconnect Codex.",
+      credentialStatus: "connected",
+      credentialStatusReason: null,
       lastValidatedAt: null,
       isCurrentUser: false,
     };
@@ -185,6 +185,7 @@ describe("SettingsIntegrationsPanel", () => {
 
     expect(screen.getByRole("button", { name: "Workspace" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Workspace 1" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Subscription-backed models")).not.toBeInTheDocument();
   });
 
   it("lets workspace admins complete the Infisical browser-token handoff", async () => {
