@@ -113,8 +113,8 @@ type IntegrationMeta = {
 
 const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   github: {
-    label: "GitHub",
-    description: "Bring pull requests and issues from your repositories into opencompany.",
+    label: "GitHub workspace ingestion",
+    description: "Ingest pull requests and issues from selected repositories through webhooks.",
     Icon: GitHubIcon,
     tileClass: "bg-[#181717] text-white",
   },

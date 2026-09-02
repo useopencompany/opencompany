@@ -7,6 +7,7 @@ export type OfficialMcpPluginMetadata = {
   source: string;
   connectionProvider: "github_user" | "linear" | "neon";
   connectHref: string;
+  accountLabel?: string;
   accountDescription: string;
   ingestionHref?: string;
   ingestionLabel?: string;
@@ -16,12 +17,13 @@ export type OfficialMcpPluginMetadata = {
 export const OFFICIAL_MCP_PLUGIN_METADATA = {
   github: {
     name: "github",
-    label: "GitHub",
+    label: "GitHub as you",
     description: "Work with repositories, issues, pull requests, and Actions as yourself.",
     source:
       "https://github.com/useopencompany/plugins/tree/232e380e8850c440c28e4588ef79143d41c000db/github",
     connectionProvider: "github_user",
     connectHref: "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
+    accountLabel: "GitHub",
     accountDescription: "The personal GitHub account opencompany uses when it works as you.",
   },
   linear: {

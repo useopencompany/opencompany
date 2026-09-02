@@ -151,10 +151,12 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    // Workspace scope is shown first: GitHub is a workspace-owned connection and
+    // Workspace scope is shown first: GitHub ingestion is a workspace-owned connection and
     // Gmail (personal) is hidden.
     expect(
-      screen.getByText("Bring pull requests and issues from your repositories into opencompany."),
+      screen.getByText(
+        "Ingest pull requests and issues from selected repositories through webhooks.",
+      ),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Let opencompany read and act on your email."),
@@ -165,7 +167,9 @@ describe("SettingsIntegrationsPanel", () => {
     // Personal scope reveals the personal connections and hides the workspace ones.
     expect(screen.getByText("Let opencompany read and act on your email.")).toBeInTheDocument();
     expect(
-      screen.queryByText("Bring pull requests and issues from your repositories into opencompany."),
+      screen.queryByText(
+        "Ingest pull requests and issues from selected repositories through webhooks.",
+      ),
     ).not.toBeInTheDocument();
   });
 
@@ -335,6 +339,7 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
+    expect(screen.getByText("GitHub workspace ingestion")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Configure repositories" })).toHaveAttribute(
       "href",
       "/settings/repositories",
