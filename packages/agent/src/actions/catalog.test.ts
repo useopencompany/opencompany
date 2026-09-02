@@ -55,6 +55,12 @@ describe("resolveActionCatalog plugin reconciliation", () => {
   it("suppresses the legacy GitHub issue search when the official plugin is installed", async () => {
     const githubPluginRegistration = {
       source: "plugin:github:github",
+      getState: vi.fn().mockResolvedValue({
+        connected: true,
+        integrationId: "gint_github_user",
+        capabilityModes: {},
+        toolModes: {},
+      }),
     } as unknown as RemoteMcpGatewayRegistration;
 
     const catalog = await resolveActionCatalog(
@@ -70,5 +76,29 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     expect(catalog.actions).not.toContainEqual(
       expect.objectContaining({ id: "github.search_issues" }),
     );
+  });
+
+  it("keeps the legacy GitHub issue search for members without a personal connection", async () => {
+    const githubPluginRegistration = {
+      source: "plugin:github:github",
+      getState: vi.fn().mockResolvedValue({
+        connected: false,
+        integrationId: null,
+        capabilityModes: {},
+        toolModes: {},
+      }),
+    } as unknown as RemoteMcpGatewayRegistration;
+
+    const catalog = await resolveActionCatalog(
+      { userWorkosId: "user_without_github", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [githubPluginRegistration] },
+    );
+
+    expect(githubPluginRegistration.getState).toHaveBeenCalledWith({
+      userWorkosId: "user_without_github",
+      workspaceId: "workspace_1",
+    });
+    expect(mocks.github).toHaveBeenCalledWith("workspace_1");
+    expect(catalog.actions).toContainEqual(expect.objectContaining({ id: "github.search_issues" }));
   });
 });
