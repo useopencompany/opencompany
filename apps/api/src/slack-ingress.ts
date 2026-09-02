@@ -46,6 +46,10 @@ export type SlackIngressService = {
 export function createSlackIngress(input: {
   db: DbLike;
   identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
 }): SlackIngressService {
   return {
     start: (request) => handleStart(input, request),
@@ -54,7 +58,14 @@ export function createSlackIngress(input: {
   };
 }
 
-type IngressInput = { db: DbLike; identify: ApiIdentityVerifier };
+type IngressInput = {
+  db: DbLike;
+  identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
+};
 
 // Message subtypes that carry conversation content. Everything else
 // (message_changed, message_deleted, channel_join, bot_message, ...) is noise
@@ -79,6 +90,7 @@ async function handleStart(input: IngressInput, request: Request): Promise<Respo
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
+  const purpose = url.searchParams.get("purpose") === "mcp" ? "mcp" : undefined;
 
   if (!isSlackIntegrationConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");
@@ -87,8 +99,9 @@ async function handleStart(input: IngressInput, request: Request): Promise<Respo
   const state = createSlackIntegrationState({
     userWorkosId: session.userId,
     returnTo,
+    ...(purpose ? { purpose } : {}),
   });
-  return sessionRedirect(session, buildSlackAuthorizationUrl(state));
+  return sessionRedirect(session, buildSlackAuthorizationUrl(state, purpose));
 }
 
 async function handleCallback(input: IngressInput, request: Request): Promise<Response> {
@@ -122,10 +135,11 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   }
 
   try {
-    const oauth = await exchangeSlackCode(code);
+    const oauth = await exchangeSlackCode(code, state.purpose);
     const identity = await fetchSlackIdentity({
       accessToken: oauth.accessToken,
       authedUserId: oauth.authedUserId,
+      includeTeamDetails: state.purpose !== "mcp",
     });
 
     await connectSlackIntegration({
@@ -145,6 +159,19 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
       workspaceId: session.workspaceId,
       provider: "slack",
     });
+    if (state.purpose === "mcp" && input.refreshPluginRegistrations) {
+      try {
+        await input.refreshPluginRegistrations({
+          userWorkosId: session.userId,
+          workspaceIds: session.workspaces.map((entry) => entry.workspace.id),
+        });
+      } catch (error) {
+        logger.warn("Slack plugin discovery refresh after connection failed", {
+          event: "goat.slack_plugin_reconnect_refresh_failed",
+          error_message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     return statusRedirect(session, state.returnTo, "connected");
   } catch (error) {

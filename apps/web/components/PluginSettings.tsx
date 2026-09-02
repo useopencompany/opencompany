@@ -6,7 +6,7 @@ import type {
   PluginListItemDto,
 } from "@opencompany/protocol";
 import { Button, buttonVariants } from "@opencompany/ui/components/button";
-import { GitHubIcon, LinearIcon, NeonIcon } from "@opencompany/ui/icons";
+import { GitHubIcon, LinearIcon, NeonIcon, SlackIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
   Archive,
@@ -108,6 +108,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: NeonIcon,
     iconClassName: "bg-[#00E599] text-[#0B0F14]",
   },
+  slack: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.slack,
+    Icon: SlackIcon,
+    iconClassName: "bg-white text-[#4A154B]",
+  },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginConfig>;
 
 export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
@@ -116,6 +121,8 @@ export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+export const SLACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.slack.name;
+export const SLACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.slack.source;
 
 export async function installOfficialMcpPlugin(
   config: OfficialMcpPluginConfig,
@@ -145,6 +152,10 @@ export function installOfficialGitHubPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.neon, preview);
+}
+
+export function installOfficialSlackPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.slack, preview);
 }
 
 export function PluginsSettings({

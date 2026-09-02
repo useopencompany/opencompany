@@ -79,8 +79,11 @@ export async function resolveActionCatalog(
   const neonPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:neon:"),
   );
+  const slackPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:slack:"),
+  );
   const resolved = await Promise.all([
-    resolveSlackActions(input.userWorkosId).catch(() => null),
+    slackPluginInstalled ? null : resolveSlackActions(input.userWorkosId).catch(() => null),
     resolveGmailActions(input.userWorkosId).catch(() => null),
     resolveGoogleCalendarActions(input.userWorkosId).catch(() => null),
     resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
