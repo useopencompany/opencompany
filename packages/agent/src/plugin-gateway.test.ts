@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   getGitHubState: vi.fn(),
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
+  getInfisicalState: vi.fn(),
+  loadInfisicalConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
 }));
@@ -37,6 +39,11 @@ vi.mock("./integrations/github-user-mcp", () => ({
   GITHUB_USER_MCP_ENDPOINT_URL: "https://api.githubcopilot.com/mcp/",
   getGitHubUserMcpIntegrationState: mocks.getGitHubState,
   loadGitHubUserMcpWorkerConnection: mocks.loadGitHubConnection,
+}));
+vi.mock("./integrations/infisical-docs-mcp", () => ({
+  INFISICAL_DOCS_MCP_ENDPOINT_URL: "https://infisical.com/docs/mcp",
+  getInfisicalDocsMcpIntegrationState: mocks.getInfisicalState,
+  loadInfisicalDocsMcpWorkerConnection: mocks.loadInfisicalConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
   POSTHOG_MCP_ENDPOINT_URL: "https://mcp.posthog.com/mcp",
@@ -239,6 +246,54 @@ describe("plugin gateway registration cache", () => {
         loadConnection: mocks.loadNeonConnection,
       }),
     ]);
+  });
+
+  it("binds Infisical only to its public docs endpoint and workspace connection gate", async () => {
+    const infisicalRecord = record({
+      pluginName: "infisical",
+      pluginLabel: "infisical",
+      pluginDescription: "Infisical docs and sandbox secret workflows.",
+      connectionProvider: "infisical",
+      server: {
+        name: "infisical",
+        type: "streamable-http",
+        url: "https://infisical.com/docs/mcp",
+        headers: {},
+      },
+      capabilities: [
+        {
+          id: "read",
+          label: "Read Infisical docs",
+          defaultMode: "on",
+          tools: ["search_infisical", "query_docs_filesystem_infisical"],
+        },
+        {
+          id: "write",
+          label: "Send docs feedback",
+          defaultMode: "off",
+          tools: ["submit_feedback"],
+        },
+      ],
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([infisicalRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:infisical:infisical",
+        connectionProvider: "infisical",
+        getState: mocks.getInfisicalState,
+        loadConnection: mocks.loadInfisicalConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...infisicalRecord,
+        server: { ...infisicalRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
   it("forces discovery immediately after install through the lifecycle hook", async () => {

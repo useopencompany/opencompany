@@ -227,7 +227,17 @@ const app = createApiApp({
   // The engine-auth device/browser flows run through the runner's internal
   // control routes; the client resolves RUNNER_INTERNAL_URL/RUNNER_PUBLIC_URL
   // and RUNNER_INTERNAL_TOKEN per call.
-  engineAuth: createEngineAuthService({ db: database.db, runner: runnerClient }),
+  engineAuth: createEngineAuthService({
+    db: database.db,
+    runner: runnerClient,
+    refreshPluginRegistrations: ({ provider, userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider: provider,
+      }),
+  }),
   engineSessions: createEngineSessionService({ db: database.db, runner: runnerClient }),
   workspaceCapabilities: createWorkspaceCapabilityService({ db: database.db }),
   workspaceControl: createWorkspaceControlService({ db: database.db, workos }),

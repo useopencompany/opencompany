@@ -23,6 +23,7 @@ import {
   AlertCircle,
   ChevronDown,
   ExternalLink,
+  KeyRound,
   Loader2,
   PackageCheck,
   PlugZap,
@@ -60,7 +61,11 @@ import {
   refreshHeadlessPluginMcp,
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
-import { type IntegrationAccountView, type IntegrationState } from "@/lib/integration-state";
+import {
+  type InfisicalProviderState,
+  type IntegrationAccountView,
+  type IntegrationState,
+} from "@/lib/integration-state";
 import type { OfficialMcpPluginName } from "@/lib/official-mcp-plugins";
 
 const NO_CONNECTION_DISCOVERY_ERROR =
@@ -123,6 +128,7 @@ export type PluginAccountsState =
       status: "ready";
       accounts: PluginAccount[];
       permissionConnection: IntegrationAccountView | null;
+      workspaceInfisical?: InfisicalProviderState;
     };
 
 export type LinearAccountsState = PluginAccountsState;
@@ -158,6 +164,25 @@ export function NeonPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.neon}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function InfisicalPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.infisical}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -236,6 +261,28 @@ export function NeonPluginDetailView({
   return (
     <OfficialMcpPluginDetailView
       config={OFFICIAL_MCP_PLUGINS.neon}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+export function InfisicalPluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS.infisical}
       pluginState={pluginState}
       accountsState={accountsState}
       toolsState={toolsState}
@@ -500,6 +547,11 @@ function AccountsSection({
   state: PluginAccountsState;
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
+  const workspaceInfisical = state.status === "ready" ? state.workspaceInfisical : undefined;
+  const hasWorkspaceInfisical =
+    workspaceInfisical &&
+    workspaceInfisical.status !== "not_connected" &&
+    workspaceInfisical.status !== "disconnected";
   const headingId = `${config.name}-accounts-heading`;
 
   return (
@@ -514,6 +566,8 @@ function AccountsSection({
         <SectionSkeleton label={`Loading ${config.label} accounts`} rows={2} compact />
       ) : state.status === "error" ? (
         <SectionError title="Accounts unavailable" message={state.message} />
+      ) : config.connectionKind === "workspace-infisical" && hasWorkspaceInfisical ? (
+        <InfisicalWorkspaceConnectionRow integration={workspaceInfisical} />
       ) : !permissionConnection ? (
         <SectionEmpty icon={Users}>{`No ${config.label} accounts are connected.`}</SectionEmpty>
       ) : (
@@ -527,7 +581,9 @@ function AccountsSection({
       )}
       <div className="flex flex-wrap items-center gap-3">
         <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
-          Connect {config.label} account
+          {config.connectionKind === "workspace-infisical" && workspaceInfisical?.connected
+            ? `Manage ${config.label} connection`
+            : `Connect ${config.label} account`}
         </a>
         {config.ingestionHref && config.ingestionLabel ? (
           <Link
@@ -539,6 +595,35 @@ function AccountsSection({
         ) : null}
       </div>
     </section>
+  );
+}
+
+function InfisicalWorkspaceConnectionRow({ integration }: { integration: InfisicalProviderState }) {
+  const region = integration.host === "https://eu.infisical.com" ? "EU" : "US";
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-border bg-surface px-3 py-3">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#6C5CE7] text-white">
+        <KeyRound className="size-4.5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-[13px] font-medium text-ink">
+            {integration.accountEmail || "Workspace Infisical CLI"}
+          </p>
+          <Badge variant={integration.connected ? "success" : "warning"}>
+            {integration.connected ? "Connected" : "Reconnect required"}
+          </Badge>
+        </div>
+        <p className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
+          {region} region · restored into coding sandboxes
+        </p>
+        {integration.statusReason ? (
+          <p className="mt-1 text-[11.5px] leading-4 text-warning-foreground">
+            {integration.statusReason}
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -598,7 +683,7 @@ function ToolsSection({
         id={headingId}
         icon={Wrench}
         title="Tools"
-        description={`Choose whether ${config.label} capabilities run automatically, ask first, or stay unavailable.`}
+        description={config.toolsDescription}
       />
       {pluginState.status === "loading" ? (
         <SectionSkeleton label={`Loading ${config.label} tools`} rows={2} />
@@ -628,8 +713,9 @@ function ToolsSection({
             />
           ) : (
             <p className="text-[12px] leading-4 text-ink-subtle">
-              Package preview · permission modes become editable after installation and account
-              connection.
+              {config.permissionsEditable
+                ? "Package preview · permission modes become editable after installation and account connection."
+                : "Package preview · reviewed permission modes remain fixed after installation."}
             </p>
           )}
           {refreshError && !isConnectionRequiredError(refreshError) ? (
@@ -667,12 +753,19 @@ function ToolsSection({
                 group={group}
                 provider={config.name}
                 permissionConnection={plugin ? permissionConnection : null}
+                permissionsEditable={config.permissionsEditable}
               />
             ))}
           </div>
-          {plugin && !permissionConnection ? (
+          {plugin && config.permissionsEditable && !permissionConnection ? (
             <p className="text-[12px] leading-4 text-ink-subtle">
               Connect a {config.label} account to change permission modes.
+            </p>
+          ) : null}
+          {plugin && !config.permissionsEditable ? (
+            <p className="text-[12px] leading-4 text-ink-subtle">
+              Documentation permissions are package-defined. Secret reads and writes are performed
+              by the sandbox CLI workflow, not by these MCP tools.
             </p>
           ) : null}
         </>
@@ -738,10 +831,12 @@ function ToolGroupCard({
   group,
   provider,
   permissionConnection,
+  permissionsEditable,
 }: {
   group: PluginToolGroupView;
   provider: string;
   permissionConnection: IntegrationAccountView | null;
+  permissionsEditable: boolean;
 }) {
   return (
     <Card className="gap-3 bg-surface py-3 shadow-none">
@@ -756,6 +851,7 @@ function ToolGroupCard({
           group={group}
           provider={provider}
           connection={permissionConnection}
+          editable={permissionsEditable}
         />
       </CardHeader>
       {group.tools.length > 0 ? (
@@ -779,10 +875,12 @@ function PluginCapabilityModeRow({
   group,
   provider,
   connection,
+  editable,
 }: {
   group: PluginToolGroupView;
   provider: string;
   connection: IntegrationAccountView | null;
+  editable: boolean;
 }) {
   const router = useRouter();
   const [pendingMode, setPendingMode] = useState<CapabilityMode | null>(null);
@@ -802,7 +900,7 @@ function PluginCapabilityModeRow({
     );
 
   const select = (nextMode: CapabilityMode) => {
-    if (!connection || isPending || nextMode === mode) return;
+    if (!editable || !connection || isPending || nextMode === mode) return;
     setPendingMode(nextMode);
     startTransition(async () => {
       const result = await setIntegrationCapabilityModeAction(
@@ -823,7 +921,7 @@ function PluginCapabilityModeRow({
     <CapabilityModeToggle
       label={group.label}
       mode={mode}
-      disabled={!connection || isPending}
+      disabled={!editable || !connection || isPending}
       onChange={select}
     />
   );
@@ -974,7 +1072,15 @@ function pluginAccountsFromState(
 ): {
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView | null;
+  workspaceInfisical?: InfisicalProviderState;
 } {
+  if (provider === "infisical") {
+    return {
+      accounts: [],
+      permissionConnection: null,
+      workspaceInfisical: state.infisical,
+    };
+  }
   if (provider === "neon") {
     const accounts = state.personalAccounts.neon.map((account) => ({ account }));
     return {
@@ -1011,6 +1117,10 @@ export function defaultNeonToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("neon");
 }
 
+export function defaultInfisicalToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("infisical");
+}
+
 function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): PluginToolsState {
   return {
     status: "ready",
@@ -1039,6 +1149,12 @@ export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null)
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "neon");
+}
+
+export function infisicalToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "infisical");
 }
 
 function officialPluginToolsStateFromPlugin(
@@ -1122,6 +1238,10 @@ export function linearToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
 
 export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "neon");
+}
+
+export function infisicalToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "infisical");
 }
 
 function officialPluginToolsStateFromPreview(

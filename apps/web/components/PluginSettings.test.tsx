@@ -8,6 +8,7 @@ import {
   previewHeadlessPluginImport,
 } from "@/lib/headless-knowledge-commands";
 import {
+  INFISICAL_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   PluginDetail,
@@ -170,7 +171,7 @@ describe("Plugin settings", () => {
     expect(screen.getByText(/1 skill · updated/i)).toBeInTheDocument();
   });
 
-  it("offers immutable official Linear and Neon packages before installation", async () => {
+  it("offers immutable official MCP packages before installation", async () => {
     render(<PluginsSettings plugins={[]} canEdit />);
 
     const linearLink = screen.getByRole("link", { name: /linear/i });
@@ -180,13 +181,20 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/neon",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(2);
-    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: /infisical/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/infisical",
+    );
+    expect(screen.getAllByText("Not installed")).toHaveLength(3);
+    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(3);
     expect(LINEAR_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/linear$/u,
     );
     expect(NEON_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/neon$/u,
+    );
+    expect(INFISICAL_PLUGIN_SOURCE).toMatch(
+      /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/infisical$/u,
     );
     expect(linearCard).not.toBeNull();
     await userEvent.click(

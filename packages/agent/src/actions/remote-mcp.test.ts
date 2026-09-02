@@ -245,6 +245,76 @@ describe("remote MCP discovery snapshots", () => {
     expect(JSON.stringify(catalog)).not.toContain("mcp.linear.app");
     expect(JSON.stringify(catalog)).not.toContain("X-Package-Version");
   });
+
+  it("omits OAuth transport configuration for public MCP discovery and execution", async () => {
+    const publicConnection = vi.fn(async () => ({
+      ok: true as const,
+      integrationId: "infisical:workspace_1:generation_1",
+    }));
+    const publicState = vi.fn(async () => ({
+      connected: true,
+      integrationId: "infisical:workspace_1:generation_1",
+      capabilityModes: {},
+      toolModes: {},
+    }));
+    const discovery = client({
+      pages: [{ tools: [{ name: "search_infisical", annotations: { readOnlyHint: true } }] }],
+    });
+    const createDiscoveryClient = vi.fn(async () => discovery);
+    const infisicalRegistration = registration({
+      source: "plugin:infisical:infisical",
+      connectionProvider: "infisical",
+      label: "Infisical",
+      server: {
+        name: "infisical",
+        type: "streamable-http",
+        url: "https://infisical.com/docs/mcp",
+        headers: {},
+      },
+      capabilities: [
+        {
+          id: "read",
+          label: "Read Infisical docs",
+          defaultMode: "on",
+          tools: ["search_infisical"],
+        },
+      ],
+      getState: publicState,
+      loadConnection: publicConnection,
+    });
+
+    const snapshot = await discoverRemoteMcpSnapshot(identity, infisicalRegistration, {
+      createClient: createDiscoveryClient,
+      recordDispatch: vi.fn(async () => {}),
+    });
+    expect(createDiscoveryClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: {
+          type: "http",
+          url: "https://infisical.com/docs/mcp",
+        },
+      }),
+    );
+
+    const execution = client({ result: { content: [{ type: "text", text: "{}" }] } });
+    const createExecutionClient = vi.fn(async () => execution);
+    const catalog = await resolveRemoteMcpActions(
+      identity,
+      { ...infisicalRegistration, discoverySnapshot: snapshot ?? [] },
+      { createClient: createExecutionClient, recordDispatch: vi.fn(async () => {}) },
+    );
+    await expect(catalog?.actions[0]?.execute({}, context)).resolves.toEqual({});
+    expect(createExecutionClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: {
+          type: "http",
+          url: "https://infisical.com/docs/mcp",
+        },
+      }),
+    );
+    expect(JSON.stringify(createDiscoveryClient.mock.calls)).not.toContain("authProvider");
+    expect(JSON.stringify(createExecutionClient.mock.calls)).not.toContain("authProvider");
+  });
 });
 
 describe("resolveRemoteMcpActions", () => {

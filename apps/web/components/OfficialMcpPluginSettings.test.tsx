@@ -10,6 +10,8 @@ import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
+  InfisicalPluginDetailView,
+  infisicalToolsStateFromPlugin,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -19,7 +21,11 @@ import {
   type PluginToolsState,
   uncuratedPluginToolGroups,
 } from "./OfficialMcpPluginSettings";
-import { LINEAR_PLUGIN_SOURCE, NEON_PLUGIN_SOURCE } from "./PluginSettings";
+import {
+  INFISICAL_PLUGIN_SOURCE,
+  LINEAR_PLUGIN_SOURCE,
+  NEON_PLUGIN_SOURCE,
+} from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
@@ -44,6 +50,15 @@ const accountActions = vi.hoisted(() => ({
 }));
 const appData = vi.hoisted(() => ({
   integrations: {
+    infisical: {
+      provider: "infisical",
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountEmail: "developer@example.com",
+      host: "https://app.infisical.com",
+      lastValidatedAt: "2026-08-26T12:00:00.000Z",
+    },
     linear: {
       connected: true,
       status: "connected",
@@ -287,6 +302,75 @@ const neonPlugin = {
             capabilityLabel: "Query database data",
             defaultMode: "ask",
             bucket: "read",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-08-26T12:00:00.000Z",
+      refreshAfter: "2026-08-26T13:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
+const infisicalPlugin = {
+  ...plugin,
+  id: "plugin_infisical",
+  name: "infisical",
+  manifest: {
+    name: "infisical",
+    description: "Search Infisical docs and safely use secrets from coding sandboxes.",
+  },
+  source: { ...plugin.source, path: "infisical" },
+  skills: [
+    {
+      name: "infisical-sandbox-secrets",
+      path: "skills/infisical-sandbox-secrets",
+      bundleId: "bundle_infisical_sandbox_secrets",
+      integrity: `sha256:${"e".repeat(64)}`,
+      description: "Use Infisical secrets without returning their values to the model.",
+    },
+  ],
+  remoteMcpServers: [
+    {
+      name: "infisical",
+      type: "streamable-http",
+      connectionProvider: "infisical",
+      capabilities: [
+        {
+          id: "read",
+          label: "Read Infisical docs",
+          defaultMode: "on",
+          tools: ["search_infisical", "query_docs_filesystem_infisical"],
+        },
+        {
+          id: "write",
+          label: "Send docs feedback",
+          defaultMode: "off",
+          tools: ["submit_feedback"],
+        },
+      ],
+      tools: [
+        {
+          name: "search_infisical",
+          description: "Search Infisical documentation.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Read Infisical docs",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "submit_feedback",
+          description: "Send documentation feedback.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Send docs feedback",
+            defaultMode: "off",
+            bucket: "write",
             curated: true,
           },
         },
@@ -663,6 +747,53 @@ describe("Linear plugin settings", () => {
         "query",
         "on",
       ),
+    );
+  });
+
+  it("shows the workspace Infisical CLI connection and fixed docs-only MCP permissions", () => {
+    const state = infisicalToolsStateFromPlugin(infisicalPlugin);
+    render(
+      <InfisicalPluginDetailView
+        pluginState={{ status: "ready", plugin: infisicalPlugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [],
+          permissionConnection: null,
+          workspaceInfisical: {
+            provider: "infisical",
+            connected: true,
+            status: "connected",
+            statusReason: null,
+            accountEmail: "developer@example.com",
+            host: "https://app.infisical.com",
+            lastValidatedAt: "2026-08-26T12:00:00.000Z",
+          },
+        }}
+        toolsState={state}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Infisical" })).toBeInTheDocument();
+    expect(screen.getByText("developer@example.com")).toBeInTheDocument();
+    expect(screen.getByText(/US region · restored into coding sandboxes/u)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Manage Infisical connection" })).toHaveAttribute(
+      "href",
+      "/settings/integrations",
+    );
+    expect(screen.getByText("Search infisical")).toBeInTheDocument();
+    expect(screen.getByText("Submit feedback")).toBeInTheDocument();
+    expect(screen.getByText("infisical-sandbox-secrets")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Secret reads and writes are performed by the sandbox CLI workflow/u),
+    ).toBeInTheDocument();
+    const readModes = screen.getByRole("group", { name: "Read Infisical docs permission" });
+    const feedbackModes = screen.getByRole("group", { name: "Send docs feedback permission" });
+    expect(within(readModes).getByRole("button", { name: "On" })).toBeDisabled();
+    expect(within(feedbackModes).getByRole("button", { name: "Off" })).toBeDisabled();
+    expect(accountActions.setIntegrationCapabilityModeAction).not.toHaveBeenCalled();
+    expect(INFISICAL_PLUGIN_SOURCE).toMatch(
+      /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/infisical$/u,
     );
   });
 

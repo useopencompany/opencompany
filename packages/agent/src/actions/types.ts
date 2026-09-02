@@ -16,6 +16,7 @@ export type ActionProviderId =
   | "revolut"
   | "latitude"
   | "neon"
+  | "infisical"
   | "x_account";
 
 export type ActionSourceId = ActionProviderId | ManagedCapabilitySource | `plugin:${string}`;

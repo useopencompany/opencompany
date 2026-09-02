@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ExternalLink,
   FileArchive,
+  KeyRound,
   Link2,
   Loader2,
   PackageOpen,
@@ -103,12 +104,19 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: NeonIcon,
     iconClassName: "bg-[#00E599] text-[#0B0F14]",
   },
+  infisical: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.infisical,
+    Icon: KeyRound,
+    iconClassName: "bg-[#6C5CE7] text-white",
+  },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginConfig>;
 
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+export const INFISICAL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.infisical.name;
+export const INFISICAL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.infisical.source;
 
 export async function installOfficialMcpPlugin(
   config: OfficialMcpPluginConfig,
@@ -134,6 +142,10 @@ export function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.neon, preview);
+}
+
+export function installOfficialInfisicalPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.infisical, preview);
 }
 
 export function PluginsSettings({

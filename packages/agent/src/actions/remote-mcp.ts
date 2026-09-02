@@ -39,7 +39,7 @@ export type RemoteMcpConnectionState = {
 
 export type RemoteMcpWorkerConnection =
   | { ok: false; reason: "not_connected" | "needs_reauth" }
-  | { ok: true; integrationId: string; authProvider: OAuthClientProvider };
+  | { ok: true; integrationId: string; authProvider?: OAuthClientProvider };
 
 export type RemoteMcpGatewayRegistration = {
   source: ActionSourceId;
@@ -113,7 +113,7 @@ export type RemoteMcpGatewayDependencies = {
       type: "http" | "sse";
       url: string;
       headers?: Record<string, string>;
-      authProvider: OAuthClientProvider;
+      authProvider?: OAuthClientProvider;
     };
   }) => Promise<RemoteMcpClient>;
   recordDispatch: (audit: RemoteMcpDispatchAudit) => Promise<void>;
@@ -464,7 +464,7 @@ function storedClassification(
   };
 }
 
-function clientConfig(server: RemoteMcpServer, authProvider: OAuthClientProvider) {
+function clientConfig(server: RemoteMcpServer, authProvider?: OAuthClientProvider) {
   return {
     clientName: "opencompany-action-gateway",
     version: "0.1.0",
@@ -476,7 +476,7 @@ function clientConfig(server: RemoteMcpServer, authProvider: OAuthClientProvider
       type: server.type === "streamable-http" ? ("http" as const) : ("sse" as const),
       url: server.url,
       ...(Object.keys(server.headers).length > 0 ? { headers: server.headers } : {}),
-      authProvider,
+      ...(authProvider ? { authProvider } : {}),
     },
   };
 }

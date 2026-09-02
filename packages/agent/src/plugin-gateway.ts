@@ -20,6 +20,11 @@ import {
   loadGitHubUserMcpWorkerConnection,
 } from "./integrations/github-user-mcp";
 import {
+  getInfisicalDocsMcpIntegrationState,
+  INFISICAL_DOCS_MCP_ENDPOINT_URL,
+  loadInfisicalDocsMcpWorkerConnection,
+} from "./integrations/infisical-docs-mcp";
+import {
   getLatitudeIntegrationState,
   LATITUDE_MCP_ENDPOINT_URL,
   loadLatitudeMcpWorkerConnection,
@@ -54,6 +59,12 @@ const providerBindings = {
     endpointUrl: GITHUB_USER_MCP_ENDPOINT_URL,
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
+  },
+  infisical: {
+    provider: "infisical",
+    endpointUrl: INFISICAL_DOCS_MCP_ENDPOINT_URL,
+    getState: getInfisicalDocsMcpIntegrationState,
+    loadConnection: loadInfisicalDocsMcpWorkerConnection,
   },
   linear: {
     provider: "linear",
