@@ -64,11 +64,16 @@ test("migrates an existing env file once and removes an equal duplicate", () => 
   );
 });
 
-test("reports moved variable names when old and new values conflict", () => {
-  withTempEnv("GOAT_PORT=3002\nOPENCOMPANY_PORT=4000\n", (path) => {
-    const before = readFileSync(path, "utf8");
-    assert.throws(() => environmentFileMigrationPlan(path), /GOAT_PORT → OPENCOMPANY_PORT/u);
-    assert.equal(readFileSync(path, "utf8"), before);
+test("removes a conflicting legacy duplicate and preserves the canonical value", () => {
+  withTempEnv("SMOKE_GOAT=false\nSMOKE_WEB=true\n", (path) => {
+    assert.deepEqual(environmentFileMigrationPlan(path), [
+      { oldName: "SMOKE_GOAT", newName: "SMOKE_WEB" },
+    ]);
+
+    assert.deepEqual(migrateEnvironmentFile(path), [
+      { oldName: "SMOKE_GOAT", newName: "SMOKE_WEB" },
+    ]);
+    assert.equal(readFileSync(path, "utf8"), "SMOKE_WEB=true\n");
   });
 });
 

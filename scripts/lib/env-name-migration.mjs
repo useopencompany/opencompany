@@ -18,24 +18,13 @@ export function migratedEnvironmentName(name) {
 export function environmentFileMigrationPlan(path) {
   if (!existsSync(path)) return [];
 
-  const assignments = readAssignments(path);
+  const assignmentNames = readAssignmentNames(path);
   const moves = [];
-  const conflicts = [];
 
-  for (const [oldName, oldValue] of assignments) {
+  for (const oldName of assignmentNames) {
     const newName = migratedEnvironmentName(oldName);
     if (!newName) continue;
     moves.push({ oldName, newName });
-    if (assignments.has(newName) && assignments.get(newName) !== oldValue) {
-      conflicts.push(`${oldName} → ${newName}`);
-    }
-  }
-
-  if (conflicts.length > 0) {
-    throw new Error(
-      `${path} contains conflicting old and new environment variables: ${conflicts.join(", ")}. ` +
-        "Keep the intended value under the new name and remove the old entry, then run setup again.",
-    );
   }
 
   return moves;
@@ -72,24 +61,12 @@ export function migrateEnvironmentFile(path) {
   return moves;
 }
 
-function readAssignments(path) {
-  const assignments = new Map();
+function readAssignmentNames(path) {
+  const names = new Set();
   for (const line of readFileSync(path, "utf8").split("\n")) {
-    const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/u);
+    const match = line.match(/^([A-Z][A-Z0-9_]*)=/u);
     if (!match) continue;
-    assignments.set(match[1], normalizedValue(match[2]));
+    names.add(match[1]);
   }
-  return assignments;
-}
-
-function normalizedValue(raw) {
-  if (raw.startsWith('"') && raw.endsWith('"')) {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return raw.slice(1, -1);
-    }
-  }
-  if (raw.startsWith("'") && raw.endsWith("'")) return raw.slice(1, -1);
-  return raw;
+  return names;
 }
