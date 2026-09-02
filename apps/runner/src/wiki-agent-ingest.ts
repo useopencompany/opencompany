@@ -722,11 +722,8 @@ export async function runWikiIngestAgentLoop(
     const result = await generateText({
       model: gateway(WIKI_AGENT_INGEST_MODEL),
       maxOutputTokens: WIKI_AGENT_INGEST_MAX_OUTPUT_TOKENS,
+      system: WIKI_AGENT_INGEST_SYSTEM_PROMPT,
       messages: [
-        {
-          role: "system",
-          content: WIKI_AGENT_INGEST_SYSTEM_PROMPT,
-        },
         {
           role: "user",
           content: buildWikiIngestUserMessage(input, triage),
