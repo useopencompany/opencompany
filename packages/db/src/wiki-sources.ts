@@ -3,13 +3,13 @@ import { and, eq, type SQL, sql } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { getDb } from "./client";
 import {
-  type ActiveWikiSourceProvider,
   type IntegrationStatus,
   integrations,
   users,
   type WikiSourceProvider,
   wikiSources,
 } from "./product-schema";
+import type { ActiveWikiSourceProvider } from "./wiki-ingest";
 
 type DbLike = any;
 

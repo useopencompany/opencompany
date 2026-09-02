@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "./client";
-import { type ActiveWikiSourceProvider, wikiSourceEventClaims } from "./product-schema";
+import { wikiSourceEventClaims } from "./product-schema";
+import type { ActiveWikiSourceProvider } from "./wiki-ingest";
 
 type DbLike = any;
 

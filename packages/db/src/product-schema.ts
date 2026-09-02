@@ -223,7 +223,7 @@ export type BrainSourceProvider =
   | "fathom"
   | "attio";
 // The persisted source unions still include Slack so historical rows remain
-// readable during the cutover. Active product schemas and workers exclude it.
+// readable during the cutover. Active API schemas and workers exclude it.
 // "slack_bot" rows are answer *destinations* (which channels a brain answers
 // in via the Slack bot), not ingestion sources; no ingestion path reads them.
 export type BrainSourceConfigProvider =
@@ -269,7 +269,6 @@ export type BrainIngestJobKind =
   | "brain_pointer_hydrate";
 export type BrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 export type WikiSourceProvider = "gmail" | "slack" | "jamie" | "granola" | "linear" | "github";
-export type ActiveWikiSourceProvider = Exclude<WikiSourceProvider, "slack">;
 export type WikiSourceType = "meeting" | "conversation" | "issue" | "activity" | "thread";
 export type WikiSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
 export type WikiIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
@@ -289,6 +288,7 @@ export type BrainImportProvider =
   | "granola"
   | "fathom"
   | "gmail"
+  | "slack"
   | "linear";
 export type BrainImportSourceSelection = Partial<
   Record<

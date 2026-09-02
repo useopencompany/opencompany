@@ -4,7 +4,6 @@ import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { reserveWorkspaceIngestion } from "./billing";
 import { getDb } from "./client";
 import {
-  type ActiveWikiSourceProvider,
   type WikiIngestJob,
   type WikiIngestJobStatus,
   type WikiSourceProvider,
@@ -12,6 +11,8 @@ import {
   wikiIngestJobs,
   wikiSourceItems,
 } from "./product-schema";
+
+export type ActiveWikiSourceProvider = Exclude<WikiSourceProvider, "slack">;
 
 type DbLike = any;
 
