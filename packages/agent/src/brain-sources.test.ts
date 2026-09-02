@@ -93,7 +93,7 @@ describe("BrainSourceApplicationService", () => {
       queuedDb([
         {
           id: "source_1",
-          provider: "slack",
+          provider: "gmail",
           userWorkosId: member.userId,
           integrationWorkspaceId: null,
         },
@@ -103,7 +103,7 @@ describe("BrainSourceApplicationService", () => {
     await expect(
       service.set(member, "brain_1", "integration_1", {
         operation: "set_enabled",
-        provider: "slack",
+        provider: "gmail",
         enabled: false,
       }),
     ).resolves.toBeUndefined();
@@ -121,7 +121,7 @@ describe("BrainSourceApplicationService", () => {
       queuedDb([
         {
           id: "source_1",
-          provider: "slack",
+          provider: "gmail",
           userWorkosId: "user_2",
           integrationWorkspaceId: null,
         },
@@ -131,7 +131,7 @@ describe("BrainSourceApplicationService", () => {
     await expect(
       service.set(member, "brain_1", "integration_1", {
         operation: "set_enabled",
-        provider: "slack",
+        provider: "gmail",
         enabled: false,
       }),
     ).rejects.toMatchObject({ code: "forbidden" });
@@ -143,7 +143,7 @@ describe("BrainSourceApplicationService", () => {
       queuedDb([
         {
           id: "source_1",
-          provider: "slack",
+          provider: "gmail",
           userWorkosId: "user_2",
           integrationWorkspaceId: null,
         },
@@ -152,7 +152,7 @@ describe("BrainSourceApplicationService", () => {
 
     await service.set(admin, "brain_1", "integration_1", {
       operation: "set_enabled",
-      provider: "slack",
+      provider: "gmail",
       enabled: false,
     });
     expect(mocks.setEnabled).toHaveBeenCalledOnce();
@@ -175,6 +175,30 @@ describe("BrainSourceApplicationService", () => {
     const service = new BrainSourceApplicationService(queuedDb([]));
     await expect(service.remove(member, "brain_1", "integration_1")).resolves.toBeUndefined();
     expect(mocks.deleteSource).not.toHaveBeenCalled();
+  });
+
+  it("hides retired Slack sources from Brain settings", async () => {
+    mocks.listSources.mockResolvedValueOnce([
+      {
+        id: "source_slack",
+        provider: "slack",
+        integrationId: "integration_slack",
+        userWorkosId: member.userId,
+        integrationWorkspaceId: null,
+        enabled: true,
+        ownerName: "Ada",
+        ownerEmail: "ada@example.com",
+        ownerAvatarUrl: null,
+        integrationAccountEmail: "ada@example.com",
+        integrationAccountName: "Ada",
+        integrationConnectionLabel: "Acme",
+        integrationStatus: "connected",
+        config: {},
+      },
+    ] as never);
+    const service = new BrainSourceApplicationService(queuedDb([]));
+
+    await expect(service.list(member, "brain_1")).resolves.toMatchObject({ sources: [] });
   });
 
   it("persists every Drive cursor before the source selection timestamp", async () => {

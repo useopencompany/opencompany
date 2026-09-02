@@ -28,7 +28,6 @@ const IMPORT_INTEGRATION_PROVIDERS = [
   "granola",
   "fathom",
   "gmail",
-  "slack",
   "linear",
 ] as const;
 const IMPORT_PROVIDERS = ["public_web", ...IMPORT_INTEGRATION_PROVIDERS] as const;
@@ -225,16 +224,6 @@ export class BrainImportApplicationService {
       }
       if (provider === "github" && !hasConfiguredEntries(config.repos)) {
         throw new CoreError("invalid_argument", "Select at least one GitHub repository.");
-      }
-      if (
-        provider === "slack" &&
-        !hasConfiguredEntries(config.channels) &&
-        !hasConfiguredEntries(config.dms)
-      ) {
-        throw new CoreError(
-          "invalid_argument",
-          "Select at least one Slack channel or DM in Brain Settings first.",
-        );
       }
       if (provider === "linear" && !hasConfiguredEntries(config.teams)) {
         throw new CoreError(

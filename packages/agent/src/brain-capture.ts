@@ -242,7 +242,7 @@ export async function captureToBrainInbox(
 
 function hydratablePointerProvider(sourceRef: string) {
   const provider = parseBrainSourceRef(sourceRef)?.provider;
-  return provider === "slack" || provider === "gmail" || provider === "linear" ? provider : null;
+  return provider === "gmail" || provider === "linear" ? provider : null;
 }
 
 export function deriveCaptureTitle(text: string): string {

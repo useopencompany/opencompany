@@ -1,17 +1,17 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 // Slack signs `v0:{timestamp}:{raw body}` with the app signing secret; the
-// timestamp window guards against replays of captured requests. Kept free of
-// db/auth imports so the webhook route and its tests stay light.
+// timestamp window guards against replays of captured requests. The caller
+// supplies the exact app secret so credentials never fall through to another
+// Slack surface.
 export function verifySlackEventSignature(input: {
   rawBody: string;
   timestamp: string | null;
   signature: string | null;
   nowMs?: number;
-  // Defaults to the ingestion app's secret; the bot webhook passes its own.
-  secret?: string | undefined;
+  secret: string | undefined;
 }): boolean {
-  const secret = (input.secret ?? process.env.OPENCOMPANY_SLACK_SIGNING_SECRET)?.trim();
+  const secret = input.secret?.trim();
   if (!secret || !input.timestamp || !input.signature) return false;
   const timestampSeconds = Number(input.timestamp);
   if (!Number.isFinite(timestampSeconds)) return false;

@@ -305,7 +305,8 @@ export async function connectSlackIntegration(input: {
       id: newIntegrationId(),
       userWorkosId: input.userWorkosId,
       provider: "slack",
-      // The Slack team id is the routing key for inbound events.
+      // One user can connect several Slack workspaces; the team id identifies
+      // the account whose credential is bound to the official MCP endpoint.
       externalId: input.teamId,
       connectionLabel,
       accountName: input.accountName,

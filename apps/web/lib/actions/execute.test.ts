@@ -18,11 +18,11 @@ function catalogWith(
   options: Pick<ResolvedAction, "maxResultChars"> = {},
 ): ResolvedActionCatalog {
   return {
-    providers: [{ id: "slack", label: "Slack", description: "Read Slack messages." }],
+    providers: [{ id: "gmail", label: "Gmail", description: "Read Gmail messages." }],
     actions: [
       {
-        id: "slack.fetch_history",
-        provider: "slack",
+        id: "gmail.fetch_history",
+        provider: "gmail",
         capability: "read",
         effects: ACTION_EFFECTS_READ,
         permissionMode: "on",
@@ -38,7 +38,7 @@ function catalogWith(
 function baseInput(catalog: ResolvedActionCatalog) {
   return {
     catalog,
-    actionId: "slack.fetch_history",
+    actionId: "gmail.fetch_history",
     params: { channel: "C1" },
     userWorkosId: "user_1",
     signal: new AbortController().signal,
@@ -67,7 +67,7 @@ describe("executeAction", () => {
     const result = await executeAction(baseInput(catalogWith(execute)));
     expect(result).toEqual({
       ok: true,
-      action: "slack.fetch_history",
+      action: "gmail.fetch_history",
       result: { messages: ["hi"] },
     });
     expect(execute).toHaveBeenCalledWith(
@@ -88,7 +88,7 @@ describe("executeAction", () => {
 
     expect(result).toEqual({
       ok: true,
-      action: "slack.fetch_history",
+      action: "gmail.fetch_history",
       result: expanded,
     });
   });
@@ -97,17 +97,17 @@ describe("executeAction", () => {
     const result = await executeAction(
       baseInput(
         catalogWith(async () => {
-          throw new ActionAuthError("auth_expired", "slack", "Reconnect Slack in Settings.");
+          throw new ActionAuthError("auth_expired", "gmail", "Reconnect Gmail in Settings.");
         }),
       ),
     );
     expect(result).toEqual({
       ok: false,
-      action: "slack.fetch_history",
+      action: "gmail.fetch_history",
       error: {
         code: "auth_expired",
-        source: "slack",
-        message: "Reconnect Slack in Settings.",
+        source: "gmail",
+        message: "Reconnect Gmail in Settings.",
       },
     });
   });
@@ -129,7 +129,7 @@ describe("executeAction", () => {
     const provider = await executeAction(
       baseInput(
         catalogWith(async () => {
-          throw new Error("Slack API request failed with 500.");
+          throw new Error("Gmail API request failed with 500.");
         }),
       ),
     );

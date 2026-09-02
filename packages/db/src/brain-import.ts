@@ -663,15 +663,6 @@ export function rankStoredBrainImportCandidate(
       ).length;
       return (directions.size > 1 ? 300 : 100) + substantive * 20 + messages.length;
     }
-    case "slack": {
-      const conversation = asRecord(content.conversation);
-      const messages = asRecords(conversation.messages);
-      const human = messages.filter((message) => !message.botId && message.userId);
-      if (human.length === 0) return Number.NEGATIVE_INFINITY;
-      const authors = new Set(human.map((message) => message.userId));
-      const replies = messages.filter((message) => message.threadTs).length;
-      return (replies > 0 || authors.size > 1 ? 300 : 100) + authors.size * 20 + messages.length;
-    }
     case "linear": {
       const issue = asRecord(content.issue);
       if (String(issue.stateType ?? "").toLowerCase() === "canceled")
@@ -706,14 +697,6 @@ export function matchesBrainImportSelectedScope(
       return (
         allowed.has(String(repository.id ?? "")) || allowed.has(String(repository.fullName ?? ""))
       );
-    }
-    case "slack": {
-      const channelId = String(asRecord(content.conversation).channelId ?? "");
-      const allowed = configuredIds(
-        [...asArray(config?.channels), ...asArray(config?.dms)],
-        ["id"],
-      );
-      return allowed.has(channelId);
     }
     case "linear": {
       const teamId = String(asRecord(content.issue).teamId ?? "");

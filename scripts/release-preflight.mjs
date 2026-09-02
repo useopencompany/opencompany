@@ -97,10 +97,9 @@ const groups = {
       "GOOGLE_OAUTH_CLIENT_ID",
       "GOOGLE_OAUTH_CLIENT_SECRET",
       "GOOGLE_INTEGRATION_STATE_SECRET",
-      // Slack ingestion + Linear ingest OAuth/webhook ingress (#1203 4b1).
+      // Official Slack MCP plugin OAuth + Linear ingest OAuth/webhook ingress.
       "OPENCOMPANY_SLACK_CLIENT_ID",
       "OPENCOMPANY_SLACK_CLIENT_SECRET",
-      "OPENCOMPANY_SLACK_SIGNING_SECRET",
       "OPENCOMPANY_SLACK_STATE_SECRET",
       "OPENCOMPANY_LINEAR_CLIENT_ID",
       "OPENCOMPANY_LINEAR_CLIENT_SECRET",

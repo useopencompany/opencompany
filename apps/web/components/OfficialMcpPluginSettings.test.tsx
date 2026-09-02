@@ -1070,7 +1070,7 @@ describe("Linear plugin settings", () => {
     );
   });
 
-  it("presents Slack connection, ingestion, and three conservative permission tiers", () => {
+  it("presents Slack connections and three conservative permission tiers", () => {
     const state = slackToolsStateFromPlugin(slackPlugin);
     render(<SlackPluginDetail pluginState={{ status: "ready", plugin: slackPlugin }} canEdit />);
 
@@ -1078,14 +1078,14 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Acme · Ada")).toBeInTheDocument();
     expect(screen.getByText("Archive Co · Ada")).toBeInTheDocument();
     expect(screen.getByText("Slack tools")).toBeInTheDocument();
-    expect(screen.getByText("Ingestion only")).toBeInTheDocument();
+    expect(screen.getByText("Not active")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Connect Slack account" })).toHaveAttribute(
       "href",
-      "/api/integrations/slack/start?purpose=mcp&returnTo=/settings/plugins/slack",
+      "/api/integrations/slack/start?returnTo=/settings/plugins/slack",
     );
     expect(
-      screen.getByRole("link", { name: "Configure Slack ingestion in Wiki sources" }),
-    ).toHaveAttribute("href", "/wiki/sources");
+      screen.queryByRole("link", { name: /Configure Slack ingestion/ }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Search public Slack permission" })).toHaveTextContent(
       "On",
     );

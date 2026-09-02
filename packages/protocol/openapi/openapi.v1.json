@@ -2207,12 +2207,6 @@
           "ownAccounts": {
             "type": "object",
             "properties": {
-              "slack": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/BrainSourceAccount"
-                }
-              },
               "linear": {
                 "type": "array",
                 "items": {
@@ -2257,7 +2251,6 @@
               }
             },
             "required": [
-              "slack",
               "linear",
               "gmail",
               "google_drive",
@@ -2343,71 +2336,6 @@
               "integration",
               "legacyDefaultDelivery",
               "isDefaultBrain"
-            ],
-            "additionalProperties": false
-          },
-          "slack": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "slack"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  },
-                  "teamName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountName",
-                  "teamName"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "integration"
             ],
             "additionalProperties": false
           },
@@ -2913,7 +2841,6 @@
           "sources",
           "ownAccounts",
           "jamie",
-          "slack",
           "linear",
           "github",
           "gmail",
@@ -2941,7 +2868,6 @@
               "gmail",
               "google_drive",
               "github",
-              "slack",
               "linear",
               "slack_bot",
               "hubspot",
@@ -3112,7 +3038,6 @@
                   "gmail",
                   "google_drive",
                   "github",
-                  "slack",
                   "linear",
                   "slack_bot",
                   "hubspot",
@@ -3161,7 +3086,6 @@
                   "gmail",
                   "google_drive",
                   "github",
-                  "slack",
                   "linear",
                   "slack_bot",
                   "hubspot",
@@ -3178,82 +3102,6 @@
               "operation",
               "provider",
               "enabled"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "operation": {
-                "type": "string",
-                "enum": [
-                  "configure"
-                ]
-              },
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "slack"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "channels": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 500
-              },
-              "dms": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 500
-              }
-            },
-            "required": [
-              "operation",
-              "provider",
-              "enabled",
-              "channels",
-              "dms"
             ],
             "additionalProperties": false
           },
@@ -5306,85 +5154,6 @@
               "provider": {
                 "type": "string",
                 "enum": [
-                  "slack"
-                ]
-              },
-              "channels": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "isPrivate": {
-                      "type": "boolean"
-                    },
-                    "isSlackConnect": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name",
-                    "isPrivate",
-                    "isSlackConnect"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "dms": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "isSlackConnect": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name",
-                    "isSlackConnect"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "partial": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "provider",
-              "channels",
-              "dms",
-              "partial"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "provider": {
-                "type": "string",
-                "enum": [
                   "linear"
                 ]
               },
@@ -5674,7 +5443,6 @@
                 "granola",
                 "fathom",
                 "gmail",
-                "slack",
                 "linear"
               ]
             },
@@ -6328,7 +6096,6 @@
             "type": "string",
             "enum": [
               "gmail",
-              "slack",
               "jamie",
               "granola",
               "linear",
@@ -6481,7 +6248,6 @@
             "type": "string",
             "enum": [
               "gmail",
-              "slack",
               "jamie",
               "granola",
               "linear",
@@ -6622,7 +6388,6 @@
             "type": "string",
             "enum": [
               "gmail",
-              "slack",
               "jamie",
               "granola",
               "linear",
@@ -16942,21 +16707,6 @@
             "application/json": {
               "schema": {
                 "oneOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "enum": [
-                          "slack"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "provider"
-                    ],
-                    "additionalProperties": false
-                  },
                   {
                     "type": "object",
                     "properties": {

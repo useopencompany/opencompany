@@ -27,7 +27,7 @@ describe("claimWikiSourceEvents", () => {
     await expect(
       claimWikiSourceEvents({
         workspaceId: "workspace_1",
-        sourceProvider: "slack",
+        sourceProvider: "gmail",
         eventKeys: ["message:existing", "message:new", "message:new"],
         db,
       }),

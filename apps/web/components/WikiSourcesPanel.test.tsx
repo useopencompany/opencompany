@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   listWikiSources: vi.fn(),
   setWikiSourceEnabled: vi.fn(),
   upsertWikiSource: vi.fn(),
-  listSlackConversations: vi.fn(),
   listGitHubRepositories: vi.fn(),
   listLinearTeams: vi.fn(),
   toastError: vi.fn(),
@@ -45,7 +44,6 @@ vi.mock("@/lib/wiki-source-api", () => ({
 }));
 
 vi.mock("@/lib/brain-source-actions", () => ({
-  listSlackConversationsAction: mocks.listSlackConversations,
   listGitHubRepositoriesAction: mocks.listGitHubRepositories,
   listLinearTeamsAction: mocks.listLinearTeams,
 }));
@@ -68,13 +66,6 @@ describe("WikiSourcesPanel", () => {
     mocks.listWikiSources.mockResolvedValue([]);
     mocks.setWikiSourceEnabled.mockReset();
     mocks.upsertWikiSource.mockReset();
-    mocks.listSlackConversations.mockReset();
-    mocks.listSlackConversations.mockResolvedValue({
-      ok: true,
-      channels: [],
-      dms: [],
-      partial: false,
-    });
     mocks.listGitHubRepositories.mockReset();
     mocks.listLinearTeams.mockReset();
     mocks.toastError.mockReset();
@@ -87,7 +78,7 @@ describe("WikiSourcesPanel", () => {
     const connect = await screen.findByRole("link", { name: "Connect Gmail" });
     expect(connect).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/wiki/sources");
     expect(screen.getByText("No sources are feeding yet")).toBeInTheDocument();
-    expect(screen.getAllByText("Not connected")).toHaveLength(6);
+    expect(screen.getAllByText("Not connected")).toHaveLength(5);
   });
 
   it("does not start the live integration collection during server rendering", () => {
@@ -162,45 +153,6 @@ describe("WikiSourcesPanel", () => {
         },
       }),
     );
-  });
-
-  it("loads Slack conversations and saves selected channels through the Wiki sources API", async () => {
-    mocks.integrations = [
-      integration({ provider: "slack", accountName: "Acme", accountEmail: null }),
-    ];
-    mocks.listWikiSources.mockResolvedValue([
-      source({ provider: "slack", accountEmail: null, accountName: "Acme", config: {} }),
-    ]);
-    mocks.listSlackConversations.mockResolvedValue({
-      ok: true,
-      channels: [{ id: "C123", name: "product", isPrivate: false, isSlackConnect: false }],
-      dms: [],
-      partial: false,
-    });
-    mocks.upsertWikiSource.mockResolvedValue(
-      source({
-        provider: "slack",
-        accountEmail: null,
-        accountName: "Acme",
-        config: { channels: [{ id: "C123", name: "product" }], dms: [] },
-      }),
-    );
-    const user = userEvent.setup();
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
-
-    await user.click(await screen.findByRole("button", { name: "Choose conversations" }));
-    await user.click(await screen.findByRole("checkbox", { name: "#product" }));
-    await user.click(screen.getByRole("button", { name: "Save conversations" }));
-
-    await waitFor(() =>
-      expect(mocks.upsertWikiSource).toHaveBeenCalledWith({
-        integrationId: "integration_1",
-        provider: "slack",
-        enabled: true,
-        config: { channels: [{ id: "C123", name: "product" }], dms: [] },
-      }),
-    );
-    expect(mocks.listSlackConversations).toHaveBeenCalledWith("integration_1");
   });
 
   it("configures selected Linear teams and events through the Wiki sources API", async () => {

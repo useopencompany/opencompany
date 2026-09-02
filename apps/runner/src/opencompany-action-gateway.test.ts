@@ -85,11 +85,11 @@ describe("createActionDispatcher", () => {
         ({
           ok: true,
           catalog: {
-            sources: [{ id: "slack", label: "Slack", description: "Messages" }],
+            sources: [{ id: "plugin:slack:slack", label: "Slack", description: "Messages" }],
             actions: [
               {
-                id: "slack.post",
-                source: "slack",
+                id: "plugin:slack:slack.post",
+                source: "plugin:slack:slack",
                 description: "Post a message.",
                 params: { type: "object" },
                 permissionMode: "ask",
@@ -104,7 +104,7 @@ describe("createActionDispatcher", () => {
       { execute },
     );
 
-    expect(dispatcher?.prelistedSourceIds).toEqual(["slack"]);
+    expect(dispatcher?.prelistedSourceIds).toEqual(["plugin:slack:slack"]);
   });
 
   it("treats an empty authorized catalog as a valid Chat runtime", async () => {

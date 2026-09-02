@@ -21,6 +21,7 @@ import {
   loadSlackMcpWorkerConnection,
   SLACK_MCP_ENDPOINT_URL,
 } from "./slack-mcp";
+import { SLACK_MCP_USER_SCOPES } from "./slack-scopes";
 
 const connectedRow = {
   id: "gint_slack",
@@ -31,6 +32,7 @@ const connectedRow = {
   statusReason: null,
   capabilityModes: { query: "ask" },
   toolModes: { slack_send_message: "off" },
+  scopes: [...SLACK_MCP_USER_SCOPES],
 };
 
 describe("Slack MCP connection", () => {
@@ -86,6 +88,32 @@ describe("Slack MCP connection", () => {
         },
       }),
     ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
+  });
+
+  it("requires legacy ingestion connections to reconnect for the plugin grant", async () => {
+    mocks.loadIntegration.mockResolvedValueOnce({
+      ...connectedRow,
+      scopes: ["channels:history", "channels:read", "search:read"],
+    });
+
+    await expect(getSlackMcpIntegrationState({ userWorkosId: "user_1" })).resolves.toMatchObject({
+      connected: false,
+      integrationId: "gint_slack",
+    });
+
+    mocks.loadIntegration.mockResolvedValueOnce({
+      ...connectedRow,
+      scopes: ["channels:history", "channels:read", "search:read"],
+    });
+    await expect(
+      loadSlackMcpWorkerConnection({
+        userWorkosId: "user_1",
+        onAuthorizationRequired: () => {
+          throw new Error("authorization required");
+        },
+      }),
+    ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
+    expect(mocks.loadCredential).not.toHaveBeenCalled();
   });
 
   it("marks the account for reconnect when Slack rejects its bearer token", async () => {

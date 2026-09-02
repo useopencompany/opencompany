@@ -712,7 +712,7 @@ describe("canonical Hono API", () => {
         items: [
           {
             id: "gwjob_1",
-            provider: "slack",
+            provider: "gmail",
             outcome: "succeeded",
             pages: [{ path: "projects/launch", action: "updated" }],
           },
@@ -1551,7 +1551,6 @@ describe("canonical Hono API", () => {
       slackIngress: {
         start: record("slack.start", calls),
         callback: record("slack.callback", calls),
-        webhook: record("slack.webhook", calls),
       },
       linearIngress: {
         start: record("linear.start", calls),
@@ -1602,7 +1601,6 @@ describe("canonical Hono API", () => {
       ["POST", "/webhooks/google-drive", "google.driveWebhook"],
       ["GET", "/integrations/slack/start", "slack.start"],
       ["GET", "/integrations/slack/callback", "slack.callback"],
-      ["POST", "/webhooks/slack/events", "slack.webhook"],
       ["GET", "/integrations/linear-ingest/start", "linear.start"],
       ["GET", "/integrations/linear-ingest/callback", "linear.callback"],
       ["POST", "/webhooks/linear/events", "linear.webhook"],
@@ -1631,6 +1629,9 @@ describe("canonical Hono API", () => {
       expect(response.status, `${method} ${path}`).toBe(200);
       await expect(response.json()).resolves.toMatchObject({ ok: true, service });
     }
+    expect(
+      (await app.request("/webhooks/slack/events", { method: "POST", body: "{}" })).status,
+    ).toBe(404);
   });
 
   it("allows credentialed browser preflight only for configured origins", async () => {
@@ -4825,9 +4826,9 @@ function wikiSourceService(
 function wikiActivityItem() {
   return {
     id: "gwjob_1",
-    provider: "slack" as const,
-    sourceType: "conversation" as const,
-    title: "#product",
+    provider: "gmail" as const,
+    sourceType: "thread" as const,
+    title: "Launch update",
     outcome: "succeeded" as const,
     reason: null,
     pages: [{ path: "projects/launch", title: "Launch", action: "updated" as const }],
@@ -4925,7 +4926,6 @@ function brainSourceDetails() {
     viewer: { actorId: actor.userId, isAdmin: true },
     sources: [],
     ownAccounts: {
-      slack: [],
       linear: [],
       gmail: [],
       google_drive: [],
@@ -4944,14 +4944,6 @@ function brainSourceDetails() {
       },
       legacyDefaultDelivery: false,
       isDefaultBrain: false,
-    },
-    slack: {
-      integration: {
-        ...unavailableBase,
-        provider: "slack" as const,
-        accountName: null,
-        teamName: null,
-      },
     },
     linear: {
       integration: {

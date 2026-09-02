@@ -799,7 +799,6 @@ const BRAIN_IMPORT_PROVIDERS = new Set([
   "granola",
   "fathom",
   "gmail",
-  "slack",
   "linear",
 ]);
 const BRAIN_IMPORT_SUMMARY_STATUSES = new Set(["pending", "ready", "failed", "unavailable"]);

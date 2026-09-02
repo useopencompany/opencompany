@@ -174,7 +174,10 @@ export function createIntegrationAccountService(input: {
     },
 
     async getUsage(actor, integrationId) {
-      await requireOwnPersonalIntegration(db, actor, integrationId);
+      const integration = await requireOwnPersonalIntegration(db, actor, integrationId);
+      if (integration.provider === "slack") {
+        return { affectedBrainSourceCount: 0 };
+      }
       try {
         const [row] = await db
           .select({ count: sql<number>`count(*)::integer` })
@@ -596,7 +599,7 @@ export function createIntegrationAccountService(input: {
 
 async function requireOwnPersonalIntegration(db: DbLike, actor: Actor, integrationId: string) {
   const [row] = await db
-    .select({ id: integrations.id })
+    .select({ id: integrations.id, provider: integrations.provider })
     .from(integrations)
     .where(
       and(
@@ -607,6 +610,7 @@ async function requireOwnPersonalIntegration(db: DbLike, actor: Actor, integrati
     )
     .limit(1);
   if (!row) throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
+  return row;
 }
 
 async function disconnectOwnedPersonalIntegration(db: DbLike, actor: Actor, integrationId: string) {

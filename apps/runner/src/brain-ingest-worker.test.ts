@@ -139,11 +139,6 @@ describe("opencompany Brain ingest worker", () => {
           supportedJobs: expect.arrayContaining([
             {
               kind: "brain_pointer_hydrate",
-              sourceProvider: "slack",
-              sourceType: "pointer",
-            },
-            {
-              kind: "brain_pointer_hydrate",
               sourceProvider: "gmail",
               sourceType: "pointer",
             },

@@ -1,4 +1,4 @@
-import { normalizeGmailThreadWindow, normalizeSlackConversationWindow } from "@opencompany/brain";
+import { normalizeGmailThreadWindow } from "@opencompany/brain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const aiMock = vi.hoisted(() => ({
@@ -39,7 +39,7 @@ describe("wiki source-only triage prompts", () => {
     });
 
     const result = await runWikiIngestTriage({
-      prompt: "Classify this Slack conversation.",
+      prompt: "Classify this Gmail thread.",
       gatewayApiKey: "gw_test",
       actorUserWorkosId: "user_123",
       workspaceId: "workspace_123",
@@ -62,36 +62,6 @@ describe("wiki source-only triage prompts", () => {
       decision: "skip",
       modelCostUsdMicros: 20,
     });
-  });
-
-  it("builds Slack triage from source content without wiki state", () => {
-    const item = normalizeSlackConversationWindow({
-      windowId: "gslkwin_1",
-      teamId: "T123",
-      channelId: "C123",
-      channelName: "product",
-      channelType: "channel",
-      messages: [
-        {
-          ts: "1724493600.000100",
-          userId: "U123",
-          userName: "Ada",
-          text: "Acme approved the onboarding plan.",
-        },
-      ],
-      flushedAt: "2026-08-24T10:00:00.000Z",
-    });
-
-    const prompt = buildWikiIngestTriagePrompt({
-      sourceProvider: "slack",
-      normalizedPayload: item,
-      sourceConfig: {},
-    });
-
-    expect(prompt).toContain("Classify this Slack conversation window.");
-    expect(prompt).toContain("Acme approved the onboarding plan.");
-    expect(prompt).toContain("<untrusted-source-data>");
-    expect(prompt).not.toContain("wiki tree");
   });
 
   it("places trusted Gmail source instructions before the untrusted thread payload", () => {
@@ -126,7 +96,7 @@ describe("wiki source-only triage prompts", () => {
     );
   });
 
-  it("does not triage sources outside the Slack and Gmail gate", () => {
+  it("does not triage sources outside the Gmail gate", () => {
     expect(
       buildWikiIngestTriagePrompt({
         sourceProvider: "granola",

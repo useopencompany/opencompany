@@ -52,7 +52,6 @@ function sourcesDetails(overrides: Record<string, unknown> = {}) {
     granola: disconnected,
     fathom: disconnected,
     gmail: disconnected,
-    slack: disconnected,
     linear: disconnected,
     googleDrive: disconnected,
     hubspot: disconnected,
@@ -136,7 +135,7 @@ describe("BrainImportApplicationService", () => {
             repos: [{ fullName: "acme/api" }, { fullName: "not-listed/repo" }],
           },
         },
-        slack: { enabled: false },
+        slack: { enabled: true, integrationId: "integration_slack" },
       },
     });
 
@@ -150,7 +149,7 @@ describe("BrainImportApplicationService", () => {
       { id: "repo_1", fullName: "acme/api" },
     ]);
     expect(Array.isArray(persisted.sourceSelection.github?.config?.events)).toBe(true);
-    expect(persisted.sourceSelection.slack).toEqual({ enabled: false });
+    expect(persisted.sourceSelection.slack).toBeUndefined();
     expect(persisted.sourceSelection.jamie).toEqual({ enabled: false });
   });
 
@@ -162,17 +161,17 @@ describe("BrainImportApplicationService", () => {
         idempotencyKey: "key-1",
         companyUrl: "acme.com",
         sourceSelection: {
-          slack: { enabled: true, integrationId: "integration_slack" },
+          gmail: { enabled: true, integrationId: "integration_gmail" },
         },
       }),
     ).rejects.toMatchObject({
       code: "invalid_argument",
-      message: "Connect Slack in your settings first.",
+      message: "Connect Gmail in your settings first.",
     } satisfies Partial<CoreError>);
     expect(mocks.startRun).not.toHaveBeenCalled();
   });
 
-  it("requires configured scope for GitHub, Slack, and Linear sources", async () => {
+  it("requires configured scope for GitHub sources", async () => {
     const { service: imports } = service();
 
     await expect(
@@ -190,33 +189,6 @@ describe("BrainImportApplicationService", () => {
     ).rejects.toMatchObject({
       code: "invalid_argument",
       message: "Select at least one GitHub repository.",
-    } satisfies Partial<CoreError>);
-
-    const configuredSlack = service({
-      list: async () =>
-        sourcesDetails({
-          slack: { integration: { integrationId: "integration_slack" } },
-          sources: [
-            {
-              provider: "slack",
-              integrationId: "integration_slack",
-              canConfigure: true,
-              config: { channels: [], dms: [] },
-            },
-          ],
-        }),
-    });
-    await expect(
-      configuredSlack.service.start(admin, "brain_1", {
-        idempotencyKey: "key-2",
-        companyUrl: "acme.com",
-        sourceSelection: {
-          slack: { enabled: true, integrationId: "integration_slack" },
-        },
-      }),
-    ).rejects.toMatchObject({
-      code: "invalid_argument",
-      message: "Select at least one Slack channel or DM in Brain Settings first.",
     } satisfies Partial<CoreError>);
   });
 

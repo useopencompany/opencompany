@@ -25,12 +25,8 @@ import {
   type NormalizedJamieMeetingSourceItem,
   type NormalizedLinearIssueContent,
   type NormalizedLinearIssueSourceItem,
-  type NormalizedSlackConversationContent,
-  type NormalizedSlackConversationMessage,
-  type NormalizedSlackConversationSourceItem,
   type NormalizedUploadAssetSourceItem,
   parseBrainUsageReport,
-  slackTsToIso,
 } from "@opencompany/brain";
 import { getBrainCliSource } from "@opencompany/brain/cli-bundle";
 import {
@@ -95,7 +91,6 @@ import {
   buildAttioIngestTriagePrompt,
   buildGitHubCommentIngestTriagePrompt,
   buildGmailIngestTriagePrompt,
-  buildSlackIngestTriagePrompt,
   runBrainIngestTriage,
 } from "./brain-ingest-triage";
 import {
@@ -154,7 +149,6 @@ const ENRICHMENT_RESULT_SUMMARY_LIMIT = 800;
 // "evidence/" root. Mirrors the deterministic connector evidence folders
 // (evidence/document for Jamie, evidence/email for Gmail).
 export const CHAT_CAPTURE_EVIDENCE_FOLDER = "evidence/chat";
-export const SLACK_EVIDENCE_FOLDER = "evidence/slack";
 const AGENT_CLI_TIMEOUT_MS = 60_000;
 const AGENT_CLI_STDOUT_LIMIT = 24_000;
 const AGENT_CLI_STDERR_LIMIT = 4_000;
@@ -162,8 +156,6 @@ const PROMPT_TRANSCRIPT_BYTES = 100_000;
 const PROMPT_SUMMARY_BYTES = 60_000;
 const PROMPT_CAPTURE_BYTES = 64_000;
 const PROMPT_ASSET_TEXT_BYTES = 100_000;
-const PROMPT_SLACK_TRANSCRIPT_BYTES = 80_000;
-const PROMPT_SLACK_CONTEXT_BYTES = 40_000;
 const PROMPT_LINEAR_DESCRIPTION_BYTES = 24_000;
 const PROMPT_LINEAR_ACTIVITY_BYTES = 80_000;
 const PROMPT_GITHUB_ACTIVITY_BYTES = 80_000;
@@ -341,12 +333,6 @@ export const UPLOAD_ASSET_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission:
     "curates one file the user uploaded into a single brain of Markdown knowledge documents. The file already exists as a document page in the brain (its bytes live outside the markdown plane); your job is to turn that page into a durable synthesis and wire it into the graph.",
   skipRule: `The user explicitly uploaded this file, so it is almost always brain-worthy. Only if its content is literally empty or unreadable AND the file name carries no meaning, make no writes and reply with exactly ${BRAIN_AGENT_SKIP_SENTINEL}; the page then stays as an unenriched draft.`,
-});
-
-export const SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
-  mission:
-    "folds one batch of Slack conversation messages into a single brain of Markdown knowledge documents.",
-  skipRule: `Slack is high-noise: most batches are chit-chat, scheduling logistics, or banter that carries no durable knowledge. If nothing in the batch is brain-worthy, make no writes and reply with exactly ${BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, plans, facts about people/companies/projects, and substantive shared content belong in the brain.`,
 });
 
 export const LINEAR_ISSUE_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
@@ -869,102 +855,6 @@ function formatLinearIssueComments(issue: NormalizedLinearIssueContent["issue"])
     .join("\n");
 }
 
-export function buildSlackConversationAgentIngestPrompt(
-  item: NormalizedSlackConversationSourceItem,
-) {
-  const conversation = item.content.conversation;
-  const label =
-    conversation.channelType === "im"
-      ? `the DM with ${conversation.channelName}`
-      : `#${conversation.channelName}`;
-  const transcript = truncateByBytes(
-    formatSlackConversationTranscript(conversation),
-    PROMPT_SLACK_TRANSCRIPT_BYTES,
-  );
-  const contextText = formatSlackConversationContext(conversation);
-  const context = contextText ? truncateByBytes(contextText, PROMPT_SLACK_CONTEXT_BYTES) : "";
-  const truncated =
-    Buffer.byteLength(transcript, "utf8") <
-    Buffer.byteLength(formatSlackConversationTranscript(conversation), "utf8");
-  const contextTruncated =
-    contextText && Buffer.byteLength(context, "utf8") < Buffer.byteLength(contextText, "utf8");
-  return [
-    `Ingest this batch of Slack messages from ${label} into the brain. It is one conversation window: everything posted there since the last ingested batch.`,
-    "The current window is the primary ingest target. Prior channel and thread context, when present, is only interpretive context to resolve references, pronouns, decisions, and long-gap replies.",
-    "",
-    "Required outcome, all scoped to this brain:",
-    "1. Query the brain first for likely existing pages and facts before writing, so you update existing knowledge instead of duplicating it.",
-    "2. Judge the current window first: extract only durable knowledge — decisions, plans, commitments, facts about people, companies, or projects, and substantive shared content. Ignore chit-chat around it.",
-    `3. Fold each durable point into the page where it belongs (rewrite compiled truth when the state of play changes, timeline-add for dated evidence). Cite individual messages with --source-ref slack:message:${conversation.teamId}:${conversation.channelId}:<message ts>.`,
-    "4. You may cite context messages only when they materially support a durable point from the current window. Do not ingest context-only chatter by itself.",
-    `5. Snapshot with append-evidence --folder ${SLACK_EVIDENCE_FOLDER} only when a message contains substantive standalone content (a decision writeup, a spec, a pasted document, an announcement). Never snapshot the whole window; Slack chatter is not evidence.`,
-    "6. Create or update person, company, or project pages for entities central to the conversation, with backlinks per the iron law. Do not create pages for people who merely posted a message.",
-    "",
-    `Source ref: ${item.sourceRef}`,
-    `Window: ${slackTsToIso(conversation.windowStartTs)} to ${slackTsToIso(conversation.windowEndTs)}`,
-    conversation.teamDomain
-      ? `Message permalinks: https://${conversation.teamDomain}.slack.com/archives/${conversation.channelId}/p<message ts without the dot>`
-      : null,
-    truncated ? "The transcript below was truncated to fit the prompt size limit." : null,
-    contextTruncated ? "The context below was truncated to fit the prompt size limit." : null,
-    "",
-    `## Conversation\n- Channel: ${label}\n- Type: ${conversation.channelType}\n- Messages: ${conversation.messages.length}`,
-    context ? `## Prior context\n${context}` : null,
-    `## Current window transcript\n${transcript}`,
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n");
-}
-
-function formatSlackConversationTranscript(
-  conversation: NormalizedSlackConversationContent["conversation"],
-) {
-  return formatSlackMessages(conversation.messages);
-}
-
-function formatSlackConversationContext(
-  conversation: NormalizedSlackConversationContent["conversation"],
-) {
-  const blocks: string[] = [];
-  const previousMessages = conversation.context?.previousMessages ?? [];
-  if (previousMessages.length > 0) {
-    blocks.push(
-      [
-        "### Previous channel messages",
-        "Messages immediately before the current window; use only to interpret the current window.",
-        formatSlackMessages(previousMessages),
-      ].join("\n"),
-    );
-  }
-  for (const thread of conversation.context?.threads ?? []) {
-    blocks.push(
-      [
-        `### Thread context for ${thread.threadTs}`,
-        "Earlier messages in the Slack thread; use only to interpret the current window.",
-        formatSlackMessages(thread.messages),
-      ].join("\n"),
-    );
-  }
-  return blocks.join("\n\n");
-}
-
-function formatSlackMessages(messages: readonly NormalizedSlackConversationMessage[]) {
-  return messages
-    .map((message) => {
-      const time = slackTsToIso(message.ts).slice(0, 16).replace("T", " ");
-      const author = message.userName ?? message.userId;
-      const isThreadReply = Boolean(message.threadTs && message.threadTs !== message.ts);
-      const prefix = isThreadReply ? "  ↳ " : "";
-      const files =
-        message.files && message.files.length > 0
-          ? ` [files: ${message.files.map((file) => file.name).join(", ")}]`
-          : "";
-      const text = message.text.replaceAll("\n", `\n${prefix}  `);
-      return `${prefix}[${time}] ${author} (ts ${message.ts}): ${text}${files}`;
-    })
-    .join("\n");
-}
-
 export function buildJamieMeetingAgentIngestPrompt(
   item: NormalizedJamieMeetingSourceItem,
   context: {
@@ -1264,8 +1154,8 @@ async function runBrainAgentIngestSession(input: {
   // a source profile cannot omit its no-op policy and silently inherit "fail".
   noMutationOutcome: BrainAgentNoMutationOutcome;
   // Attribution for documents this session creates. Defaults to the acting
-  // user (the human whose capture/meeting/upload this is); Slack passes null
-  // because the integration owner did not author the channel's content.
+  // user (the human whose capture/meeting/upload this is); externally authored
+  // source profiles pass null because the integration owner did not author it.
   createdByWorkosId?: string | null;
   importRunId?: string | null;
   signal?: AbortSignal;
@@ -1913,7 +1803,7 @@ export function runChatCaptureAgentIngest(
   return runBrainIngestProfile(CHAT_CAPTURE_INGEST_PROFILE, input, deps);
 }
 
-// Slack, Linear, HubSpot, Attio, GitHub, and Drive share one shape: fold a
+// Linear, HubSpot, Attio, GitHub, and Drive share one shape: fold a
 // window of externally-authored activity into the brain, skipping when nothing
 // is brain-worthy (the common, correct outcome for high-noise sources). They
 // differ only in prompt and returned metadata.
@@ -1936,30 +1826,6 @@ function externalActivityProfile<TItem extends NormalizedBrainSourceItem>(config
       };
     },
   };
-}
-
-const SLACK_CONVERSATION_INGEST_PROFILE =
-  externalActivityProfile<NormalizedSlackConversationSourceItem>({
-    system: SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT,
-    buildPrompt: buildSlackConversationAgentIngestPrompt,
-    buildTriagePrompt: buildSlackIngestTriagePrompt,
-    metadata: (item) => {
-      const conversation = item.content.conversation;
-      return {
-        channelId: conversation.channelId,
-        channelType: conversation.channelType,
-        messageCount: conversation.messages.length,
-        windowStartTs: conversation.windowStartTs,
-        windowEndTs: conversation.windowEndTs,
-      };
-    },
-  });
-
-export function runSlackConversationAgentIngest(
-  input: BrainIngestProfileInput<NormalizedSlackConversationSourceItem>,
-  deps: BrainAgentIngestDeps = {},
-): Promise<Record<string, unknown>> {
-  return runBrainIngestProfile(SLACK_CONVERSATION_INGEST_PROFILE, input, deps);
 }
 
 const LINEAR_ISSUE_INGEST_PROFILE = externalActivityProfile<NormalizedLinearIssueSourceItem>({

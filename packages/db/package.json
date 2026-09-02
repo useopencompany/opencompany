@@ -184,10 +184,6 @@
       "types": "./src/linear.ts",
       "default": "./src/linear.ts"
     },
-    "./slack": {
-      "types": "./src/slack.ts",
-      "default": "./src/slack.ts"
-    },
     "./slack-bot": {
       "types": "./src/slack-bot.ts",
       "default": "./src/slack-bot.ts"

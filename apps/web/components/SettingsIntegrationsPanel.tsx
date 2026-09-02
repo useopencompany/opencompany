@@ -16,7 +16,6 @@ import {
   NeonIcon,
   OpenAIIcon,
   PostHogIcon,
-  SlackIcon,
   StripeIcon,
   XIcon,
 } from "@opencompany/ui/icons";
@@ -77,7 +76,6 @@ import {
   type LinearProviderState,
   type PersonalAccountProvider,
   type PostHogProviderState,
-  type SlackProviderState,
   type StripeProviderState,
 } from "@/lib/integration-state";
 import { hasGmailDraftScope, hasGmailSendScope } from "@/lib/integrations/gmail-scopes";
@@ -91,8 +89,10 @@ import {
 // monogram fallback where no square vector mark exists), the colored logo tile,
 // and a short connection-focused description. Keyed by provider so the card
 // components derive everything from the provider string.
+type SettingsPersonalAccountProvider = Exclude<PersonalAccountProvider, "slack">;
+
 type IntegrationMetaKey =
-  | PersonalAccountProvider
+  | SettingsPersonalAccountProvider
   | "github"
   | "jamie"
   | "posthog"
@@ -173,12 +173,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: NeonIcon,
     tileClass: "bg-[#00E599] text-[#0B0F14]",
   },
-  slack: {
-    label: "Slack",
-    description: "Let opencompany search and read your Slack conversations.",
-    Icon: SlackIcon,
-    tileClass: "bg-[#4A154B] text-white",
-  },
   hubspot: {
     label: "HubSpot",
     description: "Sync CRM activity on contacts, companies, and deals.",
@@ -247,7 +241,6 @@ export function SettingsIntegrationsPanel({
   isWorkspaceAdmin,
   imessageEnabled = false,
   browserProfilesEnabled = false,
-  slackPluginInstalled = false,
   scopeKey = "active",
 }: {
   initialIntegrations: IntegrationState;
@@ -256,7 +249,6 @@ export function SettingsIntegrationsPanel({
   // Preferences; pairing state alone must not surface it.
   imessageEnabled?: boolean;
   browserProfilesEnabled?: boolean;
-  slackPluginInstalled?: boolean;
   scopeKey?: string;
 }) {
   const hydrated = useHydrated();
@@ -269,7 +261,6 @@ export function SettingsIntegrationsPanel({
           isWorkspaceAdmin={isWorkspaceAdmin}
           imessageEnabled={imessageEnabled}
           browserProfilesEnabled={browserProfilesEnabled}
-          slackPluginInstalled={slackPluginInstalled}
         />
       ) : (
         <LiveSettingsIntegrations
@@ -277,7 +268,6 @@ export function SettingsIntegrationsPanel({
           isWorkspaceAdmin={isWorkspaceAdmin}
           imessageEnabled={imessageEnabled}
           browserProfilesEnabled={browserProfilesEnabled}
-          slackPluginInstalled={slackPluginInstalled}
           scopeKey={scopeKey}
         />
       )}
@@ -321,14 +311,12 @@ function LiveSettingsIntegrations({
   isWorkspaceAdmin,
   imessageEnabled,
   browserProfilesEnabled,
-  slackPluginInstalled,
   scopeKey,
 }: {
   initialIntegrations: IntegrationState;
   isWorkspaceAdmin: boolean;
   imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
-  slackPluginInstalled: boolean;
   scopeKey: string;
 }) {
   const integrationAccountsCollection = useMemo(
@@ -363,7 +351,6 @@ function LiveSettingsIntegrations({
       isWorkspaceAdmin={isWorkspaceAdmin}
       imessageEnabled={imessageEnabled}
       browserProfilesEnabled={browserProfilesEnabled}
-      slackPluginInstalled={slackPluginInstalled}
     />
   );
 }
@@ -379,25 +366,24 @@ const INFISICAL_REGIONS = [
 // Group-card providers surfaced under each scope. These are all user-owned in the
 // data model (each member connects their own account), but the CRM / meeting /
 // issue-tracking tools read as shared workspace tooling, so we present them under
-// the Workspace scope; Gmail / Calendar / Drive / Slack stay personal.
+// the Workspace scope; Gmail / Calendar / Drive stay personal.
 const WORKSPACE_ACCOUNT_PROVIDERS = [
   "hubspot",
   "attio",
   "granola",
   "fathom",
-] as const satisfies readonly PersonalAccountProvider[];
+] as const satisfies readonly SettingsPersonalAccountProvider[];
 
 const PERSONAL_ACCOUNT_PROVIDERS = [
   "gmail",
   "google_calendar",
   "google_drive",
-  "slack",
   "latitude",
-] as const satisfies readonly PersonalAccountProvider[];
+] as const satisfies readonly SettingsPersonalAccountProvider[];
 
 function countConnectedAccounts(
   integrations: IntegrationState,
-  providers: readonly PersonalAccountProvider[],
+  providers: readonly SettingsPersonalAccountProvider[],
 ) {
   let count = 0;
   for (const provider of providers) {
@@ -417,16 +403,9 @@ function countWorkspaceConnected(integrations: IntegrationState) {
   );
 }
 
-function countPersonalConnected(
-  integrations: IntegrationState,
-  includeImessage: boolean,
-  slackPluginInstalled: boolean,
-) {
+function countPersonalConnected(integrations: IntegrationState, includeImessage: boolean) {
   return (
     countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS) +
-    (slackPluginInstalled
-      ? -integrations.personalAccounts.slack.filter((account) => account.connected).length
-      : 0) +
     (integrations.codex.connected ? 1 : 0) +
     (integrations.claude_code.connected ? 1 : 0) +
     (includeImessage && integrations.imessage.connected ? 1 : 0)
@@ -438,13 +417,11 @@ function IntegrationCards({
   isWorkspaceAdmin,
   imessageEnabled,
   browserProfilesEnabled,
-  slackPluginInstalled,
 }: {
   integrations: IntegrationState;
   isWorkspaceAdmin: boolean;
   imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
-  slackPluginInstalled: boolean;
 }) {
   const [scope, setScope] = useState<IntegrationScope>("workspace");
 
@@ -454,7 +431,7 @@ function IntegrationCards({
         scope={scope}
         onScopeChange={setScope}
         workspaceCount={countWorkspaceConnected(integrations)}
-        personalCount={countPersonalConnected(integrations, imessageEnabled, slackPluginInstalled)}
+        personalCount={countPersonalConnected(integrations, imessageEnabled)}
       />
       {scope === "workspace" ? (
         <section className="flex flex-col gap-3">
@@ -508,20 +485,6 @@ function IntegrationCards({
               provider="google_drive"
               accounts={integrations.personalAccounts.google_drive}
             />
-            {!slackPluginInstalled ? (
-              <IntegrationProviderGroupCard
-                provider="slack"
-                accounts={integrations.personalAccounts.slack}
-                capabilityIds={["read"]}
-                capabilityOverrides={{
-                  read: {
-                    label: "Read Slack",
-                    description:
-                      "Search and read channels, direct messages, threads, and people in Slack.",
-                  },
-                }}
-              />
-            ) : null}
             <IntegrationProviderGroupCard
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
@@ -893,7 +856,6 @@ function IntegrationCardRow({
     | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
-    | SlackProviderState
     | StripeProviderState;
   canConnect?: boolean;
 }) {
@@ -914,9 +876,7 @@ function IntegrationCardRow({
             ? [integration.accountName, integration.livemode === false ? "Test mode" : null]
                 .filter(Boolean)
                 .join(" · ") || null
-            : integration.provider === "slack"
-              ? [integration.teamName, integration.accountName].filter(Boolean).join(" · ") || null
-              : (integration.accountEmail ?? integration.accountName);
+            : (integration.accountEmail ?? integration.accountName);
   const capabilityBody =
     connected &&
     (integration.provider === "linear" || integration.provider === "posthog") &&
@@ -986,7 +946,7 @@ function IntegrationProviderGroupCard({
   capabilityIds,
   capabilityOverrides,
 }: {
-  provider: PersonalAccountProvider;
+  provider: SettingsPersonalAccountProvider;
   accounts: IntegrationAccountView[];
   capabilityIds?: readonly CapabilityId[];
   capabilityOverrides?: Partial<
@@ -1814,7 +1774,6 @@ function integrationStatus(
     | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
-    | SlackProviderState
     | StripeProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
@@ -1834,7 +1793,6 @@ function integrationNeedsReconnect(
     | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
-    | SlackProviderState
     | StripeProviderState,
 ) {
   return integration.status === "needs_reauth" || integration.status === "sync_failed";
@@ -1847,14 +1805,13 @@ function integrationStatusReason(
     | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
-    | SlackProviderState
     | StripeProviderState,
 ) {
   return "statusReason" in integration ? integration.statusReason : null;
 }
 
 function integrationConnectHref(
-  provider: Exclude<IntegrationMetaKey, "codex" | "claude_code" | "infisical">,
+  provider: Exclude<IntegrationMetaKey, "codex" | "claude_code" | "infisical"> | "slack",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -1873,7 +1830,7 @@ function integrationConnectHref(
   if (provider === "fathom") return "/settings/fathom";
   if (provider === "attio") return "/settings/attio";
   if (provider === "stripe") return "/settings/stripe";
-  if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
+  if (provider === "slack") return "/settings/plugins/slack";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
   if (provider === "latitude")

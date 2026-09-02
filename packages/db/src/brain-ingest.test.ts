@@ -188,14 +188,14 @@ describe("upsertBrainSourceItemAndEnqueue", () => {
 
     await upsertBrainSourceItemAndEnqueue({
       userWorkosId: "user_123",
-      sourceConnectionId: "slack_connection_123",
+      sourceConnectionId: "linear_connection_123",
       integrationId: "integration_123",
       item: {
-        sourceProvider: "slack",
-        sourceType: "conversation",
+        sourceProvider: "linear",
+        sourceType: "issue",
         externalId: "window_123",
-        sourceRef: "slack:window_123",
-        title: "Slack window",
+        sourceRef: "linear:window_123",
+        title: "Linear window",
         occurredAt: "2026-07-15T10:00:00.000Z",
         capturedAt: "2026-07-15T10:01:00.000Z",
         contentHash: "hash_claimed_window",

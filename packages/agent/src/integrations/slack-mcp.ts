@@ -2,6 +2,7 @@ import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/d
 import type { RemoteMcpConnectionState } from "../actions/remote-mcp";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
 import { loadSlackIntegration } from "./slack";
+import { slackMcpScopesSatisfied } from "./slack-scopes";
 
 export const SLACK_MCP_ENDPOINT_URL = "https://mcp.slack.com/mcp";
 
@@ -19,7 +20,7 @@ export async function getSlackMcpIntegrationState(
     };
   }
   return {
-    connected: row.status === "connected",
+    connected: row.status === "connected" && slackMcpScopesSatisfied(row.scopes ?? []),
     integrationId: row.id,
     capabilityModes: row.capabilityModes,
     toolModes: row.toolModes,
@@ -32,7 +33,9 @@ export async function loadSlackMcpWorkerConnection(input: {
 }) {
   const row = await loadSlackIntegration({ userWorkosId: input.userWorkosId });
   if (!row || row.status === "disconnected") return { ok: false, reason: "not_connected" } as const;
-  if (row.status !== "connected") return { ok: false, reason: "needs_reauth" } as const;
+  if (row.status !== "connected" || !slackMcpScopesSatisfied(row.scopes ?? [])) {
+    return { ok: false, reason: "needs_reauth" } as const;
+  }
 
   const credential = await loadIntegrationCredential({
     userWorkosId: row.userWorkosId,

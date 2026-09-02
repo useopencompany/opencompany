@@ -3,7 +3,7 @@ import { createProductChatSystemPrompt } from "./main-chat";
 
 const CONNECTED_INTEGRATIONS = [
   {
-    id: "slack",
+    id: "plugin:slack:slack",
     label: 'Slack workspace "Acme"',
     description: "Read conversations, messages, threads, and workspace members.",
   },
@@ -108,7 +108,7 @@ describe("createProductChatSystemPrompt integrations", () => {
     });
     expect(prompt).toContain("<action_sources>");
     expect(prompt).toContain(
-      '- slack [connected integration] — Slack workspace "Acme": Read conversations, messages, threads, and workspace members.',
+      '- plugin:slack:slack [connected integration] — Slack workspace "Acme": Read conversations, messages, threads, and workspace members.',
     );
     expect(prompt).toContain(
       "- gmail [connected integration] — Gmail (louis@example.com): Search and read messages and threads.",

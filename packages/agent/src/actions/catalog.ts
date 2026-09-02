@@ -10,7 +10,6 @@ import { resolveNeonActions } from "./neon";
 import { resolvePostHogActions } from "./posthog";
 import { type RemoteMcpGatewayRegistration, resolveRemoteMcpActions } from "./remote-mcp";
 import { resolveRevolutActions } from "./revolut";
-import { resolveSlackActions } from "./slack";
 import { resolveStripeActions } from "./stripe";
 import type {
   ActionProviderCatalog,
@@ -79,11 +78,7 @@ export async function resolveActionCatalog(
   const neonPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:neon:"),
   );
-  const slackPluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:slack:"),
-  );
   const resolved = await Promise.all([
-    slackPluginInstalled ? null : resolveSlackActions(input.userWorkosId).catch(() => null),
     resolveGmailActions(input.userWorkosId).catch(() => null),
     resolveGoogleCalendarActions(input.userWorkosId).catch(() => null),
     resolveGoogleDriveActions(input.userWorkosId).catch(() => null),

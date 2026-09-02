@@ -4,7 +4,6 @@ import {
   type NormalizedAttioObjectSourceItem,
   type NormalizedGitHubActivitySourceItem,
   type NormalizedGmailThreadSourceItem,
-  type NormalizedSlackConversationSourceItem,
 } from "@opencompany/brain";
 import {
   BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH,
@@ -218,20 +217,6 @@ export function buildGmailIngestTriagePrompt(
     },
     instructions,
   );
-}
-
-export function buildSlackIngestTriagePrompt(item: NormalizedSlackConversationSourceItem) {
-  const conversation = item.content.conversation;
-  return buildTriagePrompt("Slack conversation window", {
-    channel: conversation.channelName,
-    channelType: conversation.channelType,
-    messages: conversation.messages.map((message) => ({
-      sentAt: message.ts,
-      author: message.userName ?? message.userId,
-      text: message.text,
-      files: message.files?.map((file) => file.name) ?? [],
-    })),
-  });
 }
 
 export function buildAttioIngestTriagePrompt(item: NormalizedAttioObjectSourceItem) {

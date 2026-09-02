@@ -1,4 +1,4 @@
-import { normalizeSlackConversationWindow } from "@opencompany/brain";
+import { normalizeGmailThreadWindow } from "@opencompany/brain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const aiMock = vi.hoisted(() => ({
@@ -26,7 +26,6 @@ import {
   buildGmailSourceContextHeader,
   buildLinearSourceContextHeader,
   buildMeetingSourceContextHeader,
-  buildSlackSourceContextHeader,
   buildWikiIngestUserMessage,
   buildWikiSourceContextHeader,
   runWikiAgentIngest,
@@ -324,15 +323,7 @@ describe("opencompany wiki librarian agent", () => {
     expect(granolaHeader).toContain("not a standalone transcript archive");
   });
 
-  it("builds Slack and Gmail guidance with job-scoped source references", () => {
-    const slackHeader = buildSlackSourceContextHeader({
-      sourceProvider: "slack",
-      sourceType: "conversation",
-      sourceRef: "slack:T123:C123:100.000:200.000",
-      title: "#product",
-      occurredAt,
-      sourceConfig: {},
-    });
+  it("builds Gmail guidance with job-scoped source references", () => {
     const gmailHeader = buildGmailSourceContextHeader({
       sourceProvider: "gmail",
       sourceType: "thread",
@@ -344,9 +335,6 @@ describe("opencompany wiki librarian agent", () => {
       },
     });
 
-    expect(slackHeader).toContain("decisions, commitments, durable facts");
-    expect(slackHeader).toContain("transient chatter");
-    expect(slackHeader).toContain("[[source:slack:T123:C123:100.000:200.000]]");
     expect(gmailHeader).toContain("sender and thread context");
     expect(gmailHeader).toContain("facts about external contacts");
     expect(gmailHeader).toContain("Trusted source guidance: Only capture customer commitments.");
@@ -383,10 +371,10 @@ describe("opencompany wiki librarian agent", () => {
     expect(githubHeader).toContain("finish with SKIP");
   });
 
-  it("short-circuits a Slack job when cheap triage returns skip", async () => {
+  it("short-circuits a Gmail job when cheap triage returns skip", async () => {
     const runTriage = vi.fn(async () => triageResult("skip"));
 
-    await expect(runWikiAgentIngest(slackInput(vi.fn()), { runTriage })).resolves.toMatchObject({
+    await expect(runWikiAgentIngest(gmailInput(vi.fn()), { runTriage })).resolves.toMatchObject({
       model: WIKI_AGENT_INGEST_MODEL,
       skipped: true,
       skipMode: "triage",
@@ -417,10 +405,10 @@ describe("opencompany wiki librarian agent", () => {
     expect(aiMock.generateText).not.toHaveBeenCalled();
   });
 
-  it("passes triage entity hints into the full Slack librarian message", async () => {
+  it("passes triage entity hints into the full Gmail librarian message", async () => {
     generate({ text: "SKIP: already captured" });
 
-    await runWikiAgentIngest(slackInput(vi.fn()), {
+    await runWikiAgentIngest(gmailInput(vi.fn()), {
       runTriage: vi.fn(async () => triageResult("ingest", { entityHints: ["Acme", "Onboarding"] })),
     });
 
@@ -433,7 +421,7 @@ describe("opencompany wiki librarian agent", () => {
     generate({ text: "SKIP: nothing durable" });
 
     await expect(
-      runWikiAgentIngest(slackInput(vi.fn()), {
+      runWikiAgentIngest(gmailInput(vi.fn()), {
         runTriage: vi.fn(async () => {
           throw new Error("triage provider unavailable");
         }),
@@ -473,29 +461,28 @@ describe("opencompany wiki librarian agent", () => {
   });
 });
 
-function slackInput(
+function gmailInput(
   executeCommand: NonNullable<Parameters<typeof runWikiAgentIngest>[0]["executeCommand"]>,
 ) {
-  const item = normalizeSlackConversationWindow({
-    windowId: "gslkwin_123",
-    teamId: "T123",
-    channelId: "C123",
-    channelName: "product",
-    channelType: "channel",
+  const item = normalizeGmailThreadWindow({
+    windowId: "ggmwin_123",
+    threadId: "thread_123",
+    subject: "Acme onboarding",
     messages: [
       {
-        ts: "1724493600.000100",
-        userId: "U123",
-        userName: "Ada",
-        text: "Acme approved the onboarding plan.",
+        messageId: "message_123",
+        direction: "received",
+        from: "ada@acme.example",
+        sentAt: occurredAt.toISOString(),
+        bodyText: "Acme approved the onboarding plan.",
       },
     ],
     flushedAt: occurredAt.toISOString(),
   });
   return {
     ...input(executeCommand),
-    sourceProvider: "slack" as const,
-    sourceType: "conversation" as const,
+    sourceProvider: "gmail" as const,
+    sourceType: "thread" as const,
     sourceRef: item.sourceRef,
     title: item.title,
     contentHash: item.contentHash,
