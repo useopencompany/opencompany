@@ -31,6 +31,7 @@ const protectedCompatibilityTokens = [
     "physical and stored quoted goat_* identifiers",
     /["'`]goat_[a-z0-9_]*["'`]/gu,
     "[\"'`]goat_[a-z0-9_]*[\"'`]",
+    -2,
   ],
   [
     "quoted sandbox runtime roots",
