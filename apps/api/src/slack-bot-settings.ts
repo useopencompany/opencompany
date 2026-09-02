@@ -8,8 +8,11 @@ import type { Actor } from "@opencompany/core";
 import { upsertBrainSource } from "@opencompany/db/brain-sources";
 import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
 import { brainSources } from "@opencompany/db/product-schema";
-import { parseSlackBrainSourceConfig, type SlackConversationRef } from "@opencompany/db/slack";
-import { getSlackBotIntegrationForWorkspace } from "@opencompany/db/slack-bot";
+import {
+  getSlackBotIntegrationForWorkspace,
+  parseSlackBotSourceConfig,
+  type SlackConversationRef,
+} from "@opencompany/db/slack-bot";
 import { getBrainAccess } from "@opencompany/db/workspaces";
 import { and, count, eq } from "drizzle-orm";
 import { ApiError } from "./errors";
@@ -168,7 +171,7 @@ export function createSlackBotSettingsService(input: {
           )
           .limit(1);
         if (row) {
-          const config = parseSlackBrainSourceConfig(row.config);
+          const config = parseSlackBotSourceConfig(row.config);
           source = { enabled: row.enabled, channels: config.channels ?? [] };
         }
       }

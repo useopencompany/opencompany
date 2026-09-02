@@ -38,7 +38,6 @@ import { startSandboxReconciler } from "./sandbox-reconciler";
 import { startTaskScheduleWorker } from "./scheduler";
 import { createServer } from "./server";
 import { activeSlackBotEventCount, drainSlackBotEvents } from "./slack-bot-events";
-import { startSlackFlushWorker } from "./slack-flush-worker";
 import { startStuckWorkMonitor } from "./stuck-work-monitor";
 import { setWikiIngestWakeup, startWikiIngestWorker } from "./wiki-ingest-worker";
 import { startWorkflowEventWorker } from "./workflow-event-worker";
@@ -96,7 +95,6 @@ const codexChatWorker = env.taskWorkerEnabled
 const brainIngestWorker = env.taskWorkerEnabled ? startBrainIngestWorker(env) : null;
 const wikiIngestWorker = env.taskWorkerEnabled ? startWikiIngestWorker(env) : null;
 const brainImportWorker = env.taskWorkerEnabled ? startBrainImportWorker(env) : null;
-const slackFlushWorker = env.taskWorkerEnabled ? startSlackFlushWorker() : null;
 const linearFlushWorker = env.taskWorkerEnabled ? startLinearFlushWorker() : null;
 const gitHubFlushWorker = env.taskWorkerEnabled ? startGitHubFlushWorker() : null;
 const hubspotFlushWorker = env.taskWorkerEnabled ? startHubspotFlushWorker(env) : null;
@@ -212,7 +210,6 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
     runnerDrainTask("brain_ingest", brainIngestWorker),
     runnerDrainTask("wiki_ingest", wikiIngestWorker),
     runnerDrainTask("brain_import", brainImportWorker),
-    runnerDrainTask("slack_flush", slackFlushWorker),
     {
       name: "slack_bot_events",
       activeCount: activeSlackBotEventCount,

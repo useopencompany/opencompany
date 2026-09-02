@@ -11,7 +11,7 @@ import { serverApiClient } from "@/lib/server-api-client";
 import type { WorkspaceActionResult } from "@/lib/workspace-actions";
 
 export type BrainSourceView = ServiceBrainSourcesDetails["sources"][number];
-export type OwnSourceAccount = ServiceBrainSourcesDetails["ownAccounts"]["slack"][number];
+export type OwnSourceAccount = ServiceBrainSourcesDetails["ownAccounts"]["linear"][number];
 export type BrainSourcesDetails = ServiceBrainSourcesDetails;
 
 type ConfigureBody<TProvider extends BrainSourceCommand["provider"]> = Extract<
@@ -51,20 +51,6 @@ export async function setBrainSourceEnabledAction(input: {
     operation: "set_enabled",
     provider: input.provider,
     enabled: input.enabled,
-  });
-}
-
-export async function setBrainSlackSourceAction(
-  input: Omit<ConfigureBody<"slack">, "operation" | "provider"> & {
-    brainRef: string;
-    integrationId: string;
-  },
-): Promise<WorkspaceActionResult> {
-  const { brainRef, integrationId, ...configuration } = input;
-  return setSource(brainRef, integrationId, {
-    operation: "configure",
-    provider: "slack",
-    ...configuration,
   });
 }
 
@@ -150,26 +136,6 @@ export async function setBrainGoogleDriveSourceAction(
     provider: "google_drive",
     ...configuration,
   });
-}
-
-export type SlackConversationListResult =
-  | (Omit<Extract<BrainSourceOptions, { provider: "slack" }>, "provider"> & { ok: true })
-  | { ok: false; error: string };
-
-export async function listSlackConversationsAction(
-  integrationId: string,
-): Promise<SlackConversationListResult> {
-  const result = await listSourceOptions(integrationId, { provider: "slack" });
-  if (!result.ok) return result;
-  if (result.data.provider !== "slack") {
-    return { ok: false, error: "Slack returned an invalid source-option response." };
-  }
-  return {
-    ok: true,
-    channels: result.data.channels,
-    dms: result.data.dms,
-    partial: result.data.partial,
-  };
 }
 
 export type LinearTeamListResult =

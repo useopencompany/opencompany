@@ -37,7 +37,6 @@ import {
 } from "@opencompany/db/credits";
 import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import { workspaces } from "@opencompany/db/product-schema";
-import { slackSelectedConversationIds } from "@opencompany/db/slack";
 import {
   getSlackBotThreadParticipation,
   listEnabledSlackBotBrainRoutes,
@@ -45,6 +44,7 @@ import {
   pruneSlackBotThreadParticipation,
   recordSlackBotThreadParticipation,
   type SlackBotIntegrationForTeam,
+  slackBotSelectedChannelIds,
 } from "@opencompany/db/slack-bot";
 import { DEFAULT_BRAIN_SLUG, listAccessibleBrains } from "@opencompany/db/workspaces";
 import { recordModelCost } from "@opencompany/telemetry";
@@ -366,9 +366,7 @@ async function resolveBrainTargets(
   }
 
   const routes = await listEnabledSlackBotBrainRoutes(integration.id);
-  const routed = routes.filter((route) =>
-    slackSelectedConversationIds(route.config).has(channelId),
-  );
+  const routed = routes.filter((route) => slackBotSelectedChannelIds(route.config).has(channelId));
   if (routed.length === 0) return { kind: "none" };
 
   // A mapped member only reads brains they can access in the app. If none of

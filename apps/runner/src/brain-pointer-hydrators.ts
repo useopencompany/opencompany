@@ -4,41 +4,26 @@ import {
   type NormalizedBrainSourceItem,
   type NormalizedGmailThreadMessage,
   type NormalizedLinearIssueSourceItem,
-  type NormalizedSlackConversationSourceItem,
   normalizeChatCapture,
   normalizeGmailThreadWindow,
   normalizeLinearIssueWindow,
-  normalizeSlackConversationWindow,
   parseBrainSourceRef,
 } from "@opencompany/brain";
-import type { SlackOAuthCredentialPayload } from "@opencompany/db/integrations";
 import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import {
   type BrainAgentIngestEnv,
   runChatCaptureAgentIngest,
   runGmailThreadAgentIngest,
   runLinearIssueAgentIngest,
-  runSlackConversationAgentIngest,
 } from "./brain-agent-ingest";
 import { getDb } from "./db";
 import { fetchGmailThreadSnapshot } from "./gmail-api";
 import { type GoogleApiEnv, GoogleApiRequestError, googleApiCall } from "./google-api-auth";
 import { fetchLinearIssueSnapshot } from "./linear-api";
-import {
-  fetchSlackConversationContext,
-  getSlackConversationLabel,
-  normalizeSlackApiMessages,
-  resolveSlackUserNames,
-  type SlackApiMessage,
-  slackApiRequest,
-} from "./slack-api";
 
 export type BrainPointerHydrationEnv = BrainAgentIngestEnv & GoogleApiEnv;
 
-type HydratedPointerItem =
-  | NormalizedSlackConversationSourceItem
-  | NormalizedGmailThreadSourceItem
-  | NormalizedLinearIssueSourceItem;
+type HydratedPointerItem = NormalizedGmailThreadSourceItem | NormalizedLinearIssueSourceItem;
 
 type NormalizedGmailThreadSourceItem = ReturnType<typeof normalizeGmailThreadWindow>;
 
@@ -54,7 +39,6 @@ export type BrainPointerHydrator = {
 };
 
 export const BRAIN_POINTER_HYDRATORS: readonly BrainPointerHydrator[] = [
-  { provider: "slack", hydrate: hydrateSlackPointer },
   { provider: "gmail", hydrate: hydrateGmailPointer },
   { provider: "linear", hydrate: hydrateLinearPointer },
 ];
@@ -93,7 +77,6 @@ export async function runBrainPointerHydrate(
   },
   deps: {
     hydrate?: typeof hydrateBrainPointer;
-    runSlack?: typeof runSlackConversationAgentIngest;
     runGmail?: typeof runGmailThreadAgentIngest;
     runLinear?: typeof runLinearIssueAgentIngest;
     runFallback?: typeof runChatCaptureAgentIngest;
@@ -143,13 +126,7 @@ export async function runBrainPointerHydrate(
   }
 
   let result: Record<string, unknown>;
-  if (hydrated.sourceProvider === "slack") {
-    result = await (deps.runSlack ?? runSlackConversationAgentIngest)({
-      ...input,
-      item: hydrated,
-      signal,
-    });
-  } else if (hydrated.sourceProvider === "gmail") {
+  if (hydrated.sourceProvider === "gmail") {
     result = await (deps.runGmail ?? runGmailThreadAgentIngest)({
       ...input,
       item: hydrated,
@@ -168,111 +145,6 @@ export async function runBrainPointerHydrate(
     sourceRef: input.item.sourceRef,
     hydratedContentHash: hydrated.contentHash,
   };
-}
-
-async function hydrateSlackPointer(input: Parameters<BrainPointerHydrator["hydrate"]>[0]) {
-  const parsed = parseSlackPointer(input.ref);
-  if (!parsed) return null;
-  const credential = await loadIntegrationCredential({
-    userWorkosId: input.userWorkosId,
-    integrationId: input.integrationId,
-    provider: "slack",
-    kind: "oauth_token",
-    db: getDb(),
-  });
-  const payload = credential?.payload as SlackOAuthCredentialPayload | undefined;
-  if (!payload?.access_token) throw new Error("Reconnect Slack in Settings before hydrating it.");
-  if (payload.team_id !== parsed.teamId) return null;
-
-  let rawMessages: SlackApiMessage[];
-  try {
-    rawMessages = await fetchSlackAnchorMessages({
-      token: payload.access_token,
-      channelId: parsed.channelId,
-      anchorTs: parsed.anchorTs,
-      signal: input.signal,
-    });
-  } catch (error) {
-    if (input.signal.aborted) throw input.signal.reason;
-    if (isUnreachableSlackError(error)) return null;
-    throw error;
-  }
-  if (rawMessages.length === 0) return null;
-
-  const userIds = rawMessages.flatMap((message) =>
-    typeof message.user === "string" ? [message.user] : [],
-  );
-  const userNames = await resolveSlackUserNames({
-    token: payload.access_token,
-    teamId: parsed.teamId,
-    userIds,
-  });
-  const messages = normalizeSlackApiMessages(rawMessages, {
-    excludedTs: new Set(),
-    userNames,
-  });
-  if (messages.length === 0) return null;
-
-  const [channelName, context] = await Promise.all([
-    getSlackConversationLabel({
-      token: payload.access_token,
-      teamId: parsed.teamId,
-      channelId: parsed.channelId,
-      channelType: slackChannelType(parsed.channelId),
-    }),
-    fetchSlackConversationContext({
-      token: payload.access_token,
-      teamId: parsed.teamId,
-      channelId: parsed.channelId,
-      windowStartTs: messages[0]!.ts,
-      currentMessages: messages,
-    }),
-  ]);
-  const normalized = normalizeSlackConversationWindow({
-    windowId: `pointer:${input.ref}`,
-    teamId: parsed.teamId,
-    ...(payload.team_domain ? { teamDomain: payload.team_domain } : {}),
-    channelId: parsed.channelId,
-    channelName: channelName ?? parsed.channelId,
-    channelType: slackChannelType(parsed.channelId),
-    messages,
-    ...(context ? { context } : {}),
-    flushedAt: new Date().toISOString(),
-  });
-  return { ...normalized, sourceRef: input.ref };
-}
-
-async function fetchSlackAnchorMessages(input: {
-  token: string;
-  channelId: string;
-  anchorTs: string;
-  signal: AbortSignal;
-}) {
-  try {
-    const replies = await slackApiRequest<{ messages?: SlackApiMessage[] }>({
-      method: "conversations.replies",
-      token: input.token,
-      signal: input.signal,
-      form: { channel: input.channelId, ts: input.anchorTs, limit: "100" },
-    });
-    const messages = replies.messages ?? [];
-    if (messages.some((message) => message.ts === input.anchorTs)) return messages;
-  } catch (error) {
-    if (!String(error).includes("thread_not_found")) throw error;
-  }
-
-  const history = await slackApiRequest<{ messages?: SlackApiMessage[] }>({
-    method: "conversations.history",
-    token: input.token,
-    signal: input.signal,
-    form: {
-      channel: input.channelId,
-      latest: input.anchorTs,
-      inclusive: "true",
-      limit: "1",
-    },
-  });
-  return (history.messages ?? []).filter((message) => message.ts === input.anchorTs);
 }
 
 async function hydrateGmailPointer(input: Parameters<BrainPointerHydrator["hydrate"]>[0]) {
@@ -387,22 +259,6 @@ async function hydrateLinearPointer(input: Parameters<BrainPointerHydrator["hydr
   });
 }
 
-function parseSlackPointer(ref: string) {
-  const parsed = parseBrainSourceRef(ref);
-  const [kind, teamId, channelId, anchorTs, ...extra] = parsed?.id.split(":") ?? [];
-  if (
-    parsed?.provider !== "slack" ||
-    kind !== "conversation" ||
-    !teamId ||
-    !channelId ||
-    !anchorTs ||
-    extra.length > 0
-  ) {
-    return null;
-  }
-  return { teamId, channelId, anchorTs };
-}
-
 function parseGmailPointer(ref: string) {
   const parsed = parseBrainSourceRef(ref);
   if (parsed?.provider !== "gmail" || !parsed.id.startsWith("thread:")) return null;
@@ -413,18 +269,6 @@ function parseLinearPointer(ref: string) {
   const parsed = parseBrainSourceRef(ref);
   if (parsed?.provider !== "linear" || !parsed.id.startsWith("issue:")) return null;
   return parsed.id.slice("issue:".length).trim() || null;
-}
-
-function slackChannelType(channelId: string): "channel" | "group" | "im" | "mpim" {
-  if (channelId.startsWith("D")) return "im";
-  if (channelId.startsWith("G")) return "group";
-  return "channel";
-}
-
-function isUnreachableSlackError(error: unknown) {
-  return /channel_not_found|message_not_found|not_in_channel|missing_scope|account_inactive/.test(
-    String(error),
-  );
 }
 
 function readLinearAccessToken(payload: Record<string, unknown> | undefined) {

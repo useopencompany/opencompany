@@ -25,15 +25,13 @@ describe("Slack OAuth flows", () => {
     const state = createSlackIntegrationState({
       userWorkosId: "user_1",
       returnTo: "/settings/plugins/slack",
-      purpose: "mcp",
     });
     expect(verifySlackIntegrationState(state)).toMatchObject({
       userWorkosId: "user_1",
       returnTo: "/settings/plugins/slack",
-      purpose: "mcp",
     });
 
-    const url = new URL(buildSlackAuthorizationUrl(state, "mcp"));
+    const url = new URL(buildSlackAuthorizationUrl(state));
     expect(url.origin + url.pathname).toBe("https://slack.com/oauth/v2_user/authorize");
     expect(url.searchParams.get("scope")?.split(",")).toEqual([...SLACK_MCP_USER_SCOPES]);
     expect(url.searchParams.has("user_scope")).toBe(false);
@@ -42,15 +40,13 @@ describe("Slack OAuth flows", () => {
     );
   });
 
-  it("keeps the narrower legacy user-token flow unchanged", () => {
+  it("keeps invalid return paths on the official Slack plugin page", () => {
     const state = createSlackIntegrationState({
       userWorkosId: "user_1",
-      returnTo: "/settings/integrations",
+      returnTo: "https://evil.example/steal",
     });
-    const url = new URL(buildSlackAuthorizationUrl(state));
-    expect(url.origin + url.pathname).toBe("https://slack.com/oauth/v2/authorize");
-    expect(url.searchParams.has("user_scope")).toBe(true);
-    expect(url.searchParams.has("scope")).toBe(false);
+
+    expect(verifySlackIntegrationState(state).returnTo).toBe("/settings/plugins/slack");
   });
 
   it("exchanges MCP codes at oauth.v2.user.access and reads its top-level token", async () => {
@@ -64,7 +60,7 @@ describe("Slack OAuth flows", () => {
       }),
     );
 
-    await expect(exchangeSlackCode("oauth-code", "mcp")).resolves.toEqual({
+    await expect(exchangeSlackCode("oauth-code")).resolves.toEqual({
       teamId: "T123",
       teamName: "Acme",
       authedUserId: "U123",
@@ -96,7 +92,6 @@ describe("Slack OAuth flows", () => {
       fetchSlackIdentity({
         accessToken: "xoxp-mcp-token",
         authedUserId: "U123",
-        includeTeamDetails: false,
       }),
     ).resolves.toEqual({
       userName: "Ada",

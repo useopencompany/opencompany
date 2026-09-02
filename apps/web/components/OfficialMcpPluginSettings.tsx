@@ -665,7 +665,7 @@ function AccountsSection({
                 config.connectionProvider === "slack"
                   ? account.integrationId === permissionConnection?.integrationId
                     ? "Slack tools"
-                    : "Ingestion only"
+                    : "Not active"
                   : accountLabel
               }
               reconnectHref={config.connectHref}

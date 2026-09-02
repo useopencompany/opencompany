@@ -780,7 +780,6 @@ export const BrainSourceConfigProviderSchema = z.enum([
   "gmail",
   "google_drive",
   "github",
-  "slack",
   "linear",
   "slack_bot",
   "hubspot",
@@ -852,14 +851,6 @@ const JamieSourceProviderStateSchema = z
     apiKeyConfigured: z.boolean(),
   })
   .strict();
-const SlackSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("slack"),
-    ...BrainSourceProviderBaseShape,
-    accountName: NullableLabelSchema,
-    teamName: NullableLabelSchema,
-  })
-  .strict();
 const LinearSourceProviderStateSchema = z
   .object({
     provider: z.literal("linear"),
@@ -927,7 +918,6 @@ export const BrainSourceDetailsSchema = z
     sources: z.array(BrainSourceViewSchema),
     ownAccounts: z
       .object({
-        slack: z.array(BrainSourceAccountSchema),
         linear: z.array(BrainSourceAccountSchema),
         gmail: z.array(BrainSourceAccountSchema),
         google_drive: z.array(BrainSourceAccountSchema),
@@ -944,7 +934,6 @@ export const BrainSourceDetailsSchema = z
         isDefaultBrain: z.boolean(),
       })
       .strict(),
-    slack: z.object({ integration: SlackSourceProviderStateSchema }).strict(),
     linear: z.object({ integration: LinearSourceProviderStateSchema }).strict(),
     github: z.object({ integration: GitHubSourceProviderStateSchema }).strict(),
     gmail: z.object({ integration: GmailSourceProviderStateSchema }).strict(),
@@ -1011,15 +1000,6 @@ export const SetBrainSourceBodySchema = z
         operation: z.literal("set_enabled"),
         provider: BrainSourceConfigProviderSchema,
         enabled: z.boolean(),
-      })
-      .strict(),
-    z
-      .object({
-        operation: z.literal("configure"),
-        provider: z.literal("slack"),
-        enabled: z.boolean(),
-        channels: z.array(NamedSourceRefSchema).max(500),
-        dms: z.array(NamedSourceRefSchema).max(500),
       })
       .strict(),
     z
@@ -1109,7 +1089,6 @@ export const BrainSourceDeleteEnvelopeSchema = z
   .openapi("BrainSourceDeleteEnvelope");
 
 export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
-  z.object({ provider: z.literal("slack") }).strict(),
   z.object({ provider: z.literal("linear") }).strict(),
   z.object({ provider: z.literal("github") }).strict(),
   z
@@ -1122,11 +1101,6 @@ export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
     .strict(),
 ]);
 
-const SlackChannelOptionSchema = NamedSourceRefSchema.extend({
-  isPrivate: z.boolean(),
-  isSlackConnect: z.boolean(),
-}).strict();
-const SlackDmOptionSchema = NamedSourceRefSchema.extend({ isSlackConnect: z.boolean() }).strict();
 const GoogleDriveOptionSchema = z
   .object({
     id: z.string().min(1).max(512),
@@ -1140,14 +1114,6 @@ const GoogleDriveOptionSchema = z
 
 export const BrainSourceOptionsSchema = z
   .discriminatedUnion("provider", [
-    z
-      .object({
-        provider: z.literal("slack"),
-        channels: z.array(SlackChannelOptionSchema),
-        dms: z.array(SlackDmOptionSchema),
-        partial: z.boolean(),
-      })
-      .strict(),
     z
       .object({
         provider: z.literal("linear"),
@@ -1183,7 +1149,6 @@ export const BrainImportProviderSchema = z.enum([
   "granola",
   "fathom",
   "gmail",
-  "slack",
   "linear",
 ]);
 
@@ -1323,14 +1288,7 @@ export const WikiPageReadModelSchema = WikiPageSchema.openapi("WikiPageReadModel
 export const WikiTimelineReadModelSchema =
   WikiTimelineEntrySchema.openapi("WikiTimelineReadModelV1");
 
-export const WikiSourceProviderSchema = z.enum([
-  "gmail",
-  "slack",
-  "jamie",
-  "granola",
-  "linear",
-  "github",
-]);
+export const WikiSourceProviderSchema = z.enum(["gmail", "jamie", "granola", "linear", "github"]);
 
 export const WikiSourceConfigSchema = z
   .record(z.string().min(1).max(128), z.unknown())
@@ -4236,7 +4194,7 @@ export type DeleteBrainFolderBody = z.infer<typeof DeleteBrainFolderBodySchema>;
 export type WikiPageDto = z.infer<typeof WikiPageSchema>;
 export type WikiPageReadModel = z.infer<typeof WikiPageReadModelSchema>;
 export type WikiTimelineReadModel = z.infer<typeof WikiTimelineReadModelSchema>;
-export type WikiSourceProvider = "gmail" | "slack" | "jamie" | "granola" | "linear" | "github";
+export type WikiSourceProvider = "gmail" | "jamie" | "granola" | "linear" | "github";
 export type WikiSourceDto = z.infer<typeof WikiSourceSchema>;
 export type WikiIngestActivityItemDto = {
   id: string;

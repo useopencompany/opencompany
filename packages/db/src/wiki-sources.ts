@@ -9,6 +9,7 @@ import {
   type WikiSourceProvider,
   wikiSources,
 } from "./product-schema";
+import type { ActiveWikiSourceProvider } from "./wiki-ingest";
 
 type DbLike = any;
 
@@ -58,7 +59,7 @@ export async function listEnabledWikiSourcesForIntegration(
 
 export async function upsertWikiSource(input: {
   workspaceId: string;
-  provider: WikiSourceProvider;
+  provider: ActiveWikiSourceProvider;
   integrationId: string;
   userWorkosId: string;
   createdByWorkosId: string;

@@ -23,17 +23,14 @@ import {
   listGitHubRepositoriesAction,
   listGoogleDriveResourcesAction,
   listLinearTeamsAction,
-  listSlackConversationsAction,
   type OwnSourceAccount,
   removeBrainSourceAction,
-  type SlackConversationListResult,
   setBrainAttioSourceAction,
   setBrainGitHubSourceAction,
   setBrainGmailSourceAction,
   setBrainGoogleDriveSourceAction,
   setBrainHubspotSourceAction,
   setBrainLinearSourceAction,
-  setBrainSlackSourceAction,
   setBrainSourceEnabledAction,
 } from "@/lib/brain-source-actions";
 import { BRAIN_SOURCE_PROVIDERS, type BrainSourceProviderDef } from "@/lib/brain-sources/registry";
@@ -59,25 +56,23 @@ export function resolveBrainSourceState(
   const integration =
     providerId === "jamie"
       ? details?.jamie.integration
-      : providerId === "slack"
-        ? details?.slack.integration
-        : providerId === "linear"
-          ? details?.linear.integration
-          : providerId === "github"
-            ? details?.github.integration
-            : providerId === "gmail"
-              ? details?.gmail.integration
-              : providerId === "google_drive"
-                ? details?.googleDrive.integration
-                : providerId === "hubspot"
-                  ? details?.hubspot.integration
-                  : providerId === "attio"
-                    ? details?.attio.integration
-                    : providerId === "granola"
-                      ? details?.granola.integration
-                      : providerId === "fathom"
-                        ? details?.fathom.integration
-                        : undefined;
+      : providerId === "linear"
+        ? details?.linear.integration
+        : providerId === "github"
+          ? details?.github.integration
+          : providerId === "gmail"
+            ? details?.gmail.integration
+            : providerId === "google_drive"
+              ? details?.googleDrive.integration
+              : providerId === "hubspot"
+                ? details?.hubspot.integration
+                : providerId === "attio"
+                  ? details?.attio.integration
+                  : providerId === "granola"
+                    ? details?.granola.integration
+                    : providerId === "fathom"
+                      ? details?.fathom.integration
+                      : undefined;
   const jamieReady =
     providerId === "jamie" ? Boolean(details?.jamie.integration.apiKeyConfigured) : false;
   const connected = providerId === "jamie" ? jamieReady : Boolean(integration?.connected);
@@ -101,7 +96,7 @@ export function resolveBrainSourceState(
 
 // Whether a source has enough ingestion scope selected to actually feed the
 // brain. Toggling a source "on" is not enough for the scope-required providers
-// (Slack/Linear/GitHub/Drive/HubSpot/Attio) — until a channel/team/repo/object
+// (Linear/GitHub/Drive/HubSpot/Attio) — until a team/repo/object
 // is picked, nothing flows. Used to distinguish "authorized" from "feeding" so
 // onboarding never leaves a source silently ingesting nothing.
 export function brainSourceHasScope(
@@ -109,10 +104,6 @@ export function brainSourceHasScope(
   config: Record<string, unknown> | undefined,
 ): boolean {
   switch (providerId) {
-    case "slack": {
-      const selection = slackSelectionFromConfig(config);
-      return selection.channels.length + selection.dms.length > 0;
-    }
     case "linear":
       return linearTeamsFromConfig(config).length > 0;
     case "github":
@@ -253,7 +244,6 @@ export function SourceProviderCard({
     );
   }
 
-  const slack = provider.id === "slack" ? details?.slack : undefined;
   const linear = provider.id === "linear" ? details?.linear : undefined;
   const github = provider.id === "github" ? details?.github : undefined;
   const gmail = provider.id === "gmail" ? details?.gmail : undefined;
@@ -400,17 +390,6 @@ export function SourceProviderCard({
           Delivering here as your default brain. Toggling any brain makes routing explicit.
         </p>
       ) : null}
-      {provider.id === "slack" &&
-      slack?.integration.integrationId &&
-      (connected || source) &&
-      (source ? source.canConfigure : true) ? (
-        <SlackChannelPicker
-          brainRef={brainRef}
-          integrationId={source?.integrationId ?? slack.integration.integrationId}
-          source={source}
-          onChanged={onChanged}
-        />
-      ) : null}
       {provider.id === "linear" &&
       linear?.integration.integrationId &&
       (connected || source) &&
@@ -493,7 +472,6 @@ export function SourceProviderCard({
 }
 
 type PersonalBrainSourceProvider =
-  | "slack"
   | "linear"
   | "gmail"
   | "google_drive"
@@ -506,7 +484,6 @@ function isPersonalSourceProvider(
   providerId: BrainSourceProviderDef["id"],
 ): providerId is PersonalBrainSourceProvider {
   return (
-    providerId === "slack" ||
     providerId === "linear" ||
     providerId === "gmail" ||
     providerId === "google_drive" ||
@@ -522,8 +499,6 @@ function isPersonalSourceProvider(
 const ADD_SOURCE_CONSENT_COPY: Record<PersonalBrainSourceProvider, string> = {
   gmail:
     "Emails matching your filters — including what other people write to you — will be summarized into this brain. Everyone with access to this brain, now and in the future, can see what's captured.",
-  slack:
-    "Messages from the Slack conversations you select — including Slack Connect conversations and what other people write — will be summarized into this brain and visible to everyone with access to it.",
   google_drive:
     "Changes to the files and folders you select will be summarized into this brain and visible to everyone with access to it.",
   linear:
@@ -542,12 +517,6 @@ const ADD_SOURCE_CONSENT_FOOTER =
   "Only you can change what's ingested. You or a workspace admin can pause or remove this source at any time.";
 
 function sourceAccountLabel(source: BrainSourceView): string | null {
-  if (source.provider === "slack") {
-    return (
-      [source.connectionLabel, source.accountName].filter(Boolean).join(" · ") ||
-      source.accountEmail
-    );
-  }
   if (source.provider === "linear") return source.connectionLabel ?? source.accountName;
   if (source.provider === "hubspot") return source.connectionLabel ?? source.accountEmail;
   if (source.provider === "attio") return source.connectionLabel ?? source.accountName;
@@ -555,13 +524,6 @@ function sourceAccountLabel(source: BrainSourceView): string | null {
 }
 
 function ownAccountLabel(account: OwnSourceAccount, provider: string): string {
-  if (provider === "slack") {
-    return (
-      [account.connectionLabel, account.accountName].filter(Boolean).join(" · ") ||
-      account.accountEmail ||
-      account.integrationId
-    );
-  }
   if (provider === "linear") {
     return account.connectionLabel || account.accountName || account.integrationId;
   }
@@ -713,14 +675,6 @@ function SourceRow({
           </div>
         </div>
       ) : null}
-      {source.canConfigure && provider.id === "slack" ? (
-        <SlackChannelPicker
-          brainRef={brainRef}
-          integrationId={source.integrationId}
-          source={source}
-          onChanged={onChanged}
-        />
-      ) : null}
       {source.canConfigure && provider.id === "linear" ? (
         <LinearTeamPicker
           brainRef={brainRef}
@@ -853,379 +807,6 @@ function AddOwnAccountSection({
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-type SlackConfigSelection = {
-  channels: { id: string; name: string }[];
-  dms: { id: string; name: string }[];
-};
-
-type SlackPickerOption = {
-  id: string;
-  name: string;
-  kind: "channel" | "dm";
-  isPrivate?: boolean;
-};
-
-function slackSelectionFromConfig(
-  config: Record<string, unknown> | undefined,
-): SlackConfigSelection {
-  const parse = (value: unknown) =>
-    Array.isArray(value)
-      ? value.flatMap((entry) => {
-          if (!entry || typeof entry !== "object") return [];
-          const record = entry as Record<string, unknown>;
-          if (typeof record.id !== "string" || !record.id) return [];
-          return [
-            {
-              id: record.id,
-              name: typeof record.name === "string" ? record.name : record.id,
-            },
-          ];
-        })
-      : [];
-  return { channels: parse(config?.channels), dms: parse(config?.dms) };
-}
-
-export function SlackChannelPicker({
-  brainRef,
-  integrationId,
-  source,
-  onChanged,
-  defaultExpanded,
-}: {
-  brainRef: string;
-  integrationId: string;
-  source: BrainSourceView | null;
-  onChanged: () => Promise<void>;
-  defaultExpanded?: boolean;
-}) {
-  const saved = useMemo(() => slackSelectionFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
-  const [conversations, setConversations] = useState<SlackConversationListResult | null>(null);
-  const [search, setSearch] = useState("");
-  const [selection, setSelection] = useState<Map<string, { name: string; kind: "channel" | "dm" }>>(
-    () => selectionFromSaved(saved),
-  );
-  const [dmsOpen, setDmsOpen] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [isPending, startTransition] = useTransition();
-
-  useEffect(() => {
-    if (!expanded || conversations) return;
-    let cancelled = false;
-    void listSlackConversationsAction(integrationId).then((result) => {
-      if (!cancelled) setConversations(result);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [expanded, conversations, integrationId]);
-
-  const toggleConversation = (id: string, name: string, kind: "channel" | "dm") => {
-    setDirty(true);
-    setSelection((current) => {
-      const next = new Map(current);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.set(id, { name, kind });
-      }
-      return next;
-    });
-  };
-
-  const toggleConversationGroup = (options: SlackPickerOption[]) => {
-    if (options.length === 0) return;
-    setDirty(true);
-    setSelection((current) => {
-      const next = new Map(current);
-      const allSelected = options.every((option) => current.has(option.id));
-      for (const option of options) {
-        if (allSelected) {
-          next.delete(option.id);
-        } else {
-          next.set(option.id, { name: option.name, kind: option.kind });
-        }
-      }
-      return next;
-    });
-  };
-
-  const save = () => {
-    startTransition(async () => {
-      const channels: { id: string; name: string }[] = [];
-      const dms: { id: string; name: string }[] = [];
-      for (const [id, entry] of selection) {
-        (entry.kind === "dm" ? dms : channels).push({ id, name: entry.name });
-      }
-      const result = await setBrainSlackSourceAction({
-        brainRef,
-        integrationId,
-        enabled: source ? source.enabled : true,
-        channels,
-        dms,
-      });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      setDirty(false);
-      toast.success("Slack conversations updated.");
-      await onChanged();
-    });
-  };
-
-  const selectedCount = selection.size;
-  const summary =
-    selectedCount === 0
-      ? "No conversations selected yet — nothing is ingested until you choose some."
-      : `${selectedCount} conversation${selectedCount === 1 ? "" : "s"} selected.`;
-
-  if (!expanded) {
-    return (
-      <div className="flex items-center justify-between gap-2 border-t border-ink/10 pt-2">
-        <p className="text-[11.5px] leading-4 text-ink-subtle">{summary}</p>
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          className="shrink-0 rounded-md border border-ink/15 px-2.5 py-1 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
-        >
-          Choose conversations
-        </button>
-      </div>
-    );
-  }
-
-  const query = search.trim().toLowerCase();
-  const loadedChannels = conversations?.ok ? conversations.channels : [];
-  const loadedDms = conversations?.ok ? conversations.dms : [];
-  const matchesSearch = (option: { name: string }) =>
-    !query || option.name.toLowerCase().includes(query);
-  const channelOptions: SlackPickerOption[] = loadedChannels
-    .filter((channel) => !channel.isSlackConnect && matchesSearch(channel))
-    .map((channel) => ({ ...channel, kind: "channel" }));
-  const slackConnectOptions: SlackPickerOption[] = [
-    ...loadedChannels
-      .filter((channel) => channel.isSlackConnect && matchesSearch(channel))
-      .map((channel) => ({ ...channel, kind: "channel" as const })),
-    ...loadedDms
-      .filter((dm) => dm.isSlackConnect && matchesSearch(dm))
-      .map((dm) => ({ ...dm, kind: "dm" as const })),
-  ];
-  const dmOptions: SlackPickerOption[] = loadedDms
-    .filter((dm) => !dm.isSlackConnect && matchesSearch(dm))
-    .map((dm) => ({ ...dm, kind: "dm" }));
-  const hasSlackConnectConversations =
-    loadedChannels.some((channel) => channel.isSlackConnect) ||
-    loadedDms.some((dm) => dm.isSlackConnect);
-  const bulkActionLabel = (options: SlackPickerOption[]) => {
-    const allSelected = options.length > 0 && options.every((option) => selection.has(option.id));
-    if (query) return allSelected ? "Clear matches" : "Select matches";
-    return allSelected ? "Clear" : "Select all";
-  };
-
-  return (
-    <div className="flex flex-col gap-2 border-t border-ink/10 pt-2">
-      <div className="flex items-center gap-2">
-        <div className="relative min-w-0 flex-1">
-          <Search
-            size={13}
-            strokeWidth={2}
-            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-subtle"
-          />
-          <input
-            type="search"
-            aria-label="Search Slack conversations"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search conversations"
-            className="w-full rounded-md border border-ink/10 bg-transparent py-1 pl-7 pr-2 text-[12.5px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          />
-        </div>
-        <button
-          type="button"
-          onClick={() => setExpanded(false)}
-          className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
-        >
-          Collapse
-        </button>
-      </div>
-      {conversations === null ? (
-        <div className="px-1 py-1.5 text-[12px] text-ink-subtle">Loading conversations…</div>
-      ) : !conversations.ok ? (
-        <div className="px-1 py-1.5 text-[12px] text-warning">{conversations.error}</div>
-      ) : (
-        <>
-          <div className="flex items-center justify-between px-1">
-            <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
-              Channels
-            </span>
-            {channelOptions.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => toggleConversationGroup(channelOptions)}
-                aria-label={`${bulkActionLabel(channelOptions)} channels`}
-                className="rounded px-1.5 py-0.5 text-[11.5px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
-              >
-                {bulkActionLabel(channelOptions)}
-              </button>
-            ) : null}
-          </div>
-          <div className="flex max-h-[220px] flex-col gap-px overflow-y-auto rounded-md border border-ink/10 p-1">
-            {channelOptions.length === 0 ? (
-              <div className="px-2 py-1.5 text-[12px] text-ink-subtle">No channels found.</div>
-            ) : (
-              channelOptions.map((channel) => (
-                <label
-                  key={channel.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selection.has(channel.id)}
-                    onChange={() => toggleConversation(channel.id, channel.name, channel.kind)}
-                    className="accent-ink"
-                  />
-                  <span className="min-w-0 flex-1 truncate">#{channel.name}</span>
-                  {channel.isPrivate ? (
-                    <span className="shrink-0 text-[11px] text-ink-subtle">private</span>
-                  ) : null}
-                </label>
-              ))
-            )}
-          </div>
-          {hasSlackConnectConversations ? (
-            <div className="rounded-md border border-ink/10 p-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[12.5px] font-medium text-ink">Slack Connect</span>
-                {slackConnectOptions.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => toggleConversationGroup(slackConnectOptions)}
-                    aria-label={`${bulkActionLabel(slackConnectOptions)} Slack Connect conversations`}
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[11.5px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
-                  >
-                    {bulkActionLabel(slackConnectOptions)}
-                  </button>
-                ) : null}
-              </div>
-              <p className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
-                These conversations include people outside your Slack workspace. Selected messages
-                are visible to everyone with access to this brain.
-              </p>
-              <div className="mt-1 flex max-h-[180px] flex-col gap-px overflow-y-auto">
-                {slackConnectOptions.length === 0 ? (
-                  <div className="px-1 py-1 text-[12px] text-ink-subtle">
-                    No matching Slack Connect conversations.
-                  </div>
-                ) : (
-                  slackConnectOptions.map((conversation) => (
-                    <label
-                      key={conversation.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selection.has(conversation.id)}
-                        onChange={() =>
-                          toggleConversation(conversation.id, conversation.name, conversation.kind)
-                        }
-                        className="accent-ink"
-                      />
-                      <span className="min-w-0 flex-1 truncate">
-                        {conversation.kind === "channel" ? "#" : ""}
-                        {conversation.name}
-                      </span>
-                      <span className="shrink-0 text-[11px] text-ink-subtle">
-                        {conversation.kind === "dm"
-                          ? "DM"
-                          : conversation.isPrivate
-                            ? "private channel"
-                            : "channel"}
-                      </span>
-                    </label>
-                  ))
-                )}
-              </div>
-            </div>
-          ) : null}
-          <div className="rounded-md border border-ink/10">
-            <div className="flex items-center">
-              <button
-                type="button"
-                onClick={() => setDmsOpen((open) => !open)}
-                aria-expanded={dmsOpen}
-                className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-[12.5px] font-medium text-ink transition-colors hover:bg-surface-hover"
-              >
-                {dmsOpen ? (
-                  <ChevronDown size={13} strokeWidth={2} />
-                ) : (
-                  <ChevronRight size={13} strokeWidth={2} />
-                )}
-                Direct messages
-              </button>
-              {dmsOpen && dmOptions.length > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => toggleConversationGroup(dmOptions)}
-                  aria-label={`${bulkActionLabel(dmOptions)} direct messages`}
-                  className="mr-1 shrink-0 rounded px-1.5 py-0.5 text-[11.5px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
-                >
-                  {bulkActionLabel(dmOptions)}
-                </button>
-              ) : null}
-            </div>
-            {dmsOpen ? (
-              <div className="flex flex-col gap-1 px-2 pb-2">
-                <p className="text-[11.5px] leading-4 text-ink-subtle">
-                  Messages in the DMs you select — including what other people write to you — are
-                  ingested into this brain and visible to everyone with access to it.
-                </p>
-                <div className="flex max-h-[180px] flex-col gap-px overflow-y-auto">
-                  {dmOptions.length === 0 ? (
-                    <div className="px-1 py-1 text-[12px] text-ink-subtle">No DMs found.</div>
-                  ) : (
-                    dmOptions.map((dm) => (
-                      <label
-                        key={dm.id}
-                        className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selection.has(dm.id)}
-                          onChange={() => toggleConversation(dm.id, dm.name, dm.kind)}
-                          className="accent-ink"
-                        />
-                        <span className="min-w-0 flex-1 truncate">{dm.name}</span>
-                      </label>
-                    ))
-                  )}
-                </div>
-              </div>
-            ) : null}
-          </div>
-          {conversations.partial ? (
-            <p className="text-[11.5px] leading-4 text-ink-subtle">
-              Some conversations could not be loaded from Slack — try again in a minute.
-            </p>
-          ) : null}
-        </>
-      )}
-      {dirty ? (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            disabled={isPending}
-            onClick={save}
-            className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
-          >
-            {isPending ? "Saving…" : "Save conversations"}
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -1477,14 +1058,6 @@ export function GitHubRepoPicker({
       ) : null}
     </div>
   );
-}
-
-function selectionFromSaved(saved: SlackConfigSelection) {
-  const map = new Map<string, { name: string; kind: "channel" | "dm" }>();
-  for (const channel of saved.channels)
-    map.set(channel.id, { name: channel.name, kind: "channel" });
-  for (const dm of saved.dms) map.set(dm.id, { name: dm.name, kind: "dm" });
-  return map;
 }
 
 type LinearTeamSelection = { id: string; name: string; key?: string };

@@ -44,7 +44,12 @@ describe("executeActionGateway", () => {
     const catalog: ResolvedActionCatalog = {
       providers: [
         { id: "gmail", label: "Gmail", description: "Email" },
-        { id: "slack", kind: "integration", label: "Slack", description: "Messages" },
+        {
+          id: "plugin:slack:slack",
+          kind: "integration",
+          label: "Slack",
+          description: "Messages",
+        },
         { id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" },
         { id: "posthog", kind: "integration", label: "PostHog", description: "Analytics" },
       ],
@@ -58,8 +63,8 @@ describe("executeActionGateway", () => {
         },
         {
           ...readAction,
-          id: "slack.search",
-          provider: "slack",
+          id: "plugin:slack:slack.search",
+          provider: "plugin:slack:slack",
           permissionMode: "ask",
         },
         {
@@ -89,7 +94,12 @@ describe("executeActionGateway", () => {
       ok: true,
       sources: [
         { id: "gmail", kind: "integration", label: "Gmail", description: "Email" },
-        { id: "slack", kind: "integration", label: "Slack", description: "Messages" },
+        {
+          id: "plugin:slack:slack",
+          kind: "integration",
+          label: "Slack",
+          description: "Messages",
+        },
         { id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" },
         { id: "posthog", kind: "integration", label: "PostHog", description: "Analytics" },
       ],

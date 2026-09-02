@@ -85,21 +85,21 @@ describe("captureToBrainInbox", () => {
   it("enqueues a bare integration source for pointer hydration", async () => {
     const result = await captureToBrainInbox({
       ...BASE_INPUT,
-      sourceRef: "slack:conversation:T123:C456:1234.5678",
-      integrationId: "gint_slack_1",
+      sourceRef: "gmail:thread:thread_123",
+      integrationId: "gint_gmail_1",
       fallbackText: "The team approved the launch plan.",
     });
 
     expect(result).toMatchObject({ ok: true, enqueued: true });
     expect(mocks.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceConnectionId: "gint_slack_1",
-        integrationId: "gint_slack_1",
+        sourceConnectionId: "gint_gmail_1",
+        integrationId: "gint_gmail_1",
         kind: "brain_pointer_hydrate",
         item: expect.objectContaining({
-          sourceProvider: "slack",
+          sourceProvider: "gmail",
           sourceType: "pointer",
-          sourceRef: "slack:conversation:T123:C456:1234.5678",
+          sourceRef: "gmail:thread:thread_123",
           content: expect.objectContaining({
             pointer: expect.objectContaining({
               fallbackText: "The team approved the launch plan.",
@@ -209,10 +209,11 @@ describe("captureToBrainInbox", () => {
     );
   });
 
-  it("requires content when a source provider cannot be hydrated", async () => {
+  it("requires copied content instead of hydrating a Slack pointer", async () => {
     const result = await captureToBrainInbox({
       ...BASE_INPUT,
-      sourceRef: "https://example.com/company",
+      sourceRef: "slack:conversation:T123:C456:1234.5678",
+      integrationId: "gint_slack_1",
     });
 
     expect(result).toEqual({
@@ -220,5 +221,6 @@ describe("captureToBrainInbox", () => {
       error: "This source needs fallback content because its provider cannot be hydrated.",
     });
     expect(mocks.upsertFile).not.toHaveBeenCalled();
+    expect(mocks.enqueue).not.toHaveBeenCalled();
   });
 });

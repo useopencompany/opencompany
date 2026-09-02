@@ -5,7 +5,6 @@ import {
   GranolaIcon,
   LinearIcon,
   type LucideIcon,
-  SlackIcon,
 } from "@opencompany/ui/icons";
 
 export type WikiSourceProviderDef = {
@@ -29,16 +28,6 @@ export const WIKI_SOURCE_PROVIDERS: WikiSourceProviderDef[] = [
     tileClass: "bg-[#EA4335] text-white",
     connectionKind: "oauth",
     connectHref: "/api/integrations/gmail/start?returnTo=/wiki/sources",
-    scopeRequired: true,
-  },
-  {
-    id: "slack",
-    name: "Slack",
-    description: "Capture useful decisions and context from Slack conversations.",
-    Icon: SlackIcon,
-    tileClass: "bg-[#4A154B] text-white",
-    connectionKind: "oauth",
-    connectHref: "/api/integrations/slack/start?returnTo=/wiki/sources",
     scopeRequired: true,
   },
   {

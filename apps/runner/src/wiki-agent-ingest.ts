@@ -5,7 +5,8 @@ import type { NormalizedGitHubActivitySourceItem } from "@opencompany/brain";
 import type { BrainIngestTriageTrace } from "@opencompany/brain/ingest-trace";
 import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { parseGmailWikiSourceConfig } from "@opencompany/db/gmail";
-import type { WikiSourceProvider, WikiSourceType } from "@opencompany/db/product-schema";
+import type { WikiSourceType } from "@opencompany/db/product-schema";
+import type { ActiveWikiSourceProvider } from "@opencompany/db/wiki-ingest";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import { createGatewayAttribution, gatewayProviderOptions } from "@opencompany/telemetry";
@@ -28,7 +29,7 @@ import {
 import type { RunnerEnv } from "./env";
 import {
   buildWikiIngestTriagePrompt,
-  runWikiIngestTriage as runSlackGmailWikiIngestTriage,
+  runWikiIngestTriage as runSourceWikiIngestTriage,
   type WikiIngestTriageInput,
   type WikiIngestTriageTrace,
 } from "./wiki-ingest-triage";
@@ -167,7 +168,7 @@ export type WikiAgentIngestInput = {
   attempt: number;
   workspaceId: string;
   actorUserWorkosId: string;
-  sourceProvider: WikiSourceProvider;
+  sourceProvider: ActiveWikiSourceProvider;
   sourceType: WikiSourceType;
   sourceRef: string;
   title: string | null;
@@ -200,9 +201,8 @@ export type WikiSourceContextHeaderBuilder = (input: WikiSourceContextHeaderInpu
 // Source-specific guidance belongs behind this registry so adding a provider
 // does not require editing the shared librarian prompt or message assembly.
 export const WIKI_SOURCE_CONTEXT_HEADER_BUILDERS: Partial<
-  Record<WikiSourceProvider, WikiSourceContextHeaderBuilder>
+  Record<ActiveWikiSourceProvider, WikiSourceContextHeaderBuilder>
 > = {
-  slack: buildSlackSourceContextHeader,
   gmail: buildGmailSourceContextHeader,
   jamie: buildMeetingSourceContextHeader,
   granola: buildMeetingSourceContextHeader,
@@ -223,16 +223,6 @@ export function buildMeetingSourceContextHeader(input: WikiSourceContextHeaderIn
     "Worth writing: durable knowledge from the meeting, especially decisions, project state, commitments, and people or company facts that will help workspace members later.",
     "Meeting handling: put durable knowledge on the relevant pages. The meeting itself should become at most a timeline-add on those pages, not a standalone transcript archive.",
     `Source handling: do NOT copy the full transcript into the wiki. Reference the meeting with [[source:${input.sourceRef}]] using this job's source reference.`,
-  ].join("\n");
-}
-
-export function buildSlackSourceContextHeader(input: WikiSourceContextHeaderInput): string {
-  return [
-    ...sourceMetadataHeader(input),
-    "Window contents: one Slack channel, group, or direct-message conversation window with chronological messages, participant names when available, file names, thread identities, and nearby conversation context when Slack returned it.",
-    "Worth writing: decisions, commitments, durable facts, meaningful project state, and substantive problems or fixes. Skip greetings, reactions, acknowledgements, repeated status pings, and other transient chatter.",
-    "Conversation handling: synthesize the durable knowledge onto the relevant people, company, product, or project pages; do not archive the conversation verbatim.",
-    `Source handling: reference this conversation window with [[source:${input.sourceRef}]] using this job's source reference.`,
   ].join("\n");
 }
 
@@ -394,14 +384,14 @@ async function runPreparedWikiIngestTriage(
   input: WikiAgentIngestInput,
   deps: WikiAgentIngestDependencies,
 ): Promise<WikiIngestTriageTrace | null> {
-  const slackOrGmailPrompt = buildWikiIngestTriagePrompt(input);
+  const sourcePrompt = buildWikiIngestTriagePrompt(input);
   const githubItem = githubItemForTriage(input);
-  if (!slackOrGmailPrompt && !githubItem) return null;
+  if (!sourcePrompt && !githubItem) return null;
 
   try {
-    const triageInput: WikiPreparedTriageInput = slackOrGmailPrompt
+    const triageInput: WikiPreparedTriageInput = sourcePrompt
       ? {
-          prompt: slackOrGmailPrompt,
+          prompt: sourcePrompt,
           gatewayApiKey: input.env.vercelAiGatewayApiKey,
           actorUserWorkosId: input.actorUserWorkosId,
           workspaceId: input.workspaceId,
@@ -420,8 +410,8 @@ async function runPreparedWikiIngestTriage(
         };
     const triage = deps.runTriage
       ? await deps.runTriage(triageInput)
-      : slackOrGmailPrompt
-        ? await runSlackGmailWikiIngestTriage(triageInput as WikiIngestTriageInput)
+      : sourcePrompt
+        ? await runSourceWikiIngestTriage(triageInput as WikiIngestTriageInput)
         : await runGitHubWikiIngestTriage(
             triageInput as Parameters<typeof runGitHubWikiIngestTriage>[0],
           );

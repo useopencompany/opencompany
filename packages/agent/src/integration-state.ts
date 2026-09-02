@@ -1,4 +1,5 @@
 import type { IntegrationProvider, IntegrationStatus } from "@opencompany/db/product-schema";
+import { SLACK_MCP_RECONNECT_REASON, slackMcpScopesSatisfied } from "./integrations/slack-scopes";
 
 export type GoogleProviderState = {
   provider: "gmail" | "google_calendar" | "google_drive";
@@ -417,18 +418,23 @@ function accountViewFromRow(
   provider: PersonalAccountProvider,
   row: IntegrationStateRow,
 ): IntegrationAccountView {
+  const scopes = Array.isArray(row.scopes)
+    ? row.scopes.filter((scope): scope is string => typeof scope === "string")
+    : [];
+  const needsSlackPluginGrant =
+    provider === "slack" && row.status === "connected" && !slackMcpScopesSatisfied(scopes);
   return {
     integrationId: row.id ?? "",
     provider,
-    status: row.status,
-    connected: row.status === "connected",
+    status: needsSlackPluginGrant ? "needs_reauth" : row.status,
+    connected: row.status === "connected" && !needsSlackPluginGrant,
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     connectionLabel: row.connectionLabel ?? row.connection_label ?? null,
-    statusReason: row.statusReason ?? row.status_reason ?? null,
-    scopes: Array.isArray(row.scopes)
-      ? row.scopes.filter((scope): scope is string => typeof scope === "string")
-      : [],
+    statusReason: needsSlackPluginGrant
+      ? SLACK_MCP_RECONNECT_REASON
+      : (row.statusReason ?? row.status_reason ?? null),
+    scopes,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }
@@ -539,14 +545,21 @@ function slackProviderState(row: IntegrationStateRow | undefined): SlackProvider
     };
   }
 
+  const scopes = Array.isArray(row.scopes)
+    ? row.scopes.filter((scope): scope is string => typeof scope === "string")
+    : [];
+  const needsPluginGrant = row.status === "connected" && !slackMcpScopesSatisfied(scopes);
+
   return {
     provider: "slack",
-    connected: row.status === "connected",
-    status: row.status,
+    connected: row.status === "connected" && !needsPluginGrant,
+    status: needsPluginGrant ? "needs_reauth" : row.status,
     integrationId: row.id ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     teamName: row.connectionLabel ?? row.connection_label ?? null,
-    statusReason: row.statusReason ?? row.status_reason ?? null,
+    statusReason: needsPluginGrant
+      ? SLACK_MCP_RECONNECT_REASON
+      : (row.statusReason ?? row.status_reason ?? null),
   };
 }
 
