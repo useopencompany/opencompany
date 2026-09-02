@@ -438,6 +438,7 @@ describe("Linear plugin settings", () => {
     );
 
     expect(html).toContain("octocat");
+    expect(html).toContain("GitHub as you");
     expect(html).toContain("Read GitHub");
     expect(html).toContain("Manage GitHub");
     expect(useLiveQuery).not.toHaveBeenCalled();
@@ -746,7 +747,7 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "GitHub" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "GitHub as you" })).toBeInTheDocument();
     expect(screen.getByText("octocat")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Connect GitHub account" })).toHaveAttribute(
@@ -842,7 +843,7 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Neon" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Neon" })).toBeInTheDocument();
     expect(screen.getByText("List projects")).toBeInTheDocument();
     expect(screen.getByText("Run sql")).toBeInTheDocument();
     expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();

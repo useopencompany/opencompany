@@ -321,7 +321,7 @@ function OfficialMcpPluginDetailView({
     <>
       <IntegrationSetupFeedback />
       <SettingsContent
-        title={plugin?.manifest.name || config.label}
+        title={config.label}
         description={plugin?.manifest.description || config.description}
         backLink={{ href: "/settings/plugins", label: "Plugins" }}
       >
@@ -542,6 +542,7 @@ function AccountsSection({
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
   const headingId = `${config.name}-accounts-heading`;
+  const accountLabel = config.accountLabel ?? config.label;
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
@@ -552,23 +553,23 @@ function AccountsSection({
         description={config.accountDescription}
       />
       {state.status === "loading" ? (
-        <SectionSkeleton label={`Loading ${config.label} accounts`} rows={2} compact />
+        <SectionSkeleton label={`Loading ${accountLabel} accounts`} rows={2} compact />
       ) : state.status === "error" ? (
         <SectionError title="Accounts unavailable" message={state.message} />
       ) : !permissionConnection ? (
-        <SectionEmpty icon={Users}>{`No ${config.label} accounts are connected.`}</SectionEmpty>
+        <SectionEmpty icon={Users}>{`No ${accountLabel} accounts are connected.`}</SectionEmpty>
       ) : (
         <div className="flex flex-col gap-2">
           <IntegrationAccountRow
             account={permissionConnection}
-            purposeLabel={config.label}
+            purposeLabel={accountLabel}
             showCapabilityModes={false}
           />
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
         <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
-          Connect {config.label} account
+          Connect {accountLabel} account
         </a>
         {config.ingestionHref && config.ingestionLabel ? (
           <Link
