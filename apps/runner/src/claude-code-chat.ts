@@ -41,7 +41,6 @@ import {
   createTurnAbortCheck,
   loadCodexChatAttachments,
   loadCodexChatSessionSkills,
-  loadGitHubAuthForUser,
   markCodexChatSandboxTimeoutArmed,
   materializeCodexChatAttachments,
   materializeCodingChatHistory,
@@ -67,7 +66,11 @@ import {
   scheduledWakeupFromTurnSettings,
 } from "./codex-chat-wakeup";
 import { materializeClaudeSkillSnapshotsForSession } from "./codex-managed-skills";
-import { buildGitHubCommandEnv, createKnownSecretRedactor } from "./coding-agent-shared";
+import {
+  buildGitHubCommandEnv,
+  createKnownSecretRedactor,
+  loadGitHubAuthForUser,
+} from "./coding-agent-shared";
 import {
   type CodingChatHistory,
   type CodingChatHistoryAttachmentMaterialization,

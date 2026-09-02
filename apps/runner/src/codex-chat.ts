@@ -27,7 +27,6 @@ import {
   codexChatInteractions,
   codexChatTurns,
   type HarnessSpec,
-  integrations,
   runApprovals,
   skillBundles,
 } from "@opencompany/db/product-schema";
@@ -36,7 +35,7 @@ import {
   loadImmutableSkillBundles,
 } from "@opencompany/db/skill-bundle-repository";
 import { captureException, createLogger } from "@opencompany/observability";
-import { and, asc, desc, eq, lt, lte, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import { ACP_ENGINE_ADAPTERS } from "./acp-engine-adapters";
 import {
   type AcpElicitationRequest,
@@ -68,7 +67,7 @@ import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
-  gitAuthHeader,
+  loadGitHubAuthForUser,
 } from "./coding-agent-shared";
 import {
   type CodingChatHistory,
@@ -81,7 +80,6 @@ import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
 import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
-import { getGitHubWorkInstallationToken } from "./github";
 import {
   combineSandboxPromptFragments,
   reconcileInfisicalSandboxAuth,
@@ -1572,31 +1570,6 @@ function resolveCodexTurnSkills(input: {
     bundles: [...bundlesByName.values()],
     invokedSkillIds: [...invokedSkillIds],
   };
-}
-
-// GitHub auth is injected whenever the user has a connected opencompany GitHub integration; the token
-// covers every repository of the installation (no repo scoping) so Codex can clone what the user
-// asks for in chat. Missing integration is not an error - the sandbox simply has no GitHub auth.
-export async function loadGitHubAuthForUser(userWorkosId: string) {
-  const [integration] = await getDb()
-    .select({ installationId: integrations.externalId })
-    .from(integrations)
-    .where(
-      and(
-        eq(integrations.userWorkosId, userWorkosId),
-        eq(integrations.provider, "github"),
-        eq(integrations.status, "connected"),
-      ),
-    )
-    .orderBy(desc(integrations.updatedAt))
-    .limit(1);
-  if (!integration?.installationId) return null;
-
-  const githubToken = await getGitHubWorkInstallationToken({
-    installationId: integration.installationId,
-  }).catch(() => null);
-  if (!githubToken) return null;
-  return { githubToken, githubAuthHeader: gitAuthHeader(githubToken) };
 }
 
 export async function updateCodexChatSessionIfLeaseHeld(input: {

@@ -139,6 +139,7 @@ vi.mock("./acp-harness", () => ({
 vi.mock("./coding-agent-shared", () => ({
   buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
+  loadGitHubAuthForUser: chatMocks.loadGitHubAuthForUser,
 }));
 
 vi.mock("./coding-chat-history", async (importOriginal) => {
@@ -164,7 +165,6 @@ vi.mock("./codex-chat", () => ({
   CodexChatInterruptedError: class CodexChatInterruptedError extends Error {},
   loadCodexChatAttachments: chatMocks.loadCodexChatAttachments,
   loadCodexChatSessionSkills: chatMocks.loadCodexChatSessionSkills,
-  loadGitHubAuthForUser: chatMocks.loadGitHubAuthForUser,
   markCodexChatSandboxTimeoutArmed: chatMocks.markCodexChatSandboxTimeoutArmed,
   materializeCodexChatAttachments: chatMocks.materializeCodexChatAttachments,
   materializeCodingChatHistory: chatMocks.materializeCodingChatHistory,

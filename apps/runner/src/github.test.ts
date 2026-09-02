@@ -1,6 +1,10 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getGitHubWorkInstallationToken, gitHubPermissionErrorHint } from "./github";
+import {
+  getGitHubWorkInstallationToken,
+  gitHubPermissionErrorHint,
+  listGitHubUserRepositoryNames,
+} from "./github";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -260,5 +264,59 @@ describe("GitHub installation tokens", () => {
     expect(JSON.parse(String(requestInit?.body))).toEqual({
       repositories: ["app", "web"],
     });
+  });
+});
+
+describe("GitHub personal repository listing", () => {
+  it("lists, validates, deduplicates, and sorts repositories available to a user token", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json([
+        { full_name: "opencompany/web" },
+        { full_name: "founder/private" },
+        { full_name: "opencompany/web" },
+        { full_name: "invalid repository" },
+        null,
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listGitHubUserRepositoryNames({ accessToken: "ghu_personal" })).resolves.toEqual([
+      "founder/private",
+      "opencompany/web",
+    ]);
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://api.github.com/user/repos?per_page=100&page=1&sort=full_name&direction=asc",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      headers: expect.objectContaining({ Authorization: "Bearer ghu_personal" }),
+    });
+  });
+
+  it("paginates full result pages", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      full_name: `owner/repo-${String(index).padStart(3, "0")}`,
+    }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(firstPage))
+      .mockResolvedValueOnce(Response.json([{ full_name: "owner/repo-100" }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const names = await listGitHubUserRepositoryNames({ accessToken: "ghu_personal" });
+
+    expect(names).toHaveLength(101);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("page=2");
+  });
+
+  it("fails without including the credential when GitHub rejects the listing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 })),
+    );
+
+    await expect(
+      listGitHubUserRepositoryNames({ accessToken: "ghu_must_not_leak" }),
+    ).rejects.toThrow("GitHub personal repository listing failed with 401.");
   });
 });
