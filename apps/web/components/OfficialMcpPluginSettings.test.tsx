@@ -10,6 +10,9 @@ import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
+  GitHubPluginDetail,
+  GitHubPluginDetailView,
+  githubToolsStateFromPlugin,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -19,7 +22,7 @@ import {
   type PluginToolsState,
   uncuratedPluginToolGroups,
 } from "./OfficialMcpPluginSettings";
-import { LINEAR_PLUGIN_SOURCE, NEON_PLUGIN_SOURCE } from "./PluginSettings";
+import { GITHUB_PLUGIN_SOURCE, LINEAR_PLUGIN_SOURCE, NEON_PLUGIN_SOURCE } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
@@ -52,7 +55,24 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_linear_tools",
       capabilityModes: { read: "on", write: "ask" },
     },
-    personalAccounts: { linear: [], neon: [] },
+    personalAccounts: {
+      github_user: [
+        {
+          integrationId: "gint_github_user",
+          provider: "github_user",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "octocat",
+          connectionLabel: "octocat",
+          statusReason: null,
+          scopes: [],
+          capabilityModes: { read: "on", write: "ask" },
+        },
+      ],
+      linear: [],
+      neon: [],
+    },
   },
 }));
 const useLiveQuery = vi.hoisted(() => vi.fn(() => ({ data: [], isLoading: false })));
@@ -299,6 +319,82 @@ const neonPlugin = {
   ],
 } as const satisfies PluginInstallationDto;
 
+const githubAccount = {
+  ...account("gint_github_user", "octocat", { read: "on", write: "ask" }, "github_user"),
+  accountName: "octocat",
+} satisfies IntegrationAccountView;
+const githubPlugin = {
+  ...plugin,
+  id: "plugin_github",
+  name: "github",
+  manifest: {
+    name: "github",
+    description: "Work with repositories, issues, pull requests, and Actions as yourself.",
+  },
+  source: { ...plugin.source, path: "github" },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "github",
+      type: "streamable-http",
+      connectionProvider: "github",
+      capabilities: [
+        {
+          id: "read",
+          label: "Read GitHub",
+          defaultMode: "on",
+          tools: ["search_repositories", "actions_list"],
+        },
+        {
+          id: "write",
+          label: "Manage GitHub",
+          defaultMode: "ask",
+          tools: ["merge_pull_request"],
+        },
+      ],
+      tools: [
+        {
+          name: "search_repositories",
+          description: "Search repositories accessible to the connected account.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Read GitHub",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "actions_list",
+          description: "List GitHub Actions workflows and runs.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Read GitHub",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "merge_pull_request",
+          description: "Merge a pull request.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Manage GitHub",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-02T06:30:00.000Z",
+      refreshAfter: "2026-09-02T07:30:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
 describe("Linear plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
@@ -329,6 +425,21 @@ describe("Linear plugin settings", () => {
     );
 
     expect(html).toContain("Linear tool access");
+    expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps the personal github_user connection onto the GitHub plugin surface", () => {
+    const html = renderToString(
+      <GitHubPluginDetail
+        pluginState={{ status: "ready", plugin: githubPlugin }}
+        toolsState={githubToolsStateFromPlugin(githubPlugin)}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("octocat");
+    expect(html).toContain("Read GitHub");
+    expect(html).toContain("Manage GitHub");
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
 
@@ -616,6 +727,102 @@ describe("Linear plugin settings", () => {
     expect(screen.queryByRole("heading", { name: "Accounts" })).not.toBeInTheDocument();
     expect(await screen.findByText(/No tools have been discovered yet\./u)).toBeInTheDocument();
     expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
+  });
+
+  it("renders GitHub connection, discovery, and permission controls against github_user", async () => {
+    const state = githubToolsStateFromPlugin(githubPlugin);
+    window.history.replaceState({}, "", "/settings/plugins/github");
+
+    render(
+      <GitHubPluginDetailView
+        pluginState={{ status: "ready", plugin: githubPlugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: githubAccount }],
+          permissionConnection: githubAccount,
+        }}
+        toolsState={state}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "GitHub" })).toBeInTheDocument();
+    expect(screen.getByText("octocat")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect GitHub account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
+    );
+    expect(GITHUB_PLUGIN_SOURCE).toMatch(
+      /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
+    );
+    expect(state).toMatchObject({
+      status: "ready",
+      groups: [
+        {
+          id: "read",
+          defaultMode: "on",
+          tools: [
+            { name: "Search repositories", readOnly: true },
+            { name: "Actions list", readOnly: true },
+          ],
+        },
+        {
+          id: "write",
+          defaultMode: "ask",
+          tools: [{ name: "Merge pull request", readOnly: false }],
+        },
+      ],
+    });
+
+    const writeModes = screen.getByRole("group", { name: "Manage GitHub permission" });
+    await userEvent.click(within(writeModes).getByRole("button", { name: "On" }));
+    await waitFor(() =>
+      expect(accountActions.setIntegrationCapabilityModeAction).toHaveBeenCalledWith(
+        "gint_github_user",
+        "write",
+        "on",
+      ),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    await waitFor(() =>
+      expect(accountActions.disconnectIntegrationAccountAction).toHaveBeenCalledWith(
+        "gint_github_user",
+      ),
+    );
+  });
+
+  it.each([
+    {
+      query: "integration=github_user&setup=connected",
+      toast: "success" as const,
+      message: "GitHub connected.",
+    },
+    {
+      query: "integration=github_user&setup=error&reason=installation_not_authorized",
+      toast: "error" as const,
+      message: "The selected GitHub App installation is not available to this GitHub account.",
+    },
+  ])("surfaces and clears GitHub setup status: $toast", async ({ query, toast, message }) => {
+    window.history.replaceState({}, "", `/settings/plugins/github?${query}`);
+
+    render(
+      <GitHubPluginDetailView
+        pluginState={{ status: "ready", plugin: githubPlugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: githubAccount }],
+          permissionConnection: githubAccount,
+        }}
+        toolsState={githubToolsStateFromPlugin(githubPlugin)}
+        canEdit
+      />,
+    );
+
+    await waitFor(() => expect(toasts[toast]).toHaveBeenCalledWith(message));
+    expect(window.location.pathname).toBe("/settings/plugins/github");
+    expect(window.location.search).toBe("");
   });
 
   it("presents Neon through the same package, account, discovery, and query-permission flow", async () => {

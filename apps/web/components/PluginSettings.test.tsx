@@ -8,6 +8,7 @@ import {
   previewHeadlessPluginImport,
 } from "@/lib/headless-knowledge-commands";
 import {
+  GITHUB_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   PluginDetail,
@@ -125,6 +126,16 @@ const officialPreview = {
   report: { ignoredManifestFields: [], skills: [], mcp: { status: "absent" } },
 } as const satisfies PluginImportPreviewDto;
 
+const githubPreview = {
+  ...officialPreview,
+  manifest: { name: "github", description: "GitHub workflows." },
+  source: {
+    ...officialPreview.source,
+    path: "github",
+    resolvedCommit: "e".repeat(40),
+  },
+} as const satisfies PluginImportPreviewDto;
+
 describe("Plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
@@ -170,7 +181,7 @@ describe("Plugin settings", () => {
     expect(screen.getByText(/1 skill · updated/i)).toBeInTheDocument();
   });
 
-  it("offers immutable official Linear and Neon packages before installation", async () => {
+  it("offers immutable official GitHub, Linear, and Neon packages before installation", async () => {
     render(<PluginsSettings plugins={[]} canEdit />);
 
     const linearLink = screen.getByRole("link", { name: /linear/i });
@@ -180,8 +191,15 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/neon",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(2);
-    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: /github/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/github",
+    );
+    expect(screen.getAllByText("Not installed")).toHaveLength(3);
+    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(3);
+    expect(GITHUB_PLUGIN_SOURCE).toMatch(
+      /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
+    );
     expect(LINEAR_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/linear$/u,
     );
@@ -202,6 +220,31 @@ describe("Plugin settings", () => {
     });
     expect(router.push).toHaveBeenCalledWith("/settings/plugins/linear");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("installs the immutable official GitHub package from its pinned source", async () => {
+    vi.mocked(previewHeadlessPluginImport).mockResolvedValue(githubPreview);
+    vi.mocked(importHeadlessPlugin).mockResolvedValue({
+      plugin: { ...plugin, name: "github", manifest: githubPreview.manifest },
+      replayed: false,
+    });
+    render(<PluginsSettings plugins={[]} canEdit />);
+
+    const githubCard = screen.getByRole("link", { name: /github/i }).closest("div.border");
+    expect(githubCard).not.toBeNull();
+    await userEvent.click(
+      within(githubCard as HTMLElement).getByRole("button", { name: "Install" }),
+    );
+
+    await waitFor(() =>
+      expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: GITHUB_PLUGIN_SOURCE }),
+    );
+    expect(importHeadlessPlugin).toHaveBeenCalledWith({
+      url: GITHUB_PLUGIN_SOURCE,
+      expectedResolvedCommit: githubPreview.source.resolvedCommit,
+      expectedIntegrity: githubPreview.integrity,
+    });
+    expect(router.push).toHaveBeenCalledWith("/settings/plugins/github");
   });
 
   it("shows the exact MCP approval boundary without exposing environment values", () => {

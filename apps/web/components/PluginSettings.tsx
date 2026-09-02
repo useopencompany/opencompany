@@ -6,7 +6,7 @@ import type {
   PluginListItemDto,
 } from "@opencompany/protocol";
 import { Button, buttonVariants } from "@opencompany/ui/components/button";
-import { LinearIcon, NeonIcon } from "@opencompany/ui/icons";
+import { GitHubIcon, LinearIcon, NeonIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
   Archive,
@@ -93,6 +93,11 @@ export type OfficialMcpPluginConfig = OfficialMcpPluginMetadata & {
 };
 
 export const OFFICIAL_MCP_PLUGINS = {
+  github: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.github,
+    Icon: GitHubIcon,
+    iconClassName: "bg-[#181717] text-white",
+  },
   linear: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
     Icon: LinearIcon,
@@ -105,6 +110,8 @@ export const OFFICIAL_MCP_PLUGINS = {
   },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginConfig>;
 
+export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
+export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
@@ -130,6 +137,10 @@ export async function installOfficialMcpPlugin(
 
 export function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.linear, preview);
+}
+
+export function installOfficialGitHubPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.github, preview);
 }
 
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {

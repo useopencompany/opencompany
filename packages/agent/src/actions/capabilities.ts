@@ -73,6 +73,22 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  github_user: [
+    {
+      id: "read",
+      label: "Read GitHub",
+      description:
+        "Inspect repositories, code, issues, pull requests, releases, and GitHub Actions results.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Manage GitHub",
+      description:
+        "Change repository content, issues, and pull requests, including merging pull requests.",
+      defaultMode: "ask",
+    },
+  ],
   linear: [
     {
       id: "read",

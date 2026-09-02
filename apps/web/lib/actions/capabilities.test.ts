@@ -30,6 +30,13 @@ describe("PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
+  it("registers personal GitHub reads on by default and all writes behind ask", () => {
+    expect(PROVIDER_CAPABILITIES.github_user).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
   it("registers Linear with read on by default and issue management behind ask", () => {
     expect(PROVIDER_CAPABILITIES.linear).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
@@ -112,6 +119,8 @@ describe("mode helpers", () => {
     expect(providerCapability("google_drive", "read")?.label).toBe("Find & read files");
     expect(providerCapability("google_drive", "write")?.label).toBe("Edit Docs & Sheets");
     expect(providerCapability("google_calendar", "write")?.label).toBe("Add events");
+    expect(providerCapability("github_user", "read")?.label).toBe("Read GitHub");
+    expect(providerCapability("github_user", "write")?.label).toBe("Manage GitHub");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
     expect(providerCapability("slack", "read")?.label).toBe("Read Slack");
     expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
