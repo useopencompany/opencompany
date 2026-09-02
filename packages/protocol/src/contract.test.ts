@@ -274,6 +274,7 @@ describe("v1 protocol contract", () => {
       "/v1/chat-artifacts/{artifactId}",
       "/v1/chat-artifacts/{artifactId}/versions/{versionId}",
       "/v1/chat-attachments/{messageId}/{attachmentId}",
+      "/v1/conversations/{conversationId}/messages/{messageId}/presentation",
       "/v1/chat-screenshots/{conversationId}/{filename}",
       "/public/chat-shares/{shareId}",
       "/public/chat-shares/{shareId}/metadata",

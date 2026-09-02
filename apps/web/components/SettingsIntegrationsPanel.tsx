@@ -380,7 +380,6 @@ const PERSONAL_ACCOUNT_PROVIDERS = [
   "google_drive",
   "slack",
   "latitude",
-  "neon",
 ] as const satisfies readonly PersonalAccountProvider[];
 
 function countConnectedAccounts(
@@ -401,7 +400,10 @@ function countWorkspaceConnected(integrations: IntegrationState) {
     (integrationStatus(integrations.posthog) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
     (integrations.infisical.connected ? 1 : 0) +
-    (integrations.codex.workspaceEngine?.enabled ? 1 : 0) +
+    (integrations.codex.workspaceEngine?.enabled &&
+    integrations.codex.workspaceEngine.credentialStatus === "connected"
+      ? 1
+      : 0) +
     countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
   );
 }
@@ -499,10 +501,6 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
-            />
-            <IntegrationProviderGroupCard
-              provider="neon"
-              accounts={integrations.personalAccounts.neon}
             />
             <IntegrationProviderGroupCard
               provider="x_account"

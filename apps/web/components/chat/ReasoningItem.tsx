@@ -3,8 +3,18 @@
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { Markdown } from "@/components/Markdown";
+import {
+  type HistoricalPresentationDetailController,
+  HistoricalPresentationDetailStatus,
+} from "./HistoricalPresentationDetail";
 
-export function ReasoningItem({ text }: { text: string }) {
+export function ReasoningItem({
+  text,
+  detail,
+}: {
+  text: string;
+  detail?: HistoricalPresentationDetailController;
+}) {
   const [expanded, setExpanded] = useState(false);
   const compactText = text.replace(/\s+/g, " ").trim();
   const preview =
@@ -18,7 +28,11 @@ export function ReasoningItem({ text }: { text: string }) {
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => {
+            const next = !expanded;
+            setExpanded(next);
+            if (next && detail?.state !== "loaded") void detail?.load();
+          }}
           className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <ChevronRight
@@ -34,7 +48,11 @@ export function ReasoningItem({ text }: { text: string }) {
       </div>
       {expanded ? (
         <div className="ml-6 mt-1 border-l border-border pl-3 text-[12px] leading-5 text-ink-muted">
-          <Markdown content={text} />
+          {detail && detail.state !== "loaded" ? (
+            <HistoricalPresentationDetailStatus detail={detail} />
+          ) : (
+            <Markdown content={text} />
+          )}
         </div>
       ) : null}
     </div>

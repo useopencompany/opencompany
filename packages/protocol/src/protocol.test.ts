@@ -8,6 +8,7 @@ import {
   CreateTaskBodySchema,
   InvokeWorkflowBodySchema,
   MessageReadModelSchema,
+  MessageSummaryReadModelSchema,
   ReadModelSchema,
   ResolveApprovalBodySchema,
   UpdateWorkflowBodySchema,
@@ -106,6 +107,7 @@ describe("headless protocol", () => {
       "/v1/chat-artifacts/{artifactId}",
       "/v1/chat-artifacts/{artifactId}/versions/{versionId}",
       "/v1/chat-attachments/{messageId}/{attachmentId}",
+      "/v1/conversations/{conversationId}/messages/{messageId}/presentation",
       "/v1/chat-screenshots/{conversationId}/{filename}",
       "/public/chat-shares/{shareId}",
       "/public/chat-shares/{shareId}/metadata",
@@ -218,6 +220,22 @@ describe("headless protocol", () => {
         actor_id: "must-not-cross",
       }).success,
     ).toBe(false);
+    expect(
+      MessageSummaryReadModelSchema.safeParse({
+        id: "message_1",
+        conversationId: "conversation_1",
+        role: "assistant",
+        content: "Done",
+        taskId: null,
+        presentationSummary: {
+          uiMessageParts: [{ type: "reasoning", text: "Preview" }],
+        },
+        attachments: null,
+        createdAt: "2026-08-10T00:00:00.000Z",
+        updatedAt: "2026-08-10T00:00:00.000Z",
+      }).success,
+    ).toBe(true);
+    expect(ChatReadModelSchema.safeParse("chat-messages-v2").success).toBe(true);
     expect(ReadModelSchema.safeParse("workflows-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("workflow-schedules-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("task-schedules-v1").success).toBe(true);

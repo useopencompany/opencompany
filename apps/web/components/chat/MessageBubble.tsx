@@ -1,8 +1,9 @@
 "use client";
 
 import type { PublishedChatArtifact } from "@opencompany/agent-runtime";
-import type { ReactNode } from "react";
+import { type ReactNode, useCallback, useState } from "react";
 import type { ChatUiAttachment, ChatUiMessage } from "@/lib/chat-ui";
+import { loadHeadlessChatMessagePresentation } from "@/lib/headless-chat-presentations";
 import { ArtifactFileCard } from "./ArtifactFileCard";
 import { AssistantTextBubble } from "./AssistantTextBubble";
 import {
@@ -10,6 +11,7 @@ import {
   type ChatTaskLookup,
   getOrderedAssistantItems,
 } from "./assistant-items";
+import type { HistoricalPresentationDetailController } from "./HistoricalPresentationDetail";
 import { ReasoningItem } from "./ReasoningItem";
 import { TaskCard } from "./TaskCard";
 import { TurnDuration } from "./ThinkingIndicator";
@@ -94,11 +96,58 @@ function AssistantTurn({
   isTaskSession: boolean;
   artifactHref?: (artifact: PublishedChatArtifact) => string;
 }) {
-  const error = message.metadata?.error;
+  const presentationKey =
+    message.metadata?.presentation?.source === "summary"
+      ? `${message.id}:${message.metadata.presentation.updatedAt}`
+      : null;
+  const [presentationState, setPresentationState] = useState<{
+    key: string;
+    state: "loading" | "loaded" | "error";
+    message?: ChatUiMessage;
+    error?: string;
+  } | null>(null);
+  const activePresentationState =
+    presentationState?.key === presentationKey ? presentationState : null;
+  const resolvedMessage = activePresentationState?.message ?? message;
+  const loadPresentation = useCallback(async () => {
+    if (!presentationKey) return;
+    setPresentationState((current) =>
+      current?.key === presentationKey &&
+      (current.state === "loading" || current.state === "loaded")
+        ? current
+        : { key: presentationKey, state: "loading" },
+    );
+    try {
+      const resolved = await loadHeadlessChatMessagePresentation(message);
+      setPresentationState((current) =>
+        current?.key === presentationKey
+          ? { key: presentationKey, state: "loaded", message: resolved }
+          : current,
+      );
+    } catch (cause) {
+      setPresentationState((current) =>
+        current?.key === presentationKey
+          ? {
+              key: presentationKey,
+              state: "error",
+              error: cause instanceof Error ? cause.message : "Could not load this trace.",
+            }
+          : current,
+      );
+    }
+  }, [message, presentationKey]);
+  const historicalDetail: HistoricalPresentationDetailController | undefined = presentationKey
+    ? {
+        state: activePresentationState?.state ?? "idle",
+        error: activePresentationState?.error ?? null,
+        load: loadPresentation,
+      }
+    : undefined;
+  const error = resolvedMessage.metadata?.error;
   // In task sessions this metadata identifies the surrounding run; in regular chats it is also
   // the legacy fallback for a task launched by this turn. Explicit start-task parts still render.
-  const items = getOrderedAssistantItems(message, taskLookup, {
-    stopped: stopped || message.metadata?.aborted === true,
+  const items = getOrderedAssistantItems(resolvedMessage, taskLookup, {
+    stopped: stopped || resolvedMessage.metadata?.aborted === true,
     includeMetadataTaskCard: !isTaskSession,
   });
   // `nested` is set when rendering a subagent's own trace: its steps are historical, so they render
@@ -107,7 +156,15 @@ function AssistantTurn({
     if (item.type === "text") {
       return <AssistantTextBubble key={item.key} text={item.text} citations={item.citations} />;
     }
-    if (item.type === "reasoning") return <ReasoningItem key={item.key} text={item.text} />;
+    if (item.type === "reasoning") {
+      return (
+        <ReasoningItem
+          key={item.key}
+          text={item.text}
+          {...(historicalDetail ? { detail: historicalDetail } : {})}
+        />
+      );
+    }
     if (item.type === "artifact") {
       return (
         <ArtifactFileCard
@@ -130,6 +187,7 @@ function AssistantTurn({
           key={item.key}
           tool={item.subagent.tool}
           childCount={item.subagent.children.length}
+          {...(historicalDetail ? { detail: historicalDetail } : {})}
         >
           {item.subagent.children.map((child) => renderItem(child, true))}
         </SubagentRow>
@@ -144,6 +202,7 @@ function AssistantTurn({
         onActionApproval={onActionApproval}
         allowActionApproval={allowActionApproval}
         readOnly={readOnly || nested}
+        {...(historicalDetail ? { detail: historicalDetail } : {})}
       />
     );
   };

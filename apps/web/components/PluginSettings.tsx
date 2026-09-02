@@ -6,7 +6,7 @@ import type {
   PluginListItemDto,
 } from "@opencompany/protocol";
 import { Button, buttonVariants } from "@opencompany/ui/components/button";
-import { LinearIcon } from "@opencompany/ui/icons";
+import { LinearIcon, NeonIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
   Archive,
@@ -36,6 +36,11 @@ import {
   previewHeadlessPluginImport,
   revokeHeadlessPluginMcp,
 } from "@/lib/headless-knowledge-commands";
+import {
+  OFFICIAL_MCP_PLUGIN_METADATA,
+  type OfficialMcpPluginMetadata,
+  type OfficialMcpPluginName,
+} from "@/lib/official-mcp-plugins";
 
 type PluginSkillView = {
   name: string;
@@ -82,24 +87,53 @@ type PluginReportView = {
   collisions: PluginCollisionView[];
 };
 
-export const LINEAR_PLUGIN_NAME = "linear";
-// The public repository is the reviewed trust boundary. Keep this source pinned to a full commit.
-export const LINEAR_PLUGIN_SOURCE =
-  "https://github.com/useopencompany/plugins/tree/775df7a9a37f5585b9b87a26533ba6ed1035f1dc/linear";
+export type OfficialMcpPluginConfig = OfficialMcpPluginMetadata & {
+  Icon: typeof LinearIcon;
+  iconClassName: string;
+};
 
-export async function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
-  const confirmed = preview ?? (await previewHeadlessPluginImport({ url: LINEAR_PLUGIN_SOURCE }));
-  if (confirmed.manifest.name.toLocaleLowerCase() !== LINEAR_PLUGIN_NAME) {
+export const OFFICIAL_MCP_PLUGINS = {
+  linear: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
+    Icon: LinearIcon,
+    iconClassName: "bg-[#5E6AD2] text-white",
+  },
+  neon: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.neon,
+    Icon: NeonIcon,
+    iconClassName: "bg-[#00E599] text-[#0B0F14]",
+  },
+} as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginConfig>;
+
+export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
+export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
+export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
+export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+
+export async function installOfficialMcpPlugin(
+  config: OfficialMcpPluginConfig,
+  preview?: PluginImportPreviewDto,
+) {
+  const confirmed = preview ?? (await previewHeadlessPluginImport({ url: config.source }));
+  if (confirmed.manifest.name.toLocaleLowerCase() !== config.name) {
     throw new Error(
-      `Expected the ${LINEAR_PLUGIN_NAME} plugin, but this source contains ${confirmed.manifest.name}.`,
+      `Expected the ${config.name} plugin, but this source contains ${confirmed.manifest.name}.`,
     );
   }
   const result = await importHeadlessPlugin({
-    url: LINEAR_PLUGIN_SOURCE,
+    url: config.source,
     expectedResolvedCommit: confirmed.source.resolvedCommit,
     expectedIntegrity: confirmed.integrity,
   });
   return result.plugin;
+}
+
+export function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.linear, preview);
+}
+
+export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.neon, preview);
 }
 
 export function PluginsSettings({
@@ -111,19 +145,20 @@ export function PluginsSettings({
 }) {
   const router = useRouter();
   const [installError, setInstallError] = useState<string | null>(null);
+  const [installingName, setInstallingName] = useState<OfficialMcpPluginName | null>(null);
   const [isInstalling, startInstall] = useTransition();
-  const linearPlugin = plugins.find(
-    (plugin) => plugin.name.toLocaleLowerCase() === LINEAR_PLUGIN_NAME,
-  );
-  const install = () => {
+  const install = (config: OfficialMcpPluginConfig) => {
     if (isInstalling) return;
     setInstallError(null);
+    setInstallingName(config.name);
     startInstall(async () => {
       try {
-        const plugin = await installOfficialLinearPlugin();
+        const plugin = await installOfficialMcpPlugin(config);
         router.push(`/settings/plugins/${encodeURIComponent(plugin.name)}`);
       } catch (cause) {
         setInstallError(errorMessage(cause));
+      } finally {
+        setInstallingName(null);
       }
     });
   };
@@ -133,52 +168,74 @@ export function PluginsSettings({
       title="Plugins"
       description="Immutable Agent Plugin packages installed from public GitHub sources."
     >
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3">
-        <Link
-          href="/settings/plugins/linear"
-          prefetch
-          className="group flex min-w-0 flex-1 items-center gap-3 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[#5E6AD2] text-white">
-            <LinearIcon className="size-5" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-2">
-              <span className="truncate text-[14px] font-medium leading-tight text-ink">
-                Linear
-              </span>
-              {linearPlugin ? (
-                <PluginStatus status={linearPlugin.status} />
-              ) : (
-                <span className="inline-flex shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
-                  Not installed
+      <div className="flex flex-col gap-3">
+        {Object.values(OFFICIAL_MCP_PLUGINS).map((config) => {
+          const plugin = plugins.find(
+            (candidate) => candidate.name.toLocaleLowerCase() === config.name,
+          );
+          const installing = isInstalling && installingName === config.name;
+          return (
+            <div
+              key={config.name}
+              className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3"
+            >
+              <Link
+                href={`/settings/plugins/${config.name}`}
+                prefetch
+                className="group flex min-w-0 flex-1 items-center gap-3 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              >
+                <span
+                  className={cn(
+                    "flex size-10 shrink-0 items-center justify-center rounded-lg",
+                    config.iconClassName,
+                  )}
+                >
+                  <config.Icon className="size-5" />
                 </span>
-              )}
-            </span>
-            <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
-              {linearPlugin?.manifest.description ||
-                "Work with Linear issues, projects, comments, and team workflows."}
-            </span>
-            <span className="mt-1 block text-[11.5px] leading-4 text-ink-subtle">
-              {linearPlugin
-                ? `${linearPlugin.skillCount} ${linearPlugin.skillCount === 1 ? "skill" : "skills"} · updated ${formatRelativeTime(linearPlugin.updatedAt)}`
-                : "Official package · ready to install"}
-            </span>
-          </span>
-        </Link>
-        {linearPlugin ? (
-          <Link
-            href="/settings/plugins/linear"
-            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "text-ink")}
-          >
-            Manage
-          </Link>
-        ) : canEdit ? (
-          <Button variant="outline" size="sm" disabled={isInstalling} onClick={install}>
-            {isInstalling ? <Loader2 className="animate-spin" /> : null}
-            {isInstalling ? "Installing…" : "Install"}
-          </Button>
-        ) : null}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    <span className="truncate text-[14px] font-medium leading-tight text-ink">
+                      {config.label}
+                    </span>
+                    {plugin ? (
+                      <PluginStatus status={plugin.status} />
+                    ) : (
+                      <span className="inline-flex shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
+                        Not installed
+                      </span>
+                    )}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
+                    {plugin?.manifest.description || config.description}
+                  </span>
+                  <span className="mt-1 block text-[11.5px] leading-4 text-ink-subtle">
+                    {plugin
+                      ? `${plugin.skillCount} ${plugin.skillCount === 1 ? "skill" : "skills"} · updated ${formatRelativeTime(plugin.updatedAt)}`
+                      : "Official package · ready to install"}
+                  </span>
+                </span>
+              </Link>
+              {plugin ? (
+                <Link
+                  href={`/settings/plugins/${config.name}`}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "text-ink")}
+                >
+                  Manage
+                </Link>
+              ) : canEdit ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isInstalling}
+                  onClick={() => install(config)}
+                >
+                  {installing ? <Loader2 className="animate-spin" /> : null}
+                  {installing ? "Installing…" : "Install"}
+                </Button>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
       {installError ? <p className="text-[12.5px] text-danger">{installError}</p> : null}
     </SettingsContent>

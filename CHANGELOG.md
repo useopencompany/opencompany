@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-09-01
+
+### Added
+- The official Linear plugin now installs in one click: pin it to your workspace, choose exactly which Linear actions opencompany is allowed to take, and approve anything sensitive before it runs — replacing the old Linear integration card (#1468) — @louis.
+- Coding sessions can now use your wiki: Codex and Claude sandboxes reach the same wiki tools as chat, so a coding task can pull context from your pages or write results back (#1480) — @opencompany-bot.
+
+### Changed
+- Long, busy chats stay fast: heavy conversations now refresh their snapshot behind the scenes instead of slowing down as they grow (#1485) — @opencompany-bot.
+
 ## [1.20.0] - 2026-08-28
 
 ### Fixed

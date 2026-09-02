@@ -143,6 +143,15 @@ describe("remote MCP classification", () => {
       bucket: "read",
       curated: false,
     });
+    expect(
+      classifyRemoteTool({ name: "run_sql" }, [
+        { id: "query", label: "Query database data", defaultMode: "ask", tools: ["run_sql"] },
+      ]),
+    ).toMatchObject({
+      capability: { id: "query", label: "Query database data", defaultMode: "ask" },
+      bucket: "read",
+      curated: true,
+    });
   });
 
   it("treats ambiguous mappings as uncurated instead of choosing an unsafe capability", () => {

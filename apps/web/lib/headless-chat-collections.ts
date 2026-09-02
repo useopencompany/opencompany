@@ -6,8 +6,8 @@ import {
   ConversationReadModelSchema,
   type EngineSessionReadModel,
   EngineSessionReadModelSchema,
-  type MessageReadModel,
-  MessageReadModelSchema,
+  type MessageSummaryReadModel,
+  MessageSummaryReadModelSchema,
   type RunReadModel,
   RunReadModelSchema,
 } from "@opencompany/protocol";
@@ -41,10 +41,10 @@ function createConversations() {
 function createMessages(conversationId: string, messageShapeEpoch: number) {
   return createCollection(
     electricCollectionOptions({
-      id: `headless-chat:messages:v1:${conversationId}:epoch:${messageShapeEpoch}`,
-      schema: MessageReadModelSchema,
+      id: `headless-chat:messages:v2:${conversationId}:epoch:${messageShapeEpoch}`,
+      schema: MessageSummaryReadModelSchema,
       shapeOptions: {
-        ...shapeOptions("chat-messages-v1"),
+        ...shapeOptions("chat-messages-v2"),
         params: { conversationId, messageShapeEpoch: String(messageShapeEpoch) },
         // Electric already marks the collection ready on error, so without this the transcript
         // renders as a silent empty conversation. Record the failure for the retry surface and
@@ -316,7 +316,7 @@ export async function awaitHeadlessConversationTransaction(
   await getHeadlessChatConversations().utils.awaitTxId(transactionId, timeoutMs);
 }
 
-export type HeadlessChatMessageReadModel = MessageReadModel;
+export type HeadlessChatMessageReadModel = MessageSummaryReadModel;
 export type HeadlessChatRunReadModel = RunReadModel;
 export type HeadlessChatConversationReadModel = ConversationReadModel;
 export type HeadlessChatEngineSessionReadModel = EngineSessionReadModel;

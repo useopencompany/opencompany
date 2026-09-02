@@ -169,6 +169,10 @@ export type ChatMessageMetadata = {
   sessionId?: string;
   runId?: string;
   model?: string;
+  presentation?: {
+    source: "summary";
+    updatedAt: string;
+  };
   scheduledWakeup?: {
     reason: string;
     dueAt: string;

@@ -436,6 +436,78 @@ describe("Electric read models", () => {
     ]);
   });
 
+  it("streams compact Message summaries without selecting full presentations", async () => {
+    let upstreamUrl = "";
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async (input: URL | RequestInfo) => {
+        upstreamUrl = String(input);
+        return Response.json([
+          {
+            headers: { operation: "insert" },
+            key: '"message_1"',
+            value: {
+              id: "message_1",
+              conversation_id: "conversation_1",
+              role: "assistant",
+              content: "Done",
+              task_id: null,
+              presentation_summary: JSON.stringify({
+                schemaVersion: "opencompany.chat.debug.v1",
+                uiMessageParts: [
+                  { type: "reasoning", text: "Preview", presentationSummary: true },
+                  { type: "text", text: "Done" },
+                ],
+              }),
+              attachments: null,
+              created_at: "2026-08-10 20:00:00+00",
+              updated_at: "2026-08-10 20:00:01+00",
+            },
+          },
+        ]);
+      }) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "chat-messages-v2",
+      conversationId: "conversation_1",
+      messageShapeEpoch: 9,
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/chat-messages-v2?conversationId=conversation_1",
+      ),
+    });
+
+    const requestedUrl = new URL(upstreamUrl);
+    const columns = requestedUrl.searchParams.get("columns")?.split(",") ?? [];
+    expect(columns).toContain("presentation_summary");
+    expect(columns).not.toContain("presentation");
+    expect(requestedUrl.searchParams.get("params[4]")).toBe("9");
+    await expect(response.json()).resolves.toEqual([
+      {
+        headers: { operation: "insert" },
+        key: '"message_1"',
+        value: {
+          id: "message_1",
+          conversationId: "conversation_1",
+          role: "assistant",
+          content: "Done",
+          taskId: null,
+          presentationSummary: {
+            schemaVersion: "opencompany.chat.debug.v1",
+            uiMessageParts: [
+              { type: "reasoning", text: "Preview", presentationSummary: true },
+              { type: "text", text: "Done" },
+            ],
+          },
+          attachments: null,
+          createdAt: "2026-08-10T20:00:00.000Z",
+          updatedAt: "2026-08-10T20:00:01.000Z",
+        },
+      },
+    ]);
+  });
+
   it("requires conversation scope for child read models", async () => {
     const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",

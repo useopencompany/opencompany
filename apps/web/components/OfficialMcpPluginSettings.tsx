@@ -19,7 +19,6 @@ import {
 } from "@opencompany/ui/components/dialog";
 import { Skeleton } from "@opencompany/ui/components/skeleton";
 import { toast } from "@opencompany/ui/components/sonner";
-import { LinearIcon } from "@opencompany/ui/icons";
 import {
   AlertCircle,
   ChevronDown,
@@ -38,7 +37,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
-import { installOfficialLinearPlugin, LINEAR_PLUGIN_SOURCE } from "@/components/PluginSettings";
+import {
+  installOfficialMcpPlugin,
+  OFFICIAL_MCP_PLUGINS,
+  type OfficialMcpPluginConfig,
+} from "@/components/PluginSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
   IntegrationAccountRow,
@@ -58,10 +61,8 @@ import {
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
 import { type IntegrationAccountView, type IntegrationState } from "@/lib/integration-state";
+import type { OfficialMcpPluginName } from "@/lib/official-mcp-plugins";
 
-const LINEAR_DESCRIPTION = "Work with Linear issues, projects, comments, and team workflows.";
-const LINEAR_TOOLS_CONNECT_HREF =
-  "/api/integrations/linear/start?returnTo=/settings/plugins/linear";
 const NO_CONNECTION_DISCOVERY_ERROR =
   "No usable provider connection was available for MCP discovery.";
 
@@ -102,9 +103,9 @@ export type PluginToolsState =
       };
     };
 
-type LinearAccount = { account: IntegrationAccountView };
+type PluginAccount = { account: IntegrationAccountView };
 
-type LinearPluginSkill = {
+type PluginSkill = {
   id: string;
   name: string;
   description: string;
@@ -115,14 +116,16 @@ type PluginPreviewState =
   | { status: "error"; message: string }
   | { status: "ready"; preview: PluginImportPreviewDto };
 
-export type LinearAccountsState =
+export type PluginAccountsState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | {
       status: "ready";
-      accounts: LinearAccount[];
+      accounts: PluginAccount[];
       permissionConnection: IntegrationAccountView | null;
     };
+
+export type LinearAccountsState = PluginAccountsState;
 
 export function LinearPluginDetail({
   pluginState,
@@ -133,10 +136,50 @@ export function LinearPluginDetail({
   canEdit: boolean;
   toolsState?: PluginToolsState;
 }) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.linear}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function NeonPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.neon}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+function OfficialMcpPluginDetail({
+  config,
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  config: OfficialMcpPluginConfig;
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
   const { integrations } = useAppData();
-  const accountsState = useMemo<LinearAccountsState>(
-    () => ({ status: "ready", ...linearAccountsFromState(integrations) }),
-    [integrations],
+  const accountsState = useMemo<PluginAccountsState>(
+    () => ({ status: "ready", ...pluginAccountsFromState(integrations, config.name) }),
+    [config.name, integrations],
   );
   const effectiveToolsState =
     toolsState ??
@@ -144,10 +187,11 @@ export function LinearPluginDetail({
       ? { status: "loading" as const }
       : pluginState.status === "error"
         ? { status: "error" as const, message: pluginState.message }
-        : linearToolsStateFromPlugin(pluginState.plugin));
+        : officialPluginToolsStateFromPlugin(pluginState.plugin, config.name));
 
   return (
-    <LinearPluginDetailView
+    <OfficialMcpPluginDetailView
+      config={config}
       pluginState={pluginState}
       accountsState={accountsState}
       toolsState={effectiveToolsState}
@@ -167,6 +211,52 @@ export function LinearPluginDetailView({
   toolsState: PluginToolsState;
   canEdit: boolean;
 }) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS.linear}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+export function NeonPluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS.neon}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+function OfficialMcpPluginDetailView({
+  config,
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  config: OfficialMcpPluginConfig;
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
   const plugin = pluginState.status === "ready" ? pluginState.plugin : null;
   const shouldPreview = pluginState.status === "ready" && !pluginState.plugin;
   const [previewState, setPreviewState] = useState<PluginPreviewState>({ status: "loading" });
@@ -174,7 +264,7 @@ export function LinearPluginDetailView({
   useEffect(() => {
     if (!shouldPreview) return;
     let active = true;
-    void previewHeadlessPluginImport({ url: LINEAR_PLUGIN_SOURCE })
+    void previewHeadlessPluginImport({ url: config.source })
       .then((preview) => {
         if (active) setPreviewState({ status: "ready", preview });
       })
@@ -184,19 +274,25 @@ export function LinearPluginDetailView({
     return () => {
       active = false;
     };
-  }, [shouldPreview]);
+  }, [config.source, shouldPreview]);
 
   return (
     <>
       <IntegrationSetupFeedback />
       <SettingsContent
-        title={plugin?.manifest.name || "Linear"}
-        description={plugin?.manifest.description || LINEAR_DESCRIPTION}
+        title={plugin?.manifest.name || config.label}
+        description={plugin?.manifest.description || config.description}
         backLink={{ href: "/settings/plugins", label: "Plugins" }}
       >
-        <PluginHeaderSection state={pluginState} previewState={previewState} canEdit={canEdit} />
-        {plugin ? <AccountsSection state={accountsState} /> : null}
+        <PluginHeaderSection
+          config={config}
+          state={pluginState}
+          previewState={previewState}
+          canEdit={canEdit}
+        />
+        {plugin ? <AccountsSection config={config} state={accountsState} /> : null}
         <ToolsSection
+          config={config}
           pluginState={pluginState}
           previewState={previewState}
           state={toolsState}
@@ -205,17 +301,19 @@ export function LinearPluginDetailView({
             accountsState.status === "ready" ? accountsState.permissionConnection : null
           }
         />
-        <SkillsSection state={pluginState} previewState={previewState} />
+        <SkillsSection config={config} state={pluginState} previewState={previewState} />
       </SettingsContent>
     </>
   );
 }
 
 function PluginHeaderSection({
+  config,
   state,
   previewState,
   canEdit,
 }: {
+  config: OfficialMcpPluginConfig;
   state: PluginLoadState;
   previewState: PluginPreviewState;
   canEdit: boolean;
@@ -225,7 +323,9 @@ function PluginHeaderSection({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  if (state.status === "loading") return <SectionSkeleton label="Loading Linear plugin" rows={2} />;
+  if (state.status === "loading") {
+    return <SectionSkeleton label={`Loading ${config.label} plugin`} rows={2} />;
+  }
   if (state.status === "error") {
     return <SectionError title="Plugin details unavailable" message={state.message} />;
   }
@@ -236,7 +336,8 @@ function PluginHeaderSection({
     setError(null);
     startTransition(async () => {
       try {
-        await installOfficialLinearPlugin(
+        await installOfficialMcpPlugin(
+          config,
           previewState.status === "ready" ? previewState.preview : undefined,
         );
         router.refresh();
@@ -245,6 +346,7 @@ function PluginHeaderSection({
       }
     });
   };
+  const Icon = config.Icon;
   const enable = () => {
     if (!plugin) return;
     setError(null);
@@ -274,13 +376,15 @@ function PluginHeaderSection({
   return (
     <section aria-labelledby="plugin-overview-heading" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-start gap-3 rounded-lg border border-border bg-surface p-4">
-        <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-[#5E6AD2] text-white">
-          <LinearIcon className="size-6" />
+        <span
+          className={`flex size-11 shrink-0 items-center justify-center rounded-lg ${config.iconClassName}`}
+        >
+          <Icon className="size-6" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 id="plugin-overview-heading" className="text-[15px] font-semibold text-ink">
-              Linear
+              {config.label}
             </h2>
             {plugin ? (
               <Badge variant={plugin.status === "enabled" ? "success" : "outline"}>
@@ -291,7 +395,7 @@ function PluginHeaderSection({
             )}
           </div>
           <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
-            {plugin?.manifest.description || LINEAR_DESCRIPTION}
+            {plugin?.manifest.description || config.description}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -367,10 +471,10 @@ function PluginHeaderSection({
       <Dialog open={confirmingUninstall} onOpenChange={setConfirmingUninstall}>
         <DialogContent className="max-w-[440px] gap-5">
           <DialogHeader className="text-left">
-            <DialogTitle className="text-[15px]">Uninstall Linear?</DialogTitle>
+            <DialogTitle className="text-[15px]">Uninstall {config.label}?</DialogTitle>
             <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
-              Linear tools and plugin skills will be removed. Connected accounts and ongoing
-              ingestion will not be changed.
+              {config.label} tools and plugin skills will be removed. Connected accounts will not be
+              changed.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -388,57 +492,65 @@ function PluginHeaderSection({
   );
 }
 
-function AccountsSection({ state }: { state: LinearAccountsState }) {
+function AccountsSection({
+  config,
+  state,
+}: {
+  config: OfficialMcpPluginConfig;
+  state: PluginAccountsState;
+}) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
+  const headingId = `${config.name}-accounts-heading`;
 
   return (
-    <section aria-labelledby="linear-accounts-heading" className="flex flex-col gap-3">
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <SectionHeading
-        id="linear-accounts-heading"
+        id={headingId}
         icon={Users}
         title="Accounts"
-        description="The account opencompany uses when you run Linear tools."
+        description={config.accountDescription}
       />
       {state.status === "loading" ? (
-        <SectionSkeleton label="Loading Linear accounts" rows={2} compact />
+        <SectionSkeleton label={`Loading ${config.label} accounts`} rows={2} compact />
       ) : state.status === "error" ? (
         <SectionError title="Accounts unavailable" message={state.message} />
       ) : !permissionConnection ? (
-        <SectionEmpty icon={Users}>No Linear accounts are connected.</SectionEmpty>
+        <SectionEmpty icon={Users}>{`No ${config.label} accounts are connected.`}</SectionEmpty>
       ) : (
         <div className="flex flex-col gap-2">
           <IntegrationAccountRow
             account={permissionConnection}
-            purposeLabel="Linear"
+            purposeLabel={config.label}
             showCapabilityModes={false}
           />
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <a
-          href={LINEAR_TOOLS_CONNECT_HREF}
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-        >
-          Connect Linear account
+        <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
+          Connect {config.label} account
         </a>
-        <Link
-          href="/wiki/sources"
-          className="text-[12px] text-ink-subtle underline decoration-border underline-offset-2 hover:text-ink"
-        >
-          Configure Linear ingestion in Wiki sources
-        </Link>
+        {config.ingestionHref && config.ingestionLabel ? (
+          <Link
+            href={config.ingestionHref}
+            className="text-[12px] text-ink-subtle underline decoration-border underline-offset-2 hover:text-ink"
+          >
+            {config.ingestionLabel}
+          </Link>
+        ) : null}
       </div>
     </section>
   );
 }
 
 function ToolsSection({
+  config,
   pluginState,
   previewState,
   state,
   canEdit,
   permissionConnection,
 }: {
+  config: OfficialMcpPluginConfig;
   pluginState: PluginLoadState;
   previewState: PluginPreviewState;
   state: PluginToolsState;
@@ -452,7 +564,7 @@ function ToolsSection({
   const displayedState = plugin
     ? state
     : previewState.status === "ready"
-      ? linearToolsStateFromPreview(previewState.preview)
+      ? officialPluginToolsStateFromPreview(previewState.preview, config.name)
       : previewState;
 
   const refresh = () => {
@@ -467,10 +579,10 @@ function ToolsSection({
         if (discoveryError) {
           setRefreshError(discoveryError);
           if (!isConnectionRequiredError(discoveryError)) {
-            toast.error("Linear tool discovery failed.");
+            toast.error(`${config.label} tool discovery failed.`);
           }
         } else {
-          toast.success("Linear tools refreshed.");
+          toast.success(`${config.label} tools refreshed.`);
         }
         router.refresh();
       } catch (cause) {
@@ -478,22 +590,25 @@ function ToolsSection({
       }
     });
   };
+  const headingId = `${config.name}-tools-heading`;
 
   return (
-    <section aria-labelledby="linear-tools-heading" className="flex flex-col gap-3">
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <SectionHeading
-        id="linear-tools-heading"
+        id={headingId}
         icon={Wrench}
         title="Tools"
-        description="Choose whether Linear capabilities run automatically, ask first, or stay unavailable."
+        description={`Choose whether ${config.label} capabilities run automatically, ask first, or stay unavailable.`}
       />
       {pluginState.status === "loading" ? (
-        <SectionSkeleton label="Loading Linear tools" rows={2} />
+        <SectionSkeleton label={`Loading ${config.label} tools`} rows={2} />
       ) : pluginState.status === "error" ? (
         <SectionError title="Tools unavailable" message={pluginState.message} />
       ) : displayedState.status === "loading" ? (
         <SectionSkeleton
-          label={plugin ? "Discovering Linear tools" : "Loading Linear tool preview"}
+          label={
+            plugin ? `Discovering ${config.label} tools` : `Loading ${config.label} tool preview`
+          }
           rows={2}
         />
       ) : displayedState.status === "error" ? (
@@ -502,6 +617,7 @@ function ToolsSection({
         <>
           {plugin ? (
             <DiscoveryStatus
+              pluginLabel={config.label}
               discovery={displayedState.discovery}
               needsConnection={isConnectionRequiredError(
                 refreshError ?? displayedState.discovery.lastDiscoveryError,
@@ -538,9 +654,9 @@ function ToolsSection({
               {isConnectionRequiredError(
                 refreshError ?? displayedState.discovery.lastDiscoveryError,
               )
-                ? "Connect a Linear account to activate tools."
+                ? `Connect a ${config.label} account to activate tools.`
                 : displayedState.discovery.status === "error"
-                  ? "No Linear tools are available because discovery has not succeeded yet."
+                  ? `No ${config.label} tools are available because discovery has not succeeded yet.`
                   : "No tools have been discovered yet. Capability permissions are ready and will apply when discovery completes."}
             </SectionEmpty>
           ) : null}
@@ -549,13 +665,14 @@ function ToolsSection({
               <ToolGroupCard
                 key={group.id}
                 group={group}
+                provider={config.name}
                 permissionConnection={plugin ? permissionConnection : null}
               />
             ))}
           </div>
           {plugin && !permissionConnection ? (
             <p className="text-[12px] leading-4 text-ink-subtle">
-              Connect a Linear account to change permission modes.
+              Connect a {config.label} account to change permission modes.
             </p>
           ) : null}
         </>
@@ -565,12 +682,14 @@ function ToolsSection({
 }
 
 function DiscoveryStatus({
+  pluginLabel,
   discovery,
   needsConnection,
   canRefresh,
   isRefreshing,
   onRefresh,
 }: {
+  pluginLabel: string;
   discovery: Extract<PluginToolsState, { status: "ready" }>["discovery"];
   needsConnection: boolean;
   canRefresh: boolean;
@@ -586,7 +705,7 @@ function DiscoveryStatus({
         error: { label: "Failed", variant: "destructive" as const },
       }[discovery.status];
   const summary = needsConnection
-    ? "Connect a Linear account to activate tools."
+    ? `Connect a ${pluginLabel} account to activate tools.`
     : discovery.discoveredAt
       ? `${discovery.toolCount} ${discovery.toolCount === 1 ? "tool" : "tools"} discovered ${formatDateTime(discovery.discoveredAt)}`
       : "Waiting for the first successful discovery.";
@@ -617,9 +736,11 @@ function DiscoveryStatus({
 
 function ToolGroupCard({
   group,
+  provider,
   permissionConnection,
 }: {
   group: PluginToolGroupView;
+  provider: string;
   permissionConnection: IntegrationAccountView | null;
 }) {
   return (
@@ -631,7 +752,11 @@ function ToolGroupCard({
           </CardTitle>
           <p className="text-[12px] leading-4 text-ink-subtle">{group.description}</p>
         </div>
-        <PluginCapabilityModeRow group={group} connection={permissionConnection} />
+        <PluginCapabilityModeRow
+          group={group}
+          provider={provider}
+          connection={permissionConnection}
+        />
       </CardHeader>
       {group.tools.length > 0 ? (
         <CardContent className="px-3">
@@ -652,9 +777,11 @@ function ToolGroupCard({
 
 function PluginCapabilityModeRow({
   group,
+  provider,
   connection,
 }: {
   group: PluginToolGroupView;
+  provider: string;
   connection: IntegrationAccountView | null;
 }) {
   const router = useRouter();
@@ -669,7 +796,7 @@ function PluginCapabilityModeRow({
   const mode =
     pendingMode ??
     effectiveCapabilityMode(
-      connection?.provider ?? "linear",
+      connection?.provider ?? provider,
       group.modeKey,
       hasStoredMode ? storedModes : { [group.modeKey]: group.defaultMode },
     );
@@ -718,14 +845,16 @@ function ToolRows({ tools }: { tools: PluginToolView[] }) {
 }
 
 function SkillsSection({
+  config,
   state,
   previewState,
 }: {
+  config: OfficialMcpPluginConfig;
   state: PluginLoadState;
   previewState: PluginPreviewState;
 }) {
   const plugin = state.status === "ready" ? state.plugin : null;
-  const skills: LinearPluginSkill[] = plugin
+  const skills: PluginSkill[] = plugin
     ? plugin.skills.map((skill: { bundleId: string; name: string; description: string }) => ({
         id: skill.bundleId,
         name: skill.name,
@@ -740,20 +869,21 @@ function SkillsSection({
           }),
         )
       : [];
+  const headingId = `${config.name}-skills-heading`;
   return (
-    <section aria-labelledby="linear-skills-heading" className="flex flex-col gap-3">
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <SectionHeading
-        id="linear-skills-heading"
+        id={headingId}
         icon={Sparkles}
         title="Skills"
-        description="Read-only workflows supplied by the integrity-pinned plugin package."
+        description="Workflows supplied by the integrity-pinned plugin package."
       />
       {state.status === "loading" ? (
-        <SectionSkeleton label="Loading Linear skills" rows={2} compact />
+        <SectionSkeleton label={`Loading ${config.label} skills`} rows={2} compact />
       ) : state.status === "error" ? (
         <SectionError title="Skills unavailable" message={state.message} />
       ) : !plugin && previewState.status === "loading" ? (
-        <SectionSkeleton label="Loading Linear skill preview" rows={2} compact />
+        <SectionSkeleton label={`Loading ${config.label} skill preview`} rows={2} compact />
       ) : !plugin && previewState.status === "error" ? (
         <SectionError title="Skills unavailable" message={previewState.message} />
       ) : skills.length === 0 ? (
@@ -838,10 +968,21 @@ function SectionEmpty({ icon: Icon, children }: { icon: typeof Wrench; children:
   );
 }
 
-function linearAccountsFromState(state: IntegrationState): {
-  accounts: LinearAccount[];
+function pluginAccountsFromState(
+  state: IntegrationState,
+  provider: OfficialMcpPluginName,
+): {
+  accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView | null;
 } {
+  if (provider === "neon") {
+    const accounts = state.personalAccounts.neon.map((account) => ({ account }));
+    return {
+      accounts,
+      permissionConnection:
+        accounts.find(({ account }) => account.connected)?.account ?? accounts[0]?.account ?? null,
+    };
+  }
   const permissionConnection: IntegrationAccountView | null = state.linear.integrationId
     ? {
         integrationId: state.linear.integrationId,
@@ -863,9 +1004,17 @@ function linearAccountsFromState(state: IntegrationState): {
 }
 
 export function defaultLinearToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("linear");
+}
+
+export function defaultNeonToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("neon");
+}
+
+function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): PluginToolsState {
   return {
     status: "ready",
-    groups: providerCapabilities("linear").map((capability) => ({
+    groups: providerCapabilities(provider).map((capability) => ({
       id: capability.id,
       label: capability.label,
       description: capability.description,
@@ -885,7 +1034,18 @@ export function defaultLinearToolsState(): PluginToolsState {
 }
 
 export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
-  if (!plugin?.remoteMcpServers.length) return defaultLinearToolsState();
+  return officialPluginToolsStateFromPlugin(plugin, "linear");
+}
+
+export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "neon");
+}
+
+function officialPluginToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+  provider: OfficialMcpPluginName,
+): PluginToolsState {
+  if (!plugin?.remoteMcpServers.length) return defaultOfficialPluginToolsState(provider);
 
   const definitions = new Map<CapabilityId, PluginRemoteMcpServerDto["capabilities"][number]>();
   const tools: Array<
@@ -912,7 +1072,7 @@ export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null)
     }
   }
 
-  const knownCapabilities = providerCapabilities("linear");
+  const knownCapabilities = providerCapabilities(provider);
   const curatedGroups = [...definitions.values()].map((definition) => ({
     id: definition.id,
     label: definition.label,
@@ -957,7 +1117,18 @@ export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null)
 }
 
 export function linearToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
-  const knownCapabilities = providerCapabilities("linear");
+  return officialPluginToolsStateFromPreview(preview, "linear");
+}
+
+export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "neon");
+}
+
+function officialPluginToolsStateFromPreview(
+  preview: PluginImportPreviewDto,
+  provider: OfficialMcpPluginName,
+): PluginToolsState {
+  const knownCapabilities = providerCapabilities(provider);
   const definitions = new Map<CapabilityId, PluginToolGroupView>();
   for (const server of preview.remoteMcpServers) {
     for (const capability of server.capabilities) {
@@ -974,7 +1145,7 @@ export function linearToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
           id: `${server.name}:${tool}`,
           name: displayToolName(tool),
           description: null,
-          readOnly: capability.id === "read",
+          readOnly: capability.id !== "write",
         })),
       });
     }

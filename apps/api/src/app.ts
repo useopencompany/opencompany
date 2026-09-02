@@ -93,6 +93,7 @@ import type { IntegrationAccountService } from "./integration-accounts";
 import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
+import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
 import type { OnboardingService } from "./onboarding";
 import type { OnboardingEmailService } from "./onboarding-emails";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
@@ -128,6 +129,7 @@ const CORS_ALLOW_HEADERS = [
 ];
 const CORS_EXPOSE_HEADERS = [
   "Content-Disposition",
+  "ETag",
   "Electric-Cursor",
   "Electric-Handle",
   "Electric-Offset",
@@ -172,6 +174,7 @@ export type CreateApiAppInput = {
   pluginImports: PluginImportApplicationService;
   brainAssets: BrainAssetService;
   chatResources?: ChatResourceService;
+  messagePresentations?: MessagePresentationService;
   chatTitles?: ChatTitleService;
   captureChatMessage?: (input: {
     actor: Actor;
@@ -1631,6 +1634,25 @@ export function createApiApp(input: CreateApiAppInput) {
       });
       return chatResourceResponse(asset) as never;
     },
+    getMessagePresentation: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const params = c.req.valid("param");
+      await authorizeConversationRead(input, actor, params.conversationId);
+      if (!input.messagePresentations) {
+        throw new ApiError(503, "unavailable", "Message presentations are not configured.", true);
+      }
+      const result = await input.messagePresentations.get({ actor, ...params });
+      if (!result) throw new ApiError(404, "not_found", "Message presentation not found.");
+      const etag = messagePresentationEtag(params.messageId, result.updatedAt);
+      c.header("ETag", etag);
+      c.header("Cache-Control", "private, max-age=0, must-revalidate");
+      c.header("Vary", "Authorization, Cookie");
+      if (etagMatches(c.req.valid("header")["if-none-match"], etag)) {
+        return c.body(null, 304);
+      }
+      return c.json({ data: result, meta }, 200);
+    },
     downloadChatScreenshot: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -1847,7 +1869,11 @@ export function createApiApp(input: CreateApiAppInput) {
       }
       const params = c.req.valid("param");
       const query = c.req.valid("query");
-      if (query.messageShapeEpoch !== undefined && params.readModel !== "chat-messages-v1") {
+      if (
+        query.messageShapeEpoch !== undefined &&
+        params.readModel !== "chat-messages-v1" &&
+        params.readModel !== "chat-messages-v2"
+      ) {
         throw new ApiError(
           400,
           "invalid_request",
@@ -1942,7 +1968,10 @@ export function createApiApp(input: CreateApiAppInput) {
           );
         }
         const resource = await authorizeConversationRead(input, actor, query.conversationId);
-        if (params.readModel === "chat-messages-v1" && "messageShapeEpoch" in resource) {
+        if (
+          (params.readModel === "chat-messages-v1" || params.readModel === "chat-messages-v2") &&
+          "messageShapeEpoch" in resource
+        ) {
           messageShapeEpoch = resource.messageShapeEpoch;
         }
       } else if (query.conversationId || query.brainId) {
@@ -2957,6 +2986,14 @@ function isLogFields(value: unknown): value is LogFields {
 
 function requestIdFrom(c: Context) {
   return (getContextValue(c, "requestId") as string | undefined) ?? `request_${randomUUID()}`;
+}
+
+function etagMatches(value: string | undefined, etag: string) {
+  if (!value) return false;
+  return value
+    .split(",")
+    .map((candidate) => candidate.trim())
+    .some((candidate) => candidate === "*" || candidate === etag);
 }
 
 function contentDisposition(value: string, inline = true) {
