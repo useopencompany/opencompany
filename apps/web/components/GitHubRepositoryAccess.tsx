@@ -8,13 +8,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchGitHubRepositoryAccess,
   type GitHubRepositoryAccess,
+  GitHubRepositoryAccessRequestError,
   githubInstallStartHref,
 } from "@/lib/github-repository-access";
 
 type AccessState =
   | { status: "loading"; data: null; error: null }
   | { status: "ready"; data: GitHubRepositoryAccess; error: null }
-  | { status: "error"; data: null; error: string };
+  | {
+      status: "error";
+      data: null;
+      error: { message: string; code: GitHubRepositoryAccessRequestError["code"] | null };
+    };
+
+type RefreshAccess = (options?: {
+  forceTokenRefresh?: boolean;
+}) => Promise<GitHubRepositoryAccess | null>;
+
+const APPROVAL_POLL_DELAYS_MS = [5_000, 10_000, 20_000, 40_000, 60_000] as const;
 
 export function GitHubRepositoryAccessSection() {
   const access = useGitHubRepositoryAccess();
@@ -47,7 +58,7 @@ export function GitHubRepositoryAccessSection() {
       ) : access.state.status === "error" ? (
         <Alert variant="destructive">
           <AlertTitle>Repository access unavailable</AlertTitle>
-          <AlertDescription>{access.state.error}</AlertDescription>
+          <AlertDescription>{access.state.error.message}</AlertDescription>
         </Alert>
       ) : access.state.data.installations.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-3 py-3 text-[12px] leading-5 text-ink-subtle">
@@ -122,6 +133,13 @@ export function GitHubRepositoryAccessSection() {
             automatically.
           </AlertDescription>
         </Alert>
+      ) : approval.status === "timed_out" ? (
+        <Alert variant="warning" data-testid="github-installation-still-waiting">
+          <AlertTitle>Still waiting for admin approval</AlertTitle>
+          <AlertDescription>
+            GitHub has not granted the requested access yet. Check back later or re-check manually.
+          </AlertDescription>
+        </Alert>
       ) : approval.status === "approved" ? (
         <Alert data-testid="github-installation-approved">
           <CheckCircle2 />
@@ -140,7 +158,7 @@ export function GitHubRepositoryAccessSection() {
         >
           Add organization or account <ExternalLink className="size-3.5" />
         </a>
-        {approval.status === "waiting" ? (
+        {approval.status === "waiting" || approval.status === "timed_out" ? (
           <button
             type="button"
             onClick={() => void approval.recheck()}
@@ -158,11 +176,40 @@ export function GitHubRepositoryAccessSection() {
 
 export function GitHubInstallGapCard({ owner, repo }: { owner: string; repo: string }) {
   const access = useGitHubRepositoryAccess({ owner, repo });
-  const approval = useGitHubAccessApproval(access.state.data, access.refresh);
+  const approval = useGitHubAccessApproval(access.state.data, access.refresh, owner);
   const target = access.state.data?.target;
   const returnTo =
     typeof window === "undefined" ? "/" : window.location.pathname + window.location.search;
 
+  if (access.state.status === "error") {
+    if (access.state.error.code === "authentication_required") {
+      return (
+        <Alert variant="warning" className="mt-2 max-w-[92%]" data-testid="github-reconnect">
+          <FolderGit2 />
+          <AlertTitle>Reconnect GitHub</AlertTitle>
+          <AlertDescription>{access.state.error.message}</AlertDescription>
+          <a
+            href={githubInstallStartHref(owner, returnTo)}
+            target="_blank"
+            rel="noreferrer"
+            className={`mt-2 ${buttonVariants({ variant: "outline", size: "sm" })}`}
+          >
+            Reconnect GitHub <ExternalLink className="size-3.5" />
+          </a>
+        </Alert>
+      );
+    }
+    if (access.state.error.code === "rate_limited") {
+      return (
+        <Alert variant="warning" className="mt-2 max-w-[92%]" data-testid="github-rate-limited">
+          <FolderGit2 />
+          <AlertTitle>GitHub access check is rate-limited</AlertTitle>
+          <AlertDescription>{access.state.error.message}</AlertDescription>
+        </Alert>
+      );
+    }
+    return null;
+  }
   if (access.state.status !== "ready" || !target) return null;
   if (target.state === "available" && approval.status !== "approved") return null;
 
@@ -177,34 +224,43 @@ export function GitHubInstallGapCard({ owner, repo }: { owner: string; repo: str
   }
 
   const repository = `${owner}/${repo}`;
+  const requestPending = target.state !== "suspended" && approval.status === "waiting";
+  const requestTimedOut = target.state !== "suspended" && approval.status === "timed_out";
   return (
     <Alert variant="warning" className="mt-2 max-w-[92%]" data-testid="github-install-gap">
       <FolderGit2 />
       <AlertTitle>
-        {approval.status === "waiting"
+        {requestPending
           ? `Pending admin approval for ${owner}`
-          : target.state === "missing_installation"
-            ? `GitHub App is not installed on ${owner}`
-            : target.state === "suspended"
-              ? `GitHub App access is suspended for ${owner}`
-              : `GitHub App cannot access ${repository}`}
+          : requestTimedOut
+            ? `Still waiting for access to ${owner}`
+            : target.state === "missing_installation"
+              ? `GitHub App is not installed on ${owner}`
+              : target.state === "suspended"
+                ? `GitHub App access is suspended for ${owner}`
+                : `GitHub App cannot access ${repository}`}
       </AlertTitle>
       <AlertDescription>
-        {approval.status === "waiting"
+        {requestPending
           ? "GitHub emails an organization owner when approval is required. We will keep checking for access."
-          : `Your GitHub account can reach ${repository}, but the App installation cannot. Add or request access on GitHub.`}
+          : requestTimedOut
+            ? "GitHub has not granted access yet. Check back later or re-check manually."
+            : target.state === "suspended"
+              ? `The App installation for ${owner} is suspended. An organization owner must restore it on GitHub.`
+              : `Your GitHub account can reach ${repository}, but the App installation cannot. Add or request access on GitHub.`}
       </AlertDescription>
       <div className="mt-2 flex flex-wrap gap-2">
         <a
           href={githubInstallStartHref(owner, returnTo)}
           target="_blank"
           rel="noreferrer"
-          onClick={approval.begin}
+          onClick={target.state === "suspended" ? undefined : approval.begin}
           className={buttonVariants({ variant: "outline", size: "sm" })}
         >
-          Add access <ExternalLink className="size-3.5" />
+          {target.state === "suspended" ? "Review on GitHub" : "Add access"}{" "}
+          <ExternalLink className="size-3.5" />
         </a>
-        {approval.status === "waiting" ? (
+        {requestPending || requestTimedOut ? (
           <button
             type="button"
             onClick={() => void approval.recheck()}
@@ -226,32 +282,38 @@ function useGitHubRepositoryAccess(target: { owner?: string; repo?: string } = {
   const [state, setState] = useState<AccessState>({ status: "loading", data: null, error: null });
   const [refreshing, setRefreshing] = useState(false);
   const requestRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestRef.current?.abort();
+    };
+  }, []);
 
   const refresh = useCallback(
-    async (forceRefresh = false) => {
+    async (options: { forceTokenRefresh?: boolean } = {}) => {
       requestRef.current?.abort();
       const controller = new AbortController();
       requestRef.current = controller;
-      setRefreshing(true);
+      if (mountedRef.current) setRefreshing(true);
       try {
         const data = await fetchGitHubRepositoryAccess({
           ...(owner ? { owner } : {}),
           ...(repo ? { repo } : {}),
-          ...(forceRefresh ? { forceRefresh: true } : {}),
+          ...(options.forceTokenRefresh ? { forceRefresh: true } : {}),
+          bypassCache: true,
           signal: controller.signal,
         });
-        setState({ status: "ready", data, error: null });
+        if (mountedRef.current) setState({ status: "ready", data, error: null });
         return data;
       } catch (cause) {
         if (controller.signal.aborted) return null;
-        setState({
-          status: "error",
-          data: null,
-          error: cause instanceof Error ? cause.message : "GitHub access could not be checked.",
-        });
+        if (mountedRef.current) setState(accessErrorState(cause));
         return null;
       } finally {
-        if (requestRef.current === controller) setRefreshing(false);
+        if (mountedRef.current && requestRef.current === controller) setRefreshing(false);
       }
     },
     [owner, repo],
@@ -270,13 +332,12 @@ function useGitHubRepositoryAccess(target: { owner?: string; repo?: string } = {
       })
       .catch((cause) => {
         if (controller.signal.aborted) return;
-        setState({
-          status: "error",
-          data: null,
-          error: cause instanceof Error ? cause.message : "GitHub access could not be checked.",
-        });
+        if (mountedRef.current) setState(accessErrorState(cause));
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (requestRef.current === controller) requestRef.current = null;
+    };
   }, [owner, repo]);
 
   return { state, refresh, refreshing };
@@ -284,46 +345,62 @@ function useGitHubRepositoryAccess(target: { owner?: string; repo?: string } = {
 
 function useGitHubAccessApproval(
   data: GitHubRepositoryAccess | null,
-  refresh: (forceRefresh?: boolean) => Promise<GitHubRepositoryAccess | null>,
+  refresh: RefreshAccess,
+  targetOwner?: string,
 ) {
-  const [status, setStatus] = useState<"idle" | "waiting" | "approved">("idle");
-  const baselineRef = useRef<string | null>(null);
-  const signature = data ? accessSignature(data) : null;
+  const [state, setState] = useState<
+    | { status: "idle" | "approved" }
+    | { status: "timed_out"; baseline: string | null }
+    | { status: "waiting"; baseline: string | null; pollIndex: number }
+  >({ status: "idle" });
+  const forcedRefreshUsedRef = useRef(false);
+  const signature = data ? accessSignature(data, targetOwner) : null;
 
   useEffect(() => {
-    if (status !== "waiting" || !signature) return;
-    if (baselineRef.current === null) {
-      baselineRef.current = signature;
-      return;
-    }
-    if (signature !== baselineRef.current || data?.target?.state === "available") {
-      setStatus("approved");
-    }
-  }, [data?.target?.state, signature, status]);
-
-  useEffect(() => {
-    if (status !== "waiting") return;
-    const interval = window.setInterval(() => void refresh(true), 10_000);
-    const onFocus = () => void refresh(true);
-    window.addEventListener("focus", onFocus);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [refresh, status]);
+    if (state.status !== "waiting") return;
+    const pollIndex = state.pollIndex;
+    const timer = window.setTimeout(() => {
+      void refresh().then((latest) => {
+        setState((current) => {
+          if (current.status !== "waiting" || current.pollIndex !== pollIndex) return current;
+          if (approvalGranted(latest, current.baseline, targetOwner)) {
+            return { status: "approved" };
+          }
+          return pollIndex + 1 >= APPROVAL_POLL_DELAYS_MS.length
+            ? { status: "timed_out", baseline: current.baseline }
+            : { ...current, pollIndex: pollIndex + 1 };
+        });
+      });
+    }, APPROVAL_POLL_DELAYS_MS[pollIndex]);
+    return () => window.clearTimeout(timer);
+  }, [refresh, state, targetOwner]);
 
   return {
-    status,
+    status: state.status,
     begin: () => {
-      baselineRef.current = signature;
-      setStatus("waiting");
+      forcedRefreshUsedRef.current = false;
+      setState({ status: "waiting", baseline: signature, pollIndex: 0 });
     },
-    recheck: () => refresh(true),
+    recheck: async () => {
+      const forceTokenRefresh = !forcedRefreshUsedRef.current;
+      forcedRefreshUsedRef.current = true;
+      const latest = await refresh({ forceTokenRefresh });
+      const baseline = "baseline" in state ? state.baseline : null;
+      if (approvalGranted(latest, baseline, targetOwner)) {
+        setState({ status: "approved" });
+      }
+      return latest;
+    },
   };
 }
 
-function accessSignature(data: GitHubRepositoryAccess) {
-  return data.installations
+function accessSignature(data: GitHubRepositoryAccess, targetOwner?: string) {
+  const installations = targetOwner
+    ? data.installations.filter(
+        (installation) => installation.account.login.toLowerCase() === targetOwner.toLowerCase(),
+      )
+    : data.installations;
+  return installations
     .map((installation) =>
       [
         installation.id,
@@ -336,6 +413,32 @@ function accessSignature(data: GitHubRepositoryAccess) {
     )
     .sort()
     .join("|");
+}
+
+function approvalGranted(
+  data: GitHubRepositoryAccess | null,
+  baseline: string | null,
+  targetOwner?: string,
+) {
+  if (!data || baseline === null) return false;
+  if (targetOwner) {
+    return (
+      data.target?.owner.toLowerCase() === targetOwner.toLowerCase() &&
+      data.target.state === "available"
+    );
+  }
+  return accessSignature(data) !== baseline;
+}
+
+function accessErrorState(cause: unknown): AccessState {
+  return {
+    status: "error",
+    data: null,
+    error: {
+      message: cause instanceof Error ? cause.message : "GitHub access could not be checked.",
+      code: cause instanceof GitHubRepositoryAccessRequestError ? cause.code : null,
+    },
+  };
 }
 
 function permissionLabel(value: string) {

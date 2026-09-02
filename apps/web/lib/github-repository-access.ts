@@ -1,38 +1,48 @@
+import {
+  type ErrorEnvelope,
+  ErrorEnvelopeSchema,
+  type GitHubInstallationAccessDto,
+  type GitHubRepositoryAccessDto,
+  GitHubRepositoryAccessSchema,
+  type GitHubRepositoryAccessTargetDto,
+} from "@opencompany/protocol";
 import { CODEX_COMMAND_TOOL_NAME, USE_ACTION_TOOL_NAME } from "@/lib/chat-ui";
 
-export type GitHubRepositoryAccess = {
-  checkedAt: string;
-  installations: GitHubInstallationAccess[];
-  target: GitHubRepositoryAccessTarget | null;
+export type GitHubRepositoryAccess = GitHubRepositoryAccessDto;
+export type GitHubInstallationAccess = GitHubInstallationAccessDto;
+export type GitHubRepositoryAccessTarget = GitHubRepositoryAccessTargetDto;
+
+export class GitHubRepositoryAccessRequestError extends Error {
+  constructor(
+    readonly code: ErrorEnvelope["error"]["code"],
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = "GitHubRepositoryAccessRequestError";
+  }
+}
+
+const ACCESS_CACHE_TTL_MS = 5_000;
+
+type SharedAccessRequest = {
+  controller: AbortController;
+  consumers: number;
+  sequence: number;
+  settled: boolean;
+  promise: Promise<GitHubRepositoryAccess>;
 };
 
-export type GitHubInstallationAccess = {
-  id: string;
-  account: {
-    id: string;
-    login: string;
-    type: "Organization" | "User";
-    avatarUrl: string | null;
-    htmlUrl: string | null;
-  };
-  repositorySelection: "all" | "selected";
-  permissions: Record<string, string>;
-  pendingPermissions: string[];
-  suspendedAt: string | null;
-  repositories: Array<{
-    id: string;
-    name: string;
-    fullName: string;
-    private: boolean;
-    htmlUrl: string;
-  }>;
+type AccessCacheEntry = {
+  fetcher: typeof globalThis.fetch;
+  data: GitHubRepositoryAccess | null;
+  expiresAt: number;
+  latestDataSequence: number;
+  nextSequence: number;
+  requests: Map<"GET" | "POST", SharedAccessRequest>;
 };
 
-export type GitHubRepositoryAccessTarget = {
-  owner: string;
-  repo: string | null;
-  state: "available" | "missing_installation" | "missing_repository" | "suspended";
-};
+const accessCache = new Map<string, AccessCacheEntry>();
 
 type GitHubToolView = {
   name: string;
@@ -46,25 +56,109 @@ export async function fetchGitHubRepositoryAccess(input: {
   owner?: string;
   repo?: string;
   forceRefresh?: boolean;
+  bypassCache?: boolean;
   signal?: AbortSignal;
+}) {
+  const owner = input.owner?.trim() || null;
+  const repo = input.repo?.trim().replace(/\.git$/iu, "") || null;
+  if (repo && !owner) throw new Error("A GitHub repository check requires an owner.");
+
+  const fetcher = globalThis.fetch;
+  const cacheKey = owner?.toLowerCase() ?? "*";
+  let entry = accessCache.get(cacheKey);
+  if (entry && entry.fetcher !== fetcher) {
+    for (const request of entry.requests.values()) request.controller.abort();
+    accessCache.delete(cacheKey);
+    entry = undefined;
+  }
+  if (!entry) {
+    entry = {
+      fetcher,
+      data: null,
+      expiresAt: 0,
+      latestDataSequence: 0,
+      nextSequence: 0,
+      requests: new Map(),
+    };
+    accessCache.set(cacheKey, entry);
+  }
+
+  if (!input.forceRefresh && !input.bypassCache && entry.data && entry.expiresAt > Date.now()) {
+    input.signal?.throwIfAborted();
+    return withRepositoryTarget(entry.data, owner, repo);
+  }
+
+  const method = input.forceRefresh ? "POST" : "GET";
+  let request = entry.requests.get(method);
+  if (!request) {
+    const controller = new AbortController();
+    const promise = requestGitHubRepositoryAccess({
+      owner,
+      method,
+      fetcher,
+      signal: controller.signal,
+    });
+    request = {
+      controller,
+      consumers: 0,
+      sequence: entry.nextSequence + 1,
+      settled: false,
+      promise,
+    };
+    entry.nextSequence = request.sequence;
+    entry.requests.set(method, request);
+    const currentRequest = request;
+    void promise.then(
+      (data) => {
+        currentRequest.settled = true;
+        if (currentRequest.sequence >= entry.latestDataSequence) {
+          entry.data = data;
+          entry.expiresAt = Date.now() + ACCESS_CACHE_TTL_MS;
+          entry.latestDataSequence = currentRequest.sequence;
+        }
+        if (entry.requests.get(method) === currentRequest) entry.requests.delete(method);
+      },
+      () => {
+        currentRequest.settled = true;
+        if (entry.requests.get(method) === currentRequest) entry.requests.delete(method);
+      },
+    );
+  }
+
+  const data = await consumeSharedRequest(request, input.signal);
+  return withRepositoryTarget(data, owner, repo);
+}
+
+async function requestGitHubRepositoryAccess(input: {
+  owner: string | null;
+  method: "GET" | "POST";
+  fetcher: typeof globalThis.fetch;
+  signal: AbortSignal;
 }) {
   const search = new URLSearchParams();
   if (input.owner) search.set("owner", input.owner);
-  if (input.repo) search.set("repo", input.repo);
   const query = search.size > 0 ? `?${search.toString()}` : "";
-  const response = await fetch(`/api/integrations/github-user/installations${query}`, {
-    method: input.forceRefresh ? "POST" : "GET",
-    ...(input.signal ? { signal: input.signal } : {}),
+  const response = await input.fetcher(`/api/integrations/github-user/installations${query}`, {
+    method: input.method,
+    signal: input.signal,
   });
   const value = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
-    const message =
-      isRecord(value) && isRecord(value.error) && typeof value.error.message === "string"
-        ? value.error.message
-        : "GitHub repository access could not be checked.";
-    throw new Error(message);
+    const envelope = ErrorEnvelopeSchema.safeParse(value);
+    if (envelope.success) {
+      throw new GitHubRepositoryAccessRequestError(
+        envelope.data.error.code,
+        envelope.data.error.message,
+        envelope.data.error.retryable,
+      );
+    }
+    throw new GitHubRepositoryAccessRequestError(
+      "unavailable",
+      "GitHub repository access could not be checked.",
+      true,
+    );
   }
-  return parseGitHubRepositoryAccess(value);
+  return GitHubRepositoryAccessSchema.parse(value);
 }
 
 export function githubInstallGapCandidate(tool: GitHubToolView) {
@@ -73,11 +167,8 @@ export function githubInstallGapCandidate(tool: GitHubToolView) {
     if (!tool.input.action.startsWith("plugin:github:github.")) return null;
     if (!isRecord(tool.input.params)) return null;
     const output = isRecord(tool.output) ? tool.output : null;
-    const failed =
-      output?.ok === false || tool.status === "failed" || Boolean(tool.errorText?.trim());
-    const emptyResult =
-      output?.ok === true && Array.isArray(output.result) && output.result.length === 0;
-    if (!failed && !emptyResult) return null;
+    const failed = output?.ok === false || tool.status === "failed";
+    if (!failed) return null;
     return repositoryTarget(tool.input.params.owner, tool.input.params.repo);
   }
 
@@ -100,90 +191,59 @@ export function githubInstallStartHref(owner?: string, returnTo = "/") {
   return `/api/integrations/github-user/start?${search.toString()}`;
 }
 
-function parseGitHubRepositoryAccess(value: unknown): GitHubRepositoryAccess {
-  if (
-    !isRecord(value) ||
-    typeof value.checkedAt !== "string" ||
-    !Array.isArray(value.installations)
-  ) {
-    throw new Error("GitHub returned an invalid repository access response.");
-  }
-  const installations = value.installations.map(parseInstallation);
-  const target = value.target === null ? null : parseTarget(value.target);
-  return { checkedAt: value.checkedAt, installations, target };
+function consumeSharedRequest(request: SharedAccessRequest, signal?: AbortSignal) {
+  if (signal?.aborted) return Promise.reject(abortReason(signal));
+  request.consumers += 1;
+  return new Promise<GitHubRepositoryAccess>((resolve, reject) => {
+    let finished = false;
+    const finish = () => {
+      if (finished) return false;
+      finished = true;
+      signal?.removeEventListener("abort", onAbort);
+      request.consumers -= 1;
+      return true;
+    };
+    const onAbort = () => {
+      if (!finish()) return;
+      reject(abortReason(signal));
+      if (request.consumers === 0 && !request.settled) request.controller.abort();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    void request.promise.then(
+      (value) => {
+        if (finish()) resolve(value);
+      },
+      (error) => {
+        if (finish()) reject(error);
+      },
+    );
+  });
 }
 
-function parseInstallation(value: unknown): GitHubInstallationAccess {
-  if (
-    !isRecord(value) ||
-    typeof value.id !== "string" ||
-    !isRecord(value.account) ||
-    typeof value.account.id !== "string" ||
-    typeof value.account.login !== "string" ||
-    (value.account.type !== "Organization" && value.account.type !== "User") ||
-    (value.repositorySelection !== "all" && value.repositorySelection !== "selected") ||
-    !isRecord(value.permissions) ||
-    !Array.isArray(value.pendingPermissions) ||
-    !value.pendingPermissions.every((permission) => typeof permission === "string") ||
-    (value.suspendedAt !== null && typeof value.suspendedAt !== "string") ||
-    !Array.isArray(value.repositories)
-  ) {
-    throw new Error("GitHub returned an invalid installation access response.");
-  }
-  const permissions = Object.fromEntries(
-    Object.entries(value.permissions).flatMap(([key, entry]) =>
-      typeof entry === "string" ? [[key, entry]] : [],
-    ),
+function withRepositoryTarget(
+  data: GitHubRepositoryAccess,
+  owner: string | null,
+  repo: string | null,
+): GitHubRepositoryAccess {
+  if (!owner) return data;
+  const installation = data.installations.find(
+    (candidate) => candidate.account.login.toLowerCase() === owner.toLowerCase(),
   );
-  return {
-    id: value.id,
-    account: {
-      id: value.account.id,
-      login: value.account.login,
-      type: value.account.type,
-      avatarUrl: typeof value.account.avatarUrl === "string" ? value.account.avatarUrl : null,
-      htmlUrl: typeof value.account.htmlUrl === "string" ? value.account.htmlUrl : null,
-    },
-    repositorySelection: value.repositorySelection,
-    permissions,
-    pendingPermissions: value.pendingPermissions,
-    suspendedAt: value.suspendedAt,
-    repositories: value.repositories.map(parseRepository),
-  };
+  const state = !installation
+    ? "missing_installation"
+    : installation.suspendedAt
+      ? "suspended"
+      : repo &&
+          !installation.repositories.some(
+            (repository) => repository.name.toLowerCase() === repo.toLowerCase(),
+          )
+        ? "missing_repository"
+        : "available";
+  return { ...data, target: { owner, repo, state } };
 }
 
-function parseRepository(value: unknown): GitHubInstallationAccess["repositories"][number] {
-  if (
-    !isRecord(value) ||
-    typeof value.id !== "string" ||
-    typeof value.name !== "string" ||
-    typeof value.fullName !== "string" ||
-    typeof value.private !== "boolean" ||
-    typeof value.htmlUrl !== "string"
-  ) {
-    throw new Error("GitHub returned an invalid repository access response.");
-  }
-  return {
-    id: value.id,
-    name: value.name,
-    fullName: value.fullName,
-    private: value.private,
-    htmlUrl: value.htmlUrl,
-  };
-}
-
-function parseTarget(value: unknown): GitHubRepositoryAccessTarget {
-  if (
-    !isRecord(value) ||
-    typeof value.owner !== "string" ||
-    (value.repo !== null && typeof value.repo !== "string") ||
-    !["available", "missing_installation", "missing_repository", "suspended"].includes(
-      String(value.state),
-    )
-  ) {
-    throw new Error("GitHub returned an invalid repository access target.");
-  }
-  return value as GitHubRepositoryAccessTarget;
+function abortReason(signal?: AbortSignal) {
+  return signal?.reason ?? new DOMException("The request was aborted.", "AbortError");
 }
 
 function repositoryTarget(owner: unknown, repo: unknown) {
@@ -193,9 +253,8 @@ function repositoryTarget(owner: unknown, repo: unknown) {
 }
 
 function isGitHubAccessFailure(value: string) {
-  return /repository not found|could not read from remote repository|resource not accessible by integration|(?:github|api\.github\.com)[^\n]*\b403\b|\b403\b[^\n]*(?:github|api\.github\.com)/iu.test(
-    value,
-  );
+  if (/GH013|push protection|repository rules?|permission denied/iu.test(value)) return false;
+  return /resource not accessible by integration/iu.test(value);
 }
 
 function repositoryFromCommand(value: string) {

@@ -486,7 +486,7 @@ describe("MessageBubble assistant errors", () => {
       "GitHub App is not installed on opencompany",
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/integrations/github-user/installations?owner=opencompany&repo=private-repo",
+      "/api/integrations/github-user/installations?owner=opencompany",
       expect.objectContaining({ method: "GET" }),
     );
     expect(screen.getByRole("link", { name: "Add access" })).toHaveAttribute(
@@ -497,6 +497,36 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.getByTestId("github-install-gap")).toHaveTextContent(
       "Pending admin approval for opencompany",
     );
+  });
+
+  it("keeps private GitHub recovery controls out of shared transcripts", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const message: ChatUiMessage = {
+      id: "assistant_shared_github_gap",
+      role: "assistant",
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_shared_github_gap",
+          state: "output-available",
+          input: {
+            action: "plugin:github:github.pull_request_read",
+            params: { owner: "opencompany", repo: "private-repo", pullNumber: 12 },
+          },
+          output: {
+            ok: false,
+            action: "plugin:github:github.pull_request_read",
+            error: { code: "provider_error", message: "Resource not accessible by integration" },
+          },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} readOnly />);
+
+    expect(screen.queryByTestId("github-install-gap")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("presents plugin action labels and acting identity without changing the canonical id", async () => {
@@ -990,7 +1020,7 @@ describe("MessageBubble Codex interactions", () => {
           output: {
             status: "failed",
             exitCode: 128,
-            outputPreview: "remote: Repository not found.",
+            outputPreview: "remote: Resource not accessible by integration",
           },
         } as ChatUiMessage["parts"][number],
       ],

@@ -1,13 +1,17 @@
+import { ExpiringOAuthReauthRequired } from "@opencompany/agent/integrations/expiring-oauth-access-token";
 import {
   createGitHubUserIntegrationState,
   exchangeGitHubAppUserCode,
   fetchGitHubUserIdentity,
+  GitHubUserAccessAuthError,
+  GitHubUserAccessRateLimitError,
   listGitHubUserRepositoryAccess,
   resolveGitHubUserInstallTarget,
   verifyGitHubAppUserInstallation,
 } from "@opencompany/agent/integrations/github-user";
 import { connectGitHubUserIntegration } from "@opencompany/db/integrations";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
+import { PROTOCOL_VERSION } from "@opencompany/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
 import { createGitHubUserIngress } from "./github-user-ingress";
@@ -135,12 +139,14 @@ describe("GitHub user ingress", () => {
       new Request(
         "https://api.example.com/integrations/github-user/installations?owner=opencompany&repo=private-repo",
       ),
+      "request_access_1",
     );
     const refreshed = await service.installations(
       new Request(
         "https://api.example.com/integrations/github-user/installations?owner=opencompany&repo=private-repo",
         { method: "POST" },
       ),
+      "request_access_2",
     );
 
     expect(response.status).toBe(200);
@@ -166,6 +172,52 @@ describe("GitHub user ingress", () => {
         db,
       }),
     );
+  });
+
+  it.each([
+    new GitHubUserAccessAuthError("GitHub rejected the credential."),
+    new ExpiringOAuthReauthRequired("Refresh expired.", "Reconnect GitHub."),
+  ])("returns a canonical reconnect response for %s", async (error) => {
+    vi.mocked(listGitHubUserRepositoryAccess).mockRejectedValueOnce(error);
+
+    const response = await ingress().installations(
+      new Request("https://api.example.com/integrations/github-user/installations"),
+      "request_reconnect",
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "authentication_required",
+        message: "Reconnect GitHub in Settings to inspect repository access.",
+        requestId: "request_reconnect",
+        retryable: false,
+      },
+      meta: { apiVersion: "v1", protocolVersion: PROTOCOL_VERSION },
+    });
+  });
+
+  it("returns a retryable rate-limit envelope without misclassifying it as auth", async () => {
+    vi.mocked(listGitHubUserRepositoryAccess).mockRejectedValueOnce(
+      new GitHubUserAccessRateLimitError("rate limited", 30),
+    );
+
+    const response = await ingress().installations(
+      new Request("https://api.example.com/integrations/github-user/installations"),
+      "request_rate_limit",
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("30");
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "rate_limited",
+        requestId: "request_rate_limit",
+        retryable: true,
+      },
+      meta: { apiVersion: "v1", protocolVersion: PROTOCOL_VERSION },
+    });
   });
 
   it("redirects anonymous users to sign in", async () => {

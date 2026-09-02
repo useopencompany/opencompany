@@ -25,6 +25,7 @@ import {
   exchangeGitHubAppUserCode,
   fetchGitHubUserIdentity,
   GitHubUserAccessAuthError,
+  GitHubUserAccessRateLimitError,
   getGitHubUserAccessToken,
   isGitHubUserIntegrationConfigured,
   listGitHubUserRepositoryAccess,
@@ -282,6 +283,46 @@ describe("GitHub user integration", () => {
         repo: "private-repo",
         state: "missing_installation",
       },
+    });
+  });
+
+  it.each([401, 403])("requires reconnection when the access API returns %i", async (status) => {
+    mocks.loadCredential.mockResolvedValue({
+      ...storedCredential(),
+      expiresAt: new Date("2026-09-01T13:00:00.000Z"),
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ message: "Bad credentials" }, { status }),
+    );
+
+    await expect(
+      listGitHubUserRepositoryAccess({ ...connection, owner: "opencompany", now }),
+    ).rejects.toBeInstanceOf(GitHubUserAccessAuthError);
+  });
+
+  it("distinguishes a GitHub rate-limit 403 from expired authorization", async () => {
+    mocks.loadCredential.mockResolvedValue({
+      ...storedCredential(),
+      expiresAt: new Date("2026-09-01T13:00:00.000Z"),
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        { message: "API rate limit exceeded" },
+        {
+          status: 403,
+          headers: {
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": String(now.getTime() / 1_000 + 60),
+          },
+        },
+      ),
+    );
+
+    await expect(
+      listGitHubUserRepositoryAccess({ ...connection, owner: "opencompany", now }),
+    ).rejects.toMatchObject({
+      name: "GitHubUserAccessRateLimitError",
+      retryAfterSeconds: 60,
     });
   });
 

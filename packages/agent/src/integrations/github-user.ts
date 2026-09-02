@@ -6,6 +6,12 @@ import {
   loadIntegrationCredential,
 } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/product-schema";
+import type {
+  GitHubInstallationAccessDto,
+  GitHubRepositoryAccessDto,
+  GitHubRepositoryAccessItemDto,
+  GitHubRepositoryAccessTargetDto,
+} from "@opencompany/protocol";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import {
@@ -71,46 +77,25 @@ export type GitHubUserAccessConnection = {
   integrationId: string;
 };
 
-export type GitHubUserRepositoryAccess = {
-  checkedAt: string;
-  installations: GitHubUserInstallationAccess[];
-  target: GitHubUserRepositoryAccessTarget | null;
-};
-
-export type GitHubUserInstallationAccess = {
-  id: string;
-  account: {
-    id: string;
-    login: string;
-    type: "Organization" | "User";
-    avatarUrl: string | null;
-    htmlUrl: string | null;
-  };
-  repositorySelection: "all" | "selected";
-  permissions: Record<string, string>;
-  pendingPermissions: string[];
-  suspendedAt: string | null;
-  repositories: GitHubUserRepositoryAccessItem[];
-};
-
-export type GitHubUserRepositoryAccessItem = {
-  id: string;
-  name: string;
-  fullName: string;
-  private: boolean;
-  htmlUrl: string;
-};
-
-export type GitHubUserRepositoryAccessTarget = {
-  owner: string;
-  repo: string | null;
-  state: "available" | "missing_installation" | "missing_repository" | "suspended";
-};
+export type GitHubUserRepositoryAccess = GitHubRepositoryAccessDto;
+export type GitHubUserInstallationAccess = GitHubInstallationAccessDto;
+export type GitHubUserRepositoryAccessItem = GitHubRepositoryAccessItemDto;
+export type GitHubUserRepositoryAccessTarget = GitHubRepositoryAccessTargetDto;
 
 export class GitHubUserAccessAuthError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "GitHubUserAccessAuthError";
+  }
+}
+
+export class GitHubUserAccessRateLimitError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterSeconds: number | null,
+  ) {
+    super(message);
+    this.name = "GitHubUserAccessRateLimitError";
   }
 }
 
@@ -318,9 +303,7 @@ export async function resolveGitHubUserInstallTarget(input: {
       signal: input.signal ?? null,
     },
   );
-  if (!response.ok) {
-    throw new Error(`GitHub account lookup failed with ${response.status}.`);
-  }
+  await assertGitHubUserAccessResponse(response, "account lookup");
   const value = await responseJson(response);
   const id = readId(value.id);
   const login = readString(value.login);
@@ -646,15 +629,58 @@ async function fetchAllGitHubPages<T>(input: {
       headers: githubApiHeaders(input.accessToken),
       signal: input.signal ?? null,
     });
-    if (!response.ok) {
-      throw new Error(`GitHub repository access lookup failed with ${response.status}.`);
-    }
+    await assertGitHubUserAccessResponse(response, "repository access lookup");
     const parsed = input.readPage(await responseJson(response));
     items.push(...parsed.items);
     if (items.length >= parsed.totalCount || parsed.items.length < GITHUB_API_PAGE_SIZE)
       return items;
   }
   throw new Error("GitHub repository access lookup exceeded the pagination limit.");
+}
+
+async function assertGitHubUserAccessResponse(response: Response, operation: string) {
+  if (response.ok) return;
+  const providerMessage = await githubErrorMessage(response);
+  if (isGitHubRateLimited(response, providerMessage)) {
+    throw new GitHubUserAccessRateLimitError(
+      "GitHub temporarily rate-limited the repository access check.",
+      githubRetryAfterSeconds(response),
+    );
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new GitHubUserAccessAuthError(
+      `GitHub authorization no longer permits this ${operation}. Reconnect GitHub in Settings.`,
+    );
+  }
+  throw new Error(`GitHub ${operation} failed with ${response.status}.`);
+}
+
+function isGitHubRateLimited(response: Response, providerMessage: string | null) {
+  return (
+    response.status === 429 ||
+    (response.status === 403 &&
+      (response.headers.get("x-ratelimit-remaining") === "0" ||
+        response.headers.has("retry-after") ||
+        /(?:secondary |api )?rate limit/iu.test(providerMessage ?? "")))
+  );
+}
+
+async function githubErrorMessage(response: Response) {
+  try {
+    const value = (await response.json()) as unknown;
+    return isRecord(value) ? readString(value.message) : null;
+  } catch {
+    return null;
+  }
+}
+
+function githubRetryAfterSeconds(response: Response) {
+  const retryAfter = Number(response.headers.get("retry-after"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.ceil(retryAfter);
+
+  const resetAt = Number(response.headers.get("x-ratelimit-reset"));
+  if (!Number.isFinite(resetAt) || resetAt <= 0) return null;
+  return Math.max(1, Math.ceil(resetAt - Date.now() / 1_000));
 }
 
 function parseInstallationsPage(value: Record<string, unknown>) {

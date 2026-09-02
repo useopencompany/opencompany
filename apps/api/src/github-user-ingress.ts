@@ -1,5 +1,6 @@
 import { getAppUrl } from "@opencompany/agent/app-url";
 import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
+import { ExpiringOAuthReauthRequired } from "@opencompany/agent/integrations/expiring-oauth-access-token";
 import {
   appendGitHubUserIntegrationStatus,
   buildGitHubUserInstallUrl,
@@ -7,6 +8,7 @@ import {
   exchangeGitHubAppUserCode,
   fetchGitHubUserIdentity,
   GitHubUserAccessAuthError,
+  GitHubUserAccessRateLimitError,
   isGitHubUserIntegrationConfigured,
   listGitHubUserRepositoryAccess,
   resolveGitHubUserInstallTarget,
@@ -16,6 +18,7 @@ import {
 import { connectGitHubUserIntegration } from "@opencompany/db/integrations";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
+import { ApiError, errorResponse } from "./errors";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "github-user-ingress" });
@@ -25,7 +28,7 @@ type DbLike = any;
 export type GitHubUserIngressService = {
   start(request: Request): Promise<Response>;
   callback(request: Request): Promise<Response>;
-  installations(request: Request): Promise<Response>;
+  installations(request: Request, requestId: string): Promise<Response>;
 };
 
 type RefreshPluginRegistrations = (input: {
@@ -43,7 +46,7 @@ export function createGitHubUserIngress(input: GitHubUserIngressInput): GitHubUs
   return {
     start: (request) => handleStart(input, request),
     callback: (request) => handleCallback(input, request),
-    installations: (request) => handleInstallations(input, request),
+    installations: (request, requestId) => handleInstallations(input, request, requestId),
   };
 }
 
@@ -87,6 +90,7 @@ async function handleStart(input: GitHubUserIngressInput, request: Request): Pro
 async function handleInstallations(
   input: GitHubUserIngressInput,
   request: Request,
+  requestId: string,
 ): Promise<Response> {
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
@@ -106,26 +110,40 @@ async function handleInstallations(
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {
-    const reconnectRequired = error instanceof GitHubUserAccessAuthError;
+    const reconnectRequired =
+      error instanceof GitHubUserAccessAuthError || error instanceof ExpiringOAuthReauthRequired;
+    const rateLimited = error instanceof GitHubUserAccessRateLimitError;
     logger.warn("GitHub repository access lookup failed", {
       event: "opencompany.github_user_repository_access_failed",
       reconnect_required: reconnectRequired,
+      rate_limited: rateLimited,
       error_message: error instanceof Error ? error.message : String(error),
     });
-    return Response.json(
-      {
-        error: {
-          code: reconnectRequired ? "github_reconnect_required" : "github_access_unavailable",
-          message: reconnectRequired
-            ? "Reconnect GitHub in Settings to inspect repository access."
-            : "GitHub repository access could not be checked. Try again.",
-        },
-      },
-      {
-        status: reconnectRequired ? 409 : 502,
-        headers: { "Cache-Control": "private, no-store" },
-      },
-    );
+    const apiError = reconnectRequired
+      ? new ApiError(
+          409,
+          "authentication_required",
+          "Reconnect GitHub in Settings to inspect repository access.",
+        )
+      : rateLimited
+        ? new ApiError(
+            429,
+            "rate_limited",
+            "GitHub temporarily rate-limited the repository access check. Try again later.",
+            true,
+            error.retryAfterSeconds
+              ? { "Retry-After": String(error.retryAfterSeconds) }
+              : undefined,
+          )
+        : new ApiError(
+            503,
+            "unavailable",
+            "GitHub repository access could not be checked. Try again.",
+            true,
+          );
+    const response = errorResponse(apiError, requestId);
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
   }
 }
 

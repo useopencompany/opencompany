@@ -72,8 +72,9 @@ with that personal connection, its MCP tools replace the legacy `github.search_i
 the catalog never presents two GitHub issue-search paths. Plugin settings read the user token's
 reachable App installations and repositories from GitHub. A tool or sandbox git failure that is
 confirmed outside that intersection links back through the combined install-and-authorize flow;
-the client refreshes the expiring user token and polls installation access instead of depending on
-GitHub's setup redirect, which can omit OAuth state for an existing installation.
+the client uses bounded, backoff polling with ordinary access reads instead of depending on
+GitHub's setup redirect, which can omit OAuth state for an existing installation. An explicit
+re-check may refresh the expiring user token once per install attempt.
 
 ## Ownership rules
 

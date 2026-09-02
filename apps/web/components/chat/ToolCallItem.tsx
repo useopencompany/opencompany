@@ -78,6 +78,9 @@ export function ToolCallItem({
   detail?: HistoricalPresentationDetailController;
 }) {
   if (detail && detail.state !== "loaded") return <ToolCallRow tool={tool} detail={detail} />;
+  // Shared transcripts are intentionally observational: repository recovery
+  // acts on the signed-in viewer's private GitHub connection, so only an
+  // editable conversation may render those controls.
   if (readOnly) return <ToolCallRow tool={tool} {...(detail ? { detail } : {})} />;
 
   if (tool.name === BRAIN_TOOL_NAME) {
