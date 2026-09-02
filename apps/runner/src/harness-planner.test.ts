@@ -74,6 +74,23 @@ describe("runner GitHub planning context", () => {
     ]);
     expect(githubMocks.listGitHubUserRepositoryNames).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["personal credential refresh", authMocks.loadGitHubUserAuthForUser],
+    ["GitHub repository listing", githubMocks.listGitHubUserRepositoryNames],
+  ])("keeps legacy repositories when %s fails", async (_failure, failingMock) => {
+    dbMocks.rows.push([{ name: "opencompany/app" }]);
+    authMocks.loadGitHubUserAuthForUser.mockResolvedValue({
+      githubToken: "ghu_personal",
+      githubAuthHeader: "Authorization: Basic encoded",
+      provider: "github_user",
+    });
+    failingMock.mockRejectedValueOnce(new Error("temporary GitHub failure"));
+
+    await expect(getAvailableGitHubRepositoryNamesForRunner("user_1")).resolves.toEqual([
+      "opencompany/app",
+    ]);
+  });
 });
 
 function queryBuilder() {

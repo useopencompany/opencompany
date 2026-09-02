@@ -1,9 +1,12 @@
 import type { TaskToolName } from "@opencompany/db/product-schema";
 import { integrationResources, integrations } from "@opencompany/db/product-schema";
+import { createLogger } from "@opencompany/observability";
 import { and, eq, inArray } from "drizzle-orm";
 import { loadGitHubUserAuthForUser } from "./coding-agent-shared";
 import { getDb } from "./db";
 import { listGitHubUserRepositoryNames } from "./github";
+
+const logger = createLogger({ service: "opencompany-runner", runtime: "harness-planner" });
 
 const TOOL_PROVIDER_MAP: Record<string, TaskToolName[]> = {
   gmail: ["gmail_search", "gmail_get_message", "gmail_list_threads", "gmail_get_thread"],
@@ -100,7 +103,7 @@ export async function getHarnessPlannerContextForRunner(
 export async function getAvailableGitHubRepositoryNamesForRunner(
   userWorkosId: string,
 ): Promise<string[]> {
-  const [rows, personalAuth] = await Promise.all([
+  const [rows, personalNames] = await Promise.all([
     getDb()
       .select({ name: integrationResources.name })
       .from(integrationResources)
@@ -123,11 +126,8 @@ export async function getAvailableGitHubRepositoryNamesForRunner(
         ),
       )
       .orderBy(integrationResources.name),
-    loadGitHubUserAuthForUser(userWorkosId),
+    loadGitHubUserRepositoryNamesBestEffort(userWorkosId),
   ]);
-  const personalNames = personalAuth
-    ? await listGitHubUserRepositoryNames({ accessToken: personalAuth.githubToken })
-    : [];
 
   return [
     ...new Set(
@@ -136,4 +136,20 @@ export async function getAvailableGitHubRepositoryNamesForRunner(
       ),
     ),
   ];
+}
+
+async function loadGitHubUserRepositoryNamesBestEffort(userWorkosId: string) {
+  try {
+    const personalAuth = await loadGitHubUserAuthForUser(userWorkosId);
+    return personalAuth
+      ? await listGitHubUserRepositoryNames({ accessToken: personalAuth.githubToken })
+      : [];
+  } catch (error) {
+    logger.warn("Personal GitHub repository discovery failed; continuing without it", {
+      event: "opencompany.goat_github_user_repository_discovery_failed",
+      user_workos_id: userWorkosId,
+      error_name: error instanceof Error ? error.name : typeof error,
+    });
+    return [];
+  }
 }

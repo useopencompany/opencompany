@@ -1,3 +1,4 @@
+import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   CODEX_COMMAND_TOOL_PART_TYPE,
@@ -54,6 +55,7 @@ const pluginMcpMocks = vi.hoisted(() => ({
   stopPluginMcpProcesses: vi.fn(),
 }));
 const eventMocks = vi.hoisted(() => ({
+  appendNotice: vi.fn(async () => undefined),
   createExternalEngineProjector: vi.fn(),
   loadCodexChatAssistantMessageParts: vi.fn(),
 }));
@@ -102,6 +104,10 @@ vi.mock("./codex-cli", () => ({
 }));
 
 vi.mock("./coding-agent-shared", () => ({
+  GITHUB_RECONNECT_NOTICE:
+    "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+  GITHUB_UNAVAILABLE_NOTICE:
+    "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
   buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
   gitAuthHeader: (token: string) => `Authorization: Basic ${token}`,
@@ -463,6 +469,7 @@ describe("runCodexChatTurn over ACP", () => {
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
     eventMocks.createExternalEngineProjector.mockImplementation(
       (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
+        appendNotice: eventMocks.appendNotice,
         push: vi.fn(async (events: Record<string, unknown>[]) => {
           for (const event of events) input.normalizeEvent?.(event);
         }),
@@ -549,6 +556,32 @@ describe("runCodexChatTurn over ACP", () => {
       attemptId: "attempt_1",
       leaseId: "lease_1",
     });
+  });
+
+  it.each([
+    [
+      "a personal credential that needs reconnecting",
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+      "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+    ],
+    [
+      "a transient refresh failure",
+      new Error("GitHub token refresh failed with 503."),
+      "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
+    ],
+  ])("continues without GitHub auth after %s", async (_case, error, notice) => {
+    githubAuthMocks.loadGitHubAuthForUser.mockRejectedValueOnce(error);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(eventMocks.appendNotice).toHaveBeenCalledWith(notice);
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
   });
 
   it("sends current-turn images as standard ACP prompt blocks", async () => {

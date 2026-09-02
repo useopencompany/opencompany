@@ -237,10 +237,10 @@ export async function listGitHubUserRepositoryNames(input: {
   accessToken: string;
   signal?: AbortSignal;
 }): Promise<string[]> {
+  const pageCap = 10;
   const names = new Set<string>();
-  let page = 1;
 
-  while (true) {
+  for (let page = 1; page <= pageCap; page += 1) {
     const url = new URL("https://api.github.com/user/repos");
     url.searchParams.set("per_page", "100");
     url.searchParams.set("page", String(page));
@@ -271,7 +271,6 @@ export async function listGitHubUserRepositoryNames(input: {
       }
     }
     if (payload.length < 100) break;
-    page += 1;
   }
 
   return [...names].sort((left, right) => left.localeCompare(right));

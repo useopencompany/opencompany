@@ -422,6 +422,25 @@ describe("createExternalEngineProjector", () => {
     );
   });
 
+  it("persists a user-visible turn notice once", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const projector = createExternalEngineProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+    });
+
+    await projector.appendNotice("GitHub needs reconnecting.");
+    await projector.appendNotice("GitHub needs reconnecting.");
+
+    expect(mocks.execute).toHaveBeenCalledOnce();
+    const [query] = mocks.execute.mock.calls[0] ?? [];
+    expect(sqlText(query)).toContain("UPDATE goat.chat_messages AS message");
+    expect(queryValues(query)).toContainEqual(
+      expect.stringContaining("GitHub needs reconnecting."),
+    );
+  });
+
   it("persists Codex ACP MCP arguments and results in the durable tool part", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const normalizer = createAcpEventNormalizer({ engineName: "Codex" });

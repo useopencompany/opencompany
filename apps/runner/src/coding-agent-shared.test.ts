@@ -20,6 +20,12 @@ const queryBuilder = {
 Object.assign(dbMocks.db, queryBuilder);
 
 vi.mock("@opencompany/agent/integrations/github-user", () => ({
+  GitHubUserAccessAuthError: class GitHubUserAccessAuthError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "GitHubUserAccessAuthError";
+    }
+  },
   getGitHubUserAccessToken: githubUserMocks.getAccessToken,
   loadGitHubUserIntegration: githubUserMocks.loadIntegration,
 }));
@@ -48,6 +54,9 @@ describe("GitHub sandbox auth", () => {
     githubUserMocks.loadIntegration.mockResolvedValue({
       id: "integration_personal",
       status: "connected",
+      connectionLabel: "@octocat",
+      accountName: "The Octocat",
+      accountEmail: "octocat@github.com",
     });
     githubUserMocks.getAccessToken.mockResolvedValue("ghu_personal");
 
@@ -57,7 +66,12 @@ describe("GitHub sandbox auth", () => {
       { userWorkosId: "user_1", integrationId: "integration_personal" },
       { db: dbMocks.db },
     );
-    expect(auth).toMatchObject({ githubToken: "ghu_personal", provider: "github_user" });
+    expect(auth).toMatchObject({
+      githubToken: "ghu_personal",
+      provider: "github_user",
+      gitAuthorName: "The Octocat",
+      gitAuthorEmail: "octocat@github.com",
+    });
     expect(decodeGitAuthHeader(auth?.githubAuthHeader)).toBe("x-access-token:ghu_personal");
     expect(githubWorkMocks.getInstallationToken).not.toHaveBeenCalled();
   });
@@ -97,12 +111,27 @@ describe("GitHub sandbox auth", () => {
     expect(githubUserMocks.getAccessToken).not.toHaveBeenCalled();
   });
 
+  it("does not fall back to the workspace App when personal GitHub needs reauthorization", async () => {
+    githubUserMocks.loadIntegration.mockResolvedValue({
+      id: "integration_personal",
+      status: "needs_reauth",
+    });
+    dbMocks.legacyRows = [{ installationId: "installation_legacy" }];
+
+    await expect(loadGitHubAuthForUser("user_1")).rejects.toMatchObject({
+      name: "GitHubUserAccessAuthError",
+    });
+    expect(githubWorkMocks.getInstallationToken).not.toHaveBeenCalled();
+  });
+
   it("injects the personal token into gh and git through the existing environment contract", () => {
     const env = buildGitHubCommandEnv({
       githubAuthHeader: "Authorization: Basic encoded-personal-token",
       githubToken: "ghu_personal",
       repositoryFullName: "opencompany/app",
       toolCallId: "turn/unsafe",
+      gitAuthorName: "The Octocat",
+      gitAuthorEmail: "octocat@github.com",
     });
 
     expect(env).toMatchObject({
@@ -110,6 +139,26 @@ describe("GitHub sandbox auth", () => {
       GH_REPO: "opencompany/app",
       GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
       GIT_CONFIG_VALUE_0: "Authorization: Basic encoded-personal-token",
+      GIT_AUTHOR_NAME: "The Octocat",
+      GIT_AUTHOR_EMAIL: "octocat@github.com",
+      GIT_COMMITTER_NAME: "The Octocat",
+      GIT_COMMITTER_EMAIL: "octocat@github.com",
+    });
+  });
+
+  it("uses a sanitized GitHub no-reply identity when the account email is private", async () => {
+    githubUserMocks.loadIntegration.mockResolvedValue({
+      id: "integration_personal",
+      status: "connected",
+      connectionLabel: "@octocat",
+      accountName: "The\nOctocat",
+      accountEmail: null,
+    });
+    githubUserMocks.getAccessToken.mockResolvedValue("ghu_personal");
+
+    await expect(loadGitHubAuthForUser("user_1")).resolves.toMatchObject({
+      gitAuthorName: "The Octocat",
+      gitAuthorEmail: "octocat@users.noreply.github.com",
     });
   });
 });

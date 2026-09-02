@@ -309,6 +309,22 @@ describe("GitHub personal repository listing", () => {
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain("page=2");
   });
 
+  it("caps pagination and returns the repositories collected so far", async () => {
+    const fullPage = Array.from({ length: 100 }, (_, index) => ({
+      full_name: `owner/repo-${String(index).padStart(3, "0")}`,
+    }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json(fullPage),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      listGitHubUserRepositoryNames({ accessToken: "ghu_personal" }),
+    ).resolves.toHaveLength(100);
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(String(fetchMock.mock.calls[9]?.[0])).toContain("page=10");
+  });
+
   it("fails without including the credential when GitHub rejects the listing", async () => {
     vi.stubGlobal(
       "fetch",
