@@ -101,6 +101,7 @@ type RemoteMcpClient = {
     arguments?: Record<string, unknown>;
     options?: { signal?: AbortSignal };
   }): Promise<unknown>;
+  toolsFromDefinitions(input: { tools: RemoteToolDefinition[] }): unknown;
   close(): Promise<void>;
 };
 
@@ -426,6 +427,10 @@ async function executeRemoteMcpTool(input: {
     clientConfig(input.registration.server, connection.authProvider),
   );
   try {
+    // Execution clients do not call tools/list because the gateway serves its persisted discovery
+    // snapshot. Preload the selected definition so @ai-sdk/mcp can honor transport metadata such
+    // as x-mcp-header and mirror structured arguments into request-specific Mcp-Param-* headers.
+    client.toolsFromDefinitions({ tools: [input.definition] });
     await input.dependencies.recordDispatch({
       operation: "tools/call",
       actingAgent: input.context.sourceEngine ?? "opencompany",

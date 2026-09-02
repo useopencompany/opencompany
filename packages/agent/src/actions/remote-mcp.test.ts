@@ -1,9 +1,11 @@
-import type { OAuthClientProvider } from "@ai-sdk/mcp";
+import { createMCPClient, type OAuthClientProvider } from "@ai-sdk/mcp";
 import type { PluginGatewayDiscoveredTool } from "@opencompany/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createRemoteMcpStaticBearerAuthProvider } from "../integrations/remote-mcp-static-bearer";
 import {
   classifyRemoteTool,
   discoverRemoteMcpSnapshot,
+  type RemoteMcpGatewayDependencies,
   type RemoteMcpGatewayRegistration,
   resolveRemoteMcpActions,
 } from "./remote-mcp";
@@ -117,6 +119,7 @@ function client(input: {
   return {
     listTools: vi.fn(async () => pages.shift() ?? { tools: [] }),
     callTool: vi.fn(async () => input.result ?? { content: [{ type: "text", text: "{}" }] }),
+    toolsFromDefinitions: vi.fn(() => ({})),
     close: vi.fn(async () => {}),
   };
 }
@@ -315,6 +318,14 @@ describe("resolveRemoteMcpActions", () => {
     expect(loadConnection).toHaveBeenCalledOnce();
     expect(createClient).toHaveBeenCalledOnce();
     expect(execution.listTools).not.toHaveBeenCalled();
+    expect(execution.toolsFromDefinitions).toHaveBeenCalledWith({
+      tools: [
+        expect.objectContaining({
+          name: "list_issues",
+          inputSchema: { type: "object" },
+        }),
+      ],
+    });
     expect(execution.callTool).toHaveBeenCalledWith({
       name: "list_issues",
       arguments: { team: "Platform" },
@@ -332,6 +343,121 @@ describe("resolveRemoteMcpActions", () => {
       turnId: "turn_1",
       toolCallId: "tool_call_1",
     });
+  });
+
+  it("forwards GitHub owner and repo arguments as modern MCP request headers", async () => {
+    type JsonRpcRequest = Record<string, unknown> & {
+      id: string | number;
+      method: string;
+    };
+    const requests: Array<{ message: JsonRpcRequest; headers: Headers }> = [];
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const message = JSON.parse(String(init?.body)) as JsonRpcRequest;
+      requests.push({ message, headers: new Headers(init?.headers) });
+
+      const result =
+        message.method === "server/discover"
+          ? {
+              resultType: "complete",
+              supportedVersions: ["2026-07-28"],
+              capabilities: { tools: {} },
+            }
+          : {
+              resultType: "complete",
+              content: [{ type: "text", text: '{"ok":true}' }],
+            };
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const githubAuthProvider = createRemoteMcpStaticBearerAuthProvider({
+      accessToken: "github-user-token",
+      onAuthorizationRequired: () => {
+        throw new Error("authorization required");
+      },
+    });
+    const githubState = {
+      connected: true,
+      integrationId: "gint_github_1",
+      capabilityModes: {},
+      toolModes: {},
+    };
+    const githubRegistration = registration({
+      source: "plugin:github:github",
+      connectionProvider: "github_user",
+      label: "GitHub",
+      server: {
+        name: "github",
+        type: "streamable-http",
+        url: "https://api.githubcopilot.test/mcp/",
+        headers: {},
+      },
+      discoverySnapshot: [
+        discoveredTool("list_pull_requests", {
+          inputSchema: {
+            type: "object",
+            properties: {
+              owner: { type: "string", "x-mcp-header": "owner" },
+              repo: { type: "string", "x-mcp-header": "repo" },
+            },
+            required: ["owner", "repo"],
+          },
+        }),
+        discoveredTool("get_file_contents", {
+          inputSchema: {
+            type: "object",
+            properties: {
+              owner: { type: "string", "x-mcp-header": "owner" },
+              repo: { type: "string", "x-mcp-header": "repo" },
+              path: { type: "string" },
+            },
+            required: ["owner", "repo", "path"],
+          },
+        }),
+      ],
+      getState: vi.fn(async () => githubState),
+      loadConnection: vi.fn(async () => ({
+        ok: true as const,
+        integrationId: githubState.integrationId,
+        authProvider: githubAuthProvider,
+      })),
+    });
+    const createClient = (async (config: Parameters<typeof createMCPClient>[0]) =>
+      await createMCPClient({
+        ...config,
+        transport: { ...config.transport, fetch: fetchMock },
+      })) as RemoteMcpGatewayDependencies["createClient"];
+    const catalog = await resolveRemoteMcpActions(identity, githubRegistration, {
+      createClient,
+      recordDispatch: vi.fn(async () => {}),
+    });
+
+    await expect(
+      catalog?.actions
+        .find((action) => action.id.endsWith(".list_pull_requests"))
+        ?.execute({ owner: "useopencompany", repo: "opencompany-experimental" }, context),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      catalog?.actions
+        .find((action) => action.id.endsWith(".get_file_contents"))
+        ?.execute(
+          { owner: "useopencompany", repo: "opencompany-experimental", path: "README.md" },
+          context,
+        ),
+    ).resolves.toEqual({ ok: true });
+
+    const toolCalls = requests.filter(({ message }) => message.method === "tools/call");
+    expect(toolCalls).toHaveLength(2);
+    for (const { headers } of toolCalls) {
+      expect(headers.get("Mcp-Method")).toBe("tools/call");
+      expect(headers.get("Mcp-Param-owner")).toBe("useopencompany");
+      expect(headers.get("Mcp-Param-repo")).toBe("opencompany-experimental");
+      expect(headers.get("Mcp-Param-path")).toBeNull();
+    }
+    expect(toolCalls.map(({ headers }) => headers.get("Mcp-Name"))).toEqual([
+      "list_pull_requests",
+      "get_file_contents",
+    ]);
   });
 
   it("rechecks capability mode and the plugin kill switch before loading credentials", async () => {
