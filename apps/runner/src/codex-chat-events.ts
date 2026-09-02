@@ -502,6 +502,18 @@ export function createExternalEngineProjector(input: {
   };
 
   return {
+    appendNotice(text: string) {
+      return serializeProjection(async () => {
+        const notice = text.trim();
+        if (!notice || parts.some((part) => part.type === "text" && part.text === notice)) return;
+        parts = [
+          ...parts,
+          { type: "text", text: notice, itemId: "opencompany-github-auth-notice" },
+        ];
+        await syncAssistantMessage({ error: turnError, force: true });
+      });
+    },
+
     push(rawEvents: Record<string, unknown>[]) {
       return serializeProjection(async () => {
         for (const raw of rawEvents) {

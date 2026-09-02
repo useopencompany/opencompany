@@ -1,5 +1,8 @@
 import { createSign } from "node:crypto";
 import { hasGhApiRequestBody, readGhApiMethod } from "@opencompany/agent-runtime";
+import { createLogger } from "@opencompany/observability";
+
+const logger = createLogger({ service: "opencompany-runner", runtime: "github" });
 
 type InstallationToken = {
   token: string;
@@ -237,10 +240,10 @@ export async function listGitHubUserRepositoryNames(input: {
   accessToken: string;
   signal?: AbortSignal;
 }): Promise<string[]> {
+  const pageCap = 10;
   const names = new Set<string>();
-  let page = 1;
 
-  while (true) {
+  for (let page = 1; page <= pageCap; page += 1) {
     const url = new URL("https://api.github.com/user/repos");
     url.searchParams.set("per_page", "100");
     url.searchParams.set("page", String(page));
@@ -271,7 +274,13 @@ export async function listGitHubUserRepositoryNames(input: {
       }
     }
     if (payload.length < 100) break;
-    page += 1;
+    if (page === pageCap) {
+      logger.warn("GitHub personal repository listing reached its pagination cap", {
+        event: "opencompany.github_user_repository_listing_truncated",
+        page_cap: pageCap,
+        repository_count: names.size,
+      });
+    }
   }
 
   return [...names].sort((left, right) => left.localeCompare(right));
