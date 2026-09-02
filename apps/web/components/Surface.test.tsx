@@ -2579,6 +2579,36 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByRole("button", { name: "Share Claude Code chat" })).toBeInTheDocument();
   });
 
+  it("keeps a reloaded Claude session on its persisted model for the next turn", async () => {
+    const user = userEvent.setup();
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        claudeCodeConnected
+        initialChat={{
+          id: "chat_claude_fable",
+          title: "Fable session",
+          model: "anthropic/claude-fable-5",
+          engine: "claude_code",
+          messages: [],
+        }}
+      />,
+    );
+
+    const modelPicker = screen.getByRole("button", { name: "Claude model: Claude Fable 5" });
+    expect(modelPicker).toBeDisabled();
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Continue with the same model");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
+      sessionId: "chat_claude_fable",
+      model: "anthropic/claude-fable-5",
+      engine: { type: "claude_code", schemaVersion: 1 },
+    });
+  });
+
   it("uses the task readiness status in the Codex detail header", () => {
     render(
       <Surface

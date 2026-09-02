@@ -450,6 +450,7 @@ const wikiNonEmptyString = z.string().check(z.minLength(1));
 // workspaces — chat resolves the workspace from the session instead.
 const wikiToolMcpInputSchema = {
   command: z.enum([...WIKI_TOOL_COMMANDS]),
+  depth: z.optional(z.number().check(z.int(), z.minimum(0), z.maximum(10))),
   pages: z.optional(
     z.union([
       wikiNonEmptyString,
@@ -459,6 +460,7 @@ const wikiToolMcpInputSchema = {
   path: z.optional(wikiNonEmptyString),
   body: z.optional(z.string()),
   kind: z.optional(z.enum(["project", "person", "company", "research", "meeting", "other"])),
+  title: z.optional(wikiNonEmptyString),
   query: z.optional(wikiNonEmptyString),
   since: z.optional(wikiNonEmptyString),
   to: z.optional(wikiNonEmptyString),

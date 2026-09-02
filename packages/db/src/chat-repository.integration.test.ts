@@ -38,6 +38,8 @@ const migrationPaths = [
   "0227_goat_chat_skill_bundle_snapshots.sql",
   "0228_goat_plugins.sql",
   "0229_goat_chat_skill_bundle_names.sql",
+  "0235_goat_chat_message_shape_epochs.sql",
+  "0236_goat_chat_message_presentation_summaries.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -139,6 +141,143 @@ describe("Postgres Chat repositories", () => {
   it("keeps pre-existing durable rows while adding the canonical event cursor", () => {
     expect(legacySurvivedMigration).toBe(true);
     expect(legacyRuntimeSurvivedMigration).toBe(true);
+  });
+
+  it("accounts projected Message bytes and rotates the shape epoch only after a Run settles", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "message-shape-epoch",
+      content: "Grow the durable transcript.",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', updated_at = '2026-08-10T20:01:00Z'
+       WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.conversation_read_model_v1
+       SET message_shape_bytes_since_epoch = 16 * 1024 * 1024 - 1
+       WHERE id = $1`,
+      [created.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.chat_messages
+       SET content = $2, updated_at = '2026-08-10T20:02:00Z'
+       WHERE id = $1`,
+      [created.assistantMessageId, "x".repeat(1_024)],
+    );
+
+    await expect(
+      database.query<{ message_shape_epoch: number; message_shape_bytes_since_epoch: number }>(
+        `SELECT message_shape_epoch, message_shape_bytes_since_epoch
+         FROM goat.conversation_read_model_v1
+         WHERE id = $1`,
+        [created.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          message_shape_epoch: 0,
+          message_shape_bytes_since_epoch: expect.any(Number),
+        },
+      ],
+    });
+
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'completed', completed_at = '2026-08-10T20:03:00Z',
+           updated_at = '2026-08-10T20:03:00Z'
+       WHERE id = $1`,
+      [created.runId],
+    );
+    expect(
+      (
+        await database.query<{
+          message_shape_epoch: number;
+          message_shape_bytes_since_epoch: number;
+        }>(
+          `SELECT message_shape_epoch, message_shape_bytes_since_epoch
+           FROM goat.conversation_read_model_v1
+           WHERE id = $1`,
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([{ message_shape_epoch: 1, message_shape_bytes_since_epoch: 0 }]);
+  });
+
+  it("projects bounded presentation summaries while retaining full lazy-load detail", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "presentation-summary",
+      content: "Measure the historical trace.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    const longReasoning = "reasoning ".repeat(800);
+    const longToolOutput = "provider detail ".repeat(400);
+    const toolParts = Array.from({ length: 200 }, (_, index) => ({
+      type: "dynamic-tool",
+      toolName: "history_search",
+      toolCallId: `tool_${index + 1}`,
+      state: "output-available",
+      input: { query: `launch-${index + 1}` },
+      output: { detail: longToolOutput },
+    }));
+    await database.query(
+      `UPDATE goat.chat_messages
+       SET content = 'Trace complete', debug_trace = $2::jsonb,
+           updated_at = '2026-08-10T20:02:00Z'
+       WHERE id = $1`,
+      [
+        created.assistantMessageId,
+        JSON.stringify({
+          schemaVersion: "goat.codex_chat.debug.v1",
+          model: "provider/model",
+          uiMessageParts: [
+            { type: "reasoning", text: longReasoning, state: "done" },
+            ...toolParts,
+            { type: "text", text: "Trace complete" },
+          ],
+        }),
+      ],
+    );
+
+    const projection = await database.query<{
+      presentation: { uiMessageParts: Array<Record<string, unknown>> };
+      presentation_summary: { uiMessageParts: Array<Record<string, unknown>> };
+      presentation_bytes: number;
+      summary_bytes: number;
+    }>(
+      `SELECT presentation, presentation_summary,
+              octet_length(presentation::text)::int AS presentation_bytes,
+              octet_length(presentation_summary::text)::int AS summary_bytes
+       FROM goat.message_read_model_v1
+       WHERE id = $1`,
+      [created.assistantMessageId],
+    );
+    const row = projection.rows[0]!;
+    const summaryReasoning = row.presentation_summary.uiMessageParts[0]!;
+    const summaryTool = row.presentation_summary.uiMessageParts[1]!;
+    const fullTool = row.presentation.uiMessageParts[1]!;
+
+    expect(String(summaryReasoning.text)).toHaveLength(160);
+    expect(String(summaryReasoning.text)).toMatch(/\.\.\.$/u);
+    expect(summaryReasoning.presentationSummary).toBe(true);
+    expect(summaryTool).toMatchObject({
+      type: "dynamic-tool",
+      toolName: "history_search",
+      toolCallId: "tool_1",
+      state: "output-available",
+      presentationSummary: true,
+      input: { query: "launch-1" },
+    });
+    expect(String((summaryTool.output as { detail: string }).detail)).toHaveLength(160);
+    expect(String((fullTool.output as { detail: string }).detail).length).toBeGreaterThan(5_000);
+    expect(
+      row.presentation_summary.uiMessageParts.filter((part) => part.type === "dynamic-tool"),
+    ).toHaveLength(200);
+    expect(row.summary_bytes * 10).toBeLessThan(row.presentation_bytes);
   });
 
   it.each(["opencompany", "codex", "claude_code"] as const)(

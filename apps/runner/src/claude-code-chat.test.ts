@@ -444,6 +444,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     expect(harnessInput.task).toContain("Actions may modify connected services");
     expect(harnessInput.task).toContain("denial is a normal outcome");
     expect(harnessInput.task).not.toContain("cannot modify connected services");
+    expect(harnessInput.task).toContain("A wiki tool is available");
     expect(harnessInput.mcpServers).toHaveLength(1);
     const [server] = harnessInput.mcpServers;
     expect(server).toMatchObject({

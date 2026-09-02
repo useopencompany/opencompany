@@ -6,9 +6,7 @@ import {
   type CloudCodingEngine,
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
-  isClaudeCodeModelId,
   isCloudCodingEngine,
-  isCodexModelId,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { AnthropicIcon, type LucideIcon, OpenAIIcon } from "@opencompany/ui/icons";
@@ -16,7 +14,12 @@ import {
   DEFAULT_CLAUDE_CHAT_REASONING_EFFORT,
   DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 } from "@/lib/codex-chat-settings";
-import { CLAUDE_CODE_MODELS, CODEX_MODELS, type ModelOption } from "@/lib/model-options";
+import {
+  CLAUDE_CODE_MODELS,
+  CODEX_MODELS,
+  type ModelOption,
+  normalizeConversationModel,
+} from "@/lib/model-options";
 
 // A cloud coding engine ("codex" | "claude_code"). Re-exported so callers work off one type
 // instead of the two parallel picker-value aliases the two constants files used to export.
@@ -34,15 +37,11 @@ export const CODEX_CHAT_DEFAULT_MODEL_ID = CODEX_DEFAULT_MODEL_ID as CodexChatMo
 export const CLAUDE_CHAT_DEFAULT_MODEL_ID = CLAUDE_CODE_DEFAULT_MODEL_ID as ClaudeChatModelId;
 
 export function normalizeCodexChatModelId(value: unknown): CodexChatModelId {
-  return typeof value === "string" && isCodexModelId(value)
-    ? (value as CodexChatModelId)
-    : CODEX_CHAT_DEFAULT_MODEL_ID;
+  return normalizeConversationModel("codex", value);
 }
 
 export function normalizeClaudeChatModelId(value: unknown): ClaudeChatModelId {
-  return typeof value === "string" && isClaudeCodeModelId(value)
-    ? (value as ClaudeChatModelId)
-    : CLAUDE_CHAT_DEFAULT_MODEL_ID;
+  return normalizeConversationModel("claude_code", value);
 }
 
 // A cloud coding engine's client-side presentation and model catalog. Adding an engine is a

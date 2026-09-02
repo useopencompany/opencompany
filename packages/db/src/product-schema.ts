@@ -5048,6 +5048,12 @@ export const conversationReadModelV1 = productSchema.table(
     activeRunId: text("active_run_id"),
     runtimeHasError: boolean("runtime_has_error"),
     runtimeUpdatedAt: timestamp("runtime_updated_at", { withTimezone: true }),
+    messageShapeEpoch: bigint("message_shape_epoch", { mode: "number" }).notNull().default(0),
+    messageShapeBytesSinceEpoch: bigint("message_shape_bytes_since_epoch", {
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
@@ -5076,6 +5082,14 @@ export const conversationReadModelV1 = productSchema.table(
         AND ${table.runtimeUpdatedAt} IS NOT NULL
       )`,
     ),
+    messageShapeEpochCheck: check(
+      "opencompany_conversation_read_model_v1_message_shape_epoch_check",
+      sql`${table.messageShapeEpoch} >= 0`,
+    ),
+    messageShapeBytesCheck: check(
+      "opencompany_conversation_read_model_v1_message_shape_bytes_check",
+      sql`${table.messageShapeBytesSinceEpoch} >= 0`,
+    ),
   }),
 );
 
@@ -5090,6 +5104,7 @@ export const messageReadModelV1 = productSchema.table(
     content: text("content").notNull(),
     taskId: text("task_id"),
     presentation: jsonb("presentation").$type<ChatMessageDebugTrace>(),
+    presentationSummary: jsonb("presentation_summary").$type<ChatMessageDebugTrace>(),
     attachments: jsonb("attachments").$type<ChatMessageAttachment[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
