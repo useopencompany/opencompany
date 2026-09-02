@@ -4,7 +4,13 @@ import {
   loadClaudeCodeAuthStatus,
   saveClaudeCodeCredential,
 } from "@opencompany/db/claude-code-auth";
-import { deleteCodexCredential, loadCodexAuthStatus } from "@opencompany/db/codex-auth";
+import {
+  deleteCodexCredential,
+  disableWorkspaceCodexEngineAccount,
+  loadCodexAuthStatus,
+  loadWorkspaceCodexEngineAccount,
+  setWorkspaceCodexEngineAccount,
+} from "@opencompany/db/codex-auth";
 import {
   disconnectInfisicalConnection,
   loadInfisicalConnectionMetadata,
@@ -27,6 +33,9 @@ vi.mock("@opencompany/db/claude-code-auth", async (importOriginal) => ({
 vi.mock("@opencompany/db/codex-auth", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   loadCodexAuthStatus: vi.fn(async () => null),
+  loadWorkspaceCodexEngineAccount: vi.fn(async () => null),
+  setWorkspaceCodexEngineAccount: vi.fn(async () => null),
+  disableWorkspaceCodexEngineAccount: vi.fn(async () => null),
   deleteCodexCredential: vi.fn(async () => undefined),
 }));
 
@@ -105,6 +114,29 @@ describe("engine auth service", () => {
     });
   });
 
+  it("admin-gates and persists the workspace Codex engine designation", async () => {
+    await expect(service().setCodexWorkspaceEngine(member, true)).rejects.toMatchObject({
+      status: 403,
+      message: "Only workspace admins can manage subscription-backed models.",
+    });
+    expect(setWorkspaceCodexEngineAccount).not.toHaveBeenCalled();
+
+    await service().setCodexWorkspaceEngine(admin, true);
+    expect(setWorkspaceCodexEngineAccount).toHaveBeenCalledWith({
+      db: dbSentinel,
+      workspaceId: "workspace_1",
+      providerUserWorkosId: "user_1",
+      updatedByWorkosId: "user_1",
+    });
+    await service().setCodexWorkspaceEngine(admin, false);
+    expect(disableWorkspaceCodexEngineAccount).toHaveBeenCalledWith({
+      db: dbSentinel,
+      workspaceId: "workspace_1",
+      updatedByWorkosId: "user_1",
+    });
+    expect(loadWorkspaceCodexEngineAccount).toHaveBeenCalled();
+  });
+
   it("serializes credential status rows to ISO strings", async () => {
     vi.mocked(loadCodexAuthStatus).mockResolvedValueOnce({
       status: "needs_reauth",
@@ -117,6 +149,7 @@ describe("engine auth service", () => {
       statusReason: "Token expired.",
       lastValidatedAt: "2026-08-01T00:00:00.000Z",
       lastRotatedAt: null,
+      workspaceEngine: null,
     });
     expect(loadCodexAuthStatus).toHaveBeenCalledWith({
       db: dbSentinel,

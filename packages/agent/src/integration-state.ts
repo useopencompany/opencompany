@@ -183,6 +183,15 @@ export type CodexProviderState = {
   status: "connected" | "needs_reauth" | "not_connected";
   statusReason: string | null;
   lastValidatedAt: string | null;
+  workspaceEngine: {
+    enabled: boolean;
+    providerDisplayName: string;
+    providerEmail: string;
+    credentialStatus: "connected" | "needs_reauth";
+    credentialStatusReason: string | null;
+    lastValidatedAt: string | null;
+    isCurrentUser: boolean;
+  } | null;
 };
 
 export type ClaudeCodeProviderState = {
@@ -379,6 +388,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
       status: "not_connected",
       statusReason: null,
       lastValidatedAt: null,
+      workspaceEngine: null,
     },
     claude_code: {
       provider: "claude_code",

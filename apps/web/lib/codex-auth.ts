@@ -9,6 +9,15 @@ export type CodexAuthSettings = {
   statusReason: string | null;
   lastValidatedAt: string | null;
   lastRotatedAt: string | null;
+  workspaceEngine: {
+    enabled: boolean;
+    providerDisplayName: string;
+    providerEmail: string;
+    credentialStatus: "connected" | "needs_reauth";
+    credentialStatusReason: string | null;
+    lastValidatedAt: string | null;
+    isCurrentUser: boolean;
+  } | null;
 };
 
 export type CodexDeviceAuthFlow = {
@@ -83,4 +92,31 @@ export async function disconnectCodexAuth() {
   }
   revalidatePath("/settings");
   return { ok: true as const };
+}
+
+export async function setCodexWorkspaceEngineEnabled(enabled: boolean) {
+  try {
+    const response = await (await serverApiClient()).v1["engine-auth"].codex.workspace.$put({
+      json: { enabled },
+    });
+    if (!response.ok) {
+      return {
+        ok: false as const,
+        error: await serverApiErrorMessage(
+          response,
+          "Could not update subscription-backed model routing.",
+        ),
+      };
+    }
+    revalidatePath("/settings");
+    return { ok: true as const };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Could not update subscription-backed model routing.",
+    };
+  }
 }

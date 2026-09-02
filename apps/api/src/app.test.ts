@@ -1775,6 +1775,7 @@ describe("canonical Hono API", () => {
       statusReason: null,
       lastValidatedAt: null,
       lastRotatedAt: null,
+      workspaceEngine: null,
     }));
     const app = testApp(repository, {
       engineAuth: engineAuthService({ getCodexStatus }),
@@ -3388,6 +3389,7 @@ describe("canonical Hono API", () => {
       statusReason: null,
       lastValidatedAt: null,
       lastRotatedAt: null,
+      workspaceEngine: null,
     }));
     const getInfisicalStatus = vi.fn(async () => ({
       status: "needs_reauth" as const,
@@ -4733,6 +4735,9 @@ function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
     },
     getCodexStatus: async () => {
       throw new Error("Unexpected Codex status read.");
+    },
+    setCodexWorkspaceEngine: async () => {
+      throw new Error("Unexpected Codex workspace engine mutation.");
     },
     startCodexDeviceAuth: async () => {
       throw new Error("Unexpected Codex device auth start.");

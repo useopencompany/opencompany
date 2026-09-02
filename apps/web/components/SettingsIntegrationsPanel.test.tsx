@@ -36,6 +36,7 @@ vi.mock("@/components/useHydrated", () => ({
 vi.mock("@/lib/codex-auth", () => ({
   disconnectCodexAuth: vi.fn(),
   pollCodexDeviceAuth: vi.fn(),
+  setCodexWorkspaceEngineEnabled: vi.fn(),
   startCodexDeviceAuth: vi.fn(),
 }));
 
@@ -166,6 +167,24 @@ describe("SettingsIntegrationsPanel", () => {
     expect(
       screen.queryByText("Bring pull requests and issues from your repositories into opencompany."),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not count an enabled workspace Codex account that needs reauthorization", () => {
+    const integrations = integrationStateFromRows([]) as IntegrationState;
+    integrations.codex.workspaceEngine = {
+      enabled: true,
+      providerDisplayName: "Provider Admin",
+      providerEmail: "provider@example.com",
+      credentialStatus: "needs_reauth",
+      credentialStatusReason: "Reconnect Codex.",
+      lastValidatedAt: null,
+      isCurrentUser: false,
+    };
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    expect(screen.getByRole("button", { name: "Workspace" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Workspace 1" })).not.toBeInTheDocument();
   });
 
   it("lets workspace admins complete the Infisical browser-token handoff", async () => {

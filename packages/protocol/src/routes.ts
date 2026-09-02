@@ -173,6 +173,7 @@ import {
   TaskSummaryEnvelopeSchema,
   UpdateBillingAutoRefillBodySchema,
   UpdateBrainDocumentBodySchema,
+  UpdateCodexWorkspaceEngineBodySchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
   UpdateMcpSetupBodySchema,
@@ -3177,6 +3178,23 @@ export const startCodexDeviceAuthRoute = createRoute({
   },
 });
 
+export const updateCodexWorkspaceEngineRoute = createRoute({
+  method: "put",
+  path: "/v1/engine-auth/codex/workspace",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: { content: { "application/json": { schema: UpdateCodexWorkspaceEngineBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Workspace subscription-backed Codex routing updated by an admin.",
+      content: { "application/json": { schema: CodexAuthStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const pollCodexDeviceAuthRoute = createRoute({
   method: "post",
   path: "/v1/engine-auth/codex/device/{flowId}/poll",
@@ -3559,6 +3577,7 @@ export type V1RouteHandlers = {
   saveClaudeCodeToken: RouteHandler<typeof saveClaudeCodeTokenRoute>;
   deleteClaudeCodeAuth: RouteHandler<typeof deleteClaudeCodeAuthRoute>;
   getCodexAuth: RouteHandler<typeof getCodexAuthRoute>;
+  updateCodexWorkspaceEngine: RouteHandler<typeof updateCodexWorkspaceEngineRoute>;
   startCodexDeviceAuth: RouteHandler<typeof startCodexDeviceAuthRoute>;
   pollCodexDeviceAuth: RouteHandler<typeof pollCodexDeviceAuthRoute>;
   deleteCodexAuth: RouteHandler<typeof deleteCodexAuthRoute>;
@@ -3745,6 +3764,7 @@ export function createV1Router(
       .openapi(saveClaudeCodeTokenRoute, handlers.saveClaudeCodeToken)
       .openapi(deleteClaudeCodeAuthRoute, handlers.deleteClaudeCodeAuth)
       .openapi(getCodexAuthRoute, handlers.getCodexAuth)
+      .openapi(updateCodexWorkspaceEngineRoute, handlers.updateCodexWorkspaceEngine)
       // POST /codex/device registers before the {flowId} poll route so the
       // static segment always wins route matching.
       .openapi(startCodexDeviceAuthRoute, handlers.startCodexDeviceAuth)
@@ -5151,6 +5171,37 @@ const contractDocumentHandlers: V1RouteHandlers = {
           statusReason: null,
           lastValidatedAt: placeholderTime,
           lastRotatedAt: placeholderTime,
+          workspaceEngine: {
+            enabled: true,
+            providerDisplayName: "Contract Owner",
+            providerEmail: "owner@example.com",
+            credentialStatus: "connected" as const,
+            credentialStatusReason: null,
+            lastValidatedAt: placeholderTime,
+            isCurrentUser: true,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  updateCodexWorkspaceEngine: (c) =>
+    c.json(
+      {
+        data: {
+          status: "connected" as const,
+          statusReason: null,
+          lastValidatedAt: placeholderTime,
+          lastRotatedAt: placeholderTime,
+          workspaceEngine: {
+            enabled: true,
+            providerDisplayName: "Contract Owner",
+            providerEmail: "owner@example.com",
+            credentialStatus: "connected" as const,
+            credentialStatusReason: null,
+            lastValidatedAt: placeholderTime,
+            isCurrentUser: true,
+          },
         },
         meta,
       },

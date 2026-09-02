@@ -11639,13 +11639,72 @@
             "type": "string",
             "nullable": true,
             "format": "date-time"
+          },
+          "workspaceEngine": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "providerDisplayName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "providerEmail": {
+                "type": "string",
+                "format": "email"
+              },
+              "credentialStatus": {
+                "type": "string",
+                "enum": [
+                  "connected",
+                  "needs_reauth"
+                ]
+              },
+              "credentialStatusReason": {
+                "type": "string",
+                "nullable": true
+              },
+              "lastValidatedAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "isCurrentUser": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "enabled",
+              "providerDisplayName",
+              "providerEmail",
+              "credentialStatus",
+              "credentialStatusReason",
+              "lastValidatedAt",
+              "isCurrentUser"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
           "status",
           "statusReason",
           "lastValidatedAt",
-          "lastRotatedAt"
+          "lastRotatedAt",
+          "workspaceEngine"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateCodexWorkspaceEngineBody": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "additionalProperties": false
       },
@@ -22169,6 +22228,52 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EngineAuthDisconnectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/codex/workspace": {
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCodexWorkspaceEngineBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace subscription-backed Codex routing updated by an admin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodexAuthStatusEnvelope"
                 }
               }
             }

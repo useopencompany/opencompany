@@ -440,6 +440,7 @@ export type CreditLedgerSource =
   | "included_usage_expiration"
   | "stripe_topup"
   | "chat_model_usage"
+  | "subscription_covered"
   | "capability_usage"
   | "frontier_ingest"
   | "ingest_overage"
@@ -1057,7 +1058,7 @@ export const creditLedger = productSchema.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'chat_model_usage', 'subscription_covered', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );
@@ -5582,6 +5583,8 @@ export const codexCredentials = productSchema.table(
     statusReason: text("status_reason"),
     lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
     lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    refreshLockId: text("refresh_lock_id"),
+    refreshLockExpiresAt: timestamp("refresh_lock_expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -5591,6 +5594,39 @@ export const codexCredentials = productSchema.table(
       "goat_codex_credentials_status_check",
       sql`${table.status} IN ('connected', 'needs_reauth')`,
     ),
+  }),
+);
+
+// A workspace can designate one member's connected Codex credential as the
+// subscription-backed account for opencompany-engine frontier model turns.
+// The membership and credential foreign keys intentionally cascade: removing
+// the provider from the workspace or disconnecting Codex clears designation
+// instead of leaving a routing record that could silently fall back to billing.
+export const workspaceCodexEngineAccounts = productSchema.table(
+  "workspace_codex_engine_accounts",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    providerUserWorkosId: text("provider_user_workos_id").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedByWorkosId: text("updated_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    providerMembershipFk: foreignKey({
+      name: "workspace_codex_engine_accounts_membership_fk",
+      columns: [table.workspaceId, table.providerUserWorkosId],
+      foreignColumns: [workspaceMembers.workspaceId, workspaceMembers.userWorkosId],
+    }).onDelete("cascade"),
+    providerCredentialFk: foreignKey({
+      name: "workspace_codex_engine_accounts_credential_fk",
+      columns: [table.providerUserWorkosId],
+      foreignColumns: [codexCredentials.userWorkosId],
+    }).onDelete("cascade"),
   }),
 );
 
@@ -5758,6 +5794,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   brainSourceItems: many(brainSourceItems),
   brainIngestJobs: many(brainIngestJobs),
   codexDeviceAuthFlows: many(codexDeviceAuthFlows),
+  providedWorkspaceCodexEngineAccounts: many(workspaceCodexEngineAccounts),
 }));
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
@@ -5780,6 +5817,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   skillInstallations: many(skillInstallations),
   plugins: many(plugins),
   pluginData: many(workspacePluginData),
+  codexEngineAccount: one(workspaceCodexEngineAccounts),
 }));
 
 export const workspaceBillingRelations = relations(workspaceBilling, ({ one }) => ({
@@ -5799,6 +5837,24 @@ export const workspaceMembersRelations = relations(workspaceMembers, ({ one }) =
     references: [users.workosUserId],
   }),
 }));
+
+export const workspaceCodexEngineAccountsRelations = relations(
+  workspaceCodexEngineAccounts,
+  ({ one }) => ({
+    workspace: one(workspaces, {
+      fields: [workspaceCodexEngineAccounts.workspaceId],
+      references: [workspaces.id],
+    }),
+    provider: one(users, {
+      fields: [workspaceCodexEngineAccounts.providerUserWorkosId],
+      references: [users.workosUserId],
+    }),
+    credential: one(codexCredentials, {
+      fields: [workspaceCodexEngineAccounts.providerUserWorkosId],
+      references: [codexCredentials.userWorkosId],
+    }),
+  }),
+);
 
 export const workspaceCapabilitiesRelations = relations(workspaceCapabilities, ({ one }) => ({
   workspace: one(workspaces, {
@@ -6641,6 +6697,7 @@ export type IntegrationCredential = typeof integrationCredentials.$inferSelect;
 export type BrainSourceItem = typeof brainSourceItems.$inferSelect;
 export type BrainIngestJob = typeof brainIngestJobs.$inferSelect;
 export type CodexCredential = typeof codexCredentials.$inferSelect;
+export type WorkspaceCodexEngineAccount = typeof workspaceCodexEngineAccounts.$inferSelect;
 export type ClaudeCodeCredential = typeof claudeCodeCredentials.$inferSelect;
 export type CodexDeviceAuthFlow = typeof codexDeviceAuthFlows.$inferSelect;
 export type TaskSchedule = typeof taskSchedules.$inferSelect;

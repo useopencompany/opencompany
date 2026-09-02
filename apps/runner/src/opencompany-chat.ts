@@ -21,6 +21,7 @@ import { executeChatExaFetch } from "@opencompany/agent/chat-web-fetch";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
 import { resolveImessageProvider } from "@opencompany/agent/imessage/provider";
 import { createSendUserMessageRunner } from "@opencompany/agent/imessage/send-user-message";
+import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import {
   AGENT_MODEL_CATALOG,
@@ -55,13 +56,7 @@ import {
 } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
 import * as ai from "ai";
-import {
-  convertToModelMessages,
-  createGateway,
-  type LanguageModelUsage,
-  parsePartialJson,
-  stepCountIs,
-} from "ai";
+import { convertToModelMessages, type LanguageModelUsage, parsePartialJson, stepCountIs } from "ai";
 import { asc, eq } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
 import { runTaskBrainRead } from "./codex-brain-tool";
@@ -137,6 +132,18 @@ export async function runProductChatTurn(input: {
     throw new Error(`Session ${session.id} is not an opencompany-engine session.`);
   }
 
+  const feature = input.taskContext ? "task" : "chat";
+  const modelResolution = session.workspaceId
+    ? await resolveProductLanguageModel({
+        workspaceId: session.workspaceId,
+        modelId: session.model,
+        feature,
+        gatewayApiKey: env.vercelAiGatewayApiKey,
+        db: getDb(),
+      })
+    : null;
+  const subscriptionCovered = modelResolution?.billing === "subscription_covered";
+
   const projector = createProductChatProjector({
     target: {
       userWorkosId: turn.userWorkosId,
@@ -148,6 +155,8 @@ export async function runProductChatTurn(input: {
       assistantMessageId: turn.assistantMessageId,
       workspaceId: session.workspaceId,
       model: session.model,
+      billing: subscriptionCovered ? "subscription_covered" : "metered_gateway",
+      provider: subscriptionCovered ? "codex-backend" : "gateway",
       leaseId,
       leaseOwner,
       ...(input.canonicalAttemptId ? { canonicalAttemptId: input.canonicalAttemptId } : {}),
@@ -168,7 +177,7 @@ export async function runProductChatTurn(input: {
     return "settled";
   }
 
-  if (session.workspaceId) {
+  if (session.workspaceId && !subscriptionCovered) {
     if (!(await hasHostedTurnCredits(session.workspaceId))) {
       const message =
         "This workspace is out of credits. Hobby usage refreshes on the first of the month; Pro admins can add credits in Settings → Billing.";
@@ -213,17 +222,19 @@ export async function runProductChatTurn(input: {
       activeSkills: runtime.activeSkills,
     });
     throwIfAborted(generationController.signal);
-    const gateway = createGateway({ apiKey: env.vercelAiGatewayApiKey });
+    if (!modelResolution) {
+      throw new Error("Durable opencompany chat session is missing its workspace.");
+    }
     const { streamText } = getBraintrustAISDK(ai);
     const attribution = createGatewayAttribution({
       userWorkosId: turn.userWorkosId,
-      feature: input.taskContext ? "task" : "chat",
+      feature,
       chatSessionId: session.chatSessionId,
       ...(input.taskContext ? { taskId: input.taskContext.task.id } : {}),
       ...(runtime.brain ? { brainRef: runtime.brain.id } : {}),
     });
     const stream = streamText({
-      model: gateway(runtime.model),
+      model: modelResolution.model,
       system: runtime.system,
       messages,
       tools: runtime.toolContext.tools,
@@ -237,7 +248,8 @@ export async function runProductChatTurn(input: {
         ? { experimental_repairToolCall: runtime.toolContext.repairToolCall }
         : {}),
       abortSignal: generationController.signal,
-      providerOptions: productChatGatewayProviderOptions(attribution),
+      providerOptions:
+        modelResolution.providerOptions ?? productChatGatewayProviderOptions(attribution),
     });
 
     projection = await consumeProductChatStream({
@@ -738,7 +750,9 @@ export async function opencompanyModelMessagesFromStored(
       (options?.includeCurrentAssistantMessage && nextMessage?.role === "assistant" ? 2 : 1),
   );
   const uiMessages = replayMessages.map((message) => {
-    const uiMessage = toChatUiMessage(message);
+    // Server-side replay retains only the provider metadata needed for encrypted
+    // Responses reasoning continuity. Browser-facing serialization still strips it.
+    const uiMessage = toChatUiMessage(message, { preserveProviderMetadata: true });
     return message.id === currentUserMessageId && options?.activeSkills?.length
       ? replaceChatUiMessageText(
           uiMessage,

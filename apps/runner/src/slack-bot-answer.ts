@@ -6,7 +6,6 @@ import {
   normalizeBrainReadToolInput,
 } from "@opencompany/agent/brain-surface";
 import { runProductChatAgent } from "@opencompany/agent/chat-agent";
-import { CHAT_FRONTIER_MODEL } from "@opencompany/agent/chat-model-router";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
 import { slackApiRequest } from "@opencompany/agent/integrations/slack";
 import { slackBotHasScope } from "@opencompany/agent/integrations/slack-bot";
@@ -19,12 +18,23 @@ import {
   toSlackMrkdwn,
   truncateForSlack,
 } from "@opencompany/agent/integrations/slack-bot-format";
+import {
+  type ProductLanguageModelResolution,
+  resolveProductLanguageModel,
+} from "@opencompany/agent/language-model";
 import { createSlackSurfacePromptBlock } from "@opencompany/agent/prompts/slack-surface";
-import { captureProductModelSpendRecorded } from "@opencompany/analytics/product/server";
+import {
+  captureProductLlmUsageRecorded,
+  captureProductModelSpendRecorded,
+} from "@opencompany/analytics/product/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { ensureMonthlyIncludedUsage, isCreditsEnforcementEnabled } from "@opencompany/db/billing";
 import { getDb } from "@opencompany/db/client";
-import { hasPositiveCreditBalance, recordCreditDebit } from "@opencompany/db/credits";
+import {
+  hasPositiveCreditBalance,
+  recordCreditDebit,
+  recordSubscriptionCoveredUsage,
+} from "@opencompany/db/credits";
 import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import { workspaces } from "@opencompany/db/product-schema";
 import { slackSelectedConversationIds } from "@opencompany/db/slack";
@@ -62,6 +72,7 @@ export {
 } from "@opencompany/agent/integrations/slack-bot-format";
 
 const SLACK_ANSWER_MAX_CHARS = 3000;
+const SLACK_BOT_MODEL = "openai/gpt-5.6-sol";
 // Leave headroom under the runner's graceful-drain window for the Slack
 // posting/cleanup that follows the agent turn.
 const SLACK_AGENT_TIMEOUT_MS = 200_000;
@@ -207,10 +218,17 @@ async function answerForIntegration(
 
   // Same rollout gate as the chat 402: debits always record, but the hard
   // stop only fires once enforcement is on.
-  if (isCreditsEnforcementEnabled()) {
+  const modelResolution = await resolveProductLanguageModel({
+    workspaceId: integration.workspaceId,
+    modelId: SLACK_BOT_MODEL,
+    feature: "slack-bot",
+    gatewayApiKey: requiredGatewayApiKey(),
+  });
+  const subscriptionCovered = modelResolution.billing === "subscription_covered";
+  if (!subscriptionCovered && isCreditsEnforcementEnabled()) {
     await ensureMonthlyIncludedUsage(integration.workspaceId);
   }
-  if (!(await hasPositiveCreditBalance(integration.workspaceId))) {
+  if (!subscriptionCovered && !(await hasPositiveCreditBalance(integration.workspaceId))) {
     await reply("This workspace is out of credits, so I can't answer right now.");
     return "handled";
   }
@@ -267,6 +285,7 @@ async function answerForIntegration(
         mode === "dm"
           ? `slack:${input.teamId}:${input.channelId}`
           : `slack:${input.teamId}:${input.channelId}:${replyThreadTs ?? input.messageTs}`,
+      modelResolution,
     });
 
     const allowedMentionUserIds = collectSlackMentionUserIds([
@@ -296,9 +315,16 @@ async function answerForIntegration(
     await recordSlackBotUsage({
       workspaceId: integration.workspaceId,
       userWorkosId: identity.userWorkosId,
-      model: CHAT_FRONTIER_MODEL,
+      model: SLACK_BOT_MODEL,
       usage: answer.totalUsage,
+      billing: answer.billing,
+      provider: answer.provider,
       idempotencyKey: `slack_bot:${integration.id}:${input.teamId}:${input.channelId}:${input.messageTs}`,
+    }).catch((error) => {
+      console.error("[opencompany-slack-bot] Usage recording failed", {
+        workspaceId: integration.workspaceId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
   } catch (error) {
     console.error("[opencompany-slack-bot] Answer generation or delivery failed", {
@@ -307,9 +333,7 @@ async function answerForIntegration(
       mode,
       error: error instanceof Error ? error.message : String(error),
     });
-    await status
-      .fail("Something went wrong answering that. Try again in a minute.")
-      .catch(() => {});
+    await status.fail(slackGenerationErrorMessage(error)).catch(() => {});
   }
   return "handled";
 }
@@ -406,6 +430,7 @@ async function runSlackChatAgent(input: {
   slackUserId: string;
   sourceRef: string;
   telemetrySessionId: string;
+  modelResolution: ProductLanguageModelResolution;
 }) {
   const gatewayApiKey = requiredGatewayApiKey();
   const signal = AbortSignal.timeout(SLACK_AGENT_TIMEOUT_MS);
@@ -462,8 +487,10 @@ async function runSlackChatAgent(input: {
 
   return runProductChatAgent({
     messages: [...input.contextMessages, { role: "user", content: finalUserContent }],
-    model: CHAT_FRONTIER_MODEL,
+    model: SLACK_BOT_MODEL,
     gatewayApiKey,
+    workspaceId: input.integration.workspaceId,
+    modelResolution: input.modelResolution,
     feature: "slack-bot",
     taskToolsEnabled: false,
     brainCaptureEnabled: true,
@@ -655,9 +682,11 @@ async function recordSlackBotUsage(input: {
   model: string;
   usage: LanguageModelUsage | undefined;
   idempotencyKey: string;
+  billing: "metered_gateway" | "subscription_covered";
+  provider: "gateway" | "codex-backend";
 }) {
   if (!input.usage) return;
-  const cost = calculateModelUsageCost({
+  const calculatedCost = calculateModelUsageCost({
     modelName: input.model,
     inputTokens: readUsageNumber(input.usage.inputTokens),
     inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
@@ -665,13 +694,64 @@ async function recordSlackBotUsage(input: {
     inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
     outputTokens: readUsageNumber(input.usage.outputTokens),
   });
+  const cost =
+    input.billing === "subscription_covered"
+      ? {
+          ...calculatedCost,
+          providerCostUsdMicros: 0,
+          platformFeeUsdMicros: 0,
+          totalCostUsdMicros: 0,
+          billable: false,
+        }
+      : calculatedCost;
   recordModelCost({
     costUsdMicros: cost.totalCostUsdMicros,
     attributes: {
       "goat.model": input.model,
       "goat.surface": "slack_bot",
+      "goat.billing": input.billing,
+      "goat.provider": input.provider,
     },
   });
+  await captureProductLlmUsageRecorded({
+    distinctId: input.userWorkosId,
+    workspaceId: input.workspaceId,
+    surface: "slack_bot",
+    stage: "generation",
+    modelProvider: input.provider === "codex-backend" ? "codex-backend" : "vercel-ai-gateway",
+    model: input.model,
+    engine: "opencompany",
+    ...(input.billing === "subscription_covered"
+      ? { usageSource: "subscription_covered" as const }
+      : {}),
+    inputTokens: readUsageNumber(input.usage.inputTokens),
+    inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
+    inputCacheReadTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheReadTokens),
+    inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
+    outputTokens: readUsageNumber(input.usage.outputTokens),
+    outputTextTokens:
+      readUsageNumber(input.usage.outputTokenDetails?.textTokens) ||
+      Math.max(
+        0,
+        readUsageNumber(input.usage.outputTokens) -
+          readUsageNumber(input.usage.outputTokenDetails?.reasoningTokens),
+      ),
+    outputReasoningTokens: readUsageNumber(input.usage.outputTokenDetails?.reasoningTokens),
+    totalTokens: readUsageNumber(input.usage.totalTokens),
+    providerCostUsdMicros: cost.providerCostUsdMicros,
+    platformFeeUsdMicros: cost.platformFeeUsdMicros,
+    chargedCostUsdMicros: cost.totalCostUsdMicros,
+    billable: cost.billable,
+  });
+  if (input.billing === "subscription_covered") {
+    await recordSubscriptionCoveredUsage({
+      workspaceId: input.workspaceId,
+      userWorkosId: input.userWorkosId,
+      idempotencyKey: `${input.idempotencyKey}:covered`,
+      metadata: { surface: "slack_bot", model: input.model, provider: input.provider },
+    });
+    return;
+  }
   if (!cost.billable) return;
   // A debit failure must never block the already-posted answer.
   try {
@@ -713,9 +793,21 @@ function readUsageNumber(value: number | undefined) {
 }
 
 function requiredGatewayApiKey() {
-  const value = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
-  if (!value) throw new Error("VERCEL_AI_GATEWAY_API_KEY is required for the Slack bot.");
-  return value;
+  return process.env.VERCEL_AI_GATEWAY_API_KEY?.trim() ?? "";
+}
+
+function slackGenerationErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/usage limit|429/iu.test(message)) {
+    return message.startsWith("ChatGPT usage limit reached")
+      ? message
+      : "ChatGPT usage limit reached — try again later or switch model.";
+  }
+  if (/reconnect Codex|authentication expired|401/iu.test(message)) {
+    return "Codex authentication expired — reconnect Codex in Settings.";
+  }
+  if (/Codex API error/iu.test(message)) return message;
+  return "Something went wrong answering that. Try again in a minute.";
 }
 
 function logAnswerFailure(
