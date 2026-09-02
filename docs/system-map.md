@@ -69,7 +69,12 @@ handles selected-repository ingestion and webhooks, and provides sandbox git acc
 not connected a personal account. The official **GitHub as you** Plugin uses the personal
 `github_user` connection for user-authorized tools and coding-sandbox git/gh access. For members
 with that personal connection, its MCP tools replace the legacy `github.search_issues` action so
-the catalog never presents two GitHub issue-search paths.
+the catalog never presents two GitHub issue-search paths. Plugin settings read the user token's
+reachable App installations and repositories from GitHub. A tool or sandbox git failure that is
+confirmed outside that intersection links back through the combined install-and-authorize flow;
+the client uses bounded, backoff polling with ordinary access reads instead of depending on
+GitHub's setup redirect, which can omit OAuth state for an existing installation. An explicit
+re-check may refresh the expiring user token once per install attempt.
 
 ## Ownership rules
 

@@ -2254,6 +2254,88 @@ export const ErrorEnvelopeSchema = z
   .strict()
   .openapi("ErrorEnvelope");
 
+export type GitHubRepositoryAccessItemDto = {
+  id: string;
+  name: string;
+  fullName: string;
+  private: boolean;
+  htmlUrl: string;
+};
+
+export type GitHubInstallationAccessDto = {
+  id: string;
+  account: {
+    id: string;
+    login: string;
+    type: "Organization" | "User";
+    avatarUrl: string | null;
+    htmlUrl: string | null;
+  };
+  repositorySelection: "all" | "selected";
+  permissions: Record<string, string>;
+  pendingPermissions: string[];
+  suspendedAt: string | null;
+  repositories: GitHubRepositoryAccessItemDto[];
+};
+
+export type GitHubRepositoryAccessTargetDto = {
+  owner: string;
+  repo: string | null;
+  state: "available" | "missing_installation" | "missing_repository" | "suspended";
+};
+
+export type GitHubRepositoryAccessDto = {
+  checkedAt: string;
+  installations: GitHubInstallationAccessDto[];
+  target: GitHubRepositoryAccessTargetDto | null;
+};
+
+export const GitHubRepositoryAccessItemSchema: z.ZodType<GitHubRepositoryAccessItemDto> = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    fullName: z.string().min(1),
+    private: z.boolean(),
+    htmlUrl: z.url(),
+  })
+  .strict();
+
+export const GitHubInstallationAccessSchema: z.ZodType<GitHubInstallationAccessDto> = z
+  .object({
+    id: z.string().min(1),
+    account: z
+      .object({
+        id: z.string().min(1),
+        login: z.string().min(1),
+        type: z.enum(["Organization", "User"]),
+        avatarUrl: z.url().nullable(),
+        htmlUrl: z.url().nullable(),
+      })
+      .strict(),
+    repositorySelection: z.enum(["all", "selected"]),
+    permissions: z.record(z.string(), z.string()),
+    pendingPermissions: z.array(z.string()),
+    suspendedAt: TimestampSchema.nullable(),
+    repositories: z.array(GitHubRepositoryAccessItemSchema),
+  })
+  .strict();
+
+export const GitHubRepositoryAccessTargetSchema: z.ZodType<GitHubRepositoryAccessTargetDto> = z
+  .object({
+    owner: z.string().min(1),
+    repo: z.string().min(1).nullable(),
+    state: z.enum(["available", "missing_installation", "missing_repository", "suspended"]),
+  })
+  .strict();
+
+export const GitHubRepositoryAccessSchema: z.ZodType<GitHubRepositoryAccessDto> = z
+  .object({
+    checkedAt: TimestampSchema,
+    installations: z.array(GitHubInstallationAccessSchema),
+    target: GitHubRepositoryAccessTargetSchema.nullable(),
+  })
+  .strict();
+
 export const BillingOverviewSchema = z
   .object({
     creditBalanceUsdMicros: z.number().int(),

@@ -171,6 +171,7 @@
         "@opencompany/db": "workspace:*",
         "@opencompany/file-extract": "workspace:*",
         "@opencompany/observability": "workspace:*",
+        "@opencompany/protocol": "workspace:*",
         "@opencompany/telemetry": "workspace:*",
         "@opencompany/wiki": "workspace:*",
         "@sentry/bun": "^10.70.0",

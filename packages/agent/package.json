@@ -35,6 +35,7 @@
     "@opencompany/db": "workspace:*",
     "@opencompany/brain": "workspace:*",
     "@opencompany/file-extract": "workspace:*",
+    "@opencompany/protocol": "workspace:*",
     "@opencompany/telemetry": "workspace:*",
     "@opencompany/wiki": "workspace:*",
     "@opencompany/observability": "workspace:*",

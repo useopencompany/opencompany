@@ -37,6 +37,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
+import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
 import {
   installOfficialMcpPlugin,
   OFFICIAL_MCP_PLUGINS,
@@ -373,6 +374,12 @@ function OfficialMcpPluginDetailView({
           canEdit={canEdit}
         />
         {plugin ? <AccountsSection config={config} state={accountsState} /> : null}
+        {plugin &&
+        config.name === "github" &&
+        accountsState.status === "ready" &&
+        accountsState.permissionConnection ? (
+          <GitHubRepositoryAccessSection />
+        ) : null}
         <ToolsSection
           config={config}
           pluginState={pluginState}
