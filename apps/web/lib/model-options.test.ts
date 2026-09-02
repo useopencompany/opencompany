@@ -75,6 +75,29 @@ describe("opencompany model options", () => {
     expect(modelContextWindowTokens("xai/grok-4.6")).toBe(500_000);
   });
 
+  it("offers GPT 5.6 Sol and Terra in main chat", () => {
+    expect(MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "openai/gpt-5.6-sol",
+        label: "GPT 5.6 Sol",
+        supportsImages: true,
+        supportsReasoning: true,
+      }),
+    );
+    expect(MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "openai/gpt-5.6-terra",
+        label: "GPT 5.6 Terra",
+        supportsImages: true,
+        supportsReasoning: true,
+      }),
+    );
+    expect(normalizeModel("openai/gpt-5.6-sol")).toBe("openai/gpt-5.6-sol");
+    expect(normalizeModel("openai/gpt-5.6-terra")).toBe("openai/gpt-5.6-terra");
+    expect(modelContextWindowTokens("openai/gpt-5.6-sol")).toBe(1_050_000);
+    expect(modelContextWindowTokens("openai/gpt-5.6-terra")).toBe(1_050_000);
+  });
+
   it("preserves the GLM model used by workflow tasks", () => {
     expect(MODELS).toContainEqual(
       expect.objectContaining({

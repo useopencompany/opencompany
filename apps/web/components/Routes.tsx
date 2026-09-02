@@ -50,6 +50,7 @@ import { BrainView } from "@/components/BrainView";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { IMessageIntegrationSetup } from "@/components/IMessageIntegrationSetup";
+import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
@@ -208,6 +209,22 @@ export function IntegrationsSettingsRoute({
         workspaceId={workspace.id}
         imessageEnabled={featureFlags.imessage}
         browserProfilesEnabled={browserProfilesEnabled}
+      />
+    </SettingsContent>
+  );
+}
+
+export function InferenceSettingsRoute() {
+  const { integrations, workspace } = useAppData();
+
+  return (
+    <SettingsContent
+      title="Inference"
+      description="Configure how this workspace runs AI model inference."
+    >
+      <InferenceSettingsPanel
+        integration={integrations.codex}
+        canManage={workspace.role === "admin"}
       />
     </SettingsContent>
   );

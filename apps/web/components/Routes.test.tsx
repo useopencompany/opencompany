@@ -6,6 +6,7 @@ import { BrainView } from "@/components/BrainView";
 import {
   BrainRoute,
   HomeRoute,
+  InferenceSettingsRoute,
   McpSettingsRoute,
   PreferencesSettingsRoute,
   SkillBundleRoute,
@@ -157,6 +158,10 @@ vi.mock("@/components/AppDataProvider", () => ({
 
 vi.mock("@/components/SettingsIntegrationsPanel", () => ({
   SettingsIntegrationsPanel: () => <div>Integrations</div>,
+}));
+
+vi.mock("@/components/InferenceSettingsPanel", () => ({
+  InferenceSettingsPanel: () => <div data-testid="inference-settings-panel" />,
 }));
 
 vi.mock("@/lib/user-preferences", () => ({
@@ -314,6 +319,16 @@ describe("SettingsRoute", () => {
         "Connect Claude, ChatGPT, or Cursor to everything you can access in opencompany.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("renders the workspace inference settings", () => {
+    render(<InferenceSettingsRoute />);
+
+    expect(screen.getByRole("heading", { name: "Inference" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Configure how this workspace runs AI model inference."),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("inference-settings-panel")).toBeInTheDocument();
   });
 
   it("shows the Tasks & Workflows switch off by default and persists opt-in", async () => {
