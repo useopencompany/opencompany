@@ -8,6 +8,7 @@ import {
   previewHeadlessPluginImport,
 } from "@/lib/headless-knowledge-commands";
 import {
+  BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
@@ -192,6 +193,10 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/neon",
     );
+    expect(screen.getByRole("link", { name: /better stack/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/betterstack",
+    );
     expect(screen.getByRole("link", { name: /github/i })).toHaveAttribute(
       "href",
       "/settings/plugins/github",
@@ -200,8 +205,8 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/slack",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(4);
-    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(4);
+    expect(screen.getAllByText("Not installed")).toHaveLength(5);
+    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(5);
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
@@ -210,6 +215,9 @@ describe("Plugin settings", () => {
     );
     expect(NEON_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/neon$/u,
+    );
+    expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
+      /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
     );
     expect(SLACK_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",

@@ -6,7 +6,13 @@ import type {
   PluginListItemDto,
 } from "@opencompany/protocol";
 import { Button, buttonVariants } from "@opencompany/ui/components/button";
-import { GitHubIcon, LinearIcon, NeonIcon, SlackIcon } from "@opencompany/ui/icons";
+import {
+  BetterStackIcon,
+  GitHubIcon,
+  LinearIcon,
+  NeonIcon,
+  SlackIcon,
+} from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
   Archive,
@@ -93,6 +99,11 @@ export type OfficialMcpPluginConfig = OfficialMcpPluginMetadata & {
 };
 
 export const OFFICIAL_MCP_PLUGINS = {
+  betterstack: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.betterstack,
+    Icon: BetterStackIcon,
+    iconClassName: "bg-[#1B1F23] text-white",
+  },
   github: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.github,
     Icon: GitHubIcon,
@@ -121,6 +132,8 @@ export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
+export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
 export const SLACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.slack.name;
 export const SLACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.slack.source;
 
@@ -152,6 +165,10 @@ export function installOfficialGitHubPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.neon, preview);
+}
+
+export function installOfficialBetterStackPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.betterstack, preview);
 }
 
 export function installOfficialSlackPlugin(preview?: PluginImportPreviewDto) {

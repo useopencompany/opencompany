@@ -1,4 +1,5 @@
 import {
+  BetterStackPluginDetail,
   GitHubPluginDetail,
   LinearPluginDetail,
   NeonPluginDetail,
@@ -20,6 +21,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       loadOfficialPlugin(normalizedName),
     ]);
     const Detail = {
+      betterstack: BetterStackPluginDetail,
       github: GitHubPluginDetail,
       linear: LinearPluginDetail,
       neon: NeonPluginDetail,

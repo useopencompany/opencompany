@@ -4,6 +4,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import {
   AnthropicIcon,
   AttioIcon,
+  BetterStackIcon,
   FathomIcon,
   GitHubIcon,
   GmailIcon,
@@ -184,6 +185,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Sync CRM records and notes from Attio.",
     Icon: AttioIcon,
     tileClass: "bg-[#111111] text-white",
+  },
+  betterstack: {
+    label: "Better Stack",
+    description: "Investigate observability data and manage monitoring and incident response.",
+    Icon: BetterStackIcon,
+    tileClass: "bg-[#1B1F23] text-white",
   },
   stripe: {
     label: "Stripe",
@@ -1836,6 +1843,9 @@ function integrationConnectHref(
   if (provider === "latitude")
     return "/api/integrations/latitude/start?returnTo=/settings/integrations";
   if (provider === "neon") return "/api/integrations/neon/start?returnTo=/settings/integrations";
+  if (provider === "betterstack") {
+    return "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack";
+  }
   if (provider === "posthog")
     return "/api/integrations/posthog/start?returnTo=/settings/integrations";
   if (provider === "x_account")

@@ -39,6 +39,9 @@ describe("opencompany onboarding integrations", () => {
     expect(onboardingConnectionError("neon", "neon_denied")).toBe(
       "Neon authorization was cancelled.",
     );
+    expect(onboardingConnectionError("betterstack", "betterstack_denied")).toBe(
+      "Better Stack authorization was cancelled.",
+    );
     expect(onboardingConnectionError("github", "missing_code")).toContain(
       "did not return a valid authorization",
     );
@@ -64,6 +67,7 @@ describe("opencompany onboarding integrations", () => {
     expect(integrationConnectionSuccess("google_drive")).toBe("Google Drive connected.");
     expect(integrationConnectionSuccess("posthog")).toBe("PostHog connected.");
     expect(integrationConnectionSuccess("neon")).toBe("Neon connected.");
+    expect(integrationConnectionSuccess("betterstack")).toBe("Better Stack connected.");
     expect(integrationConnectionSuccess("github_user")).toBe("GitHub connected.");
     expect(integrationConnectionSuccess(null)).toBe("Integration connected.");
   });

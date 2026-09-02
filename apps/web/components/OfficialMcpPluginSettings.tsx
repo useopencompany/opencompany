@@ -128,6 +128,25 @@ export type PluginAccountsState =
 
 export type LinearAccountsState = PluginAccountsState;
 
+export function BetterStackPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.betterstack}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function GitHubPluginDetail({
   pluginState,
   canEdit,
@@ -297,6 +316,28 @@ export function NeonPluginDetailView({
   return (
     <OfficialMcpPluginDetailView
       config={OFFICIAL_MCP_PLUGINS.neon}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+export function BetterStackPluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS.betterstack}
       pluginState={pluginState}
       accountsState={accountsState}
       toolsState={toolsState}
@@ -1084,6 +1125,7 @@ function pluginAccountsFromState(
   permissionConnection: IntegrationAccountView | null;
 } {
   if (
+    config.connectionProvider === "betterstack" ||
     config.connectionProvider === "github_user" ||
     config.connectionProvider === "neon" ||
     config.connectionProvider === "slack"
@@ -1134,6 +1176,10 @@ export function defaultNeonToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("neon");
 }
 
+export function defaultBetterStackToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("betterstack");
+}
+
 export function defaultSlackToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("slack");
 }
@@ -1172,6 +1218,12 @@ export function githubToolsStateFromPlugin(plugin: PluginInstallationDto | null)
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "neon");
+}
+
+export function betterStackToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "betterstack");
 }
 
 export function slackToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
@@ -1263,6 +1315,12 @@ export function githubToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
 
 export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "neon");
+}
+
+export function betterStackToolsStateFromPreview(
+  preview: PluginImportPreviewDto,
+): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "betterstack");
 }
 
 export function slackToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {

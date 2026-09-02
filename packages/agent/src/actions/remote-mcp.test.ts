@@ -166,6 +166,55 @@ describe("remote MCP classification", () => {
     ).toMatchObject({ curated: false, capability: { defaultMode: "ask" } });
   });
 
+  it("keeps Better Stack telemetry and mutations behind Ask while docs stay On", () => {
+    const capabilities = [
+      {
+        id: "read" as const,
+        label: "Search Better Stack docs",
+        defaultMode: "on" as const,
+        tools: ["documentation"],
+      },
+      {
+        id: "query" as const,
+        label: "Inspect observability data",
+        defaultMode: "ask" as const,
+        tools: ["query", "errors", "team_members"],
+      },
+      {
+        id: "write" as const,
+        label: "Manage Better Stack",
+        defaultMode: "ask" as const,
+        tools: ["create_monitor", "remove_dashboard"],
+      },
+    ];
+
+    expect(classifyRemoteTool({ name: "documentation" }, capabilities)).toMatchObject({
+      capability: { id: "read", defaultMode: "on" },
+      bucket: "read",
+      curated: true,
+    });
+    expect(classifyRemoteTool({ name: "errors" }, capabilities)).toMatchObject({
+      capability: { id: "query", defaultMode: "ask" },
+      bucket: "read",
+      curated: true,
+    });
+    expect(classifyRemoteTool({ name: "remove_dashboard" }, capabilities)).toMatchObject({
+      capability: { id: "write", defaultMode: "ask" },
+      bucket: "write",
+      curated: true,
+    });
+    expect(
+      classifyRemoteTool(
+        { name: "new_sensitive_read", annotations: { readOnlyHint: true } },
+        capabilities,
+      ),
+    ).toMatchObject({
+      capability: { defaultMode: "ask" },
+      bucket: "read",
+      curated: false,
+    });
+  });
+
   it("keeps public Slack search on while private reads, writes, and drift ask first", () => {
     const slackCapabilities = [
       {

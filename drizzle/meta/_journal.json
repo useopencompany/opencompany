@@ -1674,6 +1674,13 @@
       "when": 1788364800000,
       "tag": "0238_codex_subscription_routing",
       "breakpoints": true
+    },
+    {
+      "idx": 239,
+      "version": "7",
+      "when": 1788364801000,
+      "tag": "0239_goat_betterstack_integration",
+      "breakpoints": true
     }
   ]
 }

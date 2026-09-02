@@ -291,6 +291,61 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official Better Stack package with its reviewed permission boundary", async () => {
+    const fixtureRoot = fileURLToPath(
+      new URL("./test-fixtures/plugins/betterstack", import.meta.url),
+    );
+    const files = await fixtureFiles(fixtureRoot, "betterstack");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "betterstack",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "betterstack", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "betterstack",
+        type: "streamable-http",
+        url: "https://mcp.betterstack.com",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Search Better Stack docs",
+        defaultMode: "on",
+        tools: ["documentation"],
+      }),
+      expect.objectContaining({
+        id: "query",
+        label: "Inspect observability data",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["query", "errors", "team_members"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Manage Better Stack",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["create_monitor", "remove_dashboard"]),
+      }),
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(107);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "betterstack", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official Slack package with least-privilege capability defaults", async () => {
     const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/slack", import.meta.url));
     const files = await fixtureFiles(fixtureRoot, "slack");

@@ -161,6 +161,19 @@ describe("integration account service", () => {
             scopes: [],
             capabilityModes: {},
           },
+          {
+            id: "gint_betterstack_mcp",
+            provider: "betterstack",
+            workspaceId: null,
+            externalId: "betterstack_mcp",
+            accountEmail: "ada@example.com",
+            accountName: "Ada's team",
+            connectionLabel: "Better Stack tool access",
+            statusReason: null,
+            status: "connected",
+            scopes: ["read", "write"],
+            capabilityModes: { read: "on", query: "ask", write: "ask" },
+          },
         ],
       ]),
     });
@@ -177,6 +190,18 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["gmail.readonly"],
         capabilityModes: { read: "on" },
+      },
+      {
+        integrationId: "gint_betterstack_mcp",
+        provider: "betterstack",
+        status: "connected",
+        connected: true,
+        accountEmail: "ada@example.com",
+        accountName: "Ada's team",
+        connectionLabel: "Better Stack tool access",
+        statusReason: null,
+        scopes: ["read", "write"],
+        capabilityModes: { read: "on", query: "ask", write: "ask" },
       },
     ]);
   });

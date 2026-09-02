@@ -182,6 +182,28 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  betterstack: [
+    {
+      id: "read",
+      label: "Search Better Stack docs",
+      description: "Search Better Stack's public product documentation.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Inspect observability data",
+      description:
+        "Read monitors, incidents, on-call schedules, logs, metrics, errors, dashboards, and team access.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage Better Stack",
+      description:
+        "Change monitoring, incidents, dashboards, alerts, status pages, error state, and team access.",
+      defaultMode: "ask",
+    },
+  ],
   x_account: [
     {
       id: "write",

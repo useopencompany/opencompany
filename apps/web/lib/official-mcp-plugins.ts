@@ -1,11 +1,11 @@
-export type OfficialMcpPluginName = "github" | "linear" | "neon" | "slack";
+export type OfficialMcpPluginName = "betterstack" | "github" | "linear" | "neon" | "slack";
 
 export type OfficialMcpPluginMetadata = {
   name: OfficialMcpPluginName;
   label: string;
   description: string;
   source: string;
-  connectionProvider: "github_user" | "linear" | "neon" | "slack";
+  connectionProvider: "betterstack" | "github_user" | "linear" | "neon" | "slack";
   connectHref: string;
   accountLabel?: string;
   accountDescription: string;
@@ -15,6 +15,17 @@ export type OfficialMcpPluginMetadata = {
 
 // The public repository is the reviewed trust boundary. Keep every source pinned to a full commit.
 export const OFFICIAL_MCP_PLUGIN_METADATA = {
+  betterstack: {
+    name: "betterstack",
+    label: "Better Stack",
+    description:
+      "Investigate observability data and manage monitoring, incidents, dashboards, and team access.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/cd2ab3510ce35031bb564fbd2d4d55b825a4a83b/betterstack",
+    connectionProvider: "betterstack",
+    connectHref: "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack",
+    accountDescription: "The account opencompany uses when you run Better Stack tools.",
+  },
   github: {
     name: "github",
     label: "GitHub as you",
