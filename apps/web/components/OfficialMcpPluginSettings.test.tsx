@@ -925,8 +925,9 @@ describe("Linear plugin settings", () => {
       "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
     );
     expect(await screen.findByRole("heading", { name: "Repository access" })).toBeVisible();
-    expect(screen.getByText("opencompany")).toBeVisible();
-    await userEvent.click(screen.getByText("opencompany"));
+    const installationAccount = await screen.findByText("opencompany");
+    expect(installationAccount).toBeVisible();
+    await userEvent.click(installationAccount);
     expect(screen.getByText("opencompany/private-repo")).toBeVisible();
     expect(screen.getByTestId("github-permissions-pending")).toHaveTextContent(
       "New permissions pending approval",
