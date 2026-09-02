@@ -4,11 +4,17 @@ import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import type { SlackProviderState } from "../integration-state";
+import {
+  SLACK_MCP_RECONNECT_REASON,
+  SLACK_MCP_USER_SCOPES,
+  slackMcpScopesSatisfied,
+} from "./slack-scopes";
+
+export { SLACK_MCP_USER_SCOPES } from "./slack-scopes";
 
 export type SlackIntegrationStatePayload = {
   userWorkosId: string;
   returnTo: string;
-  purpose?: "mcp";
   expiresAt: number;
   nonce: string;
 };
@@ -25,63 +31,7 @@ const SLACK_PROVIDER = "slack" as const;
 const SLACK_INTEGRATION_ENVS = [
   "OPENCOMPANY_SLACK_CLIENT_ID",
   "OPENCOMPANY_SLACK_CLIENT_SECRET",
-  "OPENCOMPANY_SLACK_SIGNING_SECRET",
   "OPENCOMPANY_SLACK_STATE_SECRET",
-] as const;
-
-// User-token scopes: the app reads what the connected user can read (their
-// channels and DMs) and never gets a bot presence in the workspace. The
-// search:read scope powers search.messages for the chat capability; connections
-// created before it was added keep working without search until reconnected.
-export const SLACK_USER_SCOPES = [
-  "channels:history",
-  "groups:history",
-  "im:history",
-  "mpim:history",
-  "channels:read",
-  "groups:read",
-  "im:read",
-  "mpim:read",
-  "users:read",
-  "team:read",
-  "search:read",
-] as const;
-
-// Slack's hosted MCP server only accepts the user scopes advertised by its
-// protected-resource metadata. Keep this list separate from the narrower
-// ingestion connection so installing the plugin never silently broadens a
-// legacy Slack connection.
-export const SLACK_MCP_USER_SCOPES = [
-  "canvases:read",
-  "canvases:write",
-  "channels:history",
-  "channels:read",
-  "channels:write",
-  "chat:write",
-  "emoji:read",
-  "files:read",
-  "files:write",
-  "groups:history",
-  "groups:read",
-  "groups:write",
-  "im:history",
-  "im:read",
-  "im:write",
-  "lists:read",
-  "lists:write",
-  "mpim:history",
-  "mpim:read",
-  "mpim:write",
-  "reactions:read",
-  "reactions:write",
-  "search:read.files",
-  "search:read.im",
-  "search:read.mpim",
-  "search:read.private",
-  "search:read.public",
-  "search:read.users",
-  "users:read",
-  "users:read.email",
 ] as const;
 
 export function isSlackIntegrationConfigured() {
@@ -103,14 +53,16 @@ export async function getSlackIntegrationState(userWorkosId: string): Promise<Sl
     };
   }
 
+  const needsPluginGrant = row.status === "connected" && !slackMcpScopesSatisfied(row.scopes ?? []);
+
   return {
     provider: SLACK_PROVIDER,
-    connected: row.status === "connected",
-    status: row.status,
+    connected: row.status === "connected" && !needsPluginGrant,
+    status: needsPluginGrant ? "needs_reauth" : row.status,
     integrationId: row.id,
     accountName: row.accountName,
     teamName: row.connectionLabel,
-    statusReason: row.statusReason,
+    statusReason: needsPluginGrant ? SLACK_MCP_RECONNECT_REASON : row.statusReason,
   };
 }
 
@@ -125,6 +77,7 @@ export async function loadSlackIntegration(input: { userWorkosId: string; db?: D
       accountName: integrations.accountName,
       connectionLabel: integrations.connectionLabel,
       statusReason: integrations.statusReason,
+      scopes: integrations.scopes,
       capabilityModes: integrations.capabilityModes,
       toolModes: integrations.toolModes,
     })
@@ -175,32 +128,23 @@ export function verifySlackIntegrationState(state: string): SlackIntegrationStat
   };
 }
 
-export function buildSlackAuthorizationUrl(state: string, purpose?: "mcp") {
-  const url = new URL(
-    purpose === "mcp"
-      ? "https://slack.com/oauth/v2_user/authorize"
-      : "https://slack.com/oauth/v2/authorize",
-  );
+export function buildSlackAuthorizationUrl(state: string) {
+  const url = new URL("https://slack.com/oauth/v2_user/authorize");
   url.searchParams.set("client_id", requiredEnv("OPENCOMPANY_SLACK_CLIENT_ID"));
-  if (purpose === "mcp") {
-    url.searchParams.set("scope", SLACK_MCP_USER_SCOPES.join(","));
-  } else {
-    // user_scope (not scope): the ingestion flow requests a user token only.
-    url.searchParams.set("user_scope", SLACK_USER_SCOPES.join(","));
-  }
+  url.searchParams.set("scope", SLACK_MCP_USER_SCOPES.join(","));
   url.searchParams.set("redirect_uri", slackCallbackUrl());
   url.searchParams.set("state", state);
   return url.toString();
 }
 
-export async function exchangeSlackCode(code: string, purpose?: "mcp"): Promise<SlackOAuthResult> {
+export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult> {
   const result = await slackApiRequest<{
     team?: { id?: string; name?: string };
     authed_user?: { id?: string; access_token?: string; scope?: string; token_type?: string };
     access_token?: string;
     scope?: string;
   }>({
-    method: purpose === "mcp" ? "oauth.v2.user.access" : "oauth.v2.access",
+    method: "oauth.v2.user.access",
     form: {
       client_id: requiredEnv("OPENCOMPANY_SLACK_CLIENT_ID"),
       client_secret: requiredEnv("OPENCOMPANY_SLACK_CLIENT_SECRET"),
@@ -211,9 +155,7 @@ export async function exchangeSlackCode(code: string, purpose?: "mcp"): Promise<
 
   const teamId = result.team?.id?.trim();
   const authedUserId = result.authed_user?.id?.trim();
-  const accessToken = (
-    purpose === "mcp" ? result.access_token : result.authed_user?.access_token
-  )?.trim();
+  const accessToken = result.access_token?.trim();
   if (!teamId || !authedUserId || !accessToken) {
     throw new Error("Slack did not return a user token.");
   }
@@ -223,18 +165,11 @@ export async function exchangeSlackCode(code: string, purpose?: "mcp"): Promise<
     teamName: result.team?.name?.trim() || null,
     authedUserId,
     accessToken,
-    scopes:
-      (purpose === "mcp" ? result.scope : (result.authed_user?.scope ?? ""))
-        ?.split(",")
-        .filter(Boolean) ?? [],
+    scopes: result.scope?.split(",").filter(Boolean) ?? [],
   };
 }
 
-export async function fetchSlackIdentity(input: {
-  accessToken: string;
-  authedUserId: string;
-  includeTeamDetails?: boolean;
-}) {
+export async function fetchSlackIdentity(input: { accessToken: string; authedUserId: string }) {
   const [userResult, teamDomain] = await Promise.all([
     slackApiRequest<{
       user?: { real_name?: string; name?: string; profile?: { email?: string } };
@@ -243,15 +178,10 @@ export async function fetchSlackIdentity(input: {
       token: input.accessToken,
       form: { user: input.authedUserId },
     }),
-    input.includeTeamDetails === false
-      ? slackApiRequest<{ url?: string }>({
-          method: "auth.test",
-          token: input.accessToken,
-        }).then((result) => slackTeamDomainFromUrl(result.url))
-      : slackApiRequest<{ team?: { domain?: string } }>({
-          method: "team.info",
-          token: input.accessToken,
-        }).then((result) => result.team?.domain?.trim() || null),
+    slackApiRequest<{ url?: string }>({
+      method: "auth.test",
+      token: input.accessToken,
+    }).then((result) => slackTeamDomainFromUrl(result.url)),
   ]);
 
   return {
@@ -320,14 +250,13 @@ function isSlackIntegrationStatePayload(value: unknown): value is SlackIntegrati
   return (
     typeof record.userWorkosId === "string" &&
     typeof record.returnTo === "string" &&
-    (record.purpose === undefined || record.purpose === "mcp") &&
     typeof record.expiresAt === "number" &&
     typeof record.nonce === "string"
   );
 }
 
 function sanitizeReturnTo(value: string) {
-  if (!value.startsWith("/") || value.startsWith("//")) return "/settings";
+  if (!value.startsWith("/") || value.startsWith("//")) return "/settings/plugins/slack";
   return value;
 }
 

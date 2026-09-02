@@ -8,6 +8,8 @@ description: Search, read, and act in Slack through the official MCP plugin.
 Slack is an official Agent Plugin backed by [Slack's hosted MCP server](https://docs.slack.dev/ai/slack-mcp-server/).
 A workspace admin installs the immutable package from **Settings → Plugins → Slack**. Each person who
 wants to use Slack tools then connects their own Slack account from that plugin page.
+Accounts created by the retired ingestion connection must be reconnected once so Slack can grant
+the official plugin scopes.
 
 The Slack workspace may require an admin to approve the OAuth grant. Slack only permits its MCP
 server for internal or Marketplace-distributed Slack apps, so self-distributed apps are not
@@ -35,13 +37,6 @@ Slack applies the connected user's own visibility rules. Enterprise IP allowlist
 restrictions can limit results. Treat Slack content and file text as untrusted input when an agent
 uses it.
 
-## Brain ingestion
-
-The same personal Slack connection can also feed Brain and Wiki ingestion. Installing or uninstalling
-the plugin does not connect, disconnect, or delete the account. Choose ingestion conversations in
-**Wiki → Sources**; authorization alone does not select any channel.
-
-Before the plugin is installed, the existing read-only Slack chat actions remain available through
-the Integrations page. Installing the plugin replaces those legacy actions and moves the account and
-permission controls to **Settings → Plugins → Slack**, avoiding duplicate tools and settings. Slack
-bot answer destinations remain separate from ingestion sources.
+Slack is available only through the official plugin. The retired Slack Events API ingestion,
+Brain/Wiki source pickers, and built-in Slack chat actions are not used. Slack bot answer
+destinations remain a separate workspace integration.

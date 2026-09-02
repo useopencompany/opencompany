@@ -4185,7 +4185,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
           viewer: { actorId: "user_contract", isAdmin: true },
           sources: [],
           ownAccounts: {
-            slack: [],
             linear: [],
             gmail: [],
             google_drive: [],
@@ -4207,17 +4206,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
             },
             legacyDefaultDelivery: false,
             isDefaultBrain: false,
-          },
-          slack: {
-            integration: {
-              provider: "slack",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountName: null,
-              teamName: null,
-              statusReason: null,
-            },
           },
           linear: {
             integration: {
@@ -4314,7 +4302,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
         data: {
           brainId: "brain_contract",
           integrationId: "integration_contract",
-          provider: "slack",
+          provider: "gmail",
           enabled: true,
         },
         meta,

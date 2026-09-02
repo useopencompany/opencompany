@@ -3,6 +3,7 @@ import { and, eq, type SQL, sql } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { getDb } from "./client";
 import {
+  type ActiveWikiSourceProvider,
   type IntegrationStatus,
   integrations,
   users,
@@ -58,7 +59,7 @@ export async function listEnabledWikiSourcesForIntegration(
 
 export async function upsertWikiSource(input: {
   workspaceId: string;
-  provider: WikiSourceProvider;
+  provider: ActiveWikiSourceProvider;
   integrationId: string;
   userWorkosId: string;
   createdByWorkosId: string;

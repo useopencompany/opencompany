@@ -193,10 +193,8 @@ export function SettingsRoute() {
 
 export function IntegrationsSettingsRoute({
   browserProfilesEnabled = false,
-  slackPluginInstalled = false,
 }: {
   browserProfilesEnabled?: boolean;
-  slackPluginInstalled?: boolean;
 }) {
   const { featureFlags, integrations, workspace } = useAppData();
 
@@ -211,7 +209,6 @@ export function IntegrationsSettingsRoute({
         workspaceId={workspace.id}
         imessageEnabled={featureFlags.imessage}
         browserProfilesEnabled={browserProfilesEnabled}
-        slackPluginInstalled={slackPluginInstalled}
       />
     </SettingsContent>
   );
@@ -820,14 +817,12 @@ function IntegrationRows({
   workspaceId,
   imessageEnabled,
   browserProfilesEnabled,
-  slackPluginInstalled,
 }: {
   integrations: IntegrationState;
   isWorkspaceAdmin: boolean;
   workspaceId: string;
   imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
-  slackPluginInstalled: boolean;
 }) {
   return (
     <SettingsIntegrationsPanel
@@ -836,7 +831,6 @@ function IntegrationRows({
       scopeKey={workspaceId}
       imessageEnabled={imessageEnabled}
       browserProfilesEnabled={browserProfilesEnabled}
-      slackPluginInstalled={slackPluginInstalled}
     />
   );
 }

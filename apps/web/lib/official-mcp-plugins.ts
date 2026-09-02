@@ -56,11 +56,8 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     source:
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
     connectionProvider: "slack",
-    connectHref: "/api/integrations/slack/start?purpose=mcp&returnTo=/settings/plugins/slack",
-    accountDescription:
-      "The most recently connected Slack account powers tools. Other accounts remain available for ingestion.",
-    ingestionHref: "/wiki/sources",
-    ingestionLabel: "Configure Slack ingestion in Wiki sources",
+    connectHref: "/api/integrations/slack/start?returnTo=/settings/plugins/slack",
+    accountDescription: "The most recently connected Slack account powers Slack tools.",
   },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginMetadata>;
 

@@ -17,7 +17,6 @@ import {
   isNormalizedImportSourceItem,
   isNormalizedJamieMeetingSourceItem,
   isNormalizedLinearIssueSourceItem,
-  isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
   type NormalizedBrainPointerSourceItem,
   type NormalizedBrainSourceItem,
@@ -64,7 +63,6 @@ import {
   runImportAgentIngest,
   runJamieMeetingAgentIngest,
   runLinearIssueAgentIngest,
-  runSlackConversationAgentIngest,
   runUploadAssetAgentIngest,
 } from "./brain-agent-ingest";
 import {
@@ -181,11 +179,6 @@ const CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
 const POINTER_HYDRATE_DESCRIPTORS = [
   {
     kind: "brain_pointer_hydrate",
-    sourceProvider: "slack",
-    sourceType: "pointer",
-  },
-  {
-    kind: "brain_pointer_hydrate",
     sourceProvider: "gmail",
     sourceType: "pointer",
   },
@@ -200,12 +193,6 @@ const UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "upload",
   sourceType: "asset",
-} as const satisfies BrainIngestJobDescriptor;
-
-const SLACK_CONVERSATION_AGENT_INGEST_DESCRIPTOR = {
-  kind: "brain_agent_ingest",
-  sourceProvider: "slack",
-  sourceType: "conversation",
 } as const satisfies BrainIngestJobDescriptor;
 
 const LINEAR_ISSUE_AGENT_INGEST_DESCRIPTOR = {
@@ -287,11 +274,6 @@ const BRAIN_INGEST_HANDLERS: readonly BrainIngestHandler[] = [
     descriptor: UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedUploadAssetSourceItem,
     run: runTypedBrainIngestHandler(runUploadAssetAgentIngest),
-  },
-  {
-    descriptor: SLACK_CONVERSATION_AGENT_INGEST_DESCRIPTOR,
-    isPayload: isNormalizedSlackConversationSourceItem,
-    run: runTypedBrainIngestHandler(runSlackConversationAgentIngest),
   },
   {
     descriptor: LINEAR_ISSUE_AGENT_INGEST_DESCRIPTOR,

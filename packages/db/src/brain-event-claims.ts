@@ -6,7 +6,6 @@ import { brainSourceEventClaims } from "./product-schema";
 type DbLike = any;
 
 export type BrainClaimProvider =
-  | "slack"
   | "gmail"
   | "linear"
   | "github"

@@ -60,7 +60,6 @@ const PROVIDERS: BrainImportProvider[] = [
   "granola",
   "fathom",
   "gmail",
-  "slack",
   "linear",
 ];
 

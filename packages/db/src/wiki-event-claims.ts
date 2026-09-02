@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "./client";
-import { type WikiSourceProvider, wikiSourceEventClaims } from "./product-schema";
+import { type ActiveWikiSourceProvider, wikiSourceEventClaims } from "./product-schema";
 
 type DbLike = any;
 
@@ -9,7 +9,7 @@ type DbLike = any;
 // flushes serialize on the unique (workspace, provider, event_key) index.
 export async function claimWikiSourceEvents(input: {
   workspaceId: string;
-  sourceProvider: WikiSourceProvider;
+  sourceProvider: ActiveWikiSourceProvider;
   eventKeys: string[];
   sourceItemId?: string;
   db?: DbLike;
@@ -49,7 +49,7 @@ export async function claimWikiSourceEvents(input: {
 // bump. Claims are still inserted only after the payload fetch succeeds.
 export async function listWikiSourceEventClaimedWorkspaceIds(input: {
   workspaceIds: readonly string[];
-  sourceProvider: WikiSourceProvider;
+  sourceProvider: ActiveWikiSourceProvider;
   eventKey: string;
   db?: DbLike;
 }): Promise<Set<string>> {
@@ -73,7 +73,7 @@ export async function listWikiSourceEventClaimedWorkspaceIds(input: {
 // is retained for ingestion observability.
 export async function attributeWikiSourceEventClaims(input: {
   workspaceId: string;
-  sourceProvider: WikiSourceProvider;
+  sourceProvider: ActiveWikiSourceProvider;
   eventKeys: string[];
   sourceItemId: string;
   db?: DbLike;

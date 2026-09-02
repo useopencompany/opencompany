@@ -198,6 +198,16 @@ describe("integration account service", () => {
     });
   });
 
+  it("does not report retired Slack source rows as active account usage", async () => {
+    const service = createIntegrationAccountService({
+      db: fakeDb([[{ id: "gint_slack", provider: "slack" }]]),
+    });
+
+    await expect(service.getUsage(member, "gint_slack")).resolves.toEqual({
+      affectedBrainSourceCount: 0,
+    });
+  });
+
   it("reports a non-owned disconnect with the retired owner-only copy", async () => {
     vi.mocked(disconnectPersonalIntegration).mockResolvedValueOnce(false);
     const service = createIntegrationAccountService({ db: fakeDb() });

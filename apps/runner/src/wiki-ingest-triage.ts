@@ -1,9 +1,6 @@
 import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
-import {
-  isNormalizedGmailThreadSourceItem,
-  isNormalizedSlackConversationSourceItem,
-} from "@opencompany/brain";
+import { isNormalizedGmailThreadSourceItem } from "@opencompany/brain";
 import {
   BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH,
   BRAIN_INGEST_TRIAGE_MAX_ENTITY_HINTS,
@@ -11,12 +8,12 @@ import {
 } from "@opencompany/brain/ingest-trace";
 import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { parseGmailWikiSourceConfig } from "@opencompany/db/gmail";
-import type { WikiSourceProvider } from "@opencompany/db/product-schema";
+import type { ActiveWikiSourceProvider } from "@opencompany/db/product-schema";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import { createGatewayAttribution, gatewayProviderOptions } from "@opencompany/telemetry";
 import { latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import * as ai from "ai";
-import { buildGmailIngestTriagePrompt, buildSlackIngestTriagePrompt } from "./brain-ingest-triage";
+import { buildGmailIngestTriagePrompt } from "./brain-ingest-triage";
 import type { WikiIngestTraceUsage } from "./wiki-agent-ingest";
 
 export const WIKI_INGEST_TRIAGE_MODEL = WIKI_INGEST_MODEL;
@@ -124,16 +121,10 @@ export async function runWikiIngestTriage(
 }
 
 export function buildWikiIngestTriagePrompt(input: {
-  sourceProvider: WikiSourceProvider;
+  sourceProvider: ActiveWikiSourceProvider;
   normalizedPayload: unknown;
   sourceConfig: Record<string, unknown>;
 }): string | null {
-  if (
-    input.sourceProvider === "slack" &&
-    isNormalizedSlackConversationSourceItem(input.normalizedPayload)
-  ) {
-    return buildSlackIngestTriagePrompt(input.normalizedPayload);
-  }
   if (
     input.sourceProvider === "gmail" &&
     isNormalizedGmailThreadSourceItem(input.normalizedPayload)

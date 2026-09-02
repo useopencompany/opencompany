@@ -222,6 +222,8 @@ export type BrainSourceProvider =
   | "granola"
   | "fathom"
   | "attio";
+// The persisted source unions still include Slack so historical rows remain
+// readable during the cutover. Active product schemas and workers exclude it.
 // "slack_bot" rows are answer *destinations* (which channels a brain answers
 // in via the Slack bot), not ingestion sources; no ingestion path reads them.
 export type BrainSourceConfigProvider =
@@ -267,6 +269,7 @@ export type BrainIngestJobKind =
   | "brain_pointer_hydrate";
 export type BrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 export type WikiSourceProvider = "gmail" | "slack" | "jamie" | "granola" | "linear" | "github";
+export type ActiveWikiSourceProvider = Exclude<WikiSourceProvider, "slack">;
 export type WikiSourceType = "meeting" | "conversation" | "issue" | "activity" | "thread";
 export type WikiSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
 export type WikiIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
@@ -286,7 +289,6 @@ export type BrainImportProvider =
   | "granola"
   | "fathom"
   | "gmail"
-  | "slack"
   | "linear";
 export type BrainImportSourceSelection = Partial<
   Record<
@@ -1242,8 +1244,8 @@ export const brainDocuments = productSchema.table(
       .references(() => users.workosUserId, { onDelete: "cascade" }),
     // Who originally put this document in the brain (set once at insert, never
     // on update — unlike userWorkosId, which tracks the last actor). Null when
-    // no human originated it, e.g. Slack-window ingestion: the integration
-    // owner connected the channel but did not author its content.
+    // no human originated it, e.g. externally authored source ingestion: the
+    // integration owner connected the source but did not author its content.
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
     }),
@@ -2536,10 +2538,8 @@ export const slackBotThreadParticipation = productSchema.table(
   }),
 );
 
-// Raw Slack message buffer: the events webhook inserts one row per relevant
-// message; the runner's flush sweeper batches unflushed rows per channel into a
-// conversation-window source item after a quiet period (source_item_id NULL =
-// unflushed).
+// Retired Slack-ingestion storage. Kept temporarily so this cutover does not
+// delete customer data; no webhook or runner path writes or flushes these rows.
 export const slackMessageEvents = productSchema.table(
   "slack_message_events",
   {

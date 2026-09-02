@@ -141,7 +141,7 @@ describe("wiki source lifecycle", () => {
       {
         id: "gwscfg_1",
         workspaceId: "workspace_1",
-        provider: "slack",
+        provider: "gmail",
         integrationId: "integration_1",
         userWorkosId: "user_1",
         enabled: true,
@@ -149,7 +149,7 @@ describe("wiki source lifecycle", () => {
         integrationStatus: "connected",
         integrationAccountName: "Acme",
         integrationAccountEmail: null,
-        integrationConnectionLabel: "Acme Slack",
+        integrationConnectionLabel: "Acme Gmail",
         integrationWorkspaceId: null,
         ownerFirstName: "Ada",
         ownerLastName: "Lovelace",

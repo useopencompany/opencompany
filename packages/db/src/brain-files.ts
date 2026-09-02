@@ -562,7 +562,7 @@ export async function upsertBrainFile(
     importRunId?: string | null;
     // Recorded only when the row is created; conflicting upserts never touch
     // it. Defaults to the acting user; pass null when no human originated the
-    // content (e.g. Slack-window ingestion).
+    // content (e.g. externally authored source ingestion).
     createdByWorkosId?: string | null;
   },
   options: { db?: DbClient } = {},
@@ -1058,7 +1058,7 @@ export async function syncBrainFiles(input: {
   folders?: BrainFolderManifestEntry[] | null;
   // Attribution for documents this sync *creates* (existing rows keep theirs).
   // Defaults to the acting user; pass null when no human originated the
-  // content (e.g. Slack-window ingestion).
+  // content (e.g. externally authored source ingestion).
   createdByWorkosId?: string | null;
 }): Promise<BrainSyncResult> {
   const db = input.db ?? getDb();

@@ -31,6 +31,7 @@ const protectedCompatibilityTokens = [
     "physical and stored quoted goat_* identifiers",
     /["'`]goat_[a-z0-9_]*["'`]/gu,
     "[\"'`]goat_[a-z0-9_]*[\"'`]",
+    -2,
   ],
   [
     "quoted sandbox runtime roots",
@@ -208,7 +209,10 @@ const addedEnvKeys = [
   "RUNNER_SANDBOX_NAMESPACE",
   "WORKOS_MOBILE_CLIENT_ID",
 ];
-const retiredEnvKeys = new Set([["RUNNER", "CLAUDE", "CODE", "ACP", "ENABLED"].join("_")]);
+const retiredEnvKeys = new Set([
+  ["OPENCOMPANY", "SLACK", "SIGNING", "SECRET"].join("_"),
+  ["RUNNER", "CLAUDE", "CODE", "ACP", "ENABLED"].join("_"),
+]);
 const expectedEnvKeys = [
   ...new Set([
     ...baseEnvKeys

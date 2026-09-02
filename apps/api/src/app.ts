@@ -2667,10 +2667,6 @@ export function createApiApp(input: CreateApiAppInput) {
     const ingress = input.slackIngress;
     app.get("/integrations/slack/start", (c) => ingress.start(c.req.raw));
     app.get("/integrations/slack/callback", (c) => ingress.callback(c.req.raw));
-    // Slack event payloads are small; Render enforces no platform body cap, so
-    // bound the unauthenticated raw-body read here.
-    app.use("/webhooks/slack/events", ingressBodyLimit(5 * 1024 * 1024));
-    app.post("/webhooks/slack/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.linearIngress) {
     const ingress = input.linearIngress;

@@ -4,6 +4,7 @@ import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { reserveWorkspaceIngestion } from "./billing";
 import { getDb } from "./client";
 import {
+  type ActiveWikiSourceProvider,
   type WikiIngestJob,
   type WikiIngestJobStatus,
   type WikiSourceProvider,
@@ -19,7 +20,7 @@ export const WIKI_INGEST_MAX_ATTEMPTS = 5;
 const ATTEMPT_ERROR_MAX_CHARS = 500;
 
 export type NormalizedWikiSourceItem<TContent = unknown> = {
-  sourceProvider: WikiSourceProvider;
+  sourceProvider: ActiveWikiSourceProvider;
   sourceType: WikiSourceType;
   externalId: string;
   sourceRef: string;
@@ -48,7 +49,8 @@ type PersistedWikiIngestJob = {
   skipReason: string | null;
 };
 
-export type ClaimedWikiIngestJob = WikiIngestJob & {
+export type ClaimedWikiIngestJob = Omit<WikiIngestJob, "sourceProvider"> & {
+  sourceProvider: ActiveWikiSourceProvider;
   sourceType: WikiSourceType;
   sourceRef: string;
   title: string | null;
@@ -106,6 +108,7 @@ export async function listWikiIngestActivityRows(input: {
       ON source.id = job.source_item_id
      AND source.workspace_id = job.workspace_id
     WHERE job.workspace_id = ${input.workspaceId}
+      AND job.source_provider <> 'slack'
       AND (
         ${beforeCreatedAt}::timestamptz IS NULL
         OR (job.created_at, job.id) < (${beforeCreatedAt}::timestamptz, ${beforeId})
@@ -301,6 +304,7 @@ export async function claimNextWikiIngestJob(input: {
           (job.status = 'queued' AND job.next_retry_at <= ${now})
           OR (job.status = 'running' AND job.lease_expires_at < ${now})
         )
+        AND job.source_provider <> 'slack'
         AND EXISTS (
           SELECT 1
           FROM goat.wiki_sources AS source
