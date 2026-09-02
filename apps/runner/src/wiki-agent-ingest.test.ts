@@ -198,6 +198,10 @@ describe("opencompany wiki librarian agent", () => {
     expect(generation.model).toEqual({ model: WIKI_AGENT_INGEST_MODEL });
     expect(Object.keys(generation.tools)).toEqual(["wiki"]);
     expect(generation.providerOptions.gateway.caching).toBe("auto");
+    expect(generation.system).toBe(WIKI_AGENT_INGEST_SYSTEM_PROMPT);
+    expect(generation.messages).toEqual([
+      expect.objectContaining({ role: "user", content: expect.any(String) }),
+    ]);
     expect(generation.messages).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ providerOptions: expect.anything() })]),
     );
@@ -421,8 +425,8 @@ describe("opencompany wiki librarian agent", () => {
     });
 
     const generation = aiMock.generateText.mock.calls[0]?.[0] as any;
-    expect(generation.messages[1].content).toContain("## Cheap triage handoff");
-    expect(generation.messages[1].content).toContain("- Acme\n- Onboarding");
+    expect(generation.messages[0].content).toContain("## Cheap triage handoff");
+    expect(generation.messages[0].content).toContain("- Acme\n- Onboarding");
   });
 
   it("falls through to full wiki ingest when cheap triage fails", async () => {
@@ -450,9 +454,9 @@ describe("opencompany wiki librarian agent", () => {
     });
     expect(result.budget.modelCostUsdMicros).toBeGreaterThan(25);
     const generation = aiMock.generateText.mock.calls[0]?.[0] as any;
-    expect(generation.messages[1].content).toContain("## Cheap triage handoff");
-    expect(generation.messages[1].content).toContain("- Acme API");
-    expect(generation.messages[1].content).toContain("- Billing");
+    expect(generation.messages[0].content).toContain("## Cheap triage handoff");
+    expect(generation.messages[0].content).toContain("- Acme API");
+    expect(generation.messages[0].content).toContain("- Billing");
   });
 
   it("falls through to the GitHub wiki agent when triage fails", async () => {
