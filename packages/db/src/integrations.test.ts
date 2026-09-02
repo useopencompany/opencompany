@@ -62,7 +62,13 @@ describe("connectGitHubUserIntegration", () => {
       'on conflict ("user_workos_id","provider","external_id")',
     );
     expect(integrationParams).toEqual(
-      expect.arrayContaining(["user_1", "github_user", "@octocat", "The Octocat"]),
+      expect.arrayContaining([
+        "user_1",
+        "github_user",
+        "@octocat",
+        "The Octocat",
+        "42+octocat@users.noreply.github.com",
+      ]),
     );
 
     const [, credentialParams] = query.mock.calls[1]!;

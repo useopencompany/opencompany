@@ -27,6 +27,7 @@ import {
   GitHubUserAccessAuthError,
   getGitHubUserAccessToken,
   isGitHubUserIntegrationConfigured,
+  loadGitHubUserCredentialIdentity,
   verifyGitHubUserIntegrationState,
 } from "./github-user";
 
@@ -143,6 +144,21 @@ describe("GitHub user integration", () => {
     await expect(getGitHubUserAccessToken(connection, { now })).resolves.toBe("ghu_access_old");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.rotateCredential).not.toHaveBeenCalled();
+  });
+
+  it("loads the stable account identity from the encrypted credential", async () => {
+    mocks.loadCredential.mockResolvedValue(storedCredential());
+
+    await expect(loadGitHubUserCredentialIdentity({ ...connection, db })).resolves.toEqual({
+      githubUserId: "42",
+      githubLogin: "octocat",
+    });
+    expect(mocks.loadCredential).toHaveBeenCalledWith({
+      ...connection,
+      provider: "github_user",
+      kind: "oauth_token",
+      db,
+    });
   });
 
   it("rotates and atomically persists both expiring tokens", async () => {

@@ -3,6 +3,7 @@ import { getDb } from "@opencompany/db/client";
 import {
   GITHUB_USER_INTEGRATION_EXTERNAL_ID,
   type GitHubUserOAuthCredentialPayload,
+  loadIntegrationCredential,
 } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
@@ -127,6 +128,22 @@ export async function loadGitHubUserIntegration(input: { userWorkosId: string; d
     .orderBy(desc(integrations.updatedAt))
     .limit(1);
   return row;
+}
+
+export async function loadGitHubUserCredentialIdentity(input: {
+  userWorkosId: string;
+  integrationId: string;
+  db?: DbLike;
+}) {
+  const credential = await loadIntegrationCredential({
+    userWorkosId: input.userWorkosId,
+    integrationId: input.integrationId,
+    provider: GITHUB_USER_PROVIDER,
+    kind: "oauth_token",
+    ...(input.db ? { db: input.db } : {}),
+  });
+  const tokens = credential ? parseStoredTokens(credential.payload) : null;
+  return tokens ? { githubUserId: tokens.github_user_id, githubLogin: tokens.github_login } : null;
 }
 
 export function createGitHubUserIntegrationState(

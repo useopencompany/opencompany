@@ -1,5 +1,8 @@
 import { createSign } from "node:crypto";
 import { hasGhApiRequestBody, readGhApiMethod } from "@opencompany/agent-runtime";
+import { createLogger } from "@opencompany/observability";
+
+const logger = createLogger({ service: "opencompany-runner", runtime: "github" });
 
 type InstallationToken = {
   token: string;
@@ -271,6 +274,13 @@ export async function listGitHubUserRepositoryNames(input: {
       }
     }
     if (payload.length < 100) break;
+    if (page === pageCap) {
+      logger.warn("GitHub personal repository listing reached its pagination cap", {
+        event: "opencompany.github_user_repository_listing_truncated",
+        page_cap: pageCap,
+        repository_count: names.size,
+      });
+    }
   }
 
   return [...names].sort((left, right) => left.localeCompare(right));

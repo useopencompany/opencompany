@@ -74,6 +74,7 @@ import {
   GITHUB_UNAVAILABLE_NOTICE,
   type GitHubCommandAuth,
   loadGitHubAuthForUser,
+  shouldAppendGitHubAuthNotice,
 } from "./coding-agent-shared";
 import {
   type CodingChatHistory,
@@ -421,6 +422,7 @@ export async function runClaudeCodeChatTurn(input: {
     });
     executionStage = "load_github_auth";
     let github: GitHubCommandAuth | null = null;
+    let githubNotice: string | null = null;
     try {
       github = await loadGitHubAuthForUser(turn.userWorkosId);
     } catch (error) {
@@ -432,9 +434,18 @@ export async function runClaudeCodeChatTurn(input: {
         needs_reconnect: needsReconnect,
         error_name: error instanceof Error ? error.name : typeof error,
       });
-      await projector.appendNotice(
-        needsReconnect ? GITHUB_RECONNECT_NOTICE : GITHUB_UNAVAILABLE_NOTICE,
-      );
+      githubNotice = needsReconnect ? GITHUB_RECONNECT_NOTICE : GITHUB_UNAVAILABLE_NOTICE;
+    }
+    if (githubNotice && shouldAppendGitHubAuthNotice(conversationHistory, githubNotice)) {
+      try {
+        await projector.appendNotice(githubNotice);
+      } catch (error) {
+        logger.warn("GitHub auth notice could not be persisted; continuing the chat turn", {
+          event: "opencompany.goat_claude_chat_github_auth_notice_failed",
+          turn_id: turn.id,
+          error_name: error instanceof Error ? error.name : typeof error,
+        });
+      }
     }
     const canonicalAttemptId = input.canonicalAttemptId;
     const hostGatewayEnabled =

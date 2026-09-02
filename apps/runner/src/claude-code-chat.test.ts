@@ -146,6 +146,14 @@ vi.mock("./coding-agent-shared", () => ({
   buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
   loadGitHubAuthForUser: chatMocks.loadGitHubAuthForUser,
+  shouldAppendGitHubAuthNotice: (
+    history: { messages: Array<{ role: string; content: string }> },
+    notice: string,
+  ) =>
+    !notice.startsWith("GitHub needs reconnecting") ||
+    !history.messages.some(
+      (message) => message.role === "assistant" && message.content.includes(notice),
+    ),
 }));
 
 vi.mock("./coding-chat-history", async (importOriginal) => {
@@ -498,6 +506,53 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     ).resolves.toBe("settled");
 
     expect(eventMocks.appendNotice).toHaveBeenCalledWith(notice);
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
+  it("continues when the GitHub auth notice cannot be persisted", async () => {
+    chatMocks.loadGitHubAuthForUser.mockRejectedValueOnce(
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+    );
+    eventMocks.appendNotice.mockRejectedValueOnce(new Error("database unavailable"));
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
+  it("does not repeat a reconnect notice already present in durable history", async () => {
+    chatMocks.loadGitHubAuthForUser.mockRejectedValueOnce(
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+    );
+    historyMocks.loadCodingChatHistory.mockResolvedValueOnce({
+      messages: [
+        {
+          role: "assistant",
+          content:
+            "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+          attachments: [],
+        },
+      ],
+      materializableAttachments: [],
+      omittedTurnCount: 0,
+      omittedAttachmentCount: 0,
+    });
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(eventMocks.appendNotice).not.toHaveBeenCalled();
     expect(acpMocks.runTurn).toHaveBeenCalledOnce();
   });
 

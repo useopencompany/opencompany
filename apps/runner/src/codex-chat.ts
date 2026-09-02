@@ -72,6 +72,7 @@ import {
   GITHUB_UNAVAILABLE_NOTICE,
   type GitHubCommandAuth,
   loadGitHubAuthForUser,
+  shouldAppendGitHubAuthNotice,
 } from "./coding-agent-shared";
 import {
   type CodingChatHistory,
@@ -448,7 +449,17 @@ export async function runCodexChatTurn(input: {
       normalizeEvent: acpNormalizer.normalize,
     });
     projector = turnProjector;
-    if (githubNotice) await turnProjector.appendNotice(githubNotice);
+    if (githubNotice && shouldAppendGitHubAuthNotice(conversationHistory, githubNotice)) {
+      try {
+        await turnProjector.appendNotice(githubNotice);
+      } catch (error) {
+        logger.warn("GitHub auth notice could not be persisted; continuing the chat turn", {
+          event: "opencompany.goat_codex_chat_github_auth_notice_failed",
+          turn_id: turn.id,
+          error_name: error instanceof Error ? error.name : typeof error,
+        });
+      }
+    }
 
     if (input.recovery) {
       // A client request belongs to the dead ACP connection and cannot be resumed. Settle it
