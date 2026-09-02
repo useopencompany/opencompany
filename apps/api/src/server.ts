@@ -59,6 +59,7 @@ import { createEngineAuthService } from "./engine-auth";
 import { createEngineSessionService } from "./engine-sessions";
 import { createFeedbackService } from "./feedback";
 import { createGitHubIngress } from "./github-ingress";
+import { createGitHubUserIngress } from "./github-user-ingress";
 import { createGoogleIngress } from "./google-ingress";
 import { createHubspotIngress } from "./hubspot-ingress";
 import { createIdentityService } from "./identity";
@@ -246,6 +247,19 @@ const app = createApiApp({
         {},
         { errorFormat: "error-message" },
       ),
+  }),
+  githubUserIngress: createGitHubUserIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        // Registrations persist the Plugin package name; the gateway binding
+        // maps package "github" to the personal github_user integration.
+        connectionProvider: "github",
+      }),
   }),
   googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
   slackIngress: createSlackIngress({ db: database.db, identify: identityVerifier }),

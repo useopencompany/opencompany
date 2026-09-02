@@ -86,6 +86,7 @@ import type { EngineSessionService } from "./engine-sessions";
 import { ApiError, errorResponse } from "./errors";
 import type { FeedbackService } from "./feedback";
 import type { GitHubIngressService } from "./github-ingress";
+import type { GitHubUserIngressService } from "./github-user-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
 import type { IdentityService } from "./identity";
@@ -212,6 +213,7 @@ export type CreateApiAppInput = {
   emailLifecycleInternalSecret?: string;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
+  githubUserIngress?: GitHubUserIngressService;
   googleIngress?: GoogleIngressService;
   slackIngress?: SlackIngressService;
   linearIngress?: LinearIngressService;
@@ -2639,6 +2641,11 @@ export function createApiApp(input: CreateApiAppInput) {
     // Render enforces no platform body limit, so cap it here.
     app.use("/webhooks/github/events", ingressBodyLimit(25 * 1024 * 1024));
     app.post("/webhooks/github/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.githubUserIngress) {
+    const ingress = input.githubUserIngress;
+    app.get("/integrations/github-user/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/github-user/callback", (c) => ingress.callback(c.req.raw));
   }
   if (input.googleIngress) {
     const ingress = input.googleIngress;

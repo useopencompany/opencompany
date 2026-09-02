@@ -1,12 +1,11 @@
 import { getDb } from "@opencompany/db/client";
+import { markIntegrationStatus } from "@opencompany/db/integrations";
 import {
-  loadIntegrationCredential,
-  markIntegrationStatus,
-  refreshIntegrationCredential,
-} from "@opencompany/db/integrations";
+  ExpiringOAuthReauthRequired,
+  getExpiringOAuthAccessToken,
+} from "./expiring-oauth-access-token";
 
 const X_TOKEN_ENDPOINT = "https://api.x.com/2/oauth2/token";
-const REFRESH_SKEW_MS = 60_000;
 
 type StoredXTokens = {
   access_token?: string;
@@ -78,26 +77,50 @@ export async function getXAccessToken(
   connection: XAccessConnection,
   options?: { signal?: AbortSignal; forceRefresh?: boolean },
 ): Promise<string> {
-  const credential = await loadIntegrationCredential({
-    userWorkosId: connection.userWorkosId,
-    integrationId: connection.integrationId,
-    provider: "x_account",
-    kind: "oauth_token",
-    db: getDb(),
+  return getExpiringOAuthAccessToken({
+    connection: { ...connection, provider: "x_account" },
+    displayName: "X",
+    parseCredential: parseXCredential,
+    refresh: refreshXCredential,
+    createAuthError: (message) => new XAccessAuthError(message),
+    missingCredential: {
+      message: "No stored X credentials for this account.",
+      statusReason: "Stored X credentials are missing.",
+    },
+    invalidCredential: {
+      message: "Stored X credentials are invalid.",
+      statusReason: "Stored X credentials are invalid.",
+    },
+    ...(options ? { options } : {}),
   });
-  if (!credential) {
-    throw new XAccessAuthError("No stored X credentials for this account.");
-  }
-  const tokens = credential.payload as StoredXTokens;
-  const expired = credential.expiresAt
-    ? credential.expiresAt.getTime() - REFRESH_SKEW_MS <= Date.now()
-    : true;
-  if (!options?.forceRefresh && !expired && tokens.access_token) return tokens.access_token;
-  if (!tokens.refresh_token) {
-    await markXAccountNeedsReauth(connection, "Stored X credentials have no refresh token.");
-    throw new XAccessAuthError("Stored X credentials have no refresh token.");
-  }
+}
 
+function parseXCredential(payload: Record<string, unknown>) {
+  const accessToken = typeof payload.access_token === "string" ? payload.access_token.trim() : "";
+  if (!accessToken) return null;
+  const tokens = payload as StoredXTokens;
+  return {
+    accessToken,
+    refreshToken: tokens.refresh_token?.trim() || null,
+    payload: tokens,
+  };
+}
+
+async function refreshXCredential(
+  credential: {
+    accessToken: string;
+    refreshToken: string | null;
+    payload: StoredXTokens;
+  },
+  context: { now: Date; signal?: AbortSignal },
+) {
+  const refreshToken = credential.refreshToken;
+  if (!refreshToken) {
+    throw new ExpiringOAuthReauthRequired(
+      "Stored X credentials have no refresh token.",
+      "Stored X credentials have no refresh token.",
+    );
+  }
   const clientId = process.env.OPENCOMPANY_X_CLIENT_ID?.trim();
   const clientSecret = process.env.OPENCOMPANY_X_CLIENT_SECRET?.trim();
   if (!clientId || !clientSecret)
@@ -108,17 +131,19 @@ export async function getXAccessToken(
       "Content-Type": "application/x-www-form-urlencoded",
       Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64")}`,
     },
-    signal: options?.signal ?? null,
+    signal: context.signal ?? null,
     body: new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: tokens.refresh_token,
+      refresh_token: refreshToken,
     }),
   });
   if (!response.ok) {
     const detail = await response.text();
     if (response.status === 400 || response.status === 401) {
-      await markXAccountNeedsReauth(connection, "X refused the refresh token.");
-      throw new XAccessAuthError("X refused the refresh token.");
+      throw new ExpiringOAuthReauthRequired(
+        "X refused the refresh token.",
+        "X refused the refresh token.",
+      );
     }
     throw new Error(`X token refresh failed with ${response.status}: ${xApiErrorDetail(detail)}`);
   }
@@ -127,24 +152,21 @@ export async function getXAccessToken(
   const nextTokens: StoredXTokens = {
     access_token: refreshed.access_token,
     // X may omit refresh_token on rotation responses that keep it stable.
-    refresh_token: refreshed.refresh_token ?? tokens.refresh_token,
-    ...((refreshed.scope ?? tokens.scope) ? { scope: refreshed.scope ?? tokens.scope } : {}),
+    refresh_token: refreshed.refresh_token ?? refreshToken,
+    ...((refreshed.scope ?? credential.payload.scope)
+      ? { scope: refreshed.scope ?? credential.payload.scope }
+      : {}),
   };
-  await refreshIntegrationCredential({
-    userWorkosId: connection.userWorkosId,
-    integrationId: connection.integrationId,
-    provider: "x_account",
-    kind: "oauth_token",
+  return {
+    accessToken: refreshed.access_token,
     payload: Object.fromEntries(
       Object.entries(nextTokens).filter(([, value]) => value !== undefined),
     ),
     expiresAt:
       typeof refreshed.expires_in === "number"
-        ? new Date(Date.now() + refreshed.expires_in * 1_000)
+        ? new Date(context.now.getTime() + refreshed.expires_in * 1_000)
         : null,
-    db: getDb(),
-  });
-  return refreshed.access_token;
+  };
 }
 
 async function markXAccountNeedsReauth(connection: XAccessConnection, reason: string) {

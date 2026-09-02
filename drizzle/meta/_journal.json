@@ -1664,8 +1664,15 @@
     {
       "idx": 237,
       "version": "7",
+      "when": 1788282001000,
+      "tag": "0237_goat_github_user_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 238,
+      "version": "7",
       "when": 1788364800000,
-      "tag": "0237_codex_subscription_routing",
+      "tag": "0238_codex_subscription_routing",
       "breakpoints": true
     }
   ]

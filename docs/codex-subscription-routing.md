@@ -25,7 +25,7 @@ remain encrypted in `goat.codex_credentials`.
 
 ## Operational verification
 
-After applying migration `0237_codex_subscription_routing`:
+After applying migration `0238_codex_subscription_routing`:
 
 1. Connect Codex from a workspace admin's personal Integrations settings.
 2. Enable **Subscription-backed models** in the Workspace integrations scope.
