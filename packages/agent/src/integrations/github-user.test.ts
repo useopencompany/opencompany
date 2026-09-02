@@ -25,9 +25,12 @@ import {
   exchangeGitHubAppUserCode,
   fetchGitHubUserIdentity,
   GitHubUserAccessAuthError,
+  GitHubUserAccessRateLimitError,
   getGitHubUserAccessToken,
   isGitHubUserIntegrationConfigured,
+  listGitHubUserRepositoryAccess,
   loadGitHubUserCredentialIdentity,
+  resolveGitHubUserInstallTarget,
   verifyGitHubUserIntegrationState,
 } from "./github-user";
 
@@ -87,6 +90,13 @@ describe("GitHub user integration", () => {
     const install = new URL(buildGitHubUserInstallUrl(state));
     expect(install.href).toContain("github.com/apps/opencompany-user/installations/new");
     expect(install.searchParams.get("state")).toBe(state);
+    const targetedInstall = new URL(buildGitHubUserInstallUrl(state, { suggestedTargetId: "987" }));
+    expect(targetedInstall.pathname).toBe("/apps/opencompany-user/installations/new/permissions");
+    expect(targetedInstall.searchParams.get("suggested_target_id")).toBe("987");
+    expect(targetedInstall.searchParams.get("state")).toBe(state);
+    expect(() => buildGitHubUserInstallUrl(state, { suggestedTargetId: "not-an-id" })).toThrow(
+      "must be numeric",
+    );
     expect(() => verifyGitHubUserIntegrationState(`${state}tampered`)).toThrow();
   });
 
@@ -159,6 +169,181 @@ describe("GitHub user integration", () => {
       kind: "oauth_token",
       db,
     });
+  });
+
+  it("lists the installations and repositories the personal GitHub App can reach", async () => {
+    mocks.loadCredential.mockResolvedValue({
+      ...storedCredential(),
+      expiresAt: new Date("2026-09-01T13:00:00.000Z"),
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          total_count: 1,
+          installations: [
+            {
+              id: 123,
+              account: {
+                id: 987,
+                login: "sourceco",
+                type: "Organization",
+                avatar_url: "https://avatars.example/sourceco",
+                html_url: "https://github.com/sourceco",
+              },
+              repository_selection: "selected",
+              permissions: { metadata: "read", contents: "write" },
+              suspended_at: null,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          total_count: 1,
+          repositories: [
+            {
+              id: 456,
+              name: "private-repo",
+              full_name: "sourceco/private-repo",
+              private: true,
+              html_url: "https://github.com/sourceco/private-repo",
+            },
+          ],
+        }),
+      );
+
+    await expect(
+      listGitHubUserRepositoryAccess({
+        ...connection,
+        owner: "SourceCo",
+        repo: "private-repo.git",
+        now,
+      }),
+    ).resolves.toEqual({
+      checkedAt: now.toISOString(),
+      installations: [
+        {
+          id: "123",
+          account: {
+            id: "987",
+            login: "sourceco",
+            type: "Organization",
+            avatarUrl: "https://avatars.example/sourceco",
+            htmlUrl: "https://github.com/sourceco",
+          },
+          repositorySelection: "selected",
+          permissions: { metadata: "read", contents: "write" },
+          pendingPermissions: ["actions", "checks", "issues", "pull_requests"],
+          suspendedAt: null,
+          repositories: [
+            {
+              id: "456",
+              name: "private-repo",
+              fullName: "sourceco/private-repo",
+              private: true,
+              htmlUrl: "https://github.com/sourceco/private-repo",
+            },
+          ],
+        },
+      ],
+      target: { owner: "SourceCo", repo: "private-repo", state: "available" },
+    });
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "https://api.github.com/user/installations?per_page=100&page=1",
+      "https://api.github.com/user/installations/123/repositories?per_page=100&page=1",
+    ]);
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer ghu_access_old",
+      "X-GitHub-Api-Version": "2022-11-28",
+    });
+  });
+
+  it("distinguishes a missing App installation from a generic provider failure", async () => {
+    mocks.loadCredential.mockResolvedValue({
+      ...storedCredential(),
+      expiresAt: new Date("2026-09-01T13:00:00.000Z"),
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ total_count: 0, installations: [] }),
+    );
+
+    await expect(
+      listGitHubUserRepositoryAccess({
+        ...connection,
+        owner: "opencompany",
+        repo: "private-repo",
+        now,
+      }),
+    ).resolves.toEqual({
+      checkedAt: now.toISOString(),
+      installations: [],
+      target: {
+        owner: "opencompany",
+        repo: "private-repo",
+        state: "missing_installation",
+      },
+    });
+  });
+
+  it.each([401, 403])("requires reconnection when the access API returns %i", async (status) => {
+    mocks.loadCredential.mockResolvedValue({
+      ...storedCredential(),
+      expiresAt: new Date("2026-09-01T13:00:00.000Z"),
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ message: "Bad credentials" }, { status }),
+    );
+
+    await expect(
+      listGitHubUserRepositoryAccess({ ...connection, owner: "opencompany", now }),
+    ).rejects.toBeInstanceOf(GitHubUserAccessAuthError);
+  });
+
+  it("distinguishes a GitHub rate-limit 403 from expired authorization", async () => {
+    mocks.loadCredential.mockResolvedValue({
+      ...storedCredential(),
+      expiresAt: new Date("2026-09-01T13:00:00.000Z"),
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        { message: "API rate limit exceeded" },
+        {
+          status: 403,
+          headers: {
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": String(now.getTime() / 1_000 + 60),
+          },
+        },
+      ),
+    );
+
+    await expect(
+      listGitHubUserRepositoryAccess({ ...connection, owner: "opencompany", now }),
+    ).rejects.toMatchObject({
+      name: "GitHubUserAccessRateLimitError",
+      retryAfterSeconds: 60,
+    });
+  });
+
+  it("resolves the documented targeted installation URL account id", async () => {
+    mocks.loadCredential.mockResolvedValue({
+      ...storedCredential(),
+      expiresAt: new Date("2026-09-01T13:00:00.000Z"),
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ id: 987, login: "opencompany", type: "Organization" }));
+
+    await expect(
+      resolveGitHubUserInstallTarget({ ...connection, owner: "opencompany" }),
+    ).resolves.toBe("987");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/users/opencompany",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer ghu_access_old" }),
+      }),
+    );
   });
 
   it("rotates and atomically persists both expiring tokens", async () => {
