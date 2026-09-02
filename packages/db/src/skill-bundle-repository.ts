@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   assertSafeRelativePath,
   computeArtifactIntegrity,
-  parseSkillDocument,
+  parseSkillDirectoryDocument,
   SKILL_LIMITS,
 } from "@opencompany/agent-runtime";
 import {
@@ -840,7 +840,7 @@ function validateResolvedBundle(bundle: ResolvedSkillBundle) {
   const skillFile = bundle.files.find((file) => file.path === "SKILL.md");
   if (!skillFile) throw new CoreError("invalid_argument", "The Skill bundle is incomplete.");
   try {
-    const parsed = parseSkillDocument(
+    const parsed = parseSkillDirectoryDocument(
       new TextDecoder("utf-8", { fatal: true }).decode(skillFile.content),
       bundle.name,
     );

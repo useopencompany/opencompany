@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import type { SkillImportPreviewDto } from "@opencompany/protocol";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,22 +60,25 @@ const skillActionsMock = vi.hoisted(() => ({
   enableHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
   disableHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
   replaceHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
-  previewHeadlessSkillImport: vi.fn(async () => ({
-    status: "resolved" as const,
-    name: "imported-skill",
-    description: "Does an imported thing",
-    source: {
-      type: "github" as const,
-      url: "https://github.com/o/r",
-      ref: "main",
-      path: "",
-      resolvedCommit: "a".repeat(40),
-    },
-    integrity: `sha256:${"b".repeat(64)}`,
-    files: [{ path: "SKILL.md", sizeBytes: 128 }],
-    fileCount: 1,
-    totalBytes: 128,
-  })),
+  previewHeadlessSkillImport: vi.fn(
+    async (): Promise<SkillImportPreviewDto> => ({
+      status: "resolved" as const,
+      name: "imported-skill",
+      description: "Does an imported thing",
+      source: {
+        type: "github" as const,
+        url: "https://github.com/o/r",
+        ref: "main",
+        path: "",
+        resolvedCommit: "a".repeat(40),
+      },
+      integrity: `sha256:${"b".repeat(64)}`,
+      files: [{ path: "SKILL.md", sizeBytes: 128 }],
+      fileCount: 1,
+      totalBytes: 128,
+      warnings: [],
+    }),
+  ),
   importHeadlessSkill: vi.fn(async () => ({
     installation: { name: "imported-skill" },
     replayed: false,
@@ -603,6 +607,43 @@ describe("SkillsSettingsRoute", () => {
     await waitFor(() =>
       expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/imported-skill"),
     );
+  });
+
+  it("shows when a source directory is normalized to the declared Skill name", async () => {
+    skillActionsMock.previewHeadlessSkillImport.mockResolvedValueOnce({
+      status: "resolved",
+      name: "vercel-react-best-practices",
+      description: "React and Next.js performance guidance.",
+      source: {
+        type: "skills.sh",
+        url: "https://github.com/vercel-labs/agent-skills",
+        ref: "main",
+        path: "skills/react-best-practices",
+        resolvedCommit: "a".repeat(40),
+      },
+      integrity: `sha256:${"b".repeat(64)}`,
+      files: [{ path: "SKILL.md", sizeBytes: 128 }],
+      fileCount: 1,
+      totalBytes: 128,
+      warnings: [
+        {
+          code: "source_directory_normalized",
+          message:
+            'Source directory "react-best-practices" will be installed as "vercel-react-best-practices" to match the Skill name.',
+        },
+      ],
+    });
+    render(<SkillsSettingsRoute skills={[]} canEdit />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Import skill" }));
+    await userEvent.type(
+      screen.getByPlaceholderText("github.com/owner/repo"),
+      "https://skills.sh/vercel-labs/agent-skills/vercel-react-best-practices",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(await screen.findByText(/will be installed as/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install skill" })).toBeEnabled();
   });
 
   it("creates a standard workspace-authored Skill with a derived slash command", async () => {

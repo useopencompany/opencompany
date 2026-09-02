@@ -472,6 +472,7 @@ describe("canonical Hono API", () => {
     const resolve = vi.fn(async () => ({
       status: "resolved" as const,
       bundle,
+      warnings: [],
     }));
     const install = vi.fn(async () => ({
       installation: fakeSkillInstallation(),
@@ -839,7 +840,13 @@ describe("canonical Hono API", () => {
     const app = testApp(fakeRepository(), {
       skillImports: fakeSkillImportService(
         { list, get, readFile, setEnabled, replace, archive },
-        { resolve: vi.fn(async () => ({ status: "resolved" as const, bundle: resolvedBundle })) },
+        {
+          resolve: vi.fn(async () => ({
+            status: "resolved" as const,
+            bundle: resolvedBundle,
+            warnings: [],
+          })),
+        },
       ),
     });
 
