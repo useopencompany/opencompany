@@ -1,3 +1,4 @@
+import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   verifyExternalEngineGatewayTicket,
@@ -46,6 +47,7 @@ const acpMocks = vi.hoisted(() => ({
 }));
 
 const eventMocks = vi.hoisted(() => ({
+  appendNotice: vi.fn(async () => undefined),
   createExternalEngineProjector: vi.fn(),
   loadCodexChatAssistantMessageParts: vi.fn(),
 }));
@@ -137,9 +139,21 @@ vi.mock("./acp-harness", () => ({
 }));
 
 vi.mock("./coding-agent-shared", () => ({
+  GITHUB_RECONNECT_NOTICE:
+    "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+  GITHUB_UNAVAILABLE_NOTICE:
+    "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
   buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
   loadGitHubAuthForUser: chatMocks.loadGitHubAuthForUser,
+  shouldAppendGitHubAuthNotice: (
+    history: { messages: Array<{ role: string; content: string }> },
+    notice: string,
+  ) =>
+    !notice.startsWith("GitHub needs reconnecting") ||
+    !history.messages.some(
+      (message) => message.role === "assistant" && message.content.includes(notice),
+    ),
 }));
 
 vi.mock("./coding-chat-history", async (importOriginal) => {
@@ -382,6 +396,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
     eventMocks.createExternalEngineProjector.mockImplementation(
       (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
+        appendNotice: eventMocks.appendNotice,
         push: vi.fn(async (events: Record<string, unknown>[]) => {
           for (const event of events) input.normalizeEvent?.(event);
         }),
@@ -466,6 +481,79 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       attemptId: "attempt_1",
       leaseId: "lease_1",
     });
+  });
+
+  it.each([
+    [
+      "a personal credential that needs reconnecting",
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+      "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+    ],
+    [
+      "a transient refresh failure",
+      new Error("GitHub token refresh failed with 503."),
+      "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
+    ],
+  ])("continues without GitHub auth after %s", async (_case, error, notice) => {
+    chatMocks.loadGitHubAuthForUser.mockRejectedValueOnce(error);
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(eventMocks.appendNotice).toHaveBeenCalledWith(notice);
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
+  it("continues when the GitHub auth notice cannot be persisted", async () => {
+    chatMocks.loadGitHubAuthForUser.mockRejectedValueOnce(
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+    );
+    eventMocks.appendNotice.mockRejectedValueOnce(new Error("database unavailable"));
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
+  it("does not repeat a reconnect notice already present in durable history", async () => {
+    chatMocks.loadGitHubAuthForUser.mockRejectedValueOnce(
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+    );
+    historyMocks.loadCodingChatHistory.mockResolvedValueOnce({
+      messages: [
+        {
+          role: "assistant",
+          content:
+            "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+          attachments: [],
+        },
+      ],
+      materializableAttachments: [],
+      omittedTurnCount: 0,
+      omittedAttachmentCount: 0,
+    });
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(eventMocks.appendNotice).not.toHaveBeenCalled();
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
   });
 
   it("never prepares or starts MCP for an installed but unapproved Plugin", async () => {
