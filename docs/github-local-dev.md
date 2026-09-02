@@ -1,8 +1,8 @@
 # GitHub integration local development
 
 Use a dedicated development GitHub App and the stable public tunnel started by `bun run dev:web`.
-The app needs repository metadata plus the Contents, Pull requests, and Issues permissions required
-by the opencompany coding flows.
+The app needs repository metadata plus Contents, Pull requests, and Issues read/write and Actions
+and Checks read permissions required by the opencompany coding flows.
 
 Configure these routes on the development app, replacing the origin with the tunnel URL:
 

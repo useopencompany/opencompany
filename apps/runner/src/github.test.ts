@@ -1,5 +1,17 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const loggerMocks = vi.hoisted(() => ({ warn: vi.fn() }));
+
+vi.mock("@opencompany/observability", () => ({
+  createLogger: () => ({
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: loggerMocks.warn,
+  }),
+}));
+
 import {
   getGitHubWorkInstallationToken,
   gitHubPermissionErrorHint,
@@ -7,6 +19,7 @@ import {
 } from "./github";
 
 afterEach(() => {
+  vi.clearAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
@@ -307,6 +320,30 @@ describe("GitHub personal repository listing", () => {
 
     expect(names).toHaveLength(101);
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain("page=2");
+  });
+
+  it("caps pagination and returns the repositories collected so far", async () => {
+    const fullPage = Array.from({ length: 100 }, (_, index) => ({
+      full_name: `owner/repo-${String(index).padStart(3, "0")}`,
+    }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json(fullPage),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      listGitHubUserRepositoryNames({ accessToken: "ghu_personal" }),
+    ).resolves.toHaveLength(100);
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(String(fetchMock.mock.calls[9]?.[0])).toContain("page=10");
+    expect(loggerMocks.warn).toHaveBeenCalledWith(
+      "GitHub personal repository listing reached its pagination cap",
+      {
+        event: "opencompany.github_user_repository_listing_truncated",
+        page_cap: 10,
+        repository_count: 100,
+      },
+    );
   });
 
   it("fails without including the credential when GitHub rejects the listing", async () => {

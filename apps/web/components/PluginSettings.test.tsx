@@ -9,10 +9,12 @@ import {
 } from "@/lib/headless-knowledge-commands";
 import {
   BETTERSTACK_PLUGIN_SOURCE,
+  GITHUB_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   PluginDetail,
   PluginsSettings,
+  SLACK_PLUGIN_SOURCE,
 } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
@@ -126,6 +128,16 @@ const officialPreview = {
   report: { ignoredManifestFields: [], skills: [], mcp: { status: "absent" } },
 } as const satisfies PluginImportPreviewDto;
 
+const githubPreview = {
+  ...officialPreview,
+  manifest: { name: "github", description: "GitHub workflows." },
+  source: {
+    ...officialPreview.source,
+    path: "github",
+    resolvedCommit: "e".repeat(40),
+  },
+} as const satisfies PluginImportPreviewDto;
+
 describe("Plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
@@ -171,7 +183,7 @@ describe("Plugin settings", () => {
     expect(screen.getByText(/1 skill · updated/i)).toBeInTheDocument();
   });
 
-  it("offers immutable official MCP packages before installation", async () => {
+  it("offers every immutable official MCP package before installation", async () => {
     render(<PluginsSettings plugins={[]} canEdit />);
 
     const linearLink = screen.getByRole("link", { name: /linear/i });
@@ -185,8 +197,19 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/betterstack",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(3);
-    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(3);
+    expect(screen.getByRole("link", { name: /github/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/github",
+    );
+    expect(screen.getByRole("link", { name: /slack/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/slack",
+    );
+    expect(screen.getAllByText("Not installed")).toHaveLength(5);
+    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(5);
+    expect(GITHUB_PLUGIN_SOURCE).toMatch(
+      /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
+    );
     expect(LINEAR_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/linear$/u,
     );
@@ -195,6 +218,9 @@ describe("Plugin settings", () => {
     );
     expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
+    );
+    expect(SLACK_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
     );
     expect(linearCard).not.toBeNull();
     await userEvent.click(
@@ -210,6 +236,31 @@ describe("Plugin settings", () => {
     });
     expect(router.push).toHaveBeenCalledWith("/settings/plugins/linear");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("installs the immutable official GitHub package from its pinned source", async () => {
+    vi.mocked(previewHeadlessPluginImport).mockResolvedValue(githubPreview);
+    vi.mocked(importHeadlessPlugin).mockResolvedValue({
+      plugin: { ...plugin, name: "github", manifest: githubPreview.manifest },
+      replayed: false,
+    });
+    render(<PluginsSettings plugins={[]} canEdit />);
+
+    const githubCard = screen.getByRole("link", { name: /github/i }).closest("div.border");
+    expect(githubCard).not.toBeNull();
+    await userEvent.click(
+      within(githubCard as HTMLElement).getByRole("button", { name: "Install" }),
+    );
+
+    await waitFor(() =>
+      expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: GITHUB_PLUGIN_SOURCE }),
+    );
+    expect(importHeadlessPlugin).toHaveBeenCalledWith({
+      url: GITHUB_PLUGIN_SOURCE,
+      expectedResolvedCommit: githubPreview.source.resolvedCommit,
+      expectedIntegrity: githubPreview.integrity,
+    });
+    expect(router.push).toHaveBeenCalledWith("/settings/plugins/github");
   });
 
   it("shows the exact MCP approval boundary without exposing environment values", () => {

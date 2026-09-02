@@ -73,6 +73,22 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  github_user: [
+    {
+      id: "read",
+      label: "Read GitHub",
+      description:
+        "Inspect repositories, code, issues, pull requests, releases, and GitHub Actions results.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Manage GitHub",
+      description:
+        "Change repository content, issues, and pull requests, including merging pull requests.",
+      defaultMode: "ask",
+    },
+  ],
   linear: [
     {
       id: "read",
@@ -104,9 +120,22 @@ export const PROVIDER_CAPABILITIES: Partial<
   slack: [
     {
       id: "read",
-      label: "Read Slack",
-      description: "Search and read channels, direct messages, threads, and people in Slack.",
+      label: "Search public Slack",
+      description: "Search public channels, users, and emoji available to your Slack account.",
       defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read private Slack",
+      description:
+        "Read private channels, direct messages, threads, canvases, files, and profiles.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Change Slack",
+      description: "Send or schedule messages, upload files, add reactions, and change canvases.",
+      defaultMode: "ask",
     },
   ],
   attio: [

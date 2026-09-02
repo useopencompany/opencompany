@@ -44,6 +44,11 @@ import {
   loadPostHogMcpWorkerConnection,
   POSTHOG_MCP_ENDPOINT_URL,
 } from "./integrations/posthog-mcp";
+import {
+  getSlackMcpIntegrationState,
+  loadSlackMcpWorkerConnection,
+  SLACK_MCP_ENDPOINT_URL,
+} from "./integrations/slack-mcp";
 
 const DISCOVERY_TTL_MS = 60 * 60 * 1_000;
 const DISCOVERY_RETRY_MS = 5 * 60 * 1_000;
@@ -89,6 +94,12 @@ const providerBindings = {
     endpointUrl: LATITUDE_MCP_ENDPOINT_URL,
     getState: getLatitudeIntegrationState,
     loadConnection: loadLatitudeMcpWorkerConnection,
+  },
+  slack: {
+    provider: "slack",
+    endpointUrl: SLACK_MCP_ENDPOINT_URL,
+    getState: getSlackMcpIntegrationState,
+    loadConnection: loadSlackMcpWorkerConnection,
   },
 } as const;
 

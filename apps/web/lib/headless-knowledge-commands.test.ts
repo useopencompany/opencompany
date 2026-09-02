@@ -143,6 +143,7 @@ describe("headless knowledge commands", () => {
               files: [{ path: "SKILL.md", sizeBytes: 128 }],
               fileCount: 1,
               totalBytes: 128,
+              warnings: [],
             },
             meta,
           })

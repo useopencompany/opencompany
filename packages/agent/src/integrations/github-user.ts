@@ -3,8 +3,15 @@ import { getDb } from "@opencompany/db/client";
 import {
   GITHUB_USER_INTEGRATION_EXTERNAL_ID,
   type GitHubUserOAuthCredentialPayload,
+  loadIntegrationCredential,
 } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/product-schema";
+import type {
+  GitHubInstallationAccessDto,
+  GitHubRepositoryAccessDto,
+  GitHubRepositoryAccessItemDto,
+  GitHubRepositoryAccessTargetDto,
+} from "@opencompany/protocol";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import {
@@ -17,6 +24,17 @@ import type { RemoteMcpProviderState } from "./remote-mcp-oauth";
 const GITHUB_USER_PROVIDER = "github_user" as const;
 const GITHUB_USER_TOKEN_ENDPOINT = "https://github.com/login/oauth/access_token";
 const GITHUB_API_USER_ENDPOINT = "https://api.github.com/user";
+const GITHUB_API_ROOT = "https://api.github.com";
+const GITHUB_API_PAGE_SIZE = 100;
+const GITHUB_API_MAX_PAGES = 100;
+const GITHUB_USER_REQUIRED_REPOSITORY_PERMISSIONS = {
+  actions: "read",
+  checks: "read",
+  contents: "write",
+  issues: "write",
+  metadata: "read",
+  pull_requests: "write",
+} as const;
 const STATE_TTL_MS = 10 * 60 * 1_000;
 
 const GITHUB_USER_INTEGRATION_ENVS = [
@@ -59,10 +77,25 @@ export type GitHubUserAccessConnection = {
   integrationId: string;
 };
 
+export type GitHubUserRepositoryAccess = GitHubRepositoryAccessDto;
+export type GitHubUserInstallationAccess = GitHubInstallationAccessDto;
+export type GitHubUserRepositoryAccessItem = GitHubRepositoryAccessItemDto;
+export type GitHubUserRepositoryAccessTarget = GitHubRepositoryAccessTargetDto;
+
 export class GitHubUserAccessAuthError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "GitHubUserAccessAuthError";
+  }
+}
+
+export class GitHubUserAccessRateLimitError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterSeconds: number | null,
+  ) {
+    super(message);
+    this.name = "GitHubUserAccessRateLimitError";
   }
 }
 
@@ -107,7 +140,9 @@ export async function loadGitHubUserIntegration(input: { userWorkosId: string; d
       id: integrations.id,
       userWorkosId: integrations.userWorkosId,
       status: integrations.status,
+      connectionLabel: integrations.connectionLabel,
       accountName: integrations.accountName,
+      accountEmail: integrations.accountEmail,
       statusReason: integrations.statusReason,
       capabilityModes: integrations.capabilityModes,
       toolModes: integrations.toolModes,
@@ -125,6 +160,22 @@ export async function loadGitHubUserIntegration(input: { userWorkosId: string; d
     .orderBy(desc(integrations.updatedAt))
     .limit(1);
   return row;
+}
+
+export async function loadGitHubUserCredentialIdentity(input: {
+  userWorkosId: string;
+  integrationId: string;
+  db?: DbLike;
+}) {
+  const credential = await loadIntegrationCredential({
+    userWorkosId: input.userWorkosId,
+    integrationId: input.integrationId,
+    provider: GITHUB_USER_PROVIDER,
+    kind: "oauth_token",
+    ...(input.db ? { db: input.db } : {}),
+  });
+  const tokens = credential ? parseStoredTokens(credential.payload) : null;
+  return tokens ? { githubUserId: tokens.github_user_id, githubLogin: tokens.github_login } : null;
 }
 
 export function createGitHubUserIntegrationState(
@@ -159,12 +210,22 @@ export function verifyGitHubUserIntegrationState(state: string): GitHubUserInteg
 
 // The dedicated App has "Request user authorization (OAuth) during
 // installation" enabled, so installing and authorizing land in one callback.
-export function buildGitHubUserInstallUrl(state: string) {
+export function buildGitHubUserInstallUrl(
+  state: string,
+  options: { suggestedTargetId?: string } = {},
+) {
   const slug = requiredEnv("GITHUB_USER_APP_SLUG");
   if (!/^[a-z0-9-]+$/iu.test(slug)) {
     throw new Error("GITHUB_USER_APP_SLUG is not a valid GitHub App slug.");
   }
-  const url = new URL(`https://github.com/apps/${slug}/installations/new`);
+  const suggestedTargetId = options.suggestedTargetId?.trim();
+  if (suggestedTargetId && !/^\d+$/u.test(suggestedTargetId)) {
+    throw new Error("GitHub App suggested target id must be numeric.");
+  }
+  const url = new URL(
+    `https://github.com/apps/${slug}/installations/new${suggestedTargetId ? "/permissions" : ""}`,
+  );
+  if (suggestedTargetId) url.searchParams.set("suggested_target_id", suggestedTargetId);
   url.searchParams.set("state", state);
   return url.toString();
 }
@@ -218,6 +279,111 @@ export async function fetchGitHubUserIdentity(accessToken: string): Promise<GitH
     login,
     name: readString(result.name),
     email: readString(result.email),
+  };
+}
+
+export async function resolveGitHubUserInstallTarget(input: {
+  userWorkosId: string;
+  owner: string;
+  integrationId?: string;
+  db?: DbLike;
+  signal?: AbortSignal;
+  fetch?: typeof globalThis.fetch;
+}) {
+  const owner = normalizeGitHubOwner(input.owner);
+  const connection = await resolveGitHubUserAccessConnection(input);
+  const accessToken = await getGitHubUserAccessToken(connection, {
+    ...(input.db ? { db: input.db } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  const response = await (input.fetch ?? globalThis.fetch)(
+    `${GITHUB_API_ROOT}/users/${encodeURIComponent(owner)}`,
+    {
+      headers: githubApiHeaders(accessToken),
+      signal: input.signal ?? null,
+    },
+  );
+  await assertGitHubUserAccessResponse(response, "account lookup");
+  const value = await responseJson(response);
+  const id = readId(value.id);
+  const login = readString(value.login);
+  if (!id || !login || login.toLowerCase() !== owner.toLowerCase()) {
+    throw new Error("GitHub did not return the requested account.");
+  }
+  return id;
+}
+
+export async function listGitHubUserRepositoryAccess(input: {
+  userWorkosId: string;
+  integrationId?: string;
+  owner?: string;
+  repo?: string;
+  forceRefresh?: boolean;
+  db?: DbLike;
+  signal?: AbortSignal;
+  fetch?: typeof globalThis.fetch;
+  now?: Date;
+}): Promise<GitHubUserRepositoryAccess> {
+  const owner = input.owner ? normalizeGitHubOwner(input.owner) : null;
+  const repo = input.repo ? normalizeGitHubRepo(input.repo) : null;
+  if (repo && !owner) throw new Error("A GitHub repository check requires an owner.");
+
+  const connection = await resolveGitHubUserAccessConnection(input);
+  const accessToken = await getGitHubUserAccessToken(connection, {
+    ...(input.db ? { db: input.db } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+    ...(input.forceRefresh ? { forceRefresh: true } : {}),
+    ...(input.now ? { now: input.now } : {}),
+  });
+  const fetcher = input.fetch ?? globalThis.fetch;
+  const installations = await fetchAllGitHubPages({
+    endpoint: `${GITHUB_API_ROOT}/user/installations`,
+    accessToken,
+    ...(input.signal ? { signal: input.signal } : {}),
+    fetch: fetcher,
+    readPage: parseInstallationsPage,
+  });
+  const relevantInstallations = owner
+    ? installations.filter(
+        (installation) => installation.account.login.toLowerCase() === owner.toLowerCase(),
+      )
+    : installations;
+
+  const hydrated = await Promise.all(
+    relevantInstallations.map(async (installation) => ({
+      ...installation,
+      repositories: installation.suspendedAt
+        ? []
+        : await fetchAllGitHubPages({
+            endpoint: `${GITHUB_API_ROOT}/user/installations/${encodeURIComponent(installation.id)}/repositories`,
+            accessToken,
+            ...(input.signal ? { signal: input.signal } : {}),
+            fetch: fetcher,
+            readPage: parseRepositoriesPage,
+          }),
+    })),
+  );
+
+  let target: GitHubUserRepositoryAccessTarget | null = null;
+  if (owner) {
+    const installation = hydrated[0];
+    const state = !installation
+      ? "missing_installation"
+      : installation.suspendedAt
+        ? "suspended"
+        : repo &&
+            !installation.repositories.some(
+              (repository) => repository.name.toLowerCase() === repo.toLowerCase(),
+            )
+          ? "missing_repository"
+          : "available";
+    target = { owner, repo, state };
+  }
+
+  return {
+    checkedAt: (input.now ?? new Date()).toISOString(),
+    installations: hydrated,
+    target,
   };
 }
 
@@ -429,6 +595,206 @@ function githubApiHeaders(accessToken: string) {
   };
 }
 
+async function resolveGitHubUserAccessConnection(input: {
+  userWorkosId: string;
+  integrationId?: string;
+  db?: DbLike;
+}): Promise<GitHubUserAccessConnection> {
+  if (input.integrationId) {
+    return { userWorkosId: input.userWorkosId, integrationId: input.integrationId };
+  }
+  const integration = await loadGitHubUserIntegration({
+    userWorkosId: input.userWorkosId,
+    ...(input.db ? { db: input.db } : {}),
+  });
+  if (!integration || integration.status !== "connected") {
+    throw new GitHubUserAccessAuthError("Connect GitHub in Settings to inspect repository access.");
+  }
+  return { userWorkosId: input.userWorkosId, integrationId: integration.id };
+}
+
+async function fetchAllGitHubPages<T>(input: {
+  endpoint: string;
+  accessToken: string;
+  signal?: AbortSignal;
+  fetch: typeof globalThis.fetch;
+  readPage: (value: Record<string, unknown>) => { items: T[]; totalCount: number };
+}) {
+  const items: T[] = [];
+  for (let page = 1; page <= GITHUB_API_MAX_PAGES; page += 1) {
+    const url = new URL(input.endpoint);
+    url.searchParams.set("per_page", String(GITHUB_API_PAGE_SIZE));
+    url.searchParams.set("page", String(page));
+    const response = await input.fetch(url, {
+      headers: githubApiHeaders(input.accessToken),
+      signal: input.signal ?? null,
+    });
+    await assertGitHubUserAccessResponse(response, "repository access lookup");
+    const parsed = input.readPage(await responseJson(response));
+    items.push(...parsed.items);
+    if (items.length >= parsed.totalCount || parsed.items.length < GITHUB_API_PAGE_SIZE)
+      return items;
+  }
+  throw new Error("GitHub repository access lookup exceeded the pagination limit.");
+}
+
+async function assertGitHubUserAccessResponse(response: Response, operation: string) {
+  if (response.ok) return;
+  const providerMessage = await githubErrorMessage(response);
+  if (isGitHubRateLimited(response, providerMessage)) {
+    throw new GitHubUserAccessRateLimitError(
+      "GitHub temporarily rate-limited the repository access check.",
+      githubRetryAfterSeconds(response),
+    );
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new GitHubUserAccessAuthError(
+      `GitHub authorization no longer permits this ${operation}. Reconnect GitHub in Settings.`,
+    );
+  }
+  throw new Error(`GitHub ${operation} failed with ${response.status}.`);
+}
+
+function isGitHubRateLimited(response: Response, providerMessage: string | null) {
+  return (
+    response.status === 429 ||
+    (response.status === 403 &&
+      (response.headers.get("x-ratelimit-remaining") === "0" ||
+        response.headers.has("retry-after") ||
+        /(?:secondary |api )?rate limit/iu.test(providerMessage ?? "")))
+  );
+}
+
+async function githubErrorMessage(response: Response) {
+  try {
+    const value = (await response.json()) as unknown;
+    return isRecord(value) ? readString(value.message) : null;
+  } catch {
+    return null;
+  }
+}
+
+function githubRetryAfterSeconds(response: Response) {
+  const retryAfter = Number(response.headers.get("retry-after"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.ceil(retryAfter);
+
+  const resetAt = Number(response.headers.get("x-ratelimit-reset"));
+  if (!Number.isFinite(resetAt) || resetAt <= 0) return null;
+  return Math.max(1, Math.ceil(resetAt - Date.now() / 1_000));
+}
+
+function parseInstallationsPage(value: Record<string, unknown>) {
+  const totalCount = readNonNegativeNumber(value.total_count);
+  if (totalCount === null || !Array.isArray(value.installations)) {
+    throw new Error("GitHub returned an invalid installations response.");
+  }
+  return {
+    totalCount,
+    items: value.installations.map(parseInstallation),
+  };
+}
+
+function parseInstallation(value: unknown): Omit<GitHubUserInstallationAccess, "repositories"> {
+  if (!isRecord(value) || !isRecord(value.account)) {
+    throw new Error("GitHub returned an invalid installation.");
+  }
+  const id = readId(value.id);
+  const accountId = readId(value.account.id);
+  const login = readString(value.account.login);
+  const type = value.account.type;
+  const repositorySelection = value.repository_selection;
+  const permissions = readStringRecord(value.permissions);
+  if (
+    !id ||
+    !accountId ||
+    !login ||
+    (type !== "Organization" && type !== "User") ||
+    (repositorySelection !== "all" && repositorySelection !== "selected")
+  ) {
+    throw new Error("GitHub returned an invalid installation.");
+  }
+  return {
+    id,
+    account: {
+      id: accountId,
+      login,
+      type,
+      avatarUrl: readString(value.account.avatar_url),
+      htmlUrl: readString(value.account.html_url),
+    },
+    repositorySelection,
+    permissions,
+    pendingPermissions: missingGitHubUserPermissions(permissions),
+    suspendedAt: readString(value.suspended_at),
+  };
+}
+
+function parseRepositoriesPage(value: Record<string, unknown>) {
+  const totalCount = readNonNegativeNumber(value.total_count);
+  if (totalCount === null || !Array.isArray(value.repositories)) {
+    throw new Error("GitHub returned an invalid repositories response.");
+  }
+  return {
+    totalCount,
+    items: value.repositories.map(parseRepository),
+  };
+}
+
+function parseRepository(value: unknown): GitHubUserRepositoryAccessItem {
+  if (!isRecord(value)) throw new Error("GitHub returned an invalid repository.");
+  const id = readId(value.id);
+  const name = readString(value.name);
+  const fullName = readString(value.full_name);
+  const htmlUrl = readString(value.html_url);
+  if (!id || !name || !fullName || !htmlUrl || typeof value.private !== "boolean") {
+    throw new Error("GitHub returned an invalid repository.");
+  }
+  return { id, name, fullName, private: value.private, htmlUrl };
+}
+
+async function responseJson(response: Response): Promise<Record<string, unknown>> {
+  try {
+    const value = (await response.json()) as unknown;
+    if (isRecord(value)) return value;
+  } catch {
+    // Fall through to the stable provider error below.
+  }
+  throw new Error("GitHub returned an invalid JSON response.");
+}
+
+function normalizeGitHubOwner(value: string) {
+  const owner = value.trim();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,38})$/iu.test(owner)) {
+    throw new Error("GitHub owner is invalid.");
+  }
+  return owner;
+}
+
+function normalizeGitHubRepo(value: string) {
+  const repo = value.trim().replace(/\.git$/iu, "");
+  if (!repo || repo.length > 100 || repo.includes("/") || /[\u0000-\u001f\u007f]/u.test(repo)) {
+    throw new Error("GitHub repository name is invalid.");
+  }
+  return repo;
+}
+
+function readStringRecord(value: unknown) {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, entry]) =>
+      typeof entry === "string" ? [[key, entry]] : [],
+    ),
+  );
+}
+
+function missingGitHubUserPermissions(permissions: Record<string, string>) {
+  const ranks: Record<string, number> = { read: 1, write: 2, admin: 3 };
+  return Object.entries(GITHUB_USER_REQUIRED_REPOSITORY_PERMISSIONS).flatMap(
+    ([permission, required]) =>
+      (ranks[permissions[permission] ?? ""] ?? 0) < (ranks[required] ?? 0) ? [permission] : [],
+  );
+}
+
 function sanitizeReturnTo(value: string) {
   if (!value.startsWith("/") || value.startsWith("//")) return "/settings";
   return value;
@@ -470,6 +836,10 @@ function readId(value: unknown) {
 
 function readPositiveNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function readNonNegativeNumber(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

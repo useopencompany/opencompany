@@ -345,6 +345,57 @@ describe("resolvePlugin", () => {
       issues: [],
     });
   });
+
+  it("loads the official Slack package with least-privilege capability defaults", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/slack", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "slack");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "slack",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "slack", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "slack",
+        type: "streamable-http",
+        url: "https://mcp.slack.com/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Search public Slack",
+        defaultMode: "on",
+        tools: ["slack_search_emojis", "slack_search_public"],
+      }),
+      expect.objectContaining({
+        id: "query",
+        label: "Read private Slack",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["slack_read_channel", "slack_read_thread"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Change Slack",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["slack_send_message", "slack_update_canvas"]),
+      }),
+    ]);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "slack", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
 });
 
 function text(value: string) {

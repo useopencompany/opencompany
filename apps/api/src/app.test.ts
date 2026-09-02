@@ -472,6 +472,7 @@ describe("canonical Hono API", () => {
     const resolve = vi.fn(async () => ({
       status: "resolved" as const,
       bundle,
+      warnings: [],
     }));
     const install = vi.fn(async () => ({
       installation: fakeSkillInstallation(),
@@ -839,7 +840,13 @@ describe("canonical Hono API", () => {
     const app = testApp(fakeRepository(), {
       skillImports: fakeSkillImportService(
         { list, get, readFile, setEnabled, replace, archive },
-        { resolve: vi.fn(async () => ({ status: "resolved" as const, bundle: resolvedBundle })) },
+        {
+          resolve: vi.fn(async () => ({
+            status: "resolved" as const,
+            bundle: resolvedBundle,
+            warnings: [],
+          })),
+        },
       ),
     });
 
@@ -1534,6 +1541,7 @@ describe("canonical Hono API", () => {
       githubUserIngress: {
         start: record("github-user.start", calls),
         callback: record("github-user.callback", calls),
+        installations: record("github-user.installations", calls),
       },
       googleIngress: {
         start: record("google.start", calls),
@@ -1583,6 +1591,8 @@ describe("canonical Hono API", () => {
       ["POST", "/webhooks/github/events", "github.webhook"],
       ["GET", "/integrations/github-user/start", "github-user.start"],
       ["GET", "/integrations/github-user/callback", "github-user.callback"],
+      ["GET", "/integrations/github-user/installations", "github-user.installations"],
+      ["POST", "/integrations/github-user/installations", "github-user.installations"],
       ["GET", "/integrations/gmail/start", "google.start"],
       ["GET", "/integrations/gmail/callback", "google.callback"],
       ["GET", "/integrations/google-calendar/start", "google.start"],

@@ -241,6 +241,8 @@ export async function connectGitHubUserIntegration(input: {
   now?: Date;
 }) {
   const connectionLabel = `@${input.login}`;
+  const accountEmail =
+    input.email?.trim() || `${input.githubUserId}+${input.login}@users.noreply.github.com`;
   const payload: GitHubUserOAuthCredentialPayload = {
     access_token: input.accessToken,
     refresh_token: input.refreshToken,
@@ -259,7 +261,7 @@ export async function connectGitHubUserIntegration(input: {
     externalId: GITHUB_USER_INTEGRATION_EXTERNAL_ID,
     connectionLabel,
     accountName: input.name?.trim() || input.login,
-    accountEmail: input.email,
+    accountEmail,
     accountType: "github_user",
     scopes: [],
     payload,

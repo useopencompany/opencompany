@@ -6,7 +6,13 @@ import type {
   PluginListItemDto,
 } from "@opencompany/protocol";
 import { Button, buttonVariants } from "@opencompany/ui/components/button";
-import { BetterStackIcon, LinearIcon, NeonIcon } from "@opencompany/ui/icons";
+import {
+  BetterStackIcon,
+  GitHubIcon,
+  LinearIcon,
+  NeonIcon,
+  SlackIcon,
+} from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
   Archive,
@@ -98,6 +104,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: BetterStackIcon,
     iconClassName: "bg-[#1B1F23] text-white",
   },
+  github: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.github,
+    Icon: GitHubIcon,
+    iconClassName: "bg-[#181717] text-white",
+  },
   linear: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
     Icon: LinearIcon,
@@ -108,14 +119,23 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: NeonIcon,
     iconClassName: "bg-[#00E599] text-[#0B0F14]",
   },
+  slack: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.slack,
+    Icon: SlackIcon,
+    iconClassName: "bg-white text-[#4A154B]",
+  },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginConfig>;
 
+export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
+export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
 export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
 export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
+export const SLACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.slack.name;
+export const SLACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.slack.source;
 
 export async function installOfficialMcpPlugin(
   config: OfficialMcpPluginConfig,
@@ -139,12 +159,20 @@ export function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.linear, preview);
 }
 
+export function installOfficialGitHubPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.github, preview);
+}
+
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.neon, preview);
 }
 
 export function installOfficialBetterStackPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.betterstack, preview);
+}
+
+export function installOfficialSlackPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.slack, preview);
 }
 
 export function PluginsSettings({

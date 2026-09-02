@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   loadNeonConnection: vi.fn(),
   getBetterStackState: vi.fn(),
   loadBetterStackConnection: vi.fn(),
+  getSlackState: vi.fn(),
+  loadSlackConnection: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({ getDb: () => ({ sentinel: "db" }) }));
@@ -60,6 +62,11 @@ vi.mock("./integrations/latitude-mcp", () => ({
   LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
   getLatitudeIntegrationState: vi.fn(),
   loadLatitudeMcpWorkerConnection: vi.fn(),
+}));
+vi.mock("./integrations/slack-mcp", () => ({
+  SLACK_MCP_ENDPOINT_URL: "https://mcp.slack.com/mcp",
+  getSlackMcpIntegrationState: mocks.getSlackState,
+  loadSlackMcpWorkerConnection: mocks.loadSlackConnection,
 }));
 
 import { createPluginGatewayLifecycle, resolvePluginGatewayRegistrations } from "./plugin-gateway";
@@ -277,6 +284,48 @@ describe("plugin gateway registration cache", () => {
       {
         ...betterStackRecord,
         server: { ...betterStackRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Slack credentials only to Slack's exact hosted MCP endpoint", async () => {
+    const slackRecord = record({
+      pluginName: "slack",
+      pluginLabel: "slack",
+      pluginDescription: "Slack plugin tools.",
+      connectionProvider: "slack",
+      server: {
+        name: "slack",
+        type: "streamable-http",
+        url: "https://mcp.slack.com/mcp",
+        headers: {},
+      },
+      capabilities: [
+        {
+          id: "write",
+          label: "Change Slack",
+          defaultMode: "ask",
+          tools: ["slack_send_message"],
+        },
+      ],
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([slackRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:slack:slack",
+        connectionProvider: "slack",
+        getState: mocks.getSlackState,
+        loadConnection: mocks.loadSlackConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...slackRecord,
+        server: { ...slackRecord.server, url: "https://mcp.slack.com.evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

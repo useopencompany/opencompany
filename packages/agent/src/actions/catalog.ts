@@ -64,11 +64,26 @@ export async function resolveActionCatalog(
   const linearPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:linear:"),
   );
+  const githubPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:github:"),
+  );
+  const githubPluginConnected =
+    githubPluginInstalled &&
+    (
+      await Promise.all(
+        remoteMcpRegistrations
+          .filter((registration) => registration.source.startsWith("plugin:github:"))
+          .map((registration) => registration.getState(input).catch(() => null)),
+      )
+    ).some((state) => state?.connected && state.integrationId);
   const neonPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:neon:"),
   );
+  const slackPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:slack:"),
+  );
   const resolved = await Promise.all([
-    resolveSlackActions(input.userWorkosId).catch(() => null),
+    slackPluginInstalled ? null : resolveSlackActions(input.userWorkosId).catch(() => null),
     resolveGmailActions(input.userWorkosId).catch(() => null),
     resolveGoogleCalendarActions(input.userWorkosId).catch(() => null),
     resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
@@ -77,7 +92,7 @@ export async function resolveActionCatalog(
     resolveLatitudeActions(input.userWorkosId).catch(() => null),
     neonPluginInstalled ? null : resolveNeonActions(input.userWorkosId).catch(() => null),
     resolveAttioActions(input.userWorkosId).catch(() => null),
-    resolveGitHubActions(input.workspaceId).catch(() => null),
+    githubPluginConnected ? null : resolveGitHubActions(input.workspaceId).catch(() => null),
     resolveStripeActions(input.workspaceId).catch(() => null),
     resolveRevolutActions(input.workspaceId).catch(() => null),
     resolveXAccountActions(input.userWorkosId).catch(() => null),

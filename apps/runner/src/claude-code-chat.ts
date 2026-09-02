@@ -1,4 +1,5 @@
 import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/agent/chat-agent";
+import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   type AcpTurnSummary,
@@ -69,7 +70,11 @@ import { materializeClaudeSkillSnapshotsForSession } from "./codex-managed-skill
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
+  GITHUB_RECONNECT_NOTICE,
+  GITHUB_UNAVAILABLE_NOTICE,
+  type GitHubCommandAuth,
   loadGitHubAuthForUser,
+  shouldAppendGitHubAuthNotice,
 } from "./coding-agent-shared";
 import {
   type CodingChatHistory,
@@ -416,7 +421,32 @@ export async function runClaudeCodeChatTurn(input: {
       userWorkosId: turn.userWorkosId,
     });
     executionStage = "load_github_auth";
-    const github = await loadGitHubAuthForUser(turn.userWorkosId);
+    let github: GitHubCommandAuth | null = null;
+    let githubNotice: string | null = null;
+    try {
+      github = await loadGitHubAuthForUser(turn.userWorkosId);
+    } catch (error) {
+      const needsReconnect = error instanceof GitHubUserAccessAuthError;
+      logger.warn("GitHub sandbox auth unavailable; continuing the chat turn", {
+        event: "opencompany.goat_claude_chat_github_auth_unavailable",
+        turn_id: turn.id,
+        user_workos_id: turn.userWorkosId,
+        needs_reconnect: needsReconnect,
+        error_name: error instanceof Error ? error.name : typeof error,
+      });
+      githubNotice = needsReconnect ? GITHUB_RECONNECT_NOTICE : GITHUB_UNAVAILABLE_NOTICE;
+    }
+    if (githubNotice && shouldAppendGitHubAuthNotice(conversationHistory, githubNotice)) {
+      try {
+        await projector.appendNotice(githubNotice);
+      } catch (error) {
+        logger.warn("GitHub auth notice could not be persisted; continuing the chat turn", {
+          event: "opencompany.goat_claude_chat_github_auth_notice_failed",
+          turn_id: turn.id,
+          error_name: error instanceof Error ? error.name : typeof error,
+        });
+      }
+    }
     const canonicalAttemptId = input.canonicalAttemptId;
     const hostGatewayEnabled =
       isActionHostToolContractVersion(session.hostToolContractVersion) &&
@@ -671,8 +701,7 @@ export async function runClaudeCodeChatTurn(input: {
           ...(github
             ? {
                 githubEnv: buildGitHubCommandEnv({
-                  githubAuthHeader: github.githubAuthHeader,
-                  githubToken: github.githubToken,
+                  ...github,
                   toolCallId: turn.id,
                 }),
               }

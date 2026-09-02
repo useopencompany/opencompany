@@ -7,11 +7,14 @@ import type {
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  GitHubPluginDetail,
+  GitHubPluginDetailView,
+  githubToolsStateFromPlugin,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -19,12 +22,16 @@ import {
   NeonPluginDetailView,
   neonToolsStateFromPlugin,
   type PluginToolsState,
+  SlackPluginDetail,
+  slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
 } from "./OfficialMcpPluginSettings";
 import {
   BETTERSTACK_PLUGIN_SOURCE,
+  GITHUB_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
+  SLACK_PLUGIN_SOURCE,
 } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
@@ -58,7 +65,59 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_linear_tools",
       capabilityModes: { read: "on", write: "ask" },
     },
-    personalAccounts: { linear: [], neon: [], betterstack: [] },
+    slack: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Ada",
+      teamName: "Acme",
+      integrationId: "gint_slack",
+    },
+    personalAccounts: {
+      betterstack: [],
+      github_user: [
+        {
+          integrationId: "gint_github_user",
+          provider: "github_user",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "octocat",
+          connectionLabel: "octocat",
+          statusReason: null,
+          scopes: [],
+          capabilityModes: { read: "on", write: "ask" },
+        },
+      ],
+      linear: [],
+      neon: [],
+      slack: [
+        {
+          integrationId: "gint_slack",
+          provider: "slack",
+          status: "connected",
+          connected: true,
+          accountEmail: "ada@acme.example",
+          accountName: "Ada",
+          connectionLabel: "Acme",
+          statusReason: null,
+          scopes: ["channels:history", "chat:write"],
+          capabilityModes: { read: "on", query: "ask", write: "ask" },
+        },
+        {
+          integrationId: "gint_slack_archive",
+          provider: "slack",
+          status: "connected",
+          connected: true,
+          accountEmail: "ada@archive.example",
+          accountName: "Ada",
+          connectionLabel: "Archive Co",
+          statusReason: null,
+          scopes: ["channels:history"],
+          capabilityModes: {},
+        },
+      ],
+    },
   },
 }));
 const useLiveQuery = vi.hoisted(() => vi.fn(() => ({ data: [], isLoading: false })));
@@ -389,6 +448,164 @@ const betterStackPlugin = {
   ],
 } as const satisfies PluginInstallationDto;
 
+const githubAccount = {
+  ...account("gint_github_user", "octocat", { read: "on", write: "ask" }, "github_user"),
+  accountName: "octocat",
+} satisfies IntegrationAccountView;
+const githubPlugin = {
+  ...plugin,
+  id: "plugin_github",
+  name: "github",
+  manifest: {
+    name: "github",
+    description: "Work with repositories, issues, pull requests, and Actions as yourself.",
+  },
+  source: { ...plugin.source, path: "github" },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "github",
+      type: "streamable-http",
+      connectionProvider: "github",
+      capabilities: [
+        {
+          id: "read",
+          label: "Read GitHub",
+          defaultMode: "on",
+          tools: ["search_repositories", "actions_list"],
+        },
+        {
+          id: "write",
+          label: "Manage GitHub",
+          defaultMode: "ask",
+          tools: ["merge_pull_request"],
+        },
+      ],
+      tools: [
+        {
+          name: "search_repositories",
+          description: "Search repositories accessible to the connected account.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Read GitHub",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "actions_list",
+          description: "List GitHub Actions workflows and runs.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Read GitHub",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "merge_pull_request",
+          description: "Merge a pull request.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Manage GitHub",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-02T06:30:00.000Z",
+      refreshAfter: "2026-09-02T07:30:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
+const slackPlugin = {
+  ...plugin,
+  id: "plugin_slack",
+  name: "slack",
+  manifest: {
+    name: "slack",
+    description: "Search Slack and take permission-gated actions as yourself.",
+  },
+  source: {
+    ...plugin.source,
+    path: "slack",
+    resolvedCommit: "1b912fe6c4f4497147887b2383f0181f763aa19b",
+  },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "slack",
+      type: "streamable-http",
+      connectionProvider: "slack",
+      capabilities: [
+        {
+          id: "read",
+          label: "Search public Slack",
+          defaultMode: "on",
+          tools: ["slack_search_public"],
+        },
+        {
+          id: "query",
+          label: "Read private Slack",
+          defaultMode: "ask",
+          tools: ["slack_read_channel"],
+        },
+        {
+          id: "write",
+          label: "Change Slack",
+          defaultMode: "ask",
+          tools: ["slack_send_message"],
+        },
+      ],
+      tools: [
+        {
+          name: "slack_search_public",
+          description: "Search public Slack conversations.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Search public Slack",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "slack_read_channel",
+          description: "Read a channel.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Read private Slack",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "slack_send_message",
+          description: "Send a message.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Change Slack",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-02T08:00:00.000Z",
+      refreshAfter: "2026-09-02T09:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
 describe("Linear plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
@@ -409,6 +626,10 @@ describe("Linear plugin settings", () => {
     window.history.replaceState({}, "", "/settings/plugins/linear");
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("server-renders account data without starting another live query", () => {
     const html = renderToString(
       <LinearPluginDetail
@@ -419,6 +640,22 @@ describe("Linear plugin settings", () => {
     );
 
     expect(html).toContain("Linear tool access");
+    expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps the personal github_user connection onto the GitHub plugin surface", () => {
+    const html = renderToString(
+      <GitHubPluginDetail
+        pluginState={{ status: "ready", plugin: githubPlugin }}
+        toolsState={githubToolsStateFromPlugin(githubPlugin)}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("octocat");
+    expect(html).toContain("GitHub as you");
+    expect(html).toContain("Read GitHub");
+    expect(html).toContain("Manage GitHub");
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
 
@@ -708,6 +945,171 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
   });
 
+  it("renders GitHub connection, discovery, and permission controls against github_user", async () => {
+    const state = githubToolsStateFromPlugin(githubPlugin);
+    window.history.replaceState({}, "", "/settings/plugins/github");
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) =>
+      Response.json({
+        checkedAt: "2026-09-02T12:00:00.000Z",
+        target: null,
+        installations: [
+          {
+            id: "123",
+            account: {
+              id: "987",
+              login: "opencompany",
+              type: "Organization",
+              avatarUrl: null,
+              htmlUrl: "https://github.com/opencompany",
+            },
+            repositorySelection: "selected",
+            permissions: { metadata: "read", contents: "write" },
+            pendingPermissions: ["actions", "checks", "issues", "pull_requests"],
+            suspendedAt: null,
+            repositories: [
+              {
+                id: "456",
+                name: "private-repo",
+                fullName: "opencompany/private-repo",
+                private: true,
+                htmlUrl: "https://github.com/opencompany/private-repo",
+              },
+              ...(init?.method === "POST"
+                ? [
+                    {
+                      id: "789",
+                      name: "newly-approved-repo",
+                      fullName: "opencompany/newly-approved-repo",
+                      private: true,
+                      htmlUrl: "https://github.com/opencompany/newly-approved-repo",
+                    },
+                  ]
+                : []),
+            ],
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GitHubPluginDetailView
+        pluginState={{ status: "ready", plugin: githubPlugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: githubAccount }],
+          permissionConnection: githubAccount,
+        }}
+        toolsState={state}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "GitHub as you" })).toBeInTheDocument();
+    expect(screen.getByText("octocat")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect GitHub account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
+    );
+    expect(await screen.findByRole("heading", { name: "Repository access" })).toBeVisible();
+    const installationAccount = await screen.findByText("opencompany");
+    expect(installationAccount).toBeVisible();
+    await userEvent.click(installationAccount);
+    expect(screen.getByText("opencompany/private-repo")).toBeVisible();
+    expect(screen.getByTestId("github-permissions-pending")).toHaveTextContent(
+      "New permissions pending approval",
+    );
+    expect(screen.getByRole("link", { name: "Add organization or account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/github-user/start?returnTo=%2Fsettings%2Fplugins%2Fgithub",
+    );
+    await userEvent.click(screen.getByRole("link", { name: "Add organization or account" }));
+    expect(screen.getByTestId("github-installation-pending")).toHaveTextContent(
+      "Pending admin approval",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Re-check" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/integrations/github-user/installations",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(await screen.findByTestId("github-installation-approved")).toHaveTextContent(
+      "Repository access updated",
+    );
+    expect(GITHUB_PLUGIN_SOURCE).toMatch(
+      /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
+    );
+    expect(state).toMatchObject({
+      status: "ready",
+      groups: [
+        {
+          id: "read",
+          defaultMode: "on",
+          tools: [
+            { name: "Search repositories", readOnly: true },
+            { name: "Actions list", readOnly: true },
+          ],
+        },
+        {
+          id: "write",
+          defaultMode: "ask",
+          tools: [{ name: "Merge pull request", readOnly: false }],
+        },
+      ],
+    });
+
+    const writeModes = screen.getByRole("group", { name: "Manage GitHub permission" });
+    await userEvent.click(within(writeModes).getByRole("button", { name: "On" }));
+    await waitFor(() =>
+      expect(accountActions.setIntegrationCapabilityModeAction).toHaveBeenCalledWith(
+        "gint_github_user",
+        "write",
+        "on",
+      ),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    await waitFor(() =>
+      expect(accountActions.disconnectIntegrationAccountAction).toHaveBeenCalledWith(
+        "gint_github_user",
+      ),
+    );
+  });
+
+  it.each([
+    {
+      query: "integration=github_user&setup=connected",
+      toast: "success" as const,
+      message: "GitHub connected.",
+    },
+    {
+      query: "integration=github_user&setup=error&reason=installation_not_authorized",
+      toast: "error" as const,
+      message: "The selected GitHub App installation is not available to this GitHub account.",
+    },
+  ])("surfaces and clears GitHub setup status: $toast", async ({ query, toast, message }) => {
+    window.history.replaceState({}, "", `/settings/plugins/github?${query}`);
+
+    render(
+      <GitHubPluginDetailView
+        pluginState={{ status: "ready", plugin: githubPlugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: githubAccount }],
+          permissionConnection: githubAccount,
+        }}
+        toolsState={githubToolsStateFromPlugin(githubPlugin)}
+        canEdit
+      />,
+    );
+
+    await waitFor(() => expect(toasts[toast]).toHaveBeenCalledWith(message));
+    expect(window.location.pathname).toBe("/settings/plugins/github");
+    expect(window.location.search).toBe("");
+  });
+
   it("presents Neon through the same package, account, discovery, and query-permission flow", async () => {
     const state = neonToolsStateFromPlugin(neonPlugin);
     const neonAccountsState = {
@@ -725,7 +1127,7 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Neon" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Neon" })).toBeInTheDocument();
     expect(screen.getByText("List projects")).toBeInTheDocument();
     expect(screen.getByText("Run sql")).toBeInTheDocument();
     expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
@@ -773,7 +1175,7 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Better Stack" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Better Stack" })).toBeInTheDocument();
     expect(screen.getByText("Documentation")).toBeInTheDocument();
     expect(screen.getByText("Query")).toBeInTheDocument();
     expect(screen.getByText("Create monitor")).toBeInTheDocument();
@@ -806,6 +1208,39 @@ describe("Linear plugin settings", () => {
         }),
       ).toHaveAttribute("aria-pressed", "true");
     }
+  });
+
+  it("presents Slack connection, ingestion, and three conservative permission tiers", () => {
+    const state = slackToolsStateFromPlugin(slackPlugin);
+    render(<SlackPluginDetail pluginState={{ status: "ready", plugin: slackPlugin }} canEdit />);
+
+    expect(screen.getByRole("heading", { level: 1, name: "Slack" })).toBeInTheDocument();
+    expect(screen.getByText("Acme · Ada")).toBeInTheDocument();
+    expect(screen.getByText("Archive Co · Ada")).toBeInTheDocument();
+    expect(screen.getByText("Slack tools")).toBeInTheDocument();
+    expect(screen.getByText("Ingestion only")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Slack account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/slack/start?purpose=mcp&returnTo=/settings/plugins/slack",
+    );
+    expect(
+      screen.getByRole("link", { name: "Configure Slack ingestion in Wiki sources" }),
+    ).toHaveAttribute("href", "/wiki/sources");
+    expect(screen.getByRole("group", { name: "Search public Slack permission" })).toHaveTextContent(
+      "On",
+    );
+    expect(screen.getByRole("group", { name: "Read private Slack permission" })).toHaveTextContent(
+      "Ask",
+    );
+    expect(screen.getByRole("group", { name: "Change Slack permission" })).toHaveTextContent("Ask");
+    expect(SLACK_PLUGIN_SOURCE).toContain("/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack");
+    expect(state).toMatchObject({
+      groups: [
+        { id: "read", defaultMode: "on" },
+        { id: "query", defaultMode: "ask" },
+        { id: "write", defaultMode: "ask" },
+      ],
+    });
   });
 
   it("builds the two-bucket advanced fallback with ask defaults", () => {

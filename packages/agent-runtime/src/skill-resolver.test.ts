@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { SKILL_LIMITS } from "./artifact-policy";
 import {
   discoverSkillDirectories,
   parseSkillUrl,
@@ -247,6 +248,46 @@ describe("resolveSkill: happy paths", () => {
     if (result.status !== "resolved") return;
     expect(result.skill.name).toBe("improve-codebase-architecture");
   });
+
+  test("skills.sh installs a large skill by declared name when its source directory differs", async () => {
+    const tree: SkillTreeEntry[] = [
+      {
+        path: "skills/react-best-practices/SKILL.md",
+        type: "blob",
+        mode: "100644",
+      },
+      { path: "skills/other/SKILL.md", type: "blob", mode: "100644" },
+    ];
+    const blobs: Record<string, Blob> = {
+      "skills/react-best-practices/SKILL.md": skillMd("vercel-react-best-practices"),
+      "skills/other/SKILL.md": skillMd("other"),
+    };
+    for (let index = 0; index < 75; index += 1) {
+      const path = `skills/react-best-practices/rules/rule-${index}.md`;
+      tree.push({ path, type: "blob", mode: "100644" });
+      blobs[path] = `Rule ${index}.`;
+    }
+
+    const result = await resolveSkill({
+      url: "https://www.skills.sh/vercel-labs/agent-skills/vercel-react-best-practices",
+      fetcher: fakeFetcher({ tree, blobs }),
+    });
+
+    expect(result.status).toBe("resolved");
+    if (result.status !== "resolved") return;
+    expect(result.skill).toMatchObject({
+      name: "vercel-react-best-practices",
+      fileCount: 76,
+      source: { path: "skills/react-best-practices" },
+      warnings: [
+        {
+          code: "source_directory_normalized",
+          message:
+            'Source directory "react-best-practices" will be installed as "vercel-react-best-practices" to match the Skill name.',
+        },
+      ],
+    });
+  });
 });
 
 describe("resolveSkill: rejection fixtures", () => {
@@ -300,12 +341,6 @@ describe("resolveSkill: rejection fixtures", () => {
       match: /\.git/,
     },
     {
-      label: "directory-name mismatch",
-      tree: [{ path: "skills/foo/SKILL.md", type: "blob", mode: "100644" }],
-      blobs: { "skills/foo/SKILL.md": skillMd("bar") },
-      match: /must match its directory name/,
-    },
-    {
       label: "unknown frontmatter field",
       tree: [{ path: "skills/foo/SKILL.md", type: "blob", mode: "100644" }],
       blobs: {
@@ -343,7 +378,7 @@ describe("resolveSkill: rejection fixtures", () => {
   test("too many files exceeds the skill file-count limit", async () => {
     const tree: SkillTreeEntry[] = [{ path: "s/SKILL.md", type: "blob", mode: "100644" }];
     const blobs: Record<string, Blob> = { "s/SKILL.md": skillMd("s") };
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < SKILL_LIMITS.maxFileCount; i++) {
       tree.push({ path: `s/f${i}.txt`, type: "blob", mode: "100644" });
       blobs[`s/f${i}.txt`] = "x";
     }

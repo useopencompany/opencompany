@@ -37,6 +37,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
+import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
 import {
   installOfficialMcpPlugin,
   OFFICIAL_MCP_PLUGINS,
@@ -146,6 +147,25 @@ export function BetterStackPluginDetail({
   );
 }
 
+export function GitHubPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.github}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function LinearPluginDetail({
   pluginState,
   canEdit,
@@ -184,6 +204,25 @@ export function NeonPluginDetail({
   );
 }
 
+export function SlackPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.slack}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 function OfficialMcpPluginDetail({
   config,
   pluginState,
@@ -197,8 +236,8 @@ function OfficialMcpPluginDetail({
 }) {
   const { integrations } = useAppData();
   const accountsState = useMemo<PluginAccountsState>(
-    () => ({ status: "ready", ...pluginAccountsFromState(integrations, config.name) }),
-    [config.name, integrations],
+    () => ({ status: "ready", ...pluginAccountsFromState(integrations, config) }),
+    [config, integrations],
   );
   const effectiveToolsState =
     toolsState ??
@@ -233,6 +272,28 @@ export function LinearPluginDetailView({
   return (
     <OfficialMcpPluginDetailView
       config={OFFICIAL_MCP_PLUGINS.linear}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+export function GitHubPluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS.github}
       pluginState={pluginState}
       accountsState={accountsState}
       toolsState={toolsState}
@@ -285,6 +346,28 @@ export function BetterStackPluginDetailView({
   );
 }
 
+export function SlackPluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS.slack}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
 function OfficialMcpPluginDetailView({
   config,
   pluginState,
@@ -321,7 +404,7 @@ function OfficialMcpPluginDetailView({
     <>
       <IntegrationSetupFeedback />
       <SettingsContent
-        title={plugin?.manifest.name || config.label}
+        title={config.label}
         description={plugin?.manifest.description || config.description}
         backLink={{ href: "/settings/plugins", label: "Plugins" }}
       >
@@ -332,6 +415,12 @@ function OfficialMcpPluginDetailView({
           canEdit={canEdit}
         />
         {plugin ? <AccountsSection config={config} state={accountsState} /> : null}
+        {plugin &&
+        config.name === "github" &&
+        accountsState.status === "ready" &&
+        accountsState.permissionConnection ? (
+          <GitHubRepositoryAccessSection />
+        ) : null}
         <ToolsSection
           config={config}
           pluginState={pluginState}
@@ -541,7 +630,16 @@ function AccountsSection({
   state: PluginAccountsState;
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
+  const displayedAccounts =
+    state.status !== "ready"
+      ? []
+      : config.connectionProvider === "slack"
+        ? state.accounts
+        : permissionConnection
+          ? [{ account: permissionConnection }]
+          : [];
   const headingId = `${config.name}-accounts-heading`;
+  const accountLabel = config.accountLabel ?? config.label;
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
@@ -552,23 +650,33 @@ function AccountsSection({
         description={config.accountDescription}
       />
       {state.status === "loading" ? (
-        <SectionSkeleton label={`Loading ${config.label} accounts`} rows={2} compact />
+        <SectionSkeleton label={`Loading ${accountLabel} accounts`} rows={2} compact />
       ) : state.status === "error" ? (
         <SectionError title="Accounts unavailable" message={state.message} />
-      ) : !permissionConnection ? (
-        <SectionEmpty icon={Users}>{`No ${config.label} accounts are connected.`}</SectionEmpty>
+      ) : displayedAccounts.length === 0 ? (
+        <SectionEmpty icon={Users}>{`No ${accountLabel} accounts are connected.`}</SectionEmpty>
       ) : (
         <div className="flex flex-col gap-2">
-          <IntegrationAccountRow
-            account={permissionConnection}
-            purposeLabel={config.label}
-            showCapabilityModes={false}
-          />
+          {displayedAccounts.map(({ account }) => (
+            <IntegrationAccountRow
+              key={account.integrationId}
+              account={account}
+              purposeLabel={
+                config.connectionProvider === "slack"
+                  ? account.integrationId === permissionConnection?.integrationId
+                    ? "Slack tools"
+                    : "Ingestion only"
+                  : accountLabel
+              }
+              reconnectHref={config.connectHref}
+              showCapabilityModes={false}
+            />
+          ))}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
         <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
-          Connect {config.label} account
+          Connect {accountLabel} account
         </a>
         {config.ingestionHref && config.ingestionLabel ? (
           <Link
@@ -706,7 +814,7 @@ function ToolsSection({
               <ToolGroupCard
                 key={group.id}
                 group={group}
-                provider={config.name}
+                provider={config.connectionProvider}
                 permissionConnection={plugin ? permissionConnection : null}
               />
             ))}
@@ -1011,17 +1119,29 @@ function SectionEmpty({ icon: Icon, children }: { icon: typeof Wrench; children:
 
 function pluginAccountsFromState(
   state: IntegrationState,
-  provider: OfficialMcpPluginName,
+  config: OfficialMcpPluginConfig,
 ): {
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView | null;
 } {
-  if (provider !== "linear") {
-    const accounts = state.personalAccounts[provider].map((account) => ({ account }));
+  if (
+    config.connectionProvider === "betterstack" ||
+    config.connectionProvider === "github_user" ||
+    config.connectionProvider === "neon" ||
+    config.connectionProvider === "slack"
+  ) {
+    const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
+      account,
+    }));
+    const primaryIntegrationId =
+      config.connectionProvider === "slack" ? state.slack.integrationId : null;
     return {
       accounts,
       permissionConnection:
-        accounts.find(({ account }) => account.connected)?.account ?? accounts[0]?.account ?? null,
+        accounts.find(({ account }) => account.integrationId === primaryIntegrationId)?.account ??
+        accounts.find(({ account }) => account.connected)?.account ??
+        accounts[0]?.account ??
+        null,
     };
   }
   const permissionConnection: IntegrationAccountView | null = state.linear.integrationId
@@ -1048,6 +1168,10 @@ export function defaultLinearToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("linear");
 }
 
+export function defaultGitHubToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("github");
+}
+
 export function defaultNeonToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("neon");
 }
@@ -1056,18 +1180,24 @@ export function defaultBetterStackToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("betterstack");
 }
 
+export function defaultSlackToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("slack");
+}
+
 function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): PluginToolsState {
   return {
     status: "ready",
-    groups: providerCapabilities(provider).map((capability) => ({
-      id: capability.id,
-      label: capability.label,
-      description: capability.description,
-      modeKey: capability.id,
-      defaultMode: capability.defaultMode,
-      curated: true,
-      tools: [],
-    })),
+    groups: providerCapabilities(OFFICIAL_MCP_PLUGINS[provider].connectionProvider).map(
+      (capability) => ({
+        id: capability.id,
+        label: capability.label,
+        description: capability.description,
+        modeKey: capability.id,
+        defaultMode: capability.defaultMode,
+        curated: true,
+        tools: [],
+      }),
+    ),
     discovery: {
       status: "pending",
       toolCount: 0,
@@ -1082,6 +1212,10 @@ export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null)
   return officialPluginToolsStateFromPlugin(plugin, "linear");
 }
 
+export function githubToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "github");
+}
+
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "neon");
 }
@@ -1090,6 +1224,10 @@ export function betterStackToolsStateFromPlugin(
   plugin: PluginInstallationDto | null,
 ): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "betterstack");
+}
+
+export function slackToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "slack");
 }
 
 function officialPluginToolsStateFromPlugin(
@@ -1123,7 +1261,7 @@ function officialPluginToolsStateFromPlugin(
     }
   }
 
-  const knownCapabilities = providerCapabilities(provider);
+  const knownCapabilities = providerCapabilities(OFFICIAL_MCP_PLUGINS[provider].connectionProvider);
   const curatedGroups = [...definitions.values()].map((definition) => ({
     id: definition.id,
     label: definition.label,
@@ -1171,6 +1309,10 @@ export function linearToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
   return officialPluginToolsStateFromPreview(preview, "linear");
 }
 
+export function githubToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "github");
+}
+
 export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "neon");
 }
@@ -1181,11 +1323,15 @@ export function betterStackToolsStateFromPreview(
   return officialPluginToolsStateFromPreview(preview, "betterstack");
 }
 
+export function slackToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "slack");
+}
+
 function officialPluginToolsStateFromPreview(
   preview: PluginImportPreviewDto,
   provider: OfficialMcpPluginName,
 ): PluginToolsState {
-  const knownCapabilities = providerCapabilities(provider);
+  const knownCapabilities = providerCapabilities(OFFICIAL_MCP_PLUGINS[provider].connectionProvider);
   const definitions = new Map<CapabilityId, PluginToolGroupView>();
   for (const server of preview.remoteMcpServers) {
     for (const capability of server.capabilities) {

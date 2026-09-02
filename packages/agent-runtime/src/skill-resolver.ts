@@ -11,7 +11,10 @@ import type { AgentRemoteSkillSource } from "./types";
 
 // Cap on how many candidate SKILL.md files we'll read to build a chooser, so a repo with hundreds
 // of skills can't fan out into hundreds of blob requests.
-const MAX_CANDIDATE_READS = 25;
+const MAX_CANDIDATE_READS = 100;
+const MAX_CANDIDATE_RESULTS = 25;
+const MAX_CONCURRENT_BLOB_READS = 8;
+const GITHUB_FETCH_TIMEOUT_MS = 10_000;
 
 export class SkillResolverError extends Error {
   constructor(message: string) {
@@ -86,6 +89,12 @@ export type ResolvedSkill = {
   files: ArtifactFile[];
   fileCount: number;
   totalBytes: number;
+  warnings: SkillResolutionWarning[];
+};
+
+export type SkillResolutionWarning = {
+  code: "source_directory_normalized";
+  message: string;
 };
 
 export type ResolveSkillResult =
@@ -111,6 +120,10 @@ function githubApiHeaders(): Record<string, string> {
   };
 }
 
+function fetchGitHub(url: string, init: RequestInit = {}) {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(GITHUB_FETCH_TIMEOUT_MS) });
+}
+
 function encodeRepoPath(path: string): string {
   return path
     .split("/")
@@ -123,7 +136,7 @@ function encodeRepoPath(path: string): string {
 export function createGitHubSkillFetcher(): SkillResolverFetcher {
   return {
     async defaultBranch(owner, repo) {
-      const response = await fetch(
+      const response = await fetchGitHub(
         `${GITHUB_API_HOST}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
         { headers: githubApiHeaders() },
       );
@@ -134,7 +147,7 @@ export function createGitHubSkillFetcher(): SkillResolverFetcher {
       return json.default_branch ?? "main";
     },
     async resolveCommit(owner, repo, ref) {
-      const response = await fetch(
+      const response = await fetchGitHub(
         `${GITHUB_API_HOST}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(ref)}`,
         { headers: githubApiHeaders() },
       );
@@ -146,7 +159,7 @@ export function createGitHubSkillFetcher(): SkillResolverFetcher {
       return typeof json.sha === "string" ? json.sha : null;
     },
     async fetchTree(owner, repo, commit) {
-      const response = await fetch(
+      const response = await fetchGitHub(
         `${GITHUB_API_HOST}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${commit}?recursive=1`,
         { headers: githubApiHeaders() },
       );
@@ -173,7 +186,7 @@ export function createGitHubSkillFetcher(): SkillResolverFetcher {
       return { entries, truncated: json.truncated === true };
     },
     async fetchBlob(owner, repo, commit, path) {
-      const response = await fetch(
+      const response = await fetchGitHub(
         `${GITHUB_RAW_HOST}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${commit}/${encodeRepoPath(path)}`,
         { headers: { "User-Agent": "opencompany-skills" } },
       );
@@ -351,6 +364,27 @@ function basename(path: string): string {
   return index === -1 ? path : path.slice(index + 1);
 }
 
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  mapper: (value: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, values.length) },
+    async (): Promise<void> => {
+      while (nextIndex < values.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(values[index]!, index);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
 // The directory name a skill at `dir` must match. A subdirectory skill matches its own basename; a
 // repository-root skill (`dir === ""`) matches the repository name, which is the checkout directory.
 function expectedNameForDir(dir: string, repo: string): string {
@@ -391,10 +425,20 @@ async function gatherSkillFiles(input: {
   if (blobs.length > SKILL_LIMITS.maxFileCount) {
     throw new SkillResolverError(`Skill has too many files (max ${SKILL_LIMITS.maxFileCount}).`);
   }
-
-  const files: ArtifactFile[] = [];
-  let totalBytes = 0;
   for (const entry of blobs) {
+    if (entry.size !== undefined && entry.size > SKILL_LIMITS.maxFileBytes) {
+      const relative = dir === "" ? entry.path : entry.path.slice(prefix.length);
+      throw new SkillResolverError(`Skill file ${relative} is too large.`);
+    }
+  }
+  const declaredTotalBytes = blobs.reduce((sum, entry) => sum + (entry.size ?? 0), 0);
+  if (declaredTotalBytes > SKILL_LIMITS.maxTotalBytes) {
+    throw new SkillResolverError(
+      `Skill is too large (max ${Math.floor(SKILL_LIMITS.maxTotalBytes / 1024)} KB).`,
+    );
+  }
+
+  const files = await mapWithConcurrency(blobs, MAX_CONCURRENT_BLOB_READS, async (entry) => {
     const relative = dir === "" ? entry.path : entry.path.slice(prefix.length);
     let executable: boolean;
     try {
@@ -408,13 +452,13 @@ async function gatherSkillFiles(input: {
     if (content.length > SKILL_LIMITS.maxFileBytes) {
       throw new SkillResolverError(`Skill file ${relative} is too large.`);
     }
-    totalBytes += content.length;
-    if (totalBytes > SKILL_LIMITS.maxTotalBytes) {
-      throw new SkillResolverError(
-        `Skill is too large (max ${Math.floor(SKILL_LIMITS.maxTotalBytes / 1024)} KB).`,
-      );
-    }
-    files.push({ path: relative, content, executable });
+    return { path: relative, content, executable } satisfies ArtifactFile;
+  });
+  const totalBytes = files.reduce((sum, file) => sum + file.content.length, 0);
+  if (totalBytes > SKILL_LIMITS.maxTotalBytes) {
+    throw new SkillResolverError(
+      `Skill is too large (max ${Math.floor(SKILL_LIMITS.maxTotalBytes / 1024)} KB).`,
+    );
   }
 
   if (!files.some((file) => file.path === "SKILL.md")) {
@@ -455,41 +499,65 @@ export async function resolveSkill(input: {
     throw new SkillResolverError("No SKILL.md found in that repository or path.");
   }
 
-  // For a skills.sh nameFilter, prefer a directory whose basename matches before reading
-  // frontmatter for everything.
-  if (parsed.nameFilter) {
-    const byBasename = dirs.filter((dir) => basename(dir) === parsed.nameFilter);
-    if (byBasename.length > 0) dirs = byBasename;
+  const chosenDir =
+    input.selectedPath !== undefined ? dirs.find((dir) => dir === input.selectedPath) : undefined;
+
+  if (input.selectedPath !== undefined && chosenDir === undefined) {
+    throw new SkillResolverError("The selected Skill path was not found in that repository.");
   }
 
-  const chosenDir =
-    input.selectedPath !== undefined
-      ? dirs.find((dir) => dir === input.selectedPath)
-      : dirs.length === 1
-        ? dirs[0]
-        : undefined;
+  if (chosenDir !== undefined) {
+    return finalizeSkill({ parsed, ref, commit, entries, dir: chosenDir, fetcher: input.fetcher });
+  }
 
-  if (chosenDir === undefined) {
+  if (dirs.length === 1 && !parsed.nameFilter) {
+    return finalizeSkill({ parsed, ref, commit, entries, dir: dirs[0]!, fetcher: input.fetcher });
+  }
+
+  if (dirs.length > 1 || parsed.nameFilter) {
     // Build a candidate chooser by reading each SKILL.md's frontmatter (capped). Skills that fail
-    // strict validation are skipped rather than surfaced.
-    const candidates: SkillCandidate[] = [];
-    for (const dir of dirs.slice(0, MAX_CANDIDATE_READS)) {
-      const mdPath = dir === "" ? "SKILL.md" : `${dir}/SKILL.md`;
-      const bytes = await input.fetcher.fetchBlob(parsed.owner, parsed.repo, commit, mdPath);
-      let frontmatter: SkillFrontmatter;
-      try {
-        frontmatter = parseSkillDocument(
-          decodeSkillMarkdown(bytes),
-          expectedNameForDir(dir, parsed.repo),
-        ).frontmatter;
-      } catch (error) {
-        if (error instanceof SkillSpecError || error instanceof SkillResolverError) continue;
-        throw error;
-      }
-      if (parsed.nameFilter && frontmatter.name !== parsed.nameFilter) continue;
-      candidates.push({ path: dir, name: frontmatter.name, description: frontmatter.description });
-    }
+    // document validation are skipped rather than surfaced. Prefer a matching source directory as
+    // a fast path, but always select by the declared Skill name for skills.sh and @name locators.
+    const orderedDirs = parsed.nameFilter
+      ? [
+          ...dirs.filter((dir) => basename(dir) === parsed.nameFilter),
+          ...dirs.filter((dir) => basename(dir) !== parsed.nameFilter),
+        ]
+      : dirs;
+    const candidateResults = await mapWithConcurrency(
+      orderedDirs.slice(0, MAX_CANDIDATE_READS),
+      MAX_CONCURRENT_BLOB_READS,
+      async (dir): Promise<SkillCandidate | null> => {
+        const mdPath = dir === "" ? "SKILL.md" : `${dir}/SKILL.md`;
+        const bytes = await input.fetcher.fetchBlob(parsed.owner, parsed.repo, commit, mdPath);
+        try {
+          const frontmatter: SkillFrontmatter = parseSkillDocument(
+            decodeSkillMarkdown(bytes),
+          ).frontmatter;
+          return {
+            path: dir,
+            name: frontmatter.name,
+            description: frontmatter.description,
+          };
+        } catch (error) {
+          if (error instanceof SkillSpecError || error instanceof SkillResolverError) return null;
+          throw error;
+        }
+      },
+    );
+    const validCandidates = candidateResults.filter(
+      (candidate): candidate is SkillCandidate => candidate !== null,
+    );
+    const matchingCandidates = parsed.nameFilter
+      ? validCandidates.filter((candidate) => candidate.name === parsed.nameFilter)
+      : validCandidates;
+    const candidates = matchingCandidates.slice(0, MAX_CANDIDATE_RESULTS);
     if (candidates.length === 0) {
+      if (parsed.nameFilter) {
+        throw new SkillResolverError(
+          `No Skill declaring name ${JSON.stringify(parsed.nameFilter)} was found in that repository.`,
+        );
+      }
       throw new SkillResolverError("No valid SKILL.md (with name and description) was found.");
     }
     if (candidates.length === 1) {
@@ -510,7 +578,7 @@ export async function resolveSkill(input: {
     };
   }
 
-  return finalizeSkill({ parsed, ref, commit, entries, dir: chosenDir, fetcher: input.fetcher });
+  throw new SkillResolverError("No valid SKILL.md (with name and description) was found.");
 }
 
 async function finalizeSkill(input: {
@@ -539,18 +607,30 @@ async function finalizeSkill(input: {
   }
   let document: ReturnType<typeof parseSkillDocument>;
   try {
-    document = parseSkillDocument(
-      decodeSkillMarkdown(skillMarkdown.content),
-      expectedNameForDir(dir, parsed.repo),
-    );
+    document = parseSkillDocument(decodeSkillMarkdown(skillMarkdown.content));
   } catch (error) {
     if (error instanceof SkillSpecError) throw new SkillResolverError(error.message);
     throw error;
+  }
+  if (parsed.nameFilter && document.frontmatter.name !== parsed.nameFilter) {
+    throw new SkillResolverError(
+      `Selected Skill declares name ${JSON.stringify(document.frontmatter.name)}, not ${JSON.stringify(parsed.nameFilter)}.`,
+    );
   }
 
   const integrity = await computeArtifactIntegrity(files);
   const totalBytes = files.reduce((sum, file) => sum + file.content.length, 0);
   const { frontmatter } = document;
+  const sourceDirectoryName = expectedNameForDir(dir, parsed.repo);
+  const warnings: SkillResolutionWarning[] =
+    sourceDirectoryName === frontmatter.name
+      ? []
+      : [
+          {
+            code: "source_directory_normalized",
+            message: `Source directory ${JSON.stringify(sourceDirectoryName)} will be installed as ${JSON.stringify(frontmatter.name)} to match the Skill name.`,
+          },
+        ];
 
   return {
     status: "resolved",
@@ -575,6 +655,7 @@ async function finalizeSkill(input: {
       files,
       fileCount: files.length,
       totalBytes,
+      warnings,
     },
   };
 }

@@ -1455,7 +1455,7 @@ export const SkillBundleSummarySchema = z
 
 export const SkillBundleSchema = SkillBundleSummarySchema.extend({
   body: z.string(),
-  files: z.array(SkillBundleFileMetadataSchema).max(64),
+  files: z.array(SkillBundleFileMetadataSchema).max(512),
 })
   .strict()
   .openapi("SkillBundle");
@@ -1496,6 +1496,14 @@ export const SkillImportCandidateSchema = z
   .strict()
   .openapi("SkillImportCandidate");
 
+export const SkillImportWarningSchema = z
+  .object({
+    code: z.literal("source_directory_normalized"),
+    message: z.string().min(1).max(1_024),
+  })
+  .strict()
+  .openapi("SkillImportWarning");
+
 export const SkillImportPreviewSchema = z
   .discriminatedUnion("status", [
     z
@@ -1509,13 +1517,14 @@ export const SkillImportPreviewSchema = z
         allowedTools: z.string().optional(),
         source: ExternalSkillSourceSchema,
         integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
-        files: z.array(SkillImportFileMetadataSchema).min(1).max(64),
-        fileCount: z.number().int().min(1).max(64),
+        files: z.array(SkillImportFileMetadataSchema).min(1).max(512),
+        fileCount: z.number().int().min(1).max(512),
         totalBytes: z
           .number()
           .int()
           .min(0)
           .max(1024 * 1024),
+        warnings: z.array(SkillImportWarningSchema).max(10),
       })
       .strict(),
     z
@@ -1791,7 +1800,7 @@ export const PluginImportPreviewSchema = z
           name: z.string().min(1).max(64),
           description: z.string().min(1).max(1_024),
           integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
-          fileCount: z.number().int().min(1).max(64),
+          fileCount: z.number().int().min(1).max(512),
           totalBytes: z
             .number()
             .int()
@@ -2245,6 +2254,88 @@ export const ErrorEnvelopeSchema = z
   })
   .strict()
   .openapi("ErrorEnvelope");
+
+export type GitHubRepositoryAccessItemDto = {
+  id: string;
+  name: string;
+  fullName: string;
+  private: boolean;
+  htmlUrl: string;
+};
+
+export type GitHubInstallationAccessDto = {
+  id: string;
+  account: {
+    id: string;
+    login: string;
+    type: "Organization" | "User";
+    avatarUrl: string | null;
+    htmlUrl: string | null;
+  };
+  repositorySelection: "all" | "selected";
+  permissions: Record<string, string>;
+  pendingPermissions: string[];
+  suspendedAt: string | null;
+  repositories: GitHubRepositoryAccessItemDto[];
+};
+
+export type GitHubRepositoryAccessTargetDto = {
+  owner: string;
+  repo: string | null;
+  state: "available" | "missing_installation" | "missing_repository" | "suspended";
+};
+
+export type GitHubRepositoryAccessDto = {
+  checkedAt: string;
+  installations: GitHubInstallationAccessDto[];
+  target: GitHubRepositoryAccessTargetDto | null;
+};
+
+export const GitHubRepositoryAccessItemSchema: z.ZodType<GitHubRepositoryAccessItemDto> = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    fullName: z.string().min(1),
+    private: z.boolean(),
+    htmlUrl: z.url(),
+  })
+  .strict();
+
+export const GitHubInstallationAccessSchema: z.ZodType<GitHubInstallationAccessDto> = z
+  .object({
+    id: z.string().min(1),
+    account: z
+      .object({
+        id: z.string().min(1),
+        login: z.string().min(1),
+        type: z.enum(["Organization", "User"]),
+        avatarUrl: z.url().nullable(),
+        htmlUrl: z.url().nullable(),
+      })
+      .strict(),
+    repositorySelection: z.enum(["all", "selected"]),
+    permissions: z.record(z.string(), z.string()),
+    pendingPermissions: z.array(z.string()),
+    suspendedAt: TimestampSchema.nullable(),
+    repositories: z.array(GitHubRepositoryAccessItemSchema),
+  })
+  .strict();
+
+export const GitHubRepositoryAccessTargetSchema: z.ZodType<GitHubRepositoryAccessTargetDto> = z
+  .object({
+    owner: z.string().min(1),
+    repo: z.string().min(1).nullable(),
+    state: z.enum(["available", "missing_installation", "missing_repository", "suspended"]),
+  })
+  .strict();
+
+export const GitHubRepositoryAccessSchema: z.ZodType<GitHubRepositoryAccessDto> = z
+  .object({
+    checkedAt: TimestampSchema,
+    installations: z.array(GitHubInstallationAccessSchema),
+    target: GitHubRepositoryAccessTargetSchema.nullable(),
+  })
+  .strict();
 
 export const BillingOverviewSchema = z
   .object({
@@ -4184,6 +4275,7 @@ export type SkillImportFileMetadataDto = z.infer<typeof SkillImportFileMetadataS
 export type SkillFileChunkDto = z.infer<typeof SkillFileChunkSchema>;
 export type SkillCatalogItemDto = z.infer<typeof SkillCatalogItemSchema>;
 export type SkillImportCandidateDto = z.infer<typeof SkillImportCandidateSchema>;
+export type SkillImportWarningDto = z.infer<typeof SkillImportWarningSchema>;
 export type SkillImportPreviewDto = z.infer<typeof SkillImportPreviewSchema>;
 export type SkillImportPreviewBody = z.infer<typeof SkillImportPreviewBodySchema>;
 export type ImportSkillBody = z.infer<typeof ImportSkillBodySchema>;

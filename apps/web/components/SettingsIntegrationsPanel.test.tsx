@@ -151,10 +151,12 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    // Workspace scope is shown first: GitHub is a workspace-owned connection and
+    // Workspace scope is shown first: GitHub ingestion is a workspace-owned connection and
     // Gmail (personal) is hidden.
     expect(
-      screen.getByText("Bring pull requests and issues from your repositories into opencompany."),
+      screen.getByText(
+        "Ingest pull requests and issues from selected repositories through webhooks.",
+      ),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Let opencompany read and act on your email."),
@@ -165,7 +167,9 @@ describe("SettingsIntegrationsPanel", () => {
     // Personal scope reveals the personal connections and hides the workspace ones.
     expect(screen.getByText("Let opencompany read and act on your email.")).toBeInTheDocument();
     expect(
-      screen.queryByText("Bring pull requests and issues from your repositories into opencompany."),
+      screen.queryByText(
+        "Ingest pull requests and issues from selected repositories through webhooks.",
+      ),
     ).not.toBeInTheDocument();
   });
 
@@ -335,6 +339,7 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
+    expect(screen.getByText("GitHub workspace ingestion")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Configure repositories" })).toHaveAttribute(
       "href",
       "/settings/repositories",
@@ -593,7 +598,7 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
-  it("shows one broad Slack read permission for each connected workspace", () => {
+  it("keeps the legacy Slack surface limited to its existing read permission", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_slack",
@@ -625,6 +630,34 @@ describe("SettingsIntegrationsPanel", () => {
         name: /write|send/i,
       }),
     ).not.toBeInTheDocument();
+  });
+
+  it("removes the duplicate Slack integration card after the plugin is installed", () => {
+    const integrations = integrationStateFromRows([
+      {
+        id: "gint_slack",
+        provider: "slack",
+        externalId: "T123",
+        connectionLabel: "Acme",
+        accountName: "Louis",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as IntegrationState;
+
+    render(
+      <SettingsIntegrationsPanel
+        initialIntegrations={integrations}
+        isWorkspaceAdmin
+        slackPluginInstalled
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    expect(
+      screen.queryByText("Let opencompany search and read your Slack conversations."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Personal" })).not.toHaveTextContent("1");
   });
 
   it("connects Latitude as a personal OAuth integration with guarded writes", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseSkillDocument, SkillSpecError } from "./skill-spec";
+import { parseSkillDirectoryDocument, parseSkillDocument, SkillSpecError } from "./skill-spec";
 
 describe("parseSkillDocument: accepted documents", () => {
   test("parses all six frontmatter fields and returns the exact body", () => {
@@ -17,7 +17,7 @@ describe("parseSkillDocument: accepted documents", () => {
       "Body line one.",
       "Body line two.",
     ].join("\n");
-    const parsed = parseSkillDocument(content, "my-skill");
+    const parsed = parseSkillDirectoryDocument(content, "my-skill");
     expect(parsed.frontmatter).toEqual({
       name: "my-skill",
       description: "Does the thing.",
@@ -31,7 +31,10 @@ describe("parseSkillDocument: accepted documents", () => {
   });
 
   test("omits optional fields that are absent", () => {
-    const parsed = parseSkillDocument("---\nname: foo\ndescription: bar\n---\nbody", "foo");
+    const parsed = parseSkillDirectoryDocument(
+      "---\nname: foo\ndescription: bar\n---\nbody",
+      "foo",
+    );
     expect(parsed.frontmatter).toEqual({ name: "foo", description: "bar" });
     expect(parsed.frontmatter).not.toHaveProperty("license");
     expect(parsed.frontmatter).not.toHaveProperty("metadata");
@@ -73,7 +76,7 @@ describe("parseSkillDocument: accepted documents", () => {
 
   for (const boundary of boundaryCases) {
     test(`body boundary: ${boundary.label}`, () => {
-      const parsed = parseSkillDocument(boundary.content, "foo");
+      const parsed = parseSkillDirectoryDocument(boundary.content, "foo");
       expect(parsed.frontmatter.name).toBe("foo");
       expect(parsed.body).toBe(boundary.body);
       expect(boundary.content.slice(parsed.bodyStart)).toBe(parsed.body);
@@ -166,13 +169,27 @@ describe("parseSkillDocument: rejected documents", () => {
 
   for (const testCase of cases) {
     test(testCase.label, () => {
-      expect(() => parseSkillDocument(testCase.content, testCase.expected)).toThrow(SkillSpecError);
-      expect(() => parseSkillDocument(testCase.content, testCase.expected)).toThrow(testCase.match);
+      expect(() => parseSkillDirectoryDocument(testCase.content, testCase.expected)).toThrow(
+        SkillSpecError,
+      );
+      expect(() => parseSkillDirectoryDocument(testCase.content, testCase.expected)).toThrow(
+        testCase.match,
+      );
     });
   }
 
   test("rejects a description longer than 1024 characters", () => {
     const content = `---\nname: foo\ndescription: ${"x".repeat(1025)}\n---\nbody`;
-    expect(() => parseSkillDocument(content, "foo")).toThrow(/`description` must be 1-1024/);
+    expect(() => parseSkillDirectoryDocument(content, "foo")).toThrow(
+      /`description` must be 1-1024/,
+    );
+  });
+
+  test("parses source metadata before applying the canonical bundle directory", () => {
+    const content = "---\nname: canonical-name\ndescription: bar\n---\nbody";
+    expect(parseSkillDocument(content).frontmatter.name).toBe("canonical-name");
+    expect(() => parseSkillDirectoryDocument(content, "source-folder")).toThrow(
+      /must match its directory name/,
+    );
   });
 });

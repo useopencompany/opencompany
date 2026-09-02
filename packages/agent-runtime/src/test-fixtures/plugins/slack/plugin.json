@@ -1,0 +1,54 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "slack",
+  "version": "1.0.0",
+  "description": "Search Slack, read workspace conversations, and take permission-gated actions as yourself.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "repository": "https://github.com/useopencompany/plugins/tree/main/slack",
+  "license": "MIT",
+  "keywords": ["slack", "messages", "channels", "search", "collaboration"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Search public Slack",
+        "defaultMode": "on",
+        "tools": ["slack_search_emojis", "slack_search_public"]
+      },
+      "query": {
+        "label": "Read private Slack",
+        "defaultMode": "ask",
+        "tools": [
+          "slack_get_reactions",
+          "slack_list_channel_members",
+          "slack_list_user_conversations",
+          "slack_read_canvas",
+          "slack_read_channel",
+          "slack_read_file",
+          "slack_read_thread",
+          "slack_read_user_profile",
+          "slack_search_channels",
+          "slack_search_public_and_private",
+          "slack_search_users"
+        ]
+      },
+      "write": {
+        "label": "Change Slack",
+        "defaultMode": "ask",
+        "tools": [
+          "slack_add_reaction",
+          "slack_complete_file_upload",
+          "slack_create_canvas",
+          "slack_create_conversation",
+          "slack_get_file_upload_url",
+          "slack_schedule_message",
+          "slack_send_message",
+          "slack_send_message_draft",
+          "slack_update_canvas"
+        ]
+      }
+    }
+  }
+}

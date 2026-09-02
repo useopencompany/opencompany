@@ -16,6 +16,7 @@ import {
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
+import { GitHubInstallGapCard } from "@/components/GitHubRepositoryAccess";
 import {
   BRAIN_TOOL_NAME,
   CODEX_APPROVAL_TOOL_NAME,
@@ -28,6 +29,7 @@ import {
   SCHEDULE_TASK_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
+import { githubInstallGapCandidate } from "@/lib/github-repository-access";
 import {
   actionToolLabel,
   formatDebugValue,
@@ -76,13 +78,25 @@ export function ToolCallItem({
   detail?: HistoricalPresentationDetailController;
 }) {
   if (detail && detail.state !== "loaded") return <ToolCallRow tool={tool} detail={detail} />;
+  // Shared transcripts are intentionally observational: repository recovery
+  // acts on the signed-in viewer's private GitHub connection, so only an
+  // editable conversation may render those controls.
   if (readOnly) return <ToolCallRow tool={tool} {...(detail ? { detail } : {})} />;
 
   if (tool.name === BRAIN_TOOL_NAME) {
     return <BrainToolCallRow tool={tool} initiallyExpanded={Boolean(detail)} />;
   }
   if (tool.name === CODEX_COMMAND_TOOL_NAME) {
-    return <CodexCommandRow tool={tool} initiallyExpanded={Boolean(detail)} />;
+    const target = githubInstallGapCandidate(tool);
+    const row = <CodexCommandRow tool={tool} initiallyExpanded={Boolean(detail)} />;
+    return target ? (
+      <>
+        {row}
+        <GitHubInstallGapCard owner={target.owner} repo={target.repo} />
+      </>
+    ) : (
+      row
+    );
   }
   if (tool.name === CODEX_PLAN_TOOL_NAME && planImplementationAvailable(tool)) {
     return (
@@ -118,7 +132,16 @@ export function ToolCallItem({
       return <ActionApprovalCard tool={tool} onDecision={onActionApproval} />;
     }
   }
-  return <ToolCallRow tool={tool} {...(detail ? { detail } : {})} />;
+  const target = githubInstallGapCandidate(tool);
+  const row = <ToolCallRow tool={tool} {...(detail ? { detail } : {})} />;
+  return target ? (
+    <>
+      {row}
+      <GitHubInstallGapCard owner={target.owner} repo={target.repo} />
+    </>
+  ) : (
+    row
+  );
 }
 
 function LegacyCapabilityApprovalRow({ tool }: { tool: ToolCallView }) {
