@@ -472,19 +472,20 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
       },
       required: ["query"],
     },
-    provider: TIKHUB,
-    endpoint: "/api/v1/linkedin/web/search_posts",
-    priceType: "PER_CALL",
-    executionMode: "sync",
+    provider: "apify",
+    endpoint: "/harvestapi/linkedin-post-search",
+    priceType: "PER_RESULT",
+    executionMode: "async",
     mapInput: (raw) => {
       const params = checkedParams(raw, ["query", "page", "sort", "limit"]);
       return {
         providerInput: compact({
-          keyword: requiredText(params, "query", 300),
-          page: integerParam(params, "page", 1, 20, 1),
-          sort_by: enumParam(params, "sort", ["relevant", "recent"], undefined, {
+          searchQueries: [requiredText(params, "query", 300)],
+          maxPosts: limitParam(params, 10, 10),
+          startPage: integerParam(params, "page", 1, 20, 1),
+          sortBy: enumParam(params, "sort", ["relevant", "recent"], undefined, {
             relevant: "relevance",
-            recent: "date_posted",
+            recent: "date",
           }),
         }),
         resultLimit: limitParam(params, 10, 10),
@@ -832,15 +833,15 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     source: "lead",
     description: "Get provider-available public contact information for one LinkedIn person.",
     params: URL_PARAMS,
-    provider: TIKHUB,
-    endpoint: "/api/v1/linkedin/web/get_user_contact",
-    priceType: "PER_CALL",
-    executionMode: "sync",
+    provider: "apify",
+    endpoint: "/dev_fusion/linkedin-profile-scraper",
+    priceType: "PER_RESULT",
+    executionMode: "async",
     mapInput: (raw) => {
       const params = checkedParams(raw, ["url"]);
       const url = linkedinUrl(requiredText(params, "url", 1_000), "person");
       return {
-        providerInput: { username: linkedInSlug(url, "in") },
+        providerInput: { profileUrls: [url] },
         resultLimit: 1,
         canonicalLinks: [url],
       };
@@ -2431,15 +2432,6 @@ function linkedinUrl(value: string, kind: "person" | "company" | "post") {
   url.search = "";
   url.hash = "";
   return url.toString();
-}
-
-function linkedInSlug(value: string, segment: "in" | "company") {
-  const url = new URL(value);
-  const parts = url.pathname.split("/").filter(Boolean);
-  const index = parts.indexOf(segment);
-  const slug = index >= 0 ? parts[index + 1] : undefined;
-  if (!slug) throw new ActionInvalidParamsError("The LinkedIn URL is missing its slug.");
-  return slug;
 }
 
 function linkedInPostId(value: string) {

@@ -383,6 +383,8 @@ export async function runCodexChatTurn(input: {
       hostGatewayEnabled && actionHostEnabled && Boolean(session.brainRef);
     const actionToolsEnabled = hostGatewayEnabled && actionHostEnabled;
     const artifactToolsEnabled = hostGatewayEnabled && actionHostEnabled;
+    const wikiToolsSupported =
+      hostGatewayEnabled && session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION;
     const toolGatewayTicket =
       hostGatewayEnabled && canonicalAttemptId
         ? createExternalEngineGatewayTicket({
@@ -566,6 +568,7 @@ export async function runCodexChatTurn(input: {
             brainCaptureAvailable: brainCaptureEnabled,
             actionsAvailable: actionToolsEnabled,
             artifactsAvailable: artifactToolsEnabled,
+            wikiSupported: wikiToolsSupported,
             repositoryBootstrapPrompt: combineSandboxPromptFragments(
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
@@ -583,6 +586,7 @@ export async function runCodexChatTurn(input: {
             brainCaptureAvailable: brainCaptureEnabled,
             actionsAvailable: actionToolsEnabled,
             artifactsAvailable: artifactToolsEnabled,
+            wikiSupported: wikiToolsSupported,
             repositoryBootstrapPrompt: combineSandboxPromptFragments(
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
@@ -1723,6 +1727,7 @@ function buildCodexChatTask(input: {
   brainCaptureAvailable: boolean;
   actionsAvailable: boolean;
   artifactsAvailable: boolean;
+  wikiSupported: boolean;
   repositoryBootstrapPrompt: string;
   attachmentPaths: string[];
   conversationHistory: CodingChatHistory;
@@ -1748,6 +1753,9 @@ function buildCodexChatTask(input: {
     input.artifactsAvailable
       ? "When you create a finished file the user should receive, call publish_artifact with its sandbox path so it appears as a durable file in chat. Do not publish source files, repository diffs, logs, or temporary work."
       : null,
+    input.wikiSupported
+      ? "A wiki tool is available when Wiki is enabled for the user. Use it for durable workspace knowledge: inspect existing pages before changing them, and read a page before overwriting it."
+      : null,
     ...codexBackgroundTaskPromptLines(input.taskContext),
     "Answer conversationally. Run commands or edit files only when the message calls for it, and keep replies concise unless the user asks for detail.",
     ...codingChatHistoryPromptLines(
@@ -1771,6 +1779,7 @@ function buildCodexChatRecoveryTask(input: {
   brainCaptureAvailable: boolean;
   actionsAvailable: boolean;
   artifactsAvailable: boolean;
+  wikiSupported: boolean;
   repositoryBootstrapPrompt: string;
   previousProgress: string;
   attachmentPaths: string[];
@@ -1797,6 +1806,9 @@ function buildCodexChatRecoveryTask(input: {
       : null,
     input.artifactsAvailable
       ? "When you create a finished file the user should receive, call publish_artifact with its sandbox path so it appears as a durable file in chat. Do not publish source files, repository diffs, logs, or temporary work."
+      : null,
+    input.wikiSupported
+      ? "A wiki tool is available when Wiki is enabled for the user. Use it for durable workspace knowledge: inspect existing pages before changing them, and read a page before overwriting it."
       : null,
     ...codexBackgroundTaskPromptLines(input.taskContext),
     "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",

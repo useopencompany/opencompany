@@ -278,6 +278,56 @@ describe("resolveActionCatalog", () => {
     expect(fallbackCatalog.actions.map((action) => action.id)).toEqual(["linear.read_something"]);
   });
 
+  it("uses the installed Neon plugin catalog exactly once and falls back when absent", async () => {
+    for (const resolver of [
+      mocks.resolveSlackActions,
+      mocks.resolveGmailActions,
+      mocks.resolveGoogleCalendarActions,
+      mocks.resolveGoogleDriveActions,
+      mocks.resolveLinearActions,
+      mocks.resolvePostHogActions,
+      mocks.resolveLatitudeActions,
+      mocks.resolveAttioActions,
+      mocks.resolveGitHubActions,
+      mocks.resolveStripeActions,
+      mocks.resolveRevolutActions,
+    ]) {
+      resolver.mockResolvedValue(null);
+    }
+    const pluginAction = {
+      ...providerCatalog("neon").actions[0]!,
+      id: "plugin:neon:neon.list_projects",
+      provider: "plugin:neon:neon" as const,
+    };
+    mocks.resolveNeonActions.mockResolvedValue(providerCatalog("neon"));
+    mocks.resolvePluginGatewayRegistrations.mockResolvedValue([
+      { source: "plugin:neon:neon" },
+    ] as never);
+    mocks.resolveRemoteMcpActions.mockResolvedValue({
+      id: "plugin:neon:neon",
+      label: "Neon",
+      description: "Plugin Neon tools",
+      actions: [pluginAction],
+    });
+
+    const pluginCatalog = await resolveActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(mocks.resolveNeonActions).not.toHaveBeenCalled();
+    expect(pluginCatalog.actions.map((action) => action.id)).toEqual([
+      "plugin:neon:neon.list_projects",
+    ]);
+
+    mocks.resolvePluginGatewayRegistrations.mockResolvedValue([]);
+    const fallbackCatalog = await resolveActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(mocks.resolveNeonActions).toHaveBeenCalledWith("user_1");
+    expect(fallbackCatalog.actions.map((action) => action.id)).toEqual(["neon.read_something"]);
+  });
+
   it("adds enabled managed sources to the same compact catalog", async () => {
     vi.stubEnv("MONID_API_KEY", "monid_test");
     vi.stubEnv("OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH", "");

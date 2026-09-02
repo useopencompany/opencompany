@@ -67,6 +67,7 @@ import { createIntegrationAccountService } from "./integration-accounts";
 import { createJamieIngress } from "./jamie-ingress";
 import { createLinearIngress } from "./linear-ingress";
 import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
+import { PostgresMessagePresentationService } from "./message-presentations";
 import { createOnboardingService } from "./onboarding";
 import { createOnboardingEmailService } from "./onboarding-emails";
 import { createRepoConfigService } from "./repo-configs";
@@ -165,6 +166,7 @@ const app = createApiApp({
   pluginImports,
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   chatResources: createChatResourceService({ db: database.db }),
+  messagePresentations: new PostgresMessagePresentationService(execute),
   chatTitles: createChatTitleService({
     db: database.db,
     ...(process.env.VERCEL_AI_GATEWAY_API_KEY

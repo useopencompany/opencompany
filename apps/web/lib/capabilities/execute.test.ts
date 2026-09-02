@@ -114,6 +114,60 @@ describe("managed capability contract and money helpers", () => {
     ).toThrow(/input contract/i);
   });
 
+  it("accepts exactly one matching branch of an inspected input union", () => {
+    const spec = {
+      ...actionSpec(),
+      provider: "pdl" as const,
+      endpoint: "/v5/person/search",
+      priceType: "PER_RESULT" as const,
+    };
+    const liveInspection = {
+      ...inspection(
+        { type: "PER_RESULT", amount: 0.3, currency: "USD" },
+        {
+          body: {
+            anyOf: [
+              {
+                type: "object",
+                properties: {
+                  query: { type: "object" },
+                  size: { type: "integer" },
+                },
+                required: ["query"],
+              },
+              {
+                type: "object",
+                properties: {
+                  sql: { type: "string" },
+                  size: { type: "integer" },
+                },
+                required: ["sql"],
+              },
+            ],
+          },
+          bodyType: "json",
+        },
+      ),
+      provider: "pdl",
+      endpoint: "/v5/person/search",
+    };
+
+    expect(() =>
+      assertInspectionMatches(
+        spec,
+        { providerInput: { query: {}, size: 5 }, resultLimit: 5, canonicalLinks: [] },
+        liveInspection,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertInspectionMatches(
+        spec,
+        { providerInput: { size: 5 }, resultLimit: 5, canonicalLinks: [] },
+        liveInspection,
+      ),
+    ).toThrow(/input contract/i);
+  });
+
   it("uses settled cost first and Monid's reported micro-dollar cost otherwise", () => {
     expect(
       providerRunCostUsdMicros(

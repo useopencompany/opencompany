@@ -166,7 +166,7 @@ function headlessChatMessageRowToUiMessage(
     role: row.role,
     content: row.content,
     taskId: row.taskId,
-    debugTrace: row.presentation as StoredChatMessage["debugTrace"],
+    debugTrace: row.presentationSummary as StoredChatMessage["debugTrace"],
     attachments: row.attachments as StoredChatMessage["attachments"],
     attachmentTexts: null,
     createdAt: new Date(row.createdAt),
@@ -176,13 +176,23 @@ function headlessChatMessageRowToUiMessage(
     taskPrompt: null,
     taskStatus: null,
   });
-  if (row.role !== "assistant" || !run) return message;
+  const historicalMessage =
+    row.role === "assistant" && row.presentationSummary
+      ? {
+          ...message,
+          metadata: {
+            ...message.metadata,
+            presentation: { source: "summary" as const, updatedAt: row.updatedAt },
+          },
+        }
+      : message;
+  if (row.role !== "assistant" || !run) return historicalMessage;
   return {
-    ...message,
+    ...historicalMessage,
     metadata: {
-      ...message.metadata,
+      ...historicalMessage.metadata,
       runId: run.id,
-      model: message.metadata?.model ?? run.model,
+      model: historicalMessage.metadata?.model ?? run.model,
       ...(run.status === "failed" && run.error ? { error: run.error } : {}),
       ...(run.status === "canceled" ? { aborted: true } : {}),
     },

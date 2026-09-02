@@ -1,11 +1,13 @@
 import { createCollection } from "@tanstack/react-db";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import {
+  awaitHeadlessChatTransaction,
   getHeadlessChatConversations,
   getHeadlessChatEngineSession,
   getHeadlessChatMessages,
   getHeadlessChatMessagesGeneration,
   retryHeadlessChatMessages,
+  syncHeadlessChatMessageShapeEpochs,
 } from "./headless-chat-collections";
 import { getChatSyncFailed, recordChatSyncError } from "./headless-chat-sync-status";
 
@@ -37,6 +39,7 @@ type TestCollection = {
 type MockCollection = {
   preload: Mock;
   cleanup: Mock;
+  utils: { awaitTxId: Mock };
 };
 
 describe("headless Chat collections", () => {
@@ -91,5 +94,92 @@ describe("headless Chat collections", () => {
     expect(first.cleanup.mock.invocationCallOrder[0]).toBeLessThan(
       fresh.preload.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("defers an epoch swap while streaming and hands off only after the compact snapshot is ready", async () => {
+    const conversationId = "conversation_epoch_handoff";
+    const first = getHeadlessChatMessages(conversationId) as unknown as MockCollection;
+    const generationBefore = getHeadlessChatMessagesGeneration(conversationId);
+
+    await syncHeadlessChatMessageShapeEpochs([
+      { id: conversationId, activityState: "working", messageShapeEpoch: 1 },
+    ]);
+    expect(getHeadlessChatMessages(conversationId)).toBe(
+      first as unknown as ReturnType<typeof getHeadlessChatMessages>,
+    );
+
+    let releaseSnapshot: (() => void) | undefined;
+    const snapshotReady = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    vi.mocked(createCollection).mockImplementationOnce(
+      (options) =>
+        ({
+          options,
+          preload: vi.fn(() => snapshotReady),
+          cleanup: vi.fn(async () => undefined),
+          utils: { awaitTxId: vi.fn(async () => undefined) },
+        }) as never,
+    );
+
+    const handoff = syncHeadlessChatMessageShapeEpochs([
+      { id: conversationId, activityState: "idle", messageShapeEpoch: 1 },
+    ]);
+    const candidate = vi.mocked(createCollection).mock.results.at(-1)?.value as MockCollection;
+    expect(getHeadlessChatMessages(conversationId)).toBe(
+      first as unknown as ReturnType<typeof getHeadlessChatMessages>,
+    );
+    expect(first.cleanup).not.toHaveBeenCalled();
+    expect(getHeadlessChatMessagesGeneration(conversationId)).toBe(generationBefore);
+    expect((candidate as unknown as TestCollection).options.shapeOptions.params).toEqual({
+      conversationId,
+      messageShapeEpoch: "1",
+    });
+
+    releaseSnapshot?.();
+    await handoff;
+
+    expect(getHeadlessChatMessages(conversationId)).toBe(
+      candidate as unknown as ReturnType<typeof getHeadlessChatMessages>,
+    );
+    expect(getHeadlessChatMessagesGeneration(conversationId)).toBe(generationBefore + 1);
+    expect(first.cleanup).toHaveBeenCalledTimes(1);
+    expect(candidate.preload.mock.invocationCallOrder[0]).toBeLessThan(
+      first.cleanup.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("keeps the acknowledged collection alive until an in-flight transaction wait finishes", async () => {
+    const conversationId = "conversation_epoch_await";
+    const first = getHeadlessChatMessages(conversationId) as unknown as MockCollection;
+    let releaseTransaction: (() => void) | undefined;
+    first.utils.awaitTxId.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseTransaction = resolve;
+        }),
+    );
+
+    const transaction = awaitHeadlessChatTransaction({
+      conversationId,
+      transactionId: "42",
+    });
+    await syncHeadlessChatMessageShapeEpochs([
+      { id: conversationId, activityState: "idle", messageShapeEpoch: 2 },
+    ]);
+    expect(getHeadlessChatMessages(conversationId)).toBe(
+      first as unknown as ReturnType<typeof getHeadlessChatMessages>,
+    );
+    expect(first.cleanup).not.toHaveBeenCalled();
+
+    releaseTransaction?.();
+    await transaction;
+    await vi.waitFor(() => {
+      expect(getHeadlessChatMessages(conversationId)).not.toBe(
+        first as unknown as ReturnType<typeof getHeadlessChatMessages>,
+      );
+    });
+    expect(first.utils.awaitTxId).toHaveBeenCalledWith(42, undefined);
+    expect(first.cleanup).toHaveBeenCalledTimes(1);
   });
 });

@@ -19,9 +19,10 @@ LLM-broker and billing compatibility tables through `@opencompany/db`.
 
 `src/index.ts` builds the HTTP server and starts enabled workers. opencompany-specific internal routes are
 under `/internal/goat/*`; `/healthz` is public for Render and release checks. Private routes require
-`RUNNER_INTERNAL_TOKEN`. Browser and sandbox transports validate narrow signed tickets; Claude MCP
-also rechecks persisted Conversation, Run, Attempt, lease, and membership authority for every
-operation.
+`RUNNER_INTERNAL_TOKEN`. Browser and sandbox transports validate narrow signed tickets. The shared
+Codex and Claude Code MCP gateway rechecks persisted Conversation, Run, Attempt, lease, membership,
+and Wiki-preview authority for every operation; enabled Wiki commands cross the canonical API
+boundary instead of reading the Wiki database from the runner.
 
 `RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED` controls the durable task worker. Worker concurrency, DB pool,
 lease, and sandbox timeouts are documented beside their values in `.env.example` and `render.yaml`.

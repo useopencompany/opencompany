@@ -6,7 +6,7 @@ import {
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
 } from "@opencompany/agent-runtime";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BRAIN_TOOL_PART_TYPE, type ChatUiMessage, USE_ACTION_TOOL_PART_TYPE } from "@/lib/chat-ui";
@@ -15,13 +15,81 @@ import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";
 
 const emptyTaskLookup: ChatTaskLookup = new Map();
+const presentationMocks = vi.hoisted(() => ({
+  load: vi.fn(),
+}));
 
 vi.mock("@/components/AppDataProvider", () => ({
   useAppDataOptional: () => ({ user: { email: "louis@acta.so" } }),
 }));
+vi.mock("@/lib/headless-chat-presentations", () => ({
+  loadHeadlessChatMessagePresentation: presentationMocks.load,
+}));
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  presentationMocks.load.mockReset();
+});
+
+describe("MessageBubble historical presentation details", () => {
+  it("shows loading and retry states before replacing a compact tool summary with full detail", async () => {
+    const user = userEvent.setup();
+    const summaryMessage = {
+      id: "assistant_summary",
+      role: "assistant",
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: {
+          source: "summary",
+          updatedAt: "2026-08-10T20:00:01.000Z",
+        },
+      },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: "history_search",
+          toolCallId: "tool_1",
+          state: "output-available",
+          input: { query: "launch" },
+          output: { result: "Compact preview" },
+        },
+      ],
+    } as ChatUiMessage;
+    const fullMessage = {
+      ...summaryMessage,
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: "history_search",
+          toolCallId: "tool_1",
+          state: "output-available",
+          input: { query: "launch", filters: { owner: "product" } },
+          output: { result: "Full provider result with every historical detail" },
+        },
+      ],
+    } as ChatUiMessage;
+    let rejectFirst!: (cause: Error) => void;
+    presentationMocks.load
+      .mockReturnValueOnce(
+        new Promise<ChatUiMessage>((_resolve, reject) => {
+          rejectFirst = reject;
+        }),
+      )
+      .mockResolvedValueOnce(fullMessage);
+
+    render(<MessageBubble message={summaryMessage} taskLookup={emptyTaskLookup} />);
+    await user.click(screen.getByRole("button", { name: /History Search/u }));
+    expect(screen.getByText("Loading details…")).toBeVisible();
+
+    await act(async () => rejectFirst(new Error("Temporary trace failure")));
+    expect(await screen.findByText("Temporary trace failure")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Full provider result with every historical detail/u)).toBeVisible(),
+    );
+    expect(presentationMocks.load).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("MessageBubble scheduled wakeups", () => {

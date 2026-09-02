@@ -25,6 +25,7 @@ import {
   getHeadlessChatConversations,
   type HeadlessChatConversationReadModel,
   preloadHeadlessChatMessages,
+  syncHeadlessChatMessageShapeEpochs,
 } from "@/lib/headless-chat-collections";
 import {
   getHeadlessIntegrationAccounts,
@@ -307,11 +308,21 @@ function AppLiveDataSubscriptions({
       toSummary,
     );
   }, [chatRows, chatsLoading, initialData.recentChats]);
+  const chatMessageShapeRows = useMemo(
+    () =>
+      ((chatRows ?? []) as HeadlessChatConversationReadModel[]).map((row) => ({
+        id: row.id,
+        activityState: row.activityState,
+        messageShapeEpoch: row.messageShapeEpoch,
+      })),
+    [chatRows],
+  );
 
   useEffect(() => {
     // Wait for the authoritative conversation shape so the larger server
     // fallback cannot accidentally fan out into one Electric shape per chat.
-    if (chatsLoading && !chatRows?.length) return;
+    if (chatsLoading && chatMessageShapeRows.length === 0) return;
+    void syncHeadlessChatMessageShapeEpochs(chatMessageShapeRows);
     // Only warm chats with a live runtime turn: they have an active SSE stream the user is likely
     // watching, and there are rarely more than a couple. Idle transcripts preload on demand via
     // sidebar hover/focus (Sidebar.tsx), so boot no longer fans out one shape per recent chat —
@@ -325,7 +336,7 @@ function AppLiveDataSubscriptions({
         });
       });
     }
-  }, [chatRows?.length, chatsLoading, recentChats]);
+  }, [chatMessageShapeRows, chatsLoading, recentChats]);
 
   const archivedChats = useMemo<ChatSummaryView[]>(() => {
     return ((chatRows ?? []) as HeadlessChatConversationReadModel[])

@@ -528,6 +528,7 @@ describe("runCodexChatTurn over ACP", () => {
     expect(harnessInput.task).toContain("denial is a normal outcome");
     expect(harnessInput.task).not.toContain("cannot modify connected services");
     expect(harnessInput.task).toContain("save_to_brain");
+    expect(harnessInput.task).toContain("A wiki tool is available");
     const [mcpServer] = harnessInput.mcpServers;
     expect(mcpServer).toMatchObject({
       name: "opencompany",

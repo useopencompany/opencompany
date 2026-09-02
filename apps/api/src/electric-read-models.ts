@@ -15,6 +15,7 @@ import {
   EngineSessionReadModelSchema,
   IntegrationAccountReadModelSchema,
   MessageReadModelSchema,
+  MessageSummaryReadModelSchema,
   type ReadModel,
   RunReadModelSchema,
   TaskOutcomeSchema,
@@ -57,6 +58,7 @@ const ELECTRIC_RESPONSE_HEADERS = [
 // prevents @electric-sql/client from parsing the already-decoded values a second time.
 const PREDECODED_READ_MODEL_FIELDS = new Set([
   "presentation",
+  "presentationSummary",
   "attachments",
   "steps",
   "trigger",
@@ -78,6 +80,7 @@ export interface ReadModelService {
     readModel: ReadModel;
     conversationId?: string;
     brainId?: string;
+    messageShapeEpoch?: number;
     requestUrl: URL;
   }): Promise<Response>;
 }
@@ -106,6 +109,7 @@ export class ElectricReadModelProxy implements ReadModelService {
     readModel: ReadModel;
     conversationId?: string;
     brainId?: string;
+    messageShapeEpoch?: number;
     requestUrl: URL;
   }) {
     const shape = readModelShape(input);
@@ -175,6 +179,7 @@ function readModelShape(input: {
   readModel: ReadModel;
   conversationId?: string;
   brainId?: string;
+  messageShapeEpoch?: number;
 }) {
   switch (input.readModel) {
     case "chat-conversations-v1":
@@ -209,21 +214,44 @@ function readModelShape(input: {
         "active_run_id",
         "runtime_has_error",
         "runtime_updated_at",
+        "message_shape_epoch",
         "created_at",
         "updated_at",
       ]);
     case "chat-messages-v1":
-      return conversationShape(input, "goat.message_read_model_v1", [
-        "id",
-        "conversation_id",
-        "role",
-        "content",
-        "task_id",
-        "presentation",
-        "attachments",
-        "created_at",
-        "updated_at",
-      ]);
+      return conversationShape(
+        input,
+        "goat.message_read_model_v1",
+        [
+          "id",
+          "conversation_id",
+          "role",
+          "content",
+          "task_id",
+          "presentation",
+          "attachments",
+          "created_at",
+          "updated_at",
+        ],
+        input.messageShapeEpoch ?? 0,
+      );
+    case "chat-messages-v2":
+      return conversationShape(
+        input,
+        "goat.message_read_model_v1",
+        [
+          "id",
+          "conversation_id",
+          "role",
+          "content",
+          "task_id",
+          "presentation_summary",
+          "attachments",
+          "created_at",
+          "updated_at",
+        ],
+        input.messageShapeEpoch ?? 0,
+      );
     case "chat-runs-v1":
       return conversationShape(input, "goat.run_read_model_v1", [
         "id",
@@ -507,6 +535,7 @@ function conversationShape(
   input: { actor: Actor; conversationId?: string },
   table: string,
   columns: string[],
+  shapeEpoch?: number,
 ) {
   if (!input.conversationId) {
     throw new ApiError(400, "invalid_request", "conversationId is required for this read model.");
@@ -516,8 +545,14 @@ function conversationShape(
     columns,
     where:
       `"conversation_id" = $1 ` +
-      `AND ("workspace_id" = $3 OR ("workspace_id" IS NULL AND "actor_id" = $2))`,
-    params: [input.conversationId, input.actor.userId, input.actor.workspaceId],
+      `AND ("workspace_id" = $3 OR ("workspace_id" IS NULL AND "actor_id" = $2))` +
+      (shapeEpoch === undefined ? "" : ` AND CAST($4 AS text) = CAST($4 AS text)`),
+    params: [
+      input.conversationId,
+      input.actor.userId,
+      input.actor.workspaceId,
+      ...(shapeEpoch === undefined ? [] : [String(shapeEpoch)]),
+    ],
   };
 }
 
@@ -647,6 +682,10 @@ function projectReadModelValue(
       ).parse(projected);
     case "chat-messages-v1":
       return (partial ? MessageReadModelSchema.partial() : MessageReadModelSchema).parse(projected);
+    case "chat-messages-v2":
+      return (
+        partial ? MessageSummaryReadModelSchema.partial() : MessageSummaryReadModelSchema
+      ).parse(projected);
     case "chat-runs-v1":
       return (partial ? RunReadModelSchema.partial() : RunReadModelSchema).parse(projected);
     case "engine-sessions-v1":
@@ -709,6 +748,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
   }
   if (
     name === "attemptCount" ||
+    name === "messageShapeEpoch" ||
     name === "version" ||
     name === "attempts" ||
     name === "sizeBytes" ||
@@ -719,6 +759,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
   }
   if (
     name === "presentation" ||
+    name === "presentationSummary" ||
     name === "steps" ||
     name === "trigger" ||
     name === "timeline" ||
@@ -982,6 +1023,7 @@ const READ_MODEL_COLUMN_NAMES = {
     active_run_id: "",
     runtime_has_error: "",
     runtime_updated_at: "",
+    message_shape_epoch: "messageShapeEpoch",
     created_at: "createdAt",
     updated_at: "updatedAt",
   },
@@ -992,6 +1034,17 @@ const READ_MODEL_COLUMN_NAMES = {
     content: "content",
     task_id: "taskId",
     presentation: "presentation",
+    attachments: "attachments",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "chat-messages-v2": {
+    id: "id",
+    conversation_id: "conversationId",
+    role: "role",
+    content: "content",
+    task_id: "taskId",
+    presentation_summary: "presentationSummary",
     attachments: "attachments",
     created_at: "createdAt",
     updated_at: "updatedAt",

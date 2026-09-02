@@ -8255,6 +8255,43 @@
         ],
         "additionalProperties": false
       },
+      "MessagePresentationEnvelopeV1": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MessagePresentation"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "MessagePresentation": {
+        "type": "object",
+        "properties": {
+          "presentation": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "nullable": true
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "presentation",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
       "PublicChatShareEnvelopeV1": {
         "type": "object",
         "properties": {
@@ -13125,6 +13162,7 @@
             "type": "string",
             "enum": [
               "read",
+              "query",
               "write"
             ]
           },
@@ -13557,6 +13595,7 @@
                 "type": "string",
                 "enum": [
                   "read",
+                  "query",
                   "write"
                 ]
               },
@@ -19748,6 +19787,80 @@
         }
       }
     },
+    "/v1/conversations/{conversationId}/messages/{messageId}/presentation": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "messageId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "required": false,
+            "name": "if-none-match",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The full authorized Message presentation used for lazy trace expansion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePresentationEnvelopeV1"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The Message presentation has not changed."
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chat-screenshots/{conversationId}/{filename}": {
       "get": {
         "tags": [
@@ -20417,6 +20530,7 @@
                 "chat-conversations-v1",
                 "chat-conversations-v2",
                 "chat-messages-v1",
+                "chat-messages-v2",
                 "chat-runs-v1",
                 "engine-sessions-v1",
                 "tasks-v1",
@@ -20458,6 +20572,17 @@
             },
             "required": false,
             "name": "brainId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true,
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "required": false,
+            "name": "messageShapeEpoch",
             "in": "query"
           },
           {
