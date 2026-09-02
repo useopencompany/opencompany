@@ -2702,6 +2702,10 @@ export function createApiApp(input: CreateApiAppInput) {
   }
   if (input.mcpOAuthIngress) {
     const ingress = input.mcpOAuthIngress;
+    app.get("/integrations/betterstack/start", (c) => ingress.start("betterstack", c.req.raw));
+    app.get("/integrations/betterstack/callback", (c) =>
+      ingress.callback("betterstack", c.req.raw),
+    );
     app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));
     app.get("/integrations/linear/callback", (c) => ingress.callback("linear", c.req.raw));
     app.get("/integrations/posthog/start", (c) => ingress.start("posthog", c.req.raw));

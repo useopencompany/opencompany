@@ -1,5 +1,11 @@
 import { getAppUrl } from "@opencompany/agent/app-url";
 import {
+  appendBetterStackMcpStatus,
+  completeBetterStackMcpOAuth,
+  startBetterStackMcpOAuth,
+  verifyBetterStackMcpState,
+} from "@opencompany/agent/integrations/betterstack-mcp";
+import {
   appendLatitudeMcpStatus,
   completeLatitudeMcpOAuth,
   startLatitudeMcpOAuth,
@@ -31,9 +37,9 @@ const logger = createLogger({ service: "opencompany-api", runtime: "mcp-oauth-in
 
 type DbLike = any;
 
-export type McpOAuthProvider = "linear" | "posthog" | "neon" | "latitude";
+export type McpOAuthProvider = "linear" | "posthog" | "neon" | "latitude" | "betterstack";
 
-// Provider ingress composition for the four remote-MCP connectors. Each
+// Provider ingress composition for the remote-MCP connectors. Each
 // provider shares the createRemoteMcpIntegration factory; this module
 // owns only the browser-facing OAuth start/callback flows — the runner keeps
 // loading worker connections through the module-level defaults.
@@ -55,6 +61,15 @@ type McpProviderFlow = {
 };
 
 const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
+  betterstack: {
+    start: startBetterStackMcpOAuth,
+    complete: completeBetterStackMcpOAuth,
+    verifyState: verifyBetterStackMcpState,
+    appendStatus: appendBetterStackMcpStatus,
+    deniedReason: "betterstack_denied",
+    invalidStatePath:
+      "/settings/plugins/betterstack?integration=betterstack&setup=error&reason=invalid_state",
+  },
   linear: {
     start: startLinearMcpOAuth,
     complete: completeLinearMcpOAuth,

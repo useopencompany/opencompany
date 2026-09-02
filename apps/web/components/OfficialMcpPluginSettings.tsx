@@ -127,6 +127,25 @@ export type PluginAccountsState =
 
 export type LinearAccountsState = PluginAccountsState;
 
+export function BetterStackPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.betterstack}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function LinearPluginDetail({
   pluginState,
   canEdit,
@@ -236,6 +255,28 @@ export function NeonPluginDetailView({
   return (
     <OfficialMcpPluginDetailView
       config={OFFICIAL_MCP_PLUGINS.neon}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+export function BetterStackPluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS.betterstack}
       pluginState={pluginState}
       accountsState={accountsState}
       toolsState={toolsState}
@@ -975,8 +1016,8 @@ function pluginAccountsFromState(
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView | null;
 } {
-  if (provider === "neon") {
-    const accounts = state.personalAccounts.neon.map((account) => ({ account }));
+  if (provider !== "linear") {
+    const accounts = state.personalAccounts[provider].map((account) => ({ account }));
     return {
       accounts,
       permissionConnection:
@@ -1011,6 +1052,10 @@ export function defaultNeonToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("neon");
 }
 
+export function defaultBetterStackToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("betterstack");
+}
+
 function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): PluginToolsState {
   return {
     status: "ready",
@@ -1039,6 +1084,12 @@ export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null)
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "neon");
+}
+
+export function betterStackToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "betterstack");
 }
 
 function officialPluginToolsStateFromPlugin(
@@ -1122,6 +1173,12 @@ export function linearToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
 
 export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "neon");
+}
+
+export function betterStackToolsStateFromPreview(
+  preview: PluginImportPreviewDto,
+): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "betterstack");
 }
 
 function officialPluginToolsStateFromPreview(

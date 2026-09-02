@@ -241,6 +241,7 @@ export type PersonalAccountProvider =
   | "granola"
   | "fathom"
   | "attio"
+  | "betterstack"
   | "latitude"
   | "neon"
   | "x_account";
@@ -311,6 +312,7 @@ export function personalAccountsFromRows(
     granola: [],
     fathom: [],
     attio: [],
+    betterstack: [],
     latitude: [],
     neon: [],
     x_account: [],
@@ -334,6 +336,7 @@ export function personalAccountsFromRows(
       row.provider === "granola" ||
       row.provider === "fathom" ||
       row.provider === "attio" ||
+      row.provider === "betterstack" ||
       row.provider === "latitude" ||
       row.provider === "neon" ||
       row.provider === "x_account"

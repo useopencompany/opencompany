@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   loadGitHubConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
+  getBetterStackState: vi.fn(),
+  loadBetterStackConnection: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({ getDb: () => ({ sentinel: "db" }) }));
@@ -32,6 +34,11 @@ vi.mock("./integrations/linear-mcp", () => ({
   LINEAR_MCP_ENDPOINT_URL: "https://mcp.linear.app/mcp",
   getLinearIntegrationState: mocks.getState,
   loadLinearMcpWorkerConnection: mocks.loadConnection,
+}));
+vi.mock("./integrations/betterstack-mcp", () => ({
+  BETTERSTACK_MCP_ENDPOINT_URL: "https://mcp.betterstack.com",
+  getBetterStackIntegrationState: mocks.getBetterStackState,
+  loadBetterStackMcpWorkerConnection: mocks.loadBetterStackConnection,
 }));
 vi.mock("./integrations/github-user-mcp", () => ({
   GITHUB_USER_MCP_ENDPOINT_URL: "https://api.githubcopilot.com/mcp/",
@@ -239,6 +246,40 @@ describe("plugin gateway registration cache", () => {
         loadConnection: mocks.loadNeonConnection,
       }),
     ]);
+  });
+
+  it("binds the official Better Stack package only to the public hosted endpoint", async () => {
+    const betterStackRecord = record({
+      pluginName: "betterstack",
+      pluginLabel: "betterstack",
+      pluginDescription: "Better Stack plugin tools.",
+      connectionProvider: "betterstack",
+      server: {
+        name: "betterstack",
+        type: "streamable-http",
+        url: "https://mcp.betterstack.com",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([betterStackRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:betterstack:betterstack",
+        connectionProvider: "betterstack",
+        getState: mocks.getBetterStackState,
+        loadConnection: mocks.loadBetterStackConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...betterStackRecord,
+        server: { ...betterStackRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
   it("forces discovery immediately after install through the lifecycle hook", async () => {

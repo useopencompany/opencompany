@@ -1,5 +1,9 @@
 import { createHmac } from "node:crypto";
 import {
+  completeBetterStackMcpOAuth,
+  startBetterStackMcpOAuth,
+} from "@opencompany/agent/integrations/betterstack-mcp";
+import {
   completeLatitudeMcpOAuth,
   startLatitudeMcpOAuth,
 } from "@opencompany/agent/integrations/latitude-mcp";
@@ -20,6 +24,11 @@ import { createMcpOAuthIngress, type McpOAuthProvider } from "./mcp-oauth-ingres
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listWorkspacesForUser: vi.fn(),
+}));
+vi.mock("@opencompany/agent/integrations/betterstack-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startBetterStackMcpOAuth: vi.fn(),
+  completeBetterStackMcpOAuth: vi.fn(),
 }));
 vi.mock("@opencompany/agent/integrations/linear-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -44,7 +53,7 @@ vi.mock("@opencompany/agent/integrations/latitude-mcp", async (importOriginal) =
 
 const STATE_SECRET = "mcp-state-secret-mcp-state-secret";
 const sentinelDb = { sentinel: "db" };
-const PROVIDERS: McpOAuthProvider[] = ["linear", "posthog", "neon", "latitude"];
+const PROVIDERS: McpOAuthProvider[] = ["linear", "posthog", "neon", "latitude", "betterstack"];
 
 // The mocked module-level start/complete wrappers, keyed like the ingress.
 const flowMocks = {
@@ -52,6 +61,7 @@ const flowMocks = {
   posthog: { start: startPostHogMcpOAuth, complete: completePostHogMcpOAuth },
   neon: { start: startNeonMcpOAuth, complete: completeNeonMcpOAuth },
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
+  betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },
 } as const;
 
 function ingress(
@@ -175,7 +185,7 @@ describe("remote MCP OAuth ingress", () => {
     expect(response.headers.get("location")).toBe("https://opencompany.example.com/signin");
   });
 
-  it("keeps Linear's legacy invalid-state target while the newer providers use /settings/integrations", async () => {
+  it("uses each provider's safe invalid-state target", async () => {
     for (const provider of PROVIDERS) {
       const response = await ingress().callback(
         provider,
@@ -183,7 +193,12 @@ describe("remote MCP OAuth ingress", () => {
           `https://api.example.com/integrations/${provider}/callback?state=garbage&code=abc`,
         ),
       );
-      const expectedPath = provider === "linear" ? "/settings" : "/settings/integrations";
+      const expectedPath =
+        provider === "linear"
+          ? "/settings"
+          : provider === "betterstack"
+            ? "/settings/plugins/betterstack"
+            : "/settings/integrations";
       expect(response.headers.get("location"), provider).toBe(
         `https://opencompany.example.com${expectedPath}?integration=${provider}&setup=error&reason=invalid_state`,
       );

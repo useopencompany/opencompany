@@ -15,6 +15,11 @@ import {
   type RemoteMcpGatewayRegistration,
 } from "./actions/remote-mcp";
 import {
+  BETTERSTACK_MCP_ENDPOINT_URL,
+  getBetterStackIntegrationState,
+  loadBetterStackMcpWorkerConnection,
+} from "./integrations/betterstack-mcp";
+import {
   GITHUB_USER_MCP_ENDPOINT_URL,
   getGitHubUserMcpIntegrationState,
   loadGitHubUserMcpWorkerConnection,
@@ -49,6 +54,12 @@ type Identity = { userWorkosId: string; workspaceId: string };
 const logger = createLogger({ service: "opencompany-agent", runtime: "plugin-gateway" });
 
 const providerBindings = {
+  betterstack: {
+    provider: "betterstack",
+    endpointUrl: BETTERSTACK_MCP_ENDPOINT_URL,
+    getState: getBetterStackIntegrationState,
+    loadConnection: loadBetterStackMcpWorkerConnection,
+  },
   github: {
     provider: "github_user",
     endpointUrl: GITHUB_USER_MCP_ENDPOINT_URL,

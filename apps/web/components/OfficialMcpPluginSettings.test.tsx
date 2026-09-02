@@ -10,6 +10,8 @@ import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
+  BetterStackPluginDetailView,
+  betterStackToolsStateFromPlugin,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -19,7 +21,11 @@ import {
   type PluginToolsState,
   uncuratedPluginToolGroups,
 } from "./OfficialMcpPluginSettings";
-import { LINEAR_PLUGIN_SOURCE, NEON_PLUGIN_SOURCE } from "./PluginSettings";
+import {
+  BETTERSTACK_PLUGIN_SOURCE,
+  LINEAR_PLUGIN_SOURCE,
+  NEON_PLUGIN_SOURCE,
+} from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
@@ -52,7 +58,7 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_linear_tools",
       capabilityModes: { read: "on", write: "ask" },
     },
-    personalAccounts: { linear: [], neon: [] },
+    personalAccounts: { linear: [], neon: [], betterstack: [] },
   },
 }));
 const useLiveQuery = vi.hoisted(() => vi.fn(() => ({ data: [], isLoading: false })));
@@ -287,6 +293,90 @@ const neonPlugin = {
             capabilityLabel: "Query database data",
             defaultMode: "ask",
             bucket: "read",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-08-26T12:00:00.000Z",
+      refreshAfter: "2026-08-26T13:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
+const betterStackAccount = account(
+  "gint_betterstack_tools",
+  "Better Stack tool access",
+  { read: "on", query: "ask", write: "ask" },
+  "betterstack",
+);
+const betterStackPlugin = {
+  ...plugin,
+  id: "plugin_betterstack",
+  name: "betterstack",
+  manifest: {
+    name: "betterstack",
+    description: "Investigate Better Stack observability data and manage operational resources.",
+  },
+  source: { ...plugin.source, path: "betterstack" },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "betterstack",
+      type: "streamable-http",
+      connectionProvider: "betterstack",
+      capabilities: [
+        {
+          id: "read",
+          label: "Search Better Stack docs",
+          defaultMode: "on",
+          tools: ["documentation"],
+        },
+        {
+          id: "query",
+          label: "Inspect observability data",
+          defaultMode: "ask",
+          tools: ["query"],
+        },
+        {
+          id: "write",
+          label: "Manage Better Stack",
+          defaultMode: "ask",
+          tools: ["create_monitor"],
+        },
+      ],
+      tools: [
+        {
+          name: "documentation",
+          description: "Search Better Stack documentation.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Search Better Stack docs",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "query",
+          description: "Query Better Stack telemetry.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Inspect observability data",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "create_monitor",
+          description: "Create a Better Stack monitor.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Manage Better Stack",
+            defaultMode: "ask",
+            bucket: "write",
             curated: true,
           },
         },
@@ -664,6 +754,58 @@ describe("Linear plugin settings", () => {
         "on",
       ),
     );
+  });
+
+  it("presents Better Stack with sensitive reads and writes gated on Ask", () => {
+    const state = betterStackToolsStateFromPlugin(betterStackPlugin);
+    const betterStackAccountsState = {
+      status: "ready" as const,
+      accounts: [{ account: betterStackAccount }],
+      permissionConnection: betterStackAccount,
+    };
+
+    render(
+      <BetterStackPluginDetailView
+        pluginState={{ status: "ready", plugin: betterStackPlugin }}
+        accountsState={betterStackAccountsState}
+        toolsState={state}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Better Stack" })).toBeInTheDocument();
+    expect(screen.getByText("Documentation")).toBeInTheDocument();
+    expect(screen.getByText("Query")).toBeInTheDocument();
+    expect(screen.getByText("Create monitor")).toBeInTheDocument();
+    expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Better Stack account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack",
+    );
+    expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
+      /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
+    );
+    expect(state).toMatchObject({
+      status: "ready",
+      groups: [
+        { id: "read", defaultMode: "on", tools: [{ readOnly: true }] },
+        { id: "query", defaultMode: "ask", tools: [{ readOnly: true }] },
+        { id: "write", defaultMode: "ask", tools: [{ readOnly: false }] },
+      ],
+    });
+    expect(
+      within(screen.getByRole("group", { name: "Search Better Stack docs permission" })).getByRole(
+        "button",
+        { name: "On" },
+      ),
+    ).toHaveAttribute("aria-pressed", "true");
+    for (const label of ["Inspect observability data", "Manage Better Stack"]) {
+      expect(
+        within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
+          name: "Ask",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    }
   });
 
   it("builds the two-bucket advanced fallback with ask defaults", () => {

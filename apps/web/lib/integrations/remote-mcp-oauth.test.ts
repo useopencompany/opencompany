@@ -7,6 +7,10 @@ import {
 } from "@opencompany/db/integrations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  startBetterStackMcpOAuth,
+  verifyBetterStackMcpState,
+} from "@/lib/integrations/betterstack-mcp";
+import {
   appendLatitudeMcpStatus,
   startLatitudeMcpOAuth,
   verifyLatitudeMcpState,
@@ -200,6 +204,31 @@ describe("opencompany remote MCP OAuth", () => {
       userWorkosId: "user_1",
       returnTo: "/settings/integrations",
     });
+  });
+
+  it("connects Better Stack to its public hosted MCP with read and write OAuth", async () => {
+    await startBetterStackMcpOAuth({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/betterstack",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ serverUrl: "https://mcp.betterstack.com" }),
+    );
+    expect(vi.mocked(auth).mock.calls[0]?.[1]).not.toHaveProperty("scope");
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/betterstack/callback",
+    );
+    expect(observed.clientMetadata).toMatchObject({ scope: "read write" });
+    expect(verifyBetterStackMcpState(observed.state)).toMatchObject({
+      provider: "betterstack",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/betterstack",
+    });
+    expect(() => verifyLinearMcpState(observed.state)).toThrow(
+      "Invalid Linear MCP provider state.",
+    );
   });
 
   it("accepts provider-less legacy state only for Linear", async () => {
