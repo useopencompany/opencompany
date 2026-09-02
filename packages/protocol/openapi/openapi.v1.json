@@ -11054,6 +11054,7 @@
               "google_calendar",
               "google_drive",
               "linear",
+              "github_user",
               "slack",
               "hubspot",
               "granola",

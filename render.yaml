@@ -75,6 +75,15 @@ services:
         sync: false
       - key: GITHUB_INTEGRATION_APP_WEBHOOK_SECRET
         sync: false
+      # Dedicated user-authorized GitHub App for the official GitHub Plugin.
+      - key: GITHUB_USER_APP_SLUG
+        sync: false
+      - key: GITHUB_USER_APP_CLIENT_ID
+        sync: false
+      - key: GITHUB_USER_APP_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_USER_APP_STATE_SECRET
+        sync: false
       # Google-family OAuth ingress moved to the API in the #1203 4a2 cutover
       # (Gmail, Calendar, Drive; Drive webhook verification is row-based).
       - key: GOOGLE_OAUTH_CLIENT_ID
@@ -356,6 +365,11 @@ services:
       - key: GITHUB_INTEGRATION_APP_ID
         sync: false
       - key: GITHUB_INTEGRATION_APP_PRIVATE_KEY
+        sync: false
+      # Refreshes the personal GitHub App user token before sandbox injection.
+      - key: GITHUB_USER_APP_CLIENT_ID
+        sync: false
+      - key: GITHUB_USER_APP_CLIENT_SECRET
         sync: false
       # Google OAuth client, used by the runner to refresh Gmail/Calendar access tokens.
       - key: GOOGLE_OAUTH_CLIENT_ID

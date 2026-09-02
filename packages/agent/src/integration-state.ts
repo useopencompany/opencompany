@@ -226,6 +226,7 @@ export type PersonalAccountProvider =
   | "google_calendar"
   | "google_drive"
   | "linear"
+  | "github_user"
   | "slack"
   | "hubspot"
   | "granola"
@@ -295,6 +296,7 @@ export function personalAccountsFromRows(
     google_calendar: [],
     google_drive: [],
     linear: [],
+    github_user: [],
     slack: [],
     hubspot: [],
     granola: [],
@@ -317,6 +319,7 @@ export function personalAccountsFromRows(
       row.provider === "gmail" ||
       row.provider === "google_calendar" ||
       row.provider === "google_drive" ||
+      row.provider === "github_user" ||
       row.provider === "slack" ||
       row.provider === "hubspot" ||
       row.provider === "granola" ||

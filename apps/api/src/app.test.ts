@@ -1531,6 +1531,10 @@ describe("canonical Hono API", () => {
         callback: record("github.callback", calls),
         webhook: record("github.webhook", calls),
       },
+      githubUserIngress: {
+        start: record("github-user.start", calls),
+        callback: record("github-user.callback", calls),
+      },
       googleIngress: {
         start: record("google.start", calls),
         callback: record("google.callback", calls),
@@ -1577,6 +1581,8 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/github/start", "github.start"],
       ["GET", "/integrations/github/callback", "github.callback"],
       ["POST", "/webhooks/github/events", "github.webhook"],
+      ["GET", "/integrations/github-user/start", "github-user.start"],
+      ["GET", "/integrations/github-user/callback", "github-user.callback"],
       ["GET", "/integrations/gmail/start", "google.start"],
       ["GET", "/integrations/gmail/callback", "google.callback"],
       ["GET", "/integrations/google-calendar/start", "google.start"],

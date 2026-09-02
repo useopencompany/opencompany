@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  claimRefresh: vi.fn(async () => true),
   dbRows: [] as unknown[],
   loadCredential: vi.fn(),
-  refreshCredential: vi.fn(),
   markStatus: vi.fn(),
+  releaseRefresh: vi.fn(),
+  rotateCredential: vi.fn(async () => ({ id: "gcred_gmail_1" })),
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -21,9 +23,11 @@ vi.mock("@opencompany/db/client", () => ({
   }),
 }));
 vi.mock("@opencompany/db/integrations", () => ({
+  claimIntegrationCredentialRefresh: mocks.claimRefresh,
   loadIntegrationCredential: mocks.loadCredential,
-  refreshIntegrationCredential: mocks.refreshCredential,
   markIntegrationStatus: mocks.markStatus,
+  releaseIntegrationCredentialRefresh: mocks.releaseRefresh,
+  rotateIntegrationCredential: mocks.rotateCredential,
 }));
 
 import { executeAction } from "@/lib/actions/execute";
@@ -284,7 +288,7 @@ describe("gmail.search_messages", () => {
     await search.execute({ query: "is:unread" }, CONTEXT);
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("oauth2.googleapis.com/token");
-    expect(mocks.refreshCredential).toHaveBeenCalledWith(
+    expect(mocks.rotateCredential).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "gmail", integrationId: "gint_gmail_1" }),
     );
     const apiCall = fetchMock.mock.calls[1];
