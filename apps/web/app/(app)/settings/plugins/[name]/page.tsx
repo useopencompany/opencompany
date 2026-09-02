@@ -1,4 +1,5 @@
 import {
+  GitHubPluginDetail,
   LinearPluginDetail,
   NeonPluginDetail,
   type PluginLoadState,
@@ -17,7 +18,11 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       currentUser(),
       loadOfficialPlugin(normalizedName),
     ]);
-    const Detail = normalizedName === "linear" ? LinearPluginDetail : NeonPluginDetail;
+    const Detail = {
+      github: GitHubPluginDetail,
+      linear: LinearPluginDetail,
+      neon: NeonPluginDetail,
+    }[normalizedName];
     return <Detail pluginState={pluginState} canEdit={context.role === "admin"} />;
   }
   const [context, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(name)]);

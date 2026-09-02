@@ -127,6 +127,25 @@ export type PluginAccountsState =
 
 export type LinearAccountsState = PluginAccountsState;
 
+export function GitHubPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.github}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function LinearPluginDetail({
   pluginState,
   canEdit,
@@ -178,8 +197,8 @@ function OfficialMcpPluginDetail({
 }) {
   const { integrations } = useAppData();
   const accountsState = useMemo<PluginAccountsState>(
-    () => ({ status: "ready", ...pluginAccountsFromState(integrations, config.name) }),
-    [config.name, integrations],
+    () => ({ status: "ready", ...pluginAccountsFromState(integrations, config) }),
+    [config, integrations],
   );
   const effectiveToolsState =
     toolsState ??
@@ -214,6 +233,28 @@ export function LinearPluginDetailView({
   return (
     <OfficialMcpPluginDetailView
       config={OFFICIAL_MCP_PLUGINS.linear}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+export function GitHubPluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS.github}
       pluginState={pluginState}
       accountsState={accountsState}
       toolsState={toolsState}
@@ -665,7 +706,7 @@ function ToolsSection({
               <ToolGroupCard
                 key={group.id}
                 group={group}
-                provider={config.name}
+                provider={config.connectionProvider}
                 permissionConnection={plugin ? permissionConnection : null}
               />
             ))}
@@ -970,13 +1011,15 @@ function SectionEmpty({ icon: Icon, children }: { icon: typeof Wrench; children:
 
 function pluginAccountsFromState(
   state: IntegrationState,
-  provider: OfficialMcpPluginName,
+  config: OfficialMcpPluginConfig,
 ): {
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView | null;
 } {
-  if (provider === "neon") {
-    const accounts = state.personalAccounts.neon.map((account) => ({ account }));
+  if (config.connectionProvider === "github_user" || config.connectionProvider === "neon") {
+    const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
+      account,
+    }));
     return {
       accounts,
       permissionConnection:
@@ -1007,6 +1050,10 @@ export function defaultLinearToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("linear");
 }
 
+export function defaultGitHubToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("github");
+}
+
 export function defaultNeonToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("neon");
 }
@@ -1014,15 +1061,17 @@ export function defaultNeonToolsState(): PluginToolsState {
 function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): PluginToolsState {
   return {
     status: "ready",
-    groups: providerCapabilities(provider).map((capability) => ({
-      id: capability.id,
-      label: capability.label,
-      description: capability.description,
-      modeKey: capability.id,
-      defaultMode: capability.defaultMode,
-      curated: true,
-      tools: [],
-    })),
+    groups: providerCapabilities(OFFICIAL_MCP_PLUGINS[provider].connectionProvider).map(
+      (capability) => ({
+        id: capability.id,
+        label: capability.label,
+        description: capability.description,
+        modeKey: capability.id,
+        defaultMode: capability.defaultMode,
+        curated: true,
+        tools: [],
+      }),
+    ),
     discovery: {
       status: "pending",
       toolCount: 0,
@@ -1035,6 +1084,10 @@ function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): Plugi
 
 export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "linear");
+}
+
+export function githubToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "github");
 }
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
@@ -1072,7 +1125,7 @@ function officialPluginToolsStateFromPlugin(
     }
   }
 
-  const knownCapabilities = providerCapabilities(provider);
+  const knownCapabilities = providerCapabilities(OFFICIAL_MCP_PLUGINS[provider].connectionProvider);
   const curatedGroups = [...definitions.values()].map((definition) => ({
     id: definition.id,
     label: definition.label,
@@ -1120,6 +1173,10 @@ export function linearToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
   return officialPluginToolsStateFromPreview(preview, "linear");
 }
 
+export function githubToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "github");
+}
+
 export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "neon");
 }
@@ -1128,7 +1185,7 @@ function officialPluginToolsStateFromPreview(
   preview: PluginImportPreviewDto,
   provider: OfficialMcpPluginName,
 ): PluginToolsState {
-  const knownCapabilities = providerCapabilities(provider);
+  const knownCapabilities = providerCapabilities(OFFICIAL_MCP_PLUGINS[provider].connectionProvider);
   const definitions = new Map<CapabilityId, PluginToolGroupView>();
   for (const server of preview.remoteMcpServers) {
     for (const capability of server.capabilities) {

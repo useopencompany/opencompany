@@ -1,10 +1,11 @@
-export type OfficialMcpPluginName = "linear" | "neon";
+export type OfficialMcpPluginName = "github" | "linear" | "neon";
 
 export type OfficialMcpPluginMetadata = {
   name: OfficialMcpPluginName;
   label: string;
   description: string;
   source: string;
+  connectionProvider: "github_user" | "linear" | "neon";
   connectHref: string;
   accountDescription: string;
   ingestionHref?: string;
@@ -13,12 +14,23 @@ export type OfficialMcpPluginMetadata = {
 
 // The public repository is the reviewed trust boundary. Keep every source pinned to a full commit.
 export const OFFICIAL_MCP_PLUGIN_METADATA = {
+  github: {
+    name: "github",
+    label: "GitHub",
+    description: "Work with repositories, issues, pull requests, and Actions as yourself.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/232e380e8850c440c28e4588ef79143d41c000db/github",
+    connectionProvider: "github_user",
+    connectHref: "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
+    accountDescription: "The personal GitHub account opencompany uses when it works as you.",
+  },
   linear: {
     name: "linear",
     label: "Linear",
     description: "Work with Linear issues, projects, comments, and team workflows.",
     source:
       "https://github.com/useopencompany/plugins/tree/775df7a9a37f5585b9b87a26533ba6ed1035f1dc/linear",
+    connectionProvider: "linear",
     connectHref: "/api/integrations/linear/start?returnTo=/settings/plugins/linear",
     accountDescription: "The account opencompany uses when you run Linear tools.",
     ingestionHref: "/wiki/sources",
@@ -31,6 +43,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
       "Inspect Neon projects and database structure, and run permission-gated read-only SQL.",
     source:
       "https://github.com/useopencompany/plugins/tree/bbec4c01a46b6d7bf1ffffda87af898060dd7916/neon",
+    connectionProvider: "neon",
     connectHref: "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
     accountDescription: "The account opencompany uses when you run Neon tools.",
   },
