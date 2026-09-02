@@ -7,7 +7,7 @@ import {
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq } from "drizzle-orm";
 import { slackApiRequest } from "../integrations/slack";
-import { effectiveCapabilityMode, providerCapability } from "./capabilities";
+import { effectiveCapabilityMode } from "./capabilities";
 import {
   ACTION_EFFECTS_READ,
   ActionAuthError,
@@ -451,7 +451,9 @@ function slackReadPermission(
     permission: {
       provider: "slack",
       capabilityId: "read",
-      label: providerCapability("slack", "read")?.label ?? "Read Slack",
+      // Legacy Slack actions predate the public/private MCP split and can read
+      // every conversation visible to the connected user.
+      label: "Read Slack",
       integrationIds: [connection.integrationId],
     },
   };

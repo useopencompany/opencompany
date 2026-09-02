@@ -184,6 +184,25 @@ export function NeonPluginDetail({
   );
 }
 
+export function SlackPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.slack}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 function OfficialMcpPluginDetail({
   config,
   pluginState,
@@ -277,6 +296,28 @@ export function NeonPluginDetailView({
   return (
     <OfficialMcpPluginDetailView
       config={OFFICIAL_MCP_PLUGINS.neon}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+export function SlackPluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS.slack}
       pluginState={pluginState}
       accountsState={accountsState}
       toolsState={toolsState}
@@ -541,6 +582,14 @@ function AccountsSection({
   state: PluginAccountsState;
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
+  const displayedAccounts =
+    state.status !== "ready"
+      ? []
+      : config.connectionProvider === "slack"
+        ? state.accounts
+        : permissionConnection
+          ? [{ account: permissionConnection }]
+          : [];
   const headingId = `${config.name}-accounts-heading`;
   const accountLabel = config.accountLabel ?? config.label;
 
@@ -556,15 +605,25 @@ function AccountsSection({
         <SectionSkeleton label={`Loading ${accountLabel} accounts`} rows={2} compact />
       ) : state.status === "error" ? (
         <SectionError title="Accounts unavailable" message={state.message} />
-      ) : !permissionConnection ? (
+      ) : displayedAccounts.length === 0 ? (
         <SectionEmpty icon={Users}>{`No ${accountLabel} accounts are connected.`}</SectionEmpty>
       ) : (
         <div className="flex flex-col gap-2">
-          <IntegrationAccountRow
-            account={permissionConnection}
-            purposeLabel={accountLabel}
-            showCapabilityModes={false}
-          />
+          {displayedAccounts.map(({ account }) => (
+            <IntegrationAccountRow
+              key={account.integrationId}
+              account={account}
+              purposeLabel={
+                config.connectionProvider === "slack"
+                  ? account.integrationId === permissionConnection?.integrationId
+                    ? "Slack tools"
+                    : "Ingestion only"
+                  : accountLabel
+              }
+              reconnectHref={config.connectHref}
+              showCapabilityModes={false}
+            />
+          ))}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
@@ -1017,14 +1076,23 @@ function pluginAccountsFromState(
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView | null;
 } {
-  if (config.connectionProvider === "github_user" || config.connectionProvider === "neon") {
+  if (
+    config.connectionProvider === "github_user" ||
+    config.connectionProvider === "neon" ||
+    config.connectionProvider === "slack"
+  ) {
     const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
       account,
     }));
+    const primaryIntegrationId =
+      config.connectionProvider === "slack" ? state.slack.integrationId : null;
     return {
       accounts,
       permissionConnection:
-        accounts.find(({ account }) => account.connected)?.account ?? accounts[0]?.account ?? null,
+        accounts.find(({ account }) => account.integrationId === primaryIntegrationId)?.account ??
+        accounts.find(({ account }) => account.connected)?.account ??
+        accounts[0]?.account ??
+        null,
     };
   }
   const permissionConnection: IntegrationAccountView | null = state.linear.integrationId
@@ -1057,6 +1125,10 @@ export function defaultGitHubToolsState(): PluginToolsState {
 
 export function defaultNeonToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("neon");
+}
+
+export function defaultSlackToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("slack");
 }
 
 function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): PluginToolsState {
@@ -1093,6 +1165,10 @@ export function githubToolsStateFromPlugin(plugin: PluginInstallationDto | null)
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "neon");
+}
+
+export function slackToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "slack");
 }
 
 function officialPluginToolsStateFromPlugin(
@@ -1180,6 +1256,10 @@ export function githubToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
 
 export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "neon");
+}
+
+export function slackToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "slack");
 }
 
 function officialPluginToolsStateFromPreview(

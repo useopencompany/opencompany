@@ -20,9 +20,16 @@ import {
   NeonPluginDetailView,
   neonToolsStateFromPlugin,
   type PluginToolsState,
+  SlackPluginDetail,
+  slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
 } from "./OfficialMcpPluginSettings";
-import { GITHUB_PLUGIN_SOURCE, LINEAR_PLUGIN_SOURCE, NEON_PLUGIN_SOURCE } from "./PluginSettings";
+import {
+  GITHUB_PLUGIN_SOURCE,
+  LINEAR_PLUGIN_SOURCE,
+  NEON_PLUGIN_SOURCE,
+  SLACK_PLUGIN_SOURCE,
+} from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
@@ -55,6 +62,14 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_linear_tools",
       capabilityModes: { read: "on", write: "ask" },
     },
+    slack: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Ada",
+      teamName: "Acme",
+      integrationId: "gint_slack",
+    },
     personalAccounts: {
       github_user: [
         {
@@ -72,6 +87,32 @@ const appData = vi.hoisted(() => ({
       ],
       linear: [],
       neon: [],
+      slack: [
+        {
+          integrationId: "gint_slack",
+          provider: "slack",
+          status: "connected",
+          connected: true,
+          accountEmail: "ada@acme.example",
+          accountName: "Ada",
+          connectionLabel: "Acme",
+          statusReason: null,
+          scopes: ["channels:history", "chat:write"],
+          capabilityModes: { read: "on", query: "ask", write: "ask" },
+        },
+        {
+          integrationId: "gint_slack_archive",
+          provider: "slack",
+          status: "connected",
+          connected: true,
+          accountEmail: "ada@archive.example",
+          accountName: "Ada",
+          connectionLabel: "Archive Co",
+          statusReason: null,
+          scopes: ["channels:history"],
+          capabilityModes: {},
+        },
+      ],
     },
   },
 }));
@@ -390,6 +431,88 @@ const githubPlugin = {
       discoveryStatus: "ready",
       discoveredAt: "2026-09-02T06:30:00.000Z",
       refreshAfter: "2026-09-02T07:30:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
+const slackPlugin = {
+  ...plugin,
+  id: "plugin_slack",
+  name: "slack",
+  manifest: {
+    name: "slack",
+    description: "Search Slack and take permission-gated actions as yourself.",
+  },
+  source: {
+    ...plugin.source,
+    path: "slack",
+    resolvedCommit: "1b912fe6c4f4497147887b2383f0181f763aa19b",
+  },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "slack",
+      type: "streamable-http",
+      connectionProvider: "slack",
+      capabilities: [
+        {
+          id: "read",
+          label: "Search public Slack",
+          defaultMode: "on",
+          tools: ["slack_search_public"],
+        },
+        {
+          id: "query",
+          label: "Read private Slack",
+          defaultMode: "ask",
+          tools: ["slack_read_channel"],
+        },
+        {
+          id: "write",
+          label: "Change Slack",
+          defaultMode: "ask",
+          tools: ["slack_send_message"],
+        },
+      ],
+      tools: [
+        {
+          name: "slack_search_public",
+          description: "Search public Slack conversations.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Search public Slack",
+            defaultMode: "on",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "slack_read_channel",
+          description: "Read a channel.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Read private Slack",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "slack_send_message",
+          description: "Send a message.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Change Slack",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-02T08:00:00.000Z",
+      refreshAfter: "2026-09-02T09:00:00.000Z",
       lastDiscoveryError: null,
     },
   ],
@@ -872,6 +995,39 @@ describe("Linear plugin settings", () => {
         "on",
       ),
     );
+  });
+
+  it("presents Slack connection, ingestion, and three conservative permission tiers", () => {
+    const state = slackToolsStateFromPlugin(slackPlugin);
+    render(<SlackPluginDetail pluginState={{ status: "ready", plugin: slackPlugin }} canEdit />);
+
+    expect(screen.getByRole("heading", { level: 1, name: "Slack" })).toBeInTheDocument();
+    expect(screen.getByText("Acme · Ada")).toBeInTheDocument();
+    expect(screen.getByText("Archive Co · Ada")).toBeInTheDocument();
+    expect(screen.getByText("Slack tools")).toBeInTheDocument();
+    expect(screen.getByText("Ingestion only")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Slack account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/slack/start?purpose=mcp&returnTo=/settings/plugins/slack",
+    );
+    expect(
+      screen.getByRole("link", { name: "Configure Slack ingestion in Wiki sources" }),
+    ).toHaveAttribute("href", "/wiki/sources");
+    expect(screen.getByRole("group", { name: "Search public Slack permission" })).toHaveTextContent(
+      "On",
+    );
+    expect(screen.getByRole("group", { name: "Read private Slack permission" })).toHaveTextContent(
+      "Ask",
+    );
+    expect(screen.getByRole("group", { name: "Change Slack permission" })).toHaveTextContent("Ask");
+    expect(SLACK_PLUGIN_SOURCE).toContain("/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack");
+    expect(state).toMatchObject({
+      groups: [
+        { id: "read", defaultMode: "on" },
+        { id: "query", defaultMode: "ask" },
+        { id: "write", defaultMode: "ask" },
+      ],
+    });
   });
 
   it("builds the two-bucket advanced fallback with ask defaults", () => {

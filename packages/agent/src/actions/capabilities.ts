@@ -120,9 +120,22 @@ export const PROVIDER_CAPABILITIES: Partial<
   slack: [
     {
       id: "read",
-      label: "Read Slack",
-      description: "Search and read channels, direct messages, threads, and people in Slack.",
+      label: "Search public Slack",
+      description: "Search public channels, users, and emoji available to your Slack account.",
       defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read private Slack",
+      description:
+        "Read private channels, direct messages, threads, canvases, files, and profiles.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Change Slack",
+      description: "Send or schedule messages, upload files, add reactions, and change canvases.",
+      defaultMode: "ask",
     },
   ],
   attio: [

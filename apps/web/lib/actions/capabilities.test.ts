@@ -44,9 +44,11 @@ describe("PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
-  it("registers Slack as one broad read permission", () => {
+  it("registers public Slack search on and guards private reads and writes", () => {
     expect(PROVIDER_CAPABILITIES.slack).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
@@ -122,10 +124,11 @@ describe("mode helpers", () => {
     expect(providerCapability("github_user", "read")?.label).toBe("Read GitHub");
     expect(providerCapability("github_user", "write")?.label).toBe("Manage GitHub");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
-    expect(providerCapability("slack", "read")?.label).toBe("Read Slack");
+    expect(providerCapability("slack", "read")?.label).toBe("Search public Slack");
     expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
     expect(providerCapability("neon", "read")?.label).toBe("Inspect Neon structure");
     expect(providerCapability("neon", "query")?.label).toBe("Query database data");
-    expect(providerCapability("slack", "write")).toBeUndefined();
+    expect(providerCapability("slack", "query")?.label).toBe("Read private Slack");
+    expect(providerCapability("slack", "write")?.label).toBe("Change Slack");
   });
 });

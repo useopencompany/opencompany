@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   noop: vi.fn(),
   remote: vi.fn(),
   registrations: vi.fn(),
+  slack: vi.fn(),
 }));
 
 vi.mock("../plugin-gateway", () => ({
@@ -21,7 +22,7 @@ vi.mock("./neon", () => ({ resolveNeonActions: mocks.noop }));
 vi.mock("./posthog", () => ({ resolvePostHogActions: mocks.noop }));
 vi.mock("./remote-mcp", () => ({ resolveRemoteMcpActions: mocks.remote }));
 vi.mock("./revolut", () => ({ resolveRevolutActions: mocks.noop }));
-vi.mock("./slack", () => ({ resolveSlackActions: mocks.noop }));
+vi.mock("./slack", () => ({ resolveSlackActions: mocks.slack }));
 vi.mock("./stripe", () => ({ resolveStripeActions: mocks.noop }));
 vi.mock("./x-account", () => ({ resolveXAccountActions: mocks.noop }));
 
@@ -39,6 +40,12 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       label: "GitHub",
       description: "Legacy workspace GitHub actions.",
       actions: [{ id: "github.search_issues" }],
+    });
+    mocks.slack.mockResolvedValue({
+      id: "slack",
+      label: "Slack",
+      description: "Legacy Slack actions.",
+      actions: [{ id: "slack.search_messages" }],
     });
   });
 
@@ -100,5 +107,34 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     });
     expect(mocks.github).toHaveBeenCalledWith("workspace_1");
     expect(catalog.actions).toContainEqual(expect.objectContaining({ id: "github.search_issues" }));
+  });
+
+  it("uses legacy Slack actions only until the official Slack plugin is installed", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.slack).toHaveBeenCalledWith("user_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "slack.search_messages" }),
+    );
+
+    mocks.slack.mockClear();
+    const slackPluginRegistration = {
+      source: "plugin:slack:slack",
+    } as unknown as RemoteMcpGatewayRegistration;
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [slackPluginRegistration] },
+    );
+
+    expect(mocks.slack).not.toHaveBeenCalled();
+    expect(mocks.remote).toHaveBeenCalledWith(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      slackPluginRegistration,
+    );
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "slack.search_messages" }),
+    );
   });
 });

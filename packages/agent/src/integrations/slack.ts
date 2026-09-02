@@ -1,13 +1,14 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import { integrations } from "@opencompany/db/product-schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import type { SlackProviderState } from "../integration-state";
 
 export type SlackIntegrationStatePayload = {
   userWorkosId: string;
   returnTo: string;
+  purpose?: "mcp";
   expiresAt: number;
   nonce: string;
 };
@@ -46,25 +47,49 @@ export const SLACK_USER_SCOPES = [
   "search:read",
 ] as const;
 
+// Slack's hosted MCP server only accepts the user scopes advertised by its
+// protected-resource metadata. Keep this list separate from the narrower
+// ingestion connection so installing the plugin never silently broadens a
+// legacy Slack connection.
+export const SLACK_MCP_USER_SCOPES = [
+  "canvases:read",
+  "canvases:write",
+  "channels:history",
+  "channels:read",
+  "channels:write",
+  "chat:write",
+  "emoji:read",
+  "files:read",
+  "files:write",
+  "groups:history",
+  "groups:read",
+  "groups:write",
+  "im:history",
+  "im:read",
+  "im:write",
+  "lists:read",
+  "lists:write",
+  "mpim:history",
+  "mpim:read",
+  "mpim:write",
+  "reactions:read",
+  "reactions:write",
+  "search:read.files",
+  "search:read.im",
+  "search:read.mpim",
+  "search:read.private",
+  "search:read.public",
+  "search:read.users",
+  "users:read",
+  "users:read.email",
+] as const;
+
 export function isSlackIntegrationConfigured() {
   return SLACK_INTEGRATION_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
 export async function getSlackIntegrationState(userWorkosId: string): Promise<SlackProviderState> {
-  const [row] = await getDb()
-    .select({
-      id: integrations.id,
-      status: integrations.status,
-      accountName: integrations.accountName,
-      connectionLabel: integrations.connectionLabel,
-      statusReason: integrations.statusReason,
-    })
-    .from(integrations)
-    .where(
-      and(eq(integrations.userWorkosId, userWorkosId), eq(integrations.provider, SLACK_PROVIDER)),
-    )
-    .orderBy(desc(integrations.updatedAt))
-    .limit(1);
+  const row = await loadSlackIntegration({ userWorkosId });
 
   if (!row || row.status === "disconnected") {
     return {
@@ -87,6 +112,34 @@ export async function getSlackIntegrationState(userWorkosId: string): Promise<Sl
     teamName: row.connectionLabel,
     statusReason: row.statusReason,
   };
+}
+
+type DbLike = any;
+
+export async function loadSlackIntegration(input: { userWorkosId: string; db?: DbLike }) {
+  const [row] = await (input.db ?? getDb())
+    .select({
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
+      accountName: integrations.accountName,
+      connectionLabel: integrations.connectionLabel,
+      statusReason: integrations.statusReason,
+      capabilityModes: integrations.capabilityModes,
+      toolModes: integrations.toolModes,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.userWorkosId, input.userWorkosId),
+        isNull(integrations.workspaceId),
+        eq(integrations.provider, SLACK_PROVIDER),
+        ne(integrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(integrations.updatedAt))
+    .limit(1);
+  return row;
 }
 
 export function createSlackIntegrationState(
@@ -122,22 +175,32 @@ export function verifySlackIntegrationState(state: string): SlackIntegrationStat
   };
 }
 
-export function buildSlackAuthorizationUrl(state: string) {
-  const url = new URL("https://slack.com/oauth/v2/authorize");
+export function buildSlackAuthorizationUrl(state: string, purpose?: "mcp") {
+  const url = new URL(
+    purpose === "mcp"
+      ? "https://slack.com/oauth/v2_user/authorize"
+      : "https://slack.com/oauth/v2/authorize",
+  );
   url.searchParams.set("client_id", requiredEnv("OPENCOMPANY_SLACK_CLIENT_ID"));
-  // user_scope (not scope): we request a user token only, no bot token.
-  url.searchParams.set("user_scope", SLACK_USER_SCOPES.join(","));
+  if (purpose === "mcp") {
+    url.searchParams.set("scope", SLACK_MCP_USER_SCOPES.join(","));
+  } else {
+    // user_scope (not scope): the ingestion flow requests a user token only.
+    url.searchParams.set("user_scope", SLACK_USER_SCOPES.join(","));
+  }
   url.searchParams.set("redirect_uri", slackCallbackUrl());
   url.searchParams.set("state", state);
   return url.toString();
 }
 
-export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult> {
+export async function exchangeSlackCode(code: string, purpose?: "mcp"): Promise<SlackOAuthResult> {
   const result = await slackApiRequest<{
     team?: { id?: string; name?: string };
     authed_user?: { id?: string; access_token?: string; scope?: string; token_type?: string };
+    access_token?: string;
+    scope?: string;
   }>({
-    method: "oauth.v2.access",
+    method: purpose === "mcp" ? "oauth.v2.user.access" : "oauth.v2.access",
     form: {
       client_id: requiredEnv("OPENCOMPANY_SLACK_CLIENT_ID"),
       client_secret: requiredEnv("OPENCOMPANY_SLACK_CLIENT_SECRET"),
@@ -148,7 +211,9 @@ export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult>
 
   const teamId = result.team?.id?.trim();
   const authedUserId = result.authed_user?.id?.trim();
-  const accessToken = result.authed_user?.access_token?.trim();
+  const accessToken = (
+    purpose === "mcp" ? result.access_token : result.authed_user?.access_token
+  )?.trim();
   if (!teamId || !authedUserId || !accessToken) {
     throw new Error("Slack did not return a user token.");
   }
@@ -158,12 +223,19 @@ export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult>
     teamName: result.team?.name?.trim() || null,
     authedUserId,
     accessToken,
-    scopes: (result.authed_user?.scope ?? "").split(",").filter(Boolean),
+    scopes:
+      (purpose === "mcp" ? result.scope : (result.authed_user?.scope ?? ""))
+        ?.split(",")
+        .filter(Boolean) ?? [],
   };
 }
 
-export async function fetchSlackIdentity(input: { accessToken: string; authedUserId: string }) {
-  const [userResult, teamResult] = await Promise.all([
+export async function fetchSlackIdentity(input: {
+  accessToken: string;
+  authedUserId: string;
+  includeTeamDetails?: boolean;
+}) {
+  const [userResult, teamDomain] = await Promise.all([
     slackApiRequest<{
       user?: { real_name?: string; name?: string; profile?: { email?: string } };
     }>({
@@ -171,16 +243,21 @@ export async function fetchSlackIdentity(input: { accessToken: string; authedUse
       token: input.accessToken,
       form: { user: input.authedUserId },
     }),
-    slackApiRequest<{ team?: { domain?: string } }>({
-      method: "team.info",
-      token: input.accessToken,
-    }),
+    input.includeTeamDetails === false
+      ? slackApiRequest<{ url?: string }>({
+          method: "auth.test",
+          token: input.accessToken,
+        }).then((result) => slackTeamDomainFromUrl(result.url))
+      : slackApiRequest<{ team?: { domain?: string } }>({
+          method: "team.info",
+          token: input.accessToken,
+        }).then((result) => result.team?.domain?.trim() || null),
   ]);
 
   return {
     userName: userResult.user?.real_name?.trim() || userResult.user?.name?.trim() || null,
     userEmail: userResult.user?.profile?.email?.trim() || null,
-    teamDomain: teamResult.team?.domain?.trim() || null,
+    teamDomain,
   };
 }
 
@@ -227,12 +304,23 @@ function slackCallbackUrl() {
   return `${getAppUrl()}/api/integrations/slack/callback`;
 }
 
+function slackTeamDomainFromUrl(value: string | undefined) {
+  if (!value) return null;
+  try {
+    const hostname = new URL(value).hostname.toLocaleLowerCase();
+    return hostname.endsWith(".slack.com") ? hostname.slice(0, -".slack.com".length) || null : null;
+  } catch {
+    return null;
+  }
+}
+
 function isSlackIntegrationStatePayload(value: unknown): value is SlackIntegrationStatePayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (
     typeof record.userWorkosId === "string" &&
     typeof record.returnTo === "string" &&
+    (record.purpose === undefined || record.purpose === "mcp") &&
     typeof record.expiresAt === "number" &&
     typeof record.nonce === "string"
   );

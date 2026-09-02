@@ -262,7 +262,17 @@ const app = createApiApp({
       }),
   }),
   googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
-  slackIngress: createSlackIngress({ db: database.db, identify: identityVerifier }),
+  slackIngress: createSlackIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider: "slack",
+      }),
+  }),
   linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
   hubspotIngress: createHubspotIngress({ db: database.db, identify: identityVerifier }),
   attioIngress: createAttioIngress({ db: database.db }),
