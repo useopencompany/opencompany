@@ -58,6 +58,7 @@ const eventMocks = vi.hoisted(() => ({
   loadCodexChatAssistantMessageParts: vi.fn(),
 }));
 const historyMocks = vi.hoisted(() => ({ loadCodingChatHistory: vi.fn() }));
+const githubAuthMocks = vi.hoisted(() => ({ loadGitHubAuthForUser: vi.fn() }));
 const repoMocks = vi.hoisted(() => ({
   loadRepositoryBootstrap: vi.fn(),
   stageRepositoryBootstrap: vi.fn(),
@@ -104,6 +105,7 @@ vi.mock("./coding-agent-shared", () => ({
   buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
   gitAuthHeader: (token: string) => `Authorization: Basic ${token}`,
+  loadGitHubAuthForUser: githubAuthMocks.loadGitHubAuthForUser,
 }));
 
 vi.mock("./coding-chat-history", async (importOriginal) => {
@@ -457,6 +459,7 @@ describe("runCodexChatTurn over ACP", () => {
     cliMocks.ensureCodexAcpAdapterInstalled.mockResolvedValue(undefined);
     cliMocks.killLeftoverCodexTurnProcesses.mockResolvedValue(undefined);
     historyMocks.loadCodingChatHistory.mockResolvedValue(emptyHistory());
+    githubAuthMocks.loadGitHubAuthForUser.mockResolvedValue(null);
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
     eventMocks.createExternalEngineProjector.mockImplementation(
       (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
@@ -549,7 +552,7 @@ describe("runCodexChatTurn over ACP", () => {
   });
 
   it("sends current-turn images as standard ACP prompt blocks", async () => {
-    dbMocks.selectRows.push([], [{ attachments: [imageAttachment("image_1")] }], []);
+    dbMocks.selectRows.push([{ attachments: [imageAttachment("image_1")] }], []);
 
     await runCodexChatTurn({
       turn: codexTurn(),
@@ -677,7 +680,6 @@ describe("runCodexChatTurn over ACP", () => {
 
   it("bootstraps durable history after ACP invalidates a stored session", async () => {
     dbMocks.selectRows.push(
-      [],
       [],
       [],
       [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
