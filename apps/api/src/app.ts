@@ -2646,6 +2646,8 @@ export function createApiApp(input: CreateApiAppInput) {
     const ingress = input.githubUserIngress;
     app.get("/integrations/github-user/start", (c) => ingress.start(c.req.raw));
     app.get("/integrations/github-user/callback", (c) => ingress.callback(c.req.raw));
+    app.get("/integrations/github-user/installations", (c) => ingress.installations(c.req.raw));
+    app.post("/integrations/github-user/installations", (c) => ingress.installations(c.req.raw));
   }
   if (input.googleIngress) {
     const ingress = input.googleIngress;

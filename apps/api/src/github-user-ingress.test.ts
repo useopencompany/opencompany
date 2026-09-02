@@ -2,6 +2,8 @@ import {
   createGitHubUserIntegrationState,
   exchangeGitHubAppUserCode,
   fetchGitHubUserIdentity,
+  listGitHubUserRepositoryAccess,
+  resolveGitHubUserInstallTarget,
   verifyGitHubAppUserInstallation,
 } from "@opencompany/agent/integrations/github-user";
 import { connectGitHubUserIntegration } from "@opencompany/db/integrations";
@@ -14,6 +16,8 @@ vi.mock("@opencompany/agent/integrations/github-user", async (importOriginal) =>
   ...(await importOriginal<Record<string, unknown>>()),
   exchangeGitHubAppUserCode: vi.fn(),
   fetchGitHubUserIdentity: vi.fn(),
+  listGitHubUserRepositoryAccess: vi.fn(),
+  resolveGitHubUserInstallTarget: vi.fn(),
   verifyGitHubAppUserInstallation: vi.fn(async () => ({ id: 123 })),
 }));
 vi.mock("@opencompany/agent/integrations/analytics", () => ({
@@ -81,6 +85,12 @@ describe("GitHub user ingress", () => {
       name: "The Octocat",
       email: null,
     });
+    vi.mocked(resolveGitHubUserInstallTarget).mockResolvedValue("987");
+    vi.mocked(listGitHubUserRepositoryAccess).mockResolvedValue({
+      checkedAt: "2026-09-02T12:00:00.000Z",
+      installations: [],
+      target: null,
+    });
   });
 
   afterEach(() => {
@@ -99,6 +109,63 @@ describe("GitHub user ingress", () => {
     const location = new URL(response.headers.get("location") ?? "");
     expect(location.href).toContain("github.com/apps/opencompany-user/installations/new");
     expect(location.searchParams.get("state")).toBeTruthy();
+  });
+
+  it("targets the requested organization through GitHub's documented permissions route", async () => {
+    const response = await ingress().start(
+      new Request(
+        "https://api.example.com/integrations/github-user/start?returnTo=/settings/plugins/github&owner=opencompany",
+      ),
+    );
+
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.pathname).toBe("/apps/opencompany-user/installations/new/permissions");
+    expect(location.searchParams.get("suggested_target_id")).toBe("987");
+    expect(resolveGitHubUserInstallTarget).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      owner: "opencompany",
+      db,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it("lists repository access and force-refreshes the token only on explicit re-check", async () => {
+    const service = ingress();
+    const response = await service.installations(
+      new Request(
+        "https://api.example.com/integrations/github-user/installations?owner=opencompany&repo=private-repo",
+      ),
+    );
+    const refreshed = await service.installations(
+      new Request(
+        "https://api.example.com/integrations/github-user/installations?owner=opencompany&repo=private-repo",
+        { method: "POST" },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(refreshed.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(listGitHubUserRepositoryAccess).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        owner: "opencompany",
+        repo: "private-repo",
+        forceRefresh: false,
+        db,
+      }),
+    );
+    expect(listGitHubUserRepositoryAccess).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        owner: "opencompany",
+        repo: "private-repo",
+        forceRefresh: true,
+        db,
+      }),
+    );
   });
 
   it("redirects anonymous users to sign in", async () => {

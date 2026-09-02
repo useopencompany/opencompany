@@ -442,6 +442,63 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.getByText("No open issues for the opencompany team.")).toBeInTheDocument();
   });
 
+  it("confirms a failed GitHub tool is outside install scope before offering Add access", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        checkedAt: "2026-09-02T12:00:00.000Z",
+        installations: [],
+        target: {
+          owner: "opencompany",
+          repo: "private-repo",
+          state: "missing_installation",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const message: ChatUiMessage = {
+      id: "assistant_github_install_gap",
+      role: "assistant",
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_github_install_gap",
+          state: "output-available",
+          input: {
+            action: "plugin:github:github.pull_request_read",
+            params: { owner: "opencompany", repo: "private-repo", pullNumber: 12 },
+          },
+          output: {
+            ok: false,
+            action: "plugin:github:github.pull_request_read",
+            error: {
+              code: "provider_error",
+              source: "github",
+              message: "Resource not accessible by integration",
+            },
+          },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(await screen.findByTestId("github-install-gap")).toHaveTextContent(
+      "GitHub App is not installed on opencompany",
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/integrations/github-user/installations?owner=opencompany&repo=private-repo",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(screen.getByRole("link", { name: "Add access" })).toHaveAttribute(
+      "href",
+      "/api/integrations/github-user/start?returnTo=%2F&owner=opencompany",
+    );
+    await userEvent.click(screen.getByRole("link", { name: "Add access" }));
+    expect(screen.getByTestId("github-install-gap")).toHaveTextContent(
+      "Pending admin approval for opencompany",
+    );
+  });
+
   it("presents plugin action labels and acting identity without changing the canonical id", async () => {
     const user = userEvent.setup();
     const onActionApproval = vi.fn(async () => undefined);
@@ -886,6 +943,64 @@ describe("MessageBubble Codex interactions", () => {
     expect(row).toHaveTextContent("git status --short");
     expect(row).not.toHaveTextContent("/bin/bash -lc");
     expect(row).not.toHaveTextContent(CODEX_COMMAND_TOOL_NAME);
+  });
+
+  it("offers repository access recovery for a failed sandbox git operation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          checkedAt: "2026-09-02T12:00:00.000Z",
+          installations: [
+            {
+              id: "123",
+              account: {
+                id: "987",
+                login: "opencompany",
+                type: "Organization",
+                avatarUrl: null,
+                htmlUrl: "https://github.com/opencompany",
+              },
+              repositorySelection: "selected",
+              permissions: { metadata: "read" },
+              pendingPermissions: ["actions", "checks", "contents", "issues", "pull_requests"],
+              suspendedAt: null,
+              repositories: [],
+            },
+          ],
+          target: {
+            owner: "opencompany",
+            repo: "private-repo",
+            state: "missing_repository",
+          },
+        }),
+      ),
+    );
+    const message: ChatUiMessage = {
+      id: "assistant_github_sandbox_gap",
+      role: "assistant",
+      parts: [
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_github_gap",
+          state: "output-available",
+          input: {
+            command: "git push https://github.com/opencompany/private-repo.git HEAD",
+          },
+          output: {
+            status: "failed",
+            exitCode: 128,
+            outputPreview: "remote: Repository not found.",
+          },
+        } as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(await screen.findByTestId("github-install-gap")).toHaveTextContent(
+      "GitHub App cannot access opencompany/private-repo",
+    );
   });
 
   it("renders semantic Read and MCP rows with file and tool chips", () => {

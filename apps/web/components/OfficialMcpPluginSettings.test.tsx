@@ -7,7 +7,7 @@ import type {
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   GitHubPluginDetail,
@@ -538,6 +538,10 @@ describe("Linear plugin settings", () => {
     window.history.replaceState({}, "", "/settings/plugins/linear");
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("server-renders account data without starting another live query", () => {
     const html = renderToString(
       <LinearPluginDetail
@@ -856,6 +860,49 @@ describe("Linear plugin settings", () => {
   it("renders GitHub connection, discovery, and permission controls against github_user", async () => {
     const state = githubToolsStateFromPlugin(githubPlugin);
     window.history.replaceState({}, "", "/settings/plugins/github");
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) =>
+      Response.json({
+        checkedAt: "2026-09-02T12:00:00.000Z",
+        target: null,
+        installations: [
+          {
+            id: "123",
+            account: {
+              id: "987",
+              login: "opencompany",
+              type: "Organization",
+              avatarUrl: null,
+              htmlUrl: "https://github.com/opencompany",
+            },
+            repositorySelection: "selected",
+            permissions: { metadata: "read", contents: "write" },
+            pendingPermissions: ["actions", "checks", "issues", "pull_requests"],
+            suspendedAt: null,
+            repositories: [
+              {
+                id: "456",
+                name: "private-repo",
+                fullName: "opencompany/private-repo",
+                private: true,
+                htmlUrl: "https://github.com/opencompany/private-repo",
+              },
+              ...(init?.method === "POST"
+                ? [
+                    {
+                      id: "789",
+                      name: "newly-approved-repo",
+                      fullName: "opencompany/newly-approved-repo",
+                      private: true,
+                      htmlUrl: "https://github.com/opencompany/newly-approved-repo",
+                    },
+                  ]
+                : []),
+            ],
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <GitHubPluginDetailView
@@ -876,6 +923,31 @@ describe("Linear plugin settings", () => {
     expect(screen.getByRole("link", { name: "Connect GitHub account" })).toHaveAttribute(
       "href",
       "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
+    );
+    expect(await screen.findByRole("heading", { name: "Repository access" })).toBeVisible();
+    expect(screen.getByText("opencompany")).toBeVisible();
+    await userEvent.click(screen.getByText("opencompany"));
+    expect(screen.getByText("opencompany/private-repo")).toBeVisible();
+    expect(screen.getByTestId("github-permissions-pending")).toHaveTextContent(
+      "New permissions pending approval",
+    );
+    expect(screen.getByRole("link", { name: "Add organization or account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/github-user/start?returnTo=%2Fsettings%2Fplugins%2Fgithub",
+    );
+    await userEvent.click(screen.getByRole("link", { name: "Add organization or account" }));
+    expect(screen.getByTestId("github-installation-pending")).toHaveTextContent(
+      "Pending admin approval",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Re-check" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/integrations/github-user/installations",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(await screen.findByTestId("github-installation-approved")).toHaveTextContent(
+      "Repository access updated",
     );
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,

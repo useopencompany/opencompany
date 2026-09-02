@@ -6,7 +6,10 @@ import {
   createGitHubUserIntegrationState,
   exchangeGitHubAppUserCode,
   fetchGitHubUserIdentity,
+  GitHubUserAccessAuthError,
   isGitHubUserIntegrationConfigured,
+  listGitHubUserRepositoryAccess,
+  resolveGitHubUserInstallTarget,
   verifyGitHubAppUserInstallation,
   verifyGitHubUserIntegrationState,
 } from "@opencompany/agent/integrations/github-user";
@@ -22,6 +25,7 @@ type DbLike = any;
 export type GitHubUserIngressService = {
   start(request: Request): Promise<Response>;
   callback(request: Request): Promise<Response>;
+  installations(request: Request): Promise<Response>;
 };
 
 type RefreshPluginRegistrations = (input: {
@@ -39,6 +43,7 @@ export function createGitHubUserIngress(input: GitHubUserIngressInput): GitHubUs
   return {
     start: (request) => handleStart(input, request),
     callback: (request) => handleCallback(input, request),
+    installations: (request) => handleInstallations(input, request),
   };
 }
 
@@ -47,6 +52,7 @@ async function handleStart(input: GitHubUserIngressInput, request: Request): Pro
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
+  const owner = url.searchParams.get("owner")?.trim();
 
   if (!isGitHubUserIntegrationConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");
@@ -56,7 +62,71 @@ async function handleStart(input: GitHubUserIngressInput, request: Request): Pro
     userWorkosId: session.userId,
     returnTo,
   });
-  return sessionRedirect(session, buildGitHubUserInstallUrl(state));
+  let suggestedTargetId: string | undefined;
+  if (owner) {
+    try {
+      suggestedTargetId = await resolveGitHubUserInstallTarget({
+        userWorkosId: session.userId,
+        owner,
+        db: input.db,
+        signal: request.signal,
+      });
+    } catch (error) {
+      logger.warn("GitHub install target could not be resolved", {
+        event: "opencompany.github_user_install_target_unavailable",
+        error_message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return sessionRedirect(
+    session,
+    buildGitHubUserInstallUrl(state, suggestedTargetId ? { suggestedTargetId } : {}),
+  );
+}
+
+async function handleInstallations(
+  input: GitHubUserIngressInput,
+  request: Request,
+): Promise<Response> {
+  const session = await resolveIngressSession(input, request);
+  if (session.kind === "redirect") return session.response;
+  const url = new URL(request.url);
+  const owner = url.searchParams.get("owner")?.trim();
+  const repo = url.searchParams.get("repo")?.trim();
+  try {
+    const access = await listGitHubUserRepositoryAccess({
+      userWorkosId: session.userId,
+      ...(owner ? { owner } : {}),
+      ...(repo ? { repo } : {}),
+      forceRefresh: request.method === "POST",
+      db: input.db,
+      signal: request.signal,
+    });
+    return Response.json(access, {
+      headers: { "Cache-Control": "private, no-store" },
+    });
+  } catch (error) {
+    const reconnectRequired = error instanceof GitHubUserAccessAuthError;
+    logger.warn("GitHub repository access lookup failed", {
+      event: "opencompany.github_user_repository_access_failed",
+      reconnect_required: reconnectRequired,
+      error_message: error instanceof Error ? error.message : String(error),
+    });
+    return Response.json(
+      {
+        error: {
+          code: reconnectRequired ? "github_reconnect_required" : "github_access_unavailable",
+          message: reconnectRequired
+            ? "Reconnect GitHub in Settings to inspect repository access."
+            : "GitHub repository access could not be checked. Try again.",
+        },
+      },
+      {
+        status: reconnectRequired ? 409 : 502,
+        headers: { "Cache-Control": "private, no-store" },
+      },
+    );
+  }
 }
 
 async function handleCallback(input: GitHubUserIngressInput, request: Request): Promise<Response> {
