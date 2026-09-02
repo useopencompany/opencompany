@@ -28,6 +28,7 @@ export async function resolveSkillImport(input: {
   const skill = result.skill;
   return {
     status: "resolved",
+    warnings: skill.warnings,
     bundle: {
       name: skill.name,
       description: skill.description,

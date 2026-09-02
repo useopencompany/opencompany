@@ -1,5 +1,5 @@
 import { computeArtifactIntegrity } from "./artifact-integrity";
-import { parseSkillDocument, SkillSpecError } from "./skill-spec";
+import { parseSkillDirectoryDocument, SkillSpecError } from "./skill-spec";
 
 export type WorkspaceSkillArtifact = {
   name: string;
@@ -29,7 +29,7 @@ export async function createWorkspaceSkillArtifact(input: {
   // JSON strings are valid YAML scalars and make arbitrary user-authored descriptions safe without
   // maintaining a second YAML serializer policy. The parser below remains the format authority.
   const content = `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n${instructions}\n`;
-  const document = parseSkillDocument(content, name);
+  const document = parseSkillDirectoryDocument(content, name);
   const files = [
     {
       path: "SKILL.md",

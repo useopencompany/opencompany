@@ -7016,7 +7016,7 @@
             "items": {
               "$ref": "#/components/schemas/SkillBundleFileMetadata"
             },
-            "maxItems": 64
+            "maxItems": 512
           }
         },
         "required": [
@@ -7152,17 +7152,24 @@
                   "$ref": "#/components/schemas/SkillImportFileMetadata"
                 },
                 "minItems": 1,
-                "maxItems": 64
+                "maxItems": 512
               },
               "fileCount": {
                 "type": "integer",
                 "minimum": 1,
-                "maximum": 64
+                "maximum": 512
               },
               "totalBytes": {
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 1048576
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SkillImportWarning"
+                },
+                "maxItems": 10
               }
             },
             "required": [
@@ -7173,7 +7180,8 @@
               "integrity",
               "files",
               "fileCount",
-              "totalBytes"
+              "totalBytes",
+              "warnings"
             ],
             "additionalProperties": false
           },
@@ -7253,6 +7261,27 @@
         "required": [
           "path",
           "sizeBytes"
+        ],
+        "additionalProperties": false
+      },
+      "SkillImportWarning": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "source_directory_normalized"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "code",
+          "message"
         ],
         "additionalProperties": false
       },
@@ -13067,7 +13096,7 @@
                 "fileCount": {
                   "type": "integer",
                   "minimum": 1,
-                  "maximum": 64
+                  "maximum": 512
                 },
                 "totalBytes": {
                   "type": "integer",

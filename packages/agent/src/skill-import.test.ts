@@ -37,6 +37,12 @@ describe("resolveSkillImport", () => {
         ],
         fileCount: 3,
         totalBytes: 0,
+        warnings: [
+          {
+            code: "source_directory_normalized",
+            message: "Source directory normalized.",
+          },
+        ],
       },
     });
 
@@ -44,6 +50,12 @@ describe("resolveSkillImport", () => {
 
     expect(preview).toMatchObject({
       status: "resolved",
+      warnings: [
+        {
+          code: "source_directory_normalized",
+          message: "Source directory normalized.",
+        },
+      ],
       bundle: {
         name: "my-skill",
         body: "Do the thing.",

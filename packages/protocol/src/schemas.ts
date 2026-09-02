@@ -1454,7 +1454,7 @@ export const SkillBundleSummarySchema = z
 
 export const SkillBundleSchema = SkillBundleSummarySchema.extend({
   body: z.string(),
-  files: z.array(SkillBundleFileMetadataSchema).max(64),
+  files: z.array(SkillBundleFileMetadataSchema).max(512),
 })
   .strict()
   .openapi("SkillBundle");
@@ -1495,6 +1495,14 @@ export const SkillImportCandidateSchema = z
   .strict()
   .openapi("SkillImportCandidate");
 
+export const SkillImportWarningSchema = z
+  .object({
+    code: z.literal("source_directory_normalized"),
+    message: z.string().min(1).max(1_024),
+  })
+  .strict()
+  .openapi("SkillImportWarning");
+
 export const SkillImportPreviewSchema = z
   .discriminatedUnion("status", [
     z
@@ -1508,13 +1516,14 @@ export const SkillImportPreviewSchema = z
         allowedTools: z.string().optional(),
         source: ExternalSkillSourceSchema,
         integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
-        files: z.array(SkillImportFileMetadataSchema).min(1).max(64),
-        fileCount: z.number().int().min(1).max(64),
+        files: z.array(SkillImportFileMetadataSchema).min(1).max(512),
+        fileCount: z.number().int().min(1).max(512),
         totalBytes: z
           .number()
           .int()
           .min(0)
           .max(1024 * 1024),
+        warnings: z.array(SkillImportWarningSchema).max(10),
       })
       .strict(),
     z
@@ -1790,7 +1799,7 @@ export const PluginImportPreviewSchema = z
           name: z.string().min(1).max(64),
           description: z.string().min(1).max(1_024),
           integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
-          fileCount: z.number().int().min(1).max(64),
+          fileCount: z.number().int().min(1).max(512),
           totalBytes: z
             .number()
             .int()
@@ -4182,6 +4191,7 @@ export type SkillImportFileMetadataDto = z.infer<typeof SkillImportFileMetadataS
 export type SkillFileChunkDto = z.infer<typeof SkillFileChunkSchema>;
 export type SkillCatalogItemDto = z.infer<typeof SkillCatalogItemSchema>;
 export type SkillImportCandidateDto = z.infer<typeof SkillImportCandidateSchema>;
+export type SkillImportWarningDto = z.infer<typeof SkillImportWarningSchema>;
 export type SkillImportPreviewDto = z.infer<typeof SkillImportPreviewSchema>;
 export type SkillImportPreviewBody = z.infer<typeof SkillImportPreviewBodySchema>;
 export type ImportSkillBody = z.infer<typeof ImportSkillBodySchema>;

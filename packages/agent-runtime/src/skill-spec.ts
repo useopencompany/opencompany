@@ -3,11 +3,12 @@ import { parse as parseYaml } from "yaml";
 // Strict parser for a single Agent Skills `SKILL.md` document.
 //
 // This is the one authoritative Skills parser. It implements the official frontmatter contract
-// exactly — the six supported fields, their value constraints, and the rule that `name` must equal
-// the containing directory — plus opencompany's client policy that unknown top-level frontmatter
-// fields are rejected. It performs no command extension, slug normalization, auto-suffixing, or
-// opencompany-specific description handling. It returns the exact body boundary so callers can
-// slice the model-facing body without re-parsing.
+// exactly — the six supported fields and their value constraints — plus opencompany's client
+// policy that unknown top-level frontmatter fields are rejected. Directory validation is a
+// separate operation because source repositories are locators, while the canonical installed
+// bundle root is the Skill name. It performs no command extension, slug normalization,
+// auto-suffixing, or opencompany-specific description handling. It returns the exact body boundary
+// so callers can slice the model-facing body without re-parsing.
 
 export class SkillSpecError extends Error {
   constructor(message: string) {
@@ -98,10 +99,9 @@ function parseMetadata(value: unknown): Record<string, string> {
   return out;
 }
 
-// Parse and strictly validate a SKILL.md document. `expectedName` is the name of the directory that
-// contains the SKILL.md; the frontmatter `name` must equal it. Throws SkillSpecError on any
-// violation.
-export function parseSkillDocument(content: string, expectedName: string): ParsedSkillDocument {
+// Parse and strictly validate the document-level SKILL.md contract. The directory relationship is
+// validated separately once the caller knows the canonical bundle root.
+export function parseSkillDocument(content: string): ParsedSkillDocument {
   const split = splitFrontmatter(content);
   if (!split) {
     throw new SkillSpecError("SKILL.md must begin with a YAML frontmatter block.");
@@ -130,12 +130,6 @@ export function parseSkillDocument(content: string, expectedName: string): Parse
       "Skill `name` must be 1-64 lowercase alphanumeric characters and hyphens, with no leading, trailing, or repeated hyphens.",
     );
   }
-  if (name !== expectedName) {
-    throw new SkillSpecError(
-      `Skill \`name\` (${name}) must match its directory name (${expectedName}).`,
-    );
-  }
-
   const description = requireString(record.description, "description");
   if (description.trim().length === 0 || description.length > DESCRIPTION_MAX) {
     throw new SkillSpecError("Skill `description` must be 1-1024 non-empty characters.");
@@ -161,4 +155,24 @@ export function parseSkillDocument(content: string, expectedName: string): Parse
   }
 
   return { frontmatter, body: content.slice(split.bodyStart), bodyStart: split.bodyStart };
+}
+
+// Validate the Agent Skills directory-name invariant against the root where the bundle is actually
+// installed. Source adapters may discover a Skill in a differently named monorepo directory, but
+// the canonical stored and mounted bundle must always use its declared name as this root.
+export function assertSkillDirectoryName(name: string, directoryName: string): void {
+  if (name !== directoryName) {
+    throw new SkillSpecError(
+      `Skill \`name\` (${name}) must match its directory name (${directoryName}).`,
+    );
+  }
+}
+
+export function parseSkillDirectoryDocument(
+  content: string,
+  directoryName: string,
+): ParsedSkillDocument {
+  const document = parseSkillDocument(content);
+  assertSkillDirectoryName(document.frontmatter.name, directoryName);
+  return document;
 }
