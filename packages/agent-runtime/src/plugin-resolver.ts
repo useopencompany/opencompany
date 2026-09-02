@@ -26,7 +26,7 @@ import {
   type SkillResolverFetcher,
   type SkillTreeEntry,
 } from "./skill-resolver";
-import { parseSkillDocument, SkillSpecError } from "./skill-spec";
+import { parseSkillDirectoryDocument, SkillSpecError } from "./skill-spec";
 
 export class PluginResolverError extends Error {
   constructor(message: string) {
@@ -383,9 +383,12 @@ async function resolvePluginSkill(files: ArtifactFile[], directory: string) {
   const skillMarkdown = skillFiles.find((file) => file.path === "SKILL.md");
   if (!skillMarkdown) throw new PluginResolverError("Skill is missing SKILL.md at its root.");
 
-  let document: ReturnType<typeof parseSkillDocument>;
+  let document: ReturnType<typeof parseSkillDirectoryDocument>;
   try {
-    document = parseSkillDocument(decodeUtf8(skillMarkdown.content, "SKILL.md"), directory);
+    document = parseSkillDirectoryDocument(
+      decodeUtf8(skillMarkdown.content, "SKILL.md"),
+      directory,
+    );
   } catch (error) {
     if (error instanceof SkillSpecError) throw new PluginResolverError(error.message);
     throw error;

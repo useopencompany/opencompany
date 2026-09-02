@@ -4617,6 +4617,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           files: placeholderSkillBundle.files,
           fileCount: 1,
           totalBytes: 128,
+          warnings: [],
         },
         meta,
       },

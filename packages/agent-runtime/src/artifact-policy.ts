@@ -19,7 +19,7 @@ export type ArtifactSizeLimits = {
 
 // Skill bundle: a small multi-file directory rooted at SKILL.md.
 export const SKILL_LIMITS: ArtifactSizeLimits = {
-  maxFileCount: 64,
+  maxFileCount: 512,
   maxTotalBytes: 1 * MIB,
   maxFileBytes: 512 * KIB,
 };

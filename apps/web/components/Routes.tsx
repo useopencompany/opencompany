@@ -7,6 +7,7 @@ import type {
   SkillBundleFileMetadataDto,
   SkillImportCandidateDto,
   SkillImportFileMetadataDto,
+  SkillImportWarningDto,
   SkillInstallationDto,
   SkillListItemDto,
   SkillSourceDto,
@@ -1532,6 +1533,7 @@ type ImportPreviewState = {
   totalBytes: number;
   resolvedCommit: string;
   integrity: string;
+  warnings: SkillImportWarningDto[];
 };
 
 function WorkspaceSkillDialog({
@@ -1755,6 +1757,7 @@ function ImportSkillDialog({
           totalBytes: result.totalBytes,
           resolvedCommit: result.source.resolvedCommit,
           integrity: result.integrity,
+          warnings: result.warnings,
         });
       } catch (cause) {
         setError(errorMessage(cause));
@@ -1889,6 +1892,14 @@ function ImportSkillDialog({
 
           {preview ? (
             <div className="flex flex-col gap-3">
+              {preview.warnings.map((warning) => (
+                <div
+                  key={warning.code}
+                  className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-[12px] leading-5 text-warning"
+                >
+                  {warning.message}
+                </div>
+              ))}
               <EditorField label="Name">
                 <div className={`${EDITOR_INPUT_CLASS} flex items-center opacity-70`}>
                   {preview.name}
