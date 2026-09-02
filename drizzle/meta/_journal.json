@@ -1681,6 +1681,13 @@
       "when": 1788364801000,
       "tag": "0239_goat_betterstack_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 240,
+      "version": "7",
+      "when": 1788440400000,
+      "tag": "0240_goat_chat_attachment_upload_idempotency",
+      "breakpoints": true
     }
   ]
 }

@@ -58,6 +58,41 @@ Sandboxes do not receive application database credentials or raw platform secret
 validates short-lived tokens, applies provider/model scope, records usage, and forwards only to
 configured upstreams. See [LLM token broker](./llm-token-broker.md).
 
+## Chat attachment retention
+
+The API gives each unclaimed chat attachment a 24-hour TTL. Keyed uploads reserve their key before
+Blob I/O and replay the original attachment ID and expiry. Cleanup retains the command row as a
+tombstone, so a cleaned or expired key returns a conflict and the client must use a new key.
+
+The task-worker group owns the attachment cleanup poller. It starts immediately, runs hourly, and
+requires the runner's existing `BLOB_READ_WRITE_TOKEN`. One runner holds a Postgres advisory lock
+per pass. Each pass handles at most 100 rows and runs again immediately after a full batch. Physical
+deletion starts 15 minutes after expiry. This grace does not make an upload claimable after its
+24-hour TTL.
+
+The cleaner locks and rechecks each candidate in its own transaction. Claimed uploads are never
+candidates. It deletes Blob first, then removes the unclaimed upload row and marks a keyed command
+cleaned. A missing Blob counts as success. Any other storage failure rolls back the candidate's
+database changes and leaves it for a later poll. Completion and failure logs contain counts and
+opaque attachment or command IDs only.
+
+Before enabling cleanup in production, run this read-only inventory query against the product
+database:
+
+```sql
+SELECT
+  count(*)::bigint AS expired_unclaimed_count,
+  CURRENT_TIMESTAMP - min(expires_at) AS oldest_expired_age
+FROM goat.chat_attachment_uploads
+WHERE claimed_at IS NULL
+  AND expires_at <= CURRENT_TIMESTAMP;
+```
+
+After deployment, verify `opencompany.chat_attachment_cleanup_completed` and
+`opencompany.chat_attachment_upload_replayed` events. Roll back the API and worker before dropping
+the additive command table. Blob cleanup is not reversible, but it only removes uploads that the
+existing API already treats as unavailable.
+
 ## Verification
 
 Run runner unit tests and typecheck, then exercise the real product path that durably admits the

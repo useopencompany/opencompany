@@ -5303,6 +5303,9 @@ export const chatAttachmentUploads = productSchema.table(
     actorUnclaimedIdx: index("goat_chat_attachment_uploads_actor_unclaimed_idx")
       .on(table.userWorkosId, table.workspaceId, table.expiresAt)
       .where(sql`${table.claimedAt} IS NULL`),
+    cleanupExpiryIdx: index("goat_chat_attachment_uploads_cleanup_expiry_idx")
+      .on(table.expiresAt, table.id)
+      .where(sql`${table.claimedAt} IS NULL`),
     claimedMessageIdx: index("goat_chat_attachment_uploads_claimed_message_idx").on(
       table.claimedMessageId,
     ),
@@ -5328,6 +5331,67 @@ export const chatAttachmentUploads = productSchema.table(
     expiryCheck: check(
       "goat_chat_attachment_uploads_expiry_check",
       sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+  }),
+);
+
+// Keyed attachment uploads reserve their identity before Blob I/O. Cleanup marks these rows but
+// retains them as tombstones, preventing a previously used key from acquiring a new meaning.
+// There is intentionally no attachment FK because the reservation precedes the upload row.
+export const chatAttachmentUploadCommands = productSchema.table(
+  "chat_attachment_upload_commands",
+  {
+    commandId: text("command_id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    attachmentId: text("attachment_id").notNull(),
+    blobPathname: text("blob_pathname").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cleanedAt: timestamp("cleaned_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    touchedAt: timestamp("touched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    actorKeyIdx: uniqueIndex("goat_chat_attachment_upload_commands_actor_key_idx").on(
+      table.userWorkosId,
+      table.workspaceId,
+      table.idempotencyKey,
+    ),
+    attachmentIdx: uniqueIndex("goat_chat_attachment_upload_commands_attachment_idx").on(
+      table.attachmentId,
+    ),
+    blobPathnameIdx: uniqueIndex("goat_chat_attachment_upload_commands_blob_pathname_idx").on(
+      table.blobPathname,
+    ),
+    expiryIdx: index("goat_chat_attachment_upload_commands_expiry_idx")
+      .on(table.expiresAt, table.commandId)
+      .where(sql`${table.cleanedAt} IS NULL`),
+    requestHashCheck: check(
+      "goat_chat_attachment_upload_commands_request_hash_check",
+      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    keyLengthCheck: check(
+      "goat_chat_attachment_upload_commands_key_length_check",
+      sql`length(${table.idempotencyKey}) BETWEEN 1 AND 200`,
+    ),
+    keyAsciiCheck: check(
+      "goat_chat_attachment_upload_commands_key_ascii_check",
+      sql`${table.idempotencyKey} ~ '^[!-~]+$'`,
+    ),
+    expiryCheck: check(
+      "goat_chat_attachment_upload_commands_expiry_check",
+      sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+    lifecycleCheck: check(
+      "goat_chat_attachment_upload_commands_lifecycle_check",
+      sql`${table.cleanedAt} IS NULL OR ${table.completedAt} IS NULL OR ${table.cleanedAt} >= ${table.completedAt}`,
     ),
   }),
 );

@@ -66,6 +66,25 @@ export type ChatAttachmentUpload = {
   expiresAt: Date;
 };
 
+export type ChatAttachmentUploadReservation = {
+  commandId: string;
+  requestHash: string;
+  attachmentId: string;
+  blobPathname: string;
+  expiresAt: Date;
+  completedAt: Date | null;
+  cleanedAt: Date | null;
+};
+
+export type CompleteChatAttachmentUploadInput = Omit<
+  CreateChatAttachmentUploadInput,
+  "actor" | "id" | "blobPathname" | "expiresAt"
+> & {
+  commandId: string;
+};
+
+export type CompletedChatAttachmentUpload = ChatAttachmentUpload & { created: boolean };
+
 export type ChatRepositoryIdFactory = {
   command(): string;
   conversation(): string;
@@ -112,6 +131,119 @@ export class PostgresChatAttachmentRepository {
         expires_at AS "expiresAt"
     `);
     return row ? mapAttachmentUpload(row) : null;
+  }
+
+  async reserve(input: {
+    actor: Actor;
+    commandId: string;
+    idempotencyKey: string;
+    requestHash: string;
+    attachmentId: string;
+    blobPathname: string;
+    expiresAt: Date;
+  }): Promise<ChatAttachmentUploadReservation | null> {
+    const touchedAt = this.now();
+    const [row] = await this.rows<ChatAttachmentUploadReservationRow>(sql`
+      INSERT INTO goat.chat_attachment_upload_commands (
+        command_id, user_workos_id, workspace_id, idempotency_key, request_hash,
+        attachment_id, blob_pathname, expires_at, created_at, touched_at
+      )
+      SELECT
+        ${input.commandId}, ${input.actor.userId}, ${input.actor.workspaceId},
+        ${input.idempotencyKey}, ${input.requestHash}, ${input.attachmentId},
+        ${input.blobPathname}, ${input.expiresAt}, ${touchedAt}, ${touchedAt}
+      WHERE EXISTS (
+        SELECT 1
+        FROM goat.workspace_members AS member
+        WHERE member.workspace_id = ${input.actor.workspaceId}
+          AND member.user_workos_id = ${input.actor.userId}
+      )
+      ON CONFLICT (user_workos_id, workspace_id, idempotency_key)
+      DO UPDATE SET touched_at = EXCLUDED.touched_at
+      RETURNING
+        command_id AS "commandId", request_hash AS "requestHash",
+        attachment_id AS "attachmentId", blob_pathname AS "blobPathname",
+        expires_at AS "expiresAt", completed_at AS "completedAt", cleaned_at AS "cleanedAt"
+    `);
+    return row ? mapAttachmentUploadReservation(row) : null;
+  }
+
+  async findCompleted(commandId: string): Promise<ChatAttachmentUpload | null> {
+    const [row] = await this.rows<ChatAttachmentUploadRow>(sql`
+      SELECT
+        upload.id, upload.format, upload.media_type AS "mediaType", upload.filename,
+        upload.size_bytes AS "sizeBytes", command.expires_at AS "expiresAt"
+      FROM goat.chat_attachment_upload_commands AS command
+      INNER JOIN goat.chat_attachment_uploads AS upload ON upload.id = command.attachment_id
+      WHERE command.command_id = ${commandId}
+        AND command.completed_at IS NOT NULL
+        AND command.cleaned_at IS NULL
+      LIMIT 1
+    `);
+    return row ? mapAttachmentUpload(row) : null;
+  }
+
+  async complete(
+    input: CompleteChatAttachmentUploadInput,
+  ): Promise<CompletedChatAttachmentUpload | null> {
+    const completedAt = this.now();
+    const [row] = await this.rows<CompletedChatAttachmentUploadRow>(sql`
+      WITH locked_command AS MATERIALIZED (
+        SELECT command.*
+        FROM goat.chat_attachment_upload_commands AS command
+        WHERE command.command_id = ${input.commandId}
+          AND command.cleaned_at IS NULL
+        FOR UPDATE
+      ), inserted AS (
+        INSERT INTO goat.chat_attachment_uploads (
+          id, user_workos_id, workspace_id, format, media_type, filename, size_bytes,
+          blob_pathname, blob_url, extracted_text, expires_at, created_at
+        )
+        SELECT
+          command.attachment_id, command.user_workos_id, command.workspace_id, ${input.format},
+          ${input.mediaType}, ${input.filename}, ${input.sizeBytes}, command.blob_pathname,
+          ${input.blobUrl}, ${input.extractedText}, command.expires_at, ${completedAt}
+        FROM locked_command AS command
+        WHERE EXISTS (
+            SELECT 1
+            FROM goat.workspace_members AS member
+            WHERE member.workspace_id = command.workspace_id
+              AND member.user_workos_id = command.user_workos_id
+          )
+        ON CONFLICT (id) DO NOTHING
+        RETURNING id
+      ), completed AS (
+        UPDATE goat.chat_attachment_upload_commands AS command
+        SET completed_at = COALESCE(command.completed_at, ${completedAt}),
+            touched_at = ${completedAt}
+        WHERE command.command_id = ${input.commandId}
+          AND command.cleaned_at IS NULL
+          AND (
+            EXISTS (SELECT 1 FROM inserted)
+            OR EXISTS (
+              SELECT 1
+              FROM goat.chat_attachment_uploads AS upload
+              WHERE upload.id = command.attachment_id
+                AND upload.user_workos_id = command.user_workos_id
+                AND upload.workspace_id = command.workspace_id
+                AND upload.blob_pathname = command.blob_pathname
+                AND upload.format = ${input.format}
+                AND upload.media_type = ${input.mediaType}
+                AND upload.filename = ${input.filename}
+                AND upload.size_bytes = ${input.sizeBytes}
+                AND upload.extracted_text IS NOT DISTINCT FROM ${input.extractedText}
+            )
+          )
+        RETURNING command.attachment_id, command.expires_at
+      )
+      SELECT
+        completed.attachment_id AS id, ${input.format} AS format,
+        ${input.mediaType} AS "mediaType", ${input.filename} AS filename,
+        ${input.sizeBytes} AS "sizeBytes", completed.expires_at AS "expiresAt",
+        EXISTS (SELECT 1 FROM inserted) AS created
+      FROM completed
+    `);
+    return row ? { ...mapAttachmentUpload(row), created: row.created } : null;
   }
 
   async resolve(input: {
@@ -2250,6 +2382,18 @@ type ChatAttachmentUploadRow = {
   expiresAt: Date | string;
 };
 
+type ChatAttachmentUploadReservationRow = {
+  commandId: string;
+  requestHash: string;
+  attachmentId: string;
+  blobPathname: string;
+  expiresAt: Date | string;
+  completedAt: Date | string | null;
+  cleanedAt: Date | string | null;
+};
+
+type CompletedChatAttachmentUploadRow = ChatAttachmentUploadRow & { created: boolean };
+
 type ResolvedAttachmentRow = {
   id: string;
   format: ChatMessageAttachment["kind"];
@@ -2525,6 +2669,20 @@ function mapAttachmentUpload(row: ChatAttachmentUploadRow): ChatAttachmentUpload
     filename: row.filename,
     sizeBytes: row.sizeBytes,
     expiresAt: asDate(row.expiresAt),
+  };
+}
+
+function mapAttachmentUploadReservation(
+  row: ChatAttachmentUploadReservationRow,
+): ChatAttachmentUploadReservation {
+  return {
+    commandId: row.commandId,
+    requestHash: row.requestHash,
+    attachmentId: row.attachmentId,
+    blobPathname: row.blobPathname,
+    expiresAt: asDate(row.expiresAt),
+    completedAt: row.completedAt ? asDate(row.completedAt) : null,
+    cleanedAt: row.cleanedAt ? asDate(row.cleanedAt) : null,
   };
 }
 

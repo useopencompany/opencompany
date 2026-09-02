@@ -352,6 +352,24 @@ describe("v1 protocol contract", () => {
         }),
       ]),
     );
+    expect(document.paths?.["/v1/attachments"]?.post?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          in: "header",
+          name: "idempotency-key",
+          required: false,
+          schema: expect.objectContaining({ minLength: 1, maxLength: 200 }),
+        }),
+      ]),
+    );
+    expect(document.components?.schemas?.AttachmentUploadEnvelope).toMatchObject({
+      properties: {
+        data: {
+          required: expect.arrayContaining(["replayed"]),
+          properties: { replayed: { type: "boolean" } },
+        },
+      },
+    });
     expect(JSON.stringify(document)).not.toMatch(/workos|codex_chat_turn|lease_owner/iu);
 
     const client = createApiClient("https://api.opencompany.test");

@@ -2857,6 +2857,7 @@ export const AttachmentUploadEnvelopeSchema = z
       .object({
         attachment: AttachmentSchema,
         expiresAt: TimestampSchema,
+        replayed: z.boolean(),
       })
       .strict(),
     meta: ProtocolMetadataSchema,

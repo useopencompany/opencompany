@@ -1731,6 +1731,14 @@ export const uploadAttachmentRoute = createRoute({
   tags: ["Chat"],
   security: actorSecurity,
   request: {
+    headers: z.object({
+      "idempotency-key": z
+        .string()
+        .regex(/^[\x21-\x7e]+$/u)
+        .min(1)
+        .max(200)
+        .optional(),
+    }),
     body: {
       required: true,
       content: { "multipart/form-data": { schema: AttachmentUploadBodySchema } },

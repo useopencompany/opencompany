@@ -7983,11 +7983,15 @@
               "expiresAt": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "replayed": {
+                "type": "boolean"
               }
             },
             "required": [
               "attachment",
-              "expiresAt"
+              "expiresAt",
+              "replayed"
             ],
             "additionalProperties": false
           },
@@ -19404,6 +19408,19 @@
           },
           {
             "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[\\x21-\\x7e]+$/u"
+            },
+            "required": false,
+            "name": "idempotency-key",
+            "in": "header"
           }
         ],
         "requestBody": {

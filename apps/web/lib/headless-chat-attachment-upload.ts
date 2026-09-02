@@ -4,7 +4,7 @@ import { createApiClient } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 
 export async function uploadHeadlessChatAttachment(
-  input: { file: File },
+  input: { file: File; pendingId: string },
   options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
 ) {
   const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
@@ -14,7 +14,10 @@ export async function uploadHeadlessChatAttachment(
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
   });
-  const response = await client.v1.attachments.$post({ form: { file: input.file } });
+  const response = await client.v1.attachments.$post({
+    header: { "idempotency-key": `web-chat-attachment:${input.pendingId}` },
+    form: { file: input.file },
+  });
   if (!response.ok) throw await headlessChatResponseError(response);
   const envelope = await response.json();
   return { id: envelope.data.attachment.id };

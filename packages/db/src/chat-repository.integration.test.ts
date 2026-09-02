@@ -40,6 +40,7 @@ const migrationPaths = [
   "0229_goat_chat_skill_bundle_names.sql",
   "0235_goat_chat_message_shape_epochs.sql",
   "0236_goat_chat_message_presentation_summaries.sql",
+  "0239_goat_chat_attachment_upload_idempotency.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -50,6 +51,7 @@ describe("Postgres Chat repositories", () => {
   let execute: (query: SQL) => Promise<unknown>;
   let legacySurvivedMigration: boolean;
   let legacyRuntimeSurvivedMigration: boolean;
+  let legacyAttachmentSurvivedMigration: boolean;
 
   beforeEach(async () => {
     database = new PGlite();
@@ -78,6 +80,18 @@ describe("Postgres Chat repositories", () => {
       );
     `);
     for (const migrationPath of migrationPaths) {
+      if (migrationPath.endsWith("0239_goat_chat_attachment_upload_idempotency.sql")) {
+        await database.exec(`
+          INSERT INTO goat.chat_attachment_uploads (
+            id, user_workos_id, workspace_id, format, media_type, filename, size_bytes,
+            blob_pathname, blob_url, expires_at
+          ) VALUES (
+            'migration_attachment', 'migration_user', 'migration_workspace', 'text',
+            'text/plain', 'preserve.txt', 8, 'migration/preserve',
+            'https://blob.invalid/preserve', now() + interval '1 day'
+          )
+        `);
+      }
       const migration = await readFile(migrationPath, "utf8");
       for (const statement of migration.split("--> statement-breakpoint")) {
         if (statement.trim()) await database.exec(statement);
@@ -106,6 +120,12 @@ describe("Postgres Chat repositories", () => {
       migratedConversationProjection.rows[0]?.runtime_status === "queued" &&
       migratedConversationProjection.rows[0]?.active_run_id === null &&
       migratedConversationProjection.rows[0]?.runtime_has_error === false;
+    legacyAttachmentSurvivedMigration =
+      (
+        await database.query<{ count: number }>(
+          "SELECT count(*)::int AS count FROM goat.chat_attachment_uploads WHERE id = 'migration_attachment'",
+        )
+      ).rows[0]?.count === 1;
     await database.exec(`
       DELETE FROM goat.codex_chat_turns;
       DELETE FROM goat.codex_chat_sessions;
@@ -141,6 +161,87 @@ describe("Postgres Chat repositories", () => {
   it("keeps pre-existing durable rows while adding the canonical event cursor", () => {
     expect(legacySurvivedMigration).toBe(true);
     expect(legacyRuntimeSurvivedMigration).toBe(true);
+    expect(legacyAttachmentSurvivedMigration).toBe(true);
+  });
+
+  it("scopes attachment upload keys to actor and workspace and completes atomically", async () => {
+    await database.exec(`
+      INSERT INTO goat.workspace_members (id, workspace_id, user_workos_id, role)
+      VALUES ('member_4', 'workspace_2', 'user_1', 'admin')
+    `);
+    const uploads = new PostgresChatAttachmentRepository(
+      execute,
+      () => new Date("2026-08-10T20:00:00.000Z"),
+    );
+    const expiresAt = new Date("2026-08-11T20:00:00.000Z");
+    const requestHash = "a".repeat(64);
+    const first = await uploads.reserve({
+      actor: actor(),
+      commandId: "attachment_command_1",
+      idempotencyKey: "same-key",
+      requestHash,
+      attachmentId: "attachment_keyed_1",
+      blobPathname: "goat-chat-v1/user_1/attachment_keyed_1/content",
+      expiresAt,
+    });
+    const otherWorkspace = await uploads.reserve({
+      actor: actor({ workspaceId: "workspace_2" }),
+      commandId: "attachment_command_2",
+      idempotencyKey: "same-key",
+      requestHash,
+      attachmentId: "attachment_keyed_2",
+      blobPathname: "goat-chat-v1/user_1/attachment_keyed_2/content",
+      expiresAt,
+    });
+    expect(first?.commandId).toBe("attachment_command_1");
+    expect(otherWorkspace?.commandId).toBe("attachment_command_2");
+
+    await expect(
+      uploads.complete({
+        commandId: "attachment_command_1",
+        format: "text",
+        mediaType: "text/plain",
+        filename: "notes.txt",
+        sizeBytes: 5,
+        blobUrl: "https://blob.invalid/keyed-1",
+        extractedText: "notes",
+      }),
+    ).resolves.toMatchObject({ id: "attachment_keyed_1", created: true });
+    expect(
+      (
+        await database.query<{ completed_at: Date; upload_count: number }>(`
+          SELECT command.completed_at,
+                 count(upload.id)::int AS upload_count
+          FROM goat.chat_attachment_upload_commands AS command
+          LEFT JOIN goat.chat_attachment_uploads AS upload ON upload.id = command.attachment_id
+          WHERE command.command_id = 'attachment_command_1'
+          GROUP BY command.completed_at
+        `)
+      ).rows,
+    ).toMatchObject([{ completed_at: expect.any(Date), upload_count: 1 }]);
+
+    await database.exec(`
+      DELETE FROM goat.chat_attachment_uploads WHERE id = 'attachment_keyed_1';
+      UPDATE goat.chat_attachment_upload_commands
+      SET cleaned_at = '2026-08-12T00:00:00Z'
+      WHERE command_id = 'attachment_command_1';
+    `);
+    await expect(
+      uploads.reserve({
+        actor: actor(),
+        commandId: "replacement_command",
+        idempotencyKey: "same-key",
+        requestHash,
+        attachmentId: "replacement_attachment",
+        blobPathname: "goat-chat-v1/user_1/replacement_attachment/content",
+        expiresAt: new Date("2026-08-13T20:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({
+      commandId: "attachment_command_1",
+      attachmentId: "attachment_keyed_1",
+      cleanedAt: expect.any(Date),
+      expiresAt,
+    });
   });
 
   it("accounts projected Message bytes and rotates the shape epoch only after a Run settles", async () => {

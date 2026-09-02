@@ -5278,8 +5278,8 @@ function automationCommandError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-async function uploadCanonicalAttachment({ file }: { file: File }) {
-  return { ...(await uploadHeadlessChatAttachment({ file })), canonical: true };
+async function uploadCanonicalAttachment({ file, pendingId }: { file: File; pendingId: string }) {
+  return { ...(await uploadHeadlessChatAttachment({ file, pendingId })), canonical: true };
 }
 
 function escapeRegExp(value: string) {
