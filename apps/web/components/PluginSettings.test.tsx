@@ -16,6 +16,7 @@ import {
   OfficialSkillPluginDetail,
   PluginDetail,
   PluginsSettings,
+  SIGNOZ_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
   YC_ADVISE_PLUGIN_SOURCE,
 } from "./PluginSettings";
@@ -235,12 +236,16 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/slack",
     );
+    expect(screen.getByRole("link", { name: /signoz/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/signoz",
+    );
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
       "/settings/plugins/yc-advise",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(6);
-    expect(screen.getAllByText("Official package · review before installing")).toHaveLength(5);
+    expect(screen.getAllByText("Not installed")).toHaveLength(7);
+    expect(screen.getAllByText("Official package · review before installing")).toHaveLength(6);
     expect(
       screen.getByText("Official skill package · review before installing"),
     ).toBeInTheDocument();
@@ -256,6 +261,9 @@ describe("Plugin settings", () => {
     expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
     );
+    expect(SIGNOZ_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
+    );
     expect(SLACK_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
     );
@@ -267,7 +275,7 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/linear",
     );
-    expect(screen.getAllByRole("link", { name: "Review" })).toHaveLength(6);
+    expect(screen.getAllByRole("link", { name: "Review" })).toHaveLength(7);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });

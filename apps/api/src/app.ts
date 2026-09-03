@@ -2705,6 +2705,8 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/betterstack/callback", (c) =>
       ingress.callback("betterstack", c.req.raw),
     );
+    app.get("/integrations/signoz/start", (c) => ingress.start("signoz", c.req.raw));
+    app.get("/integrations/signoz/callback", (c) => ingress.callback("signoz", c.req.raw));
     app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));
     app.get("/integrations/linear/callback", (c) => ingress.callback("linear", c.req.raw));
     app.get("/integrations/posthog/start", (c) => ingress.start("posthog", c.req.raw));

@@ -223,6 +223,25 @@ export function SlackPluginDetail({
   );
 }
 
+export function SigNozPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.signoz}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 function OfficialMcpPluginDetail({
   config,
   pluginState,
@@ -1139,6 +1158,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "betterstack" ||
     config.connectionProvider === "github_user" ||
     config.connectionProvider === "neon" ||
+    config.connectionProvider === "signoz" ||
     config.connectionProvider === "slack"
   ) {
     const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
@@ -1195,6 +1215,10 @@ export function defaultSlackToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("slack");
 }
 
+export function defaultSigNozToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("signoz");
+}
+
 function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): PluginToolsState {
   return {
     status: "ready",
@@ -1239,6 +1263,10 @@ export function betterStackToolsStateFromPlugin(
 
 export function slackToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "slack");
+}
+
+export function signozToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "signoz");
 }
 
 function officialPluginToolsStateFromPlugin(
@@ -1336,6 +1364,10 @@ export function betterStackToolsStateFromPreview(
 
 export function slackToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "slack");
+}
+
+export function signozToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "signoz");
 }
 
 function officialPluginToolsStateFromPreview(

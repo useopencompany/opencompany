@@ -1,0 +1,63 @@
+---
+title: SigNoz
+description: Investigate SigNoz telemetry and manage operational resources through permission-gated tools.
+---
+
+## What the Plugin does
+
+SigNoz is an official Agent Plugin for main Chat and persistent Codex or Claude Code sessions. Its
+integrity-pinned package connects SigNoz Cloud's hosted MCP server to opencompany's action gateway.
+It can search SigNoz documentation, inspect logs, metrics, traces, alerts, dashboards, views, and
+notification channels, and manage operational resources.
+
+The Plugin is workspace-installed, while each person connects their own SigNoz account. Installing
+or uninstalling the package never creates or removes that personal connection.
+
+## Permission layers
+
+The package uses three reviewed permission groups:
+
+1. **Read SigNoz documentation** defaults to **On** and contains only public documentation tools.
+2. **Inspect observability data** defaults to **Ask** because telemetry and operational
+   configuration can contain sensitive production or customer data.
+3. **Manage SigNoz** defaults to **Ask** because these tools can create, update, import, or delete
+   alerts, dashboards, views, and notification channels.
+4. Newly discovered tools stay on **Ask** until a reviewed package version classifies them.
+5. Every call still passes through opencompany's permission checks and audit trail.
+
+Persistent coding sessions receive only permissions set to **On**. Keep telemetry inspection and
+management on **Ask** unless you intentionally want a trusted session to use them without a pause.
+
+## Connect SigNoz
+
+1. Confirm that your account is hosted in SigNoz's **US Cloud region**.
+2. Ask a workspace admin to install SigNoz under **Settings → Plugins → SigNoz**.
+3. On the SigNoz Plugin page, choose **Connect SigNoz account**.
+4. In SigNoz's authorization page, enter your instance URL and a service-account API key. Only a
+   SigNoz admin can create that key.
+5. Review the three tool groups and leave sensitive reads and writes on **Ask**.
+
+OAuth bearer and refresh tokens remain encrypted and server-side. The instance URL and service
+account key are entered directly into SigNoz's hosted authorization page and are not sent to
+opencompany.
+
+## Current limitations and safety
+
+This initial integration is intentionally bound to SigNoz US Cloud at
+`https://mcp.us.signoz.cloud/mcp`. Other SigNoz Cloud regions and self-hosted MCP endpoints are not
+accepted, which prevents saved credentials from being redirected to an arbitrary server. Support
+for another region requires a separately reviewed fixed endpoint.
+
+Observability data can contain customer data, credentials, request payloads, and personally
+identifiable information. Query narrowly and prefer aggregates when raw telemetry is unnecessary.
+Review every proposed alert, dashboard, view, or notification-channel change before approving it.
+
+See [SigNoz's MCP guide](https://signoz.io/docs/ai/signoz-mcp-server/) for provider requirements.
+
+## Example requests
+
+- “Search the SigNoz docs for trace sampling guidance.”
+- “Summarize error rates by service for the last hour without returning raw logs.”
+- “List active alerts and the dashboards associated with checkout latency.”
+
+SigNoz is not a Brain source. Tool results enter Brain only through an explicit supported capture.
