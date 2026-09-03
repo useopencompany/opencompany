@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { V1_BROWSER_REQUEST_HEADERS } from "./browser-transport";
 import { createApiClient } from "./client";
 import { decodeEventCursor, encodeEventCursor, RunEventSchema } from "./events";
 import { createOpenApiDocument } from "./routes";
@@ -15,6 +16,46 @@ import {
 } from "./schemas";
 
 describe("headless protocol", () => {
+  it("keeps the browser request-header contract aligned with every OpenAPI operation", () => {
+    type HeaderParameter = { in?: string; name?: string } | { $ref: string };
+    type Operation = { parameters?: HeaderParameter[] };
+    const methods = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
+    const document = createOpenApiDocument() as unknown as {
+      paths?: Record<
+        string,
+        Partial<Record<(typeof methods)[number], Operation>> & {
+          parameters?: HeaderParameter[];
+        }
+      >;
+    };
+    const declaredHeaders = new Set<string>();
+    const collectHeaders = (parameters: HeaderParameter[] | undefined) => {
+      for (const parameter of parameters ?? []) {
+        if (!("$ref" in parameter) && parameter.in === "header" && parameter.name) {
+          declaredHeaders.add(parameter.name.toLowerCase());
+        }
+      }
+    };
+    for (const path of Object.values(document.paths ?? {})) {
+      collectHeaders(path.parameters);
+      for (const method of methods) collectHeaders(path[method]?.parameters);
+    }
+
+    const expectedHeaders = new Set([
+      // Fetch metadata and JSON request bodies are represented by OpenAPI media types rather than
+      // operation header parameters. Bearer auth is represented by the security scheme.
+      "accept",
+      "authorization",
+      "content-type",
+      ...declaredHeaders,
+    ]);
+    const browserHeaders = new Set(
+      V1_BROWSER_REQUEST_HEADERS.map((header) => header.toLowerCase()),
+    );
+
+    expect(browserHeaders).toEqual(expectedHeaders);
+  });
+
   it("publishes every canonical /v1 operation in OpenAPI", () => {
     const document = createOpenApiDocument();
     expect(Object.keys(document.paths ?? {})).toEqual([

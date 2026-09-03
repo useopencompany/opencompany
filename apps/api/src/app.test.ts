@@ -41,6 +41,7 @@ import {
   PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_HEADER,
+  V1_BROWSER_REQUEST_HEADERS,
 } from "@opencompany/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
@@ -1675,10 +1676,9 @@ describe("canonical Hono API", () => {
     expect(allowed.status).toBe(204);
     expect(allowed.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true");
-    expect(allowed.headers.get("access-control-allow-headers")).toContain("Idempotency-Key");
-    expect(allowed.headers.get("access-control-allow-headers")).toContain(
-      "X-OpenCompany-Protocol-Version",
-    );
+    const allowedHeaders = allowed.headers.get("access-control-allow-headers")?.toLowerCase();
+    expect(allowedHeaders).toContain("idempotency-key");
+    expect(allowedHeaders).toContain("x-opencompany-protocol-version");
     expect(allowed.headers.get("access-control-allow-methods")).toContain("PUT");
     expect(allowed.headers.get("access-control-allow-methods")).toContain("DELETE");
 
@@ -1691,6 +1691,29 @@ describe("canonical Hono API", () => {
     });
     expect(disallowed.status).toBe(204);
     expect(disallowed.headers.has("access-control-allow-origin")).toBe(false);
+  });
+
+  it("allows conditional cross-origin Message presentation reads", async () => {
+    const app = testApp(fakeRepository(), {
+      browserOrigins: ["https://my.opencompany.chat"],
+    });
+    const response = await app.request(
+      "/v1/conversations/conversation_1/messages/message_assistant_1/presentation",
+      {
+        method: "OPTIONS",
+        headers: {
+          Origin: "https://my.opencompany.chat",
+          "Access-Control-Request-Method": "GET",
+          "Access-Control-Request-Headers": "if-none-match",
+        },
+      },
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
+    expect(response.headers.get("access-control-allow-headers")?.split(",")).toEqual(
+      expect.arrayContaining([...V1_BROWSER_REQUEST_HEADERS]),
+    );
   });
 
   it("rejects cookie mutations without an allowed Origin while preserving bearer clients", async () => {
