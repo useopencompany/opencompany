@@ -50,7 +50,9 @@ vi.mock("./integrations/github-user-mcp", () => ({
   loadGitHubUserMcpWorkerConnection: mocks.loadGitHubConnection,
 }));
 vi.mock("./integrations/google-calendar-mcp", () => ({
-  GOOGLE_CALENDAR_MCP_ENDPOINT_URL: "https://calendarmcp.googleapis.com/mcp/v1",
+  GOOGLE_CALENDAR_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-calendar",
+  googleCalendarMcpRuntimeEndpointUrl: () =>
+    "https://api.opencompany.chat/mcp/plugins/google-calendar",
   getGoogleCalendarMcpIntegrationState: mocks.getGoogleCalendarState,
   loadGoogleCalendarMcpWorkerConnection: mocks.loadGoogleCalendarConnection,
 }));
@@ -230,7 +232,7 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
-  it("binds Google credentials only to Google's exact Calendar MCP endpoint", async () => {
+  it("binds Google credentials only to opencompany's exact Calendar MCP endpoint", async () => {
     const calendarRecord = record({
       pluginName: "google-calendar",
       pluginLabel: "google-calendar",
@@ -239,28 +241,42 @@ describe("plugin gateway registration cache", () => {
       server: {
         name: "google-calendar",
         type: "streamable-http",
-        url: "https://calendarmcp.googleapis.com/mcp/v1",
+        url: "https://api.opencompany.chat/mcp/plugins/google-calendar",
         headers: {},
       },
       refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
     });
     mocks.listRegistrations.mockResolvedValueOnce([calendarRecord]);
 
-    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+    const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registrations).toEqual([
       expect.objectContaining({
         source: "plugin:google-calendar:google-calendar",
         connectionProvider: "google_calendar",
         getState: mocks.getGoogleCalendarState,
-        loadConnection: mocks.loadGoogleCalendarConnection,
       }),
     ]);
+    await registrations[0]!.loadConnection({
+      ...identity,
+      operation: { type: "tools/list" },
+      onAuthorizationRequired: () => {
+        throw new Error("authorization required");
+      },
+    });
+    expect(mocks.loadGoogleCalendarConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...identity,
+        registrationId: "plugin_gateway_1",
+        operation: { type: "tools/list" },
+      }),
+    );
 
     mocks.listRegistrations.mockResolvedValueOnce([
       {
         ...calendarRecord,
         server: {
           ...calendarRecord.server,
-          url: "https://calendarmcp.googleapis.com.evil.example/mcp/v1",
+          url: "https://api.opencompany.chat.evil.example/mcp/plugins/google-calendar",
         },
       },
     ]);

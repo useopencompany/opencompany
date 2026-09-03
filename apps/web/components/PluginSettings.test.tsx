@@ -228,7 +228,7 @@ describe("Plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
     );
     expect(GOOGLE_CALENDAR_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/163e3f05fe3e1c157fd90ab5345e21c00f57a2ee/google-calendar",
+      "https://github.com/useopencompany/plugins/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
     );
     expect(linearCard).not.toBeNull();
     await userEvent.click(

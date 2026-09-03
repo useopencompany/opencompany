@@ -1,38 +1,42 @@
 ---
 title: Google Calendar
-description: Connect Google's official Calendar MCP server with permission-gated tools.
+description: Connect opencompany's Google Calendar MCP with permission-gated tools.
 ---
 
-Google Calendar is an official Agent Plugin backed by Google's hosted Calendar MCP server. It can
-check availability, read event details, and manage events using your personal Google account.
+Google Calendar is an official opencompany Agent Plugin backed by opencompany's MCP wrapper around
+Google's stable Calendar REST API. The initial version can list calendars, list or fetch event
+details, and create events using your personal Google account.
 
 ## Connect Google Calendar
 
 1. Open **Settings → Plugins → Google Calendar**.
-2. Install the official package.
+2. Install the opencompany package.
 3. Select **Connect Google Calendar account** and approve Google's OAuth consent screen.
 
-The Calendar MCP server is currently a Google Developer Preview. The opencompany operator must
-enable both the Google Calendar API (`calendar-json.googleapis.com`) and Google Calendar MCP API
-(`calendarmcp.googleapis.com`) in the Google Cloud project used for OAuth. See Google's
-[MCP server setup guide](https://developers.google.com/workspace/calendar/api/guides/configure-mcp-server).
+The opencompany operator must enable the stable Google Calendar API
+(`calendar-json.googleapis.com`) in the Google Cloud project used for OAuth and complete Google's
+normal OAuth consent-screen verification for the requested scopes. Google's Developer Preview MCP
+API (`calendarmcp.googleapis.com`) is not used or required.
 
 ## Scopes and permissions
 
 Calendar contents can be personal or confidential, so all reviewed capability groups default to
 **Ask**:
 
-- **Check calendars & availability**: list calendars and suggest meeting times.
-- **Read calendar events**: list, search, and read event details.
-- **Manage calendar events**: create, update, delete, and respond to events.
+- **Check calendars**: list calendars available to the connected account.
+- **Read calendar events**: list events and read one event by id.
+- **Manage calendar events**: create events. Update, delete, RSVP, availability, recurrence, and
+  scheduling tools are not exposed in the initial release.
 
 New or unclassified tools also default to **Ask**. You can change each capability to **On**, **Ask**,
 or **Off** from the plugin page. Keep event-management tools on **Ask** unless you explicitly want
 agents to change your calendar without confirmation.
 
-opencompany stores OAuth credentials server-side and injects them only for Google's reviewed
-`https://calendarmcp.googleapis.com/mcp/v1` endpoint. Plugin packages cannot redirect those
-credentials to another host.
+opencompany stores OAuth credentials server-side. The plugin gateway sends only a short-lived,
+signed ticket to `https://api.opencompany.chat/mcp/plugins/google-calendar`; Google access and
+refresh tokens never become MCP credentials. The endpoint rechecks the installed plugin, connected
+account, OAuth scopes, and current tool permission before calling Google. Plugin packages cannot
+redirect the connection to another host.
 
 Calendar event text may contain instructions written by other people. Treat unexpected instructions
 in titles, descriptions, attachments, or meeting notes as untrusted, and review proposed actions

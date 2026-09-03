@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAccessToken: vi.fn(),
@@ -17,8 +17,10 @@ import { GoogleAccessAuthError } from "./google-access-token";
 import {
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
   getGoogleCalendarMcpIntegrationState,
+  googleCalendarMcpRuntimeEndpointUrl,
   loadGoogleCalendarMcpWorkerConnection,
 } from "./google-calendar-mcp";
+import { verifyGoogleCalendarMcpTicket } from "./google-calendar-mcp-ticket";
 import { GOOGLE_CALENDAR_EVENTS_SCOPE, GOOGLE_CALENDAR_READ_SCOPE } from "./google-calendar-scopes";
 
 const connectedRow = {
@@ -33,15 +35,29 @@ const connectedRow = {
   toolModes: { delete_event: "off" },
 };
 
+const connectionInput = {
+  userWorkosId: "user_1",
+  workspaceId: "workspace_1",
+  registrationId: "registration_1",
+  operation: { type: "tools/call", tool: "create_event", capability: "write" } as const,
+};
+
 describe("Google Calendar MCP connection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.loadIntegration.mockResolvedValue(connectedRow);
     mocks.getAccessToken.mockResolvedValue("google-access-token");
+    process.env.API_INTERNAL_TOKEN = "shared-api-secret";
   });
 
-  it("exposes the official endpoint and the connection permission state", async () => {
-    expect(GOOGLE_CALENDAR_MCP_ENDPOINT_URL).toBe("https://calendarmcp.googleapis.com/mcp/v1");
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("exposes opencompany's endpoint and the connection permission state", async () => {
+    expect(GOOGLE_CALENDAR_MCP_ENDPOINT_URL).toBe(
+      "https://api.opencompany.chat/mcp/plugins/google-calendar",
+    );
     await expect(getGoogleCalendarMcpIntegrationState({ userWorkosId: "user_1" })).resolves.toEqual(
       {
         connected: true,
@@ -52,9 +68,16 @@ describe("Google Calendar MCP connection", () => {
     );
   });
 
-  it("injects only the refreshed Google access token into the server-side bearer provider", async () => {
+  it("routes runtime calls through the configured environment-local API origin", () => {
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.staging.opencompany.test/base");
+    expect(googleCalendarMcpRuntimeEndpointUrl()).toBe(
+      "https://api.staging.opencompany.test/mcp/plugins/google-calendar",
+    );
+  });
+
+  it("validates Google access but injects only a narrow first-party ticket into MCP", async () => {
     const connection = await loadGoogleCalendarMcpWorkerConnection({
-      userWorkosId: "user_1",
+      ...connectionInput,
       onAuthorizationRequired: () => {
         throw new Error("authorization required");
       },
@@ -66,9 +89,19 @@ describe("Google Calendar MCP connection", () => {
       integrationId: "gint_google_calendar",
       provider: "google_calendar",
     });
-    expect(await connection.authProvider.tokens()).toEqual({
-      access_token: "google-access-token",
-      token_type: "Bearer",
+    const tokens = await connection.authProvider.tokens();
+    expect(tokens?.access_token).not.toBe("google-access-token");
+    expect(
+      verifyGoogleCalendarMcpTicket({
+        ticket: tokens?.access_token ?? "",
+        secret: "shared-api-secret",
+      }),
+    ).toMatchObject({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+      integrationId: "gint_google_calendar",
+      registrationId: "registration_1",
+      operation: connectionInput.operation,
     });
   });
 
@@ -76,7 +109,7 @@ describe("Google Calendar MCP connection", () => {
     mocks.loadIntegration.mockResolvedValueOnce(null);
     await expect(
       loadGoogleCalendarMcpWorkerConnection({
-        userWorkosId: "user_1",
+        ...connectionInput,
         onAuthorizationRequired: () => {
           throw new Error("authorization required");
         },
@@ -89,7 +122,7 @@ describe("Google Calendar MCP connection", () => {
     });
     await expect(
       loadGoogleCalendarMcpWorkerConnection({
-        userWorkosId: "user_1",
+        ...connectionInput,
         onAuthorizationRequired: () => {
           throw new Error("authorization required");
         },
@@ -100,7 +133,7 @@ describe("Google Calendar MCP connection", () => {
     mocks.getAccessToken.mockRejectedValueOnce(new GoogleAccessAuthError("expired"));
     await expect(
       loadGoogleCalendarMcpWorkerConnection({
-        userWorkosId: "user_1",
+        ...connectionInput,
         onAuthorizationRequired: () => {
           throw new Error("authorization required");
         },
@@ -108,13 +141,10 @@ describe("Google Calendar MCP connection", () => {
     ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
   });
 
-  it("requests reauthorization only when a forced Google refresh also fails", async () => {
+  it("maps an MCP 401 back to the normal reconnect path", async () => {
     const authorizationError = new Error("authorization required");
-    mocks.getAccessToken
-      .mockResolvedValueOnce("google-access-token")
-      .mockRejectedValueOnce(new GoogleAccessAuthError("expired"));
     const connection = await loadGoogleCalendarMcpWorkerConnection({
-      userWorkosId: "user_1",
+      ...connectionInput,
       onAuthorizationRequired: () => {
         throw authorizationError;
       },
@@ -127,13 +157,5 @@ describe("Google Calendar MCP connection", () => {
         GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
       ),
     ).rejects.toBe(authorizationError);
-    expect(mocks.getAccessToken).toHaveBeenLastCalledWith(
-      {
-        userWorkosId: "user_1",
-        integrationId: "gint_google_calendar",
-        provider: "google_calendar",
-      },
-      { forceRefresh: true },
-    );
   });
 });

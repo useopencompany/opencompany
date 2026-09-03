@@ -639,12 +639,12 @@ const googleCalendarPlugin = {
   name: "google-calendar",
   manifest: {
     name: "google-calendar",
-    description: "Read and manage Google Calendar through Google's official MCP server.",
+    description: "Read and create Google Calendar events through opencompany's MCP server.",
   },
   source: {
     ...plugin.source,
     path: "google-calendar",
-    resolvedCommit: "163e3f05fe3e1c157fd90ab5345e21c00f57a2ee",
+    resolvedCommit: "de04f0c11eeb4e4eb4ed1140818205e14b08401f",
   },
   skills: [],
   remoteMcpServers: [
@@ -655,21 +655,21 @@ const googleCalendarPlugin = {
       capabilities: [
         {
           id: "read",
-          label: "Check calendars & availability",
+          label: "Check calendars",
           defaultMode: "ask",
-          tools: ["list_calendars", "suggest_time"],
+          tools: ["list_calendars"],
         },
         {
           id: "query",
           label: "Read calendar events",
           defaultMode: "ask",
-          tools: ["list_events", "get_event", "search_events"],
+          tools: ["list_events", "get_event"],
         },
         {
           id: "write",
           label: "Manage calendar events",
           defaultMode: "ask",
-          tools: ["create_event", "update_event", "delete_event", "respond_to_event"],
+          tools: ["create_event"],
         },
       ],
       tools: [
@@ -678,7 +678,7 @@ const googleCalendarPlugin = {
           description: "List calendars.",
           classification: {
             capabilityId: "read",
-            capabilityLabel: "Check calendars & availability",
+            capabilityLabel: "Check calendars",
             defaultMode: "ask",
             bucket: "read",
             curated: true,
@@ -687,6 +687,17 @@ const googleCalendarPlugin = {
         {
           name: "list_events",
           description: "List events.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Read calendar events",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "get_event",
+          description: "Get an event.",
           classification: {
             capabilityId: "query",
             capabilityLabel: "Read calendar events",
@@ -1367,11 +1378,7 @@ describe("Linear plugin settings", () => {
       "href",
       "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
     );
-    for (const label of [
-      "Check calendars & availability",
-      "Read calendar events",
-      "Manage calendar events",
-    ]) {
+    for (const label of ["Check calendars", "Read calendar events", "Manage calendar events"]) {
       expect(
         within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
           name: "Ask",
@@ -1379,7 +1386,7 @@ describe("Linear plugin settings", () => {
       ).toHaveAttribute("aria-pressed", "true");
     }
     expect(GOOGLE_CALENDAR_PLUGIN_SOURCE).toContain(
-      "/tree/163e3f05fe3e1c157fd90ab5345e21c00f57a2ee/google-calendar",
+      "/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
     );
     expect(state).toMatchObject({
       groups: [

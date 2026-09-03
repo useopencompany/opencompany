@@ -6,7 +6,7 @@ export const GOOGLE_CALENDAR_LIST_READ_SCOPE =
   "https://www.googleapis.com/auth/calendar.calendarlist.readonly";
 
 export const GOOGLE_CALENDAR_MCP_RECONNECT_REASON =
-  "Reconnect Google Calendar to grant the official plugin's calendar-list and event-management access.";
+  "Reconnect Google Calendar to grant opencompany's plugin calendar-list and event-management access.";
 
 export function googleCalendarMcpScopesSatisfied(scopes: readonly string[]) {
   const granted = new Set(scopes);

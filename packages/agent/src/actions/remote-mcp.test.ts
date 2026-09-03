@@ -9,7 +9,7 @@ import {
   type RemoteMcpGatewayRegistration,
   resolveRemoteMcpActions,
 } from "./remote-mcp";
-import { type ActionExecuteContext, ActionPermissionError } from "./types";
+import { ActionAuthError, type ActionExecuteContext, ActionPermissionError } from "./types";
 
 const authProvider = {} as OAuthClientProvider;
 const identity = { userWorkosId: "user_1", workspaceId: "workspace_1" };
@@ -261,25 +261,25 @@ describe("remote MCP classification", () => {
     const calendarCapabilities = [
       {
         id: "read" as const,
-        label: "Check calendars & availability",
+        label: "Check calendars",
         defaultMode: "ask" as const,
-        tools: ["list_calendars", "suggest_time"],
+        tools: ["list_calendars"],
       },
       {
         id: "query" as const,
         label: "Read calendar events",
         defaultMode: "ask" as const,
-        tools: ["list_events", "get_event", "search_events"],
+        tools: ["list_events", "get_event"],
       },
       {
         id: "write" as const,
         label: "Manage calendar events",
         defaultMode: "ask" as const,
-        tools: ["create_event", "update_event", "delete_event", "respond_to_event"],
+        tools: ["create_event"],
       },
     ];
 
-    expect(classifyRemoteTool({ name: "suggest_time" }, calendarCapabilities)).toMatchObject({
+    expect(classifyRemoteTool({ name: "list_calendars" }, calendarCapabilities)).toMatchObject({
       capability: { id: "read", defaultMode: "ask" },
       bucket: "read",
       curated: true,
@@ -289,7 +289,7 @@ describe("remote MCP classification", () => {
       bucket: "read",
       curated: true,
     });
-    expect(classifyRemoteTool({ name: "delete_event" }, calendarCapabilities)).toMatchObject({
+    expect(classifyRemoteTool({ name: "create_event" }, calendarCapabilities)).toMatchObject({
       capability: { id: "write", defaultMode: "ask" },
       bucket: "write",
       curated: true,
@@ -387,6 +387,32 @@ describe("remote MCP discovery snapshots", () => {
 });
 
 describe("resolveRemoteMcpActions", () => {
+  it("maps the first-party Calendar MCP auth envelope to the reconnect flow", async () => {
+    const execution = client({
+      result: {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: { code: "auth_expired", message: "Calendar must be reauthorized." },
+            }),
+          },
+        ],
+      },
+    });
+    const calendarRegistration = registration({
+      source: "plugin:google-calendar:google-calendar",
+      connectionProvider: "google_calendar",
+      label: "Google Calendar",
+    });
+    const catalog = await resolveRemoteMcpActions(identity, calendarRegistration, {
+      createClient: vi.fn(async () => execution),
+    });
+
+    await expect(catalog?.actions[0]?.execute({}, context)).rejects.toBeInstanceOf(ActionAuthError);
+  });
+
   it("does zero tools/list calls during execute and loads credentials only at dispatch", async () => {
     const execution = client({
       result: { content: [{ type: "text", text: '{"issues":[{"id":"issue_1"}]}' }] },

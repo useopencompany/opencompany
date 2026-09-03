@@ -27,6 +27,7 @@ import {
 import {
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
   getGoogleCalendarMcpIntegrationState,
+  googleCalendarMcpRuntimeEndpointUrl,
   loadGoogleCalendarMcpWorkerConnection,
 } from "./integrations/google-calendar-mcp";
 import {
@@ -316,16 +317,23 @@ function bindRegistration(
     });
     return null;
   }
+  const loadConnection: RemoteMcpGatewayRegistration["loadConnection"] =
+    record.pluginName === "google-calendar"
+      ? (input) => loadGoogleCalendarMcpWorkerConnection({ ...input, registrationId: record.id })
+      : (binding.loadConnection as RemoteMcpGatewayRegistration["loadConnection"]);
   return {
     source: `plugin:${record.pluginName}:${record.server.name}`,
     connectionProvider: binding.provider,
     label: displayName(record.pluginName),
     description: record.pluginDescription,
-    server: record.server,
+    server:
+      record.pluginName === "google-calendar"
+        ? { ...record.server, url: googleCalendarMcpRuntimeEndpointUrl() }
+        : record.server,
     capabilities: record.capabilities,
     discoverySnapshot: record.discoverySnapshot,
     getState: binding.getState,
-    loadConnection: binding.loadConnection,
+    loadConnection,
     isEnabled: () =>
       isPluginGatewayRegistrationActive(db, {
         workspaceId: identity.workspaceId,

@@ -346,7 +346,7 @@ describe("resolvePlugin", () => {
     });
   });
 
-  it("loads the official Google Calendar package with every live tool classified", async () => {
+  it("loads the opencompany Google Calendar package with every exposed tool classified", async () => {
     const fixtureRoot = fileURLToPath(
       new URL("./test-fixtures/plugins/google-calendar", import.meta.url),
     );
@@ -358,37 +358,37 @@ describe("resolvePlugin", () => {
       trustedCapabilitySources: ["useopencompany/plugins"],
     });
 
-    expect(plugin.manifest).toMatchObject({ name: "google-calendar", version: "1.0.0" });
+    expect(plugin.manifest).toMatchObject({ name: "google-calendar", version: "1.1.0" });
     expect(plugin.skills).toEqual([]);
     expect(plugin.remoteServers).toEqual([
       {
         name: "google-calendar",
         type: "streamable-http",
-        url: "https://calendarmcp.googleapis.com/mcp/v1",
+        url: "https://api.opencompany.chat/mcp/plugins/google-calendar",
         headers: {},
       },
     ]);
     expect(plugin.capabilities).toEqual([
       {
         id: "read",
-        label: "Check calendars & availability",
+        label: "Check calendars",
         defaultMode: "ask",
-        tools: ["list_calendars", "suggest_time"],
+        tools: ["list_calendars"],
       },
       {
         id: "query",
         label: "Read calendar events",
         defaultMode: "ask",
-        tools: ["list_events", "get_event", "search_events"],
+        tools: ["list_events", "get_event"],
       },
       {
         id: "write",
         label: "Manage calendar events",
         defaultMode: "ask",
-        tools: ["create_event", "update_event", "delete_event", "respond_to_event"],
+        tools: ["create_event"],
       },
     ]);
-    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(9);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(4);
     expect(plugin.report.mcp).toMatchObject({
       status: "parsed",
       reports: [{ name: "google-calendar", status: "gateway-registered" }],

@@ -8,7 +8,7 @@ import {
 import { SLACK_MCP_RECONNECT_REASON, SLACK_MCP_USER_SCOPES } from "./integrations/slack-scopes";
 
 describe("Google Calendar integration state", () => {
-  it("requires a legacy connection to grant the official plugin scopes", () => {
+  it("requires a legacy connection to grant the opencompany MCP scopes", () => {
     const state = integrationStateFromRows([
       {
         id: "gint_google_calendar",
@@ -25,7 +25,7 @@ describe("Google Calendar integration state", () => {
     });
   });
 
-  it("accepts a complete official Calendar MCP grant", () => {
+  it("accepts a complete opencompany Calendar MCP grant", () => {
     const state = integrationStateFromRows([
       {
         id: "gint_google_calendar",

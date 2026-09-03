@@ -1,10 +1,29 @@
 import type { RemoteMcpConnectionState } from "../actions/remote-mcp";
 import { GoogleAccessAuthError, getGoogleAccessToken } from "./google-access-token";
+import {
+  createGoogleCalendarMcpTicket,
+  type GoogleCalendarMcpOperation,
+} from "./google-calendar-mcp-ticket";
 import { googleCalendarMcpScopesSatisfied } from "./google-calendar-scopes";
 import { loadGoogleCalendarIntegration } from "./google-data";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
 
-export const GOOGLE_CALENDAR_MCP_ENDPOINT_URL = "https://calendarmcp.googleapis.com/mcp/v1";
+export const GOOGLE_CALENDAR_MCP_ENDPOINT_URL =
+  "https://api.opencompany.chat/mcp/plugins/google-calendar";
+
+export function googleCalendarMcpRuntimeEndpointUrl() {
+  const configuredOrigin = process.env.OPENCOMPANY_API_ORIGIN?.trim();
+  if (!configuredOrigin) return GOOGLE_CALENDAR_MCP_ENDPOINT_URL;
+  try {
+    const origin = new URL(configuredOrigin);
+    if (origin.protocol !== "https:" && origin.hostname !== "localhost") {
+      return GOOGLE_CALENDAR_MCP_ENDPOINT_URL;
+    }
+    return new URL("/mcp/plugins/google-calendar", origin).toString();
+  } catch {
+    return GOOGLE_CALENDAR_MCP_ENDPOINT_URL;
+  }
+}
 
 export async function getGoogleCalendarMcpIntegrationState(
   identity: string | { userWorkosId: string },
@@ -29,6 +48,9 @@ export async function getGoogleCalendarMcpIntegrationState(
 
 export async function loadGoogleCalendarMcpWorkerConnection(input: {
   userWorkosId: string;
+  workspaceId: string;
+  registrationId: string;
+  operation: GoogleCalendarMcpOperation;
   onAuthorizationRequired: () => never;
 }) {
   const row = await loadGoogleCalendarIntegration({ userWorkosId: input.userWorkosId });
@@ -44,9 +66,10 @@ export async function loadGoogleCalendarMcpWorkerConnection(input: {
     integrationId: row.id,
     provider: "google_calendar" as const,
   };
-  let accessToken: string;
   try {
-    accessToken = await getGoogleAccessToken(connection);
+    // Validate/refresh the provider credential before starting the MCP
+    // handshake, but never use that broad Google token as MCP authentication.
+    await getGoogleAccessToken(connection);
   } catch (error) {
     if (error instanceof GoogleAccessAuthError) {
       return { ok: false, reason: "needs_reauth" } as const;
@@ -54,19 +77,26 @@ export async function loadGoogleCalendarMcpWorkerConnection(input: {
     throw error;
   }
 
+  const internalSecret = process.env.API_INTERNAL_TOKEN?.trim();
+  if (!internalSecret) {
+    throw new Error("Google Calendar MCP is not configured: API_INTERNAL_TOKEN is missing.");
+  }
+  const { ticket } = createGoogleCalendarMcpTicket({
+    userWorkosId: input.userWorkosId,
+    workspaceId: input.workspaceId,
+    integrationId: row.id,
+    registrationId: input.registrationId,
+    operation: input.operation,
+    secret: internalSecret,
+  });
+
   return {
     ok: true,
     integrationId: row.id,
     authProvider: createRemoteMcpStaticBearerAuthProvider({
-      accessToken,
+      accessToken: ticket,
       onAuthorizationRequired: async () => {
-        try {
-          await getGoogleAccessToken(connection, { forceRefresh: true });
-        } catch (error) {
-          if (error instanceof GoogleAccessAuthError) return input.onAuthorizationRequired();
-          throw error;
-        }
-        throw new Error("Google Calendar MCP rejected a freshly refreshed credential.");
+        return input.onAuthorizationRequired();
       },
     }),
   } as const;

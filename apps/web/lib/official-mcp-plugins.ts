@@ -52,9 +52,9 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   "google-calendar": {
     name: "google-calendar",
     label: "Google Calendar",
-    description: "Check availability, read your schedule, and manage calendar events.",
+    description: "List calendars, read your schedule, and create calendar events.",
     source:
-      "https://github.com/useopencompany/plugins/tree/163e3f05fe3e1c157fd90ab5345e21c00f57a2ee/google-calendar",
+      "https://github.com/useopencompany/plugins/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
     connectionProvider: "google_calendar",
     connectHref:
       "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",

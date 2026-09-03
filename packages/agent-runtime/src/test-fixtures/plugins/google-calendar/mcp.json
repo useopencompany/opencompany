@@ -3,7 +3,7 @@
   "mcpServers": {
     "google-calendar": {
       "type": "streamable-http",
-      "url": "https://calendarmcp.googleapis.com/mcp/v1"
+      "url": "https://api.opencompany.chat/mcp/plugins/google-calendar"
     }
   }
 }
