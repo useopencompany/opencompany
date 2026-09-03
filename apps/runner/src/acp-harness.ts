@@ -81,6 +81,11 @@ export type AcpExtensionRequest = {
   params: Record<string, unknown>;
 };
 
+export type AcpNotification = {
+  method: string;
+  params: Record<string, unknown>;
+};
+
 export type AcpHarnessTurnInput = {
   adapter: AcpEngineAdapter;
   sandbox: SandboxHandle;
@@ -93,6 +98,7 @@ export type AcpHarnessTurnInput = {
   timeoutMs: number;
   redact: (value: string) => string;
   checkAbort: () => Promise<void>;
+  onNotification?: (notification: AcpNotification) => Promise<void>;
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
   onEngineSessionId: (sessionId: string) => Promise<void>;
   onExistingSessionInvalidated: () => Promise<void>;
@@ -127,6 +133,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       envs: input.envs,
       redact: input.redact,
       onNotification: async (notification) => {
+        await input.onNotification?.(notification);
         if (projectUpdates && notification.method === "session/update") {
           await input.onRuntimeEvents([notification]);
         }
@@ -488,11 +495,6 @@ type AcpJsonRpcRequest = {
   params: Record<string, unknown>;
 };
 
-type AcpJsonRpcNotification = {
-  method: string;
-  params: Record<string, unknown>;
-};
-
 class AcpJsonRpcClient {
   private buffer = "";
   private nextId = 1;
@@ -518,7 +520,7 @@ class AcpJsonRpcClient {
       command: string;
       envs: Record<string, string>;
       redact: (value: string) => string;
-      onNotification: (notification: AcpJsonRpcNotification) => Promise<void>;
+      onNotification: (notification: AcpNotification) => Promise<void>;
       onServerRequest: (request: AcpJsonRpcRequest) => Promise<Record<string, unknown>>;
     },
   ) {}
@@ -620,9 +622,13 @@ class AcpJsonRpcClient {
       return;
     }
     if (!method) return;
+    if (this.failure) return;
     const notification = { method, params: readRecord(record.params) ?? {} };
     this.processing = this.processing
-      .then(() => this.input.onNotification(notification))
+      .then(() => {
+        this.throwIfFailed();
+        return this.input.onNotification(notification);
+      })
       .catch((error) => this.fail(asError(error)));
   }
 

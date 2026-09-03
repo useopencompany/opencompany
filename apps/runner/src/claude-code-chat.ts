@@ -31,7 +31,12 @@ import { isLegacyBrainEnabledForWorkspace } from "@opencompany/db/workspaces";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { ACP_ENGINE_ADAPTERS } from "./acp-engine-adapters";
-import { AcpHarness, type AcpPermissionRequest, type AcpPermissionResponse } from "./acp-harness";
+import {
+  AcpHarness,
+  type AcpNotification,
+  type AcpPermissionRequest,
+  type AcpPermissionResponse,
+} from "./acp-harness";
 import { buildAcpToolsMcpServers } from "./acp-tools-client";
 import {
   buildClaudeAcpCommandEnv,
@@ -162,6 +167,15 @@ const logger = createLogger({
 
 export const CLAUDE_CODE_CHAT_REAUTH_MESSAGE =
   "Claude Code is disconnected. Reconnect Claude Code in opencompany settings, then send your message again.";
+export const CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE =
+  "Connected integrations are temporarily unavailable because opencompany tools did not initialize in Claude Code. Send your message again to retry.";
+
+class ClaudeCoreMcpUnavailableError extends Error {
+  constructor() {
+    super(CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE);
+    this.name = "ClaudeCoreMcpUnavailableError";
+  }
+}
 
 // "authenticat" covers both "Failed to authenticate" (real 401 result text, observed
 // against claude 2.1.220) and "authentication". Usage-credit and credit-balance failures are
@@ -170,6 +184,48 @@ const AUTH_FAILURE_PATTERN = /oauth|authenticat|unauthorized|401|login expired|i
 
 export function isClaudeCodeAuthenticationFailure(value: string) {
   return AUTH_FAILURE_PATTERN.test(value);
+}
+
+export type ClaudeCoreMcpInitialization = {
+  sessionId: string | null;
+  status: string;
+  advertisedToolCount: number;
+  hasListActions: boolean;
+  hasUseAction: boolean;
+  ready: boolean;
+  failureReason: "server_not_connected" | "required_tools_missing" | null;
+};
+
+export function inspectClaudeCoreMcpInitialization(
+  notification: AcpNotification,
+): ClaudeCoreMcpInitialization | null {
+  if (notification.method !== "_claude/sdkMessage") return null;
+  const message = recordFromUnknown(notification.params.message) ?? notification.params;
+  if (message.type !== "system" || message.subtype !== "init") return null;
+
+  const tools = new Set(
+    (Array.isArray(message.tools) ? message.tools : []).filter(
+      (tool): tool is string => typeof tool === "string",
+    ),
+  );
+  const coreServer = (Array.isArray(message.mcp_servers) ? message.mcp_servers : [])
+    .map(recordFromUnknown)
+    .find((server) => server?.name === "opencompany");
+  const status = mcpStatusForTelemetry(coreServer?.status);
+  const hasListActions = tools.has("mcp__opencompany__list_actions");
+  const hasUseAction = tools.has("mcp__opencompany__use_action");
+  const ready = status === "connected" && hasListActions && hasUseAction;
+  return {
+    sessionId:
+      typeof notification.params.sessionId === "string" ? notification.params.sessionId : null,
+    status,
+    advertisedToolCount: tools.size,
+    hasListActions,
+    hasUseAction,
+    ready,
+    failureReason:
+      status !== "connected" ? "server_not_connected" : ready ? null : "required_tools_missing",
+  };
 }
 
 export async function loadClaudeCodeAuth(
@@ -725,7 +781,8 @@ export async function runClaudeCodeChatTurn(input: {
     executionStage = "run_turn";
     const runAcpOnce = async (resume: string | null, prompt: string) => {
       const harness = new AcpHarness();
-      return harness.runTurn({
+      let coreMcpInitObserved = !actionGatewayTicket;
+      const result = await harness.runTurn({
         adapter: ACP_ENGINE_ADAPTERS.claude_code,
         sandbox,
         workdir: CLAUDE_CHAT_WORKDIR,
@@ -755,6 +812,38 @@ export async function runClaudeCodeChatTurn(input: {
           pluginDataRuntime?.assertHealthy();
           await checkAbort();
         },
+        ...(actionGatewayTicket
+          ? {
+              onNotification: async (notification: AcpNotification) => {
+                const initialization = inspectClaudeCoreMcpInitialization(notification);
+                if (!initialization || coreMcpInitObserved) return;
+                coreMcpInitObserved = true;
+                const fields = {
+                  turn_id: turn.id,
+                  codex_chat_session_id: session.id,
+                  attempt_id: canonicalAttemptId,
+                  engine_session_id: initialization.sessionId,
+                  mcp_status: initialization.status,
+                  advertised_tool_count: initialization.advertisedToolCount,
+                  list_actions_available: initialization.hasListActions,
+                  use_action_available: initialization.hasUseAction,
+                };
+                if (initialization.ready) {
+                  logger.info("Claude Code initialized opencompany tools", {
+                    event: "opencompany.goat_claude_core_mcp_initialized",
+                    ...fields,
+                  });
+                  return;
+                }
+                logger.warn("Claude Code could not initialize required opencompany tools", {
+                  event: "opencompany.goat_claude_core_mcp_unavailable",
+                  ...fields,
+                  failure_reason: initialization.failureReason,
+                });
+                throw new ClaudeCoreMcpUnavailableError();
+              },
+            }
+          : {}),
         onEngineSessionId: async (sessionId) => {
           acpNormalizer.beginRun(sessionId);
           await persistEngineSessionId();
@@ -789,6 +878,18 @@ export async function runClaudeCodeChatTurn(input: {
         // bypass-permissions behavior without surfacing an approval prompt.
         onPermissionRequest: async (request) => approveAcpPermission(request),
       });
+      if (actionGatewayTicket && !coreMcpInitObserved) {
+        logger.warn("Claude Code did not report opencompany tool initialization", {
+          event: "opencompany.goat_claude_core_mcp_unavailable",
+          turn_id: turn.id,
+          codex_chat_session_id: session.id,
+          attempt_id: canonicalAttemptId,
+          mcp_status: "missing",
+          failure_reason: "init_event_missing",
+        });
+        throw new ClaudeCoreMcpUnavailableError();
+      }
+      return result;
     };
 
     const acpResult = await runAcpOnce(resumeSessionId, task);
@@ -1342,4 +1443,10 @@ function recordFromUnknown(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function mcpStatusForTelemetry(value: unknown) {
+  if (typeof value !== "string") return "missing";
+  const status = value.trim().toLowerCase();
+  return /^[a-z0-9_-]{1,32}$/.test(status) ? status : "unknown";
 }

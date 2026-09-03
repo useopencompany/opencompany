@@ -42,6 +42,9 @@ export const CLAUDE_ACP_ENGINE_ADAPTER: AcpEngineAdapter = {
       mcpServers: deferredMcpServers,
       meta: {
         claudeCode: {
+          ...(coreMcpServers.length > 0
+            ? { emitRawSDKMessages: [{ type: "system", subtype: "init" }] }
+            : {}),
           options: {
             maxTurns: 250,
             ...(mcpServers.length > 0 ? { strictMcpConfig: true } : {}),

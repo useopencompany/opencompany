@@ -89,6 +89,19 @@ describe("AcpHarness", () => {
       } else if (message.method === "session/prompt") {
         await emit({
           jsonrpc: "2.0",
+          method: "_claude/sdkMessage",
+          params: {
+            sessionId: "session_new",
+            message: {
+              type: "system",
+              subtype: "init",
+              tools: ["mcp__opencompany__list_actions", "mcp__opencompany__use_action"],
+              mcp_servers: [{ name: "opencompany", status: "connected" }],
+            },
+          },
+        });
+        await emit({
+          jsonrpc: "2.0",
           id: "permission_1",
           method: "session/request_permission",
           params: {
@@ -122,6 +135,7 @@ describe("AcpHarness", () => {
     const onPermissionRequest = vi.fn(async () => ({
       outcome: { outcome: "selected" as const, optionId: "allow-once" },
     }));
+    const onNotification = vi.fn(async () => undefined);
     const onEngineStopped = vi.fn(async () => undefined);
     const input = harnessInput(transport.sandbox, {
       mcpServers: [
@@ -141,6 +155,7 @@ describe("AcpHarness", () => {
       onRuntimeEvents: vi.fn(async (events) => {
         runtimeEvents.push(...events);
       }),
+      onNotification,
       onPermissionRequest,
       onEngineStopped,
       model: "claude-sonnet-5",
@@ -167,6 +182,7 @@ describe("AcpHarness", () => {
         ],
         _meta: {
           claudeCode: {
+            emitRawSDKMessages: [{ type: "system", subtype: "init" }],
             options: {
               maxTurns: 250,
               strictMcpConfig: true,
@@ -184,6 +200,10 @@ describe("AcpHarness", () => {
       },
     });
     expect(input.onEngineSessionId).toHaveBeenCalledWith("session_new");
+    expect(onNotification).toHaveBeenCalledWith({
+      method: "_claude/sdkMessage",
+      params: expect.objectContaining({ sessionId: "session_new" }),
+    });
     expect(onPermissionRequest).toHaveBeenCalledWith(
       expect.objectContaining({ id: "permission_1", method: "session/request_permission" }),
     );
@@ -810,6 +830,56 @@ describe("AcpHarness", () => {
     expect(result.loadedSession).toBe(true);
     expect(JSON.stringify(runtimeEvents)).not.toContain("Historical answer");
     expect(JSON.stringify(runtimeEvents)).toContain("Current answer");
+  });
+
+  it("fails the active prompt when a notification observer rejects", async () => {
+    const observerError = new Error("Required runtime capability was unavailable.");
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { agentCapabilities: { loadSession: true } },
+        });
+      } else if (message.method === "session/new") {
+        await emit({ jsonrpc: "2.0", id: message.id, result: { sessionId: "session_guarded" } });
+      } else if (message.method === "session/prompt") {
+        await emit({
+          jsonrpc: "2.0",
+          method: "_claude/sdkMessage",
+          params: {
+            sessionId: "session_guarded",
+            message: { type: "system", subtype: "init" },
+          },
+        });
+        await Promise.resolve();
+        await emit({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "session_guarded",
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "Do not project after the observer fails." },
+            },
+          },
+        });
+      }
+    });
+    const runtimeEvents: Record<string, unknown>[] = [];
+    const input = harnessInput(transport.sandbox, {
+      onNotification: vi.fn(async (notification) => {
+        if (notification.method === "_claude/sdkMessage") throw observerError;
+      }),
+      onRuntimeEvents: vi.fn(async (events) => {
+        runtimeEvents.push(...events);
+      }),
+    });
+
+    await expect(new AcpHarness().runTurn(input)).rejects.toBe(observerError);
+
+    expect(JSON.stringify(runtimeEvents)).not.toContain("Do not project");
+    expect(transport.kill).toHaveBeenCalledWith(41);
   });
 
   it("injects Codex steering through the provider extension while a prompt is active", async () => {
