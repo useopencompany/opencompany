@@ -1,6 +1,10 @@
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { confirmBrainImportAction, startBrainImportDiscoveryAction } from "./brain-import-actions";
+import {
+  confirmBrainImportAction,
+  startBrainImportDiscoveryAction,
+  startWikiImportDiscoveryAction,
+} from "./brain-import-actions";
 
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
 
@@ -114,5 +118,33 @@ describe("Brain import API actions", () => {
       ok: false,
       message: "This company-context scan is no longer awaiting confirmation. (request request_1)",
     });
+  });
+
+  it("starts Wiki discovery through the workspace-scoped command route", async () => {
+    let upstream: Request | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+        upstream = input instanceof Request ? input : new Request(input, init);
+        return Response.json(
+          {
+            data: { importRunId: "gbimp_wiki", status: "discovering", replayed: false },
+            meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+          },
+          { status: 201 },
+        );
+      }),
+    );
+
+    await expect(
+      startWikiImportDiscoveryAction({
+        companyUrl: "acme.com",
+        sourceSelection: { public_web: { enabled: true } },
+      }),
+    ).resolves.toEqual({ ok: true, importRunId: "gbimp_wiki" });
+
+    const request = upstream as unknown as Request;
+    expect(new URL(request.url).pathname).toBe("/v1/wiki/imports");
+    expect(request.headers.get("idempotency-key")).toMatch(/^web-wiki-import:/);
   });
 });

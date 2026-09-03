@@ -29,10 +29,12 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
+import { WikiImport } from "@/components/BrainImport";
 import { brainSourceHasScope, resolveBrainSourceState } from "@/components/BrainSourceCards";
 import { ConnectIntegrationModal } from "@/components/onboarding/ConnectIntegrationModal";
 import { OnboardingSourceCard } from "@/components/onboarding/OnboardingSourceCard";
 import { SourceConfigSheet } from "@/components/onboarding/SourceConfigSheet";
+import { WikiSourcesPanel } from "@/components/WikiSourcesPanel";
 import {
   type BrainSourcesDetails,
   getBrainSourcesAction,
@@ -43,6 +45,7 @@ import {
   type BrainSourceProviderDef,
   brainSourceNeedsConfig,
 } from "@/lib/brain-sources/registry";
+import type { IntegrationState } from "@/lib/integration-state";
 import {
   checkWorkspaceSlugAction,
   finishOnboardingAction,
@@ -50,6 +53,7 @@ import {
   saveOnboardingWorkspaceAction,
 } from "@/lib/onboarding-actions";
 import {
+  integrationConnectionSuccess,
   ONBOARDING_CONNECTION_MESSAGE,
   ONBOARDING_CONNECTION_STORAGE_KEY,
   type OnboardingConnectionMessage,
@@ -86,7 +90,13 @@ const OWNER_STEPS: StepDef[] = [
   { key: "finish", label: "You're all set" },
 ];
 
-const OWNER_WIKI_STEPS: StepDef[] = OWNER_STEPS.filter((step) => step.key !== "sources");
+const OWNER_WIKI_STEPS: StepDef[] = [
+  { key: "profile", label: "About you" },
+  { key: "workspace", label: "Create workspace" },
+  { key: "sources", label: "Connect sources" },
+  { key: "import", label: "Import company" },
+  { key: "finish", label: "You're all set" },
+];
 
 // Invited members join a workspace an admin already shaped, so they only need a
 // welcome before entering the product.
@@ -202,6 +212,7 @@ export function OnboardingWizard({
   initialReferral,
   initialSourceDetails,
   initialConnectionResult,
+  initialIntegrations,
 }: {
   user: OnboardingUser;
   currentWorkspaceName: string;
@@ -217,6 +228,7 @@ export function OnboardingWizard({
   initialReferral: string | null;
   initialSourceDetails: BrainSourcesDetails | null;
   initialConnectionResult: OnboardingConnectionResult | null;
+  initialIntegrations?: IntegrationState;
 }) {
   const router = useRouter();
   const steps =
@@ -246,6 +258,17 @@ export function OnboardingWizard({
   const [showSourcesGate, setShowSourcesGate] = useState(false);
   const analyticsStartedRef = useRef(false);
   const analyticsStepsViewedRef = useRef(new Set<StepKey>());
+
+  useEffect(() => {
+    if (legacyBrainEnabled || !initialConnectionResult) return;
+    if (initialConnectionResult.status === "connected") {
+      toast.success(integrationConnectionSuccess(initialConnectionResult.provider));
+    } else if (initialConnectionResult.status === "error") {
+      toast.error(
+        onboardingConnectionError(initialConnectionResult.provider, initialConnectionResult.reason),
+      );
+    }
+  }, [initialConnectionResult, legacyBrainEnabled]);
 
   const reloadSourceDetails = useCallback(async () => {
     if (!activeBrainRef) return null;
@@ -365,7 +388,7 @@ export function OnboardingWizard({
             source_goal_met: sourcesFeeding >= SOURCE_GOAL,
           });
         }
-        if (variant === "owner" && normalizedCompanyUrl) {
+        if (variant === "owner" && legacyBrainEnabled && normalizedCompanyUrl) {
           if (!queueOnboardingKickoff(normalizedCompanyUrl)) {
             toast.error("Onboarding finished, but the first Wiki run could not be started.");
           }
@@ -381,7 +404,13 @@ export function OnboardingWizard({
     // Before leaving the sources step, surface any account the user authorized
     // but never finished configuring — otherwise they land in a brain with
     // nothing flowing in. Soft gate: they can still continue anyway.
-    if (step.key === "sources" && !isLast && authorizedNotFeeding > 0 && !sourcesGateConfirmed) {
+    if (
+      legacyBrainEnabled &&
+      step.key === "sources" &&
+      !isLast &&
+      authorizedNotFeeding > 0 &&
+      !sourcesGateConfirmed
+    ) {
       setShowSourcesGate(true);
       return;
     }
@@ -438,20 +467,44 @@ export function OnboardingWizard({
           {step.key === "welcome" && (
             <WelcomeStep user={user} workspaceName={currentWorkspaceName} />
           )}
-          {step.key === "sources" && (
-            <SourcesStep
-              brainRef={activeBrainRef}
-              details={sourceDetails}
-              reload={reloadSourceDetails}
-              initialConnectionResult={initialConnectionResult}
-            />
-          )}
+          {step.key === "sources" &&
+            (legacyBrainEnabled ? (
+              <SourcesStep
+                brainRef={activeBrainRef}
+                details={sourceDetails}
+                reload={reloadSourceDetails}
+                initialConnectionResult={initialConnectionResult}
+              />
+            ) : activeWorkspaceId ? (
+              <WikiSourcesPanel
+                workspaceId={activeWorkspaceId}
+                isAdmin
+                mode="onboarding"
+                {...(initialIntegrations ? { integrationState: initialIntegrations } : {})}
+              />
+            ) : (
+              <p className="text-[13px] text-danger">Create the workspace before adding sources.</p>
+            ))}
+          {step.key === "import" && activeWorkspaceId ? (
+            <div>
+              <StepHeader
+                title="Build your company Wiki"
+                subtitle="Scan public research and the sources you just connected. You review the workload before any pages are written."
+              />
+              <WikiImport
+                workspaceId={activeWorkspaceId}
+                compact
+                initialWebsite={normalizedCompanyUrl ?? ""}
+              />
+            </div>
+          ) : null}
           {step.key === "finish" && (
             <FinishStep
               workspaceName={variant === "member" ? currentWorkspaceName : workspaceName}
               referral={referral}
               onSelect={setReferral}
               showReferral={variant === "owner"}
+              wiki={!legacyBrainEnabled}
             />
           )}
 
@@ -507,7 +560,7 @@ export function OnboardingWizard({
 }
 
 function isSkippable(key: StepKey) {
-  return key === "sources";
+  return key === "sources" || key === "import";
 }
 
 // Soft gate shown when the user tries to leave the sources step with accounts
@@ -1177,11 +1230,13 @@ function FinishStep({
   referral,
   onSelect,
   showReferral,
+  wiki,
 }: {
   workspaceName: string;
   referral: string | null;
   onSelect: (v: string) => void;
   showReferral: boolean;
+  wiki: boolean;
 }) {
   return (
     <div>
@@ -1194,8 +1249,11 @@ function FinishStep({
             You&apos;re all set
           </h1>
           <p className="text-[14px] leading-6 text-ink-muted">
-            {workspaceName ? `${workspaceName} is ready.` : "Your brain is ready."} It&apos;ll keep
-            learning as content flows in — you can shape it anytime.
+            {workspaceName
+              ? `${workspaceName} is ready.`
+              : `Your ${wiki ? "Wiki" : "brain"} is ready.`}{" "}
+            Your {wiki ? "Wiki" : "brain"} will keep learning as content flows in — you can shape it
+            anytime.
           </p>
         </div>
       </div>

@@ -22,6 +22,7 @@ vi.mock("@opencompany/observability/braintrust", () => ({
 }));
 
 import {
+  buildCompanyImportSourceContextHeader,
   buildGitHubSourceContextHeader,
   buildGmailSourceContextHeader,
   buildLinearSourceContextHeader,
@@ -164,9 +165,101 @@ function githubInput() {
   };
 }
 
+function companyImportInput(
+  executeCommand: NonNullable<Parameters<typeof runWikiAgentIngest>[0]["executeCommand"]>,
+) {
+  return {
+    ...input(executeCommand),
+    sourceProvider: "opencompany-import" as const,
+    sourceType: "run" as const,
+    sourceRef: "opencompany-import:run:gbimp_1:research",
+    title: "Acme context import",
+    contentHash: "hash_import",
+    normalizedPayload: {
+      sourceProvider: "opencompany-import",
+      sourceType: "run",
+      externalId: "gbimp_1:research",
+      sourceRef: "opencompany-import:run:gbimp_1:research",
+      title: "Acme context import",
+      occurredAt: occurredAt.toISOString(),
+      capturedAt: occurredAt.toISOString(),
+      contentHash: "hash_import",
+      content: {
+        phase: "research",
+        importRunId: "gbimp_1",
+        companyUrl: "https://acme.example",
+        companyDomain: "acme.example",
+        searches: [],
+        results: [],
+      },
+    },
+  };
+}
+
 describe("opencompany wiki librarian agent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("writes company-import pages through the API command boundary as the acting user", async () => {
+    const executeCommand = vi.fn(async () => ({
+      ok: true as const,
+      result: { action: "created", path: "companies/acme" },
+    }));
+    generate({
+      text: "Created the company profile.",
+      toolInput: {
+        command: "write",
+        path: "companies/acme",
+        title: "Acme",
+        kind: "company",
+        body: "# Acme",
+      },
+    });
+
+    await expect(runWikiAgentIngest(companyImportInput(executeCommand))).resolves.toMatchObject({
+      mutations: 1,
+      skipped: false,
+    });
+    expect(executeCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace_123",
+        actorId: "user_123",
+        toolInput: expect.objectContaining({ command: "write", kind: "company" }),
+      }),
+    );
+  });
+
+  it("rejects company-import writes with a non-company/person kind before the API call", async () => {
+    const executeCommand = vi.fn();
+    generate({
+      text: "Could not create the page.",
+      toolInput: {
+        command: "write",
+        path: "research/acme",
+        title: "Acme",
+        kind: "research",
+        body: "# Acme",
+      },
+    });
+
+    await expect(runWikiAgentIngest(companyImportInput(executeCommand))).rejects.toBeInstanceOf(
+      WikiAgentOutcomeError,
+    );
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("gives company imports explicit company/person kind guidance", () => {
+    expect(
+      buildCompanyImportSourceContextHeader({
+        sourceProvider: "opencompany-import",
+        sourceType: "run",
+        sourceRef: "opencompany-import:run:gbimp_1:research",
+        title: "Acme context import",
+        occurredAt,
+        sourceConfig: {},
+      }),
+    ).toContain("kind `company`");
   });
 
   it("uses one wiki tool and classifies a successful mutation", async () => {

@@ -159,7 +159,15 @@ function createWikiCollections(scopeKey: string) {
       },
     }),
   );
-  return { pages, timeline };
+  const importRuns = createCollection(
+    electricCollectionOptions({
+      id: `headless-wiki-import-runs:v1:${scope}`,
+      schema: BrainImportRunReadModelSchema,
+      shapeOptions: shapeOptions("wiki-import-runs-v1"),
+      getKey: (row) => row.id,
+    }),
+  );
+  return { pages, timeline, importRuns };
 }
 
 const wikiPageWriteChains = new Map<string, Promise<unknown>>();
@@ -282,5 +290,6 @@ export type HeadlessBrainImportRunReadModel = {
   createdAt: string;
   updatedAt: string;
 };
+export type HeadlessWikiImportRunReadModel = HeadlessBrainImportRunReadModel;
 export type HeadlessWikiPageReadModel = WikiPageReadModel;
 export type HeadlessWikiTimelineReadModel = WikiTimelineReadModel;

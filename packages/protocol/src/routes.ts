@@ -786,6 +786,78 @@ export const retryBrainImportRoute = createRoute({
   },
 });
 
+export const startWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: StartBrainImportBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Workspace Wiki company-context discovery started or replayed.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const confirmWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/confirm",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ importRunId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: ConfirmBrainImportBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Discovered Wiki import confirmed; ingestion begins.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const cancelWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/cancel",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ importRunId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Active Wiki import canceled; queued ingestion jobs are skipped.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const retryWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/retry",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ importRunId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Failed Wiki discovery reset and started again.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const createBrainDocumentRoute = createRoute({
   method: "post",
   path: "/v1/brains/{brainId}/documents",
@@ -3498,6 +3570,10 @@ export type V1RouteHandlers = {
   confirmBrainImport: RouteHandler<typeof confirmBrainImportRoute>;
   cancelBrainImport: RouteHandler<typeof cancelBrainImportRoute>;
   retryBrainImport: RouteHandler<typeof retryBrainImportRoute>;
+  startWikiImport: RouteHandler<typeof startWikiImportRoute>;
+  confirmWikiImport: RouteHandler<typeof confirmWikiImportRoute>;
+  cancelWikiImport: RouteHandler<typeof cancelWikiImportRoute>;
+  retryWikiImport: RouteHandler<typeof retryWikiImportRoute>;
   createBrainDocument: RouteHandler<typeof createBrainDocumentRoute>;
   uploadBrainAsset: RouteHandler<typeof uploadBrainAssetRoute>;
   replaceBrainAsset: RouteHandler<typeof replaceBrainAssetRoute>;
@@ -3694,6 +3770,10 @@ export function createV1Router(
       .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
       .openapi(cancelBrainImportRoute, handlers.cancelBrainImport)
       .openapi(retryBrainImportRoute, handlers.retryBrainImport)
+      .openapi(startWikiImportRoute, handlers.startWikiImport)
+      .openapi(confirmWikiImportRoute, handlers.confirmWikiImport)
+      .openapi(cancelWikiImportRoute, handlers.cancelWikiImport)
+      .openapi(retryWikiImportRoute, handlers.retryWikiImport)
       .openapi(createBrainDocumentRoute, handlers.createBrainDocument)
       .openapi(uploadBrainAssetRoute, handlers.uploadBrainAsset)
       .openapi(replaceBrainAssetRoute, handlers.replaceBrainAsset)
@@ -4547,6 +4627,38 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   retryBrainImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "discovering" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
+  startWikiImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "discovering" as const, replayed: false },
+        meta,
+      },
+      201,
+    ),
+  confirmWikiImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "ingesting" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
+  cancelWikiImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "canceled" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
+  retryWikiImport: (c) =>
     c.json(
       {
         data: { importRunId: "gbimp_contract", status: "discovering" as const, replayed: false },
