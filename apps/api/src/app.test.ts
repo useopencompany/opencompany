@@ -4428,7 +4428,24 @@ describe("POST /internal/wiki/commands", () => {
     const response = await app.request("/internal/wiki/commands", {
       method: "POST",
       headers: headers(),
-      body: body({ command: "write", path: "projects/plan", body: "# Plan" }),
+      body: body({
+        command: "write",
+        path: "projects/plan",
+        body: "# Plan",
+        kind: "other",
+        title: "",
+        pages: "",
+        query: "",
+        since: "",
+        to: "",
+        at: "",
+        text: "",
+        depth: 0,
+        limit: 100,
+        offset: 0,
+        recursive: false,
+        ignoreCase: true,
+      }),
     });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
