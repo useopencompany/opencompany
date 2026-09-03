@@ -192,6 +192,18 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: BetterStackIcon,
     tileClass: "bg-[#1B1F23] text-white",
   },
+  render: {
+    label: "Render",
+    description: "Deploy and operate services and datastores through Render's official MCP server.",
+    monogram: "R",
+    tileClass: "bg-[#0B0D0E] text-white",
+  },
+  signoz: {
+    label: "SigNoz",
+    description: "Investigate observability data and manage alerts and dashboards.",
+    monogram: "S",
+    tileClass: "bg-[#FF6B35] text-white",
+  },
   stripe: {
     label: "Stripe",
     description:
@@ -382,7 +394,6 @@ const WORKSPACE_ACCOUNT_PROVIDERS = [
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
 
 const PERSONAL_ACCOUNT_PROVIDERS = [
-  "google_calendar",
   "google_drive",
   "latitude",
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
@@ -479,10 +490,6 @@ function IntegrationCards({
             Connections that act as you. Only you can manage them or wire them into brains.
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <IntegrationProviderGroupCard
-              provider="google_calendar"
-              accounts={integrations.personalAccounts.google_calendar}
-            />
             <IntegrationProviderGroupCard
               provider="google_drive"
               accounts={integrations.personalAccounts.google_drive}
@@ -1836,6 +1843,10 @@ function integrationConnectHref(
   if (provider === "neon") return "/api/integrations/neon/start?returnTo=/settings/integrations";
   if (provider === "betterstack") {
     return "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack";
+  }
+  if (provider === "render") return "/settings/plugins/render#render-api-key";
+  if (provider === "signoz") {
+    return "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz";
   }
   if (provider === "posthog")
     return "/api/integrations/posthog/start?returnTo=/settings/integrations";

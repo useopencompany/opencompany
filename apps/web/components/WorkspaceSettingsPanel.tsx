@@ -2,6 +2,7 @@
 
 import { toast } from "@opencompany/ui/components/sonner";
 import { Mail, Trash2, UserRound, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { SettingsContent } from "@/components/SettingsChrome";
@@ -28,6 +29,7 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
   const isAdmin = initial.role === "admin";
   const seatsUsed = initial.members.length + initial.invitations.length;
   const overCap = initial.members.length > initial.memberCap;
+  const atMemberCap = seatsUsed >= initial.memberCap;
   const [name, setName] = useState(initial.workspace.name);
   const [inviteEmail, setInviteEmail] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -131,30 +133,50 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
           <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
             Invite people
           </h2>
-          <div className="flex items-center gap-2">
-            <input
-              type="email"
-              value={inviteEmail}
-              onChange={(event) => setInviteEmail(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") invite();
-              }}
-              placeholder="teammate@company.example"
-              className="flex-1 rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
-            />
-            <button
-              type="button"
-              disabled={isPending || !inviteEmail.trim() || seatsUsed >= initial.memberCap}
-              onClick={invite}
-              className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
-            >
-              Invite
-            </button>
-          </div>
-          <p className="text-[11.5px] leading-4 text-ink-subtle">
-            Invited people get an email and join this workspace when they sign up. They see every
-            brain that is open to the workspace.
-          </p>
+          {atMemberCap ? (
+            <div className="flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-[12.5px] leading-5 text-ink">
+                {initial.plan === "hobby"
+                  ? "Hobby includes one member. Upgrade to Pro to invite teammates."
+                  : `This workspace has reached its ${initial.memberCap}-member limit. Remove a member or revoke a pending invitation first.`}
+              </p>
+              {initial.plan === "hobby" ? (
+                <Link
+                  href="/settings/workspace/billing"
+                  className="inline-flex shrink-0 items-center justify-center rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity hover:opacity-85"
+                >
+                  Upgrade to Pro
+                </Link>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(event) => setInviteEmail(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") invite();
+                  }}
+                  placeholder="teammate@company.example"
+                  className="flex-1 rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
+                />
+                <button
+                  type="button"
+                  disabled={isPending || !inviteEmail.trim()}
+                  onClick={invite}
+                  className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
+                >
+                  Invite
+                </button>
+              </div>
+              <p className="text-[11.5px] leading-4 text-ink-subtle">
+                Invited people get an email and join this workspace when they sign up. They see
+                every brain that is open to the workspace.
+              </p>
+            </>
+          )}
         </section>
       ) : null}
 

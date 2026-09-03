@@ -108,6 +108,64 @@ export async function retryBrainImportDiscoveryAction(input: {
   );
 }
 
+export async function startWikiImportDiscoveryAction(input: {
+  companyUrl: string;
+  focus?: string;
+  sourceSelection: Record<
+    string,
+    { enabled: boolean; integrationId?: string; config?: Record<string, unknown> }
+  >;
+}): Promise<BrainImportActionResult> {
+  return importCommand(async () => {
+    return (await serverImportClient()).v1.wiki.imports.$post({
+      header: { "idempotency-key": `web-wiki-import:${crypto.randomUUID()}` },
+      json: {
+        companyUrl: input.companyUrl,
+        ...(input.focus?.trim() ? { focus: input.focus } : {}),
+        sourceSelection: protocolSourceSelection(input.sourceSelection),
+      },
+    });
+  }, "The Wiki company-context import failed.");
+}
+
+export async function confirmWikiImportAction(input: {
+  importRunId: string;
+  enabledProviders: BrainImportProvider[];
+}): Promise<BrainImportActionResult> {
+  return importCommand(
+    async () =>
+      (await serverImportClient()).v1.wiki.imports[":importRunId"].confirm.$post({
+        param: { importRunId: input.importRunId },
+        json: { enabledProviders: input.enabledProviders },
+      }),
+    "The Wiki company-context import failed.",
+  );
+}
+
+export async function cancelWikiImportAction(input: {
+  importRunId: string;
+}): Promise<BrainImportActionResult> {
+  return importCommand(
+    async () =>
+      (await serverImportClient()).v1.wiki.imports[":importRunId"].cancel.$post({
+        param: { importRunId: input.importRunId },
+      }),
+    "The Wiki company-context import failed.",
+  );
+}
+
+export async function retryWikiImportDiscoveryAction(input: {
+  importRunId: string;
+}): Promise<BrainImportActionResult> {
+  return importCommand(
+    async () =>
+      (await serverImportClient()).v1.wiki.imports[":importRunId"].retry.$post({
+        param: { importRunId: input.importRunId },
+      }),
+    "The Wiki company-context import failed.",
+  );
+}
+
 async function importCommand(
   request: () => Promise<Response>,
   fallback: string,

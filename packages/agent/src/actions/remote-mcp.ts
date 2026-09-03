@@ -41,6 +41,10 @@ export type RemoteMcpWorkerConnection =
   | { ok: false; reason: "not_connected" | "needs_reauth" }
   | { ok: true; integrationId: string; authProvider: OAuthClientProvider };
 
+export type RemoteMcpOperation =
+  | { type: "tools/list" }
+  | { type: "tools/call"; tool: string; capability: CapabilityId };
+
 export type RemoteMcpGatewayRegistration = {
   source: ActionSourceId;
   connectionProvider: ActionProviderId;
@@ -56,6 +60,7 @@ export type RemoteMcpGatewayRegistration = {
   loadConnection: (input: {
     userWorkosId: string;
     workspaceId: string;
+    operation: RemoteMcpOperation;
     onAuthorizationRequired: () => never;
   }) => Promise<RemoteMcpWorkerConnection>;
   isEnabled: () => Promise<boolean>;
@@ -220,6 +225,7 @@ export async function discoverRemoteMcpSnapshot(
   if (!state.connected || !state.integrationId) return null;
   const connection = await registration.loadConnection({
     ...identity,
+    operation: { type: "tools/list" },
     onAuthorizationRequired: () => {
       throw remoteAuthError(registration, "auth_expired");
     },
@@ -406,6 +412,11 @@ async function executeRemoteMcpTool(input: {
 
   const connection = await input.registration.loadConnection({
     ...identity,
+    operation: {
+      type: "tools/call",
+      tool: input.definition.name,
+      capability: input.classification.capability.id,
+    },
     onAuthorizationRequired: () => {
       throw remoteAuthError(input.registration, "auth_expired");
     },
@@ -448,7 +459,7 @@ async function executeRemoteMcpTool(input: {
       arguments: input.params,
       options: { signal: input.context.signal },
     });
-    return unwrapRemoteMcpResult(result, input.registration.label);
+    return unwrapRemoteMcpResult(result, input.registration);
   } finally {
     await client.close().catch(() => {});
   }
@@ -496,7 +507,10 @@ function normalizeInputSchema(value: RemoteToolDefinition["inputSchema"]): JSONS
   } as JSONSchema7;
 }
 
-function unwrapRemoteMcpResult(result: unknown, label: string): unknown {
+function unwrapRemoteMcpResult(
+  result: unknown,
+  registration: Pick<RemoteMcpGatewayRegistration, "connectionProvider" | "label">,
+): unknown {
   if (!isRecord(result) || !Array.isArray(result.content)) return result;
   const texts = result.content
     .filter(
@@ -505,12 +519,26 @@ function unwrapRemoteMcpResult(result: unknown, label: string): unknown {
     )
     .map((entry) => entry.text);
   const joined = texts.join("\n");
-  if (result.isError === true) throw new Error(joined || `${label} returned an MCP tool error.`);
+  if (result.isError === true) {
+    if (registration.connectionProvider === "google_calendar" && isAuthExpiredMcpError(joined)) {
+      throw remoteAuthError(registration, "auth_expired");
+    }
+    throw new Error(joined || `${registration.label} returned an MCP tool error.`);
+  }
   if (texts.length === 0) return result;
   try {
     return JSON.parse(joined) as unknown;
   } catch {
     return joined;
+  }
+}
+
+function isAuthExpiredMcpError(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) && isRecord(parsed.error) && parsed.error.code === "auth_expired";
+  } catch {
+    return false;
   }
 }
 

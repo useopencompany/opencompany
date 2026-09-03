@@ -27,8 +27,15 @@ import {
 import {
   GMAIL_MCP_ENDPOINT_URL,
   getGmailMcpIntegrationState,
+  gmailMcpRuntimeEndpointUrl,
   loadGmailMcpWorkerConnection,
 } from "./integrations/gmail-mcp";
+import {
+  GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
+  getGoogleCalendarMcpIntegrationState,
+  googleCalendarMcpRuntimeEndpointUrl,
+  loadGoogleCalendarMcpWorkerConnection,
+} from "./integrations/google-calendar-mcp";
 import {
   getLatitudeIntegrationState,
   LATITUDE_MCP_ENDPOINT_URL,
@@ -49,6 +56,16 @@ import {
   loadPostHogMcpWorkerConnection,
   POSTHOG_MCP_ENDPOINT_URL,
 } from "./integrations/posthog-mcp";
+import {
+  getRenderIntegrationState,
+  loadRenderMcpWorkerConnection,
+  RENDER_MCP_ENDPOINT_URL,
+} from "./integrations/render-mcp";
+import {
+  getSigNozIntegrationState,
+  loadSigNozMcpWorkerConnection,
+  SIGNOZ_MCP_ENDPOINT_URL,
+} from "./integrations/signoz-mcp";
 import {
   getSlackMcpIntegrationState,
   loadSlackMcpWorkerConnection,
@@ -82,6 +99,12 @@ const providerBindings = {
     getState: getGmailMcpIntegrationState,
     loadConnection: loadGmailMcpWorkerConnection,
   },
+  "google-calendar": {
+    provider: "google_calendar",
+    endpointUrl: GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
+    getState: getGoogleCalendarMcpIntegrationState,
+    loadConnection: loadGoogleCalendarMcpWorkerConnection,
+  },
   linear: {
     provider: "linear",
     endpointUrl: LINEAR_MCP_ENDPOINT_URL,
@@ -93,6 +116,12 @@ const providerBindings = {
     endpointUrl: POSTHOG_MCP_ENDPOINT_URL,
     getState: getPostHogIntegrationState,
     loadConnection: loadPostHogMcpWorkerConnection,
+  },
+  render: {
+    provider: "render",
+    endpointUrl: RENDER_MCP_ENDPOINT_URL,
+    getState: getRenderIntegrationState,
+    loadConnection: loadRenderMcpWorkerConnection,
   },
   neon: {
     provider: "neon",
@@ -111,6 +140,12 @@ const providerBindings = {
     endpointUrl: SLACK_MCP_ENDPOINT_URL,
     getState: getSlackMcpIntegrationState,
     loadConnection: loadSlackMcpWorkerConnection,
+  },
+  signoz: {
+    provider: "signoz",
+    endpointUrl: SIGNOZ_MCP_ENDPOINT_URL,
+    getState: getSigNozIntegrationState,
+    loadConnection: loadSigNozMcpWorkerConnection,
   },
 } as const;
 
@@ -316,16 +351,27 @@ function bindRegistration(
     });
     return null;
   }
+  const loadConnection: RemoteMcpGatewayRegistration["loadConnection"] =
+    record.pluginName === "google-calendar"
+      ? (input) => loadGoogleCalendarMcpWorkerConnection({ ...input, registrationId: record.id })
+      : record.pluginName === "gmail"
+        ? (input) => loadGmailMcpWorkerConnection({ ...input, registrationId: record.id })
+        : (binding.loadConnection as RemoteMcpGatewayRegistration["loadConnection"]);
   return {
     source: `plugin:${record.pluginName}:${record.server.name}`,
     connectionProvider: binding.provider,
     label: displayName(record.pluginName),
     description: record.pluginDescription,
-    server: record.server,
+    server:
+      record.pluginName === "google-calendar"
+        ? { ...record.server, url: googleCalendarMcpRuntimeEndpointUrl() }
+        : record.pluginName === "gmail"
+          ? { ...record.server, url: gmailMcpRuntimeEndpointUrl() }
+          : record.server,
     capabilities: record.capabilities,
     discoverySnapshot: record.discoverySnapshot,
     getState: binding.getState,
-    loadConnection: binding.loadConnection,
+    loadConnection,
     isEnabled: () =>
       isPluginGatewayRegistrationActive(db, {
         workspaceId: identity.workspaceId,

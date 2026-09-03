@@ -4,7 +4,11 @@ import { WorkflowMentionError } from "@opencompany/agent/workflows";
 import { type Actor, CoreError } from "@opencompany/core";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
 import { describe, expect, it, vi } from "vitest";
-import { createAutomationTaskCreator, mapWorkflowPreparationError } from "./automations";
+import {
+  createAutomationTaskCreator,
+  mapWorkflowPreparationError,
+  shouldRefineWorkflowTaskTitle,
+} from "./automations";
 
 const actor: Actor = {
   userId: "user_1",
@@ -111,5 +115,43 @@ describe("createAutomationTaskCreator", () => {
       // Rejecting with the insert sentinel — not the "does not match its
       // canonical command" invariant error — proves validation passed.
     ).rejects.toThrow("__insert_reached__");
+  });
+
+  it("refines a newly created workflow Task after canonical name normalization", () => {
+    expect(
+      shouldRefineWorkflowTaskTitle({
+        source: "workflow",
+        workflowName: "ship-feature",
+        taskName: "Ship-feature",
+        idempotentReplay: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("repairs only idempotent replays that still have the canonical workflow fallback", () => {
+    expect(
+      shouldRefineWorkflowTaskTitle({
+        source: "workflow",
+        workflowName: "ship-feature",
+        taskName: "Ship-feature",
+        idempotentReplay: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRefineWorkflowTaskTitle({
+        source: "workflow",
+        workflowName: "ship-feature",
+        taskName: "Add one-click plugin installs",
+        idempotentReplay: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRefineWorkflowTaskTitle({
+        source: "schedule",
+        workflowName: "ship-feature",
+        taskName: "Ship-feature",
+        idempotentReplay: false,
+      }),
+    ).toBe(false);
   });
 });

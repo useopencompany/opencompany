@@ -1,8 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  ACTION_HOST_TOOL_CONTRACT_VERSION,
-  CHAT_HOST_TOOL_CONTRACT_VERSION,
-} from "@opencompany/agent-runtime";
+import { hostToolContractVersionForEngine } from "@opencompany/agent-runtime";
 import {
   type Actor,
   type ChatAttachmentFormat,
@@ -892,14 +889,7 @@ export class PostgresChatRepository implements ChatRepository {
         SELECT
           ${runtimeId}, target_chat.owner_user_workos_id, target_chat.id, ${input.command.engine},
           ${runtimeModel}, ${input.actor.workspaceId},
-          CASE WHEN target_chat.task_id IS NULL
-            THEN ${
-              input.command.engine === "opencompany"
-                ? CHAT_HOST_TOOL_CONTRACT_VERSION
-                : ACTION_HOST_TOOL_CONTRACT_VERSION
-            }
-            ELSE NULL
-          END,
+          ${hostToolContractVersionForEngine(input.command.engine)},
           ${runId}, 'queued', ${now}, ${now}
         FROM target_chat
         ON CONFLICT (chat_session_id) DO UPDATE

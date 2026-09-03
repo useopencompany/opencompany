@@ -60,7 +60,7 @@ const serverApiErrorMessageMock = vi.mocked(serverApiErrorMessage);
 const activation = {
   workspaceId: "goat_ws_new",
   organizationId: "org_new",
-  brainId: "brain_general",
+  brainId: null,
   createdByCaller: true,
 };
 
@@ -120,7 +120,7 @@ describe("opencompany onboarding API adapters", () => {
     ).resolves.toEqual({
       ok: true,
       workspaceId: "goat_ws_new",
-      brainRef: "brain_general",
+      brainRef: null,
     });
     expect(mocks.saveWorkspace).toHaveBeenCalledWith({
       json: {
@@ -133,7 +133,7 @@ describe("opencompany onboarding API adapters", () => {
     expect(activateWorkspaceMock).toHaveBeenCalledWith({
       workspaceId: "goat_ws_new",
       workosOrganizationId: "org_new",
-      brainId: "brain_general",
+      brainId: null,
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/", "layout");
   });

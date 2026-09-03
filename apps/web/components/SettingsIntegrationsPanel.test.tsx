@@ -151,7 +151,7 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    // Workspace scope is shown first and personal Google connections are hidden.
+    // Workspace scope is shown first and personal connections are hidden.
     expect(
       screen.getByText(
         "Ingest pull requests and issues from selected repositories through webhooks.",
@@ -163,10 +163,13 @@ describe("SettingsIntegrationsPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    // Personal scope reveals personal connections and hides workspace-owned ones.
+    // Personal scope reveals non-plugin connections and hides workspace-owned ones.
     expect(
-      screen.getByText("Let opencompany view and update your schedule and events."),
+      screen.getByText("Sync files and folders you choose into opencompany."),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Let opencompany view and update your schedule and events."),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText(
         "Ingest pull requests and issues from selected repositories through webhooks.",
@@ -391,6 +394,29 @@ describe("SettingsIntegrationsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
     expect(screen.queryByText("Acme")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Personal" })).not.toHaveTextContent("1");
+  });
+
+  it("keeps Google Calendar out of the legacy Integrations panel", () => {
+    const integrations = integrationStateFromRows([
+      {
+        id: "gint_google_calendar",
+        provider: "google_calendar",
+        externalId: "google-user-1",
+        accountEmail: "ada@example.com",
+        accountName: "Ada",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as IntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    expect(screen.queryByText("Ada")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Let opencompany read and manage your calendar events."),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Personal" })).not.toHaveTextContent("1");
   });
 

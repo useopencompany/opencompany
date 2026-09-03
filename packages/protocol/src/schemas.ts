@@ -394,6 +394,7 @@ export const BrainTimelineReadModelNameSchema = z.literal("brain-timeline-v1");
 export const BrainEdgeReadModelNameSchema = z.literal("brain-edges-v1");
 export const BrainIngestJobReadModelNameSchema = z.literal("brain-ingest-jobs-v1");
 export const BrainImportRunReadModelNameSchema = z.literal("brain-import-runs-v1");
+export const WikiImportRunReadModelNameSchema = z.literal("wiki-import-runs-v1");
 export const WikiPageReadModelNameSchema = z.literal("wiki-pages-v2");
 export const WikiTimelineReadModelNameSchema = z.literal("wiki-timeline-v1");
 export const IntegrationAccountReadModelNameSchema = z.literal("integration-accounts-v1");
@@ -409,6 +410,7 @@ export const ReadModelSchema = z.enum([
   BrainEdgeReadModelNameSchema.value,
   BrainIngestJobReadModelNameSchema.value,
   BrainImportRunReadModelNameSchema.value,
+  WikiImportRunReadModelNameSchema.value,
   WikiPageReadModelNameSchema.value,
   WikiTimelineReadModelNameSchema.value,
   IntegrationAccountReadModelNameSchema.value,
@@ -432,6 +434,8 @@ export const IntegrationAccountReadModelSchema = z
       "fathom",
       "attio",
       "betterstack",
+      "render",
+      "signoz",
       "stripe",
       "latitude",
       "posthog",
@@ -2020,7 +2024,7 @@ export const WikiCommandSchema = z
   .strict();
 
 // Body of POST /internal/wiki/commands. The API never trusts the caller-supplied
-// tenancy: it reloads the user, onboarding, wiki flag, membership, role, and
+// tenancy: it reloads the user, onboarding, membership, role, and
 // permissions from Postgres before executing the command.
 export const InternalWikiCommandRequestSchema = z
   .object({
@@ -3396,7 +3400,7 @@ export const OnboardingWorkspaceEnvelopeSchema = z
       .object({
         workspaceId: ResourceIdSchema,
         organizationId: ResourceIdSchema,
-        brainId: ResourceIdSchema,
+        brainId: ResourceIdSchema.nullable(),
         createdByCaller: z.boolean(),
       })
       .strict(),
@@ -3461,7 +3465,8 @@ export const IdentityUserSchema = z
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
     imessageEnabled: z.boolean(),
-    wikiEnabled: z.boolean(),
+    /** @deprecated Wiki is always enabled. */
+    wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
     preferredMcpClient: McpClientSchema.nullable(),
     mcpSetupCompletedAt: TimestampSchema.nullable(),
@@ -3478,6 +3483,7 @@ export const IdentityWorkspaceSchema = z
     name: z.string().min(1).max(80),
     slug: z.string().max(40).nullable(),
     role: z.enum(["admin", "member"]),
+    legacyBrainEnabled: z.boolean(),
   })
   .strict()
   .openapi("IdentityWorkspace");
@@ -3516,7 +3522,8 @@ export const UserPreferencesSchema = z
   .object({
     timezone: z.string().min(1).max(100),
     taskSpawningEnabled: z.boolean(),
-    wikiEnabled: z.boolean(),
+    /** @deprecated Wiki is always enabled. */
+    wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
     imessageEnabled: z.boolean(),
     autoModelRoutingEnabled: z.boolean(),
@@ -3528,6 +3535,7 @@ export const UpdateUserPreferencesBodySchema = z
   .object({
     timezone: z.string().min(1).max(100).optional(),
     taskSpawningEnabled: z.boolean().optional(),
+    /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */
     wikiEnabled: z.boolean().optional(),
     taskViewMode: TaskViewModeSchema.optional(),
     imessageEnabled: z.boolean().optional(),
@@ -3679,6 +3687,8 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "fathom",
   "attio",
   "betterstack",
+  "render",
+  "signoz",
   "latitude",
   "neon",
   "x_account",
@@ -3839,6 +3849,28 @@ export const IntegrationApiKeyBodySchema = z
   .object({ apiKey: z.string().min(1).max(4_000) })
   .strict()
   .openapi("IntegrationApiKeyBody");
+
+export const RenderAccountStateSchema = z
+  .object({
+    provider: z.literal("render"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    accountName: z.string().nullable(),
+    statusReason: z.string().nullable(),
+    capabilityModes: z.record(z.string(), z.unknown()),
+    toolModes: z.record(z.string(), z.unknown()),
+  })
+  .strict()
+  .openapi("RenderAccountState");
+
+export const RenderAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: RenderAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("RenderAccountStateEnvelope");
 
 export const AttioAccountStateSchema = z
   .object({

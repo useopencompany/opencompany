@@ -59,7 +59,7 @@ const identity = {
     autoModelRoutingEnabled: false,
     chatCapabilitiesBetaEnabled: false,
     imessageEnabled: false,
-    wikiEnabled: true,
+    wikiEnabled: true as const,
     taskViewMode: "board" as const,
     preferredMcpClient: "claude" as const,
     mcpSetupCompletedAt: "2026-08-13T12:00:00.000Z",
@@ -72,6 +72,7 @@ const identity = {
       id: "goat_ws_company",
       name: "Analytical Co",
       slug: "analytical-co",
+      legacyBrainEnabled: true,
       role: "member" as const,
     },
   ],
@@ -197,6 +198,7 @@ describe("request-cached identity adapter", () => {
       id: "goat_ws_company",
       name: "Analytical Co",
       slug: "analytical-co",
+      legacyBrainEnabled: true,
     });
     expect(context.activeBrain?.id).toBe("brain_company");
   });

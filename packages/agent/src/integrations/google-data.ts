@@ -13,6 +13,7 @@ import { getLatitudeIntegrationState } from "./latitude-mcp";
 import { getLinearIntegrationState } from "./linear-mcp";
 
 const GOOGLE_PROVIDERS: IntegrationProvider[] = ["gmail", "google_calendar", "google_drive"];
+type DbLike = any;
 const BROWSER_TOOLS = [
   "browser_open",
   "browser_snapshot",
@@ -57,6 +58,33 @@ export async function getGoogleIntegrationState(userWorkosId: string) {
   return googleIntegrationStateFromRows(rows);
 }
 
+export async function loadGoogleCalendarIntegration(input: { userWorkosId: string; db?: DbLike }) {
+  const [row] = await (input.db ?? getDb())
+    .select({
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
+      toolModes: integrations.toolModes,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.userWorkosId, input.userWorkosId),
+        isNull(integrations.workspaceId),
+        eq(integrations.provider, "google_calendar"),
+        ne(integrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(integrations.updatedAt))
+    .limit(1);
+  return row;
+}
+
 // Gmail-as-a-brain-source state: same integration rows as the Gmail tool
 // connection, but exposed with the integration id the brain-source picker and
 // save action key config rows on.
@@ -95,8 +123,6 @@ export async function getGmailSourceIntegrationState(
     statusReason: row.statusReason,
   };
 }
-
-type DbLike = any;
 
 export async function loadGmailIntegration(input: { userWorkosId: string; db?: DbLike }) {
   const [row] = await (input.db ?? getDb())

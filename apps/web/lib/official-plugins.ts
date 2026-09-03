@@ -2,8 +2,11 @@ export type OfficialMcpPluginName =
   | "betterstack"
   | "github"
   | "gmail"
+  | "google-calendar"
   | "linear"
   | "neon"
+  | "render"
+  | "signoz"
   | "slack";
 export type OfficialSkillPluginName = "yc-advise";
 export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
@@ -18,7 +21,16 @@ type OfficialPluginMetadataBase = {
 export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
   name: OfficialMcpPluginName;
   kind: "mcp";
-  connectionProvider: "betterstack" | "github_user" | "gmail" | "linear" | "neon" | "slack";
+  connectionProvider:
+    | "betterstack"
+    | "github_user"
+    | "gmail"
+    | "google_calendar"
+    | "linear"
+    | "neon"
+    | "render"
+    | "signoz"
+    | "slack";
   connectHref: string;
   accountLabel?: string;
   accountDescription: string;
@@ -65,12 +77,24 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     label: "Gmail",
     description: "Search and read Gmail, create drafts, and organize messages with approval.",
     source:
-      "https://github.com/useopencompany/plugins/tree/27c6666fd61b9f939295b9617e447b7bdce64b66/gmail",
+      "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
     connectionProvider: "gmail",
     connectHref: "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
     accountDescription: "The most recently connected Gmail account powers Gmail tools.",
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure Gmail ingestion in Wiki sources",
+  },
+  "google-calendar": {
+    name: "google-calendar",
+    kind: "mcp",
+    label: "Google Calendar",
+    description: "List calendars, read your schedule, and create calendar events.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
+    connectionProvider: "google_calendar",
+    connectHref:
+      "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
+    accountDescription: "The Google account opencompany uses when you run Calendar tools.",
   },
   linear: {
     name: "linear",
@@ -96,6 +120,29 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "neon",
     connectHref: "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
     accountDescription: "The account opencompany uses when you run Neon tools.",
+  },
+  render: {
+    name: "render",
+    kind: "mcp",
+    label: "Render",
+    description:
+      "Inspect Render infrastructure, troubleshoot services, and deploy permission-gated applications and datastores.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
+    connectionProvider: "render",
+    connectHref: "/settings/plugins/render#render-api-key",
+    accountDescription: "The Render account opencompany uses when you run Render tools.",
+  },
+  signoz: {
+    name: "signoz",
+    kind: "mcp",
+    label: "SigNoz",
+    description: "Investigate logs, metrics, traces, alerts, and dashboards in SigNoz US Cloud.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
+    connectionProvider: "signoz",
+    connectHref: "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz",
+    accountDescription: "The SigNoz US Cloud account opencompany uses when you run SigNoz tools.",
   },
   slack: {
     name: "slack",

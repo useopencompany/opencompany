@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { executeActionPrincipalGateway } from "@opencompany/agent/application/persisted-action-gateway";
 import { captureToBrainInbox } from "@opencompany/agent/brain-capture";
 import { nextAvailableBrainId } from "@opencompany/agent/brain-files";
@@ -6,6 +7,7 @@ import {
   normalizeBrainReadToolInput,
 } from "@opencompany/agent/brain-surface";
 import { runProductChatAgent } from "@opencompany/agent/chat-agent";
+import type { BrainToolInput, SaveToBrainToolInput } from "@opencompany/agent/chat-ui";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
 import { slackApiRequest } from "@opencompany/agent/integrations/slack";
 import { slackBotHasScope } from "@opencompany/agent/integrations/slack-bot";
@@ -46,10 +48,20 @@ import {
   type SlackBotIntegrationForTeam,
   slackBotSelectedChannelIds,
 } from "@opencompany/db/slack-bot";
-import { DEFAULT_BRAIN_SLUG, listAccessibleBrains } from "@opencompany/db/workspaces";
+import {
+  DEFAULT_BRAIN_SLUG,
+  isLegacyBrainEnabledForWorkspace,
+  listAccessibleBrains,
+} from "@opencompany/db/workspaces";
 import { recordModelCost } from "@opencompany/telemetry";
+import {
+  WIKI_READ_COMMANDS,
+  type WikiToolInput,
+  type WikiToolOutput,
+} from "@opencompany/wiki/tool";
 import type { LanguageModelUsage } from "ai";
 import { eq } from "drizzle-orm";
+import { executeApiWikiCommand } from "./api-wiki-client";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { runTaskBrainRead } from "./codex-brain-tool";
 import { createActionDispatcher } from "./opencompany-action-gateway";
@@ -82,7 +94,8 @@ export type SlackBotMentionInput = SlackBotEventInput;
 type SlackAnswerMode = "mention" | "follow_up" | "dm";
 
 // Runs after the API webhook has dispatched the claimed event to the runner:
-// resolve the install → route to brains by channel → answer → post in-thread.
+// resolve the install → identify the sender → answer from the workspace Wiki → post in-thread.
+// The old per-channel Brain routing is retained behind the workspace legacy flag.
 // Individual integration failures reply best-effort and are logged so another
 // opencompany workspace connected to the same Slack team can still answer.
 export async function processSlackBotMention(input: SlackBotMentionInput) {
@@ -156,6 +169,11 @@ export async function processSlackBotDirectMessage(
 
 type AnswerOutcome = "handled" | "duplicate" | { kind: "unmapped_dm"; botToken: string };
 
+export function slackChannelWikiAccessRefusal(sender: SlackSenderResolution): string | null {
+  if (sender.kind === "member") return null;
+  return "I couldn't match your Slack account to a member of this opencompany workspace, so I can't use its Wiki in this channel. Ask a workspace admin to add or verify your account, then try again.";
+}
+
 async function answerForIntegration(
   integration: SlackBotIntegrationForTeam,
   input: SlackBotEventInput,
@@ -198,21 +216,18 @@ async function answerForIntegration(
   if (mode === "dm" && sender.kind !== "member") {
     return { kind: "unmapped_dm", botToken };
   }
-
-  const brains = await resolveBrainTargets(integration, input.channelId, mode, sender);
-  if (brains.kind === "none") {
-    if (mode === "mention") {
-      await reply(
-        "This channel isn't connected to a brain yet. A workspace admin can enable it under Brain settings → Destinations.",
-      );
-    } else if (mode === "dm") {
-      await reply("No brain is available in this workspace yet, so I can't answer here.");
-    }
-    // Follow-ups stay silent when routing was removed mid-thread.
+  const channelAccessRefusal = mode === "dm" ? null : slackChannelWikiAccessRefusal(sender);
+  if (channelAccessRefusal) {
+    await reply(channelAccessRefusal);
     return "handled";
   }
+
+  const legacyBrains = (await isLegacyBrainEnabledForWorkspace(integration.workspaceId))
+    ? await resolveBrainTargets(integration, input.channelId, mode, sender)
+    : ({ kind: "none" } as const);
   const identity =
-    sender.kind === "member" && !brains.degradedToFallback
+    sender.kind === "member" &&
+    !(legacyBrains.kind === "targets" && legacyBrains.degradedToFallback)
       ? { userWorkosId: sender.member.workosUserId, member: sender.member }
       : { userWorkosId: integration.userWorkosId, member: null };
 
@@ -272,7 +287,7 @@ async function answerForIntegration(
     const answer = await runSlackChatAgent({
       integration,
       identity,
-      brains: brains.targets,
+      brains: legacyBrains.kind === "targets" ? legacyBrains.targets : [],
       mode,
       status,
       question,
@@ -347,7 +362,7 @@ async function resolveBrainTargets(
   channelId: string,
   mode: SlackAnswerMode,
   sender: SlackSenderResolution,
-): Promise<BrainResolution & { degradedToFallback?: boolean }> {
+): Promise<BrainResolution> {
   if (mode === "dm") {
     if (sender.kind !== "member") return { kind: "none" };
     const brains = await listAccessibleBrains({
@@ -369,9 +384,6 @@ async function resolveBrainTargets(
   const routed = routes.filter((route) => slackBotSelectedChannelIds(route.config).has(channelId));
   if (routed.length === 0) return { kind: "none" };
 
-  // A mapped member only reads brains they can access in the app. If none of
-  // the routed brains are accessible to them, the whole turn degrades to the
-  // workspace fallback identity so attribution stays coherent.
   if (sender.kind === "member") {
     const accessible = await listAccessibleBrains({
       userWorkosId: sender.member.workosUserId,
@@ -390,11 +402,8 @@ async function resolveBrainTargets(
       };
     }
     console.warn(
-      "[opencompany-slack-bot] Mapped member lacks access to routed brains; using fallback",
-      {
-        integrationId: integration.id,
-        channelId,
-      },
+      "[opencompany-slack-bot] Mapped member lacks access to routed legacy brains; using fallback",
+      { integrationId: integration.id, channelId },
     );
   }
 
@@ -405,8 +414,8 @@ async function resolveBrainTargets(
   };
 }
 
-// Drives the shared main-chat agent loop headlessly: same system prompt, same
-// toolset (brain read, save_to_brain, web search, integration actions), no
+// Drives the shared main-chat agent loop headlessly: same system prompt, with
+// Wiki access, optional flag-guarded legacy Brain tools, web search, and integration actions, but no
 // task/schedule tools, no persisted chat session — the Slack reply is the
 // entire output.
 async function runSlackChatAgent(input: {
@@ -433,9 +442,7 @@ async function runSlackChatAgent(input: {
   const gatewayApiKey = requiredGatewayApiKey();
   const signal = AbortSignal.timeout(SLACK_AGENT_TIMEOUT_MS);
   const currentDate = new Date();
-
-  const primaryBrain = input.brains[0];
-  if (!primaryBrain) throw new Error("Slack bot agent needs at least one brain.");
+  const primaryBrain = input.brains[0] ?? null;
   const multiBrain = input.brains.length > 1;
   const brainByRef = new Map(input.brains.map((brain) => [brain.brainRef, brain]));
 
@@ -449,9 +456,9 @@ async function runSlackChatAgent(input: {
     : ((await getUserBasics(input.identity.userWorkosId)) ?? undefined);
   const userTimezone = userContext?.timezone || "UTC";
 
-  // Never expose the installing admin's private integrations to an unmapped
-  // Slack sender using the fallback identity. DMs already require a mapped
-  // member; channel fallbacks remain limited to their explicitly routed brains.
+  // Only mapped members can use their private integrations. A mapped member
+  // may still use the legacy Brain fallback identity when routed Brain access
+  // has drifted, and that fallback must not inherit the installer's actions.
   const actions = input.identity.member
     ? await resolveSlackActionDispatcher({
         userWorkosId: input.identity.userWorkosId,
@@ -463,8 +470,7 @@ async function runSlackChatAgent(input: {
         userTimezone,
       })
     : null;
-
-  const workspaceName = await getWorkspaceName(input.integration.workspaceId);
+  const workspaceName = primaryBrain ? await getWorkspaceName(input.integration.workspaceId) : null;
 
   // In channels the final turn names the asker like the reconstructed history
   // does, so the model knows who to address among several humans.
@@ -491,77 +497,91 @@ async function runSlackChatAgent(input: {
     modelResolution: input.modelResolution,
     feature: "slack-bot",
     taskToolsEnabled: false,
-    brainCaptureEnabled: true,
-    activeBrain: {
-      name: primaryBrain.brainName,
-      workspaceName: workspaceName ?? "this workspace",
-    },
+    ...(primaryBrain
+      ? {
+          activeBrain: {
+            name: primaryBrain.brainName,
+            workspaceName: workspaceName ?? "this workspace",
+          },
+          brainRef: primaryBrain.brainRef,
+          ...(multiBrain ? { brainMultiBrain: { targets: input.brains } } : {}),
+          runBrainCli: async (args: BrainToolInput) => {
+            input.status.setPhase("Searching the legacy brain…");
+            const record = (args ?? {}) as Record<string, unknown>;
+            const requestedBrain =
+              multiBrain && typeof record.brain === "string" ? record.brain : primaryBrain.brainRef;
+            const target = brainByRef.get(requestedBrain) ?? primaryBrain;
+            const toolArgs = { ...record };
+            delete toolArgs.brain;
+            const normalized = multiBrain
+              ? normalizeBrainReadToolInput(toolArgs)
+              : (args as Parameters<typeof runTaskBrainRead>[0]["toolInput"]);
+            return runTaskBrainRead({
+              brainRef: target.brainRef,
+              userWorkosId: input.identity.userWorkosId,
+              chatSessionId: input.telemetrySessionId,
+              toolInput: normalized,
+              gatewayApiKey,
+            });
+          },
+          saveToBrain: async (toolInput: SaveToBrainToolInput) => {
+            input.status.setPhase("Saving to the legacy brain…");
+            const content = toolInput.content?.trim();
+            const sourceRef = toolInput.sourceRef?.trim();
+            if (!content && !sourceRef) {
+              return { ok: false as const, error: "Provide content or sourceRef to save." };
+            }
+            const captured = await captureToBrainInbox(
+              {
+                brainRef: primaryBrain.brainRef,
+                actorId: input.identity.userWorkosId,
+                ...(content ? { text: content } : {}),
+                ...(toolInput.title ? { title: toolInput.title } : {}),
+                ...(toolInput.intent ? { intent: toolInput.intent } : {}),
+                ...(sourceRef ? { sourceRef } : {}),
+                ...(toolInput.integrationId ? { integrationId: toolInput.integrationId } : {}),
+                ...(toolInput.fallbackContent ? { fallbackText: toolInput.fallbackContent } : {}),
+                source: {
+                  kind: "chat",
+                  connectionId: input.sourceRef,
+                  itemId: input.sourceRef,
+                },
+              },
+              {
+                nextAvailableBrainId,
+                wakeIngest: async () => wakeBrainIngestWorker(),
+              },
+            );
+            if (!captured.ok) return captured;
+            return {
+              ok: true as const,
+              draftId: captured.draftBrainId,
+              path: captured.path,
+              title: captured.title,
+              status: captured.quotaPaused ? ("paused_by_plan" as const) : ("captured" as const),
+            };
+          },
+        }
+      : { activeBrain: null }),
+    wikiToolReadOnly: true,
     ...(actions ? { connectedIntegrations: actions.catalog.providers } : {}),
     extraSystemBlocks: [createSlackSurfacePromptBlock({ isDirectMessage: input.mode === "dm" })],
-    ...(multiBrain ? { brainMultiBrain: { targets: input.brains } } : {}),
     userWorkosId: input.identity.userWorkosId,
     telemetrySessionId: input.telemetrySessionId,
-    brainRef: primaryBrain.brainRef,
     currentDate,
     ...(userContext ? { userContext } : {}),
     abortSignal: signal,
-    runBrainCli: async (args) => {
-      input.status.setPhase("Searching the brain…");
-      // Multi-brain turns receive raw args with a required `brain` enum value;
-      // single-brain turns arrive already normalized from the tool context.
-      const record = (args ?? {}) as Record<string, unknown>;
-      const requestedBrain =
-        multiBrain && typeof record.brain === "string" ? record.brain : primaryBrain.brainRef;
-      const target = brainByRef.get(requestedBrain) ?? primaryBrain;
-      const toolArgs = { ...record };
-      delete toolArgs.brain;
-      const normalized = multiBrain
-        ? normalizeBrainReadToolInput(toolArgs)
-        : (args as Parameters<typeof runTaskBrainRead>[0]["toolInput"]);
-      return runTaskBrainRead({
-        brainRef: target.brainRef,
-        userWorkosId: input.identity.userWorkosId,
-        chatSessionId: input.telemetrySessionId,
-        toolInput: normalized,
-        gatewayApiKey,
+    runWiki: async (toolInput, toolContext) => {
+      input.status.setPhase("Searching the wiki…");
+      return runSlackWikiCommand({
+        origin: requiredCanonicalApiOrigin(),
+        token: requiredApiInternalToken(),
+        workspaceId: input.integration.workspaceId,
+        actorId: input.identity.userWorkosId,
+        toolInput,
+        idempotencyKey: slackWikiIdempotencyKey(input.sourceRef, toolContext.toolCallId),
+        signal,
       });
-    },
-    saveToBrain: async (toolInput) => {
-      input.status.setPhase("Saving to the brain…");
-      const content = toolInput.content?.trim();
-      const sourceRef = toolInput.sourceRef?.trim();
-      if (!content && !sourceRef) {
-        return { ok: false, error: "Provide content or sourceRef to save." };
-      }
-      const captured = await captureToBrainInbox(
-        {
-          brainRef: primaryBrain.brainRef,
-          actorId: input.identity.userWorkosId,
-          ...(content ? { text: content } : {}),
-          ...(toolInput.title ? { title: toolInput.title } : {}),
-          ...(toolInput.intent ? { intent: toolInput.intent } : {}),
-          ...(sourceRef ? { sourceRef } : {}),
-          ...(toolInput.integrationId ? { integrationId: toolInput.integrationId } : {}),
-          ...(toolInput.fallbackContent ? { fallbackText: toolInput.fallbackContent } : {}),
-          source: {
-            kind: "chat",
-            connectionId: input.sourceRef,
-            itemId: input.sourceRef,
-          },
-        },
-        {
-          nextAvailableBrainId: nextAvailableBrainId,
-          wakeIngest: async () => wakeBrainIngestWorker(),
-        },
-      );
-      if (!captured.ok) return captured;
-      return {
-        ok: true,
-        draftId: captured.draftBrainId,
-        path: captured.path,
-        title: captured.title,
-        status: captured.quotaPaused ? "paused_by_plan" : "captured",
-      };
     },
     ...(process.env.EXA_API_KEY?.trim()
       ? {
@@ -578,6 +598,47 @@ async function runSlackChatAgent(input: {
       : {}),
     ...(actions ? { actions: actions.dispatcher } : {}),
   });
+}
+
+export async function runSlackWikiCommand(
+  input: {
+    origin: string;
+    token: string;
+    workspaceId: string;
+    actorId: string;
+    toolInput: WikiToolInput;
+    idempotencyKey: string;
+    signal?: AbortSignal;
+  },
+  execute: typeof executeApiWikiCommand = executeApiWikiCommand,
+): Promise<WikiToolOutput> {
+  if (!WIKI_READ_COMMANDS.includes(input.toolInput.command)) {
+    return { ok: false, error: "I can't write to the Wiki from Slack yet." };
+  }
+  try {
+    return await execute({
+      origin: input.origin,
+      token: input.token,
+      workspaceId: input.workspaceId,
+      actorId: input.actorId,
+      toolInput: input.toolInput,
+      idempotencyKey: input.idempotencyKey,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "The wiki lookup failed.",
+    };
+  }
+}
+
+function slackWikiIdempotencyKey(sourceRef: string, toolCallId: string) {
+  const digest = createHash("sha256")
+    .update(`${sourceRef}:${toolCallId}`)
+    .digest("hex")
+    .slice(0, 24);
+  return `slack-wiki:${digest}`;
 }
 
 async function resolveSlackActionDispatcher(input: {
@@ -792,6 +853,18 @@ function readUsageNumber(value: number | undefined) {
 
 function requiredGatewayApiKey() {
   return process.env.VERCEL_AI_GATEWAY_API_KEY?.trim() ?? "";
+}
+
+function requiredCanonicalApiOrigin() {
+  const value = process.env.OPENCOMPANY_API_ORIGIN?.trim();
+  if (!value) throw new Error("OPENCOMPANY_API_ORIGIN is required for Slack Wiki access.");
+  return value;
+}
+
+function requiredApiInternalToken() {
+  const value = process.env.API_INTERNAL_TOKEN?.trim();
+  if (!value) throw new Error("API_INTERNAL_TOKEN is required for Slack Wiki access.");
+  return value;
 }
 
 function slackGenerationErrorMessage(error: unknown) {

@@ -21,7 +21,7 @@ LLM-broker and billing compatibility tables through `@opencompany/db`.
 under `/internal/goat/*`; `/healthz` is public for Render and release checks. Private routes require
 `RUNNER_INTERNAL_TOKEN`. Browser and sandbox transports validate narrow signed tickets. The shared
 Codex and Claude Code MCP gateway rechecks persisted Conversation, Run, Attempt, lease, membership,
-and Wiki-preview authority for every operation; enabled Wiki commands cross the canonical API
+and workspace Wiki authority for every operation; Wiki commands cross the canonical API
 boundary instead of reading the Wiki database from the runner.
 
 `RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED` controls the durable task worker. Worker concurrency, DB pool,

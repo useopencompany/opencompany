@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAccessToken: vi.fn(),
@@ -14,8 +14,10 @@ vi.mock("./google-data", () => ({ loadGmailIntegration: mocks.loadIntegration })
 import {
   GMAIL_MCP_ENDPOINT_URL,
   getGmailMcpIntegrationState,
+  gmailMcpRuntimeEndpointUrl,
   loadGmailMcpWorkerConnection,
 } from "./gmail-mcp";
+import { verifyGmailMcpTicket } from "./gmail-mcp-ticket";
 import { GMAIL_MODIFY_SCOPE } from "./gmail-scopes";
 import { GoogleAccessAuthError } from "./google-access-token";
 
@@ -28,15 +30,27 @@ const connectedRow = {
   toolModes: { trash_message: "off" },
 };
 
+const connectionInput = {
+  userWorkosId: "user_1",
+  workspaceId: "workspace_1",
+  registrationId: "registration_1",
+  operation: { type: "tools/call", tool: "create_draft", capability: "draft" } as const,
+};
+
 describe("Gmail MCP connection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.loadIntegration.mockResolvedValue(connectedRow);
     mocks.getAccessToken.mockResolvedValue("google-access-token");
+    process.env.API_INTERNAL_TOKEN = "shared-api-secret";
   });
 
-  it("exposes the exact Google endpoint and connection permission state", async () => {
-    expect(GMAIL_MCP_ENDPOINT_URL).toBe("https://gmailmcp.googleapis.com/mcp/v1");
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("exposes opencompany's endpoint and connection permission state", async () => {
+    expect(GMAIL_MCP_ENDPOINT_URL).toBe("https://api.opencompany.chat/mcp/plugins/gmail");
     await expect(getGmailMcpIntegrationState({ userWorkosId: "user_1" })).resolves.toEqual({
       connected: true,
       integrationId: "gint_gmail",
@@ -45,9 +59,16 @@ describe("Gmail MCP connection", () => {
     });
   });
 
-  it("loads the server-side Google token into the static bearer provider", async () => {
+  it("routes runtime calls through the configured environment-local API origin", () => {
+    vi.stubEnv("OPENCOMPANY_API_ORIGIN", "https://api.staging.opencompany.test/base");
+    expect(gmailMcpRuntimeEndpointUrl()).toBe(
+      "https://api.staging.opencompany.test/mcp/plugins/gmail",
+    );
+  });
+
+  it("validates Google access but injects only a narrow first-party ticket into MCP", async () => {
     const connection = await loadGmailMcpWorkerConnection({
-      userWorkosId: "user_1",
+      ...connectionInput,
       onAuthorizationRequired: () => {
         throw new Error("authorization required");
       },
@@ -60,9 +81,19 @@ describe("Gmail MCP connection", () => {
     });
     expect(connection).toMatchObject({ ok: true, integrationId: "gint_gmail" });
     if (!connection.ok) throw new Error("Expected a connected Gmail account.");
-    expect(connection.authProvider.tokens()).toEqual({
-      access_token: "google-access-token",
-      token_type: "Bearer",
+    const tokens = await connection.authProvider.tokens();
+    expect(tokens?.access_token).not.toBe("google-access-token");
+    expect(
+      verifyGmailMcpTicket({
+        ticket: tokens?.access_token ?? "",
+        secret: "shared-api-secret",
+      }),
+    ).toMatchObject({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+      integrationId: "gint_gmail",
+      registrationId: "registration_1",
+      operation: connectionInput.operation,
     });
   });
 
@@ -73,7 +104,7 @@ describe("Gmail MCP connection", () => {
     });
     await expect(
       loadGmailMcpWorkerConnection({
-        userWorkosId: "user_1",
+        ...connectionInput,
         onAuthorizationRequired: () => {
           throw new Error("authorization required");
         },
@@ -85,7 +116,7 @@ describe("Gmail MCP connection", () => {
     mocks.getAccessToken.mockRejectedValueOnce(new GoogleAccessAuthError("expired"));
     await expect(
       loadGmailMcpWorkerConnection({
-        userWorkosId: "user_1",
+        ...connectionInput,
         onAuthorizationRequired: () => {
           throw new Error("authorization required");
         },
@@ -93,13 +124,10 @@ describe("Gmail MCP connection", () => {
     ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
   });
 
-  it("requests reauthorization only when a forced refresh also fails", async () => {
+  it("maps an MCP 401 back to the normal reconnect path", async () => {
     const authorizationError = new Error("authorization required");
-    mocks.getAccessToken
-      .mockResolvedValueOnce("google-access-token")
-      .mockRejectedValueOnce(new GoogleAccessAuthError("expired"));
     const connection = await loadGmailMcpWorkerConnection({
-      userWorkosId: "user_1",
+      ...connectionInput,
       onAuthorizationRequired: () => {
         throw authorizationError;
       },
@@ -109,9 +137,5 @@ describe("Gmail MCP connection", () => {
     await expect(
       connection.authProvider.validateResourceURL?.(GMAIL_MCP_ENDPOINT_URL, GMAIL_MCP_ENDPOINT_URL),
     ).rejects.toBe(authorizationError);
-    expect(mocks.getAccessToken).toHaveBeenLastCalledWith(
-      { userWorkosId: "user_1", integrationId: "gint_gmail", provider: "gmail" },
-      { forceRefresh: true },
-    );
   });
 });

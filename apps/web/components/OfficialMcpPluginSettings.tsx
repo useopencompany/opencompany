@@ -43,6 +43,7 @@ import {
   OFFICIAL_MCP_PLUGINS,
   type OfficialMcpPluginConfig,
 } from "@/components/PluginSettings";
+import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
   IntegrationAccountRow,
@@ -185,6 +186,25 @@ export function GmailPluginDetail({
   );
 }
 
+export function GoogleCalendarPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS["google-calendar"]}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function LinearPluginDetail({
   pluginState,
   canEdit,
@@ -223,6 +243,25 @@ export function NeonPluginDetail({
   );
 }
 
+export function RenderPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.render}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function SlackPluginDetail({
   pluginState,
   canEdit,
@@ -235,6 +274,25 @@ export function SlackPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.slack}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function SigNozPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.signoz}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -727,9 +785,16 @@ function AccountsSection({
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
-          Connect {accountLabel} account
-        </a>
+        {config.name === "render" ? (
+          <RenderApiKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />
+        ) : (
+          <a
+            href={config.connectHref}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Connect {accountLabel} account
+          </a>
+        )}
         {config.ingestionHref && config.ingestionLabel ? (
           <Link
             href={config.ingestionHref}
@@ -1180,7 +1245,10 @@ function pluginAccountsFromState(
     config.connectionProvider === "betterstack" ||
     config.connectionProvider === "github_user" ||
     config.connectionProvider === "gmail" ||
+    config.connectionProvider === "google_calendar" ||
     config.connectionProvider === "neon" ||
+    config.connectionProvider === "render" ||
+    config.connectionProvider === "signoz" ||
     config.connectionProvider === "slack"
   ) {
     const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
@@ -1191,7 +1259,9 @@ function pluginAccountsFromState(
         ? state.gmail.integrationId
         : config.connectionProvider === "slack"
           ? state.slack.integrationId
-          : null;
+          : config.connectionProvider === "google_calendar"
+            ? state.google_calendar.integrationId
+            : null;
     return {
       accounts,
       permissionConnection:
@@ -1233,6 +1303,10 @@ export function defaultGmailToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("gmail");
 }
 
+export function defaultGoogleCalendarToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("google-calendar");
+}
+
 export function defaultNeonToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("neon");
 }
@@ -1243,6 +1317,10 @@ export function defaultBetterStackToolsState(): PluginToolsState {
 
 export function defaultSlackToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("slack");
+}
+
+export function defaultSigNozToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("signoz");
 }
 
 function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): PluginToolsState {
@@ -1281,6 +1359,12 @@ export function gmailToolsStateFromPlugin(plugin: PluginInstallationDto | null):
   return officialPluginToolsStateFromPlugin(plugin, "gmail");
 }
 
+export function googleCalendarToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "google-calendar");
+}
+
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "neon");
 }
@@ -1293,6 +1377,10 @@ export function betterStackToolsStateFromPlugin(
 
 export function slackToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "slack");
+}
+
+export function signozToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "signoz");
 }
 
 function officialPluginToolsStateFromPlugin(
@@ -1383,6 +1471,12 @@ export function gmailToolsStateFromPreview(preview: PluginImportPreviewDto): Plu
   return officialPluginToolsStateFromPreview(preview, "gmail");
 }
 
+export function googleCalendarToolsStateFromPreview(
+  preview: PluginImportPreviewDto,
+): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "google-calendar");
+}
+
 export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "neon");
 }
@@ -1395,6 +1489,10 @@ export function betterStackToolsStateFromPreview(
 
 export function slackToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "slack");
+}
+
+export function signozToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "signoz");
 }
 
 function officialPluginToolsStateFromPreview(

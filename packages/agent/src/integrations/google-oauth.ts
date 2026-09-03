@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IntegrationProvider } from "@opencompany/db/product-schema";
 import { getAppUrl } from "../app-url";
 import { GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE, GMAIL_READ_SCOPE } from "./gmail-scopes";
+import { GOOGLE_CALENDAR_EVENTS_SCOPE, GOOGLE_CALENDAR_READ_SCOPE } from "./google-calendar-scopes";
 import {
   GOOGLE_DOCS_WRITE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
@@ -36,8 +37,8 @@ export const GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GooglePro
     routeSegment: "google-calendar",
     displayName: "Google Calendar",
     scopes: [
-      "https://www.googleapis.com/auth/calendar.readonly",
-      "https://www.googleapis.com/auth/calendar.events",
+      GOOGLE_CALENDAR_READ_SCOPE,
+      GOOGLE_CALENDAR_EVENTS_SCOPE,
       "https://www.googleapis.com/auth/calendar.freebusy",
       ...OPENID_SCOPES,
     ],
@@ -57,8 +58,8 @@ export const GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GooglePro
 
 const GMAIL_MCP_PROVIDER_CONFIG: GoogleProviderConfig = {
   ...GOOGLE_PROVIDER_CONFIG.gmail,
-  // Google's hosted MCP requires gmail.modify for its label, trash, and spam tools.
-  // The credential remains server-side and is injected only for the reviewed endpoint.
+  // opencompany's Gmail MCP uses gmail.modify for read, draft, label, and
+  // reversible trash operations. The credential remains server-side.
   scopes: [GMAIL_MODIFY_SCOPE, ...OPENID_SCOPES],
 };
 

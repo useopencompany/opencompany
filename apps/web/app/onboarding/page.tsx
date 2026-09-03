@@ -46,9 +46,11 @@ export default async function OnboardingPage({
 
   // Source hydration depends on the workspace/brain resolution above; all
   // independent first-run reads already ran in parallel.
-  const sourceDetails = context?.activeBrain
-    ? await getBrainSourcesAction(context.activeBrain.id)
-    : null;
+  const legacyBrainEnabled = context?.workspace.legacyBrainEnabled === true;
+  const sourceDetails =
+    legacyBrainEnabled && context?.activeBrain
+      ? await getBrainSourcesAction(context.activeBrain.id)
+      : null;
   const connectionResult: OnboardingConnectionResult | null =
     params.setup === "connected" || params.setup === "error"
       ? {
@@ -74,6 +76,7 @@ export default async function OnboardingPage({
       }}
       currentWorkspaceName={context?.workspace.name ?? ""}
       brainRef={context?.activeBrain?.id ?? null}
+      legacyBrainEnabled={legacyBrainEnabled}
       variant={variant}
       initialStep={initialStep}
       initialWorkspaceId={context?.workspace.id ?? null}
@@ -84,6 +87,7 @@ export default async function OnboardingPage({
       initialReferral={onboarding?.referralSource ?? null}
       initialSourceDetails={sourceDetails}
       initialConnectionResult={connectionResult}
+      initialIntegrations={context?.integrations}
     />
   );
 }

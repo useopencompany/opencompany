@@ -577,7 +577,12 @@ function initialData(): AppInitialData {
     schedules: [],
     recentChats: [],
     integrations: integrationStateFromRows([]),
-    featureFlags: { taskSpawning: false, autoModelRouting: false, imessage: false, wiki: false },
+    featureFlags: {
+      taskSpawning: false,
+      autoModelRouting: false,
+      imessage: false,
+      legacyBrain: false,
+    },
     codexConnected: false,
     claudeCodeConnected: false,
     mcpSetup: { preferredClient: null, completedAt: null },

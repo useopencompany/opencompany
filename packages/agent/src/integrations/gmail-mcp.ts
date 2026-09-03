@@ -1,10 +1,25 @@
 import type { RemoteMcpConnectionState } from "../actions/remote-mcp";
+import { createGmailMcpTicket, type GmailMcpOperation } from "./gmail-mcp-ticket";
 import { gmailMcpScopesSatisfied } from "./gmail-scopes";
 import { GoogleAccessAuthError, getGoogleAccessToken } from "./google-access-token";
 import { loadGmailIntegration } from "./google-data";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
 
-export const GMAIL_MCP_ENDPOINT_URL = "https://gmailmcp.googleapis.com/mcp/v1";
+export const GMAIL_MCP_ENDPOINT_URL = "https://api.opencompany.chat/mcp/plugins/gmail";
+
+export function gmailMcpRuntimeEndpointUrl() {
+  const configuredOrigin = process.env.OPENCOMPANY_API_ORIGIN?.trim();
+  if (!configuredOrigin) return GMAIL_MCP_ENDPOINT_URL;
+  try {
+    const origin = new URL(configuredOrigin);
+    if (origin.protocol !== "https:" && origin.hostname !== "localhost") {
+      return GMAIL_MCP_ENDPOINT_URL;
+    }
+    return new URL("/mcp/plugins/gmail", origin).toString();
+  } catch {
+    return GMAIL_MCP_ENDPOINT_URL;
+  }
+}
 
 export async function getGmailMcpIntegrationState(
   identity: string | { userWorkosId: string },
@@ -29,6 +44,9 @@ export async function getGmailMcpIntegrationState(
 
 export async function loadGmailMcpWorkerConnection(input: {
   userWorkosId: string;
+  workspaceId: string;
+  registrationId: string;
+  operation: GmailMcpOperation;
   onAuthorizationRequired: () => never;
 }) {
   const row = await loadGmailIntegration({ userWorkosId: input.userWorkosId });
@@ -37,9 +55,10 @@ export async function loadGmailMcpWorkerConnection(input: {
     return { ok: false, reason: "needs_reauth" } as const;
   }
 
-  let accessToken: string;
   try {
-    accessToken = await getGoogleAccessToken({
+    // Validate/refresh the provider credential before starting the MCP
+    // handshake, but never use that broad Google token as MCP authentication.
+    await getGoogleAccessToken({
       userWorkosId: row.userWorkosId,
       integrationId: row.id,
       provider: "gmail",
@@ -51,26 +70,26 @@ export async function loadGmailMcpWorkerConnection(input: {
     throw error;
   }
 
+  const internalSecret = process.env.API_INTERNAL_TOKEN?.trim();
+  if (!internalSecret) {
+    throw new Error("Gmail MCP is not configured: API_INTERNAL_TOKEN is missing.");
+  }
+  const { ticket } = createGmailMcpTicket({
+    userWorkosId: input.userWorkosId,
+    workspaceId: input.workspaceId,
+    integrationId: row.id,
+    registrationId: input.registrationId,
+    operation: input.operation,
+    secret: internalSecret,
+  });
+
   return {
     ok: true,
     integrationId: row.id,
     authProvider: createRemoteMcpStaticBearerAuthProvider({
-      accessToken,
+      accessToken: ticket,
       onAuthorizationRequired: async () => {
-        try {
-          await getGoogleAccessToken(
-            {
-              userWorkosId: row.userWorkosId,
-              integrationId: row.id,
-              provider: "gmail",
-            },
-            { forceRefresh: true },
-          );
-        } catch (error) {
-          if (error instanceof GoogleAccessAuthError) return input.onAuthorizationRequired();
-          throw error;
-        }
-        throw new Error("Gmail MCP rejected a freshly refreshed credential.");
+        return input.onAuthorizationRequired();
       },
     }),
   } as const;

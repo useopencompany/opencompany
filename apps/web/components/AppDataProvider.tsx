@@ -367,17 +367,15 @@ function AppLiveDataSubscriptions({
     );
     return {
       ...liveIntegrations,
-      // Gmail's MCP gateway deliberately selects the most recently updated
-      // account. Retain the server-selected id while account details continue
-      // to update live, so the plugin page always edits that exact account.
+      // Official MCP gateways deliberately select the most recently updated
+      // account. Preserve the server-selected primaries while personalAccounts
+      // continues to update live, so plugin pages edit those same accounts.
       gmail: {
         ...liveIntegrations.gmail,
         integrationId: initialData.integrations.gmail.integrationId,
       },
-      // Slack's MCP gateway deliberately selects the most recently updated
-      // account. Preserve the server-selected primary while personalAccounts
-      // continues to update live, so the plugin page edits that same account.
       slack: initialData.integrations.slack,
+      google_calendar: initialData.integrations.google_calendar,
       codex: initialData.integrations.codex,
       claude_code: initialData.integrations.claude_code,
       infisical: initialData.integrations.infisical,

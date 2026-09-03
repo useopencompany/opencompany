@@ -29,10 +29,12 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
+import { WikiImport } from "@/components/BrainImport";
 import { brainSourceHasScope, resolveBrainSourceState } from "@/components/BrainSourceCards";
 import { ConnectIntegrationModal } from "@/components/onboarding/ConnectIntegrationModal";
 import { OnboardingSourceCard } from "@/components/onboarding/OnboardingSourceCard";
 import { SourceConfigSheet } from "@/components/onboarding/SourceConfigSheet";
+import { WikiSourcesPanel } from "@/components/WikiSourcesPanel";
 import {
   type BrainSourcesDetails,
   getBrainSourcesAction,
@@ -43,6 +45,7 @@ import {
   type BrainSourceProviderDef,
   brainSourceNeedsConfig,
 } from "@/lib/brain-sources/registry";
+import type { IntegrationState } from "@/lib/integration-state";
 import {
   checkWorkspaceSlugAction,
   finishOnboardingAction,
@@ -50,6 +53,7 @@ import {
   saveOnboardingWorkspaceAction,
 } from "@/lib/onboarding-actions";
 import {
+  integrationConnectionSuccess,
   ONBOARDING_CONNECTION_MESSAGE,
   ONBOARDING_CONNECTION_STORAGE_KEY,
   type OnboardingConnectionMessage,
@@ -76,13 +80,21 @@ type StepKey = ProductOnboardingStep;
 
 type StepDef = { key: StepKey; label: string };
 
-// Activation-optimized order: know them → name it (and scaffold its Brain from
-// their role) → feed it → done. Referral is folded into the finish so it never
+// Activation-optimized order for legacy workspaces: know them → name it →
+// feed the Brain → done. Referral is folded into the finish so it never
 // interrupts a value step.
 const OWNER_STEPS: StepDef[] = [
   { key: "profile", label: "About you" },
   { key: "workspace", label: "Create workspace" },
   { key: "sources", label: "Connect sources" },
+  { key: "finish", label: "You're all set" },
+];
+
+const OWNER_WIKI_STEPS: StepDef[] = [
+  { key: "profile", label: "About you" },
+  { key: "workspace", label: "Create workspace" },
+  { key: "sources", label: "Connect sources" },
+  { key: "import", label: "Import company" },
   { key: "finish", label: "You're all set" },
 ];
 
@@ -189,6 +201,7 @@ export function OnboardingWizard({
   user,
   currentWorkspaceName,
   brainRef,
+  legacyBrainEnabled,
   variant,
   initialStep,
   initialWorkspaceId,
@@ -199,10 +212,12 @@ export function OnboardingWizard({
   initialReferral,
   initialSourceDetails,
   initialConnectionResult,
+  initialIntegrations,
 }: {
   user: OnboardingUser;
   currentWorkspaceName: string;
   brainRef: string | null;
+  legacyBrainEnabled: boolean;
   variant: "owner" | "member";
   initialStep: number;
   initialWorkspaceId: string | null;
@@ -213,12 +228,14 @@ export function OnboardingWizard({
   initialReferral: string | null;
   initialSourceDetails: BrainSourcesDetails | null;
   initialConnectionResult: OnboardingConnectionResult | null;
+  initialIntegrations?: IntegrationState;
 }) {
   const router = useRouter();
-  const STEPS = variant === "member" ? MEMBER_STEPS : OWNER_STEPS;
+  const steps =
+    variant === "member" ? MEMBER_STEPS : legacyBrainEnabled ? OWNER_STEPS : OWNER_WIKI_STEPS;
   const normalizedInitialRole = isOnboardingRole(initialRole) ? initialRole : null;
   const [stepIndex, setStepIndex] = useState(() =>
-    Math.min(Math.max(initialStep, 0), STEPS.length - 1),
+    Math.min(Math.max(initialStep, 0), steps.length - 1),
   );
 
   const [workspaceName, setWorkspaceName] = useState(initialWorkspaceName);
@@ -242,6 +259,17 @@ export function OnboardingWizard({
   const analyticsStartedRef = useRef(false);
   const analyticsStepsViewedRef = useRef(new Set<StepKey>());
 
+  useEffect(() => {
+    if (legacyBrainEnabled || !initialConnectionResult) return;
+    if (initialConnectionResult.status === "connected") {
+      toast.success(integrationConnectionSuccess(initialConnectionResult.provider));
+    } else if (initialConnectionResult.status === "error") {
+      toast.error(
+        onboardingConnectionError(initialConnectionResult.provider, initialConnectionResult.reason),
+      );
+    }
+  }, [initialConnectionResult, legacyBrainEnabled]);
+
   const reloadSourceDetails = useCallback(async () => {
     if (!activeBrainRef) return null;
     const next = await getBrainSourcesAction(activeBrainRef);
@@ -254,8 +282,8 @@ export function OnboardingWizard({
     [sourceDetails],
   );
 
-  const step = STEPS[stepIndex] ?? STEPS[0]!;
-  const isLast = stepIndex === STEPS.length - 1;
+  const step = steps[stepIndex] ?? steps[0]!;
+  const isLast = stepIndex === steps.length - 1;
   const effectiveSlug = slugTouched ? slug : slugify(workspaceName);
   const normalizedCompanyUrl = normalizeOnboardingCompanyUrl(companyUrl);
   const companyUrlStatus: CompanyUrlStatus = !companyUrl.trim()
@@ -280,7 +308,7 @@ export function OnboardingWizard({
       flow: variant,
       initial_step: step.key,
       initial_step_index: stepIndex,
-      total_steps: STEPS.length,
+      total_steps: steps.length,
       is_resume: stepIndex > 0,
       ...(activeWorkspaceId ? { workspace_id: activeWorkspaceId } : {}),
     });
@@ -288,7 +316,7 @@ export function OnboardingWizard({
     activeWorkspaceId,
     step.key,
     stepIndex,
-    STEPS.length,
+    steps.length,
     user.email,
     user.workosUserId,
     variant,
@@ -301,10 +329,10 @@ export function OnboardingWizard({
       flow: variant,
       step: step.key,
       step_index: stepIndex,
-      total_steps: STEPS.length,
+      total_steps: steps.length,
       ...(activeWorkspaceId ? { workspace_id: activeWorkspaceId } : {}),
     });
-  }, [activeWorkspaceId, step.key, stepIndex, STEPS.length, variant]);
+  }, [activeWorkspaceId, step.key, stepIndex, steps.length, variant]);
 
   // Persist the active step to a cookie so an OAuth round-trip (connecting a
   // source) resumes exactly here.
@@ -354,21 +382,21 @@ export function OnboardingWizard({
           const sourcesFeeding = countSourcesFeeding(sourceDetails);
           captureProductEvent("onboarding_completed", {
             flow: variant,
-            total_steps: STEPS.length,
+            total_steps: steps.length,
             workspace_id: activeWorkspaceId,
             sources_feeding: sourcesFeeding,
             source_goal_met: sourcesFeeding >= SOURCE_GOAL,
           });
         }
-        if (variant === "owner" && normalizedCompanyUrl) {
+        if (variant === "owner" && legacyBrainEnabled && normalizedCompanyUrl) {
           if (!queueOnboardingKickoff(normalizedCompanyUrl)) {
-            toast.error("Onboarding finished, but the first Brain run could not be started.");
+            toast.error("Onboarding finished, but the first Wiki run could not be started.");
           }
         }
         router.push("/");
         return;
       }
-      setStepIndex((i) => Math.min(i + 1, STEPS.length - 1));
+      setStepIndex((i) => Math.min(i + 1, steps.length - 1));
     });
   };
 
@@ -376,7 +404,13 @@ export function OnboardingWizard({
     // Before leaving the sources step, surface any account the user authorized
     // but never finished configuring — otherwise they land in a brain with
     // nothing flowing in. Soft gate: they can still continue anyway.
-    if (step.key === "sources" && !isLast && authorizedNotFeeding > 0 && !sourcesGateConfirmed) {
+    if (
+      legacyBrainEnabled &&
+      step.key === "sources" &&
+      !isLast &&
+      authorizedNotFeeding > 0 &&
+      !sourcesGateConfirmed
+    ) {
       setShowSourcesGate(true);
       return;
     }
@@ -397,7 +431,7 @@ export function OnboardingWizard({
       <div className="h-[3px] w-full shrink-0 bg-surface-subtle">
         <div
           className="h-full bg-ink transition-all duration-300"
-          style={{ width: `${((stepIndex + 1) / STEPS.length) * 100}%` }}
+          style={{ width: `${((stepIndex + 1) / steps.length) * 100}%` }}
         />
       </div>
 
@@ -417,6 +451,7 @@ export function OnboardingWizard({
           {step.key === "workspace" && (
             <WorkspaceStep
               user={user}
+              wiki={!legacyBrainEnabled}
               name={workspaceName}
               onName={(v) => {
                 setWorkspaceName(v);
@@ -431,22 +466,50 @@ export function OnboardingWizard({
             />
           )}
           {step.key === "welcome" && (
-            <WelcomeStep user={user} workspaceName={currentWorkspaceName} />
-          )}
-          {step.key === "sources" && (
-            <SourcesStep
-              brainRef={activeBrainRef}
-              details={sourceDetails}
-              reload={reloadSourceDetails}
-              initialConnectionResult={initialConnectionResult}
+            <WelcomeStep
+              user={user}
+              workspaceName={currentWorkspaceName}
+              wiki={!legacyBrainEnabled}
             />
           )}
+          {step.key === "sources" &&
+            (legacyBrainEnabled ? (
+              <SourcesStep
+                brainRef={activeBrainRef}
+                details={sourceDetails}
+                reload={reloadSourceDetails}
+                initialConnectionResult={initialConnectionResult}
+              />
+            ) : activeWorkspaceId ? (
+              <WikiSourcesPanel
+                workspaceId={activeWorkspaceId}
+                isAdmin
+                mode="onboarding"
+                {...(initialIntegrations ? { integrationState: initialIntegrations } : {})}
+              />
+            ) : (
+              <p className="text-[13px] text-danger">Create the workspace before adding sources.</p>
+            ))}
+          {step.key === "import" && activeWorkspaceId ? (
+            <div>
+              <StepHeader
+                title="Build your company Wiki"
+                subtitle="Scan public research and the sources you just connected. You review the workload before any pages are written."
+              />
+              <WikiImport
+                workspaceId={activeWorkspaceId}
+                compact
+                initialWebsite={normalizedCompanyUrl ?? ""}
+              />
+            </div>
+          ) : null}
           {step.key === "finish" && (
             <FinishStep
               workspaceName={variant === "member" ? currentWorkspaceName : workspaceName}
               referral={referral}
               onSelect={setReferral}
               showReferral={variant === "owner"}
+              wiki={!legacyBrainEnabled}
             />
           )}
 
@@ -502,7 +565,7 @@ export function OnboardingWizard({
 }
 
 function isSkippable(key: StepKey) {
-  return key === "sources";
+  return key === "sources" || key === "import";
 }
 
 // Soft gate shown when the user tries to leave the sources step with accounts
@@ -634,16 +697,16 @@ function ProfileStep({
 }) {
   const companyUrlHint =
     companyUrlStatus === "valid"
-      ? "URL looks good. We'll use it to start your first Brain research run."
+      ? "URL looks good. We'll use it to start your first Wiki research run."
       : companyUrlStatus === "invalid"
         ? "Enter a valid company URL."
-        : "We'll use this to start your first Brain research run.";
+        : "We'll use this to start your first Wiki research run.";
 
   return (
     <div>
       <StepHeader
         title={`Welcome, ${user.name.split(" ")[0]}`}
-        subtitle="Tell us a little about your role and company so we can shape your Brain around how you work."
+        subtitle="Tell us a little about your role and company so we can shape your Wiki around how you work."
       />
 
       <div className="flex flex-col gap-6">
@@ -713,6 +776,7 @@ function ProfileStep({
 
 function WorkspaceStep({
   user,
+  wiki,
   name,
   onName,
   slug,
@@ -720,6 +784,7 @@ function WorkspaceStep({
   slugStatus,
 }: {
   user: OnboardingUser;
+  wiki: boolean;
   name: string;
   onName: (v: string) => void;
   slug: string;
@@ -741,7 +806,7 @@ function WorkspaceStep({
     <div>
       <StepHeader
         title="Create your workspace"
-        subtitle="This is the home for your company's brain. You can invite teammates later."
+        subtitle={`This is the home for your company's ${wiki ? "Wiki" : "brain"}. Hobby includes one member; upgrade to Pro to invite teammates.`}
       />
 
       <IdentityRow user={user} />
@@ -801,12 +866,24 @@ function WorkspaceStep({
 // Step — Welcome (invited members)
 // ---------------------------------------------------------------------------
 
-function WelcomeStep({ user, workspaceName }: { user: OnboardingUser; workspaceName: string }) {
+function WelcomeStep({
+  user,
+  workspaceName,
+  wiki,
+}: {
+  user: OnboardingUser;
+  workspaceName: string;
+  wiki: boolean;
+}) {
   return (
     <div>
       <StepHeader
         title={`Welcome to ${workspaceName}`}
-        subtitle="You've been added to this company's brain. It already knows a lot — here's how to start putting it to work."
+        subtitle={
+          wiki
+            ? "You've joined this company's workspace. Its Wiki brings shared context together — here's how to start using it."
+            : "You've been added to this company's brain. It already knows a lot — here's how to start putting it to work."
+        }
       />
 
       <IdentityRow user={user} />
@@ -815,7 +892,11 @@ function WelcomeStep({ user, workspaceName }: { user: OnboardingUser; workspaceN
         <HighlightRow
           icon={MessagesSquare}
           title="Ask it anything"
-          text="Chat with the brain to get up to speed on people, projects, and decisions."
+          text={
+            wiki
+              ? "Chat with opencompany to get up to speed on people, projects, and decisions from the company Wiki."
+              : "Chat with the brain to get up to speed on people, projects, and decisions."
+          }
         />
         <HighlightRow
           icon={ShieldCheck}
@@ -1172,11 +1253,13 @@ function FinishStep({
   referral,
   onSelect,
   showReferral,
+  wiki,
 }: {
   workspaceName: string;
   referral: string | null;
   onSelect: (v: string) => void;
   showReferral: boolean;
+  wiki: boolean;
 }) {
   return (
     <div>
@@ -1189,8 +1272,11 @@ function FinishStep({
             You&apos;re all set
           </h1>
           <p className="text-[14px] leading-6 text-ink-muted">
-            {workspaceName ? `${workspaceName} is ready.` : "Your brain is ready."} It&apos;ll keep
-            learning as content flows in — you can shape it anytime.
+            {workspaceName
+              ? `${workspaceName} is ready.`
+              : `Your ${wiki ? "Wiki" : "brain"} is ready.`}{" "}
+            Your {wiki ? "Wiki" : "brain"} will keep learning as content flows in — you can shape it
+            anytime.
           </p>
         </div>
       </div>

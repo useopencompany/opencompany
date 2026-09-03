@@ -17,6 +17,8 @@ export type ActionProviderId =
   | "latitude"
   | "neon"
   | "betterstack"
+  | "render"
+  | "signoz"
   | "x_account";
 
 export type ActionSourceId = ActionProviderId | ManagedCapabilitySource | `plugin:${string}`;

@@ -5,14 +5,15 @@ description: Read and organize Gmail and create drafts through the official MCP 
 
 ## Install and connect
 
-Gmail is an official Agent Plugin backed by [Google's hosted Gmail MCP server](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server),
-which is currently a Developer Preview. A workspace admin installs the immutable package from
+Gmail is an official opencompany Agent Plugin backed by opencompany's MCP wrapper around Google's
+stable Gmail REST API. A workspace admin installs the immutable package from
 **Settings → Plugins → Gmail**. Each person who wants to use Gmail tools then connects their own
 Google account from the Gmail plugin page.
 
-The Google Cloud project used for OAuth must have both the Gmail API and Gmail MCP API
-(`gmailmcp.googleapis.com`) enabled. Accounts connected before the plugin shipped must reconnect
-once to grant the access needed by the full tool set.
+The Google Cloud project used for OAuth must have the stable Gmail API (`gmail.googleapis.com`)
+enabled and complete Google's normal verification for the requested restricted scope. Google's
+Developer Preview Gmail MCP API is not used or required. Accounts connected before the plugin
+shipped must reconnect once to grant the access needed by the full tool set.
 
 ## Scopes and permissions
 
@@ -21,22 +22,25 @@ content is sensitive and every supported write changes the user's mailbox:
 
 - **Read Gmail — Ask:** search and read messages, threads, drafts, and labels.
 - **Create drafts — Ask:** create a draft for the user to review in Gmail.
-- **Organize Gmail — Ask:** add or remove labels, create labels, move messages or threads to trash,
-  and mark or unmark spam.
+- **Organize Gmail — Ask:** add or remove labels, create labels, and move messages or threads to or
+  from trash.
 
 New or unclassified tools always start at **Ask**. Persistent coding sessions only receive tools set
 to **On**. You can change these modes for the active account on the Gmail plugin page.
 
-Google requires the `gmail.modify` OAuth scope for the organization tools. Google defines that scope
-as allowing reading, composing, and sending email, but the hosted MCP server currently exposes no
-send-email tool. Credentials remain encrypted and server-side, and the plugin gateway sends them
-only to the fixed `https://gmailmcp.googleapis.com/mcp/v1` endpoint.
+Google requires the `gmail.modify` OAuth scope for the combined read, draft, label, and trash tools.
+Google defines that scope as allowing reading, composing, and sending email, but opencompany exposes
+no send-email tool. OAuth credentials remain encrypted and server-side. The plugin gateway sends
+only a short-lived, signed, operation-bound ticket to
+`https://api.opencompany.chat/mcp/plugins/gmail`; Google access and refresh tokens never become MCP
+credentials. The endpoint rechecks the installed plugin, connected account, scopes, and current tool
+permission before calling Gmail.
 
 ## Safety and limitations
 
-The Gmail MCP server currently supports reading mail, creating drafts, and organizing messages. It
-does not expose a send-email tool or a dedicated rich-attachment extraction tool. Sending must be
-completed manually from Gmail after reviewing a draft.
+The Gmail MCP server supports reading mail, creating drafts, applying or removing labels, moving
+mail to or from trash, and creating labels. It does not expose send, permanent-delete, spam, or
+attachment-download tools. Sending must be completed manually from Gmail after reviewing a draft.
 
 Email bodies are untrusted input and can contain indirect prompt-injection attempts. Keep Gmail
 permissions at **Ask** unless automatic access is intentional, and review any proposed mailbox

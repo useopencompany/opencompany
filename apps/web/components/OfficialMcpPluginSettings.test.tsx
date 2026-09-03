@@ -12,12 +12,15 @@ import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  defaultSigNozToolsState,
   GitHubPluginDetail,
   GitHubPluginDetailView,
   GmailPluginDetail,
   GmailPluginDetailView,
+  GoogleCalendarPluginDetail,
   githubToolsStateFromPlugin,
   gmailToolsStateFromPlugin,
+  googleCalendarToolsStateFromPlugin,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -25,6 +28,7 @@ import {
   NeonPluginDetailView,
   neonToolsStateFromPlugin,
   type PluginToolsState,
+  SigNozPluginDetail,
   SlackPluginDetail,
   slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
@@ -33,6 +37,7 @@ import {
   BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
   GMAIL_PLUGIN_SOURCE,
+  GOOGLE_CALENDAR_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
@@ -86,6 +91,13 @@ const appData = vi.hoisted(() => ({
       teamName: "Acme",
       integrationId: "gint_slack",
     },
+    google_calendar: {
+      connected: true,
+      status: "connected",
+      accountEmail: "ada@example.com",
+      accountName: "Ada",
+      integrationId: "gint_google_calendar",
+    },
     personalAccounts: {
       betterstack: [],
       gmail: [
@@ -116,8 +128,39 @@ const appData = vi.hoisted(() => ({
           capabilityModes: { read: "on", write: "ask" },
         },
       ],
+      google_calendar: [
+        {
+          integrationId: "gint_google_calendar",
+          provider: "google_calendar",
+          status: "connected",
+          connected: true,
+          accountEmail: "ada@example.com",
+          accountName: "Ada",
+          connectionLabel: null,
+          statusReason: null,
+          scopes: [
+            "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar.events",
+          ],
+          capabilityModes: {},
+        },
+      ],
       linear: [],
       neon: [],
+      signoz: [
+        {
+          integrationId: "gint_signoz",
+          provider: "signoz",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "SigNoz",
+          connectionLabel: "SigNoz",
+          statusReason: null,
+          scopes: [],
+          capabilityModes: { read: "on", query: "ask", write: "ask" },
+        },
+      ],
       slack: [
         {
           integrationId: "gint_slack",
@@ -633,6 +676,99 @@ const slackPlugin = {
   ],
 } as const satisfies PluginInstallationDto;
 
+const googleCalendarPlugin = {
+  ...plugin,
+  id: "plugin_google_calendar",
+  name: "google-calendar",
+  manifest: {
+    name: "google-calendar",
+    description: "Read and create Google Calendar events through opencompany's MCP server.",
+  },
+  source: {
+    ...plugin.source,
+    path: "google-calendar",
+    resolvedCommit: "de04f0c11eeb4e4eb4ed1140818205e14b08401f",
+  },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "google-calendar",
+      type: "streamable-http",
+      connectionProvider: "google-calendar",
+      capabilities: [
+        {
+          id: "read",
+          label: "Check calendars",
+          defaultMode: "ask",
+          tools: ["list_calendars"],
+        },
+        {
+          id: "query",
+          label: "Read calendar events",
+          defaultMode: "ask",
+          tools: ["list_events", "get_event"],
+        },
+        {
+          id: "write",
+          label: "Manage calendar events",
+          defaultMode: "ask",
+          tools: ["create_event"],
+        },
+      ],
+      tools: [
+        {
+          name: "list_calendars",
+          description: "List calendars.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Check calendars",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "list_events",
+          description: "List events.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Read calendar events",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "get_event",
+          description: "Get an event.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Read calendar events",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "create_event",
+          description: "Create an event.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Manage calendar events",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-03T08:00:00.000Z",
+      refreshAfter: "2026-09-03T09:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
 const slackPreview = {
   ...officialPreview,
   manifest: slackPlugin.manifest,
@@ -660,7 +796,7 @@ const gmailPlugin = {
   source: {
     ...plugin.source,
     path: "gmail",
-    resolvedCommit: "27c6666fd61b9f939295b9617e447b7bdce64b66",
+    resolvedCommit: "587fb06ae2a4e4bed7532e216f8712979ca35e7b",
   },
   skills: [],
   remoteMcpServers: [
@@ -767,6 +903,28 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read GitHub");
     expect(html).toContain("Manage GitHub");
     expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps the personal SigNoz connection onto the official plugin surface", () => {
+    const signozPlugin = {
+      ...plugin,
+      id: "plugin_signoz",
+      name: "signoz",
+      manifest: { name: "signoz", description: "Investigate SigNoz telemetry." },
+      source: { ...plugin.source, path: "signoz" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <SigNozPluginDetail
+        pluginState={{ status: "ready", plugin: signozPlugin }}
+        toolsState={defaultSigNozToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("SigNoz");
+    expect(html).toContain("Read SigNoz documentation");
+    expect(html).toContain("Inspect observability data");
+    expect(html).toContain("Manage SigNoz");
   });
 
   it("shows provenance, accounts, discovered tools, and read-only skills", async () => {
@@ -1354,6 +1512,40 @@ describe("Linear plugin settings", () => {
     });
   });
 
+  it("presents Google Calendar with every capability gated on Ask", () => {
+    const state = googleCalendarToolsStateFromPlugin(googleCalendarPlugin);
+    render(
+      <GoogleCalendarPluginDetail
+        pluginState={{ status: "ready", plugin: googleCalendarPlugin }}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "Google Calendar" })).toBeInTheDocument();
+    expect(screen.getByText("ada@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Google Calendar account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
+    );
+    for (const label of ["Check calendars", "Read calendar events", "Manage calendar events"]) {
+      expect(
+        within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
+          name: "Ask",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    }
+    expect(GOOGLE_CALENDAR_PLUGIN_SOURCE).toContain(
+      "/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
+    );
+    expect(state).toMatchObject({
+      groups: [
+        { id: "read", defaultMode: "ask" },
+        { id: "query", defaultMode: "ask" },
+        { id: "write", defaultMode: "ask" },
+      ],
+    });
+  });
+
   it("reviews and installs Slack from the pinned package on its detail page", async () => {
     commands.previewHeadlessPluginImport.mockResolvedValue(slackPreview);
     commands.importHeadlessPlugin.mockResolvedValue({ plugin: slackPlugin, replayed: false });
@@ -1404,7 +1596,7 @@ describe("Linear plugin settings", () => {
         { id: "write", defaultMode: "ask", tools: [{ readOnly: false }] },
       ],
     });
-    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/27c6666fd61b9f939295b9617e447b7bdce64b66/gmail");
+    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail");
   });
 
   it("edits the same Gmail account selected by the MCP gateway", async () => {

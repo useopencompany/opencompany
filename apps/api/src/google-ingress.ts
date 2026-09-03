@@ -39,6 +39,10 @@ export type GoogleIngressService = {
 export function createGoogleIngress(input: {
   db: DbLike;
   identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
 }): GoogleIngressService {
   return {
     start: (provider, request) => handleStart(input, provider, request),
@@ -47,7 +51,14 @@ export function createGoogleIngress(input: {
   };
 }
 
-type IngressInput = { db: DbLike; identify: ApiIdentityVerifier };
+type IngressInput = {
+  db: DbLike;
+  identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
+};
 
 async function handleStart(
   input: IngressInput,
@@ -152,6 +163,19 @@ async function handleCallback(
       workspaceId: session.workspaceId,
       provider,
     });
+    if (provider === "google_calendar" && input.refreshPluginRegistrations) {
+      try {
+        await input.refreshPluginRegistrations({
+          userWorkosId: session.userId,
+          workspaceIds: session.workspaces.map((entry) => entry.workspace.id),
+        });
+      } catch (error) {
+        logger.warn("Google Calendar plugin discovery refresh after connection failed", {
+          event: "goat.google_calendar_plugin_reconnect_refresh_failed",
+          error_message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     return statusRedirect(session, state.returnTo, provider, "connected");
   } catch (error) {

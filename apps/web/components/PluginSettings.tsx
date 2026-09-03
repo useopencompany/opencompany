@@ -11,12 +11,14 @@ import {
   BetterStackIcon,
   GitHubIcon,
   GmailIcon,
+  GoogleCalendarIcon,
   LinearIcon,
   NeonIcon,
   SlackIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
+  Activity,
   Archive,
   ChevronDown,
   ExternalLink,
@@ -125,6 +127,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: GmailIcon,
     iconClassName: "bg-white text-[#EA4335]",
   },
+  "google-calendar": {
+    ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],
+    Icon: GoogleCalendarIcon,
+    iconClassName: "bg-[#1A73E8] text-white",
+  },
   linear: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
     Icon: LinearIcon,
@@ -134,6 +141,16 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.neon,
     Icon: NeonIcon,
     iconClassName: "bg-[#00E599] text-[#0B0F14]",
+  },
+  render: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.render,
+    Icon: ServerCog,
+    iconClassName: "bg-[#0B0D0E] text-white",
+  },
+  signoz: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
+    Icon: Activity,
+    iconClassName: "bg-[#FF6B35] text-white",
   },
   slack: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.slack,
@@ -159,12 +176,18 @@ export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
 export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
 export const GMAIL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.gmail.name;
 export const GMAIL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.gmail.source;
+export const GOOGLE_CALENDAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-calendar"].name;
+export const GOOGLE_CALENDAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-calendar"].source;
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;
+export const RENDER_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.render.source;
 export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
 export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
+export const SIGNOZ_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.signoz.name;
+export const SIGNOZ_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.signoz.source;
 export const SLACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.slack.name;
 export const SLACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.slack.source;
 export const YC_ADVISE_PLUGIN_NAME = OFFICIAL_SKILL_PLUGINS["yc-advise"].name;
@@ -207,12 +230,20 @@ export function installOfficialGmailPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.gmail, preview);
 }
 
+export function installOfficialGoogleCalendarPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS["google-calendar"], preview);
+}
+
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.neon, preview);
 }
 
 export function installOfficialBetterStackPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.betterstack, preview);
+}
+
+export function installOfficialSigNozPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.signoz, preview);
 }
 
 export function installOfficialSlackPlugin(preview?: PluginImportPreviewDto) {
@@ -226,6 +257,25 @@ export function PluginsSettings({
   plugins: PluginListItemDto[];
   canEdit: boolean;
 }) {
+  const router = useRouter();
+  const [installingPluginName, setInstallingPluginName] = useState<OfficialPluginName | null>(null);
+  const [isInstalling, startInstall] = useTransition();
+
+  const install = (config: OfficialPluginConfig) => {
+    if (isInstalling) return;
+    setInstallingPluginName(config.name);
+    startInstall(async () => {
+      try {
+        await installOfficialPlugin(config);
+        toast.success(`${config.label} installed.`);
+        router.push(`/settings/plugins/${config.name}`);
+      } catch (cause) {
+        setInstallingPluginName(null);
+        toast.error(`Couldn't install ${config.label}. ${errorMessage(cause)}`);
+      }
+    });
+  };
+
   return (
     <SettingsContent
       title="Plugins"
@@ -243,7 +293,7 @@ export function PluginsSettings({
             >
               <Link
                 href={`/settings/plugins/${config.name}`}
-                prefetch
+                prefetch={Boolean(plugin)}
                 className="group flex min-w-0 flex-1 items-center gap-3 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
               >
                 <span
@@ -274,8 +324,8 @@ export function PluginsSettings({
                     {plugin
                       ? `${plugin.skillCount} ${plugin.skillCount === 1 ? "skill" : "skills"} · updated ${formatRelativeTime(plugin.updatedAt)}`
                       : config.kind === "skills"
-                        ? "Official skill package · review before installing"
-                        : "Official package · review before installing"}
+                        ? "Official skill package"
+                        : "Official package"}
                   </span>
                 </span>
               </Link>
@@ -287,12 +337,17 @@ export function PluginsSettings({
                   Manage
                 </Link>
               ) : canEdit ? (
-                <Link
-                  href={`/settings/plugins/${config.name}`}
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "text-ink")}
+                <Button
+                  size="sm"
+                  disabled={isInstalling}
+                  aria-busy={isInstalling && installingPluginName === config.name}
+                  onClick={() => install(config)}
                 >
-                  Review
-                </Link>
+                  {isInstalling && installingPluginName === config.name ? (
+                    <Loader2 className="animate-spin" />
+                  ) : null}
+                  {isInstalling && installingPluginName === config.name ? "Installing…" : "Install"}
+                </Button>
               ) : null}
             </div>
           );
@@ -308,12 +363,13 @@ type OfficialSkillPluginPreviewState =
   | { status: "error"; message: string };
 
 export function OfficialSkillPluginDetail({
-  config,
+  name,
   canEdit,
 }: {
-  config: OfficialSkillPluginConfig;
+  name: OfficialSkillPluginName;
   canEdit: boolean;
 }) {
+  const config = OFFICIAL_SKILL_PLUGINS[name];
   const router = useRouter();
   const [previewState, setPreviewState] = useState<OfficialSkillPluginPreviewState>({
     status: "loading",

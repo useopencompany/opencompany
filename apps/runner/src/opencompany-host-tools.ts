@@ -137,12 +137,8 @@ export async function loadHostTools(
             ) as ReturnType<EditWorkspaceSkillRunner>,
         }
       : {}),
-    ...(bootstrap.wikiEnabled
-      ? {
-          runWiki: (input: Record<string, unknown>, wikiContext: { toolCallId: string }) =>
-            call("wiki", input, wikiContext.toolCallId),
-        }
-      : {}),
+    runWiki: (input: Record<string, unknown>, wikiContext: { toolCallId: string }) =>
+      call("wiki", input, wikiContext.toolCallId),
     ...(bootstrap.browserToolsEnabled
       ? {
           browserTools: ({ name, args }) =>
