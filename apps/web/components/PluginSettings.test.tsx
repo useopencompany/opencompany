@@ -1,7 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import type { PluginImportPreviewDto } from "@opencompany/protocol";
-import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   importHeadlessPlugin,
@@ -128,16 +127,6 @@ const officialPreview = {
   report: { ignoredManifestFields: [], skills: [], mcp: { status: "absent" } },
 } as const satisfies PluginImportPreviewDto;
 
-const githubPreview = {
-  ...officialPreview,
-  manifest: { name: "github", description: "GitHub workflows." },
-  source: {
-    ...officialPreview.source,
-    path: "github",
-    resolvedCommit: "e".repeat(40),
-  },
-} as const satisfies PluginImportPreviewDto;
-
 describe("Plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
@@ -183,7 +172,7 @@ describe("Plugin settings", () => {
     expect(screen.getByText(/1 skill · updated/i)).toBeInTheDocument();
   });
 
-  it("offers every immutable official MCP package before installation", async () => {
+  it("routes every uninstalled official package through review before installation", () => {
     render(<PluginsSettings plugins={[]} canEdit />);
 
     const linearLink = screen.getByRole("link", { name: /linear/i });
@@ -206,7 +195,7 @@ describe("Plugin settings", () => {
       "/settings/plugins/slack",
     );
     expect(screen.getAllByText("Not installed")).toHaveLength(5);
-    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(5);
+    expect(screen.getAllByText("Official package · review before installing")).toHaveLength(5);
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
@@ -223,44 +212,13 @@ describe("Plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
     );
     expect(linearCard).not.toBeNull();
-    await userEvent.click(
-      within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
+    expect(within(linearCard as HTMLElement).getByRole("link", { name: "Review" })).toHaveAttribute(
+      "href",
+      "/settings/plugins/linear",
     );
-    await waitFor(() =>
-      expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: LINEAR_PLUGIN_SOURCE }),
-    );
-    expect(importHeadlessPlugin).toHaveBeenCalledWith({
-      url: LINEAR_PLUGIN_SOURCE,
-      expectedResolvedCommit: officialPreview.source.resolvedCommit,
-      expectedIntegrity: officialPreview.integrity,
-    });
-    expect(router.push).toHaveBeenCalledWith("/settings/plugins/linear");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("installs the immutable official GitHub package from its pinned source", async () => {
-    vi.mocked(previewHeadlessPluginImport).mockResolvedValue(githubPreview);
-    vi.mocked(importHeadlessPlugin).mockResolvedValue({
-      plugin: { ...plugin, name: "github", manifest: githubPreview.manifest },
-      replayed: false,
-    });
-    render(<PluginsSettings plugins={[]} canEdit />);
-
-    const githubCard = screen.getByRole("link", { name: /github/i }).closest("div.border");
-    expect(githubCard).not.toBeNull();
-    await userEvent.click(
-      within(githubCard as HTMLElement).getByRole("button", { name: "Install" }),
-    );
-
-    await waitFor(() =>
-      expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: GITHUB_PLUGIN_SOURCE }),
-    );
-    expect(importHeadlessPlugin).toHaveBeenCalledWith({
-      url: GITHUB_PLUGIN_SOURCE,
-      expectedResolvedCommit: githubPreview.source.resolvedCommit,
-      expectedIntegrity: githubPreview.integrity,
-    });
-    expect(router.push).toHaveBeenCalledWith("/settings/plugins/github");
+    expect(screen.getAllByRole("link", { name: "Review" })).toHaveLength(5);
+    expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
+    expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });
 
   it("shows the exact MCP approval boundary without exposing environment values", () => {
