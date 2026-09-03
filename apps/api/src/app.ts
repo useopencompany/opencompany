@@ -61,6 +61,7 @@ import {
   PROTOCOL_VERSION_HEADER,
   PresentationDeltaEventSchema,
   RunEventSchema,
+  V1_BROWSER_REQUEST_HEADERS,
   type V1RouteHandlers,
 } from "@opencompany/protocol";
 import { SPANS, withSpan } from "@opencompany/telemetry";
@@ -121,13 +122,6 @@ const HEARTBEAT_MS = 15_000;
 const TERMINAL_RUN_STATUSES = new Set(["paused", "completed", "failed", "canceled"]);
 const MULTIPART_ENVELOPE_BYTES = 64 * 1024;
 const SAFE_BROWSER_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const CORS_ALLOW_HEADERS = [
-  "Accept",
-  "Content-Type",
-  "Idempotency-Key",
-  "Last-Event-ID",
-  "X-OpenCompany-Protocol-Version",
-];
 const CORS_EXPOSE_HEADERS = [
   "Content-Disposition",
   "ETag",
@@ -2383,7 +2377,7 @@ export function createApiApp(input: CreateApiAppInput) {
         cors({
           origin: browserOrigins,
           allowMethods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-          allowHeaders: CORS_ALLOW_HEADERS,
+          allowHeaders: [...V1_BROWSER_REQUEST_HEADERS],
           exposeHeaders: CORS_EXPOSE_HEADERS,
           credentials: true,
           maxAge: 600,
