@@ -54,7 +54,10 @@ export type AcpEngineAdapter = {
   id: string;
   displayName: string;
   command: (workdir: string) => string;
-  sessionMeta?: (input: { hasMcpServers: boolean }) => Record<string, unknown> | null;
+  prepareSession?: (input: { mcpServers: AcpMcpServer[] }) => {
+    mcpServers?: AcpMcpServer[];
+    meta?: Record<string, unknown> | null;
+  };
   configOptions: {
     model?: string;
     reasoningEffort?: {
@@ -171,13 +174,11 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       for (const request of input.extensionRequests ?? []) {
         await client.request(request.method, request.params);
       }
-      const sessionMeta = input.adapter.sessionMeta?.({
-        hasMcpServers: input.mcpServers.length > 0,
-      });
+      const preparedSession = input.adapter.prepareSession?.({ mcpServers: input.mcpServers });
       const sessionParams = {
         cwd: input.workdir,
-        mcpServers: input.mcpServers,
-        ...(sessionMeta ? { _meta: sessionMeta } : {}),
+        mcpServers: preparedSession?.mcpServers ?? input.mcpServers,
+        ...(preparedSession?.meta ? { _meta: preparedSession.meta } : {}),
       };
 
       let loadedSession = false;
