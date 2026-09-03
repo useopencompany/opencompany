@@ -1,4 +1,4 @@
-import type { HarnessSpec } from "@opencompany/db/product-schema";
+import type { TaskResultMode } from "@opencompany/db/product-schema";
 
 const BRAIN_REPORT_CONTRACT_START = "<brain_markdown_report_result_contract>";
 const BRAIN_REPORT_CONTRACT_END = "</brain_markdown_report_result_contract>";
@@ -12,14 +12,21 @@ const BRAIN_REPORT_CONTRACT = [
   BRAIN_REPORT_CONTRACT_END,
 ].join("\n");
 
-export function systemPromptForTaskResultMode(
-  systemPrompt: string,
-  resultMode: HarnessSpec["resultMode"],
-) {
+export function systemPromptForTaskResultMode(systemPrompt: string, resultMode: TaskResultMode) {
   const basePrompt = removeBrainReportContracts(systemPrompt);
   return resultMode === "brain_markdown_report"
     ? [basePrompt, BRAIN_REPORT_CONTRACT].filter(Boolean).join("\n\n")
     : basePrompt;
+}
+
+export function systemBlocksForTaskResultMode(
+  systemBlocks: readonly string[],
+  resultMode: TaskResultMode,
+) {
+  const baseBlocks = systemBlocks.map(removeBrainReportContracts).filter(Boolean);
+  return resultMode === "brain_markdown_report"
+    ? [...baseBlocks, BRAIN_REPORT_CONTRACT]
+    : baseBlocks;
 }
 
 function removeBrainReportContracts(systemPrompt: string) {

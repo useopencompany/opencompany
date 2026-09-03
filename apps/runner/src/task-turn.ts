@@ -48,7 +48,7 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { getAvailableGitHubRepositoryNamesForRunner } from "./harness-planner";
 import { rowsFromExecute } from "./sql-exec";
-import { systemPromptForTaskResultMode } from "./task-result-mode";
+import { systemBlocksForTaskResultMode, systemPromptForTaskResultMode } from "./task-result-mode";
 import { normalizeTaskToolNames } from "./task-tool-names";
 
 const TASK_OUTCOME_COMMENT_MAX_LENGTH = 200;
@@ -83,6 +83,11 @@ export function resolveTaskTurnContext(task: Task, turn: CodexChatTurn): TaskTur
       ...task.harnessSpec,
       resultMode,
       systemPrompt: systemPromptForTaskResultMode(task.harnessSpec.systemPrompt, resultMode),
+      ...(task.harnessSpec.systemBlocks
+        ? {
+            systemBlocks: systemBlocksForTaskResultMode(task.harnessSpec.systemBlocks, resultMode),
+          }
+        : {}),
     },
   };
 }
@@ -378,7 +383,7 @@ export function buildTaskTurnCompletion(input: {
     : null;
   let outcomeComment =
     input.outcomeComment?.trim().slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH) || null;
-  let harnessSpec = input.context.harnessSpec;
+  let harnessSpec = input.context.task.harnessSpec;
   let nextTurn: TaskNextTurn | null = null;
 
   if (workflow?.steps?.length) {
@@ -418,8 +423,8 @@ export function buildTaskTurnCompletion(input: {
         engine: nextStep.engine,
         model: nextStep.model,
         ...(nextStepCodexConfig ? { codex: nextStepCodexConfig } : {}),
-        systemPrompt: nextStep.systemPrompt,
-        systemBlocks: nextStep.systemBlocks,
+        systemPrompt: systemPromptForTaskResultMode(nextStep.systemPrompt, harnessSpec.resultMode),
+        systemBlocks: systemBlocksForTaskResultMode(nextStep.systemBlocks, harnessSpec.resultMode),
         workflow: {
           ...harnessSpec.workflow!,
           currentStepIndex: currentStepIndex + 1,
@@ -466,7 +471,7 @@ export function buildTaskTerminalProjection(context: TaskTurnContext): TaskTurnC
     taskId: context.task.id,
     taskDisplayId: context.task.displayId,
     taskName: context.task.name,
-    harnessSpec: context.harnessSpec,
+    harnessSpec: context.task.harnessSpec,
     result: "",
     reportedOutcome: null,
     outcomeComment: null,

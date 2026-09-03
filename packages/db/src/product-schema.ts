@@ -422,6 +422,8 @@ export type HarnessSpec = {
   };
 };
 
+export type TaskResultMode = HarnessSpec extends { resultMode: infer Mode } ? Mode : never;
+
 export type WorkspaceRole = "admin" | "member";
 export type McpClient = "claude" | "chatgpt" | "cursor";
 export type TaskViewMode = "board" | "list";
@@ -657,7 +659,7 @@ export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
 export type CodexChatTurnSettings = {
   approvalContinuation?: boolean;
   mentions?: Array<{ kind: "skill"; id: string }>;
-  taskResultMode?: HarnessSpec["resultMode"];
+  taskResultMode?: TaskResultMode;
   reasoningEffort?: CodexReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
   wakeupChain?: number;
