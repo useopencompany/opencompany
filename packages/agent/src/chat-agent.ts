@@ -1,7 +1,9 @@
 import {
   ACTION_TOOL_CONTRACT,
   AGENT_MODEL_CATALOG,
+  CLAUDE_CODE_AGENT_MODEL_IDS,
   CLAUDE_CODE_DEFAULT_MODEL_ID,
+  CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   isClaudeCodeModelId,
@@ -669,6 +671,13 @@ export function createProductChatToolContext(input: {
 
   const startTask = input.startTask;
   if (startTask) {
+    const taskEngineHint = input.requestedEngine ?? inferStartTaskEngine(input.latestUserMessage);
+    const availableTaskModels =
+      taskEngineHint === "codex"
+        ? CODEX_AGENT_MODEL_IDS
+        : taskEngineHint === "claude_code"
+          ? CLAUDE_CODE_AGENT_MODEL_IDS
+          : AGENT_MODEL_CATALOG.map((model) => model.id);
     tools[START_TASK_TOOL_NAME] = tool<
       StartTaskToolInput,
       StartTaskToolOutput,
@@ -698,7 +707,7 @@ export function createProductChatToolContext(input: {
           },
           model: {
             type: "string",
-            enum: AGENT_MODEL_CATALOG.map((model) => model.id),
+            enum: [...availableTaskModels],
             description: START_TASK_MODEL_DESCRIPTION,
           },
         },

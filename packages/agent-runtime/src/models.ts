@@ -48,9 +48,14 @@ export const CODEX_AGENT_MODEL_IDS = [
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",
   "openai/gpt-5.6-luna",
+] as const satisfies readonly AgentModelId[];
+// Retired selections remain runnable so persisted chats and in-flight tasks do not fail after a
+// catalog update. New Codex work must pass isCodexModelId and is limited to the current family.
+const LEGACY_CODEX_RUNTIME_MODEL_IDS = [
   "openai/gpt-5.5",
   "openai/gpt-5.4",
   "openai/gpt-5.4-mini",
+  "openai/gpt-5.2-codex",
 ] as const satisfies readonly AgentModelId[];
 export const CODEX_REASONING_EFFORTS = [
   "low",
@@ -60,6 +65,10 @@ export const CODEX_REASONING_EFFORTS = [
 ] as const satisfies readonly CodexReasoningEffort[];
 
 const CODEX_MODEL_ID_SET = new Set<string>(CODEX_AGENT_MODEL_IDS);
+const CODEX_RUNTIME_MODEL_ID_SET = new Set<string>([
+  ...CODEX_AGENT_MODEL_IDS,
+  ...LEGACY_CODEX_RUNTIME_MODEL_IDS,
+]);
 const CODEX_REASONING_EFFORT_SET = new Set<string>(CODEX_REASONING_EFFORTS);
 
 export function isCodexModelId(value: string): value is AgentModelId {
@@ -71,9 +80,7 @@ export function isCodexReasoningEffort(value: string): value is CodexReasoningEf
 }
 
 export function codexCliModelNameForModelId(modelId: string): string | null {
-  return isCodexModelId(modelId) || modelId === "openai/gpt-5.2-codex"
-    ? modelId.replace(/^openai\//, "")
-    : null;
+  return CODEX_RUNTIME_MODEL_ID_SET.has(modelId) ? modelId.replace(/^openai\//, "") : null;
 }
 
 // Sonnet is the default because it is fully covered by Claude subscription limits on
