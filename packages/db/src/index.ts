@@ -15,6 +15,7 @@ export * from "./knowledge-repository";
 export * from "./legacy-billing-schema";
 export * from "./llm-broker-schema";
 export * from "./plugin-repository";
+export * from "./postgres-json";
 export * from "./product-schema";
 export * from "./repo-configs";
 export * from "./skill-bundle-repository";

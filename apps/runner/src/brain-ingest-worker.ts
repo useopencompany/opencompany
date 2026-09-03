@@ -26,6 +26,7 @@ import { normalizeBrainIngestTrace } from "@opencompany/brain/ingest-trace";
 import { releasePendingIngestionReservations } from "@opencompany/db/billing";
 import { brainFilePathFor, listBrainFiles, upsertBrainFile } from "@opencompany/db/brain-files";
 import { recordCreditDebit } from "@opencompany/db/credits";
+import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import {
   type BrainIngestJob,
   type BrainIngestJobKind,
@@ -484,7 +485,7 @@ export function createDbBrainIngestStore(): BrainIngestStore {
     },
 
     async complete(input) {
-      const resultJson = JSON.stringify(input.result);
+      const resultJson = stringifyPostgresJson(input.result);
       const result = await getDb().execute(sql`
         WITH completed_job AS (
           UPDATE goat.brain_ingest_jobs
@@ -523,7 +524,7 @@ export function createDbBrainIngestStore(): BrainIngestStore {
     },
 
     async skip(input) {
-      const resultJson = JSON.stringify(input.result);
+      const resultJson = stringifyPostgresJson(input.result);
       const result = await getDb().execute(sql`
         WITH skipped_job AS (
           UPDATE goat.brain_ingest_jobs
@@ -564,14 +565,14 @@ export function createDbBrainIngestStore(): BrainIngestStore {
       // Append this attempt's error to result.attemptErrors so retry causes
       // survive the retries (last_error alone is overwritten per attempt and
       // cleared when a later attempt succeeds or skips).
-      const attemptErrorJson = JSON.stringify([
+      const attemptErrorJson = stringifyPostgresJson([
         {
           attempt: input.attempts,
           at: input.now.toISOString(),
           error: input.error.slice(0, ATTEMPT_ERROR_MAX_CHARS),
         },
       ]);
-      const failureResultJson = JSON.stringify(input.result ?? {});
+      const failureResultJson = stringifyPostgresJson(input.result ?? {});
       const result = await getDb().execute(sql`
         WITH failed_job AS (
           UPDATE goat.brain_ingest_jobs

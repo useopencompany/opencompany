@@ -24,6 +24,7 @@ import {
 } from "@opencompany/agent-runtime";
 import { type ActionTurnRef, resolveActionApproval } from "@opencompany/db/action-governance";
 import { RUN_EVENT_NOTIFY_CHANNEL } from "@opencompany/db/chat-repository";
+import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import { runApprovals } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
@@ -344,7 +345,7 @@ async function requestGatewayActionApproval(input: {
   const eventId = `run_event_${randomUUID()}`;
   const now = new Date();
   const prompt = `Approve ${input.action}?`;
-  const payload = JSON.stringify({
+  const payload = stringifyPostgresJson({
     approvalId,
     toolCallId: input.invocationId,
     kind: "use_action",

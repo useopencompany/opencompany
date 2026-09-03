@@ -48,6 +48,10 @@
       "types": "./src/plugin-data-runtime-repository.ts",
       "default": "./src/plugin-data-runtime-repository.ts"
     },
+    "./postgres-json": {
+      "types": "./src/postgres-json.ts",
+      "default": "./src/postgres-json.ts"
+    },
     "./skill-catalog": {
       "types": "./src/skill-catalog.ts",
       "default": "./src/skill-catalog.ts"

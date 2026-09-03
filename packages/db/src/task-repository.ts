@@ -29,6 +29,7 @@ import {
   type ResolvedChatAttachments,
   RUN_EVENT_NOTIFY_CHANNEL,
 } from "./chat-repository";
+import { stringifyPostgresJson } from "./postgres-json";
 import type { HarnessSpec } from "./product-schema";
 
 export type TaskRepositoryIdFactory = {
@@ -561,14 +562,14 @@ export class PostgresTaskRepository implements TaskRepository {
             ${input.command.scheduledFor ?? null}, ${input.command.workflowId ?? null},
             ${this.options.compatibility?.workflowBrainRef ?? null},
             'queued', 'queued', ${now},
-            CASE WHEN ${JSON.stringify(harness)}::jsonb ? 'workflow'
+            CASE WHEN ${stringifyPostgresJson(harness)}::jsonb ? 'workflow'
               THEN jsonb_set(
-                ${JSON.stringify(harness)}::jsonb,
+                ${stringifyPostgresJson(harness)}::jsonb,
                 '{workflow,pluginIds}',
                 (SELECT plugin_ids FROM enabled_task_plugins),
                 true
               )
-              ELSE ${JSON.stringify(harness)}::jsonb
+              ELSE ${stringifyPostgresJson(harness)}::jsonb
             END,
             ${now}, ${now}
           FROM winner
@@ -615,7 +616,7 @@ export class PostgresTaskRepository implements TaskRepository {
           )
           SELECT
             winner.assistant_message_id, task.session_id, 'assistant', '',
-            ${JSON.stringify(assistantDebugTrace)}::jsonb, ${assistantCreatedAt}, ${assistantCreatedAt}
+            ${stringifyPostgresJson(assistantDebugTrace)}::jsonb, ${assistantCreatedAt}, ${assistantCreatedAt}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
           RETURNING id
@@ -642,7 +643,7 @@ export class PostgresTaskRepository implements TaskRepository {
           SELECT
             winner.run_id, ${input.actor.userId}, runtime.id, task.session_id,
             winner.message_id, winner.assistant_message_id, 'queued', ${initialMessageContent},
-            ${JSON.stringify(turnSettingsFromHarness(harness))}::jsonb, 1, ${now}, ${now}
+            ${stringifyPostgresJson(turnSettingsFromHarness(harness))}::jsonb, 1, ${now}, ${now}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
           JOIN inserted_runtime AS runtime ON true
@@ -1148,12 +1149,12 @@ function turnSettingsFromHarness(harness: HarnessSpec) {
 }
 
 function attachmentsJson(attachments: ResolvedChatAttachments["attachments"]) {
-  return attachments.length > 0 ? JSON.stringify(attachments) : null;
+  return attachments.length > 0 ? stringifyPostgresJson(attachments) : null;
 }
 
 function attachmentTextsJson(attachmentTexts: ResolvedChatAttachments["attachmentTexts"]) {
   return attachmentTexts && Object.keys(attachmentTexts).length > 0
-    ? JSON.stringify(attachmentTexts)
+    ? stringifyPostgresJson(attachmentTexts)
     : null;
 }
 

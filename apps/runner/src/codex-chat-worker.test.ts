@@ -717,7 +717,7 @@ describe("runClaimedTurn", () => {
     await expect(runClaimedTurn(turn(), env())).resolves.toBeUndefined();
 
     expect(eventMocks.fail).toHaveBeenCalledWith(
-      "This chat run failed before the coding engine could finish. Send your message again to retry.",
+      "This chat run failed unexpectedly. Send your message again to retry.",
       { sessionStatus: "failed" },
     );
   });

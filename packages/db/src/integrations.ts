@@ -9,6 +9,7 @@ import {
 import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { getDb } from "./client";
+import { stringifyPostgresJson } from "./postgres-json";
 import type * as schema from "./product-schema";
 import {
   type IntegrationCredentialKind,
@@ -1112,7 +1113,7 @@ export async function applyIntegrationCapabilityMode(input: {
   await (input.db ?? getDb())
     .update(integrations)
     .set({
-      capabilityModes: sql`${integrations.capabilityModes} || ${JSON.stringify({
+      capabilityModes: sql`${integrations.capabilityModes} || ${stringifyPostgresJson({
         [input.capabilityId]: input.mode,
       })}::jsonb`,
       updatedAt: input.now ?? new Date(),

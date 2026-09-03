@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./client";
+import { stringifyPostgresJson } from "./postgres-json";
 import { actionTurns } from "./product-schema";
 
 type DbLike = any;
@@ -59,7 +60,7 @@ export async function registerActionApproval(input: {
     requestedAt: now.toISOString(),
     ...(input.decision === "denied" ? { resolvedAt: now.toISOString() } : {}),
   };
-  const recordJson = JSON.stringify(record);
+  const recordJson = stringifyPostgresJson(record);
   const [stored] = await db
     .update(actionTurns)
     .set({
@@ -176,7 +177,7 @@ export async function recordActionSourceDiscovery(input: {
 }) {
   const db = input.db ?? getDb();
   await ensureActionTurn(input.turn, db);
-  const sourceIds = JSON.stringify([input.sourceId]);
+  const sourceIds = stringifyPostgresJson([input.sourceId]);
   await db
     .update(actionTurns)
     .set({
@@ -203,8 +204,8 @@ export async function claimActionInvocation(input: {
 > {
   const db = input.db ?? getDb();
   await ensureActionTurn(input.turn, db);
-  const sourceIds = JSON.stringify([input.sourceId]);
-  const invocationIds = JSON.stringify([input.invocationId]);
+  const sourceIds = stringifyPostgresJson([input.sourceId]);
+  const invocationIds = stringifyPostgresJson([input.invocationId]);
   const [claimed] = await db
     .update(actionTurns)
     .set({
@@ -280,8 +281,8 @@ export async function storeActionCapabilityQuote(input: {
 }) {
   const db = input.db ?? getDb();
   await ensureActionTurn(input.turn, db);
-  const quoteJson = JSON.stringify({ [input.invocationId]: input.quote });
-  const invocationIds = JSON.stringify([input.invocationId]);
+  const quoteJson = stringifyPostgresJson({ [input.invocationId]: input.quote });
+  const invocationIds = stringifyPostgresJson([input.invocationId]);
   const [stored] = await db
     .update(actionTurns)
     .set({
@@ -330,7 +331,7 @@ export async function releaseActionCapabilityQuote(input: {
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
-  const invocationIds = JSON.stringify([input.invocationId]);
+  const invocationIds = stringifyPostgresJson([input.invocationId]);
   await db
     .update(actionTurns)
     .set({
@@ -359,7 +360,7 @@ export async function claimActionAsyncRun(input: {
 }) {
   const db = input.db ?? getDb();
   await ensureActionTurn(input.turn, db);
-  const invocationIds = JSON.stringify([input.invocationId]);
+  const invocationIds = stringifyPostgresJson([input.invocationId]);
   const [claimed] = await db
     .update(actionTurns)
     .set({
@@ -395,7 +396,7 @@ export async function releaseActionAsyncRun(input: {
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
-  const invocationIds = JSON.stringify([input.invocationId]);
+  const invocationIds = stringifyPostgresJson([input.invocationId]);
   await db
     .update(actionTurns)
     .set({
