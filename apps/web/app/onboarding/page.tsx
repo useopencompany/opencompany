@@ -87,6 +87,7 @@ export default async function OnboardingPage({
       initialReferral={onboarding?.referralSource ?? null}
       initialSourceDetails={sourceDetails}
       initialConnectionResult={connectionResult}
+      initialIntegrations={context?.integrations}
     />
   );
 }

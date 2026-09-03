@@ -8,7 +8,7 @@ import {
 } from "@opencompany/brain/ingest-trace";
 import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { parseGmailWikiSourceConfig } from "@opencompany/db/gmail";
-import type { ActiveWikiSourceProvider } from "@opencompany/db/wiki-ingest";
+import type { ActiveWikiIngestSourceProvider } from "@opencompany/db/wiki-ingest";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import { createGatewayAttribution, gatewayProviderOptions } from "@opencompany/telemetry";
 import { latitudeTelemetry } from "@opencompany/telemetry/latitude";
@@ -121,7 +121,7 @@ export async function runWikiIngestTriage(
 }
 
 export function buildWikiIngestTriagePrompt(input: {
-  sourceProvider: ActiveWikiSourceProvider;
+  sourceProvider: ActiveWikiIngestSourceProvider;
   normalizedPayload: unknown;
   sourceConfig: Record<string, unknown>;
 }): string | null {

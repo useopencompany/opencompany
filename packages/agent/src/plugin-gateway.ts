@@ -25,6 +25,12 @@ import {
   loadGitHubUserMcpWorkerConnection,
 } from "./integrations/github-user-mcp";
 import {
+  GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
+  getGoogleCalendarMcpIntegrationState,
+  googleCalendarMcpRuntimeEndpointUrl,
+  loadGoogleCalendarMcpWorkerConnection,
+} from "./integrations/google-calendar-mcp";
+import {
   getLatitudeIntegrationState,
   LATITUDE_MCP_ENDPOINT_URL,
   loadLatitudeMcpWorkerConnection,
@@ -44,6 +50,11 @@ import {
   loadPostHogMcpWorkerConnection,
   POSTHOG_MCP_ENDPOINT_URL,
 } from "./integrations/posthog-mcp";
+import {
+  getRenderIntegrationState,
+  loadRenderMcpWorkerConnection,
+  RENDER_MCP_ENDPOINT_URL,
+} from "./integrations/render-mcp";
 import {
   getSigNozIntegrationState,
   loadSigNozMcpWorkerConnection,
@@ -76,6 +87,12 @@ const providerBindings = {
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
   },
+  "google-calendar": {
+    provider: "google_calendar",
+    endpointUrl: GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
+    getState: getGoogleCalendarMcpIntegrationState,
+    loadConnection: loadGoogleCalendarMcpWorkerConnection,
+  },
   linear: {
     provider: "linear",
     endpointUrl: LINEAR_MCP_ENDPOINT_URL,
@@ -87,6 +104,12 @@ const providerBindings = {
     endpointUrl: POSTHOG_MCP_ENDPOINT_URL,
     getState: getPostHogIntegrationState,
     loadConnection: loadPostHogMcpWorkerConnection,
+  },
+  render: {
+    provider: "render",
+    endpointUrl: RENDER_MCP_ENDPOINT_URL,
+    getState: getRenderIntegrationState,
+    loadConnection: loadRenderMcpWorkerConnection,
   },
   neon: {
     provider: "neon",
@@ -316,16 +339,23 @@ function bindRegistration(
     });
     return null;
   }
+  const loadConnection: RemoteMcpGatewayRegistration["loadConnection"] =
+    record.pluginName === "google-calendar"
+      ? (input) => loadGoogleCalendarMcpWorkerConnection({ ...input, registrationId: record.id })
+      : (binding.loadConnection as RemoteMcpGatewayRegistration["loadConnection"]);
   return {
     source: `plugin:${record.pluginName}:${record.server.name}`,
     connectionProvider: binding.provider,
     label: displayName(record.pluginName),
     description: record.pluginDescription,
-    server: record.server,
+    server:
+      record.pluginName === "google-calendar"
+        ? { ...record.server, url: googleCalendarMcpRuntimeEndpointUrl() }
+        : record.server,
     capabilities: record.capabilities,
     discoverySnapshot: record.discoverySnapshot,
     getState: binding.getState,
-    loadConnection: binding.loadConnection,
+    loadConnection,
     isEnabled: () =>
       isPluginGatewayRegistrationActive(db, {
         workspaceId: identity.workspaceId,

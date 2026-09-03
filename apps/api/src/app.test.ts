@@ -85,6 +85,21 @@ function messageHeaders(idempotencyKey: string) {
 }
 
 describe("canonical Hono API", () => {
+  it("mounts the first-party Google Calendar MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { googleCalendarMcp: { handle } });
+    const response = await app.request("/mcp/plugins/google-calendar", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/google-calendar", { method: "GET" })).status).toBe(404);
+  });
+
   it("reports the deployed API release for expected-SHA health gates", async () => {
     const previousRelease = process.env.RENDER_GIT_COMMIT;
     process.env.RENDER_GIT_COMMIT = "api-release-sha";
@@ -120,6 +135,7 @@ describe("canonical Hono API", () => {
       wikiSources: fakeWikiSources(),
       brainSources: fakeBrainSources(),
       brainImports: fakeBrainImports(),
+      wikiImports: fakeWikiImports(),
       browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
       pluginImports: fakePluginImportService(),
@@ -1183,6 +1199,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({ start, confirm, cancel, retry }),
+      wikiImports: fakeWikiImports(),
     });
 
     const started = await app.request("/v1/brains/brain_1/imports", {
@@ -1251,6 +1268,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({ start }),
+      wikiImports: fakeWikiImports(),
     });
 
     const missingKey = await app.request("/v1/brains/brain_1/imports", {
@@ -1274,6 +1292,58 @@ describe("canonical Hono API", () => {
     expect(start).not.toHaveBeenCalled();
   });
 
+  it("drives the workspace Wiki import lifecycle without a Brain parameter", async () => {
+    const start = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    }));
+    const confirm = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "ingesting" as const,
+      replayed: false,
+    }));
+    const cancel = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "canceled" as const,
+      replayed: false,
+    }));
+    const retry = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    }));
+    const app = testApp(fakeRepository(), {
+      wikiImports: wikiImportService({ start, confirm, cancel, retry }),
+    });
+
+    const started = await app.request("/v1/wiki/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "wiki-import-1" },
+      body: JSON.stringify({
+        companyUrl: "acme.com",
+        sourceSelection: { public_web: { enabled: true } },
+      }),
+    });
+    expect(started.status).toBe(201);
+    expect(start).toHaveBeenCalledWith(actor, {
+      idempotencyKey: "wiki-import-1",
+      companyUrl: "acme.com",
+      sourceSelection: { public_web: { enabled: true } },
+    });
+
+    await app.request("/v1/wiki/imports/gbimp_wiki/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabledProviders: ["public_web"] }),
+    });
+    expect(confirm).toHaveBeenCalledWith(actor, "gbimp_wiki", ["public_web"]);
+    await app.request("/v1/wiki/imports/gbimp_wiki/cancel", { method: "POST" });
+    expect(cancel).toHaveBeenCalledWith(actor, "gbimp_wiki");
+    await app.request("/v1/wiki/imports/gbimp_wiki/retry", { method: "POST" });
+    expect(retry).toHaveBeenCalledWith(actor, "gbimp_wiki");
+  });
+
   it("maps import state conflicts to typed conflict responses", async () => {
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({
@@ -1284,6 +1354,7 @@ describe("canonical Hono API", () => {
           );
         },
       }),
+      wikiImports: fakeWikiImports(),
     });
     const response = await app.request("/v1/brains/brain_1/imports/gbimp_1/confirm", {
       method: "POST",
@@ -3349,11 +3420,22 @@ describe("canonical Hono API", () => {
       workspaceName: "Acme CRM",
       statusReason: null,
     }));
+    const connectRender = vi.fn(async () => ({
+      provider: "render" as const,
+      connected: true,
+      status: "connected" as const,
+      integrationId: "gint_render",
+      accountName: "Acme Hosting",
+      statusReason: null,
+      capabilityModes: {},
+      toolModes: {},
+    }));
     const app = testApp(fakeRepository(), {
       integrationAccounts: integrationAccountService({
         connectStripe,
         disconnectStripe,
         connectAttio,
+        connectRender,
       }),
     });
 
@@ -3387,6 +3469,20 @@ describe("canonical Hono API", () => {
     await expect(attio.json()).resolves.toMatchObject({
       data: { state: { provider: "attio", workspaceName: "Acme CRM" } },
     });
+
+    const renderKey = "rnd_supersecretrenderkey000";
+    const render = await app.request("/v1/integration-accounts/render", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: renderKey }),
+    });
+    expect(render.status).toBe(200);
+    const renderBody = await render.json();
+    expect(JSON.stringify(renderBody)).not.toContain(renderKey);
+    expect(renderBody).toMatchObject({
+      data: { state: { provider: "render", connected: true, accountName: "Acme Hosting" } },
+    });
+    expect(connectRender).toHaveBeenCalledWith(actor, renderKey);
   });
 
   it("gives iMessage pairing starts their own small rate bucket", async () => {
@@ -4384,6 +4480,7 @@ function testApp(
     wikiSources: fakeWikiSources(),
     brainSources: fakeBrainSources(),
     brainImports: fakeBrainImports(),
+    wikiImports: fakeWikiImports(),
     browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
     pluginImports: fakePluginImportService(),
@@ -4636,10 +4733,41 @@ function fakeBrainImports(): Parameters<typeof createApiApp>[0]["brainImports"] 
   };
 }
 
+function fakeWikiImports(): Parameters<typeof createApiApp>[0]["wikiImports"] {
+  return {
+    start: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    })),
+    confirm: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "ingesting" as const,
+      replayed: false,
+    })),
+    cancel: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "canceled" as const,
+      replayed: false,
+    })),
+    retry: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    })),
+  };
+}
+
 function brainImportService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["brainImports"]>,
 ): Parameters<typeof createApiApp>[0]["brainImports"] {
   return { ...fakeBrainImports(), ...overrides };
+}
+
+function wikiImportService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["wikiImports"]>,
+): Parameters<typeof createApiApp>[0]["wikiImports"] {
+  return { ...fakeWikiImports(), ...overrides };
 }
 
 function fakeUserSettings(): Parameters<typeof createApiApp>[0]["userSettings"] {
@@ -4735,6 +4863,9 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     },
     connectGranola: async () => {
       throw new Error("Unexpected Granola connect.");
+    },
+    connectRender: async () => {
+      throw new Error("Unexpected Render connect.");
     },
     startImessagePairing: async () => {
       throw new Error("Unexpected iMessage pairing start.");

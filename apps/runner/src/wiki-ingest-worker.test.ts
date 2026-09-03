@@ -67,6 +67,7 @@ function job(overrides: Partial<ClaimedWikiIngestJob> = {}): ClaimedWikiIngestJo
     sourceProvider: "jamie",
     sourceConnectionId: "connection_123",
     integrationId: "integration_123",
+    importRunId: null,
     contentHash: "hash_123",
     status: "running",
     attempts: 1,

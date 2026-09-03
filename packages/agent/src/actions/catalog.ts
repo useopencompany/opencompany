@@ -66,6 +66,9 @@ export async function resolveActionCatalog(
   const githubPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:github:"),
   );
+  const googleCalendarPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:google-calendar:"),
+  );
   const githubPluginConnected =
     githubPluginInstalled &&
     (
@@ -80,7 +83,9 @@ export async function resolveActionCatalog(
   );
   const resolved = await Promise.all([
     resolveGmailActions(input.userWorkosId).catch(() => null),
-    resolveGoogleCalendarActions(input.userWorkosId).catch(() => null),
+    googleCalendarPluginInstalled
+      ? null
+      : resolveGoogleCalendarActions(input.userWorkosId).catch(() => null),
     resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
     linearPluginInstalled ? null : resolveLinearActions(input.userWorkosId).catch(() => null),
     resolvePostHogActions(input.userWorkosId).catch(() => null),

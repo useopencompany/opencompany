@@ -63,7 +63,7 @@ function harnessInput(
 }
 
 describe("AcpHarness", () => {
-  it("runs an ACP turn, streams updates, and answers permission requests", async () => {
+  it("starts Claude with core MCP tools ready while plugin MCP tools stay deferred", async () => {
     let resolvePermission: (() => void) | null = null;
     const permissionAnswered = new Promise<void>((resolve) => {
       resolvePermission = resolve;
@@ -126,10 +126,16 @@ describe("AcpHarness", () => {
     const input = harnessInput(transport.sandbox, {
       mcpServers: [
         {
-          name: "opencompany-actions",
+          name: "opencompany",
           type: "http",
           url: "https://runner.example.test/mcp",
           headers: [{ name: "x-opencompany-tool-ticket", value: "ticket" }],
+        },
+        {
+          name: "plugin-linear",
+          type: "http",
+          url: "https://plugins.example.test/linear/mcp",
+          headers: [{ name: "authorization", value: "Bearer plugin-ticket" }],
         },
       ],
       onRuntimeEvents: vi.fn(async (events) => {
@@ -153,13 +159,28 @@ describe("AcpHarness", () => {
       params: {
         mcpServers: [
           {
-            name: "opencompany-actions",
+            name: "plugin-linear",
             type: "http",
-            url: "https://runner.example.test/mcp",
-            headers: [{ name: "x-opencompany-tool-ticket", value: "ticket" }],
+            url: "https://plugins.example.test/linear/mcp",
+            headers: [{ name: "authorization", value: "Bearer plugin-ticket" }],
           },
         ],
-        _meta: { claudeCode: { options: { maxTurns: 250, strictMcpConfig: true } } },
+        _meta: {
+          claudeCode: {
+            options: {
+              maxTurns: 250,
+              strictMcpConfig: true,
+              mcpServers: {
+                opencompany: {
+                  type: "http",
+                  url: "https://runner.example.test/mcp",
+                  headers: { "x-opencompany-tool-ticket": "ticket" },
+                  alwaysLoad: true,
+                },
+              },
+            },
+          },
+        },
       },
     });
     expect(input.onEngineSessionId).toHaveBeenCalledWith("session_new");

@@ -17,6 +17,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@opencompany/ui/components/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@opencompany/ui/components/dialog";
 import { Skeleton } from "@opencompany/ui/components/skeleton";
 import { toast } from "@opencompany/ui/components/sonner";
 import { Switch } from "@opencompany/ui/components/switch";
@@ -26,6 +33,8 @@ import { ArrowLeft, CircleAlert, Loader2, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
+import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
+import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { useHydrated } from "@/components/useHydrated";
 import {
   WikiIngestActivityFeed,
@@ -58,17 +67,21 @@ export type WikiSourceScopeSlot = (entry: WikiSourceEntry) => ReactNode;
 export function WikiSourcesPanel({
   workspaceId,
   isAdmin,
+  mode = "page",
+  integrationState,
 }: {
   workspaceId: string;
   isAdmin: boolean;
+  mode?: "page" | "onboarding";
+  integrationState?: IntegrationState;
 }) {
   const hydrated = useHydrated();
   const initialIntegrations = useAppDataOptional()?.integrations;
   if (!hydrated) {
     return (
-      <WikiSourcesLayout>
+      <WikiSourcesLayout mode={mode}>
         <WikiSourceCardSkeletons />
-        <WikiIngestActivitySkeleton />
+        {mode === "page" ? <WikiIngestActivitySkeleton /> : null}
       </WikiSourcesLayout>
     );
   }
@@ -76,7 +89,8 @@ export function WikiSourcesPanel({
     <WikiSourcesLivePanel
       workspaceId={workspaceId}
       isAdmin={isAdmin}
-      initialIntegrations={initialIntegrations}
+      mode={mode}
+      initialIntegrations={integrationState ?? initialIntegrations}
     />
   );
 }
@@ -85,10 +99,12 @@ function WikiSourcesLivePanel({
   workspaceId,
   isAdmin,
   initialIntegrations,
+  mode,
 }: {
   workspaceId: string;
   isAdmin: boolean;
   initialIntegrations: IntegrationState | undefined;
+  mode: "page" | "onboarding";
 }) {
   const [sources, setSources] = useState<WikiSourceDto[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -96,6 +112,7 @@ function WikiSourcesLivePanel({
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [, startTransition] = useTransition();
   const autoEnableAttempted = useRef(new Set<string>());
+  const [setupProvider, setSetupProvider] = useState<"jamie" | "granola" | null>(null);
 
   const integrationCollection = useMemo(
     () => getHeadlessIntegrationAccounts(workspaceId),
@@ -290,7 +307,7 @@ function WikiSourcesLivePanel({
         />
       );
     }
-    return defaultScopeSlot(entry);
+    return null;
   };
 
   const loading = !loadError && (sources === null || !integrationsReady);
@@ -299,7 +316,7 @@ function WikiSourcesLivePanel({
     .filter((entry) => entry.source?.enabled && entry.status === "connected").length;
 
   return (
-    <WikiSourcesLayout>
+    <WikiSourcesLayout mode={mode}>
       {loadError ? (
         <Alert variant="destructive">
           <CircleAlert />
@@ -335,7 +352,10 @@ function WikiSourcesLivePanel({
       {loading ? (
         <WikiSourceCardSkeletons />
       ) : (
-        <section aria-label="Wiki source providers" className="grid gap-4 md:grid-cols-2">
+        <section
+          aria-label="Wiki source providers"
+          className={cn("grid gap-4", mode === "page" && "md:grid-cols-2")}
+        >
           {WIKI_SOURCE_PROVIDERS.map((provider) => (
             <WikiSourceCard
               key={provider.id}
@@ -344,33 +364,65 @@ function WikiSourcesLivePanel({
               pendingIds={pendingIds}
               rowErrors={rowErrors}
               onEnabledChange={updateEnabled}
+              connectHref={wikiSourceConnectHref(provider.connectHref, mode)}
+              {...(mode === "onboarding" && (provider.id === "jamie" || provider.id === "granola")
+                ? { onConnect: () => setSetupProvider(provider.id as "jamie" | "granola") }
+                : {})}
               {...(provider.scopeRequired ? { scopeSlot: renderScopeSlot } : {})}
             />
           ))}
         </section>
       )}
-      <WikiIngestActivityFeed />
+      {mode === "page" ? <WikiIngestActivityFeed /> : null}
+      {setupProvider ? (
+        <WikiSourceSetupDialog
+          provider={setupProvider}
+          integrations={initialIntegrations}
+          isAdmin={isAdmin}
+          onClose={() => setSetupProvider(null)}
+        />
+      ) : null}
     </WikiSourcesLayout>
   );
 }
 
-function WikiSourcesLayout({ children }: { children: ReactNode }) {
+function WikiSourcesLayout({
+  children,
+  mode,
+}: {
+  children: ReactNode;
+  mode: "page" | "onboarding";
+}) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-8 sm:px-8 sm:py-10">
+    <div className={cn(mode === "page" && "min-h-0 flex-1 overflow-y-auto")}>
+      <main
+        className={cn(
+          "mx-auto flex w-full flex-col gap-6",
+          mode === "page" ? "max-w-5xl px-5 py-8 sm:px-8 sm:py-10" : "max-w-[560px]",
+        )}
+      >
         <header className="flex flex-col gap-3">
-          <Link
-            href="/wiki"
-            className="inline-flex w-fit items-center gap-1.5 text-[12px] font-medium text-ink-subtle transition-colors hover:text-ink"
-          >
-            <ArrowLeft size={13} strokeWidth={1.9} />
-            Back to Wiki
-          </Link>
+          {mode === "page" ? (
+            <Link
+              href="/wiki"
+              className="inline-flex w-fit items-center gap-1.5 text-[12px] font-medium text-ink-subtle transition-colors hover:text-ink"
+            >
+              <ArrowLeft size={13} strokeWidth={1.9} />
+              Back to Wiki
+            </Link>
+          ) : null}
           <div>
-            <h1 className="text-[24px] font-semibold tracking-[-0.02em] text-ink">Wiki sources</h1>
+            <h1
+              className={cn(
+                "font-semibold tracking-[-0.02em] text-ink",
+                mode === "page" ? "text-[24px]" : "text-[26px] leading-tight",
+              )}
+            >
+              {mode === "page" ? "Wiki sources" : "Connect your sources"}
+            </h1>
             <p className="mt-1 max-w-2xl text-[13px] leading-5 text-ink-subtle">
-              Connect workspace knowledge sources, then choose which connections continuously feed
-              your Wiki.
+              Connect accounts, then choose the channels of knowledge that should continuously feed
+              your workspace Wiki. You can safely skip this and connect later from Wiki Sources.
             </p>
           </div>
         </header>
@@ -386,6 +438,8 @@ function WikiSourceCard({
   pendingIds,
   rowErrors,
   onEnabledChange,
+  connectHref,
+  onConnect,
   scopeSlot,
 }: {
   provider: WikiSourceProviderDef;
@@ -393,6 +447,8 @@ function WikiSourceCard({
   pendingIds: ReadonlySet<string>;
   rowErrors: Record<string, string>;
   onEnabledChange: (entry: WikiSourceEntry, enabled: boolean) => void;
+  connectHref: string;
+  onConnect?: () => void;
   scopeSlot?: WikiSourceScopeSlot;
 }) {
   const Icon = provider.Icon;
@@ -476,24 +532,25 @@ function WikiSourceCard({
 
       <CardFooter className="mt-auto px-5">
         {entries.length === 0 ? (
-          <Link
-            href={provider.connectHref}
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
-            {provider.connectionKind === "oauth" ? "Connect" : "Set up"} {provider.name}
-          </Link>
+          onConnect ? (
+            <button
+              type="button"
+              onClick={onConnect}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              Set up {provider.name}
+            </button>
+          ) : (
+            <Link href={connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
+              {provider.connectionKind === "oauth" ? "Connect" : "Set up"} {provider.name}
+            </Link>
+          )
         ) : needsReconnect ? (
-          <Link
-            href={provider.connectHref}
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
+          <Link href={connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
             Reconnect
           </Link>
         ) : provider.id === "gmail" || provider.id === "linear" || provider.id === "granola" ? (
-          <Link
-            href={provider.connectHref}
-            className={buttonVariants({ variant: "ghost", size: "sm" })}
-          >
+          <Link href={connectHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
             Add another account
           </Link>
         ) : null}
@@ -502,15 +559,72 @@ function WikiSourceCard({
   );
 }
 
-function defaultScopeSlot(entry: WikiSourceEntry) {
-  if (entry.status !== "connected") return null;
+function wikiSourceConnectHref(href: string, mode: "page" | "onboarding") {
+  if (mode === "page") return href;
+  const url = new URL(href, "https://opencompany.local");
+  url.searchParams.set("returnTo", "/onboarding/connected");
+  return `${url.pathname}${url.search}`;
+}
+
+function WikiSourceSetupDialog({
+  provider,
+  integrations,
+  isAdmin,
+  onClose,
+}: {
+  provider: "jamie" | "granola";
+  integrations: IntegrationState | undefined;
+  isAdmin: boolean;
+  onClose: () => void;
+}) {
   return (
-    <div className="flex items-center gap-1.5 border-t border-border/70 pt-2 text-[11px] leading-4 text-ink-subtle">
-      <Settings2 className="size-3 shrink-0" />
-      Scope configuration coming soon
-    </div>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[85dvh] max-w-[560px] overflow-y-auto">
+        <DialogHeader className="mb-3 text-left">
+          <DialogTitle>Connect {provider === "jamie" ? "Jamie" : "Granola"}</DialogTitle>
+          <DialogDescription>
+            Completed meetings will start feeding into this workspace Wiki.
+          </DialogDescription>
+        </DialogHeader>
+        {provider === "jamie" ? (
+          <JamieIntegrationSetup
+            initialState={integrations?.jamie ?? EMPTY_JAMIE_STATE}
+            canManage={isAdmin}
+            variant="modal"
+            onSaved={onClose}
+          />
+        ) : (
+          <GranolaIntegrationSetup
+            initialState={integrations?.granola ?? EMPTY_GRANOLA_STATE}
+            variant="modal"
+            onSaved={onClose}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
+
+const EMPTY_JAMIE_STATE: IntegrationState["jamie"] = {
+  provider: "jamie",
+  connected: false,
+  status: "not_connected",
+  accountName: null,
+  statusReason: null,
+  integrationId: null,
+  webhookUrl: null,
+  apiKeyConfigured: false,
+};
+
+const EMPTY_GRANOLA_STATE: IntegrationState["granola"] = {
+  provider: "granola",
+  connected: false,
+  status: "not_connected",
+  integrationId: null,
+  accountEmail: null,
+  accountName: null,
+  statusReason: null,
+};
 
 function WikiSourceCardSkeletons() {
   return (

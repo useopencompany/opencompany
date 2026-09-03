@@ -1,9 +1,11 @@
 import {
   BetterStackPluginDetail,
   GitHubPluginDetail,
+  GoogleCalendarPluginDetail,
   LinearPluginDetail,
   NeonPluginDetail,
   type PluginLoadState,
+  RenderPluginDetail,
   SigNozPluginDetail,
   SlackPluginDetail,
 } from "@/components/OfficialMcpPluginSettings";
@@ -29,8 +31,10 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
     const Detail = {
       betterstack: BetterStackPluginDetail,
       github: GitHubPluginDetail,
+      "google-calendar": GoogleCalendarPluginDetail,
       linear: LinearPluginDetail,
       neon: NeonPluginDetail,
+      render: RenderPluginDetail,
       signoz: SigNozPluginDetail,
       slack: SlackPluginDetail,
     }[normalizedName];

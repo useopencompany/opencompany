@@ -367,10 +367,11 @@ function AppLiveDataSubscriptions({
     );
     return {
       ...liveIntegrations,
-      // Slack's MCP gateway deliberately selects the most recently updated
-      // account. Preserve the server-selected primary while personalAccounts
-      // continues to update live, so the plugin page edits that same account.
+      // Official MCP gateways deliberately select the most recently updated
+      // account. Preserve the server-selected primaries while personalAccounts
+      // continues to update live, so plugin pages edit those same accounts.
       slack: initialData.integrations.slack,
+      google_calendar: initialData.integrations.google_calendar,
       codex: initialData.integrations.codex,
       claude_code: initialData.integrations.claude_code,
       infisical: initialData.integrations.infisical,

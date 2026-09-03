@@ -1008,12 +1008,12 @@ describe("Electric read models", () => {
     );
   });
 
-  it("scopes Wiki shapes to the authenticated Workspace and ignores caller shape parameters", async () => {
-    let upstreamUrl = "";
+  it("scopes Wiki page and import shapes to the authenticated Workspace", async () => {
+    const upstreamUrls: string[] = [];
     const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
       fetch: vi.fn(async (input: URL | RequestInfo) => {
-        upstreamUrl = String(input);
+        upstreamUrls.push(String(input));
         return Response.json([]);
       }) as typeof fetch,
     });
@@ -1025,12 +1025,25 @@ describe("Electric read models", () => {
         "https://api.example.test/v1/read-models/wiki-pages-v2?table=goat.users&where=true&params[1]=workspace_other",
       ),
     });
+    await proxy.stream({
+      actor,
+      readModel: "wiki-import-runs-v1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/wiki-import-runs-v1?table=goat.users&where=true&params[1]=workspace_other",
+      ),
+    });
 
-    const requestedUrl = new URL(upstreamUrl);
-    expect(requestedUrl.searchParams.get("table")).toBe("goat.wiki_pages");
-    expect(requestedUrl.searchParams.get("where")).toBe('"workspace_id" = $1');
-    expect(requestedUrl.searchParams.get("params[1]")).toBe("workspace_1");
-    expect(requestedUrl.searchParams.get("columns")).not.toContain("created_by_workos_id");
+    const pagesUrl = new URL(upstreamUrls[0]!);
+    expect(pagesUrl.searchParams.get("table")).toBe("goat.wiki_pages");
+    expect(pagesUrl.searchParams.get("where")).toBe('"workspace_id" = $1');
+    expect(pagesUrl.searchParams.get("params[1]")).toBe("workspace_1");
+    expect(pagesUrl.searchParams.get("columns")).not.toContain("created_by_workos_id");
+
+    const importsUrl = new URL(upstreamUrls[1]!);
+    expect(importsUrl.searchParams.get("table")).toBe("goat.brain_import_runs");
+    expect(importsUrl.searchParams.get("where")).toBe('"workspace_id" = $1');
+    expect(importsUrl.searchParams.get("params[1]")).toBe("workspace_1");
+    expect(importsUrl.searchParams.get("columns")).not.toMatch(/brain_ref|user_workos|lease/iu);
   });
 
   it("scopes the Task shape to the server-owned Workspace and nests canonical outcome fields", async () => {

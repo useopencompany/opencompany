@@ -192,6 +192,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: BetterStackIcon,
     tileClass: "bg-[#1B1F23] text-white",
   },
+  render: {
+    label: "Render",
+    description: "Deploy and operate services and datastores through Render's official MCP server.",
+    monogram: "R",
+    tileClass: "bg-[#0B0D0E] text-white",
+  },
   signoz: {
     label: "SigNoz",
     description: "Investigate observability data and manage alerts and dashboards.",
@@ -389,7 +395,6 @@ const WORKSPACE_ACCOUNT_PROVIDERS = [
 
 const PERSONAL_ACCOUNT_PROVIDERS = [
   "gmail",
-  "google_calendar",
   "google_drive",
   "latitude",
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
@@ -489,10 +494,6 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="gmail"
               accounts={integrations.personalAccounts.gmail}
-            />
-            <IntegrationProviderGroupCard
-              provider="google_calendar"
-              accounts={integrations.personalAccounts.google_calendar}
             />
             <IntegrationProviderGroupCard
               provider="google_drive"
@@ -1852,6 +1853,7 @@ function integrationConnectHref(
   if (provider === "betterstack") {
     return "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack";
   }
+  if (provider === "render") return "/settings/plugins/render#render-api-key";
   if (provider === "signoz") {
     return "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz";
   }

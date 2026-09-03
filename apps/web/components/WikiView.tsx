@@ -27,6 +27,7 @@ import {
   ChevronDown,
   ChevronRight,
   DatabaseZap,
+  Globe2,
   History,
   MoreHorizontal,
   Plus,
@@ -546,6 +547,14 @@ export function WikiTreeSidebar({
           Wiki
         </span>
         <div className="flex items-center gap-0.5">
+          <Link
+            href="/wiki/import"
+            title="Import company context"
+            aria-label="Import company context"
+            className="rounded p-1 text-ink-subtle hover:bg-surface-sunken hover:text-ink"
+          >
+            <Globe2 className="h-3.5 w-3.5" />
+          </Link>
           <Link
             href="/wiki/sources"
             title="Wiki sources"
