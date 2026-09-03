@@ -5,6 +5,7 @@ import {
   exchangeSlackCode,
   fetchSlackIdentity,
   SLACK_MCP_USER_SCOPES,
+  SlackOAuthResponseError,
   verifySlackIntegrationState,
 } from "./slack";
 
@@ -70,6 +71,28 @@ describe("Slack OAuth flows", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "https://slack.com/api/oauth.v2.user.access",
       expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("reports the non-sensitive response shape when Slack omits required OAuth fields", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ok: true,
+        authed_user: { id: "U123", access_token: "xoxp-nested-token" },
+        team: { id: "T123" },
+        enterprise: { id: "E123" },
+        is_enterprise_install: true,
+      }),
+    );
+
+    await expect(exchangeSlackCode("oauth-code")).rejects.toEqual(
+      new SlackOAuthResponseError(["access_token"], {
+        credentialLocation: "nested",
+        hasAuthedUserId: true,
+        hasTeamId: true,
+        hasEnterpriseId: true,
+        isEnterpriseInstall: true,
+      }),
     );
   });
 

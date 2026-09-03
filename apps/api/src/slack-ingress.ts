@@ -7,16 +7,23 @@ import {
   exchangeSlackCode,
   fetchSlackIdentity,
   isSlackIntegrationConfigured,
+  SlackOAuthResponseError,
   verifySlackIntegrationState,
 } from "@opencompany/agent/integrations/slack";
 import { connectSlackIntegration } from "@opencompany/db/integrations";
-import { createLogger } from "@opencompany/observability";
+import { createLogger, errorToLogFields } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "slack-oauth" });
 
 type DbLike = any;
+
+type SlackCallbackFailureStage =
+  | "oauth_exchange"
+  | "identity_lookup"
+  | "connection_persistence"
+  | "integration_analytics";
 
 // OAuth boundary for the official Slack MCP plugin. Slack event ingestion was
 // retired; the separate workspace answer bot owns its own OAuth and webhook.
@@ -98,13 +105,16 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
     return statusRedirect(session, state.returnTo, "error", "missing_code");
   }
 
+  let failureStage: SlackCallbackFailureStage = "oauth_exchange";
   try {
     const oauth = await exchangeSlackCode(code);
+    failureStage = "identity_lookup";
     const identity = await fetchSlackIdentity({
       accessToken: oauth.accessToken,
       authedUserId: oauth.authedUserId,
     });
 
+    failureStage = "connection_persistence";
     await connectSlackIntegration({
       userWorkosId: session.userId,
       teamId: oauth.teamId,
@@ -117,6 +127,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
       scopes: oauth.scopes,
       db: input.db,
     });
+    failureStage = "integration_analytics";
     await captureIntegrationAddedAnalytics({
       userWorkosId: session.userId,
       workspaceId: session.workspaceId,
@@ -131,7 +142,9 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
       } catch (error) {
         logger.warn("Slack plugin discovery refresh after connection failed", {
           event: "goat.slack_plugin_reconnect_refresh_failed",
-          error_message: error instanceof Error ? error.message : String(error),
+          failure_stage: "plugin_discovery_refresh",
+          request_id: requestId(request),
+          ...observableErrorFields(error),
         });
       }
     }
@@ -140,10 +153,45 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   } catch (error) {
     logger.warn("Slack plugin connection failed", {
       event: "goat.slack_plugin_callback_failed",
-      error_message: error instanceof Error ? error.message : String(error),
+      failure_stage: failureStage,
+      request_id: requestId(request),
+      ...observableErrorFields(error),
+      ...(error instanceof SlackOAuthResponseError
+        ? {
+            missing_response_fields: error.missingFields,
+            oauth_response_shape: {
+              credential_location: error.responseShape.credentialLocation,
+              has_authed_user_id: error.responseShape.hasAuthedUserId,
+              has_team_id: error.responseShape.hasTeamId,
+              has_enterprise_id: error.responseShape.hasEnterpriseId,
+              is_enterprise_install: error.responseShape.isEnterpriseInstall,
+            },
+          }
+        : {}),
     });
     return statusRedirect(session, state.returnTo, "error", "connection_sync_failed");
   }
+}
+
+function requestId(request: Request) {
+  return (
+    request.headers.get("Rndr-Id")?.trim() || request.headers.get("X-Request-Id")?.trim() || null
+  );
+}
+
+function observableErrorFields(error: unknown) {
+  const fields = errorToLogFields(error);
+  const details = fields.error;
+  const errorMessage =
+    typeof details === "string"
+      ? details
+      : details &&
+          typeof details === "object" &&
+          "message" in details &&
+          typeof details.message === "string"
+        ? details.message
+        : "Unknown error";
+  return { error_message: errorMessage, ...fields };
 }
 
 function statusRedirect(
