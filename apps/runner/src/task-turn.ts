@@ -48,6 +48,7 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { getAvailableGitHubRepositoryNamesForRunner } from "./harness-planner";
 import { rowsFromExecute } from "./sql-exec";
+import { systemPromptForTaskResultMode } from "./task-result-mode";
 import { normalizeTaskToolNames } from "./task-tool-names";
 
 const TASK_OUTCOME_COMMENT_MAX_LENGTH = 200;
@@ -70,6 +71,21 @@ export type TaskTurnCompletion = {
   outcomeComment: string | null;
   nextTurn: TaskNextTurn | null;
 };
+
+export function resolveTaskTurnContext(task: Task, turn: CodexChatTurn): TaskTurnContext {
+  const resultMode = turn.settings.taskResultMode;
+  if (!resultMode || resultMode === task.harnessSpec.resultMode) {
+    return { task, harnessSpec: task.harnessSpec };
+  }
+  return {
+    task,
+    harnessSpec: {
+      ...task.harnessSpec,
+      resultMode,
+      systemPrompt: systemPromptForTaskResultMode(task.harnessSpec.systemPrompt, resultMode),
+    },
+  };
+}
 
 type TaskNextTurn = {
   id: string;

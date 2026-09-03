@@ -653,6 +653,7 @@ export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
 export type CodexChatTurnSettings = {
   approvalContinuation?: boolean;
   mentions?: Array<{ kind: "skill"; id: string }>;
+  taskResultMode?: HarnessSpec["resultMode"];
   reasoningEffort?: CodexReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
   wakeupChain?: number;

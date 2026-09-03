@@ -23,6 +23,7 @@ import {
   HARNESS_MODEL_OPTIONS,
   HARNESS_SKILL_OPTIONS,
 } from "./prompts/harness-creation";
+import { systemPromptForTaskResultMode } from "./task-result-mode";
 import { normalizeTaskToolNames } from "./task-tool-names";
 
 export const PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
@@ -394,19 +395,7 @@ function augmentSystemPrompt(
   const sections = [withTaskSafetyPromptText(systemPrompt)];
   const skillPrompt = buildHarnessSkillSystemPrompt(skillIds);
   if (skillPrompt) sections.push(skillPrompt);
-  if (resultMode === "brain_markdown_report") {
-    sections.push(
-      [
-        "<brain_markdown_report_result_contract>",
-        "Finish with only the complete Markdown report body.",
-        "Do not include conversational framing, delivery notes, or a separate summary outside the report.",
-        "Use a clear H1 title, concise executive summary, sourced findings, uncertainty, and practical next steps when relevant.",
-        "The harness will save this final Markdown as a .md file in the user's Brain and return the file link as the task result.",
-        "</brain_markdown_report_result_contract>",
-      ].join("\n"),
-    );
-  }
-  return sections.join("\n\n");
+  return systemPromptForTaskResultMode(sections.join("\n\n"), resultMode);
 }
 
 function withTaskSafetyPromptText(systemPrompt: string) {
