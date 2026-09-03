@@ -95,6 +95,7 @@ function CanonicalTaskDetailView({
       codexConnected={data.codexConnected}
       claudeCodeConnected={data.claudeCodeConnected}
       taskSpawningEnabled={data.featureFlags.taskSpawning}
+      workspaceId={data.workspace.id}
       userName={userName}
       userWorkosId={data.user.workosUserId}
       taskConversation={{
@@ -131,6 +132,7 @@ function LegacyTaskDetailPanel({ initialRun }: { initialRun: HarnessRunViewModel
       codexConnected={data.codexConnected}
       claudeCodeConnected={data.claudeCodeConnected}
       taskSpawningEnabled={data.featureFlags.taskSpawning}
+      workspaceId={data.workspace.id}
       userName={userName}
       userWorkosId={data.user.workosUserId}
       taskConversation={{

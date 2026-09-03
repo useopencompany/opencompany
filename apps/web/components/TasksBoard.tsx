@@ -15,14 +15,31 @@ import {
 } from "@opencompany/ui/components/select";
 import { toast } from "@opencompany/ui/components/sonner";
 import { GitHubIcon } from "@opencompany/ui/icons";
-import { Archive, ArrowUpRight, LayoutGrid, ListTodo, Loader2, Rows3 } from "lucide-react";
+import { useLiveQuery } from "@tanstack/react-db";
+import { Archive, ArrowUp, ArrowUpRight, LayoutGrid, ListTodo, Loader2, Rows3 } from "lucide-react";
 import Link from "next/link";
-import { type KeyboardEvent, type ReactNode, useMemo, useState, useTransition } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { taskRowToView, useAppData } from "@/components/AppDataProvider";
 import { EmptyState, formatRelativeTime, TasksWorkflowsDisabledRoute } from "@/components/Routes";
 import type { TaskView } from "@/components/Surface";
+import { useHydrated } from "@/components/useHydrated";
 import { formatUsdMicros } from "@/lib/cost-format";
-import { archiveHeadlessTask } from "@/lib/headless-task-commands";
+import {
+  getHeadlessTaskActivities,
+  type HeadlessTaskActivityReadModel,
+} from "@/lib/headless-task-collections";
+import {
+  archiveHeadlessTask,
+  createHeadlessTaskComment,
+  newHeadlessTaskCommentId,
+} from "@/lib/headless-task-commands";
 import { extractGitHubPullRequestUrl } from "@/lib/pull-request-link";
 import {
   formatStartedAt,
@@ -42,6 +59,12 @@ import { useTaskSummary } from "@/lib/use-task-summary";
 import { type TaskViewMode, updateTaskViewModeAction } from "@/lib/user-preferences";
 
 const TERMINAL_TASK_STATUSES = new Set<TaskView["status"]>(["succeeded", "failed", "canceled"]);
+const SETTLED_TASK_STATUSES = new Set<TaskView["status"]>([
+  "waiting",
+  "succeeded",
+  "failed",
+  "canceled",
+]);
 const CAPPED_TASK_BOARD_COLUMNS = new Set<TaskBoardColumn>(["done", "canceled"]);
 export const TASK_BOARD_COLUMN_CAP = 50;
 const ALL_TASKS_FILTER_VALUE = "all";
@@ -603,27 +626,43 @@ function TaskBoardSheet({
   onClose: () => void;
 }) {
   const { schedules, workspace } = useAppData();
+  const hydrated = useHydrated();
   const [isArchiving, startArchiveTransition] = useTransition();
+  const activityCollection = useMemo(
+    () => (hydrated && task.sessionId ? getHeadlessTaskActivities(task.id) : null),
+    [hydrated, task.id, task.sessionId],
+  );
+  const { data: activityRows } = useLiveQuery(
+    (query) => (activityCollection ? query.from({ activity: activityCollection }) : undefined),
+    [activityCollection],
+  );
   const schedule = task.scheduleId
     ? (schedules.find((candidate) => candidate.id === task.scheduleId) ?? null)
     : null;
   const terminal = TERMINAL_TASK_STATUSES.has(task.status);
+  const settled = SETTLED_TASK_STATUSES.has(task.status);
   const archivable = terminal && Boolean(task.sessionId);
-  const { summary, error: summaryError } = useTaskSummary(task.id, terminal);
-  const durationLabel = !terminal
+  const { summary, error: summaryError } = useTaskSummary(task.id, settled);
+  const durationLabel = !settled
     ? null
     : summary?.durationMs !== null && summary?.durationMs !== undefined
       ? formatTaskDurationMs(summary.durationMs)
       : summary
         ? formatTaskDuration(task.createdAt, task.updatedAt)
         : null;
-  const activityEntries = buildTaskActivityEntries({
+  const fallbackActivityEntries = buildTaskActivityEntries({
     task,
-    terminal,
+    settled,
     sourceLabel: taskSourceLabel(task, workflowNames),
     durationLabel,
   });
-  const pullRequestUrl = terminal
+  const durableActivityEntries = buildDurableTaskActivityEntries(
+    (activityRows ?? []) as HeadlessTaskActivityReadModel[],
+    taskSourceLabel(task, workflowNames),
+  );
+  const activityEntries =
+    durableActivityEntries.length > 0 ? durableActivityEntries : fallbackActivityEntries;
+  const pullRequestUrl = settled
     ? extractGitHubPullRequestUrl(task.result, task.outcomeComment)
     : null;
 
@@ -730,6 +769,13 @@ function TaskBoardSheet({
                   </li>
                 ))}
               </ol>
+              {task.sessionId ? (
+                <TaskCommentComposer
+                  taskId={task.id}
+                  workspaceId={workspace.id}
+                  active={!settled}
+                />
+              ) : null}
             </section>
           </div>
 
@@ -818,6 +864,84 @@ function TaskBoardSheet({
   );
 }
 
+function TaskCommentComposer({
+  taskId,
+  workspaceId,
+  active,
+}: {
+  taskId: string;
+  workspaceId: string;
+  active: boolean;
+}) {
+  const [body, setBody] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const pendingComment = useRef<{ id: string; body: string } | null>(null);
+  const disabled = active || submitting;
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (disabled || !body.trim()) return;
+    const command =
+      pendingComment.current?.body === body
+        ? pendingComment.current
+        : { id: newHeadlessTaskCommentId(), body };
+    pendingComment.current = command;
+    setSubmitting(true);
+    try {
+      await createHeadlessTaskComment(taskId, command, { scopeKey: workspaceId });
+      pendingComment.current = null;
+      setBody("");
+      toast.success("Comment posted. The task is running again.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not post the comment.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form className="border-t border-border pt-4" onSubmit={submit}>
+      <label htmlFor={`task-comment-${taskId}`} className="sr-only">
+        Add a comment
+      </label>
+      <div className="rounded-lg border border-border bg-canvas p-2 focus-within:border-ink/30">
+        <textarea
+          id={`task-comment-${taskId}`}
+          value={body}
+          onChange={(event) => {
+            setBody(event.target.value);
+            if (pendingComment.current?.body !== event.target.value) pendingComment.current = null;
+          }}
+          disabled={disabled}
+          maxLength={10_000}
+          rows={3}
+          placeholder="Add a comment…"
+          className="block w-full resize-none bg-transparent px-1 py-0.5 text-[12.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <span className="text-[11px] leading-4 text-ink-subtle">
+            {active
+              ? "You can comment when the current run finishes."
+              : "Posting a comment resumes this task."}
+          </span>
+          <button
+            type="submit"
+            aria-label="Post comment"
+            disabled={disabled || !body.trim()}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink text-canvas transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {submitting ? (
+              <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
+            ) : (
+              <ArrowUp size={13} strokeWidth={1.75} />
+            )}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
 function DetailLabel({ children }: { children: string }) {
   return (
     <h3 className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
@@ -844,14 +968,108 @@ type TaskActivityEntry = {
   body?: string | undefined;
 };
 
+function buildDurableTaskActivityEntries(
+  activities: readonly HeadlessTaskActivityReadModel[],
+  sourceLabel: string,
+): TaskActivityEntry[] {
+  const ordered = activities.toSorted((left, right) => {
+    const timestampDelta = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+    return timestampDelta || left.id.localeCompare(right.id);
+  });
+  const startedByRunId = new Map<string, HeadlessTaskActivityReadModel>();
+
+  return ordered.map((activity) => {
+    const runId = taskActivityMetadataString(activity.metadata, "runId");
+    const stepLabel = taskActivityStepLabel(activity.metadata);
+    if (activity.kind === "run_started" && runId) startedByRunId.set(runId, activity);
+    const runStarted = runId ? startedByRunId.get(runId) : undefined;
+    const duration =
+      activity.kind === "run_finished" && runStarted
+        ? formatTaskDuration(runStarted.createdAt, activity.createdAt)
+        : null;
+    const meta = [stepLabel, duration].filter(Boolean).join(" · ") || undefined;
+
+    switch (activity.kind) {
+      case "created":
+        return taskActivityEntry(activity, "Created", { meta: sourceLabel });
+      case "run_started":
+        return taskActivityEntry(activity, "Run started", { meta: stepLabel ?? undefined });
+      case "run_finished": {
+        const turnStatus = taskActivityMetadataString(activity.metadata, "turnStatus");
+        const disposition = taskActivityMetadataString(activity.metadata, "disposition");
+        if (turnStatus === "failed" || disposition === "failed") {
+          return taskActivityEntry(activity, "Run failed", { meta, tone: "danger" });
+        }
+        if (turnStatus === "interrupted" || disposition === "canceled") {
+          return taskActivityEntry(activity, "Run canceled", { meta });
+        }
+        return taskActivityEntry(
+          activity,
+          disposition === "waiting"
+            ? "Run finished — waiting for you"
+            : disposition === "needs_attention"
+              ? "Run finished — needs attention"
+              : "Run finished",
+          { meta },
+        );
+      }
+      case "status_changed": {
+        const toStatus = taskActivityMetadataString(activity.metadata, "toStatus");
+        return taskActivityEntry(activity, toStatus === "canceled" ? "Canceled" : "Status changed");
+      }
+      case "comment":
+        return taskActivityEntry(
+          activity,
+          activity.author === "orchestrator" ? "Orchestrator note" : "You commented",
+        );
+      case "retry":
+        return taskActivityEntry(activity, "Retry queued", { meta: stepLabel ?? undefined });
+    }
+    return taskActivityEntry(activity, "Activity");
+  });
+}
+
+function taskActivityEntry(
+  activity: HeadlessTaskActivityReadModel,
+  label: string,
+  options: Pick<TaskActivityEntry, "meta" | "tone"> = {},
+): TaskActivityEntry {
+  const body = activity.kind === "comment" ? activity.body : activity.body?.trim();
+  return {
+    id: activity.id,
+    label,
+    timestamp: activity.createdAt,
+    ...(body?.trim() ? { body } : {}),
+    ...options,
+  };
+}
+
+function taskActivityStepLabel(metadata: Record<string, unknown>) {
+  const stepIndex = taskActivityMetadataNumber(metadata, "stepIndex");
+  const stepCount = taskActivityMetadataNumber(metadata, "stepCount");
+  if (stepIndex === null || stepCount === null || stepCount < 1) return null;
+  const title = taskActivityMetadataString(metadata, "stepTitle");
+  return `Step ${stepIndex + 1}/${stepCount}${title ? `: ${title}` : ""}`;
+}
+
+function taskActivityMetadataString(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function taskActivityMetadataNumber(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
 function buildTaskActivityEntries({
   task,
-  terminal,
+  settled,
   sourceLabel,
   durationLabel,
 }: {
   task: TaskView;
-  terminal: boolean;
+  settled: boolean;
   sourceLabel: string;
   durationLabel: string | null;
 }): TaskActivityEntry[] {
@@ -868,7 +1086,7 @@ function buildTaskActivityEntries({
     });
   }
 
-  if (!terminal) {
+  if (!settled) {
     if (task.updatedAt !== task.createdAt) {
       entries.push({
         id: "status",
@@ -879,7 +1097,15 @@ function buildTaskActivityEntries({
     return entries;
   }
 
-  if (task.status === "succeeded") {
+  if (task.status === "waiting") {
+    entries.push({
+      id: "waiting",
+      label: "Waiting for you",
+      timestamp: task.updatedAt,
+      meta: durationLabel ?? undefined,
+      body: task.result?.trim() || undefined,
+    });
+  } else if (task.status === "succeeded") {
     entries.push({
       id: "completed",
       label:

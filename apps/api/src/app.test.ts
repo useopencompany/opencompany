@@ -9,6 +9,7 @@ import {
   CoreError,
   type CreateMessageCommand,
   type CreateTaskCommand,
+  type CreateTaskCommentCommand,
   KnowledgeApplicationService,
   type KnowledgeRepository,
   type PluginGatewayLifecycle,
@@ -245,6 +246,43 @@ describe("canonical Hono API", () => {
       model: "moonshotai/kimi-k3",
       source: "manual",
     });
+
+    const commentBody = "  Continue with the revised brief.\nKeep this indentation.  ";
+    const commented = await app.request("/v1/tasks/task_1/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "task_activity_comment_1", body: commentBody }),
+    });
+    expect(commented.status).toBe(202);
+    await expect(commented.json()).resolves.toMatchObject({
+      data: {
+        task: { id: "task_1", status: "running" },
+        comment: {
+          id: "task_activity_comment_1",
+          taskId: "task_1",
+          author: "user",
+          kind: "comment",
+          body: commentBody,
+        },
+        messageId: "message_task_comment_1",
+        assistantMessageId: "message_task_comment_assistant_1",
+        runId: "run_task_comment_1",
+        transactionId: "45",
+        replayed: false,
+      },
+    });
+    expect(tasks.lastComment).toEqual({ id: "task_activity_comment_1", body: commentBody });
+
+    tasks.createTaskCommentAndRun = vi.fn(async () => {
+      throw new CoreError("conflict", "Wait for the active Task run to finish before commenting.");
+    });
+    const activeComment = await app.request("/v1/tasks/task_1/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "task_activity_comment_2", body: "One more note" }),
+    });
+    expect(activeComment.status).toBe(409);
+    await expect(activeComment.json()).resolves.toMatchObject({ error: { code: "conflict" } });
 
     const listed = await app.request("/v1/tasks?archived=false");
     expect(listed.status).toBe(200);
@@ -2633,6 +2671,34 @@ describe("canonical Hono API", () => {
         conversationId: "conversation_task_1",
       }),
     );
+  });
+
+  it("authorizes a task-scoped activity read model before contacting Electric", async () => {
+    const tasks = fakeTaskRepository();
+    const getTask = vi.fn(tasks.getTask);
+    tasks.getTask = getTask;
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(fakeRepository(), {
+      tasks: new TaskApplicationService(tasks),
+      readModels: { stream },
+    });
+
+    const response = await app.request("/v1/read-models/task-activities-v1?taskId=task_1");
+
+    expect(response.status).toBe(200);
+    expect(getTask).toHaveBeenCalledWith({ actor, taskId: "task_1" });
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({ actor, readModel: "task-activities-v1", taskId: "task_1" }),
+    );
+
+    const missing = await app.request("/v1/read-models/task-activities-v1?taskId=task_other");
+    expect(missing.status).toBe(404);
+    expect(stream).toHaveBeenCalledTimes(1);
+
+    const unscoped = await app.request("/v1/read-models/task-activities-v1");
+    expect(unscoped.status).toBe(400);
+    const misplacedScope = await app.request("/v1/read-models/tasks-v1?taskId=task_1");
+    expect(misplacedScope.status).toBe(400);
   });
 
   it("authorizes Brain read models before forwarding the fixed Brain scope", async () => {
@@ -5497,7 +5563,10 @@ function fakePluginInstallation(): PluginInstallation {
 
 type FakeRepository = ChatRepository & { lastCommand: CreateMessageCommand | null };
 
-type FakeTaskRepository = TaskRepository & { lastCommand: CreateTaskCommand | null };
+type FakeTaskRepository = TaskRepository & {
+  lastCommand: CreateTaskCommand | null;
+  lastComment: CreateTaskCommentCommand | null;
+};
 
 function fakeAutomationServices() {
   const workflowRepository: WorkflowRepository = {
@@ -5723,6 +5792,7 @@ function populatedAutomationServices() {
 function fakeTaskRepository(): FakeTaskRepository {
   const repository: FakeTaskRepository = {
     lastCommand: null,
+    lastComment: null,
     listTasks: async () => ({ tasks: [fakeTask()], nextCursor: null }),
     getTask: async ({ taskId }) => (taskId === "task_1" ? fakeTask() : null),
     getTaskSummary: async ({ taskId }) =>
@@ -5750,6 +5820,25 @@ function fakeTaskRepository(): FakeTaskRepository {
         assistantMessageId: "message_task_assistant_1",
         runId: "run_task_1",
         transactionId: "43",
+        idempotentReplay: false,
+      };
+    },
+    createTaskCommentAndRun: async ({ actor, taskId, command }) => {
+      repository.lastComment = command;
+      if (taskId !== "task_1") return null;
+      return {
+        task: fakeTask({ status: "running" }),
+        comment: {
+          id: command.id,
+          taskId: "task_1",
+          authorWorkosId: actor.userId,
+          body: command.body,
+          createdAt,
+        },
+        messageId: "message_task_comment_1",
+        assistantMessageId: "message_task_comment_assistant_1",
+        runId: "run_task_comment_1",
+        transactionId: "45",
         idempotentReplay: false,
       };
     },

@@ -35,6 +35,7 @@ describe("stuck-work monitor", () => {
     expect(query).toContain("COALESCE(attempt.started_at, turn.updated_at)");
     expect(query).toContain("job.next_run_at <=");
     expect(query).toContain("import_run.next_run_at <=");
+    expect(query).toContain("task.status = 'waiting'");
     expect(query).not.toContain("job.updated_at <=");
   });
 
