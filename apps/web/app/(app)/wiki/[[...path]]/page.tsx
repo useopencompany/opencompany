@@ -13,7 +13,6 @@ type PageProps = {
 export default async function WikiPage({ params }: PageProps) {
   const { path } = await params;
   const { user, workspace } = await currentUser();
-  if (!user.wikiEnabled) notFound();
 
   const pagePath = (path ?? []).map((segment) => decodeURIComponent(segment)).join("/");
   const pages = await listHeadlessWikiPages();

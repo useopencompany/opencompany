@@ -86,6 +86,8 @@ const OWNER_STEPS: StepDef[] = [
   { key: "finish", label: "You're all set" },
 ];
 
+const OWNER_WIKI_STEPS: StepDef[] = OWNER_STEPS.filter((step) => step.key !== "sources");
+
 // Invited members join a workspace an admin already shaped, so they only need a
 // welcome before entering the product.
 const MEMBER_STEPS: StepDef[] = [
@@ -189,6 +191,7 @@ export function OnboardingWizard({
   user,
   currentWorkspaceName,
   brainRef,
+  legacyBrainEnabled,
   variant,
   initialStep,
   initialWorkspaceId,
@@ -203,6 +206,7 @@ export function OnboardingWizard({
   user: OnboardingUser;
   currentWorkspaceName: string;
   brainRef: string | null;
+  legacyBrainEnabled: boolean;
   variant: "owner" | "member";
   initialStep: number;
   initialWorkspaceId: string | null;
@@ -215,10 +219,11 @@ export function OnboardingWizard({
   initialConnectionResult: OnboardingConnectionResult | null;
 }) {
   const router = useRouter();
-  const STEPS = variant === "member" ? MEMBER_STEPS : OWNER_STEPS;
+  const steps =
+    variant === "member" ? MEMBER_STEPS : legacyBrainEnabled ? OWNER_STEPS : OWNER_WIKI_STEPS;
   const normalizedInitialRole = isOnboardingRole(initialRole) ? initialRole : null;
   const [stepIndex, setStepIndex] = useState(() =>
-    Math.min(Math.max(initialStep, 0), STEPS.length - 1),
+    Math.min(Math.max(initialStep, 0), steps.length - 1),
   );
 
   const [workspaceName, setWorkspaceName] = useState(initialWorkspaceName);
@@ -254,8 +259,8 @@ export function OnboardingWizard({
     [sourceDetails],
   );
 
-  const step = STEPS[stepIndex] ?? STEPS[0]!;
-  const isLast = stepIndex === STEPS.length - 1;
+  const step = steps[stepIndex] ?? steps[0]!;
+  const isLast = stepIndex === steps.length - 1;
   const effectiveSlug = slugTouched ? slug : slugify(workspaceName);
   const normalizedCompanyUrl = normalizeOnboardingCompanyUrl(companyUrl);
   const companyUrlStatus: CompanyUrlStatus = !companyUrl.trim()
@@ -280,7 +285,7 @@ export function OnboardingWizard({
       flow: variant,
       initial_step: step.key,
       initial_step_index: stepIndex,
-      total_steps: STEPS.length,
+      total_steps: steps.length,
       is_resume: stepIndex > 0,
       ...(activeWorkspaceId ? { workspace_id: activeWorkspaceId } : {}),
     });
@@ -288,7 +293,7 @@ export function OnboardingWizard({
     activeWorkspaceId,
     step.key,
     stepIndex,
-    STEPS.length,
+    steps.length,
     user.email,
     user.workosUserId,
     variant,
@@ -301,10 +306,10 @@ export function OnboardingWizard({
       flow: variant,
       step: step.key,
       step_index: stepIndex,
-      total_steps: STEPS.length,
+      total_steps: steps.length,
       ...(activeWorkspaceId ? { workspace_id: activeWorkspaceId } : {}),
     });
-  }, [activeWorkspaceId, step.key, stepIndex, STEPS.length, variant]);
+  }, [activeWorkspaceId, step.key, stepIndex, steps.length, variant]);
 
   // Persist the active step to a cookie so an OAuth round-trip (connecting a
   // source) resumes exactly here.
@@ -354,7 +359,7 @@ export function OnboardingWizard({
           const sourcesFeeding = countSourcesFeeding(sourceDetails);
           captureProductEvent("onboarding_completed", {
             flow: variant,
-            total_steps: STEPS.length,
+            total_steps: steps.length,
             workspace_id: activeWorkspaceId,
             sources_feeding: sourcesFeeding,
             source_goal_met: sourcesFeeding >= SOURCE_GOAL,
@@ -362,13 +367,13 @@ export function OnboardingWizard({
         }
         if (variant === "owner" && normalizedCompanyUrl) {
           if (!queueOnboardingKickoff(normalizedCompanyUrl)) {
-            toast.error("Onboarding finished, but the first Brain run could not be started.");
+            toast.error("Onboarding finished, but the first Wiki run could not be started.");
           }
         }
         router.push("/");
         return;
       }
-      setStepIndex((i) => Math.min(i + 1, STEPS.length - 1));
+      setStepIndex((i) => Math.min(i + 1, steps.length - 1));
     });
   };
 
@@ -397,7 +402,7 @@ export function OnboardingWizard({
       <div className="h-[3px] w-full shrink-0 bg-surface-subtle">
         <div
           className="h-full bg-ink transition-all duration-300"
-          style={{ width: `${((stepIndex + 1) / STEPS.length) * 100}%` }}
+          style={{ width: `${((stepIndex + 1) / steps.length) * 100}%` }}
         />
       </div>
 
@@ -634,16 +639,16 @@ function ProfileStep({
 }) {
   const companyUrlHint =
     companyUrlStatus === "valid"
-      ? "URL looks good. We'll use it to start your first Brain research run."
+      ? "URL looks good. We'll use it to start your first Wiki research run."
       : companyUrlStatus === "invalid"
         ? "Enter a valid company URL."
-        : "We'll use this to start your first Brain research run.";
+        : "We'll use this to start your first Wiki research run.";
 
   return (
     <div>
       <StepHeader
         title={`Welcome, ${user.name.split(" ")[0]}`}
-        subtitle="Tell us a little about your role and company so we can shape your Brain around how you work."
+        subtitle="Tell us a little about your role and company so we can shape your Wiki around how you work."
       />
 
       <div className="flex flex-col gap-6">

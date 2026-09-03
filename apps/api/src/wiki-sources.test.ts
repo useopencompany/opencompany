@@ -84,7 +84,7 @@ describe("Wiki source service", () => {
     });
   });
 
-  it("requires the Wiki preview permission for reads and writes", async () => {
+  it("requires Wiki permissions for reads and writes", async () => {
     const service = createWikiSourceService({ db: integrationDb([]) });
     const previewDisabled = actor({ permissions: [] });
 

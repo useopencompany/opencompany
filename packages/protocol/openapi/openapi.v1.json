@@ -4417,7 +4417,10 @@
             "type": "boolean"
           },
           "wikiEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "taskViewMode": {
             "type": "string",
@@ -4501,13 +4504,17 @@
               "admin",
               "member"
             ]
+          },
+          "legacyBrainEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
           "id",
           "name",
           "slug",
-          "role"
+          "role",
+          "legacyBrainEnabled"
         ],
         "additionalProperties": false
       },
@@ -9894,7 +9901,10 @@
             "type": "boolean"
           },
           "wikiEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "taskViewMode": {
             "type": "string",

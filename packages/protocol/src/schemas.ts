@@ -2020,7 +2020,7 @@ export const WikiCommandSchema = z
   .strict();
 
 // Body of POST /internal/wiki/commands. The API never trusts the caller-supplied
-// tenancy: it reloads the user, onboarding, wiki flag, membership, role, and
+// tenancy: it reloads the user, onboarding, membership, role, and
 // permissions from Postgres before executing the command.
 export const InternalWikiCommandRequestSchema = z
   .object({
@@ -3461,7 +3461,8 @@ export const IdentityUserSchema = z
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
     imessageEnabled: z.boolean(),
-    wikiEnabled: z.boolean(),
+    /** @deprecated Wiki is always enabled. */
+    wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
     preferredMcpClient: McpClientSchema.nullable(),
     mcpSetupCompletedAt: TimestampSchema.nullable(),
@@ -3478,6 +3479,7 @@ export const IdentityWorkspaceSchema = z
     name: z.string().min(1).max(80),
     slug: z.string().max(40).nullable(),
     role: z.enum(["admin", "member"]),
+    legacyBrainEnabled: z.boolean(),
   })
   .strict()
   .openapi("IdentityWorkspace");
@@ -3516,7 +3518,8 @@ export const UserPreferencesSchema = z
   .object({
     timezone: z.string().min(1).max(100),
     taskSpawningEnabled: z.boolean(),
-    wikiEnabled: z.boolean(),
+    /** @deprecated Wiki is always enabled. */
+    wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
     imessageEnabled: z.boolean(),
     autoModelRoutingEnabled: z.boolean(),
@@ -3528,6 +3531,7 @@ export const UpdateUserPreferencesBodySchema = z
   .object({
     timezone: z.string().min(1).max(100).optional(),
     taskSpawningEnabled: z.boolean().optional(),
+    /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */
     wikiEnabled: z.boolean().optional(),
     taskViewMode: TaskViewModeSchema.optional(),
     imessageEnabled: z.boolean().optional(),

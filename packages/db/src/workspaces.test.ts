@@ -6,6 +6,7 @@ import { brainFolders, brains, workspaceMembers, workspaces } from "./product-sc
 import {
   createWorkspaceForUser,
   getBrainEnrichmentEnabled,
+  isLegacyBrainEnabledForWorkspace,
   newBrainId,
   replaceBrainMembers,
   updateBrainEnrichmentEnabled,
@@ -159,6 +160,26 @@ describe("opencompany brain enrichment flag", () => {
   });
 });
 
+describe("legacy Brain workspace flag", () => {
+  it("is disabled unless the workspace explicitly opts in", async () => {
+    await expect(
+      isLegacyBrainEnabledForWorkspace("workspace_1", {
+        db: selectLegacyBrainFlagDb([{ enabled: false }]),
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      isLegacyBrainEnabledForWorkspace("workspace_1", {
+        db: selectLegacyBrainFlagDb([{ enabled: true }]),
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      isLegacyBrainEnabledForWorkspace("workspace_missing", {
+        db: selectLegacyBrainFlagDb([]),
+      }),
+    ).resolves.toBe(false);
+  });
+});
+
 describe("opencompany brain access membership", () => {
   it("removes personal sources for users excluded from the desired member set", async () => {
     let executedQuery: unknown;
@@ -208,6 +229,18 @@ function updateRowsDb(rows: Array<{ id: string }>) {
       set: vi.fn(() => ({
         where: vi.fn(() => ({
           returning: vi.fn(async () => rows),
+        })),
+      })),
+    })),
+  };
+}
+
+function selectLegacyBrainFlagDb(rows: Array<{ enabled: boolean }>) {
+  return {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => rows),
         })),
       })),
     })),

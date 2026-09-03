@@ -35,6 +35,7 @@ import {
   type ImmutableSkillBundle,
   loadImmutableSkillBundles,
 } from "@opencompany/db/skill-bundle-repository";
+import { isLegacyBrainEnabledForWorkspace } from "@opencompany/db/workspaces";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, eq, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import { ACP_ENGINE_ADAPTERS } from "./acp-engine-adapters";
@@ -394,14 +395,16 @@ export async function runCodexChatTurn(input: {
       Boolean(session.workspaceId) &&
       Boolean(env.runnerPublicUrl) &&
       Boolean(canonicalAttemptId);
+    const legacyBrainEnabled = session.workspaceId
+      ? await isLegacyBrainEnabledForWorkspace(session.workspaceId, { db: getDb() })
+      : false;
     const brainToolEnabled =
-      hostGatewayEnabled && brainReadHostEnabled && Boolean(session.brainRef);
+      hostGatewayEnabled && legacyBrainEnabled && brainReadHostEnabled && Boolean(session.brainRef);
     const brainCaptureEnabled =
-      hostGatewayEnabled && actionHostEnabled && Boolean(session.brainRef);
+      hostGatewayEnabled && legacyBrainEnabled && actionHostEnabled && Boolean(session.brainRef);
     const actionToolsEnabled = hostGatewayEnabled && actionHostEnabled;
     const artifactToolsEnabled = hostGatewayEnabled && actionHostEnabled;
-    const wikiToolsSupported =
-      hostGatewayEnabled && session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION;
+    const wikiToolsSupported = hostGatewayEnabled;
     const toolGatewayTicket =
       hostGatewayEnabled && canonicalAttemptId
         ? createExternalEngineGatewayTicket({
@@ -1756,7 +1759,7 @@ function buildCodexChatTask(input: {
       ? "When you create a finished file the user should receive, call publish_artifact with its sandbox path so it appears as a durable file in chat. Do not publish source files, repository diffs, logs, or temporary work."
       : null,
     input.wikiSupported
-      ? "A wiki tool is available when Wiki is enabled for the user. Use it for durable workspace knowledge: inspect existing pages before changing them, and read a page before overwriting it."
+      ? "A wiki tool is available for durable workspace knowledge. Inspect existing pages before changing them, and read a page before overwriting it."
       : null,
     ...codexBackgroundTaskPromptLines(input.taskContext),
     "Answer conversationally. Run commands or edit files only when the message calls for it, and keep replies concise unless the user asks for detail.",
@@ -1810,7 +1813,7 @@ function buildCodexChatRecoveryTask(input: {
       ? "When you create a finished file the user should receive, call publish_artifact with its sandbox path so it appears as a durable file in chat. Do not publish source files, repository diffs, logs, or temporary work."
       : null,
     input.wikiSupported
-      ? "A wiki tool is available when Wiki is enabled for the user. Use it for durable workspace knowledge: inspect existing pages before changing them, and read a page before overwriting it."
+      ? "A wiki tool is available for durable workspace knowledge. Inspect existing pages before changing them, and read a page before overwriting it."
       : null,
     ...codexBackgroundTaskPromptLines(input.taskContext),
     "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",

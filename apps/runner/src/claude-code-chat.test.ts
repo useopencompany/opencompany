@@ -111,12 +111,17 @@ const wakeupMocks = vi.hoisted(() => ({
   enqueueCodexChatWakeup: vi.fn(),
   persistCodexChatScheduledWakeup: vi.fn(),
 }));
+const workspaceMocks = vi.hoisted(() => ({
+  isLegacyBrainEnabledForWorkspace: vi.fn(async () => false),
+}));
 
 vi.mock("@opencompany/db/claude-code-auth", () => ({
   loadClaudeCodeCredential: authMocks.loadClaudeCodeCredential,
   markClaudeCodeCredentialNeedsReauth: authMocks.markClaudeCodeCredentialNeedsReauth,
   markClaudeCodeCredentialValidated: authMocks.markClaudeCodeCredentialValidated,
 }));
+
+vi.mock("@opencompany/db/workspaces", () => workspaceMocks);
 
 vi.mock("@opencompany/db/plugin-runtime-repository", () => ({
   loadChatSessionPluginRuntime: pluginRuntimeMocks.loadChatSessionPluginRuntime,

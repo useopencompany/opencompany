@@ -68,7 +68,7 @@ describe("headless Chat host tools", () => {
           timezone: "Europe/London",
           taskToolsEnabled: true,
           skillToolsEnabled: true,
-          wikiEnabled: true,
+          legacyBrainEnabled: false,
         })),
         browserProfilesAvailable: () => true,
         listBrowserProfiles: vi.fn(async () => [activeSession.profile]),

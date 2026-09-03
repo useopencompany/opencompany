@@ -35,6 +35,7 @@ const mcpSetupMock = vi.hoisted(() => ({ completedAt: null as string | null }));
 const featureFlagsMock = vi.hoisted(() => ({
   taskSpawning: false,
   autoModelRouting: false,
+  legacyBrain: true,
 }));
 const recentChatsMock = vi.hoisted(() => ({
   value: [] as Array<{
@@ -134,6 +135,8 @@ vi.mock("@/components/AppDataProvider", () => ({
     featureFlags: {
       taskSpawning: featureFlagsMock.taskSpawning,
       autoModelRouting: featureFlagsMock.autoModelRouting,
+      imessage: false,
+      legacyBrain: featureFlagsMock.legacyBrain,
     },
     mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
   }),
@@ -147,6 +150,7 @@ describe("Sidebar", () => {
     workspacesMock.value = [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }];
     mcpSetupMock.completedAt = null;
     featureFlagsMock.taskSpawning = false;
+    featureFlagsMock.legacyBrain = true;
     recentChatsMock.value = [];
     tasksMock.value = [];
     clearAllLocalChatStates();
@@ -169,6 +173,7 @@ describe("Sidebar", () => {
     expect(within(nav).queryByRole("link", { name: "Tasks" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "Workflows" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "Brain" })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Wiki" })).toHaveAttribute("href", "/wiki");
     expect(screen.getByText("Brains")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "General" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("button", { name: "New brain" })).toHaveClass("opacity-0");
@@ -183,6 +188,16 @@ describe("Sidebar", () => {
     const feedback = screen.getByRole("button", { name: "Feedback" });
     expect(feedback.nextElementSibling).toBe(account);
     expect(screen.queryByRole("link", { name: "Changelog" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the wiki visible and hides legacy Brain navigation by default", () => {
+    featureFlagsMock.legacyBrain = false;
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const nav = screen.getByRole("navigation", { name: "opencompany primary" });
+    expect(within(nav).getByRole("link", { name: "Wiki" })).toHaveAttribute("href", "/wiki");
+    expect(screen.queryByText("Brains")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "General" })).not.toBeInTheDocument();
   });
 
   it("opens the account menu with settings, changelog, docs, and sign out", async () => {
@@ -318,7 +333,7 @@ describe("Sidebar", () => {
     pathnameMock.value = "/settings/mcp";
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const setup = screen.getByRole("link", { name: "Connect your brain" });
+    const setup = screen.getByRole("link", { name: "Connect MCP" });
     expect(setup).toHaveAttribute("href", "/settings/mcp");
     expect(setup).toHaveAttribute("aria-current", "page");
   });

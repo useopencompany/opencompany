@@ -19,7 +19,7 @@ const context: ChatHostContext = {
   timezone: "Europe/London",
   taskToolsEnabled: true,
   skillToolsEnabled: true,
-  wikiEnabled: true,
+  legacyBrainEnabled: false,
 };
 
 describe("opencompany Chat Task host tools", () => {
@@ -206,12 +206,37 @@ describe("opencompany Chat Task host tools", () => {
     expect(createTask).toHaveBeenCalledWith({
       actorId: "user_1",
       workspaceId: "workspace_1",
-      brainRef: "brain_1",
+      brainRef: null,
       name: "Market research",
       prompt: "Research the market.",
       model: "moonshotai/kimi-k2.6",
       engine: "opencompany",
     });
+  });
+
+  it("passes a Brain to created Tasks only when the workspace enables the legacy feature", async () => {
+    const createTask = vi.fn(async () => taskResult);
+    const dependencies = testDependencies({
+      loadContext: vi.fn(async () => ({ ...context, legacyBrainEnabled: true })),
+      createTask,
+    });
+
+    await executeChatHostToolService({
+      command: {
+        operation: "start_task",
+        sessionId: "runtime_1",
+        runId: "run_1",
+        input: {
+          name: "Market research",
+          prompt: "Research the market.",
+          model: "moonshotai/kimi-k2.6",
+          engine: "opencompany",
+        },
+      },
+      dependencies,
+    });
+
+    expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ brainRef: "brain_1" }));
   });
 
   it("rejects a task model that the selected coding engine cannot run", async () => {

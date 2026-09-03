@@ -710,13 +710,13 @@ export const users = productSchema.table(
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     imessageEnabled: boolean("imessage_enabled").notNull().default(false),
-    // Preview flag for the workspace wiki (brain v2). Gates the /wiki surface
-    // and the `wiki` agent tool per user while brain keeps running unchanged.
+    // Retained for rollback compatibility after the wiki became the default.
+    // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
     // Board vs list layout for the Tasks page; persisted per user across devices.
     taskViewMode: text("task_view_mode").notNull().default("board").$type<TaskViewMode>(),
     preferredMcpClient: text("preferred_mcp_client").$type<McpClient>(),
-    // Set exactly once, when this user first completes a successful Brain query over MCP.
+    // Set exactly once, when this user first completes a successful knowledge query over MCP.
     mcpSetupCompletedAt: timestamp("mcp_setup_completed_at", { withTimezone: true }),
     // Set when the user finishes the onboarding flow; null gates them into it.
     onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
@@ -750,6 +750,9 @@ export const workspaces = productSchema.table(
     capabilitySessionBudgetUsdMicros: bigint("capability_session_budget_usd_micros", {
       mode: "number",
     }),
+    // Reversible cutover switch for the retired Brain UI and agent tools.
+    // Wiki is the default knowledge system for every workspace.
+    legacyBrainEnabled: boolean("legacy_brain_enabled").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

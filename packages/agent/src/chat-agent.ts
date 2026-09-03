@@ -616,24 +616,22 @@ export function createProductChatToolContext(input: {
       >[0])
     : BRAIN_READ_TOOL_AI_SCHEMA;
 
-  const tools: ToolSet = {
-    [BRAIN_TOOL_NAME]: tool<BrainToolInput, BrainToolOutput, Record<string, unknown>>({
+  const tools: ToolSet = {};
+  if (input.runBrainCli) {
+    tools[BRAIN_TOOL_NAME] = tool<BrainToolInput, BrainToolOutput, Record<string, unknown>>({
       description: BRAIN_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<BrainToolInput>(brainSchema),
       execute: async (args, executionContext?: unknown) => {
-        if (!input.runBrainCli) {
-          throw new Error("brain is not configured for this chat.");
-        }
         visibleToolActivity = true;
         // Multi-brain runners receive the raw args (including `brain`) and own
         // normalization after extracting the target.
         const toolArgs = multiBrain ? args : normalizeBrainToolInput(args);
         return executionContext === undefined
-          ? input.runBrainCli(toolArgs)
-          : input.runBrainCli(toolArgs, executionContext);
+          ? input.runBrainCli!(toolArgs)
+          : input.runBrainCli!(toolArgs, executionContext);
       },
-    }),
-  };
+    });
+  }
 
   const startTrackedTask = async (
     create: () => Promise<StartedTask>,

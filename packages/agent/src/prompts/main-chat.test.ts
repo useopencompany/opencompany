@@ -30,7 +30,9 @@ describe("createProductChatSystemPrompt integrations", () => {
     const base = createProductChatSystemPrompt({ currentDate });
     expect(createProductChatSystemPrompt({ currentDate, connectedIntegrations: [] })).toBe(base);
     expect(base).not.toContain("<action_sources>");
-    expect(base).not.toContain("<brain_fill>");
+    expect(base).not.toContain("<wiki_fill>");
+    expect(base).toContain("Use the wiki tool whenever the user wants something kept");
+    expect(base).not.toContain("Use the save_to_brain tool whenever");
     expect(base).not.toContain("<skill_source>");
     expect(base).not.toContain("<workflow_source>");
     expect(base).not.toContain("list_actions");
@@ -135,11 +137,11 @@ describe("createProductChatSystemPrompt integrations", () => {
     expect(prompt).toContain("treat that as a completed lookup with no match");
     expect(prompt).toContain("chat session's spending limit");
     expect(prompt).toContain("one-off approval card");
-    expect(prompt).toContain("<brain_fill>");
+    expect(prompt).toContain("<wiki_fill>");
     expect(prompt).toContain("Survey breadth before depth");
     expect(prompt).toContain("exception to normal task routing");
     expect(prompt).toContain("nextCursor or nextPageToken");
-    expect(prompt).toContain("sourceRef plus integrationId");
+    expect(prompt).toContain("[[source:provider:id]]");
     expect(prompt).toContain("summarize what you saved");
     // The block stays small: one routing line per integration, not an action index.
     const block = prompt.slice(
@@ -149,14 +151,14 @@ describe("createProductChatSystemPrompt integrations", () => {
     expect(block.length).toBeLessThan(800);
   });
 
-  it("omits brain-fill guidance when chat capture is disabled", () => {
+  it("keeps Wiki-fill guidance when legacy Brain capture is disabled", () => {
     const prompt = createProductChatSystemPrompt({
       connectedIntegrations: CONNECTED_INTEGRATIONS,
       brainCaptureEnabled: false,
     });
 
     expect(prompt).toContain("<action_sources>");
-    expect(prompt).not.toContain("<brain_fill>");
+    expect(prompt).toContain("<wiki_fill>");
   });
 
   it("keeps multi-step action research in chat when task tools are disabled", () => {

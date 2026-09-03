@@ -12,7 +12,6 @@ const bootstrap: ChatHostBootstrap = {
   workspaceName: "Analytical Engines",
   taskToolsEnabled: true,
   skillToolsEnabled: true,
-  wikiEnabled: true,
   browserToolsEnabled: true,
   browserProfiles: [{ id: "profile_1", name: "GitHub", siteHost: "github.com" }],
   skills: [{ id: "sales", name: "Sales", description: "Sell thoughtfully." }],

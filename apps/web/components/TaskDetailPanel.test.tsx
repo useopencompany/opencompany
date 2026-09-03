@@ -44,6 +44,8 @@ vi.mock("@/components/AppDataProvider", () => ({
     featureFlags: {
       taskSpawning: true,
       autoModelRouting: false,
+      imessage: false,
+      legacyBrain: false,
     },
   }),
 }));

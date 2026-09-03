@@ -45,6 +45,7 @@ import {
   DEFAULT_BRAIN_SLUG,
   getBrainAccess,
   getWorkspaceRole,
+  isLegacyBrainEnabledForWorkspace,
   listAccessibleBrains,
 } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
@@ -956,9 +957,10 @@ async function resolveProductChatRuntime(input: {
   if (!workspaceRole) {
     throw new Error("You no longer have access to this chat's workspace.");
   }
+  const legacyBrainEnabled = await isLegacyBrainEnabledForWorkspace(workspaceId, { db: getDb() });
 
   let brain = null;
-  if (session.brainRef) {
+  if (legacyBrainEnabled && session.brainRef) {
     const access = await getBrainAccess(
       { userWorkosId: turn.userWorkosId, brainRef: session.brainRef },
       { db: getDb() },
@@ -967,7 +969,7 @@ async function resolveProductChatRuntime(input: {
       throw new Error("You no longer have access to this chat's Brain.");
     }
     brain = access.brain;
-  } else {
+  } else if (legacyBrainEnabled) {
     const brains = await listAccessibleBrains(
       { userWorkosId: turn.userWorkosId, workspaceId },
       { db: getDb() },

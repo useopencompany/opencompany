@@ -121,7 +121,7 @@ describe("API authentication", () => {
           workspaceId: "workspace_1",
           role: "admin",
           taskSpawningEnabled: true,
-          wikiEnabled: true,
+          legacyBrainEnabled: true,
         },
       ],
     }));
@@ -158,12 +158,12 @@ describe("API authentication", () => {
           "chat:write",
           "task:read",
           "task:write",
-          "brain:read",
           "skill:read",
-          "brain:write",
-          "skill:write",
           "wiki:read",
           "wiki:write",
+          "brain:read",
+          "skill:write",
+          "brain:write",
           "workflow:read",
           "workflow:write",
           "schedule:read",
@@ -206,7 +206,7 @@ describe("API authentication", () => {
           workspaceId: "workspace_1",
           role: "member",
           taskSpawningEnabled: false,
-          wikiEnabled: false,
+          legacyBrainEnabled: false,
         },
       ],
     }));
@@ -230,8 +230,9 @@ describe("API authentication", () => {
       "chat:write",
       "task:read",
       "task:write",
-      "brain:read",
       "skill:read",
+      "wiki:read",
+      "wiki:write",
     ]);
   });
 
@@ -242,7 +243,7 @@ describe("API authentication", () => {
           workspaceId: "workspace_mobile",
           role: "member",
           taskSpawningEnabled: false,
-          wikiEnabled: false,
+          legacyBrainEnabled: false,
         },
       ],
     }));
@@ -394,7 +395,7 @@ describe("API authentication", () => {
           workspaceId: "workspace_1",
           role: "admin",
           taskSpawningEnabled: false,
-          wikiEnabled: false,
+          legacyBrainEnabled: false,
         },
       ],
     }));
@@ -462,7 +463,7 @@ describe("API authentication", () => {
           workspaceId: "workspace_1",
           role: "member",
           taskSpawningEnabled: true,
-          wikiEnabled: false,
+          legacyBrainEnabled: false,
         },
       ],
     }));

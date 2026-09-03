@@ -1681,6 +1681,13 @@
       "when": 1788364801000,
       "tag": "0239_goat_betterstack_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 240,
+      "version": "7",
+      "when": 1788364802000,
+      "tag": "0240_goat_legacy_brain_flag",
+      "breakpoints": true
     }
   ]
 }

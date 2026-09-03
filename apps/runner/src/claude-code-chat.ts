@@ -23,6 +23,7 @@ import {
 } from "@opencompany/db/plugin-runtime-repository";
 import { type CodexChatSession, type CodexChatTurn } from "@opencompany/db/product-schema";
 import type { ImmutableSkillBundle } from "@opencompany/db/skill-bundle-repository";
+import { isLegacyBrainEnabledForWorkspace } from "@opencompany/db/workspaces";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { ACP_ENGINE_ADAPTERS } from "./acp-engine-adapters";
@@ -143,7 +144,7 @@ const CLAUDE_CHAT_ACTIONS_PROMPT =
 const CLAUDE_CHAT_ARTIFACTS_PROMPT =
   "When you create a finished file the user should receive, call publish_artifact with its sandbox path so it appears as a durable file in chat. Do not publish source files, repository diffs, logs, or temporary work.";
 const CLAUDE_CHAT_WIKI_PROMPT =
-  "A wiki tool is available when Wiki is enabled for the user. Use it for durable workspace knowledge: inspect existing pages before changing them, and read a page before overwriting it.";
+  "A wiki tool is available for durable workspace knowledge. Inspect existing pages before changing them, and read a page before overwriting it.";
 const CLAUDE_CHAT_BRAIN_PROMPT =
   "A read-only goat_brain tool is available for the Brain pinned to this chat. Use it when durable company or user context would help; it cannot modify the Brain.";
 const CLAUDE_CHAT_BRAIN_CAPTURE_PROMPT =
@@ -457,7 +458,10 @@ export async function runClaudeCodeChatTurn(input: {
     const artifactToolsEnabled = hostGatewayEnabled;
     const wikiToolsSupported =
       hostGatewayEnabled && session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION;
-    const brainToolsEnabled = hostGatewayEnabled && Boolean(session.brainRef);
+    const legacyBrainEnabled = session.workspaceId
+      ? await isLegacyBrainEnabledForWorkspace(session.workspaceId, { db: getDb() })
+      : false;
+    const brainToolsEnabled = hostGatewayEnabled && legacyBrainEnabled && Boolean(session.brainRef);
     const brainCaptureEnabled =
       brainToolsEnabled && session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION;
     // Minted before the redactor so a leaked ticket (e.g. the agent cats its own MCP

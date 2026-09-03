@@ -219,7 +219,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       lastName: users.lastName,
       timezone: users.timezone,
       taskSpawningEnabled: users.taskSpawningEnabled,
-      wikiEnabled: users.wikiEnabled,
+      legacyBrainEnabled: workspaces.legacyBrainEnabled,
       workspaceName: workspaces.name,
       workspaceRole: workspaceMembers.role,
     })
@@ -257,14 +257,14 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     workspaceName: row.workspaceName,
     conversationId: row.chatSessionId,
     messageId: row.userMessageId,
-    brainRef: row.brainRef,
+    brainRef: row.legacyBrainEnabled ? row.brainRef : null,
     email: row.email,
     firstName: row.firstName,
     lastName: row.lastName,
     timezone: row.timezone,
     taskToolsEnabled: row.taskSpawningEnabled && row.workspaceRole === "admin",
     skillToolsEnabled: row.workspaceRole === "admin",
-    wikiEnabled: row.wikiEnabled,
+    legacyBrainEnabled: row.legacyBrainEnabled,
   };
 }
 
