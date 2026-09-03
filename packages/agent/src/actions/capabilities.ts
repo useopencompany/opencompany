@@ -204,6 +204,27 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  render: [
+    {
+      id: "read",
+      label: "Inspect Render resources",
+      description: "List workspaces, services, deploys, Postgres databases, and Key Value stores.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read operational data",
+      description: "Read logs and metrics, and run provider-enforced read-only database queries.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage Render infrastructure",
+      description:
+        "Create services and datastores, change environment variables, and trigger deploys.",
+      defaultMode: "ask",
+    },
+  ],
   signoz: [
     {
       id: "read",

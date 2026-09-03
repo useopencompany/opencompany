@@ -3349,11 +3349,22 @@ describe("canonical Hono API", () => {
       workspaceName: "Acme CRM",
       statusReason: null,
     }));
+    const connectRender = vi.fn(async () => ({
+      provider: "render" as const,
+      connected: true,
+      status: "connected" as const,
+      integrationId: "gint_render",
+      accountName: "Acme Hosting",
+      statusReason: null,
+      capabilityModes: {},
+      toolModes: {},
+    }));
     const app = testApp(fakeRepository(), {
       integrationAccounts: integrationAccountService({
         connectStripe,
         disconnectStripe,
         connectAttio,
+        connectRender,
       }),
     });
 
@@ -3387,6 +3398,20 @@ describe("canonical Hono API", () => {
     await expect(attio.json()).resolves.toMatchObject({
       data: { state: { provider: "attio", workspaceName: "Acme CRM" } },
     });
+
+    const renderKey = "rnd_supersecretrenderkey000";
+    const render = await app.request("/v1/integration-accounts/render", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: renderKey }),
+    });
+    expect(render.status).toBe(200);
+    const renderBody = await render.json();
+    expect(JSON.stringify(renderBody)).not.toContain(renderKey);
+    expect(renderBody).toMatchObject({
+      data: { state: { provider: "render", connected: true, accountName: "Acme Hosting" } },
+    });
+    expect(connectRender).toHaveBeenCalledWith(actor, renderKey);
   });
 
   it("gives iMessage pairing starts their own small rate bucket", async () => {
@@ -4735,6 +4760,9 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     },
     connectGranola: async () => {
       throw new Error("Unexpected Granola connect.");
+    },
+    connectRender: async () => {
+      throw new Error("Unexpected Render connect.");
     },
     startImessagePairing: async () => {
       throw new Error("Unexpected iMessage pairing start.");

@@ -4,6 +4,7 @@ import {
   LinearPluginDetail,
   NeonPluginDetail,
   type PluginLoadState,
+  RenderPluginDetail,
   SigNozPluginDetail,
   SlackPluginDetail,
 } from "@/components/OfficialMcpPluginSettings";
@@ -31,6 +32,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       github: GitHubPluginDetail,
       linear: LinearPluginDetail,
       neon: NeonPluginDetail,
+      render: RenderPluginDetail,
       signoz: SigNozPluginDetail,
       slack: SlackPluginDetail,
     }[normalizedName];

@@ -3,6 +3,7 @@ export type OfficialMcpPluginName =
   | "github"
   | "linear"
   | "neon"
+  | "render"
   | "signoz"
   | "slack";
 export type OfficialSkillPluginName = "yc-advise";
@@ -18,7 +19,14 @@ type OfficialPluginMetadataBase = {
 export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
   name: OfficialMcpPluginName;
   kind: "mcp";
-  connectionProvider: "betterstack" | "github_user" | "linear" | "neon" | "signoz" | "slack";
+  connectionProvider:
+    | "betterstack"
+    | "github_user"
+    | "linear"
+    | "neon"
+    | "render"
+    | "signoz"
+    | "slack";
   connectHref: string;
   accountLabel?: string;
   accountDescription: string;
@@ -83,6 +91,18 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "neon",
     connectHref: "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
     accountDescription: "The account opencompany uses when you run Neon tools.",
+  },
+  render: {
+    name: "render",
+    kind: "mcp",
+    label: "Render",
+    description:
+      "Inspect Render infrastructure, troubleshoot services, and deploy permission-gated applications and datastores.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
+    connectionProvider: "render",
+    connectHref: "/settings/plugins/render#render-api-key",
+    accountDescription: "The Render account opencompany uses when you run Render tools.",
   },
   signoz: {
     name: "signoz",

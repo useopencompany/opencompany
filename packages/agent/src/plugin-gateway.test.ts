@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   loadNeonConnection: vi.fn(),
   getBetterStackState: vi.fn(),
   loadBetterStackConnection: vi.fn(),
+  getRenderState: vi.fn(),
+  loadRenderConnection: vi.fn(),
   getSlackState: vi.fn(),
   loadSlackConnection: vi.fn(),
   getSigNozState: vi.fn(),
@@ -53,6 +55,11 @@ vi.mock("./integrations/posthog-mcp", () => ({
   POSTHOG_MCP_ENDPOINT_URL: "https://mcp.posthog.com/mcp",
   getPostHogIntegrationState: vi.fn(),
   loadPostHogMcpWorkerConnection: vi.fn(),
+}));
+vi.mock("./integrations/render-mcp", () => ({
+  RENDER_MCP_ENDPOINT_URL: "https://mcp.render.com/mcp",
+  getRenderIntegrationState: mocks.getRenderState,
+  loadRenderMcpWorkerConnection: mocks.loadRenderConnection,
 }));
 vi.mock("./integrations/neon-mcp", () => ({
   NEON_MCP_ENDPOINT_URL:
@@ -332,6 +339,40 @@ describe("plugin gateway registration cache", () => {
       {
         ...betterStackRecord,
         server: { ...betterStackRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Render API-key credentials only to Render's exact hosted MCP endpoint", async () => {
+    const renderRecord = record({
+      pluginName: "render",
+      pluginLabel: "render",
+      pluginDescription: "Render plugin tools.",
+      connectionProvider: "render",
+      server: {
+        name: "render",
+        type: "streamable-http",
+        url: "https://mcp.render.com/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([renderRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:render:render",
+        connectionProvider: "render",
+        getState: mocks.getRenderState,
+        loadConnection: mocks.loadRenderConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...renderRecord,
+        server: { ...renderRecord.server, url: "https://mcp.render.com.evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

@@ -172,6 +172,7 @@ describe("headless protocol", () => {
       "/v1/integration-accounts/attio/{integrationId}",
       "/v1/integration-accounts/fathom",
       "/v1/integration-accounts/granola",
+      "/v1/integration-accounts/render",
       "/v1/integration-accounts/imessage/pairing",
       "/v1/integration-accounts/imessage/pairing/confirm",
       "/v1/integration-accounts/stripe",
