@@ -62,7 +62,7 @@ import {
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
 import { type IntegrationAccountView, type IntegrationState } from "@/lib/integration-state";
-import type { OfficialMcpPluginName } from "@/lib/official-mcp-plugins";
+import type { OfficialMcpPluginName } from "@/lib/official-plugins";
 
 const NO_CONNECTION_DISCOVERY_ERROR =
   "No usable provider connection was available for MCP discovery.";
