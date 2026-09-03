@@ -606,6 +606,22 @@ const slackPlugin = {
   ],
 } as const satisfies PluginInstallationDto;
 
+const slackPreview = {
+  ...officialPreview,
+  manifest: slackPlugin.manifest,
+  source: slackPlugin.source,
+  integrity: slackPlugin.integrity,
+  skills: [],
+  remoteMcpServers: slackPlugin.remoteMcpServers.map(
+    ({ name, type, connectionProvider, capabilities }: PluginRemoteMcpServerDto) => ({
+      name,
+      type,
+      connectionProvider,
+      capabilities,
+    }),
+  ),
+} as const satisfies PluginImportPreviewDto;
+
 describe("Linear plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
@@ -769,6 +785,7 @@ describe("Linear plugin settings", () => {
       expectedResolvedCommit: officialPreview.source.resolvedCommit,
       expectedIntegrity: officialPreview.integrity,
     });
+    expect(toasts.success).toHaveBeenCalledWith("Linear installed.");
     expect(router.refresh).toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
@@ -1241,6 +1258,32 @@ describe("Linear plugin settings", () => {
         { id: "write", defaultMode: "ask" },
       ],
     });
+  });
+
+  it("reviews and installs Slack from the pinned package on its detail page", async () => {
+    commands.previewHeadlessPluginImport.mockResolvedValue(slackPreview);
+    commands.importHeadlessPlugin.mockResolvedValue({ plugin: slackPlugin, replayed: false });
+
+    render(<SlackPluginDetail pluginState={{ status: "ready", plugin: null }} canEdit />);
+
+    expect(screen.getByRole("button", { name: "Loading package…" })).toBeDisabled();
+    expect(await screen.findByText("Search public Slack")).toBeInTheDocument();
+    const installButton = screen.getByRole("button", { name: "Install" });
+    expect(installButton).toBeEnabled();
+
+    await userEvent.click(installButton);
+
+    await waitFor(() => expect(commands.importHeadlessPlugin).toHaveBeenCalledTimes(1));
+    expect(commands.previewHeadlessPluginImport).toHaveBeenCalledWith({
+      url: SLACK_PLUGIN_SOURCE,
+    });
+    expect(commands.importHeadlessPlugin).toHaveBeenCalledWith({
+      url: SLACK_PLUGIN_SOURCE,
+      expectedResolvedCommit: slackPreview.source.resolvedCommit,
+      expectedIntegrity: slackPreview.integrity,
+    });
+    expect(toasts.success).toHaveBeenCalledWith("Slack installed.");
+    expect(router.refresh).toHaveBeenCalled();
   });
 
   it("builds the two-bucket advanced fallback with ask defaults", () => {
