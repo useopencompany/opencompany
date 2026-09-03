@@ -2887,6 +2887,7 @@ export function Surface({
                       onActionApproval={handleActionApproval}
                       allowActionApproval={message.id === latestAssistantMessageId}
                       isTaskSession={Boolean(activeTaskConversation)}
+                      compactTrace={isCloudCodingEngine(activeChatEngine)}
                     />
                   ))}
                   {isTaskConversationStopping ? (
