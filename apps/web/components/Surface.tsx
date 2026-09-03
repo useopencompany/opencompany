@@ -1106,6 +1106,12 @@ export function Surface({
   );
   const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
+  const activeAssistantMessageId =
+    foregroundAssistantMessageId && !isChatTurnTerminal(chatTurnPhase)
+      ? foregroundAssistantMessageId
+      : isTaskConversationWorking && chatMessages.at(-1)?.role === "assistant"
+        ? latestAssistantMessageId
+        : null;
   const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
   const activeTurnTimerStartedAtMs =
     foregroundTurn?.startedAtMs ??
@@ -2888,6 +2894,7 @@ export function Surface({
                       allowActionApproval={message.id === latestAssistantMessageId}
                       isTaskSession={Boolean(activeTaskConversation)}
                       compactTrace={isCloudCodingEngine(activeChatEngine)}
+                      turnActive={message.id === activeAssistantMessageId}
                     />
                   ))}
                   {isTaskConversationStopping ? (
