@@ -308,6 +308,27 @@ describe("extractAcpScheduleWakeup", () => {
     });
   });
 
+  it("recognizes ScheduleWakeup calls wrapped in the Claude ACP MCP envelope", () => {
+    expect(
+      extractAcpScheduleWakeup(
+        acpToolCallEvent("codex_mcp_tool", {
+          kind: "other",
+          tool: "ScheduleWakeup",
+          toolName: "ScheduleWakeup",
+          arguments: {
+            delaySeconds: 600,
+            reason: "Wait for CI",
+            prompt: "Inspect PR #42.",
+          },
+        }),
+      ),
+    ).toEqual({
+      delaySeconds: 600,
+      reason: "Wait for CI",
+      prompt: "Inspect PR #42.",
+    });
+  });
+
   it("ignores malformed tool input and unrelated raw events", () => {
     expect(
       extractAcpScheduleWakeup(
@@ -1092,8 +1113,8 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     const turn = claudeTurn({ settings: { reasoningEffort: "high" } });
     const completion = { taskId: "goat_task_1", nextTurn: { id: "next_turn" } };
     taskMocks.closeTaskTurn.mockResolvedValueOnce({
-      reportedOutcome: "needs_attention",
-      outcomeComment: "Waiting for CI.",
+      disposition: "needs_attention",
+      comment: "Waiting for CI.",
     });
     taskMocks.finalizeTaskResult.mockResolvedValueOnce("PR opened; CI is running.");
     taskMocks.buildTaskTurnCompletion.mockReturnValueOnce(completion);
@@ -1115,10 +1136,15 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       }) => {
         await input.onEngineSessionId("claude_thread_1");
         await input.onRuntimeEvents([
-          acpToolCallEvent("ScheduleWakeup", {
-            delay_seconds: 600,
-            reason: "Wait for CI",
-            prompt: "Inspect PR #42.",
+          acpToolCallEvent("codex_mcp_tool", {
+            kind: "other",
+            tool: "ScheduleWakeup",
+            toolName: "ScheduleWakeup",
+            arguments: {
+              delay_seconds: 600,
+              reason: "Wait for CI",
+              prompt: "Inspect PR #42.",
+            },
           }),
           ...successfulAcpEvents("PR opened; CI is running."),
         ]);

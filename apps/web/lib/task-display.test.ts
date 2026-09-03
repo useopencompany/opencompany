@@ -15,6 +15,9 @@ describe("taskBoardColumn", () => {
     ["running", null, "in_progress"],
     ["running", "done", "in_progress"],
     ["running", "needs_attention", "in_progress"],
+    ["waiting", null, "in_review"],
+    ["waiting", "done", "in_review"],
+    ["waiting", "needs_attention", "in_review"],
     ["succeeded", null, "done"],
     ["succeeded", "done", "done"],
     ["succeeded", "needs_attention", "in_review"],
@@ -33,6 +36,8 @@ describe("workflowTaskDisplayStatus", () => {
   it.each([
     ["queued", null, "running"],
     ["running", null, "running"],
+    ["waiting", null, "waiting"],
+    ["waiting", "needs_attention", "waiting"],
     ["failed", null, "failed"],
     ["canceled", null, "canceled"],
     ["succeeded", null, "done"],

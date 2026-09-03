@@ -44,6 +44,12 @@ export async function listStuckRunnerWork(input: {
        AND attempt.lease_id = turn.lease_id
       WHERE turn.status IN ('queued', 'running')
         AND (turn.run_after IS NULL OR turn.run_after <= ${now})
+        AND NOT EXISTS (
+          SELECT 1
+          FROM goat.tasks AS task
+          WHERE task.session_id = turn.chat_session_id
+            AND task.status = 'waiting'
+        )
         AND CASE
           WHEN turn.status = 'running'
             THEN COALESCE(attempt.started_at, turn.updated_at)

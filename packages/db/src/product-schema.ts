@@ -75,7 +75,7 @@ const bytea = customType<{ data: Buffer }>({
   },
 });
 
-export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+export type TaskStatus = "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled";
 
 // Workflows retain the draft/active lifecycle from their original Brain documents.
 export type WorkflowStatus = "draft" | "active";
@@ -422,6 +422,8 @@ export type HarnessSpec = {
   };
 };
 
+export type TaskResultMode = HarnessSpec extends { resultMode: infer Mode } ? Mode : never;
+
 export type WorkspaceRole = "admin" | "member";
 export type McpClient = "claude" | "chatgpt" | "cursor";
 export type TaskViewMode = "board" | "list";
@@ -540,6 +542,16 @@ export type TaskMessageRole = "user" | "assistant" | "tool";
 export type TaskMessageStatus = "created" | "running" | "completed" | "failed";
 export type TaskModelUsagePhase = "planner" | "execution";
 
+export type TaskActivityAuthor = "user" | "orchestrator" | "system";
+export type TaskActivityKind =
+  | "created"
+  | "run_started"
+  | "run_finished"
+  | "status_changed"
+  | "comment"
+  | "retry";
+export type TaskActivityMetadata = Record<string, unknown>;
+
 export type TaskEventType =
   | "task.status"
   | "harness.planned"
@@ -657,6 +669,7 @@ export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
 export type CodexChatTurnSettings = {
   approvalContinuation?: boolean;
   mentions?: Array<{ kind: "skill"; id: string }>;
+  taskResultMode?: TaskResultMode;
   reasoningEffort?: CodexReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
   wakeupChain?: number;
@@ -3687,7 +3700,7 @@ export const tasks = productSchema.table(
       .where(sql`${table.sessionId} IS NOT NULL`),
     statusCheck: check(
       "goat_tasks_status_check",
-      sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed', 'canceled')`,
+      sql`${table.status} IN ('queued', 'running', 'waiting', 'succeeded', 'failed', 'canceled')`,
     ),
     sourceCheck: check(
       "goat_tasks_source_check",
@@ -3881,6 +3894,38 @@ export const taskMessages = productSchema.table(
     statusCheck: check(
       "goat_task_messages_status_check",
       sql`${table.status} IN ('created', 'running', 'completed', 'failed')`,
+    ),
+  }),
+);
+
+export const taskActivities = productSchema.table(
+  "task_activities",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    author: text("author").$type<TaskActivityAuthor>().notNull(),
+    authorWorkosId: text("author_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    kind: text("kind").$type<TaskActivityKind>().notNull(),
+    body: text("body"),
+    metadata: jsonb("metadata").$type<TaskActivityMetadata>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    taskCreatedAtIdx: index("opencompany_task_activities_task_created_at_idx").on(
+      table.taskId,
+      table.createdAt,
+    ),
+    authorCheck: check(
+      "opencompany_task_activities_author_check",
+      sql`${table.author} IN ('user', 'orchestrator', 'system')`,
+    ),
+    kindCheck: check(
+      "opencompany_task_activities_kind_check",
+      sql`${table.kind} IN ('created', 'run_started', 'run_finished', 'status_changed', 'comment', 'retry')`,
     ),
   }),
 );
@@ -6353,6 +6398,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
     references: [taskSchedules.id],
   }),
   taskMessages: many(taskMessages),
+  taskActivities: many(taskActivities),
   taskEvents: many(taskEvents),
   modelUsage: many(taskModelUsage),
   toolUsage: many(taskToolUsage),
@@ -6432,6 +6478,17 @@ export const taskEventsRelations = relations(taskEvents, ({ one }) => ({
   message: one(taskMessages, {
     fields: [taskEvents.messageId],
     references: [taskMessages.id],
+  }),
+}));
+
+export const taskActivitiesRelations = relations(taskActivities, ({ one }) => ({
+  task: one(tasks, {
+    fields: [taskActivities.taskId],
+    references: [tasks.id],
+  }),
+  authorUser: one(users, {
+    fields: [taskActivities.authorWorkosId],
+    references: [users.workosUserId],
   }),
 }));
 
@@ -6746,6 +6803,7 @@ export type TaskScheduleRun = typeof taskScheduleRuns.$inferSelect;
 export type WorkflowScheduleRun = typeof workflowScheduleRuns.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type TaskMessage = typeof taskMessages.$inferSelect;
+export type TaskActivity = typeof taskActivities.$inferSelect;
 export type TaskEvent = typeof taskEvents.$inferSelect;
 export type TaskModelUsage = typeof taskModelUsage.$inferSelect;
 export type TaskToolUsage = typeof taskToolUsage.$inferSelect;

@@ -326,6 +326,54 @@ export function createApiApp(input: CreateApiAppInput) {
         202,
       );
     },
+    createTaskComment: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const { taskId } = c.req.valid("param");
+      const body = c.req.valid("json");
+      const result = await input.tasks.createComment(actor, taskId, body);
+      if (!result.idempotentReplay && input.captureChatMessage) {
+        void Promise.resolve(
+          input.captureChatMessage({
+            actor,
+            conversationId: result.task.conversationId,
+            firstMessage: false,
+            engine: result.task.engine,
+            model: result.task.model,
+            messageLength: body.body.length,
+            selectionMode: "manual",
+          }),
+        ).catch((error) =>
+          logger.warn("Canonical Task comment analytics capture failed", {
+            event: "opencompany.canonical_task_comment_analytics_failed",
+            task_id: result.task.id,
+            error_name: error instanceof Error ? error.name : typeof error,
+          }),
+        );
+      }
+      return c.json(
+        {
+          data: {
+            task: taskDto(result.task),
+            comment: {
+              id: result.comment.id,
+              taskId: result.comment.taskId,
+              author: "user" as const,
+              kind: "comment" as const,
+              body: result.comment.body,
+              createdAt: result.comment.createdAt.toISOString(),
+            },
+            messageId: result.messageId,
+            assistantMessageId: result.assistantMessageId,
+            runId: result.runId,
+            transactionId: result.transactionId,
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        202,
+      );
+    },
     getTask: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -1906,6 +1954,9 @@ export function createApiApp(input: CreateApiAppInput) {
       }
       const params = c.req.valid("param");
       const query = c.req.valid("query");
+      if (params.readModel !== "task-activities-v1" && query.taskId) {
+        throw new ApiError(400, "invalid_request", "taskId is not valid for this read model.");
+      }
       if (
         query.messageShapeEpoch !== undefined &&
         params.readModel !== "chat-messages-v1" &&
@@ -1918,7 +1969,16 @@ export function createApiApp(input: CreateApiAppInput) {
         );
       }
       let messageShapeEpoch: number | undefined;
-      if (params.readModel.startsWith("brain-")) {
+      if (params.readModel === "task-activities-v1") {
+        if (!query.taskId || query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "taskId is required and other resource identifiers are not valid for this read model.",
+          );
+        }
+        await input.tasks.getTask(actor, query.taskId);
+      } else if (params.readModel.startsWith("brain-")) {
         if (query.conversationId || !query.brainId) {
           throw new ApiError(
             400,
@@ -2023,6 +2083,7 @@ export function createApiApp(input: CreateApiAppInput) {
         readModel: params.readModel,
         ...(query.conversationId ? { conversationId: query.conversationId } : {}),
         ...(query.brainId ? { brainId: query.brainId } : {}),
+        ...(query.taskId ? { taskId: query.taskId } : {}),
         ...(messageShapeEpoch !== undefined ? { messageShapeEpoch } : {}),
         requestUrl: new URL(c.req.url),
       }) as never;

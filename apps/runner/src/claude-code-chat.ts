@@ -1,4 +1,7 @@
-import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/agent/chat-agent";
+import {
+  TASK_SYSTEM_BLOCK,
+  TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
+} from "@opencompany/agent/chat-agent";
 import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
@@ -116,6 +119,7 @@ import {
   closeTaskTurn,
   finalizeTaskResult,
   markTaskTurnRunning,
+  orchestrateTaskFailure,
   type TaskTurnContext,
 } from "./task-turn";
 import {
@@ -281,8 +285,16 @@ export async function runClaudeCodeChatTurn(input: {
       ) {
         await bareProjector().interrupted(buildTaskTerminalProjection(taskContext));
       } else {
-        await bareProjector().fail(errorMessage(effectiveError), {
-          taskCompletion: buildTaskTerminalProjection(taskContext),
+        const message = errorMessage(effectiveError);
+        const taskCompletion = await orchestrateTaskFailure({
+          context: taskContext,
+          error: message,
+          env,
+          session,
+          turn,
+        });
+        await bareProjector().fail(message, {
+          taskCompletion,
         });
       }
       return "settled";
@@ -293,9 +305,18 @@ export async function runClaudeCodeChatTurn(input: {
 
   const auth = await loadClaudeCodeAuth(turn.userWorkosId);
   if (!auth) {
+    const taskCompletion = taskContext
+      ? await orchestrateTaskFailure({
+          context: taskContext,
+          error: CLAUDE_CODE_CHAT_REAUTH_MESSAGE,
+          env,
+          session,
+          turn,
+        })
+      : null;
     await bareProjector().fail(CLAUDE_CODE_CHAT_REAUTH_MESSAGE, {
       sessionStatus: "failed",
-      ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
+      ...(taskCompletion ? { taskCompletion } : {}),
     });
     return "settled";
   }
@@ -336,12 +357,19 @@ export async function runClaudeCodeChatTurn(input: {
         failureDiagnostic("connect_sandbox", error, redactAcquisitionError),
       );
     }
-    await bareProjector().fail(
-      `Claude Code sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`,
-      {
-        ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
-      },
-    );
+    const message = `Claude Code sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`;
+    const taskCompletion = taskContext
+      ? await orchestrateTaskFailure({
+          context: taskContext,
+          error: message,
+          env,
+          session,
+          turn,
+        })
+      : null;
+    await bareProjector().fail(message, {
+      ...(taskCompletion ? { taskCompletion } : {}),
+    });
     return "settled";
   }
 
@@ -848,7 +876,7 @@ export async function runClaudeCodeChatTurn(input: {
         await checkAbort();
         reported = await closeTaskTurn({
           context: taskContext,
-          finalContent: rawResult,
+          run: { status: "completed", result: rawResult },
           env,
           session,
           turn,
@@ -872,8 +900,13 @@ export async function runClaudeCodeChatTurn(input: {
           taskCompletion: buildTaskTurnCompletion({
             context: taskContext,
             result: finalResult,
-            reportedOutcome: reported?.reportedOutcome,
-            outcomeComment: reported?.outcomeComment,
+            disposition:
+              reported?.disposition === "done" ||
+              reported?.disposition === "needs_attention" ||
+              reported?.disposition === "waiting"
+                ? reported.disposition
+                : null,
+            outcomeComment: reported?.comment,
             ...(scheduledWakeup
               ? {
                   scheduledWakeup: {
@@ -886,8 +919,15 @@ export async function runClaudeCodeChatTurn(input: {
         },
       );
     } else if (taskContext) {
+      const taskCompletion = await orchestrateTaskFailure({
+        context: taskContext,
+        error: engineSummary.error?.trim() || "Claude Code ended without a result.",
+        env,
+        session,
+        turn,
+      });
       await projector.finalize(engineSummary, {
-        taskCompletion: buildTaskTerminalProjection(taskContext),
+        taskCompletion,
       });
     } else {
       await projector.finalize(engineSummary);
@@ -987,8 +1027,17 @@ export async function runClaudeCodeChatTurn(input: {
         error_name: effectiveError instanceof Error ? effectiveError.name : typeof effectiveError,
         error: message,
       });
+      const taskCompletion = taskContext
+        ? await orchestrateTaskFailure({
+            context: taskContext,
+            error: message,
+            env,
+            session,
+            turn,
+          })
+        : null;
       await projector.fail(message, {
-        ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
+        ...(taskCompletion ? { taskCompletion } : {}),
         failureDiagnostic: failureDiagnostic(executionStage, effectiveError, redact),
       });
     }
@@ -1069,14 +1118,18 @@ export function extractAcpScheduleWakeup(
   const update = recordFromUnknown(params?.update);
   if (update?.sessionUpdate !== "tool_call") return null;
   const claudeMeta = recordFromUnknown(recordFromUnknown(update._meta)?.claudeCode);
-  const toolName =
-    typeof claudeMeta?.toolName === "string"
-      ? claudeMeta.toolName
-      : typeof update.name === "string"
-        ? update.name
-        : null;
-  if (toolName !== "ScheduleWakeup" && !toolName?.endsWith("__ScheduleWakeup")) return null;
-  return scheduleWakeupFromToolInput(recordFromUnknown(update.rawInput));
+  const rawInput = recordFromUnknown(update.rawInput);
+  const toolNames = [claudeMeta?.toolName, update.name, rawInput?.tool, rawInput?.toolName];
+  if (
+    !toolNames.some(
+      (value) =>
+        typeof value === "string" &&
+        (value === "ScheduleWakeup" || value.endsWith("__ScheduleWakeup")),
+    )
+  ) {
+    return null;
+  }
+  return scheduleWakeupFromToolInput(recordFromUnknown(rawInput?.arguments) ?? rawInput);
 }
 
 function scheduleWakeupFromToolInput(
@@ -1243,10 +1296,8 @@ function claudeBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
   const codex = context.harnessSpec.codex;
   return [
     "",
-    "<background_task_run>",
-    "You are running autonomously as a background task. There is no interactive user to answer questions or approve steps. Work to completion with the tools available, then give a concise final result.",
+    TASK_SYSTEM_BLOCK,
     TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
-    context.harnessSpec.systemPrompt.trim() || null,
     codex?.repository
       ? `The planner selected GitHub repository ${codex.repository}. Work in that repository unless the task itself clearly requires otherwise.`
       : null,
@@ -1255,7 +1306,7 @@ function claudeBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
       : codex?.createPullRequest === false
         ? "Do not open a pull request unless the task explicitly asks for one."
         : null,
-    "</background_task_run>",
+    context.harnessSpec.systemPrompt.trim() || null,
   ].filter((line): line is string => line !== null);
 }
 
