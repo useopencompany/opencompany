@@ -646,7 +646,9 @@ export async function loadSpendBreakdown(
 ): Promise<SpendBreakdownRow[]> {
   const db = options.db ?? getDb();
   const now = options.now ?? new Date();
-  const since = new Date(now.getTime() - (options.days ?? 30) * 24 * 60 * 60 * 1000);
+  const days = options.days ?? 30;
+  const since = new Date(now);
+  since.setUTCDate(since.getUTCDate() - (days - 1));
   since.setUTCHours(0, 0, 0, 0);
   const result = await db.execute(sql`
     SELECT

@@ -1,19 +1,13 @@
 "use client";
 
 import { useState } from "react";
-
-export type SpendCategory = "chat" | "ingestion" | "capabilities" | "other";
-
-export type SpendDay = {
-  day: string;
-  chat: number;
-  ingestion: number;
-  capabilities: number;
-  other: number;
-  total: number;
-};
-
-export type SpendSeries = { key: SpendCategory; label: string; total: number };
+import {
+  formatUsdAxisMicros,
+  formatUsdMicros,
+  type SpendCategory,
+  type SpendDay,
+  type SpendSeries,
+} from "@/lib/usage-spend";
 
 // Validated categorical palette (six-checks pass, light + dark); tokens live in globals.css.
 const BAR_CLASS: Record<SpendCategory, string> = {
@@ -25,25 +19,8 @@ const BAR_CLASS: Record<SpendCategory, string> = {
 
 const PLOT_HEIGHT_CLASS = "h-44"; // 176px
 
-export function formatUsdMicros(usdMicros: number) {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(usdMicros / 1_000_000);
-}
-
-function formatAxis(usdMicros: number) {
-  const v = usdMicros / 1_000_000;
-  if (v <= 0) return "$0";
-  if (v >= 1000) return `$${(v / 1000).toFixed(v >= 10_000 ? 0 : 1)}k`;
-  if (v >= 10 || Number.isInteger(v)) return `$${Math.round(v)}`;
-  return `$${v.toFixed(1)}`;
-}
-
 function formatDay(day: string) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     timeZone: "UTC",
@@ -82,7 +59,7 @@ export function SpendChart({ days, series }: { days: SpendDay[]; series: SpendSe
               style={{ top: `${(i / (gridVals.length - 1)) * 100}%` }}
               className="absolute right-0 -translate-y-1/2 text-[10px] tabular-nums text-ink-subtle"
             >
-              {formatAxis(g)}
+              {formatUsdAxisMicros(g)}
             </span>
           ))}
         </div>

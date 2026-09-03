@@ -2,13 +2,14 @@ import type { BillingUsageDto } from "@opencompany/protocol";
 import { AlertCircle, DatabaseZap } from "lucide-react";
 import Link from "next/link";
 import { SettingsContent } from "@/components/SettingsChrome";
+import { SpendChart } from "@/components/SpendChart";
 import {
+  buildDailySpendSeries,
   formatUsdMicros,
   type SpendCategory,
-  SpendChart,
-  type SpendDay,
   type SpendSeries,
-} from "@/components/SpendChart";
+  USAGE_REPORTING_WINDOW_DAYS,
+} from "@/lib/usage-spend";
 
 export type UsageData = BillingUsageDto;
 
@@ -26,9 +27,9 @@ export function UsagePanel({ data }: { data: UsageData }) {
   const totalProviderCost = data.breakdown.reduce((sum, row) => sum + row.providerCostUsdMicros, 0);
   const totalFee = data.breakdown.reduce((sum, row) => sum + row.platformFeeUsdMicros, 0);
 
-  const days = buildDailySeries(data.breakdown);
+  const days = buildDailySpendSeries(data.breakdown);
   const series = buildSeries(data.breakdown);
-  const avgPerDay = days.length ? totalSpend / days.length : 0;
+  const avgPerDay = totalSpend / USAGE_REPORTING_WINDOW_DAYS;
 
   return (
     <SettingsContent
@@ -58,7 +59,8 @@ export function UsagePanel({ data }: { data: UsageData }) {
         </span>
         <span className="text-[12.5px] text-ink-subtle">
           {formatUsdMicros(totalProviderCost)} provider cost · {formatUsdMicros(totalFee)} usage fee
-          {days.length ? ` · ${formatUsdMicros(avgPerDay)}/day avg` : ""}
+          {" · "}
+          {formatUsdMicros(avgPerDay)}/day avg
         </span>
       </section>
 
@@ -66,7 +68,7 @@ export function UsagePanel({ data }: { data: UsageData }) {
         <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Daily spend
         </h2>
-        {days.length ? (
+        {totalSpend > 0 ? (
           <div className="rounded-xl border border-border bg-canvas p-4">
             <SpendChart days={days} series={series} />
           </div>
@@ -120,35 +122,6 @@ export function UsagePanel({ data }: { data: UsageData }) {
       </section>
     </SettingsContent>
   );
-}
-
-// Collapse the breakdown into one contiguous column per calendar day (gaps filled with zero) so
-// the chart reads as a continuous timeline rather than skipping days with no spend.
-function buildDailySeries(rows: BillingUsageDto["breakdown"]): SpendDay[] {
-  const byDay = new Map<string, SpendDay>();
-  for (const row of rows) {
-    let entry = byDay.get(row.day);
-    if (!entry) {
-      entry = { day: row.day, chat: 0, ingestion: 0, capabilities: 0, other: 0, total: 0 };
-      byDay.set(row.day, entry);
-    }
-    entry[row.category] += row.spendUsdMicros;
-    entry.total += row.spendUsdMicros;
-  }
-  if (byDay.size === 0) return [];
-
-  const keys = [...byDay.keys()].sort();
-  const start = new Date(`${keys[0]}T00:00:00.000Z`);
-  const end = new Date(`${keys[keys.length - 1]}T00:00:00.000Z`);
-  const out: SpendDay[] = [];
-  for (let t = start.getTime(), guard = 0; t <= end.getTime() && guard < 400; t += 86_400_000) {
-    const key = new Date(t).toISOString().slice(0, 10);
-    out.push(
-      byDay.get(key) ?? { day: key, chat: 0, ingestion: 0, capabilities: 0, other: 0, total: 0 },
-    );
-    guard += 1;
-  }
-  return out;
 }
 
 function buildSeries(rows: BillingUsageDto["breakdown"]): SpendSeries[] {
