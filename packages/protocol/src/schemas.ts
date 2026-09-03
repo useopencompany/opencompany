@@ -1,5 +1,9 @@
 import { z } from "@hono/zod-openapi";
-import { WIKI_TOOL_COMMANDS } from "@opencompany/wiki/tool";
+import {
+  normalizeWikiToolInput,
+  WIKI_TOOL_INPUT_JSON_SCHEMA,
+  type WikiToolInput,
+} from "@opencompany/wiki/tool";
 import { API_VERSION, PROTOCOL_VERSION } from "./version";
 
 export const ResourceIdSchema = z.string().min(1).max(256).openapi({ example: "run_019fed53" });
@@ -2021,31 +2025,14 @@ export const AddWikiTimelineEntryBodySchema = z
   .strict()
   .openapi("AddWikiTimelineEntryBody");
 
-// Runtime validator for the shared `wiki` agent tool command contract. It mirrors
-// WIKI_TOOL_INPUT_JSON_SCHEMA (the AI-SDK/MCP schema) and sources its command enum
-// from the same WIKI_TOOL_COMMANDS constant; the protocol test asserts the field
-// set never drifts from the JSON schema. Deliberately not registered as an OpenAPI
-// component — the runner→API command endpoint is internal, not public.
-export const WikiCommandSchema = z
-  .object({
-    command: z.enum([...WIKI_TOOL_COMMANDS]),
-    depth: z.number().int().min(0).max(10).optional(),
-    pages: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(20)]).optional(),
-    path: z.string().min(1).max(512).optional(),
-    body: z.string().max(1_000_000).optional(),
-    kind: WikiKindSchema.optional(),
-    title: z.string().max(160).optional(),
-    query: z.string().min(1).optional(),
-    since: z.string().min(1).optional(),
-    to: z.string().min(1).optional(),
-    recursive: z.boolean().optional(),
-    ignoreCase: z.boolean().optional(),
-    at: z.string().min(1).optional(),
-    text: z.string().min(1).optional(),
-    limit: z.number().int().min(1).max(200).optional(),
-    offset: z.number().int().min(0).optional(),
-  })
-  .strict();
+// Derive the internal runtime validator from the exact JSON Schema advertised
+// to AI-SDK and MCP clients. Provider-generated empty placeholders are removed
+// first; command-specific requirements remain domain errors from the command
+// service, allowing the model to correct a malformed invocation.
+export const WikiCommandSchema = z.preprocess(
+  normalizeWikiToolInput,
+  z.fromJSONSchema(WIKI_TOOL_INPUT_JSON_SCHEMA),
+) as z.ZodType<WikiToolInput>;
 
 // Body of POST /internal/wiki/commands. The API never trusts the caller-supplied
 // tenancy: it reloads the user, onboarding, membership, role, and
