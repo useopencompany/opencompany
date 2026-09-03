@@ -1730,6 +1730,13 @@
       "when": 1788436805000,
       "tag": "0246_goat_task_waiting_status",
       "breakpoints": true
+    },
+    {
+      "idx": 247,
+      "version": "7",
+      "when": 1788454430567,
+      "tag": "0247_preserve_assistant_message_boundaries",
+      "breakpoints": true
     }
   ]
 }

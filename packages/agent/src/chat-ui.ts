@@ -982,6 +982,7 @@ function parseDebugTraceUiMessageParts(
       parts.push({
         type: "text",
         text: part.text,
+        ...(typeof part.itemId === "string" ? { itemId: part.itemId } : {}),
         ...persistedProviderMetadata(part, options),
       } as ChatUiMessage["parts"][number]);
       continue;
