@@ -346,6 +346,60 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official Google Calendar package with every live tool classified", async () => {
+    const fixtureRoot = fileURLToPath(
+      new URL("./test-fixtures/plugins/google-calendar", import.meta.url),
+    );
+    const files = await fixtureFiles(fixtureRoot, "google-calendar");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "google-calendar",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "google-calendar", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "google-calendar",
+        type: "streamable-http",
+        url: "https://calendarmcp.googleapis.com/mcp/v1",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      {
+        id: "read",
+        label: "Check calendars & availability",
+        defaultMode: "ask",
+        tools: ["list_calendars", "suggest_time"],
+      },
+      {
+        id: "query",
+        label: "Read calendar events",
+        defaultMode: "ask",
+        tools: ["list_events", "get_event", "search_events"],
+      },
+      {
+        id: "write",
+        label: "Manage calendar events",
+        defaultMode: "ask",
+        tools: ["create_event", "update_event", "delete_event", "respond_to_event"],
+      },
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(9);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "google-calendar", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official Slack package with least-privilege capability defaults", async () => {
     const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/slack", import.meta.url));
     const files = await fixtureFiles(fixtureRoot, "slack");

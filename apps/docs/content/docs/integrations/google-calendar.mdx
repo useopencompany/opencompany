@@ -1,18 +1,45 @@
 ---
 title: Google Calendar
-description: Let opencompany view and update your schedule and events.
+description: Connect Google's official Calendar MCP server with permission-gated tools.
 ---
 
-## What connecting does
+Google Calendar is an official Agent Plugin backed by Google's hosted Calendar MCP server. It can
+check availability, read event details, and manage events using your personal Google account.
 
-Google Calendar is a personal OAuth connection for reading calendar context and creating or updating
-events through permitted agent actions.
+## Connect Google Calendar
+
+1. Open **Settings → Plugins → Google Calendar**.
+2. Install the official package.
+3. Select **Connect Google Calendar account** and approve Google's OAuth consent screen.
+
+The Calendar MCP server is currently a Google Developer Preview. The opencompany operator must
+enable both the Google Calendar API (`calendar-json.googleapis.com`) and Google Calendar MCP API
+(`calendarmcp.googleapis.com`) in the Google Cloud project used for OAuth. See Google's
+[MCP server setup guide](https://developers.google.com/workspace/calendar/api/guides/configure-mcp-server).
 
 ## Scopes and permissions
 
-Calendar reads and writes follow separate action modes where exposed in Settings. A complete Google
-OAuth scope and supported-field reference is coming soon. Confirm event writes when the action is set
-to **Ask**.
+Calendar contents can be personal or confidential, so all reviewed capability groups default to
+**Ask**:
+
+- **Check calendars & availability**: list calendars and suggest meeting times.
+- **Read calendar events**: list, search, and read event details.
+- **Manage calendar events**: create, update, delete, and respond to events.
+
+New or unclassified tools also default to **Ask**. You can change each capability to **On**, **Ask**,
+or **Off** from the plugin page. Keep event-management tools on **Ask** unless you explicitly want
+agents to change your calendar without confirmation.
+
+opencompany stores OAuth credentials server-side and injects them only for Google's reviewed
+`https://calendarmcp.googleapis.com/mcp/v1` endpoint. Plugin packages cannot redirect those
+credentials to another host.
+
+Calendar event text may contain instructions written by other people. Treat unexpected instructions
+in titles, descriptions, attachments, or meeting notes as untrusted, and review proposed actions
+before approving them.
+
+When the plugin is installed, it replaces the older built-in Calendar actions. Disabling or
+uninstalling the plugin leaves the older integration available as a fallback.
 
 ## Brain ingestion
 

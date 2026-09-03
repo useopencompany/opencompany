@@ -1,11 +1,23 @@
-export type OfficialMcpPluginName = "betterstack" | "github" | "linear" | "neon" | "slack";
+export type OfficialMcpPluginName =
+  | "betterstack"
+  | "github"
+  | "google-calendar"
+  | "linear"
+  | "neon"
+  | "slack";
 
 export type OfficialMcpPluginMetadata = {
   name: OfficialMcpPluginName;
   label: string;
   description: string;
   source: string;
-  connectionProvider: "betterstack" | "github_user" | "linear" | "neon" | "slack";
+  connectionProvider:
+    | "betterstack"
+    | "github_user"
+    | "google_calendar"
+    | "linear"
+    | "neon"
+    | "slack";
   connectHref: string;
   accountLabel?: string;
   accountDescription: string;
@@ -36,6 +48,17 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref: "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
     accountLabel: "GitHub",
     accountDescription: "The personal GitHub account opencompany uses when it works as you.",
+  },
+  "google-calendar": {
+    name: "google-calendar",
+    label: "Google Calendar",
+    description: "Check availability, read your schedule, and manage calendar events.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/163e3f05fe3e1c157fd90ab5345e21c00f57a2ee/google-calendar",
+    connectionProvider: "google_calendar",
+    connectHref:
+      "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
+    accountDescription: "The Google account opencompany uses when you run Calendar tools.",
   },
   linear: {
     name: "linear",

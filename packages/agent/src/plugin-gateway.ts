@@ -25,6 +25,11 @@ import {
   loadGitHubUserMcpWorkerConnection,
 } from "./integrations/github-user-mcp";
 import {
+  GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
+  getGoogleCalendarMcpIntegrationState,
+  loadGoogleCalendarMcpWorkerConnection,
+} from "./integrations/google-calendar-mcp";
+import {
   getLatitudeIntegrationState,
   LATITUDE_MCP_ENDPOINT_URL,
   loadLatitudeMcpWorkerConnection,
@@ -70,6 +75,12 @@ const providerBindings = {
     endpointUrl: GITHUB_USER_MCP_ENDPOINT_URL,
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
+  },
+  "google-calendar": {
+    provider: "google_calendar",
+    endpointUrl: GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
+    getState: getGoogleCalendarMcpIntegrationState,
+    loadConnection: loadGoogleCalendarMcpWorkerConnection,
   },
   linear: {
     provider: "linear",

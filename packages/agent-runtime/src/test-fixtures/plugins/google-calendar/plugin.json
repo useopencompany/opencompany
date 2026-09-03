@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "google-calendar",
+  "version": "1.0.0",
+  "description": "Check availability, read calendar events, and manage events through Google Calendar's official MCP server.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://developers.google.com/workspace/calendar/api/guides/configure-mcp-server",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/google-calendar",
+  "license": "MIT",
+  "keywords": ["google-calendar", "calendar", "events", "scheduling", "availability"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Check calendars & availability",
+        "defaultMode": "ask",
+        "tools": ["list_calendars", "suggest_time"]
+      },
+      "query": {
+        "label": "Read calendar events",
+        "defaultMode": "ask",
+        "tools": ["list_events", "get_event", "search_events"]
+      },
+      "write": {
+        "label": "Manage calendar events",
+        "defaultMode": "ask",
+        "tools": ["create_event", "update_event", "delete_event", "respond_to_event"]
+      }
+    }
+  }
+}

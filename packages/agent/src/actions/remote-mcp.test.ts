@@ -256,6 +256,51 @@ describe("remote MCP classification", () => {
       ),
     ).toMatchObject({ capability: { defaultMode: "ask" }, curated: false });
   });
+
+  it("keeps Calendar metadata, event details, and mutations in distinct Ask groups", () => {
+    const calendarCapabilities = [
+      {
+        id: "read" as const,
+        label: "Check calendars & availability",
+        defaultMode: "ask" as const,
+        tools: ["list_calendars", "suggest_time"],
+      },
+      {
+        id: "query" as const,
+        label: "Read calendar events",
+        defaultMode: "ask" as const,
+        tools: ["list_events", "get_event", "search_events"],
+      },
+      {
+        id: "write" as const,
+        label: "Manage calendar events",
+        defaultMode: "ask" as const,
+        tools: ["create_event", "update_event", "delete_event", "respond_to_event"],
+      },
+    ];
+
+    expect(classifyRemoteTool({ name: "suggest_time" }, calendarCapabilities)).toMatchObject({
+      capability: { id: "read", defaultMode: "ask" },
+      bucket: "read",
+      curated: true,
+    });
+    expect(classifyRemoteTool({ name: "get_event" }, calendarCapabilities)).toMatchObject({
+      capability: { id: "query", defaultMode: "ask" },
+      bucket: "read",
+      curated: true,
+    });
+    expect(classifyRemoteTool({ name: "delete_event" }, calendarCapabilities)).toMatchObject({
+      capability: { id: "write", defaultMode: "ask" },
+      bucket: "write",
+      curated: true,
+    });
+    expect(
+      classifyRemoteTool(
+        { name: "new_calendar_reader", annotations: { readOnlyHint: true } },
+        calendarCapabilities,
+      ),
+    ).toMatchObject({ capability: { defaultMode: "ask" }, curated: false });
+  });
 });
 
 describe("remote MCP discovery snapshots", () => {

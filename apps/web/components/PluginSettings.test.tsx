@@ -10,6 +10,7 @@ import {
 import {
   BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
+  GOOGLE_CALENDAR_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   PluginDetail,
@@ -205,8 +206,12 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/slack",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(5);
-    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(5);
+    expect(screen.getByRole("link", { name: /google calendar/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/google-calendar",
+    );
+    expect(screen.getAllByText("Not installed")).toHaveLength(6);
+    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(6);
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
@@ -221,6 +226,9 @@ describe("Plugin settings", () => {
     );
     expect(SLACK_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
+    );
+    expect(GOOGLE_CALENDAR_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/163e3f05fe3e1c157fd90ab5345e21c00f57a2ee/google-calendar",
     );
     expect(linearCard).not.toBeNull();
     await userEvent.click(

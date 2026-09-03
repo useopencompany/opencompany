@@ -14,7 +14,9 @@ import {
   betterStackToolsStateFromPlugin,
   GitHubPluginDetail,
   GitHubPluginDetailView,
+  GoogleCalendarPluginDetail,
   githubToolsStateFromPlugin,
+  googleCalendarToolsStateFromPlugin,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -29,6 +31,7 @@ import {
 import {
   BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
+  GOOGLE_CALENDAR_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
@@ -73,6 +76,13 @@ const appData = vi.hoisted(() => ({
       teamName: "Acme",
       integrationId: "gint_slack",
     },
+    google_calendar: {
+      connected: true,
+      status: "connected",
+      accountEmail: "ada@example.com",
+      accountName: "Ada",
+      integrationId: "gint_google_calendar",
+    },
     personalAccounts: {
       betterstack: [],
       github_user: [
@@ -87,6 +97,23 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: [],
           capabilityModes: { read: "on", write: "ask" },
+        },
+      ],
+      google_calendar: [
+        {
+          integrationId: "gint_google_calendar",
+          provider: "google_calendar",
+          status: "connected",
+          connected: true,
+          accountEmail: "ada@example.com",
+          accountName: "Ada",
+          connectionLabel: null,
+          statusReason: null,
+          scopes: [
+            "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar.events",
+          ],
+          capabilityModes: {},
         },
       ],
       linear: [],
@@ -601,6 +628,88 @@ const slackPlugin = {
       discoveryStatus: "ready",
       discoveredAt: "2026-09-02T08:00:00.000Z",
       refreshAfter: "2026-09-02T09:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
+const googleCalendarPlugin = {
+  ...plugin,
+  id: "plugin_google_calendar",
+  name: "google-calendar",
+  manifest: {
+    name: "google-calendar",
+    description: "Read and manage Google Calendar through Google's official MCP server.",
+  },
+  source: {
+    ...plugin.source,
+    path: "google-calendar",
+    resolvedCommit: "163e3f05fe3e1c157fd90ab5345e21c00f57a2ee",
+  },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "google-calendar",
+      type: "streamable-http",
+      connectionProvider: "google-calendar",
+      capabilities: [
+        {
+          id: "read",
+          label: "Check calendars & availability",
+          defaultMode: "ask",
+          tools: ["list_calendars", "suggest_time"],
+        },
+        {
+          id: "query",
+          label: "Read calendar events",
+          defaultMode: "ask",
+          tools: ["list_events", "get_event", "search_events"],
+        },
+        {
+          id: "write",
+          label: "Manage calendar events",
+          defaultMode: "ask",
+          tools: ["create_event", "update_event", "delete_event", "respond_to_event"],
+        },
+      ],
+      tools: [
+        {
+          name: "list_calendars",
+          description: "List calendars.",
+          classification: {
+            capabilityId: "read",
+            capabilityLabel: "Check calendars & availability",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "list_events",
+          description: "List events.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Read calendar events",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "create_event",
+          description: "Create an event.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Manage calendar events",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-03T08:00:00.000Z",
+      refreshAfter: "2026-09-03T09:00:00.000Z",
       lastDiscoveryError: null,
     },
   ],
@@ -1237,6 +1346,44 @@ describe("Linear plugin settings", () => {
     expect(state).toMatchObject({
       groups: [
         { id: "read", defaultMode: "on" },
+        { id: "query", defaultMode: "ask" },
+        { id: "write", defaultMode: "ask" },
+      ],
+    });
+  });
+
+  it("presents Google Calendar with every capability gated on Ask", () => {
+    const state = googleCalendarToolsStateFromPlugin(googleCalendarPlugin);
+    render(
+      <GoogleCalendarPluginDetail
+        pluginState={{ status: "ready", plugin: googleCalendarPlugin }}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "Google Calendar" })).toBeInTheDocument();
+    expect(screen.getByText("ada@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Google Calendar account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
+    );
+    for (const label of [
+      "Check calendars & availability",
+      "Read calendar events",
+      "Manage calendar events",
+    ]) {
+      expect(
+        within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
+          name: "Ask",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    }
+    expect(GOOGLE_CALENDAR_PLUGIN_SOURCE).toContain(
+      "/tree/163e3f05fe3e1c157fd90ab5345e21c00f57a2ee/google-calendar",
+    );
+    expect(state).toMatchObject({
+      groups: [
+        { id: "read", defaultMode: "ask" },
         { id: "query", defaultMode: "ask" },
         { id: "write", defaultMode: "ask" },
       ],

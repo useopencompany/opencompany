@@ -383,7 +383,6 @@ const WORKSPACE_ACCOUNT_PROVIDERS = [
 
 const PERSONAL_ACCOUNT_PROVIDERS = [
   "gmail",
-  "google_calendar",
   "google_drive",
   "latitude",
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
@@ -483,10 +482,6 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="gmail"
               accounts={integrations.personalAccounts.gmail}
-            />
-            <IntegrationProviderGroupCard
-              provider="google_calendar"
-              accounts={integrations.personalAccounts.google_calendar}
             />
             <IntegrationProviderGroupCard
               provider="google_drive"

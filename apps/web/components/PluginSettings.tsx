@@ -9,6 +9,7 @@ import { Button, buttonVariants } from "@opencompany/ui/components/button";
 import {
   BetterStackIcon,
   GitHubIcon,
+  GoogleCalendarIcon,
   LinearIcon,
   NeonIcon,
   SlackIcon,
@@ -109,6 +110,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: GitHubIcon,
     iconClassName: "bg-[#181717] text-white",
   },
+  "google-calendar": {
+    ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],
+    Icon: GoogleCalendarIcon,
+    iconClassName: "bg-[#1A73E8] text-white",
+  },
   linear: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
     Icon: LinearIcon,
@@ -128,6 +134,8 @@ export const OFFICIAL_MCP_PLUGINS = {
 
 export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
 export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
+export const GOOGLE_CALENDAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-calendar"].name;
+export const GOOGLE_CALENDAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-calendar"].source;
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
@@ -161,6 +169,10 @@ export function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialGitHubPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.github, preview);
+}
+
+export function installOfficialGoogleCalendarPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS["google-calendar"], preview);
 }
 
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {

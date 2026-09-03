@@ -10,8 +10,10 @@ const mocks = vi.hoisted(() => ({
   discoverSnapshot: vi.fn(),
   getState: vi.fn(),
   getGitHubState: vi.fn(),
+  getGoogleCalendarState: vi.fn(),
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
+  loadGoogleCalendarConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
   getBetterStackState: vi.fn(),
@@ -46,6 +48,11 @@ vi.mock("./integrations/github-user-mcp", () => ({
   GITHUB_USER_MCP_ENDPOINT_URL: "https://api.githubcopilot.com/mcp/",
   getGitHubUserMcpIntegrationState: mocks.getGitHubState,
   loadGitHubUserMcpWorkerConnection: mocks.loadGitHubConnection,
+}));
+vi.mock("./integrations/google-calendar-mcp", () => ({
+  GOOGLE_CALENDAR_MCP_ENDPOINT_URL: "https://calendarmcp.googleapis.com/mcp/v1",
+  getGoogleCalendarMcpIntegrationState: mocks.getGoogleCalendarState,
+  loadGoogleCalendarMcpWorkerConnection: mocks.loadGoogleCalendarConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
   POSTHOG_MCP_ENDPOINT_URL: "https://mcp.posthog.com/mcp",
@@ -218,6 +225,43 @@ describe("plugin gateway registration cache", () => {
       {
         ...githubRecord,
         server: { ...githubRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Google credentials only to Google's exact Calendar MCP endpoint", async () => {
+    const calendarRecord = record({
+      pluginName: "google-calendar",
+      pluginLabel: "google-calendar",
+      pluginDescription: "Google Calendar plugin tools.",
+      connectionProvider: "google-calendar",
+      server: {
+        name: "google-calendar",
+        type: "streamable-http",
+        url: "https://calendarmcp.googleapis.com/mcp/v1",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([calendarRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:google-calendar:google-calendar",
+        connectionProvider: "google_calendar",
+        getState: mocks.getGoogleCalendarState,
+        loadConnection: mocks.loadGoogleCalendarConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...calendarRecord,
+        server: {
+          ...calendarRecord.server,
+          url: "https://calendarmcp.googleapis.com.evil.example/mcp/v1",
+        },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
