@@ -40,6 +40,7 @@ describe("listFastFailingCodexChatSessions", () => {
     expect(query).toContain("make_interval(secs =>");
     expect(query).toContain("stats.fast_fail_count =");
     expect(query).toContain("active.status IN ('queued', 'running')");
+    expect(query).toContain("task.status = 'waiting'");
   });
 
   it("maps rows to typed sessions", async () => {
@@ -78,6 +79,7 @@ describe("selfHealCodexChatSession", () => {
     // Re-validates the fast-fail signature atomically so a recovered session no-ops (race guard).
     expect(query).toContain("stats.fast_fail_count =");
     expect(query).toContain("active.status IN ('queued', 'running')");
+    expect(query).toContain("task.status = 'waiting'");
   });
 
   it("escalates to the sandbox tier only after a post-repair fast-fail (watermark)", async () => {

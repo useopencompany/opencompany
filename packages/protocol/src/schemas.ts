@@ -389,6 +389,7 @@ export const ChatReadModelSchema = z.enum([
   "engine-sessions-v1",
 ]);
 export const TaskReadModelNameSchema = z.literal("tasks-v1");
+export const TaskActivityReadModelNameSchema = z.literal("task-activities-v1");
 export const WorkflowReadModelNameSchema = z.literal("workflows-v1");
 export const WorkflowScheduleReadModelNameSchema = z.literal("workflow-schedules-v1");
 export const TaskScheduleReadModelNameSchema = z.literal("task-schedules-v1");
@@ -405,6 +406,7 @@ export const IntegrationAccountReadModelNameSchema = z.literal("integration-acco
 export const ReadModelSchema = z.enum([
   ...ChatReadModelSchema.options,
   TaskReadModelNameSchema.value,
+  TaskActivityReadModelNameSchema.value,
   WorkflowReadModelNameSchema.value,
   WorkflowScheduleReadModelNameSchema.value,
   TaskScheduleReadModelNameSchema.value,
@@ -588,6 +590,28 @@ export const EngineRuntimeAccessEnvelopeSchema = z
   .openapi("EngineRuntimeAccessEnvelope");
 
 export const TaskReadModelSchema = TaskSchema.openapi("TaskReadModelV1");
+export const TaskActivityAuthorSchema = z.enum(["user", "orchestrator", "system"]);
+export const TaskActivityKindSchema = z.enum([
+  "created",
+  "run_started",
+  "run_finished",
+  "status_changed",
+  "comment",
+  "retry",
+]);
+export const TaskActivityReadModelSchema = z
+  .object({
+    id: ResourceIdSchema,
+    taskId: ResourceIdSchema,
+    author: TaskActivityAuthorSchema,
+    authorWorkosId: ResourceIdSchema.nullable(),
+    kind: TaskActivityKindSchema,
+    body: z.string().max(10_000).nullable(),
+    metadata: z.record(z.string(), z.unknown()),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("TaskActivityReadModelV1");
 export const WorkflowReadModelSchema = WorkflowSchema.openapi("WorkflowReadModelV1");
 export const TaskScheduleReadModelSchema = TaskScheduleSchema.openapi("TaskScheduleReadModelV1");
 
@@ -2729,6 +2753,44 @@ export const CreateTaskEnvelopeSchema = z
   .strict()
   .openapi("CreateTaskEnvelope");
 
+export const CreateTaskCommentBodySchema = z
+  .object({
+    id: ResourceIdSchema,
+    body: z.string().min(1).max(10_000),
+  })
+  .strict()
+  .openapi("CreateTaskCommentBody");
+
+export const TaskCommentSchema = z
+  .object({
+    id: ResourceIdSchema,
+    taskId: ResourceIdSchema,
+    author: z.literal("user"),
+    kind: z.literal("comment"),
+    body: z.string().min(1).max(10_000),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("TaskComment");
+
+export const CreateTaskCommentEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        task: TaskSchema,
+        comment: TaskCommentSchema,
+        messageId: ResourceIdSchema,
+        assistantMessageId: ResourceIdSchema,
+        runId: ResourceIdSchema,
+        transactionId: z.string().regex(/^[0-9]+$/u),
+        replayed: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("CreateTaskCommentEnvelope");
+
 export const UpdateTaskBodySchema = z
   .union([
     z.object({ archived: z.boolean() }).strict(),
@@ -4176,6 +4238,7 @@ export type LegacyTaskHistoryMessageDto = z.infer<typeof LegacyTaskHistoryMessag
 export type LegacyTaskHistoryEventDto = z.infer<typeof LegacyTaskHistoryEventSchema>;
 export type LegacyTaskHistoryDto = z.infer<typeof LegacyTaskHistoryEnvelopeSchema>["data"];
 export type TaskReadModel = z.infer<typeof TaskReadModelSchema>;
+export type TaskActivityReadModel = z.infer<typeof TaskActivityReadModelSchema>;
 export type WorkflowDto = z.infer<typeof WorkflowSchema>;
 export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
 export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
@@ -4286,6 +4349,8 @@ export type EngineRuntimeAccess = z.infer<typeof EngineRuntimeAccessEnvelopeSche
 export type AttachmentUploadEnvelope = z.infer<typeof AttachmentUploadEnvelopeSchema>;
 export type CreateMessageBody = z.infer<typeof CreateMessageBodySchema>;
 export type CreateTaskBody = z.infer<typeof CreateTaskBodySchema>;
+export type CreateTaskCommentBody = z.infer<typeof CreateTaskCommentBodySchema>;
+export type CreateTaskCommentResult = z.infer<typeof CreateTaskCommentEnvelopeSchema>["data"];
 export type UpdateTaskBody = z.infer<typeof UpdateTaskBodySchema>;
 export type BrowserProfileDto = z.infer<typeof BrowserProfileSchema>;
 export type CreateBrowserProfileBody = z.infer<typeof CreateBrowserProfileBodySchema>;

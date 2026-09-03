@@ -377,6 +377,133 @@
         ],
         "additionalProperties": false
       },
+      "CreateTaskCommentEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "$ref": "#/components/schemas/Task"
+              },
+              "comment": {
+                "$ref": "#/components/schemas/TaskComment"
+              },
+              "messageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "assistantMessageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "transactionId": {
+                "type": "string",
+                "pattern": "^[0-9]+$/u"
+              },
+              "replayed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "task",
+              "comment",
+              "messageId",
+              "assistantMessageId",
+              "runId",
+              "transactionId",
+              "replayed"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "TaskComment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "author": {
+            "type": "string",
+            "enum": [
+              "user"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "comment"
+            ]
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "author",
+          "kind",
+          "body",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "CreateTaskCommentBody": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "id",
+          "body"
+        ],
+        "additionalProperties": false
+      },
       "TaskEnvelope": {
         "type": "object",
         "properties": {
@@ -13838,6 +13965,66 @@
         }
       }
     },
+    "/v1/tasks/{taskId}/comments": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTaskCommentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Comment recorded verbatim and Task resumed with a queued Run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTaskCommentEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tasks/{taskId}": {
       "get": {
         "tags": [
@@ -20692,6 +20879,7 @@
                 "chat-runs-v1",
                 "engine-sessions-v1",
                 "tasks-v1",
+                "task-activities-v1",
                 "workflows-v1",
                 "workflow-schedules-v1",
                 "task-schedules-v1",
@@ -20731,6 +20919,17 @@
             },
             "required": false,
             "name": "brainId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": false,
+            "name": "taskId",
             "in": "query"
           },
           {

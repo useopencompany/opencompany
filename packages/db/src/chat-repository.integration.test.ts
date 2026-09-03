@@ -40,6 +40,7 @@ const migrationPaths = [
   "0229_goat_chat_skill_bundle_names.sql",
   "0235_goat_chat_message_shape_epochs.sql",
   "0236_goat_chat_message_presentation_summaries.sql",
+  "0245_goat_task_activities.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -1672,11 +1673,38 @@ describe("Postgres Chat repositories", () => {
     ).toMatchObject({
       rows: [
         {
-          status: "queued",
+          status: "running",
           session_id: "task_conversation_1",
           host_tool_contract_version: CHAT_HOST_TOOL_CONTRACT_VERSION,
           run_owner: "user_1",
           run_settings: { taskResultMode: "assistant_final" },
+        },
+      ],
+    });
+    expect(
+      await database.query<{
+        author: string;
+        author_workos_id: string;
+        kind: string;
+        body: string;
+        metadata: Record<string, unknown>;
+      }>(`
+        SELECT author, author_workos_id, kind, body, metadata
+        FROM goat.task_activities
+        WHERE task_id = 'task_1'
+      `),
+    ).toMatchObject({
+      rows: [
+        {
+          author: "user",
+          author_workos_id: "user_3",
+          kind: "status_changed",
+          body: "Resumed by user.",
+          metadata: {
+            fromStatus: "succeeded",
+            toStatus: "running",
+            runId: created.runId,
+          },
         },
       ],
     });
@@ -1769,6 +1797,101 @@ describe("Postgres Chat repositories", () => {
         SELECT status, error FROM goat.tasks WHERE id = 'task_1'
       `),
     ).toMatchObject({ rows: [{ status: "canceled", error: "Stopped by user." }] });
+    expect(
+      await database.query<{
+        author: string;
+        author_workos_id: string;
+        kind: string;
+        body: string;
+        metadata: Record<string, unknown>;
+      }>(`
+        SELECT author, author_workos_id, kind, body, metadata
+        FROM goat.task_activities
+        WHERE task_id = 'task_1'
+      `),
+    ).toMatchObject({
+      rows: [
+        {
+          author: "user",
+          author_workos_id: "user_3",
+          kind: "status_changed",
+          body: "Resumed by user.",
+          metadata: {
+            fromStatus: "succeeded",
+            toStatus: "running",
+            runId: created.runId,
+          },
+        },
+        {
+          author: "user",
+          author_workos_id: "user_3",
+          kind: "status_changed",
+          body: "Stopped by user.",
+          metadata: {
+            fromStatus: "running",
+            toStatus: "canceled",
+            runId: created.runId,
+          },
+        },
+      ],
+    });
+  });
+
+  it("reopens a waiting Task when the user sends a follow-up", async () => {
+    await seedTerminalTask(database);
+    await database.query(
+      "UPDATE goat.tasks SET status = 'waiting', outcome_comment = 'Approve the plan.' WHERE id = 'task_1'",
+    );
+
+    const created = await service.createMessage(actor({ userId: "user_3" }), {
+      idempotencyKey: "waiting-task-follow-up",
+      conversationId: "task_conversation_1",
+      content: "Approved. Continue with the implementation.",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+
+    expect(
+      await database.query<{ status: string; attempts: number; outcome_comment: string | null }>(`
+        SELECT status, attempts, outcome_comment FROM goat.tasks WHERE id = 'task_1'
+      `),
+    ).toMatchObject({ rows: [{ status: "running", attempts: 2, outcome_comment: null }] });
+    expect(
+      await database.query<{ kind: string; metadata: Record<string, unknown> }>(`
+        SELECT kind, metadata FROM goat.task_activities WHERE task_id = 'task_1'
+      `),
+    ).toMatchObject({
+      rows: [
+        {
+          kind: "status_changed",
+          metadata: { fromStatus: "waiting", toStatus: "running", runId: created.runId },
+        },
+      ],
+    });
+  });
+
+  it("keeps archived Task conversations read-only", async () => {
+    await seedTerminalTask(database);
+    await database.query("UPDATE goat.tasks SET archived_at = now() WHERE id = 'task_1'");
+
+    await expect(
+      service.createMessage(actor({ userId: "user_3" }), {
+        idempotencyKey: "archived-task-follow-up",
+        conversationId: "task_conversation_1",
+        content: "Continue this archived task.",
+        engine: "opencompany",
+        model: "provider/model",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(
+      await database.query<{ status: string; activity_count: number }>(`
+        SELECT task.status, count(activity.id)::integer AS activity_count
+        FROM goat.tasks AS task
+        LEFT JOIN goat.task_activities AS activity ON activity.task_id = task.id
+        WHERE task.id = 'task_1'
+        GROUP BY task.id
+      `),
+    ).toMatchObject({ rows: [{ status: "succeeded", activity_count: 0 }] });
   });
 
   it("keeps the first Chat bundle fixed after its installation is replaced and archived", async () => {
@@ -1879,10 +2002,10 @@ async function seedTerminalTask(database: PGlite) {
       'task_conversation_1', 'user_1', 'Review task', 'provider/model', 'opencompany', 'task'
     );
     INSERT INTO goat.tasks (
-      id, user_workos_id, workspace_id, session_id, status, stage, result
+      id, user_workos_id, workspace_id, session_id, status, stage, result, attempts
     ) VALUES (
       'task_1', 'user_1', 'workspace_1', 'task_conversation_1',
-      'succeeded', 'completed', 'Initial review complete.'
+      'succeeded', 'completed', 'Initial review complete.', 1
     );
     INSERT INTO goat.chat_messages (id, session_id, role, content, task_id)
     VALUES
@@ -2007,6 +2130,7 @@ const BASE_SCHEMA = `
     error text,
     reported_outcome text,
     outcome_comment text,
+    attempts integer NOT NULL DEFAULT 0,
     next_run_at timestamptz NOT NULL DEFAULT now(),
     lease_id text,
     lease_owner text,

@@ -107,6 +107,12 @@ export async function listFastFailingCodexChatSessions(input: ListInput = {}) {
         AND (session.sandbox_id IS NOT NULL OR session.codex_thread_id IS NOT NULL)
         AND session.updated_at <= ${quietCutoff}
         AND session.updated_at >= ${activityCutoff}
+        AND NOT EXISTS (
+          SELECT 1
+          FROM goat.tasks AS task
+          WHERE task.session_id = session.chat_session_id
+            AND task.status = 'waiting'
+        )
         AND ${noActiveTurnClause(sql`session.id`)}
     )
     SELECT candidate.id AS "id",
@@ -178,6 +184,12 @@ export async function selfHealCodexChatSession(
       AND session.status IN ('idle', 'failed', 'interrupted')
       AND stats.turn_count = ${lookbackTurns}
       AND stats.fast_fail_count = ${lookbackTurns}
+      AND NOT EXISTS (
+        SELECT 1
+        FROM goat.tasks AS task
+        WHERE task.session_id = session.chat_session_id
+          AND task.status = 'waiting'
+      )
       AND ${tierGuard}
       AND ${noActiveTurnClause(sql`session.id`)}
     RETURNING session.id
