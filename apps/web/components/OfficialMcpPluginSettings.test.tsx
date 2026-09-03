@@ -61,6 +61,15 @@ const accountActions = vi.hoisted(() => ({
 }));
 const appData = vi.hoisted(() => ({
   integrations: {
+    gmail: {
+      connected: true,
+      status: "connected",
+      accountEmail: "ada@example.com",
+      accountName: "Ada",
+      integrationId: "gint_gmail",
+      scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+      capabilityModes: { query: "ask", draft: "ask", write: "ask" },
+    },
     linear: {
       connected: true,
       status: "connected",
@@ -1371,6 +1380,32 @@ describe("Linear plugin settings", () => {
       ],
     });
     expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/27c6666fd61b9f939295b9617e447b7bdce64b66/gmail");
+  });
+
+  it("edits the same Gmail account selected by the MCP gateway", async () => {
+    const [primary] = appData.integrations.personalAccounts.gmail;
+    if (!primary) throw new Error("Expected a primary Gmail fixture.");
+    const other = {
+      ...primary,
+      integrationId: "gint_gmail_other",
+      accountEmail: "other@example.com",
+      connectionLabel: "other@example.com",
+      capabilityModes: { query: "off", draft: "off", write: "off" },
+    };
+    appData.integrations.personalAccounts.gmail = [other, primary];
+
+    render(<GmailPluginDetail pluginState={{ status: "ready", plugin: gmailPlugin }} canEdit />);
+
+    await userEvent.click(
+      within(screen.getByRole("group", { name: "Read Gmail permission" })).getByRole("button", {
+        name: "On",
+      }),
+    );
+    expect(accountActions.setIntegrationCapabilityModeAction).toHaveBeenCalledWith(
+      "gint_gmail",
+      "query",
+      "on",
+    );
   });
 
   it("prompts older Gmail connections to grant the full MCP scope", () => {

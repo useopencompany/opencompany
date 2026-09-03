@@ -5,8 +5,11 @@ export type GoogleProviderState = {
   provider: "gmail" | "google_calendar" | "google_drive";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
   accountEmail: string | null;
   accountName: string | null;
+  scopes: string[];
+  capabilityModes: Record<string, unknown>;
 };
 
 export type GoogleDriveSourceProviderState = {
@@ -18,9 +21,8 @@ export type GoogleDriveSourceProviderState = {
   statusReason: string | null;
 };
 
-// The Gmail brain-source connection view: unlike GoogleProviderState it
-// carries the integration id, which the brain-source picker and save action
-// need to key config rows on.
+// The Gmail brain-source connection view adds ingestion-specific status detail
+// used by the brain-source picker and save action.
 export type GmailSourceProviderState = {
   provider: "gmail";
   connected: boolean;
@@ -450,17 +452,27 @@ function googleProviderState(
       provider,
       connected: false,
       status: "not_connected",
+      integrationId: null,
       accountEmail: null,
       accountName: null,
+      scopes: [],
+      capabilityModes: {},
     };
   }
+
+  const scopes = Array.isArray(row.scopes)
+    ? row.scopes.filter((scope): scope is string => typeof scope === "string")
+    : [];
 
   return {
     provider,
     connected: row.status === "connected",
     status: row.status,
+    integrationId: row.id ?? null,
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
+    scopes,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }
 

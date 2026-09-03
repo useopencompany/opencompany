@@ -1176,7 +1176,11 @@ function pluginAccountsFromState(
       account,
     }));
     const primaryIntegrationId =
-      config.connectionProvider === "slack" ? state.slack.integrationId : null;
+      config.connectionProvider === "gmail"
+        ? state.gmail.integrationId
+        : config.connectionProvider === "slack"
+          ? state.slack.integrationId
+          : null;
     return {
       accounts,
       permissionConnection:
