@@ -2,21 +2,14 @@ import { cookies } from "next/headers";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 import { currentIdentity, currentUser } from "@/lib/auth";
-import { getBrainSourcesAction } from "@/lib/brain-source-actions";
 import { getOnboardingState } from "@/lib/onboarding-actions";
-import type { OnboardingConnectionResult } from "@/lib/onboarding-integrations";
 
 export const dynamic = "force-dynamic";
 
 export default async function OnboardingPage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    variant?: string;
-    integration?: string;
-    setup?: string;
-    reason?: string;
-  }>;
+  searchParams: Promise<{ variant?: string }>;
 }) {
   const identity = await currentIdentity();
   const name =
@@ -44,21 +37,7 @@ export default async function OnboardingPage({
           ? "member"
           : "owner";
 
-  // Source hydration depends on the workspace/brain resolution above; all
-  // independent first-run reads already ran in parallel.
   const legacyBrainEnabled = context?.workspace.legacyBrainEnabled === true;
-  const sourceDetails =
-    legacyBrainEnabled && context?.activeBrain
-      ? await getBrainSourcesAction(context.activeBrain.id)
-      : null;
-  const connectionResult: OnboardingConnectionResult | null =
-    params.setup === "connected" || params.setup === "error"
-      ? {
-          provider: params.integration ?? null,
-          status: params.setup,
-          reason: params.reason ?? null,
-        }
-      : null;
 
   const savedSlug = context?.workspace.slug ?? "";
   const stepCookie = Number.parseInt(cookieStore.get(ONBOARDING_STEP_COOKIE)?.value ?? "", 10);
@@ -75,7 +54,6 @@ export default async function OnboardingPage({
         avatarUrl: identity.user.avatarUrl,
       }}
       currentWorkspaceName={context?.workspace.name ?? ""}
-      brainRef={context?.activeBrain?.id ?? null}
       legacyBrainEnabled={legacyBrainEnabled}
       variant={variant}
       initialStep={initialStep}
@@ -85,9 +63,6 @@ export default async function OnboardingPage({
       initialRole={onboarding?.role ?? null}
       initialCompanyUrl={onboarding?.contextUrls?.[0] ?? onboarding?.companyDomain ?? ""}
       initialReferral={onboarding?.referralSource ?? null}
-      initialSourceDetails={sourceDetails}
-      initialConnectionResult={connectionResult}
-      initialIntegrations={context?.integrations}
     />
   );
 }
