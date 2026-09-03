@@ -30,6 +30,7 @@ import {
   listSkillCatalog,
   readChatSkillFile,
   resolveSkillMentions,
+  updateWorkspaceSkillForActor,
 } from "../skills";
 import {
   createTaskScheduleForUser,
@@ -105,6 +106,7 @@ export function executePersistedChatHostTool(input: {
     readSkillFile: ({ conversationId, ...skillFile }) =>
       readChatSkillFile({ chatSessionId: conversationId, ...skillFile }),
     createWorkspaceSkill: createWorkspaceSkillForActor,
+    updateWorkspaceSkill: updateWorkspaceSkillForActor,
     createTask: (task) =>
       createTaskForActor(
         {

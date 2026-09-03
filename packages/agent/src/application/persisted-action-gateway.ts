@@ -64,46 +64,62 @@ const defaultDependencies: ActionGatewayServiceDependencies = {
   now: () => new Date(),
 };
 
-export function executeActionGateway(input: {
+type ActionGatewayInput = {
   request: ActionGatewayRequest;
   signal: AbortSignal;
-  dependencies?: Partial<ActionGatewayServiceDependencies>;
-}): Promise<ActionGatewayResponse> {
-  return executeActionGatewayService({
-    request: actionServiceRequest(input.request),
-    signal: input.signal,
-    dependencies: { ...defaultDependencies, ...input.dependencies },
-  });
-}
+};
 
-export function executeActionHostGateway(input: {
+type ActionHostGatewayInput = {
   request: ActionHostGatewayRequest;
   signal: AbortSignal;
-  dependencies?: Partial<ActionGatewayServiceDependencies>;
-}): Promise<ActionGatewayResponse> {
-  return executeActionHostGatewayService({
-    request: actionServiceRequest(input.request),
-    signal: input.signal,
-    dependencies: { ...defaultDependencies, ...input.dependencies },
-  });
-}
+};
 
-export function executeActionPrincipalGateway(input: {
-  request: ActionHostGatewayRequest;
+type ActionPrincipalGatewayInput = ActionHostGatewayInput & {
   principal: ActionPrincipal & { policy: "headless" };
-  signal: AbortSignal;
-  dependencies?: Partial<ActionGatewayServiceDependencies>;
-}): Promise<ActionGatewayResponse> {
-  return executeActionHostGatewayService({
-    request: actionServiceRequest(input.request),
-    signal: input.signal,
-    dependencies: {
-      ...defaultDependencies,
-      ...input.dependencies,
-      loadContext: async () => input.principal,
-    },
-  });
+};
+
+export function createActionGateway(
+  overrides: Partial<ActionGatewayServiceDependencies> = {},
+): (input: ActionGatewayInput) => Promise<ActionGatewayResponse> {
+  const dependencies = { ...defaultDependencies, ...overrides };
+  return (input) =>
+    executeActionGatewayService({
+      request: actionServiceRequest(input.request),
+      signal: input.signal,
+      dependencies,
+    });
 }
+
+export function createActionHostGateway(
+  overrides: Partial<ActionGatewayServiceDependencies> = {},
+): (input: ActionHostGatewayInput) => Promise<ActionGatewayResponse> {
+  const dependencies = { ...defaultDependencies, ...overrides };
+  return (input) =>
+    executeActionHostGatewayService({
+      request: actionServiceRequest(input.request),
+      signal: input.signal,
+      dependencies,
+    });
+}
+
+export function createActionPrincipalGateway(
+  overrides: Partial<ActionGatewayServiceDependencies> = {},
+): (input: ActionPrincipalGatewayInput) => Promise<ActionGatewayResponse> {
+  const dependencies = { ...defaultDependencies, ...overrides };
+  return (input) =>
+    executeActionHostGatewayService({
+      request: actionServiceRequest(input.request),
+      signal: input.signal,
+      dependencies: {
+        ...dependencies,
+        loadContext: async () => input.principal,
+      },
+    });
+}
+
+export const executeActionGateway = createActionGateway();
+export const executeActionHostGateway = createActionHostGateway();
+export const executeActionPrincipalGateway = createActionPrincipalGateway();
 
 async function evaluateActionApproval(input: {
   request: Extract<ActionServiceRequest, { operation: "approval" }>;

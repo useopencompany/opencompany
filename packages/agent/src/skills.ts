@@ -54,6 +54,13 @@ export type CreatedWorkspaceSkill = {
   bundleId: string;
 };
 
+export type UpdatedWorkspaceSkill = {
+  updated: true;
+  name: string;
+  command: string;
+  bundleId: string;
+};
+
 export class SkillMentionError extends Error {
   constructor(message: string) {
     super(message);
@@ -105,6 +112,26 @@ export async function createWorkspaceSkillForActor(input: {
   });
   return {
     created: true,
+    name: installation.name,
+    command: `/${installation.name}`,
+    bundleId: installation.bundle.id,
+  };
+}
+
+export async function updateWorkspaceSkillForActor(input: {
+  actor: Actor;
+  name: string;
+  skill: Omit<SkillAuthoringInput, "name">;
+  db?: Db;
+}): Promise<UpdatedWorkspaceSkill> {
+  const service = new SkillImportApplicationService(
+    new PostgresSkillBundleRepository(input.db ?? getDb()),
+    createSkillImportResolver(),
+    { create: createWorkspaceSkillArtifact },
+  );
+  const installation = await service.update(input.actor, input.name, input.skill);
+  return {
+    updated: true,
     name: installation.name,
     command: `/${installation.name}`,
     bundleId: installation.bundle.id,
