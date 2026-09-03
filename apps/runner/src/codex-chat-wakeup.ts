@@ -179,6 +179,7 @@ export function prepareCodexChatScheduledWakeup(input: {
     ...input.parentSettings,
     wakeupChain,
   };
+  delete settings.taskResultMode;
   delete settings.scheduledWakeup;
 
   return {
