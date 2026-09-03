@@ -226,6 +226,25 @@ export function PluginsSettings({
   plugins: PluginListItemDto[];
   canEdit: boolean;
 }) {
+  const router = useRouter();
+  const [installingPluginName, setInstallingPluginName] = useState<OfficialPluginName | null>(null);
+  const [isInstalling, startInstall] = useTransition();
+
+  const install = (config: OfficialPluginConfig) => {
+    if (isInstalling) return;
+    setInstallingPluginName(config.name);
+    startInstall(async () => {
+      try {
+        await installOfficialPlugin(config);
+        toast.success(`${config.label} installed.`);
+        router.push(`/settings/plugins/${config.name}`);
+      } catch (cause) {
+        setInstallingPluginName(null);
+        toast.error(`Couldn't install ${config.label}. ${errorMessage(cause)}`);
+      }
+    });
+  };
+
   return (
     <SettingsContent
       title="Plugins"
@@ -243,7 +262,7 @@ export function PluginsSettings({
             >
               <Link
                 href={`/settings/plugins/${config.name}`}
-                prefetch
+                prefetch={Boolean(plugin)}
                 className="group flex min-w-0 flex-1 items-center gap-3 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
               >
                 <span
@@ -274,8 +293,8 @@ export function PluginsSettings({
                     {plugin
                       ? `${plugin.skillCount} ${plugin.skillCount === 1 ? "skill" : "skills"} · updated ${formatRelativeTime(plugin.updatedAt)}`
                       : config.kind === "skills"
-                        ? "Official skill package · review before installing"
-                        : "Official package · review before installing"}
+                        ? "Official skill package"
+                        : "Official package"}
                   </span>
                 </span>
               </Link>
@@ -287,12 +306,17 @@ export function PluginsSettings({
                   Manage
                 </Link>
               ) : canEdit ? (
-                <Link
-                  href={`/settings/plugins/${config.name}`}
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "text-ink")}
+                <Button
+                  size="sm"
+                  disabled={isInstalling}
+                  aria-busy={isInstalling && installingPluginName === config.name}
+                  onClick={() => install(config)}
                 >
-                  Review
-                </Link>
+                  {isInstalling && installingPluginName === config.name ? (
+                    <Loader2 className="animate-spin" />
+                  ) : null}
+                  {isInstalling && installingPluginName === config.name ? "Installing…" : "Install"}
+                </Button>
               ) : null}
             </div>
           );
