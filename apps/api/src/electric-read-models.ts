@@ -513,6 +513,26 @@ function readModelShape(input: {
         "created_at",
         "updated_at",
       ]);
+    case "wiki-import-runs-v1":
+      return {
+        table: "goat.brain_import_runs",
+        columns: [
+          "id",
+          "status",
+          "company_url",
+          "company_name",
+          "focus",
+          "source_selection",
+          "discovery_summary",
+          "last_error",
+          "confirmed_at",
+          "completed_at",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"workspace_id" = $1`,
+        params: [input.actor.workspaceId],
+      };
     case "wiki-pages-v2":
       return {
         table: "goat.wiki_pages",
@@ -666,7 +686,7 @@ function projectReadModelValue(
   if (readModel === "brain-ingest-jobs-v1" && Object.hasOwn(projected, "lastError")) {
     projected.lastError = boundedNullableString(projected.lastError, 2_000);
   }
-  if (readModel === "brain-import-runs-v1") {
+  if (readModel === "brain-import-runs-v1" || readModel === "wiki-import-runs-v1") {
     if (Object.hasOwn(projected, "sourceSelection")) {
       projected.sourceSelection = publicBrainImportSourceSelection(projected.sourceSelection);
     }
@@ -753,6 +773,7 @@ function projectReadModelValue(
         partial ? BrainIngestJobReadModelSchema.partial() : BrainIngestJobReadModelSchema
       ).parse(projected);
     case "brain-import-runs-v1":
+    case "wiki-import-runs-v1":
       return (
         partial ? BrainImportRunReadModelSchema.partial() : BrainImportRunReadModelSchema
       ).parse(projected);
@@ -1254,6 +1275,20 @@ const READ_MODEL_COLUMN_NAMES = {
     updated_at: "updatedAt",
   },
   "brain-import-runs-v1": {
+    id: "id",
+    status: "status",
+    company_url: "companyUrl",
+    company_name: "companyName",
+    focus: "focus",
+    source_selection: "sourceSelection",
+    discovery_summary: "discoverySummary",
+    last_error: "lastError",
+    confirmed_at: "confirmedAt",
+    completed_at: "completedAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "wiki-import-runs-v1": {
     id: "id",
     status: "status",
     company_url: "companyUrl",

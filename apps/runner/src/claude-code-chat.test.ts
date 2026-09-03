@@ -308,6 +308,27 @@ describe("extractAcpScheduleWakeup", () => {
     });
   });
 
+  it("recognizes ScheduleWakeup calls wrapped in the Claude ACP MCP envelope", () => {
+    expect(
+      extractAcpScheduleWakeup(
+        acpToolCallEvent("codex_mcp_tool", {
+          kind: "other",
+          tool: "ScheduleWakeup",
+          toolName: "ScheduleWakeup",
+          arguments: {
+            delaySeconds: 600,
+            reason: "Wait for CI",
+            prompt: "Inspect PR #42.",
+          },
+        }),
+      ),
+    ).toEqual({
+      delaySeconds: 600,
+      reason: "Wait for CI",
+      prompt: "Inspect PR #42.",
+    });
+  });
+
   it("ignores malformed tool input and unrelated raw events", () => {
     expect(
       extractAcpScheduleWakeup(
@@ -1115,10 +1136,15 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       }) => {
         await input.onEngineSessionId("claude_thread_1");
         await input.onRuntimeEvents([
-          acpToolCallEvent("ScheduleWakeup", {
-            delay_seconds: 600,
-            reason: "Wait for CI",
-            prompt: "Inspect PR #42.",
+          acpToolCallEvent("codex_mcp_tool", {
+            kind: "other",
+            tool: "ScheduleWakeup",
+            toolName: "ScheduleWakeup",
+            arguments: {
+              delay_seconds: 600,
+              reason: "Wait for CI",
+              prompt: "Inspect PR #42.",
+            },
           }),
           ...successfulAcpEvents("PR opened; CI is running."),
         ]);

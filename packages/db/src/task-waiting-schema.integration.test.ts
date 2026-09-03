@@ -3,7 +3,7 @@ import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-describe("0244 Task waiting status", () => {
+describe("0246 Task waiting status", () => {
   let database: PGlite;
 
   beforeEach(async () => {
@@ -18,7 +18,7 @@ describe("0244 Task waiting status", () => {
       );
     `);
     const migration = await readFile(
-      path.resolve(import.meta.dirname, "../../..", "drizzle/0244_goat_task_waiting_status.sql"),
+      path.resolve(import.meta.dirname, "../../..", "drizzle/0246_goat_task_waiting_status.sql"),
       "utf8",
     );
     for (const statement of migration.split("--> statement-breakpoint")) {

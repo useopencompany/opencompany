@@ -131,8 +131,7 @@ async function findProvisionedWorkspace(workspaceId: string, userWorkosId: strin
   const workosOrganizationId = existing?.workspace.workosOrganizationId;
   if (!existing || !workosOrganizationId) return null;
   const brains = await listAccessibleBrains({ userWorkosId, workspaceId }, { db });
-  const brain = brains.find((entry) => entry.slug === DEFAULT_BRAIN_SLUG) ?? brains[0];
-  if (!brain) return null;
+  const brain = brains.find((entry) => entry.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
   return {
     workspace: { ...existing.workspace, workosOrganizationId },
     brain,

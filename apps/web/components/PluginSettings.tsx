@@ -10,6 +10,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import {
   BetterStackIcon,
   GitHubIcon,
+  GoogleCalendarIcon,
   LinearIcon,
   NeonIcon,
   SlackIcon,
@@ -120,6 +121,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: GitHubIcon,
     iconClassName: "bg-[#181717] text-white",
   },
+  "google-calendar": {
+    ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],
+    Icon: GoogleCalendarIcon,
+    iconClassName: "bg-[#1A73E8] text-white",
+  },
   linear: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
     Icon: LinearIcon,
@@ -129,6 +135,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.neon,
     Icon: NeonIcon,
     iconClassName: "bg-[#00E599] text-[#0B0F14]",
+  },
+  render: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.render,
+    Icon: ServerCog,
+    iconClassName: "bg-[#0B0D0E] text-white",
   },
   signoz: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
@@ -157,10 +168,14 @@ export const OFFICIAL_PLUGINS = {
 
 export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
 export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
+export const GOOGLE_CALENDAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-calendar"].name;
+export const GOOGLE_CALENDAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-calendar"].source;
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;
+export const RENDER_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.render.source;
 export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
 export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
 export const SIGNOZ_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.signoz.name;
@@ -201,6 +216,10 @@ export function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialGitHubPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.github, preview);
+}
+
+export function installOfficialGoogleCalendarPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS["google-calendar"], preview);
 }
 
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {

@@ -17,6 +17,7 @@ export type ActionProviderId =
   | "latitude"
   | "neon"
   | "betterstack"
+  | "render"
   | "signoz"
   | "x_account";
 

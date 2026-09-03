@@ -43,6 +43,7 @@ import {
   OFFICIAL_MCP_PLUGINS,
   type OfficialMcpPluginConfig,
 } from "@/components/PluginSettings";
+import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
   IntegrationAccountRow,
@@ -166,6 +167,25 @@ export function GitHubPluginDetail({
   );
 }
 
+export function GoogleCalendarPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS["google-calendar"]}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function LinearPluginDetail({
   pluginState,
   canEdit,
@@ -197,6 +217,25 @@ export function NeonPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.neon}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function RenderPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.render}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -705,9 +744,16 @@ function AccountsSection({
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
-          Connect {accountLabel} account
-        </a>
+        {config.name === "render" ? (
+          <RenderApiKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />
+        ) : (
+          <a
+            href={config.connectHref}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Connect {accountLabel} account
+          </a>
+        )}
         {config.ingestionHref && config.ingestionLabel ? (
           <Link
             href={config.ingestionHref}
@@ -1157,7 +1203,9 @@ function pluginAccountsFromState(
   if (
     config.connectionProvider === "betterstack" ||
     config.connectionProvider === "github_user" ||
+    config.connectionProvider === "google_calendar" ||
     config.connectionProvider === "neon" ||
+    config.connectionProvider === "render" ||
     config.connectionProvider === "signoz" ||
     config.connectionProvider === "slack"
   ) {
@@ -1165,7 +1213,11 @@ function pluginAccountsFromState(
       account,
     }));
     const primaryIntegrationId =
-      config.connectionProvider === "slack" ? state.slack.integrationId : null;
+      config.connectionProvider === "slack"
+        ? state.slack.integrationId
+        : config.connectionProvider === "google_calendar"
+          ? state.google_calendar.integrationId
+          : null;
     return {
       accounts,
       permissionConnection:
@@ -1201,6 +1253,10 @@ export function defaultLinearToolsState(): PluginToolsState {
 
 export function defaultGitHubToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("github");
+}
+
+export function defaultGoogleCalendarToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("google-calendar");
 }
 
 export function defaultNeonToolsState(): PluginToolsState {
@@ -1249,6 +1305,12 @@ export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null)
 
 export function githubToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "github");
+}
+
+export function googleCalendarToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "google-calendar");
 }
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
@@ -1350,6 +1412,12 @@ export function linearToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
 
 export function githubToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "github");
+}
+
+export function googleCalendarToolsStateFromPreview(
+  preview: PluginImportPreviewDto,
+): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "google-calendar");
 }
 
 export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {

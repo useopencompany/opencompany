@@ -72,6 +72,7 @@ const groups = {
       "OPENCOMPANY_STRIPE_API_KEY",
       "CRON_SECRET",
       "API_BROWSER_ORIGINS",
+      "OPENCOMPANY_API_ORIGIN",
       "OPENCOMPANY_AUTHKIT_DOMAIN",
       "OPENCOMPANY_API_OAUTH_AUDIENCE",
       "VERCEL_AI_GATEWAY_API_KEY",
@@ -118,8 +119,8 @@ const groups = {
       // public URL is the guaranteed fallback; the internal URL is optional.
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
-      // Validates the runner→API internal wiki command bearer. Must match the
-      // runner's API_INTERNAL_TOKEN or agent wiki writes 401.
+      // Validates runner→API wiki calls and first-party plugin MCP tickets.
+      // Must match the runner's API_INTERNAL_TOKEN.
       "API_INTERNAL_TOKEN",
       // Billing/usage and Stripe ingress.
       "OPENCOMPANY_STRIPE_WEBHOOK_SECRET",

@@ -165,6 +165,7 @@ export type IntegrationProvider =
   | "fathom"
   | "attio"
   | "betterstack"
+  | "render"
   | "signoz"
   | "stripe"
   | "latitude"
@@ -174,7 +175,7 @@ export type IntegrationProvider =
   | "x_account";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
-// Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, SigNoz, X) are always personal. Installation-bound
+// Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, Render, SigNoz, X) are always personal. Installation-bound
 // connections (GitHub App org installs, Jamie webhook secrets, the Slack
 // answer-bot install) are workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
@@ -272,6 +273,9 @@ export type BrainIngestJobKind =
 export type BrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 export type WikiSourceProvider = "gmail" | "slack" | "jamie" | "granola" | "linear" | "github";
 export type WikiSourceType = "meeting" | "conversation" | "issue" | "activity" | "thread";
+export type WikiIngestSourceProvider = WikiSourceProvider | "opencompany-import";
+export type WikiIngestSourceType = WikiSourceType | "run";
+export type IngestionReservationSourceProvider = BrainSourceProvider | WikiIngestSourceProvider;
 export type WikiSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
 export type WikiIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 export type BrainImportStatus =
@@ -1129,12 +1133,11 @@ export const brainImportRuns = productSchema.table(
   "brain_import_runs",
   {
     id: text("id").primaryKey(),
-    brainRef: text("brain_ref")
-      .notNull()
-      .references(() => brains.id, {
-        onDelete: "cascade",
-        onUpdate: "cascade",
-      }),
+    brainRef: text("brain_ref").references(() => brains.id, {
+      onDelete: "cascade",
+      onUpdate: "cascade",
+    }),
+    workspaceId: text("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => users.workosUserId, { onDelete: "cascade" }),
@@ -1170,7 +1173,12 @@ export const brainImportRuns = productSchema.table(
     activeBrainIdx: uniqueIndex("goat_brain_import_runs_active_brain_idx")
       .on(table.brainRef)
       .where(
-        sql`${table.status} IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing')`,
+        sql`${table.brainRef} IS NOT NULL AND ${table.status} IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing')`,
+      ),
+    activeWorkspaceIdx: uniqueIndex("opencompany_brain_import_runs_active_workspace_idx")
+      .on(table.workspaceId)
+      .where(
+        sql`${table.workspaceId} IS NOT NULL AND ${table.status} IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing')`,
       ),
     statusNextRunIdx: index("goat_brain_import_runs_status_next_run_idx").on(
       table.status,
@@ -1182,6 +1190,14 @@ export const brainImportRuns = productSchema.table(
     brainCreatedIdx: index("goat_brain_import_runs_brain_created_idx").on(
       table.brainRef,
       table.createdAt,
+    ),
+    workspaceCreatedIdx: index("opencompany_brain_import_runs_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    targetCheck: check(
+      "opencompany_brain_import_runs_target_check",
+      sql`(${table.brainRef} IS NOT NULL AND ${table.workspaceId} IS NULL) OR (${table.brainRef} IS NULL AND ${table.workspaceId} IS NOT NULL)`,
     ),
     statusCheck: check(
       "goat_brain_import_runs_status_check",
@@ -1611,7 +1627,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1661,7 +1677,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1711,7 +1727,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -2024,7 +2040,7 @@ export const workspaceIngestionReservations = productSchema.table(
     wikiSourceItemId: text("wiki_source_item_id").references(() => wikiSourceItems.id, {
       onDelete: "cascade",
     }),
-    sourceProvider: text("source_provider").$type<BrainSourceProvider>().notNull(),
+    sourceProvider: text("source_provider").$type<IngestionReservationSourceProvider>().notNull(),
     rawEventCount: integer("raw_event_count").notNull(),
     status: text("status").$type<IngestionReservationStatus>().notNull().default("pending"),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
@@ -2079,7 +2095,7 @@ export const workspaceIngestionReservations = productSchema.table(
     ),
     sourceProviderCheck: check(
       "goat_ingestion_reservations_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola', 'fathom', 'attio')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola', 'fathom', 'attio', 'opencompany-import')`,
     ),
     consumptionStateCheck: check(
       "goat_ingestion_reservations_consumption_state_check",
@@ -2106,6 +2122,9 @@ export const brainImportCandidates = productSchema.table(
     ingestJobId: text("ingest_job_id").references(() => brainIngestJobs.id, {
       onDelete: "set null",
     }),
+    // wiki_ingest_jobs is declared later in this file; migration 0244 adds
+    // the database-level FK for this cross-pipeline progress marker.
+    wikiIngestJobId: text("wiki_ingest_job_id"),
     entryCount: integer("entry_count").notNull().default(1),
     rank: integer("rank").notNull().default(0),
     selected: boolean("selected").notNull().default(true),
@@ -2121,6 +2140,9 @@ export const brainImportCandidates = productSchema.table(
       table.importRunId,
       table.provider,
       table.rank,
+    ),
+    wikiIngestJobIdx: index("opencompany_brain_import_candidates_wiki_ingest_job_idx").on(
+      table.wikiIngestJobId,
     ),
     providerCheck: check(
       "goat_brain_import_candidates_provider_check",
@@ -2186,12 +2208,12 @@ export const wikiSourceItems = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    sourceProvider: text("source_provider").$type<WikiSourceProvider>().notNull(),
+    sourceProvider: text("source_provider").$type<WikiIngestSourceProvider>().notNull(),
     sourceConnectionId: text("source_connection_id").notNull(),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integrations.id, { onDelete: "cascade" }),
-    sourceType: text("source_type").$type<WikiSourceType>().notNull(),
+    integrationId: text("integration_id").references(() => integrations.id, {
+      onDelete: "cascade",
+    }),
+    sourceType: text("source_type").$type<WikiIngestSourceType>().notNull(),
     externalId: text("external_id").notNull(),
     sourceRef: text("source_ref").notNull(),
     title: text("title"),
@@ -2232,11 +2254,15 @@ export const wikiSourceItems = productSchema.table(
     ),
     sourceProviderCheck: check(
       "opencompany_wiki_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
+      sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github', 'opencompany-import')`,
     ),
     sourceTypeCheck: check(
       "opencompany_wiki_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting', 'conversation', 'issue', 'activity', 'thread')`,
+      sql`${table.sourceType} IN ('meeting', 'conversation', 'issue', 'activity', 'thread', 'run')`,
+    ),
+    integrationCheck: check(
+      "opencompany_wiki_source_items_integration_check",
+      sql`(${table.sourceProvider} = 'opencompany-import' AND ${table.integrationId} IS NULL AND ${table.sourceType} = 'run') OR (${table.sourceProvider} <> 'opencompany-import' AND ${table.integrationId} IS NOT NULL AND ${table.sourceType} <> 'run')`,
     ),
     lastIngestStatusCheck: check(
       "opencompany_wiki_source_items_last_ingest_status_check",
@@ -2259,9 +2285,12 @@ export const wikiIngestJobs = productSchema.table(
     sourceItemId: text("source_item_id")
       .notNull()
       .references(() => wikiSourceItems.id, { onDelete: "cascade" }),
-    sourceProvider: text("source_provider").$type<WikiSourceProvider>().notNull(),
+    sourceProvider: text("source_provider").$type<WikiIngestSourceProvider>().notNull(),
     sourceConnectionId: text("source_connection_id").notNull(),
-    integrationId: text("integration_id").notNull(),
+    integrationId: text("integration_id"),
+    importRunId: text("import_run_id").references(() => brainImportRuns.id, {
+      onDelete: "cascade",
+    }),
     contentHash: text("content_hash").notNull(),
     status: text("status").$type<WikiIngestJobStatus>().notNull().default("queued"),
     attempts: integer("attempts").notNull().default(0),
@@ -2300,9 +2329,14 @@ export const wikiIngestJobs = productSchema.table(
     workspaceIntegrationStatusIdx: index(
       "opencompany_wiki_ingest_jobs_workspace_integration_status_idx",
     ).on(table.workspaceId, table.integrationId, table.status),
+    importRunIdx: index("opencompany_wiki_ingest_jobs_import_run_idx").on(table.importRunId),
     sourceProviderCheck: check(
       "opencompany_wiki_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')`,
+      sql`${table.sourceProvider} IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github', 'opencompany-import')`,
+    ),
+    importTargetCheck: check(
+      "opencompany_wiki_ingest_jobs_import_target_check",
+      sql`(${table.sourceProvider} = 'opencompany-import' AND ${table.integrationId} IS NULL AND ${table.importRunId} IS NOT NULL) OR (${table.sourceProvider} <> 'opencompany-import' AND ${table.integrationId} IS NOT NULL AND ${table.importRunId} IS NULL)`,
     ),
     statusCheck: check(
       "opencompany_wiki_ingest_jobs_status_check",

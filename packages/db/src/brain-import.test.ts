@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   cancelBrainImport,
+  cancelWikiImport,
   confirmBrainImport,
+  confirmWikiImport,
   matchesBrainImportSelectedScope,
   normalizeCompanyUrl,
   rankStoredBrainImportCandidate,
   retryBrainImportDiscovery,
+  retryWikiImportDiscovery,
 } from "./brain-import";
 
 describe("confirmBrainImport", () => {
@@ -66,6 +69,46 @@ describe("retryBrainImportDiscovery", () => {
     ).resolves.toEqual({ importRunId: "gbimp_123", deletedCandidates: 3 });
 
     expect(execute).toHaveBeenCalledOnce();
+    expect(transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("Wiki import lifecycle commands", () => {
+  it("confirms, cancels, and retries through workspace-scoped atomic statements", async () => {
+    const transaction = vi.fn(() => {
+      throw new Error("No transactions support in neon-http driver");
+    });
+    const confirmExecute = vi.fn(async () => [{ importRunId: "gbimp_wiki", enqueued: 0 }]);
+    const cancelExecute = vi.fn(async () => [{ importRunId: "gbimp_wiki", skippedJobs: 2 }]);
+    const retryExecute = vi.fn(async () => [{ importRunId: "gbimp_wiki", deletedCandidates: 3 }]);
+
+    await expect(
+      confirmWikiImport({
+        importRunId: "gbimp_wiki",
+        workspaceId: "workspace_1",
+        enabledProviders: ["public_web"],
+        actingUserWorkosId: "user_1",
+        db: { execute: confirmExecute, transaction },
+      }),
+    ).resolves.toEqual({ importRunId: "gbimp_wiki", enqueued: 0 });
+    await expect(
+      cancelWikiImport({
+        importRunId: "gbimp_wiki",
+        workspaceId: "workspace_1",
+        db: { execute: cancelExecute, transaction },
+      }),
+    ).resolves.toEqual({ importRunId: "gbimp_wiki", skippedJobs: 2 });
+    await expect(
+      retryWikiImportDiscovery({
+        importRunId: "gbimp_wiki",
+        workspaceId: "workspace_1",
+        db: { execute: retryExecute, transaction },
+      }),
+    ).resolves.toEqual({ importRunId: "gbimp_wiki", deletedCandidates: 3 });
+
+    expect(confirmExecute).toHaveBeenCalledOnce();
+    expect(cancelExecute).toHaveBeenCalledOnce();
+    expect(retryExecute).toHaveBeenCalledOnce();
     expect(transaction).not.toHaveBeenCalled();
   });
 });

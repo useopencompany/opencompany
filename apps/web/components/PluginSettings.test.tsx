@@ -10,11 +10,13 @@ import {
 import {
   BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
+  GOOGLE_CALENDAR_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   OfficialSkillPluginDetail,
   PluginDetail,
   PluginsSettings,
+  RENDER_PLUGIN_SOURCE,
   SIGNOZ_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
   YC_ADVISE_PLUGIN_SOURCE,
@@ -236,16 +238,24 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/slack",
     );
+    expect(screen.getByRole("link", { name: /google calendar/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/google-calendar",
+    );
     expect(screen.getByRole("link", { name: /signoz/i })).toHaveAttribute(
       "href",
       "/settings/plugins/signoz",
+    );
+    expect(screen.getByRole("link", { name: /render/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/render",
     );
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
       "/settings/plugins/yc-advise",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(7);
-    expect(screen.getAllByText("Official package")).toHaveLength(6);
+    expect(screen.getAllByText("Not installed")).toHaveLength(9);
+    expect(screen.getAllByText("Official package")).toHaveLength(8);
     expect(screen.getByText("Official skill package")).toBeInTheDocument();
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
@@ -259,11 +269,17 @@ describe("Plugin settings", () => {
     expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
     );
+    expect(RENDER_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
+    );
     expect(SIGNOZ_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
     );
     expect(SLACK_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
+    );
+    expect(GOOGLE_CALENDAR_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
     );
     expect(YC_ADVISE_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/2e092c3bc518622f1dc4ac1a6777d87ae3695ec6/yc-advise",
@@ -272,7 +288,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(7);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(9);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });
@@ -289,7 +305,9 @@ describe("Plugin settings", () => {
 
     render(<PluginsSettings plugins={[]} canEdit />);
 
-    await user.click(screen.getAllByRole("button", { name: "Install" })[2]!);
+    const linearCard = screen.getByRole("link", { name: /linear/i }).closest("div.border");
+    expect(linearCard).not.toBeNull();
+    await user.click(within(linearCard as HTMLElement).getByRole("button", { name: "Install" }));
 
     expect(screen.getByRole("button", { name: "Installing…" })).toBeDisabled();
     expect(screen.getAllByRole("button", { name: "Install" })[0]).toBeDisabled();
@@ -316,7 +334,12 @@ describe("Plugin settings", () => {
 
     render(<PluginsSettings plugins={[]} canEdit />);
 
-    await user.click(screen.getAllByRole("button", { name: "Install" })[2]!);
+    const linearCard = screen.getByRole("link", { name: /linear/i }).closest("div.border");
+    expect(linearCard).not.toBeNull();
+    const installButton = within(linearCard as HTMLElement).getByRole("button", {
+      name: "Install",
+    });
+    await user.click(installButton);
 
     await waitFor(() => {
       expect(toasts.error).toHaveBeenCalledWith(
@@ -324,7 +347,7 @@ describe("Plugin settings", () => {
       );
     });
     expect(router.push).not.toHaveBeenCalled();
-    expect(screen.getAllByRole("button", { name: "Install" })[2]).toBeEnabled();
+    expect(installButton).toBeEnabled();
   });
 
   it("previews and installs an official skills-only package from its detail page", async () => {

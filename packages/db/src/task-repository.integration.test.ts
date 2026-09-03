@@ -32,8 +32,8 @@ const migrationPaths = [
   "0223_goat_task_projection_preservation.sql",
   "0226_goat_immutable_skill_bundles.sql",
   "0228_goat_plugins.sql",
-  "0243_goat_task_activities.sql",
-  "0244_goat_task_waiting_status.sql",
+  "0245_goat_task_activities.sql",
+  "0246_goat_task_waiting_status.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 

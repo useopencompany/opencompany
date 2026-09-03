@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "google-calendar",
+  "version": "1.1.0",
+  "description": "List calendars, read events, and create events through opencompany's Google Calendar MCP.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://github.com/useopencompany/plugins/tree/main/google-calendar",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/google-calendar",
+  "license": "MIT",
+  "keywords": ["google-calendar", "calendar", "events", "scheduling", "availability"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Check calendars",
+        "defaultMode": "ask",
+        "tools": ["list_calendars"]
+      },
+      "query": {
+        "label": "Read calendar events",
+        "defaultMode": "ask",
+        "tools": ["list_events", "get_event"]
+      },
+      "write": {
+        "label": "Manage calendar events",
+        "defaultMode": "ask",
+        "tools": ["create_event"]
+      }
+    }
+  }
+}

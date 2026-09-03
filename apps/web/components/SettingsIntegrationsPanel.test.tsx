@@ -393,6 +393,29 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.getByRole("button", { name: "Personal" })).not.toHaveTextContent("1");
   });
 
+  it("keeps Google Calendar out of the legacy Integrations panel", () => {
+    const integrations = integrationStateFromRows([
+      {
+        id: "gint_google_calendar",
+        provider: "google_calendar",
+        externalId: "google-user-1",
+        accountEmail: "ada@example.com",
+        accountName: "Ada",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as IntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    expect(screen.queryByText("Ada")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Let opencompany read and manage your calendar events."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Personal" })).not.toHaveTextContent("1");
+  });
+
   it("shows PostHog with read-on and create-insights-ask permissions", () => {
     const integrations = integrationStateFromRows([
       {

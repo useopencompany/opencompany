@@ -1118,14 +1118,18 @@ export function extractAcpScheduleWakeup(
   const update = recordFromUnknown(params?.update);
   if (update?.sessionUpdate !== "tool_call") return null;
   const claudeMeta = recordFromUnknown(recordFromUnknown(update._meta)?.claudeCode);
-  const toolName =
-    typeof claudeMeta?.toolName === "string"
-      ? claudeMeta.toolName
-      : typeof update.name === "string"
-        ? update.name
-        : null;
-  if (toolName !== "ScheduleWakeup" && !toolName?.endsWith("__ScheduleWakeup")) return null;
-  return scheduleWakeupFromToolInput(recordFromUnknown(update.rawInput));
+  const rawInput = recordFromUnknown(update.rawInput);
+  const toolNames = [claudeMeta?.toolName, update.name, rawInput?.tool, rawInput?.toolName];
+  if (
+    !toolNames.some(
+      (value) =>
+        typeof value === "string" &&
+        (value === "ScheduleWakeup" || value.endsWith("__ScheduleWakeup")),
+    )
+  ) {
+    return null;
+  }
+  return scheduleWakeupFromToolInput(recordFromUnknown(rawInput?.arguments) ?? rawInput);
 }
 
 function scheduleWakeupFromToolInput(

@@ -125,6 +125,7 @@ import {
   RenameBrainDocumentBodySchema,
   RenameBrainFolderBodySchema,
   RenameWorkspaceBodySchema,
+  RenderAccountStateEnvelopeSchema,
   RepoConfigDeleteEnvelopeSchema,
   RepoConfigListEnvelopeSchema,
   RepoConfigMutationEnvelopeSchema,
@@ -802,6 +803,78 @@ export const retryBrainImportRoute = createRoute({
   responses: {
     200: {
       description: "Failed pre-confirmation discovery reset and started again.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: StartBrainImportBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Workspace Wiki company-context discovery started or replayed.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const confirmWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/confirm",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ importRunId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: ConfirmBrainImportBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Discovered Wiki import confirmed; ingestion begins.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const cancelWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/cancel",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ importRunId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Active Wiki import canceled; queued ingestion jobs are skipped.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const retryWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/retry",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ importRunId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Failed Wiki discovery reset and started again.",
       content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
     },
     default: errorResponse,
@@ -2842,6 +2915,27 @@ export const connectGranolaAccountRoute = createRoute({
   },
 });
 
+export const connectRenderAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/render",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Render connected (or reconnected) for the acting user. The API key never appears in the response.",
+      content: { "application/json": { schema: RenderAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const startImessagePairingRoute = createRoute({
   method: "post",
   path: "/v1/integration-accounts/imessage/pairing",
@@ -3501,6 +3595,10 @@ export type V1RouteHandlers = {
   confirmBrainImport: RouteHandler<typeof confirmBrainImportRoute>;
   cancelBrainImport: RouteHandler<typeof cancelBrainImportRoute>;
   retryBrainImport: RouteHandler<typeof retryBrainImportRoute>;
+  startWikiImport: RouteHandler<typeof startWikiImportRoute>;
+  confirmWikiImport: RouteHandler<typeof confirmWikiImportRoute>;
+  cancelWikiImport: RouteHandler<typeof cancelWikiImportRoute>;
+  retryWikiImport: RouteHandler<typeof retryWikiImportRoute>;
   createBrainDocument: RouteHandler<typeof createBrainDocumentRoute>;
   uploadBrainAsset: RouteHandler<typeof uploadBrainAssetRoute>;
   replaceBrainAsset: RouteHandler<typeof replaceBrainAssetRoute>;
@@ -3582,6 +3680,7 @@ export type V1RouteHandlers = {
   disconnectAttioAccount: RouteHandler<typeof disconnectAttioAccountRoute>;
   connectFathomAccount: RouteHandler<typeof connectFathomAccountRoute>;
   connectGranolaAccount: RouteHandler<typeof connectGranolaAccountRoute>;
+  connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
   startImessagePairing: RouteHandler<typeof startImessagePairingRoute>;
   confirmImessagePairing: RouteHandler<typeof confirmImessagePairingRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
@@ -3697,6 +3796,10 @@ export function createV1Router(
       .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
       .openapi(cancelBrainImportRoute, handlers.cancelBrainImport)
       .openapi(retryBrainImportRoute, handlers.retryBrainImport)
+      .openapi(startWikiImportRoute, handlers.startWikiImport)
+      .openapi(confirmWikiImportRoute, handlers.confirmWikiImport)
+      .openapi(cancelWikiImportRoute, handlers.cancelWikiImport)
+      .openapi(retryWikiImportRoute, handlers.retryWikiImport)
       .openapi(createBrainDocumentRoute, handlers.createBrainDocument)
       .openapi(uploadBrainAssetRoute, handlers.uploadBrainAsset)
       .openapi(replaceBrainAssetRoute, handlers.replaceBrainAsset)
@@ -3770,6 +3873,7 @@ export function createV1Router(
       .openapi(disconnectAttioAccountRoute, handlers.disconnectAttioAccount)
       .openapi(connectFathomAccountRoute, handlers.connectFathomAccount)
       .openapi(connectGranolaAccountRoute, handlers.connectGranolaAccount)
+      .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
       .openapi(startImessagePairingRoute, handlers.startImessagePairing)
       .openapi(confirmImessagePairingRoute, handlers.confirmImessagePairing)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
@@ -4580,6 +4684,38 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  startWikiImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "discovering" as const, replayed: false },
+        meta,
+      },
+      201,
+    ),
+  confirmWikiImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "ingesting" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
+  cancelWikiImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "canceled" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
+  retryWikiImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "discovering" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
   createBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 201),
   uploadBrainAsset: (c) =>
     c.json(
@@ -5050,6 +5186,25 @@ const contractDocumentHandlers: V1RouteHandlers = {
             accountEmail: null,
             accountName: null,
             statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  connectRenderAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "render" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            accountName: "Contract",
+            statusReason: null,
+            capabilityModes: {},
+            toolModes: {},
           },
         },
         meta,

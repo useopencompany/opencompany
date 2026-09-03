@@ -33,6 +33,14 @@ vi.mock("@/components/WikiIngestActivityFeed", () => ({
   WikiIngestActivitySkeleton: () => <section>Loading Wiki ingestion activity</section>,
 }));
 
+vi.mock("@/components/JamieIntegrationSetup", () => ({
+  JamieIntegrationSetup: () => <div>Jamie setup form</div>,
+}));
+
+vi.mock("@/components/GranolaIntegrationSetup", () => ({
+  GranolaIntegrationSetup: () => <div>Granola setup form</div>,
+}));
+
 vi.mock("@/lib/headless-integration-collections", () => ({
   getHeadlessIntegrationAccounts: () => ({ id: "integration-accounts" }),
 }));
@@ -79,6 +87,28 @@ describe("WikiSourcesPanel", () => {
     expect(connect).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/wiki/sources");
     expect(screen.getByText("No sources are feeding yet")).toBeInTheDocument();
     expect(screen.getAllByText("Not connected")).toHaveLength(5);
+  });
+
+  it("keeps OAuth connections in onboarding and ships no dead scope placeholder", async () => {
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin mode="onboarding" />);
+
+    expect(await screen.findByText("Connect your sources")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Gmail" })).toHaveAttribute(
+      "href",
+      "/api/integrations/gmail/start?returnTo=%2Fonboarding%2Fconnected",
+    );
+    expect(screen.queryByText("Scope configuration coming soon")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recent ingestion activity")).not.toBeInTheDocument();
+  });
+
+  it("opens meeting-source setup during fresh onboarding without a server snapshot", async () => {
+    const user = userEvent.setup();
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin mode="onboarding" />);
+
+    await user.click(await screen.findByRole("button", { name: "Set up Jamie" }));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("Connect Jamie");
+    expect(screen.getByText("Jamie setup form")).toBeInTheDocument();
   });
 
   it("does not start the live integration collection during server rendering", () => {

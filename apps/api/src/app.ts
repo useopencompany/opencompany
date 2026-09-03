@@ -3,7 +3,10 @@ import {
   AutoModelRoutingError,
   type AutoModelRoutingResolution,
 } from "@opencompany/agent/application/auto-model-routing";
-import type { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
+import type {
+  BrainImportApplicationService,
+  WikiImportApplicationService,
+} from "@opencompany/agent/brain-imports";
 import type { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import type { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import type {
@@ -13,6 +16,8 @@ import type {
   ImessageProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
+import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
+import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { McpService } from "@opencompany/agent/mcp-http";
 import type { BillingApplicationService } from "@opencompany/billing/application-service";
 import {
@@ -156,6 +161,7 @@ export type CreateApiAppInput = {
   wikiSources: WikiSourceService;
   brainSources: Pick<BrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
   brainImports: Pick<BrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
+  wikiImports: Pick<WikiImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
   browserProfiles: Pick<
     BrowserProfileApplicationService,
     | "list"
@@ -194,6 +200,7 @@ export type CreateApiAppInput = {
   integrationAccounts: IntegrationAccountService;
   slackBotSettings: SlackBotSettingsService;
   mcp?: McpService;
+  googleCalendarMcp?: GoogleCalendarMcpService;
   engineAuth: EngineAuthService;
   engineSessions: EngineSessionService;
   billing: BillingApplicationService;
@@ -961,6 +968,38 @@ export function createApiApp(input: CreateApiAppInput) {
         },
         200,
       );
+    },
+    startWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.wikiImports.start(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    confirmWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const result = await input.wikiImports.confirm(
+        actor,
+        params.importRunId,
+        c.req.valid("json").enabledProviders,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    cancelWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.wikiImports.cancel(actor, c.req.valid("param").importRunId);
+      return c.json({ data: result, meta }, 200);
+    },
+    retryWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.wikiImports.retry(actor, c.req.valid("param").importRunId);
+      return c.json({ data: result, meta }, 200);
     },
     createBrainDocument: async (c) => {
       const actor = actorFrom(c);
@@ -2149,6 +2188,15 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
     },
+    connectRenderAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectRender(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: renderStateDto(state) }, meta }, 200);
+    },
     startImessagePairing: async (c) => {
       const actor = actorFrom(c);
       // Pairing sends a real text message, so it gets its own small bucket
@@ -2590,6 +2638,9 @@ export function createApiApp(input: CreateApiAppInput) {
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
   if (input.mcp) {
     app.on(["GET", "POST", "DELETE"], "/mcp", (c) => input.mcp!.handle(c.req.raw));
+  }
+  if (input.googleCalendarMcp) {
+    app.post("/mcp/plugins/google-calendar", (c) => input.googleCalendarMcp!.handle(c.req.raw));
   }
   app.post("/internal/onboarding-emails/enroll", async (c) => {
     authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
@@ -3434,6 +3485,19 @@ function granolaStateDto(state: GranolaProviderState) {
     accountEmail: state.accountEmail,
     accountName: state.accountName,
     statusReason: state.statusReason,
+  };
+}
+
+function renderStateDto(state: RenderProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountName: state.accountName,
+    statusReason: state.statusReason,
+    capabilityModes: state.capabilityModes,
+    toolModes: state.toolModes,
   };
 }
 
