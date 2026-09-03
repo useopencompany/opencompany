@@ -36,6 +36,8 @@ export async function getGoogleIntegrationState(userWorkosId: string) {
       accountEmail: integrations.accountEmail,
       accountName: integrations.accountName,
       status: integrations.status,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
       updatedAt: integrations.updatedAt,
     })
     .from(integrations)
