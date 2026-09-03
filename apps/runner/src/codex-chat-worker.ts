@@ -434,7 +434,7 @@ export async function runClaimedTurn(
       attempt: turn.attempts,
       error,
     });
-    await failClaimedTurn({
+    await settleClaimedTurnFailure({
       turn,
       session,
       canonicalAttemptId,
@@ -457,7 +457,7 @@ export async function runClaimedTurn(
         attempt: turn.attempts,
         error: retryableError.cause ?? retryableError,
       });
-      await failClaimedTurn({
+      await settleClaimedTurnFailure({
         turn,
         session,
         canonicalAttemptId,
@@ -516,6 +516,129 @@ export async function runClaimedTurn(
     if (!abandonedAttempt) throw new CodexChatLeaseLostError();
     await releaseCodexChatTurnForHandoff({ turnId: turn.id, leaseId, leaseOwner });
   }
+}
+
+// Terminal failures must always settle the turn. If the rich failure path itself
+// throws — a broken settlement query, a failing task-failure orchestration — letting
+// that error escape would leave the turn running with a live lease: every lease
+// expiry reclaims it into the same failure, forever, re-running the task closer LLM
+// call each cycle (TASK-411 looped this way for hours). Fall back to a minimal
+// settlement that only touches plain columns so a bug in the rich path cannot
+// strand a turn.
+async function settleClaimedTurnFailure(input: {
+  turn: CodexChatTurn;
+  session: CodexChatSession;
+  canonicalAttemptId: string;
+  taskContext: TaskTurnContext | null;
+  env: RunnerEnv;
+  message: string;
+}) {
+  try {
+    await failClaimedTurn(input);
+  } catch (error) {
+    if (error instanceof CodexChatLeaseLostError) throw error;
+    captureException(error, {
+      event: "opencompany.goat_codex_chat_turn_failure_write_failed",
+      turn_id: input.turn.id,
+      codex_chat_session_id: input.session.id,
+    });
+    logger.error("Turn failure write failed; forcing minimal settlement", {
+      event: "opencompany.goat_codex_chat_turn_failure_write_failed",
+      turn_id: input.turn.id,
+      codex_chat_session_id: input.session.id,
+      engine: input.session.engine,
+      error,
+    });
+    await forceFailClaimedTurn(input);
+  }
+}
+
+// Last-resort settlement: fail the turn, its canonical attempt, the runtime session,
+// and the backing task (when present) in one statement of plain column updates. No
+// events, no projections, no jsonb building — anything that could share a bug with
+// the rich path is deliberately absent. Exported for integration coverage against a
+// real Postgres parser.
+export async function forceFailClaimedTurn(input: {
+  turn: CodexChatTurn;
+  session: CodexChatSession;
+  canonicalAttemptId: string;
+  taskContext: TaskTurnContext | null;
+  message: string;
+}) {
+  const { turn, session } = input;
+  const leaseId = turn.leaseId;
+  const leaseOwner = turn.leaseOwner;
+  if (!leaseId || !leaseOwner) throw new CodexChatLeaseLostError();
+  const now = new Date();
+  const result = await getDb().execute(sql`
+    WITH failed_turn AS (
+      UPDATE goat.codex_chat_turns AS turn
+      SET status = 'failed',
+          error = ${input.message},
+          completed_at = ${now},
+          updated_at = ${now}
+      WHERE turn.id = ${turn.id}
+        AND turn.user_workos_id = ${turn.userWorkosId}
+        AND turn.lease_id = ${leaseId}
+        AND turn.lease_owner = ${leaseOwner}
+        AND turn.status = 'running'
+      RETURNING turn.id
+    ),
+    finished_attempt AS (
+      UPDATE goat.run_attempts AS attempt
+      SET status = 'failed',
+          error_code = 'failure_write_failed',
+          error_message = ${input.message},
+          completed_at = ${now}
+      FROM failed_turn
+      WHERE attempt.id = ${input.canonicalAttemptId}
+        AND attempt.run_id = failed_turn.id
+        AND attempt.status = 'running'
+        AND attempt.lease_id = ${leaseId}
+      RETURNING attempt.id
+    ),
+    failed_runtime AS (
+      UPDATE goat.codex_chat_sessions AS runtime
+      SET status = 'failed',
+          active_turn_id = NULL,
+          error = ${input.message},
+          updated_at = ${now}
+      FROM failed_turn
+      WHERE runtime.id = ${session.id}
+        AND runtime.user_workos_id = ${turn.userWorkosId}
+        AND (runtime.active_turn_id IS NULL OR runtime.active_turn_id = ${turn.id})
+      RETURNING runtime.id
+    ),
+    failed_task AS (
+      UPDATE goat.tasks AS task
+      SET status = 'failed',
+          stage = 'failed',
+          error = ${input.message},
+          updated_at = ${now}
+      FROM failed_turn
+      WHERE ${Boolean(input.taskContext)}::boolean
+        AND task.id = ${input.taskContext?.task.id ?? null}
+        AND task.session_id = ${turn.chatSessionId}
+        AND task.status IN ('queued', 'running')
+      RETURNING task.id
+    ),
+    unseen_chat AS (
+      UPDATE goat.chat_sessions AS chat
+      SET has_unseen = true,
+          updated_at = ${now}
+      FROM failed_turn
+      WHERE chat.id = ${turn.chatSessionId}
+      RETURNING chat.id
+    )
+    SELECT failed_turn.id FROM failed_turn
+  `);
+  if (rowsFromExecute(result).length === 0) throw new CodexChatLeaseLostError();
+  logger.warn("Forced minimal settlement for opencompany chat turn", {
+    event: "opencompany.goat_codex_chat_turn_force_failed",
+    turn_id: turn.id,
+    codex_chat_session_id: session.id,
+    task_id: input.taskContext?.task.id ?? null,
+  });
 }
 
 async function failClaimedTurn(input: {
