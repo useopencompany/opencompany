@@ -18,10 +18,10 @@ ALTER TABLE "goat"."wiki_source_items" ADD CONSTRAINT "opencompany_wiki_source_i
 
 ALTER TABLE "goat"."wiki_ingest_jobs" ALTER COLUMN "integration_id" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "goat"."wiki_ingest_jobs" ADD COLUMN "import_run_id" text;--> statement-breakpoint
-ALTER TABLE "goat"."wiki_ingest_jobs" ADD CONSTRAINT "wiki_ingest_jobs_import_run_id_brain_import_runs_id_fk" FOREIGN KEY ("import_run_id") REFERENCES "goat"."brain_import_runs"("id") ON DELETE set null;--> statement-breakpoint
+ALTER TABLE "goat"."wiki_ingest_jobs" ADD CONSTRAINT "wiki_ingest_jobs_import_run_id_brain_import_runs_id_fk" FOREIGN KEY ("import_run_id") REFERENCES "goat"."brain_import_runs"("id") ON DELETE cascade;--> statement-breakpoint
 ALTER TABLE "goat"."wiki_ingest_jobs" DROP CONSTRAINT "opencompany_wiki_ingest_jobs_source_provider_check";--> statement-breakpoint
 ALTER TABLE "goat"."wiki_ingest_jobs" ADD CONSTRAINT "opencompany_wiki_ingest_jobs_source_provider_check" CHECK ("source_provider" IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github', 'opencompany-import'));--> statement-breakpoint
-ALTER TABLE "goat"."wiki_ingest_jobs" ADD CONSTRAINT "opencompany_wiki_ingest_jobs_import_target_check" CHECK (("source_provider" = 'opencompany-import' AND "integration_id" IS NULL AND "import_run_id" IS NOT NULL) OR ("source_provider" <> 'opencompany-import' AND "integration_id" IS NOT NULL));--> statement-breakpoint
+ALTER TABLE "goat"."wiki_ingest_jobs" ADD CONSTRAINT "opencompany_wiki_ingest_jobs_import_target_check" CHECK (("source_provider" = 'opencompany-import' AND "integration_id" IS NULL AND "import_run_id" IS NOT NULL) OR ("source_provider" <> 'opencompany-import' AND "integration_id" IS NOT NULL AND "import_run_id" IS NULL));--> statement-breakpoint
 CREATE INDEX "opencompany_wiki_ingest_jobs_import_run_idx" ON "goat"."wiki_ingest_jobs" USING btree ("import_run_id");--> statement-breakpoint
 ALTER TABLE "goat"."brain_import_candidates" ADD CONSTRAINT "brain_import_candidates_wiki_ingest_job_id_wiki_ingest_jobs_id_fk" FOREIGN KEY ("wiki_ingest_job_id") REFERENCES "goat"."wiki_ingest_jobs"("id") ON DELETE set null;--> statement-breakpoint
 

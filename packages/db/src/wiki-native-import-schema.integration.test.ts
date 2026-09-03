@@ -58,6 +58,11 @@ describe("0244_wiki_native_company_imports", () => {
         "SELECT wiki_ingest_job_id FROM goat.brain_import_candidates WHERE id = 'gbimpc_research'",
       ),
     ).resolves.toMatchObject({ rows: [{ wiki_ingest_job_id: "gwjob_research" }] });
+
+    await database.exec("DELETE FROM goat.brain_import_runs WHERE id = 'gbimp_wiki'");
+    await expect(
+      database.query("SELECT id FROM goat.wiki_ingest_jobs WHERE id = 'gwjob_research'"),
+    ).resolves.toMatchObject({ rows: [] });
   });
 
   it("rejects mixed targets and import jobs that bypass the internal provider contract", async () => {

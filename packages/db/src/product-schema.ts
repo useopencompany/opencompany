@@ -2279,7 +2279,7 @@ export const wikiIngestJobs = productSchema.table(
     sourceConnectionId: text("source_connection_id").notNull(),
     integrationId: text("integration_id"),
     importRunId: text("import_run_id").references(() => brainImportRuns.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     contentHash: text("content_hash").notNull(),
     status: text("status").$type<WikiIngestJobStatus>().notNull().default("queued"),
@@ -2326,7 +2326,7 @@ export const wikiIngestJobs = productSchema.table(
     ),
     importTargetCheck: check(
       "opencompany_wiki_ingest_jobs_import_target_check",
-      sql`(${table.sourceProvider} = 'opencompany-import' AND ${table.integrationId} IS NULL AND ${table.importRunId} IS NOT NULL) OR (${table.sourceProvider} <> 'opencompany-import' AND ${table.integrationId} IS NOT NULL)`,
+      sql`(${table.sourceProvider} = 'opencompany-import' AND ${table.integrationId} IS NULL AND ${table.importRunId} IS NOT NULL) OR (${table.sourceProvider} <> 'opencompany-import' AND ${table.integrationId} IS NOT NULL AND ${table.importRunId} IS NULL)`,
     ),
     statusCheck: check(
       "opencompany_wiki_ingest_jobs_status_check",

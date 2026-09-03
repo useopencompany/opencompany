@@ -80,8 +80,8 @@ type StepKey = ProductOnboardingStep;
 
 type StepDef = { key: StepKey; label: string };
 
-// Activation-optimized order: know them → name it (and scaffold its Brain from
-// their role) → feed it → done. Referral is folded into the finish so it never
+// Activation-optimized order for legacy workspaces: know them → name it →
+// feed the Brain → done. Referral is folded into the finish so it never
 // interrupts a value step.
 const OWNER_STEPS: StepDef[] = [
   { key: "profile", label: "About you" },
@@ -451,6 +451,7 @@ export function OnboardingWizard({
           {step.key === "workspace" && (
             <WorkspaceStep
               user={user}
+              wiki={!legacyBrainEnabled}
               name={workspaceName}
               onName={(v) => {
                 setWorkspaceName(v);
@@ -465,7 +466,11 @@ export function OnboardingWizard({
             />
           )}
           {step.key === "welcome" && (
-            <WelcomeStep user={user} workspaceName={currentWorkspaceName} />
+            <WelcomeStep
+              user={user}
+              workspaceName={currentWorkspaceName}
+              wiki={!legacyBrainEnabled}
+            />
           )}
           {step.key === "sources" &&
             (legacyBrainEnabled ? (
@@ -771,6 +776,7 @@ function ProfileStep({
 
 function WorkspaceStep({
   user,
+  wiki,
   name,
   onName,
   slug,
@@ -778,6 +784,7 @@ function WorkspaceStep({
   slugStatus,
 }: {
   user: OnboardingUser;
+  wiki: boolean;
   name: string;
   onName: (v: string) => void;
   slug: string;
@@ -799,7 +806,7 @@ function WorkspaceStep({
     <div>
       <StepHeader
         title="Create your workspace"
-        subtitle="This is the home for your company's brain. Hobby includes one member; upgrade to Pro to invite teammates."
+        subtitle={`This is the home for your company's ${wiki ? "Wiki" : "brain"}. Hobby includes one member; upgrade to Pro to invite teammates.`}
       />
 
       <IdentityRow user={user} />
@@ -859,12 +866,24 @@ function WorkspaceStep({
 // Step — Welcome (invited members)
 // ---------------------------------------------------------------------------
 
-function WelcomeStep({ user, workspaceName }: { user: OnboardingUser; workspaceName: string }) {
+function WelcomeStep({
+  user,
+  workspaceName,
+  wiki,
+}: {
+  user: OnboardingUser;
+  workspaceName: string;
+  wiki: boolean;
+}) {
   return (
     <div>
       <StepHeader
         title={`Welcome to ${workspaceName}`}
-        subtitle="You've been added to this company's brain. It already knows a lot — here's how to start putting it to work."
+        subtitle={
+          wiki
+            ? "You've joined this company's workspace. Its Wiki brings shared context together — here's how to start using it."
+            : "You've been added to this company's brain. It already knows a lot — here's how to start putting it to work."
+        }
       />
 
       <IdentityRow user={user} />
@@ -873,7 +892,11 @@ function WelcomeStep({ user, workspaceName }: { user: OnboardingUser; workspaceN
         <HighlightRow
           icon={MessagesSquare}
           title="Ask it anything"
-          text="Chat with the brain to get up to speed on people, projects, and decisions."
+          text={
+            wiki
+              ? "Chat with opencompany to get up to speed on people, projects, and decisions from the company Wiki."
+              : "Chat with the brain to get up to speed on people, projects, and decisions."
+          }
         />
         <HighlightRow
           icon={ShieldCheck}
