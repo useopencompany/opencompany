@@ -8,9 +8,9 @@ import {
   type ResolvedActionCatalog,
 } from "../actions/types";
 import {
-  executeActionGateway,
-  executeActionHostGateway,
-  executeActionPrincipalGateway,
+  createActionGateway,
+  createActionHostGateway,
+  createActionPrincipalGateway,
 } from "./persisted-action-gateway";
 
 function listRequest(source?: string): ActionGatewayRequest {
@@ -81,13 +81,12 @@ describe("executeActionGateway", () => {
         },
       ],
     };
-    const response = await executeActionGateway({
+    const response = await createActionGateway({
+      loadContext: vi.fn(async () => context),
+      resolveCatalog: vi.fn(async () => catalog),
+    })({
       request: listRequest(),
       signal: new AbortController().signal,
-      dependencies: {
-        loadContext: vi.fn(async () => context),
-        resolveCatalog: vi.fn(async () => catalog),
-      },
     });
 
     expect(response).toEqual({
@@ -127,14 +126,13 @@ describe("executeActionGateway", () => {
       actions: [readAction, writeAction, managedAction],
     };
 
-    const response = await executeActionHostGateway({
+    const response = await createActionHostGateway({
+      loadContext: vi.fn(async () => interactiveContext),
+      resolveCatalog: vi.fn(async () => catalog),
+      recordSourceDiscovery,
+    })({
       request: { operation: "catalog", sessionId: "session_1", turnId: "turn_1" },
       signal: new AbortController().signal,
-      dependencies: {
-        loadContext: vi.fn(async () => interactiveContext),
-        resolveCatalog: vi.fn(async () => catalog),
-        recordSourceDiscovery,
-      },
     });
 
     expect(response).toEqual({
@@ -166,7 +164,18 @@ describe("executeActionGateway", () => {
       actions: [managedAction],
     };
 
-    const response = await executeActionHostGateway({
+    const response = await createActionHostGateway({
+      loadContext: vi.fn(async () => interactiveContext),
+      resolveCatalog: vi.fn(async () => catalog),
+      getCapabilityTurnState: () => ({
+        quotedTotalUsdMicros: 0,
+        admittedToolCallIds: [],
+        quotesByToolCallId: new Map(),
+        asyncRunsStarted: 0,
+      }),
+      evaluateApproval,
+      recordSourceDiscovery,
+    })({
       request: {
         operation: "approval",
         sessionId: "session_1",
@@ -176,18 +185,6 @@ describe("executeActionGateway", () => {
         invocationId: "call_1",
       },
       signal: new AbortController().signal,
-      dependencies: {
-        loadContext: vi.fn(async () => interactiveContext),
-        resolveCatalog: vi.fn(async () => catalog),
-        getCapabilityTurnState: () => ({
-          quotedTotalUsdMicros: 0,
-          admittedToolCallIds: [],
-          quotesByToolCallId: new Map(),
-          asyncRunsStarted: 0,
-        }),
-        evaluateApproval,
-        recordSourceDiscovery,
-      },
     });
 
     expect(response).toEqual({ ok: true, needsApproval: true });
@@ -207,15 +204,15 @@ describe("executeActionGateway", () => {
       providers: [{ id: "neon", kind: "integration", label: "Neon", description: "Database" }],
       actions: [queryAction],
     };
+    const gateway = createActionGateway({
+      loadContext: vi.fn(async () => context),
+      resolveCatalog: vi.fn(async () => catalog),
+    });
 
     await expect(
-      executeActionGateway({
+      gateway({
         request: listRequest(),
         signal: new AbortController().signal,
-        dependencies: {
-          loadContext: vi.fn(async () => context),
-          resolveCatalog: vi.fn(async () => catalog),
-        },
       }),
     ).resolves.toEqual({
       ok: true,
@@ -224,13 +221,9 @@ describe("executeActionGateway", () => {
 
     queryAction.permissionMode = "ask";
     await expect(
-      executeActionGateway({
+      gateway({
         request: listRequest(),
         signal: new AbortController().signal,
-        dependencies: {
-          loadContext: vi.fn(async () => context),
-          resolveCatalog: vi.fn(async () => catalog),
-        },
       }),
     ).resolves.toEqual({
       ok: true,
@@ -277,15 +270,16 @@ describe("executeActionGateway", () => {
       registerApproval,
       claimInvocation: admittedInvocation,
     };
+    const gateway = createActionGateway(dependencies);
 
-    await expect(
-      executeActionGateway({ request, signal: new AbortController().signal, dependencies }),
-    ).resolves.toMatchObject({ ok: false, error: { code: "approval_required" } });
+    await expect(gateway({ request, signal: new AbortController().signal })).resolves.toMatchObject(
+      { ok: false, error: { code: "approval_required" } },
+    );
     expect(action.execute).not.toHaveBeenCalled();
 
-    await expect(
-      executeActionGateway({ request, signal: new AbortController().signal, dependencies }),
-    ).resolves.toMatchObject({ ok: true, action: action.id });
+    await expect(gateway({ request, signal: new AbortController().signal })).resolves.toMatchObject(
+      { ok: true, action: action.id },
+    );
     expect(action.execute).toHaveBeenCalledOnce();
     expect(registerApproval).toHaveBeenCalledTimes(2);
   });
@@ -297,7 +291,27 @@ describe("executeActionGateway", () => {
     action.permissionMode = "ask";
 
     await expect(
-      executeActionHostGateway({
+      createActionHostGateway({
+        loadContext: vi.fn(async () => interactiveContext),
+        resolveCatalog: vi.fn(async () => ({
+          providers: [
+            {
+              id: "gmail" as const,
+              kind: "integration" as const,
+              label: "Gmail",
+              description: "Email",
+            },
+          ],
+          actions: [action],
+        })),
+        registerApproval: vi.fn(async () => ({
+          actionId: action.id,
+          sourceId: action.provider,
+          capabilityId: action.capability,
+          inputHash: "input_hash",
+          status: "approved" as const,
+        })),
+      })({
         request: {
           operation: "approval",
           sessionId: "session_approval",
@@ -307,27 +321,6 @@ describe("executeActionGateway", () => {
           invocationId: "call_approval",
         },
         signal: new AbortController().signal,
-        dependencies: {
-          loadContext: vi.fn(async () => interactiveContext),
-          resolveCatalog: vi.fn(async () => ({
-            providers: [
-              {
-                id: "gmail" as const,
-                kind: "integration" as const,
-                label: "Gmail",
-                description: "Email",
-              },
-            ],
-            actions: [action],
-          })),
-          registerApproval: vi.fn(async () => ({
-            actionId: action.id,
-            sourceId: action.provider,
-            capabilityId: action.capability,
-            inputHash: "input_hash",
-            status: "approved" as const,
-          })),
-        },
       }),
     ).resolves.toEqual({ ok: true, needsApproval: false });
   });
@@ -359,6 +352,7 @@ describe("executeActionGateway", () => {
       registerApproval,
     };
     const principal = { ...context, policy: "headless" as const };
+    const gateway = createActionPrincipalGateway(dependencies);
     const request = {
       sessionId: "task_session",
       turnId: "task_turn",
@@ -368,19 +362,17 @@ describe("executeActionGateway", () => {
     };
 
     await expect(
-      executeActionPrincipalGateway({
+      gateway({
         request: { ...request, operation: "approval" },
         principal,
         signal: new AbortController().signal,
-        dependencies,
       }),
     ).resolves.toEqual({ ok: true, needsApproval: false });
     await expect(
-      executeActionPrincipalGateway({
+      gateway({
         request: { ...request, operation: "execute" },
         principal,
         signal: new AbortController().signal,
-        dependencies,
       }),
     ).resolves.toMatchObject({ ok: false, error: { code: "not_permitted" } });
     expect(registerApproval).toHaveBeenCalledWith(
@@ -407,7 +399,12 @@ describe("executeActionGateway", () => {
       providers: [{ id: "gmail", kind: "integration", label: "Gmail", description: "Email" }],
       actions: [readAction],
     };
-    const response = await executeActionGateway({
+    const response = await createActionGateway({
+      loadContext: vi.fn(async () => context),
+      resolveCatalog: vi.fn(async () => catalog),
+      claimInvocation: admittedInvocation,
+      now: () => new Date("2026-07-28T12:00:00.000Z"),
+    })({
       request: {
         operation: "execute",
         sessionId: "codex_session_1",
@@ -417,12 +414,6 @@ describe("executeActionGateway", () => {
         invocationId: "call_1",
       },
       signal: new AbortController().signal,
-      dependencies: {
-        loadContext: vi.fn(async () => context),
-        resolveCatalog: vi.fn(async () => catalog),
-        claimInvocation: admittedInvocation,
-        now: () => new Date("2026-07-28T12:00:00.000Z"),
-      },
     });
 
     expect(response).toEqual({
@@ -476,16 +467,15 @@ describe("executeActionGateway", () => {
       getCapabilityTurnState: () => capabilityTurnState,
       now: () => new Date("2026-07-28T12:00:00.000Z"),
     };
+    const gateway = createActionGateway(dependencies);
 
-    const first = await executeActionGateway({
+    const first = await gateway({
       request,
       signal: new AbortController().signal,
-      dependencies,
     });
-    const second = await executeActionGateway({
+    const second = await gateway({
       request: { ...request, invocationId: "call_2" },
       signal: new AbortController().signal,
-      dependencies,
     });
 
     expect(first).toEqual({
@@ -519,10 +509,11 @@ describe("executeActionGateway", () => {
       resolveCatalog: vi.fn(async () => catalog),
       claimInvocation,
     };
+    const gateway = createActionGateway(dependencies);
 
     for (let call = 1; call <= ACTION_MAX_CALLS_PER_TURN; call += 1) {
       await expect(
-        executeActionGateway({
+        gateway({
           request: {
             operation: "execute",
             sessionId: "session_budget",
@@ -532,13 +523,12 @@ describe("executeActionGateway", () => {
             invocationId: `call_${call}`,
           },
           signal: new AbortController().signal,
-          dependencies,
         }),
       ).resolves.toMatchObject({ ok: true });
     }
 
     await expect(
-      executeActionGateway({
+      gateway({
         request: {
           operation: "execute",
           sessionId: "session_budget",
@@ -548,14 +538,30 @@ describe("executeActionGateway", () => {
           invocationId: "call_17",
         },
         signal: new AbortController().signal,
-        dependencies,
       }),
     ).resolves.toMatchObject({ ok: false, error: { code: "call_budget" } });
   });
 
   it("does not redispatch an admitted invocation after a transport retry", async () => {
     const action = createReadAction();
-    const response = await executeActionGateway({
+    const response = await createActionGateway({
+      loadContext: vi.fn(async () => context),
+      resolveCatalog: vi.fn(async () => ({
+        providers: [
+          {
+            id: "gmail" as const,
+            label: "Gmail",
+            description: "Email",
+          },
+        ],
+        actions: [action],
+      })),
+      claimInvocation: vi.fn(async () => ({
+        ok: true as const,
+        callCount: 1,
+        duplicate: true,
+      })),
+    })({
       request: {
         operation: "execute",
         sessionId: "session_retry",
@@ -565,24 +571,6 @@ describe("executeActionGateway", () => {
         invocationId: "stable_call_1",
       },
       signal: new AbortController().signal,
-      dependencies: {
-        loadContext: vi.fn(async () => context),
-        resolveCatalog: vi.fn(async () => ({
-          providers: [
-            {
-              id: "gmail" as const,
-              label: "Gmail",
-              description: "Email",
-            },
-          ],
-          actions: [action],
-        })),
-        claimInvocation: vi.fn(async () => ({
-          ok: true as const,
-          callCount: 1,
-          duplicate: true,
-        })),
-      },
     });
 
     expect(response).toMatchObject({ ok: false, error: { code: "duplicate_invocation" } });
@@ -591,19 +579,18 @@ describe("executeActionGateway", () => {
 
   it("returns a structured internal error when durable governance is unavailable", async () => {
     const action = createReadAction();
-    const response = await executeActionGateway({
+    const response = await createActionGateway({
+      loadContext: vi.fn(async () => context),
+      resolveCatalog: vi.fn(async () => ({
+        providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
+        actions: [action],
+      })),
+      recordSourceDiscovery: vi.fn(async () => {
+        throw new Error("database unavailable");
+      }),
+    })({
       request: listRequest("gmail"),
       signal: new AbortController().signal,
-      dependencies: {
-        loadContext: vi.fn(async () => context),
-        resolveCatalog: vi.fn(async () => ({
-          providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
-          actions: [action],
-        })),
-        recordSourceDiscovery: vi.fn(async () => {
-          throw new Error("database unavailable");
-        }),
-      },
     });
 
     expect(response).toMatchObject({ ok: false, error: { code: "internal" } });
@@ -611,13 +598,12 @@ describe("executeActionGateway", () => {
 
   it("fails closed when the turn no longer authorizes access", async () => {
     const resolveCatalog = vi.fn();
-    const response = await executeActionGateway({
+    const response = await createActionGateway({
+      loadContext: vi.fn(async () => null),
+      resolveCatalog,
+    })({
       request: listRequest(),
       signal: new AbortController().signal,
-      dependencies: {
-        loadContext: vi.fn(async () => null),
-        resolveCatalog,
-      },
     });
 
     expect(response).toMatchObject({
