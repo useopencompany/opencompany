@@ -8,9 +8,10 @@ import {
 } from "@/lib/actions/capabilities";
 
 describe("PROVIDER_CAPABILITIES", () => {
-  it("registers Gmail reads and drafts on by default and sends behind ask", () => {
+  it("preserves legacy Gmail defaults and adds sensitive plugin reads behind ask", () => {
     expect(PROVIDER_CAPABILITIES.gmail).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
       expect.objectContaining({ id: "draft", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);

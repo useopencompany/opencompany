@@ -1,6 +1,7 @@
 import {
   BetterStackPluginDetail,
   GitHubPluginDetail,
+  GmailPluginDetail,
   GoogleCalendarPluginDetail,
   GoogleDrivePluginDetail,
   LinearPluginDetail,
@@ -32,6 +33,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
     const Detail = {
       betterstack: BetterStackPluginDetail,
       github: GitHubPluginDetail,
+      gmail: GmailPluginDetail,
       "google-drive": GoogleDrivePluginDetail,
       "google-calendar": GoogleCalendarPluginDetail,
       linear: LinearPluginDetail,

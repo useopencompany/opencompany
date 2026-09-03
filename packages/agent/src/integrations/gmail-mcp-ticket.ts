@@ -5,14 +5,14 @@ import {
   verifyFirstPartyMcpTicket,
 } from "./first-party-mcp-ticket";
 
-const TICKET_AUDIENCE = "opencompany-google-calendar-mcp";
-const SIGNING_CONTEXT = "opencompany-google-calendar-mcp-ticket";
+const TICKET_AUDIENCE = "opencompany-gmail-mcp";
+const SIGNING_CONTEXT = "opencompany-gmail-mcp-ticket";
 
-export type GoogleCalendarMcpOperation = RemoteMcpOperation;
-export type GoogleCalendarMcpTicketPayload = FirstPartyMcpTicketPayload<typeof TICKET_AUDIENCE>;
+export type GmailMcpOperation = RemoteMcpOperation;
+export type GmailMcpTicketPayload = FirstPartyMcpTicketPayload<typeof TICKET_AUDIENCE>;
 
-export function createGoogleCalendarMcpTicket(
-  input: Omit<GoogleCalendarMcpTicketPayload, "v" | "aud" | "expiresAt"> & {
+export function createGmailMcpTicket(
+  input: Omit<GmailMcpTicketPayload, "v" | "aud" | "expiresAt"> & {
     secret: string;
     now?: number;
     ttlMs?: number;
@@ -25,11 +25,7 @@ export function createGoogleCalendarMcpTicket(
   });
 }
 
-export function verifyGoogleCalendarMcpTicket(input: {
-  ticket: string;
-  secret: string;
-  now?: number;
-}) {
+export function verifyGmailMcpTicket(input: { ticket: string; secret: string; now?: number }) {
   return verifyFirstPartyMcpTicket({
     ...input,
     audience: TICKET_AUDIENCE,

@@ -13244,6 +13244,7 @@
             "enum": [
               "read",
               "query",
+              "draft",
               "write"
             ]
           },
@@ -13677,6 +13678,7 @@
                 "enum": [
                   "read",
                   "query",
+                  "draft",
                   "write"
                 ]
               },

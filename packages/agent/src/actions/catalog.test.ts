@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   calendar: vi.fn(),
   github: vi.fn(),
+  gmail: vi.fn(),
   googleDrive: vi.fn(),
   noop: vi.fn(),
   remote: vi.fn(),
@@ -14,7 +15,7 @@ vi.mock("../plugin-gateway", () => ({
 }));
 vi.mock("./attio", () => ({ resolveAttioActions: mocks.noop }));
 vi.mock("./github", () => ({ resolveGitHubActions: mocks.github }));
-vi.mock("./gmail", () => ({ resolveGmailActions: mocks.noop }));
+vi.mock("./gmail", () => ({ resolveGmailActions: mocks.gmail }));
 vi.mock("./google-calendar", () => ({ resolveGoogleCalendarActions: mocks.calendar }));
 vi.mock("./google-drive", () => ({ resolveGoogleDriveActions: mocks.googleDrive }));
 vi.mock("./latitude", () => ({ resolveLatitudeActions: mocks.noop }));
@@ -46,6 +47,12 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       label: "GitHub",
       description: "Legacy workspace GitHub actions.",
       actions: [{ id: "github.search_issues" }],
+    });
+    mocks.gmail.mockResolvedValue({
+      id: "gmail",
+      label: "Gmail",
+      description: "Legacy Gmail actions.",
+      actions: [{ id: "gmail.search_messages" }],
     });
     mocks.googleDrive.mockResolvedValue({
       id: "google_drive",
@@ -178,6 +185,40 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
     expect(withPlugin.actions).toContainEqual(
       expect.objectContaining({ id: "plugin:slack:slack.search" }),
+    );
+  });
+
+  it("keeps legacy Gmail as a fallback and suppresses it once the plugin is installed", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.gmail).toHaveBeenCalledWith("user_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "gmail.search_messages" }),
+    );
+
+    mocks.gmail.mockClear();
+    const gmailPluginRegistration = {
+      source: "plugin:gmail:gmail",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:gmail:gmail",
+      label: "Gmail",
+      description: "Official Gmail plugin tools.",
+      actions: [{ id: "plugin:gmail:gmail.search_threads" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [gmailPluginRegistration] },
+    );
+
+    expect(mocks.gmail).not.toHaveBeenCalled();
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:gmail:gmail.search_threads" }),
+    );
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "gmail.search_messages" }),
     );
   });
 

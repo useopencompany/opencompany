@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IntegrationProvider } from "@opencompany/db/product-schema";
 import { getAppUrl } from "../app-url";
-import { GMAIL_COMPOSE_SCOPE, GMAIL_READ_SCOPE } from "./gmail-scopes";
+import { GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE, GMAIL_READ_SCOPE } from "./gmail-scopes";
 import { GOOGLE_CALENDAR_EVENTS_SCOPE, GOOGLE_CALENDAR_READ_SCOPE } from "./google-calendar-scopes";
 import {
   GOOGLE_DOCS_WRITE_SCOPE,
@@ -22,6 +22,8 @@ export type GoogleProviderConfig = {
   scopes: string[];
 };
 
+export type GoogleIntegrationAccess = "default" | "gmail_mcp";
+
 const OPENID_SCOPES = ["openid", "email", "profile"];
 
 export const GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GoogleProviderConfig> = {
@@ -29,9 +31,6 @@ export const GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GooglePro
     provider: "gmail",
     routeSegment: "gmail",
     displayName: "Gmail",
-    // gmail.compose is the narrowest Gmail API scope that can create drafts.
-    // It also authorizes sending, which opencompany gates separately in its own
-    // per-account permission model.
     scopes: [GMAIL_READ_SCOPE, GMAIL_COMPOSE_SCOPE, ...OPENID_SCOPES],
   },
   google_calendar: {
@@ -57,6 +56,22 @@ export const GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GooglePro
     ],
   },
 };
+
+const GMAIL_MCP_PROVIDER_CONFIG: GoogleProviderConfig = {
+  ...GOOGLE_PROVIDER_CONFIG.gmail,
+  // opencompany's Gmail MCP uses gmail.modify for read, draft, label, and
+  // reversible trash operations. The credential remains server-side.
+  scopes: [GMAIL_MODIFY_SCOPE, ...OPENID_SCOPES],
+};
+
+export function googleProviderConfigForAccess(
+  provider: GoogleIntegrationProvider,
+  access: GoogleIntegrationAccess,
+): GoogleProviderConfig {
+  return provider === "gmail" && access === "gmail_mcp"
+    ? GMAIL_MCP_PROVIDER_CONFIG
+    : GOOGLE_PROVIDER_CONFIG[provider];
+}
 
 export function googleAuthorizationConfigForReturnTo(
   config: GoogleProviderConfig,
@@ -101,10 +116,15 @@ export type GoogleUserInfo = {
 
 export type GoogleIntegrationStatePayload = {
   provider: GoogleIntegrationProvider;
+  access: GoogleIntegrationAccess;
   userWorkosId: string;
   returnTo: string;
   expiresAt: number;
   nonce: string;
+};
+
+type ParsedGoogleIntegrationStatePayload = Omit<GoogleIntegrationStatePayload, "access"> & {
+  access?: GoogleIntegrationAccess;
 };
 
 export function isGoogleIntegrationConfigured() {
@@ -112,10 +132,13 @@ export function isGoogleIntegrationConfigured() {
 }
 
 export function createGoogleIntegrationState(
-  input: Omit<GoogleIntegrationStatePayload, "expiresAt" | "nonce">,
+  input: Omit<GoogleIntegrationStatePayload, "access" | "expiresAt" | "nonce"> & {
+    access?: GoogleIntegrationAccess;
+  },
 ) {
   const payload: GoogleIntegrationStatePayload = {
     provider: input.provider,
+    access: input.access ?? "default",
     userWorkosId: input.userWorkosId,
     returnTo: sanitizeReturnTo(input.returnTo),
     expiresAt: Date.now() + 10 * 60 * 1000,
@@ -141,6 +164,7 @@ export function verifyGoogleIntegrationState(state: string): GoogleIntegrationSt
 
   return {
     provider: payload.provider,
+    access: payload.access ?? "default",
     userWorkosId: payload.userWorkosId,
     returnTo: sanitizeReturnTo(payload.returnTo),
     expiresAt: payload.expiresAt,
@@ -250,13 +274,18 @@ function toExpiresAt(expiresIn?: number) {
   return new Date(Date.now() + expiresIn * 1000);
 }
 
-function isGoogleIntegrationStatePayload(value: unknown): value is GoogleIntegrationStatePayload {
+function isGoogleIntegrationStatePayload(
+  value: unknown,
+): value is ParsedGoogleIntegrationStatePayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (
     (record.provider === "gmail" ||
       record.provider === "google_calendar" ||
       record.provider === "google_drive") &&
+    (record.access === undefined ||
+      record.access === "default" ||
+      (record.provider === "gmail" && record.access === "gmail_mcp")) &&
     typeof record.userWorkosId === "string" &&
     typeof record.returnTo === "string" &&
     typeof record.expiresAt === "number" &&

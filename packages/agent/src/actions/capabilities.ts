@@ -33,6 +33,12 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "on",
     },
     {
+      id: "query",
+      label: "Read Gmail",
+      description: "Search and read messages, threads, drafts, and labels in your Gmail account.",
+      defaultMode: "ask",
+    },
+    {
       id: "draft",
       label: "Create drafts",
       description: "Save new email drafts in Gmail for you to review and send.",

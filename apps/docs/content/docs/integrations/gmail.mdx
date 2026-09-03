@@ -1,20 +1,56 @@
 ---
 title: Gmail
-description: Read email, draft or send messages, and ingest selected mail events.
+description: Read and organize Gmail and create drafts through the official MCP plugin.
 ---
 
-## What connecting does
+## Install and connect
 
-Gmail is a personal OAuth connection. Current actions can read mail, create new plain-text drafts for
-manual review, and send new plain-text email when the send action is approved.
+Gmail is an official opencompany Agent Plugin backed by opencompany's MCP wrapper around Google's
+stable Gmail REST API. A workspace admin installs the immutable package from
+**Settings → Plugins → Gmail**. Each person who wants to use Gmail tools then connects their own
+Google account from the Gmail plugin page.
+
+The Google Cloud project used for OAuth must have the stable Gmail API (`gmail.googleapis.com`)
+enabled and complete Google's normal verification for the requested restricted scope. Google's
+Developer Preview Gmail MCP API is not used or required. Accounts connected before the plugin
+shipped must reconnect once to grant the access needed by the full tool set.
 
 ## Scopes and permissions
 
-Reading, draft creation, and sending are separate opencompany permissions even where Google groups
-provider access under the same OAuth grant. Sending defaults to a confirmation boundary. The full
-Google scope list and reconnect rules are coming soon; review the consent screen before authorizing.
+The plugin groups reviewed tools into three controls, all set to **Ask** by default because mailbox
+content is sensitive and every supported write changes the user's mailbox:
 
-## Brain ingestion
+- **Read Gmail — Ask:** search and read messages, threads, drafts, and labels.
+- **Create drafts — Ask:** create a draft for the user to review in Gmail.
+- **Organize Gmail — Ask:** add or remove labels, create labels, and move messages or threads to or
+  from trash.
 
-Choose the supported sent or received email events and any ingestion instructions in the destination
-Brain's Sources settings. Connecting Gmail alone does not ingest the mailbox.
+New or unclassified tools always start at **Ask**. Persistent coding sessions only receive tools set
+to **On**. You can change these modes for the active account on the Gmail plugin page.
+
+Google requires the `gmail.modify` OAuth scope for the combined read, draft, label, and trash tools.
+Google defines that scope as allowing reading, composing, and sending email, but opencompany exposes
+no send-email tool. OAuth credentials remain encrypted and server-side. The plugin gateway sends
+only a short-lived, signed, operation-bound ticket to
+`https://api.opencompany.chat/mcp/plugins/gmail`; Google access and refresh tokens never become MCP
+credentials. The endpoint rechecks the installed plugin, connected account, scopes, and current tool
+permission before calling Gmail.
+
+## Safety and limitations
+
+The Gmail MCP server supports reading mail, creating drafts, applying or removing labels, moving
+mail to or from trash, and creating labels. It does not expose send, permanent-delete, spam, or
+attachment-download tools. Sending must be completed manually from Gmail after reviewing a draft.
+
+Email bodies are untrusted input and can contain indirect prompt-injection attempts. Keep Gmail
+permissions at **Ask** unless automatic access is intentional, and review any proposed mailbox
+change before approving it.
+
+## Legacy actions and Brain ingestion
+
+Before the Gmail plugin is installed, existing accounts continue to use the built-in Gmail chat
+actions as a fallback. Installing the plugin replaces those actions so duplicate Gmail tools are not
+shown. Uninstalling the plugin restores the fallback without disconnecting the Google account.
+
+Brain ingestion remains separate. Choose the supported sent or received email events and any
+ingestion instructions in **Wiki → Sources**. Connecting Gmail alone does not ingest the mailbox.

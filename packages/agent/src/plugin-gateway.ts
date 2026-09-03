@@ -25,6 +25,12 @@ import {
   loadGitHubUserMcpWorkerConnection,
 } from "./integrations/github-user-mcp";
 import {
+  GMAIL_MCP_ENDPOINT_URL,
+  getGmailMcpIntegrationState,
+  gmailMcpRuntimeEndpointUrl,
+  loadGmailMcpWorkerConnection,
+} from "./integrations/gmail-mcp";
+import {
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
   getGoogleCalendarMcpIntegrationState,
   googleCalendarMcpRuntimeEndpointUrl,
@@ -92,6 +98,12 @@ const providerBindings = {
     endpointUrl: GITHUB_USER_MCP_ENDPOINT_URL,
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
+  },
+  gmail: {
+    provider: "gmail",
+    endpointUrl: GMAIL_MCP_ENDPOINT_URL,
+    getState: getGmailMcpIntegrationState,
+    loadConnection: loadGmailMcpWorkerConnection,
   },
   "google-calendar": {
     provider: "google_calendar",
@@ -361,6 +373,10 @@ function bindRegistration(
     loadConnection = (input) =>
       loadGoogleDriveMcpWorkerConnection({ ...input, registrationId: record.id });
     server = { ...record.server, url: googleDriveMcpRuntimeEndpointUrl() };
+  } else if (record.pluginName === "gmail") {
+    loadConnection = (input) =>
+      loadGmailMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: gmailMcpRuntimeEndpointUrl() };
   }
   return {
     source: `plugin:${record.pluginName}:${record.server.name}`,

@@ -370,6 +370,10 @@ function AppLiveDataSubscriptions({
       // Official MCP gateways deliberately select the most recently updated
       // account. Preserve the server-selected primaries while personalAccounts
       // continues to update live, so plugin pages edit those same accounts.
+      gmail: {
+        ...liveIntegrations.gmail,
+        integrationId: initialData.integrations.gmail.integrationId,
+      },
       slack: initialData.integrations.slack,
       google_calendar: initialData.integrations.google_calendar,
       google_drive: initialData.integrations.google_drive,

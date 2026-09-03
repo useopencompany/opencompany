@@ -7,10 +7,10 @@ import {
   createGoogleIntegrationState,
   exchangeGoogleCode,
   fetchGoogleUserInfo,
-  GOOGLE_PROVIDER_CONFIG,
   type GoogleIntegrationProvider,
   googleAuthorizationConfigForReturnTo,
   googleOAuthRedirectUri,
+  googleProviderConfigForAccess,
   isGoogleIntegrationConfigured,
   verifyGoogleIntegrationState,
 } from "@opencompany/agent/integrations/google-oauth";
@@ -41,7 +41,7 @@ export function createGoogleIngress(input: {
   db: DbLike;
   identify: ApiIdentityVerifier;
   refreshPluginRegistrations?: (input: {
-    provider: Extract<GoogleIntegrationProvider, "google_calendar" | "google_drive">;
+    provider: GoogleIntegrationProvider;
     userWorkosId: string;
     workspaceIds: string[];
   }) => Promise<void>;
@@ -57,7 +57,7 @@ type IngressInput = {
   db: DbLike;
   identify: ApiIdentityVerifier;
   refreshPluginRegistrations?: (input: {
-    provider: Extract<GoogleIntegrationProvider, "google_calendar" | "google_drive">;
+    provider: GoogleIntegrationProvider;
     userWorkosId: string;
     workspaceIds: string[];
   }) => Promise<void>;
@@ -72,7 +72,9 @@ async function handleStart(
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
-  const config = GOOGLE_PROVIDER_CONFIG[provider];
+  const access =
+    provider === "gmail" && url.searchParams.get("access") === "mcp" ? "gmail_mcp" : "default";
+  const config = googleProviderConfigForAccess(provider, access);
   const authorizationConfig = googleAuthorizationConfigForReturnTo(config, returnTo);
   const oauthRedirectUri = googleOAuthRedirectUri(config);
 
@@ -82,6 +84,7 @@ async function handleStart(
 
   const state = createGoogleIntegrationState({
     provider,
+    access,
     userWorkosId: session.userId,
     returnTo,
   });
@@ -99,7 +102,6 @@ async function handleCallback(
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
-  const config = GOOGLE_PROVIDER_CONFIG[provider];
   const errorRedirect = (returnTo: string) => statusRedirect(session, returnTo, provider, "error");
 
   let state: ReturnType<typeof verifyGoogleIntegrationState>;
@@ -123,6 +125,7 @@ async function handleCallback(
     });
     return errorRedirect(state.returnTo);
   }
+  const config = googleProviderConfigForAccess(provider, state.access);
 
   if (!isGoogleIntegrationConfigured()) {
     return errorRedirect(state.returnTo);
@@ -168,7 +171,7 @@ async function handleCallback(
       workspaceId: session.workspaceId,
       provider,
     });
-    if (provider === "google_calendar" || provider === "google_drive") {
+    if (provider !== "gmail" || state.access === "gmail_mcp") {
       await refreshGooglePluginAfterConnection(input, session, provider);
     }
 
@@ -187,7 +190,7 @@ async function handleCallback(
 async function refreshGooglePluginAfterConnection(
   input: IngressInput,
   session: Extract<Awaited<ReturnType<typeof resolveIngressSession>>, { kind: "actor" }>,
-  provider: Extract<GoogleIntegrationProvider, "google_calendar" | "google_drive">,
+  provider: GoogleIntegrationProvider,
 ) {
   if (!input.refreshPluginRegistrations) return;
   try {
@@ -201,7 +204,9 @@ async function refreshGooglePluginAfterConnection(
       event:
         provider === "google_drive"
           ? "goat.google_drive_plugin_reconnect_refresh_failed"
-          : "goat.google_calendar_plugin_reconnect_refresh_failed",
+          : provider === "gmail"
+            ? "goat.gmail_plugin_reconnect_refresh_failed"
+            : "goat.google_calendar_plugin_reconnect_refresh_failed",
       provider,
       error_message: error instanceof Error ? error.message : String(error),
     });

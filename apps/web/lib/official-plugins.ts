@@ -1,6 +1,7 @@
 export type OfficialMcpPluginName =
   | "betterstack"
   | "github"
+  | "gmail"
   | "google-calendar"
   | "google-drive"
   | "linear"
@@ -24,6 +25,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
   connectionProvider:
     | "betterstack"
     | "github_user"
+    | "gmail"
     | "google_calendar"
     | "google_drive"
     | "linear"
@@ -70,6 +72,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref: "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
     accountLabel: "GitHub",
     accountDescription: "The personal GitHub account opencompany uses when it works as you.",
+  },
+  gmail: {
+    name: "gmail",
+    kind: "mcp",
+    label: "Gmail",
+    description: "Search and read Gmail, create drafts, and organize messages with approval.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
+    connectionProvider: "gmail",
+    connectHref: "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+    accountDescription: "The most recently connected Gmail account powers Gmail tools.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure Gmail ingestion in Wiki sources",
   },
   "google-calendar": {
     name: "google-calendar",

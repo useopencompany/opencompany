@@ -16,6 +16,7 @@ import type {
   ImessageProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
+import type { GmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
 import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
@@ -201,6 +202,7 @@ export type CreateApiAppInput = {
   integrationAccounts: IntegrationAccountService;
   slackBotSettings: SlackBotSettingsService;
   mcp?: McpService;
+  gmailMcp?: GmailMcpService;
   googleCalendarMcp?: GoogleCalendarMcpService;
   googleDriveMcp?: GoogleDriveMcpService;
   engineAuth: EngineAuthService;
@@ -2640,6 +2642,9 @@ export function createApiApp(input: CreateApiAppInput) {
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
   if (input.mcp) {
     app.on(["GET", "POST", "DELETE"], "/mcp", (c) => input.mcp!.handle(c.req.raw));
+  }
+  if (input.gmailMcp) {
+    app.post("/mcp/plugins/gmail", (c) => input.gmailMcp!.handle(c.req.raw));
   }
   if (input.googleCalendarMcp) {
     app.post("/mcp/plugins/google-calendar", (c) => input.googleCalendarMcp!.handle(c.req.raw));

@@ -10,6 +10,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import {
   BetterStackIcon,
   GitHubIcon,
+  GmailIcon,
   GoogleCalendarIcon,
   GoogleDriveIcon,
   LinearIcon,
@@ -122,6 +123,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: GitHubIcon,
     iconClassName: "bg-[#181717] text-white",
   },
+  gmail: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.gmail,
+    Icon: GmailIcon,
+    iconClassName: "bg-white text-[#EA4335]",
+  },
   "google-calendar": {
     ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],
     Icon: GoogleCalendarIcon,
@@ -174,6 +180,8 @@ export const OFFICIAL_PLUGINS = {
 
 export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
 export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
+export const GMAIL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.gmail.name;
+export const GMAIL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.gmail.source;
 export const GOOGLE_CALENDAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-calendar"].name;
 export const GOOGLE_CALENDAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-calendar"].source;
 export const GOOGLE_DRIVE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-drive"].name;
@@ -224,6 +232,10 @@ export function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialGitHubPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.github, preview);
+}
+
+export function installOfficialGmailPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.gmail, preview);
 }
 
 export function installOfficialGoogleCalendarPlugin(preview?: PluginImportPreviewDto) {

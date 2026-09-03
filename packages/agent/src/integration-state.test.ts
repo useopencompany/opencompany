@@ -92,6 +92,36 @@ describe("Slack integration state", () => {
   });
 });
 
+describe("Google integration state", () => {
+  it("carries the server-selected Gmail account and its permission snapshot", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_gmail_old",
+        provider: "gmail",
+        status: "connected",
+        accountEmail: "old@example.com",
+        scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+        capabilityModes: { query: "off" },
+      },
+      {
+        id: "gint_gmail_primary",
+        provider: "gmail",
+        status: "connected",
+        accountEmail: "primary@example.com",
+        scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+        capabilityModes: { query: "ask", draft: "ask", write: "ask" },
+      },
+    ]);
+
+    expect(state.gmail).toMatchObject({
+      integrationId: "gint_gmail_primary",
+      accountEmail: "primary@example.com",
+      scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+      capabilityModes: { query: "ask", draft: "ask", write: "ask" },
+    });
+  });
+});
+
 describe("Google Drive integration state", () => {
   it("keeps legacy accounts connected for Brain ingestion without the plugin grant", () => {
     const state = integrationStateFromRows([
