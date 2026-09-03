@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ask opencompany to update one of your workspace skills right from chat (#1519) — @louis.
 
 ### Changed
-- Wiki is now your workspace's knowledge system by default, and onboarding helps you connect sources and import your company context from the start. Brain stays available behind a legacy setting (#1527, #1543) — @louis.
+- Wiki is now your workspace's knowledge system by default. Owner onboarding is shorter, and connecting sources or importing company context stays available from Wiki after setup. Brain stays available behind a legacy setting (#1527, #1543, #1548) — @louis.
 - The old built-in Slack integration is retired in favor of the Slack plugin; reconnect Slack once through the plugin to keep it working (#1508) — @louis.
 - The workspace Usage page is rebuilt around one daily-spend chart, broken down by where your spend goes, so you can see how much you're spending and which way it's trending at a glance (#1512) — @louis.
 - Long coding chats stay readable: earlier Codex and Claude tool calls collapse behind a single disclosure while the latest reply and anything still running stay in view (#1529) — @louis.
