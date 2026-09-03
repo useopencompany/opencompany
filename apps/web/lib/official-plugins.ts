@@ -3,6 +3,7 @@ export type OfficialMcpPluginName =
   | "github"
   | "gmail"
   | "google-calendar"
+  | "google-drive"
   | "linear"
   | "neon"
   | "render"
@@ -26,6 +27,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "github_user"
     | "gmail"
     | "google_calendar"
+    | "google_drive"
     | "linear"
     | "neon"
     | "render"
@@ -95,6 +97,20 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref:
       "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
     accountDescription: "The Google account opencompany uses when you run Calendar tools.",
+  },
+  "google-drive": {
+    name: "google-drive",
+    kind: "mcp",
+    label: "Google Drive",
+    description: "Browse, read, create, and copy files through opencompany's Google Drive MCP.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/dc0c91221bcfa9b6088a19277f875c438b37e96e/google-drive",
+    connectionProvider: "google_drive",
+    connectHref: "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
+    accountDescription:
+      "The most recently connected Google Drive account powers plugin tools. Other accounts remain available for Wiki ingestion.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure Google Drive ingestion in Wiki sources",
   },
   linear: {
     name: "linear",

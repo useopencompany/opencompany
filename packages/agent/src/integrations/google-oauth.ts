@@ -5,6 +5,7 @@ import { GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE, GMAIL_READ_SCOPE } from "./gma
 import { GOOGLE_CALENDAR_EVENTS_SCOPE, GOOGLE_CALENDAR_READ_SCOPE } from "./google-calendar-scopes";
 import {
   GOOGLE_DOCS_WRITE_SCOPE,
+  GOOGLE_DRIVE_FILE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
   GOOGLE_SHEETS_WRITE_SCOPE,
 } from "./google-drive-scopes";
@@ -70,6 +71,20 @@ export function googleProviderConfigForAccess(
   return provider === "gmail" && access === "gmail_mcp"
     ? GMAIL_MCP_PROVIDER_CONFIG
     : GOOGLE_PROVIDER_CONFIG[provider];
+}
+
+export function googleAuthorizationConfigForReturnTo(
+  config: GoogleProviderConfig,
+  returnTo: string,
+): GoogleProviderConfig {
+  const returnPath = new URL(sanitizeReturnTo(returnTo), "https://opencompany.invalid").pathname;
+  if (config.provider !== "google_drive" || returnPath !== "/settings/plugins/google-drive") {
+    return config;
+  }
+  return {
+    ...config,
+    scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, ...OPENID_SCOPES],
+  };
 }
 
 const GOOGLE_INTEGRATION_ENVS = [

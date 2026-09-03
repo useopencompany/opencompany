@@ -376,6 +376,7 @@ function AppLiveDataSubscriptions({
       },
       slack: initialData.integrations.slack,
       google_calendar: initialData.integrations.google_calendar,
+      google_drive: initialData.integrations.google_drive,
       codex: initialData.integrations.codex,
       claude_code: initialData.integrations.claude_code,
       infisical: initialData.integrations.infisical,

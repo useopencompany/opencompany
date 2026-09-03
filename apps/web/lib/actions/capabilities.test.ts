@@ -17,9 +17,10 @@ describe("PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
-  it("registers Drive reads on by default and document writes behind ask", () => {
+  it("keeps legacy Drive reads on and guards sensitive MCP reads and writes", () => {
     expect(PROVIDER_CAPABILITIES.google_drive).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });

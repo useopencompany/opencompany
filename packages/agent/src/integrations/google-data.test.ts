@@ -1,55 +1,63 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  select: vi.fn(),
+  getDb: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({
-  getDb: () => ({ select: mocks.select }),
+  getDb: mocks.getDb,
 }));
 
 import { GOOGLE_CALENDAR_EVENTS_SCOPE, GOOGLE_CALENDAR_READ_SCOPE } from "./google-calendar-scopes";
 import { getGoogleIntegrationState } from "./google-data";
-
-const storedCalendarRow: Record<string, unknown> = {
-  id: "gint_google_calendar",
-  provider: "google_calendar",
-  accountEmail: "calendar@example.com",
-  accountName: "Calendar User",
-  status: "connected",
-  scopes: [GOOGLE_CALENDAR_READ_SCOPE, GOOGLE_CALENDAR_EVENTS_SCOPE],
-  capabilityModes: { read: "ask", write: "ask" },
-  updatedAt: new Date("2026-09-03T08:00:00.000Z"),
-};
+import { GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DRIVE_READ_SCOPE } from "./google-drive-scopes";
 
 describe("getGoogleIntegrationState", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.select.mockImplementation((selection: Record<string, unknown>) => {
-      const queryShapedRow = Object.fromEntries(
-        Object.keys(selection).map((field) => [field, storedCalendarRow[field]]),
-      );
-      return {
-        from: () => ({
-          where: () => ({
-            orderBy: async () => [queryShapedRow],
-          }),
-        }),
-      };
-    });
   });
 
-  it("selects the Calendar OAuth fields needed by the server snapshot", async () => {
+  it("preserves Drive scopes and capability modes in the query-shaped initial state", async () => {
+    const sourceRow = {
+      id: "gint_drive",
+      provider: "google_drive",
+      accountEmail: "ada@example.com",
+      accountName: "Ada",
+      status: "connected",
+      scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE],
+      capabilityModes: { read: "ask", query: "ask", write: "ask" },
+      updatedAt: new Date("2026-09-03T08:00:00.000Z"),
+    };
+    mocks.getDb.mockReturnValue(queryShapedDb(sourceRow));
+
     const state = await getGoogleIntegrationState("user_1");
 
-    expect(mocks.select).toHaveBeenCalledTimes(1);
-    const selection = mocks.select.mock.calls[0]?.[0];
-    expect(selection).toEqual(
+    expect(state.personalAccounts.google_drive).toEqual([
       expect.objectContaining({
-        scopes: expect.anything(),
-        capabilityModes: expect.anything(),
+        integrationId: "gint_drive",
+        connected: true,
+        status: "connected",
+        scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE],
+        capabilityModes: { read: "ask", query: "ask", write: "ask" },
       }),
-    );
+    ]);
+  });
+
+  it("preserves Calendar scopes and capability modes in the query-shaped initial state", async () => {
+    const sourceRow = {
+      id: "gint_google_calendar",
+      provider: "google_calendar",
+      accountEmail: "calendar@example.com",
+      accountName: "Calendar User",
+      status: "connected",
+      scopes: [GOOGLE_CALENDAR_READ_SCOPE, GOOGLE_CALENDAR_EVENTS_SCOPE],
+      capabilityModes: { read: "ask", write: "ask" },
+      updatedAt: new Date("2026-09-03T09:00:00.000Z"),
+    };
+    mocks.getDb.mockReturnValue(queryShapedDb(sourceRow));
+
+    const state = await getGoogleIntegrationState("user_1");
+
     expect(state.personalAccounts.google_calendar).toEqual([
       expect.objectContaining({
         connected: true,
@@ -60,3 +68,19 @@ describe("getGoogleIntegrationState", () => {
     ]);
   });
 });
+
+function queryShapedDb(sourceRow: Record<string, unknown>) {
+  return {
+    select: vi.fn((selection: Record<string, unknown>) => {
+      const projectedRow = Object.fromEntries(
+        Object.keys(selection).map((field) => [field, sourceRow[field]]),
+      );
+      const builder = {
+        from: vi.fn(() => builder),
+        where: vi.fn(() => builder),
+        orderBy: vi.fn(async () => [projectedRow]),
+      };
+      return builder;
+    }),
+  };
+}

@@ -10,6 +10,7 @@ import { BrowserProfileApplicationService } from "@opencompany/agent/browser-pro
 import { createGmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
 import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
+import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import {
   createPluginGatewayLifecycle,
@@ -246,6 +247,10 @@ const app = createApiApp({
           db: database.db,
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
         }),
+        googleDriveMcp: createGoogleDriveMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
       }
     : {}),
   billing: createBillingApplicationService({
@@ -293,12 +298,17 @@ const app = createApiApp({
   googleIngress: createGoogleIngress({
     db: database.db,
     identify: identityVerifier,
-    refreshPluginRegistrations: ({ userWorkosId, workspaceIds }) =>
+    refreshPluginRegistrations: ({ provider, userWorkosId, workspaceIds }) =>
       refreshPluginGatewayRegistrationsForWorkspaces({
         db: database.db,
         userWorkosId,
         workspaceIds,
-        connectionProvider: "google-calendar",
+        connectionProvider:
+          provider === "gmail"
+            ? "gmail"
+            : provider === "google_drive"
+              ? "google-drive"
+              : "google-calendar",
       }),
   }),
   slackIngress: createSlackIngress({

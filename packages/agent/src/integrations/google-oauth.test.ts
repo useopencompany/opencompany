@@ -3,6 +3,7 @@ import {
   buildGoogleAuthorizationUrl,
   createGoogleIntegrationState,
   GOOGLE_PROVIDER_CONFIG,
+  googleAuthorizationConfigForReturnTo,
   googleOAuthRedirectUri,
   googleProviderConfigForAccess,
   verifyGoogleIntegrationState,
@@ -79,6 +80,9 @@ describe("opencompany Google OAuth", () => {
     expect(driveUrl.searchParams.get("scope")).toContain(
       "https://www.googleapis.com/auth/drive.readonly",
     );
+    expect(driveUrl.searchParams.get("scope")).not.toContain(
+      "https://www.googleapis.com/auth/drive.file",
+    );
     expect(driveUrl.searchParams.get("scope")).toContain(
       "https://www.googleapis.com/auth/documents",
     );
@@ -87,6 +91,23 @@ describe("opencompany Google OAuth", () => {
     );
     expect(driveUrl.searchParams.get("scope")).not.toContain("gmail.readonly");
     expect(driveUrl.searchParams.get("scope")).not.toContain("calendar.readonly");
+  });
+
+  it("requests only Google's required Drive MCP scopes from the plugin surface", () => {
+    const config = googleAuthorizationConfigForReturnTo(
+      GOOGLE_PROVIDER_CONFIG.google_drive,
+      "/settings/plugins/google-drive?integration=google_drive",
+    );
+
+    expect(config.scopes).toEqual([
+      "https://www.googleapis.com/auth/drive.readonly",
+      "https://www.googleapis.com/auth/drive.file",
+      "openid",
+      "email",
+      "profile",
+    ]);
+    expect(config.scopes).not.toContain("https://www.googleapis.com/auth/documents");
+    expect(config.scopes).not.toContain("https://www.googleapis.com/auth/spreadsheets");
   });
 
   it("uses direct opencompany callbacks", () => {
