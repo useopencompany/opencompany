@@ -904,7 +904,7 @@ export function Surface({
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
     : null;
-  const attachmentsEnabled = Boolean(userWorkosId) && !activeTaskConversation;
+  const attachmentsEnabled = Boolean(userWorkosId) && !readOnly;
   const composerAttachments = useChatAttachments({
     modelName: String(composerChatModel),
     // The Cmd+K compose view mounts a second composer with its own window-level drop

@@ -1308,6 +1308,54 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("Please check the afternoon too")).toBeInTheDocument();
   });
 
+  it("attaches a dropped screenshot when continuing a session-backed task", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "goat_chat_task_1",
+          title: "Investigate task",
+          model: DEFAULT_MODEL,
+          engine: "opencompany",
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "goat_task_1",
+          status: "succeeded",
+          startedAtMs: Date.now(),
+        }}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const screenshot = new File(["image"], "screenshot.png", { type: "image/png" });
+    fireEvent.drop(window, {
+      dataTransfer: { types: ["Files"], files: [screenshot] },
+    });
+
+    await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
+    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({ file: screenshot });
+    expect(await screen.findByText("screenshot.png")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "",
+      metadata: {
+        attachments: [
+          expect.objectContaining({
+            id: "attachment_1",
+            kind: "image",
+            filename: "screenshot.png",
+          }),
+        ],
+      },
+    });
+  });
+
   it("keeps pre-cutover Task history explicitly read-only", () => {
     render(
       <Surface
@@ -1331,6 +1379,7 @@ describe("Surface chat streaming UI", () => {
           status: "succeeded",
           startedAtMs: Date.now(),
         }}
+        userWorkosId="user_1"
         readOnlyNotice="This pre-cutover task is available as read-only history. Start a new task to continue the work."
       />,
     );
