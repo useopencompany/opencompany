@@ -12,6 +12,7 @@ import type { SandboxHandle } from "./sandbox";
 const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
 const CODEX_ACP_PREFIX = '"$HOME/.codex-acp"';
 const CODEX_ACP_BIN_PATH = '"$HOME/.codex-acp/bin"';
+const CODEX_VERSION_CHECK_TIMEOUT_MS = 60_000;
 export const CODEX_FALLBACK_NPM_PACKAGE = CODEX_CLI_PACKAGE;
 const CODEX_PROVIDER_ID = "opencompany";
 const CODEX_PROVIDER_NAME = "opencompany";
@@ -34,7 +35,7 @@ export type CodexCliAuth =
 export async function ensureCodexInstalled(sandbox: SandboxHandle) {
   const check = await sandbox.commands.run(
     `export PATH=${CODEX_BIN_PATH}:"$PATH" && codex --version 2>/dev/null || true`,
-    { timeoutMs: 30_000 },
+    { timeoutMs: CODEX_VERSION_CHECK_TIMEOUT_MS },
   );
   if (String(check.stdout ?? "").trim() === CODEX_CLI_VERSION_OUTPUT) return;
   await sandbox.commands.run(
@@ -54,7 +55,7 @@ export async function ensureCodexAcpAdapterInstalled(sandbox: SandboxHandle) {
       "codex-acp --version 2>/dev/null || true",
       "codex --version 2>/dev/null || true",
     ].join(" && "),
-    { timeoutMs: 30_000 },
+    { timeoutMs: CODEX_VERSION_CHECK_TIMEOUT_MS },
   );
   const output = String(check.stdout ?? "");
   if (

@@ -1,5 +1,6 @@
 import {
   createGitHubPluginFetcher,
+  GitHubArtifactFetchError,
   PluginResolverError,
   resolvePlugin,
 } from "@opencompany/agent-runtime";
@@ -62,6 +63,13 @@ export async function resolvePluginImport(input: {
   } catch (error) {
     if (error instanceof PluginResolverError) {
       throw new CoreError("invalid_argument", error.message);
+    }
+    if (error instanceof GitHubArtifactFetchError) {
+      throw new CoreError(
+        "unavailable",
+        "Couldn't read that plugin right now. Check the URL and try again.",
+        { cause: error },
+      );
     }
     throw new CoreError(
       "unavailable",

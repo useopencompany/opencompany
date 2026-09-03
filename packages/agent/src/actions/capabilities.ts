@@ -210,6 +210,28 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  signoz: [
+    {
+      id: "read",
+      label: "Read SigNoz documentation",
+      description: "Search SigNoz's public product documentation.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Inspect observability data",
+      description:
+        "Query logs, metrics, traces, alerts, dashboards, views, and notification channels.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage SigNoz",
+      description:
+        "Create, update, import, or delete alerts, dashboards, views, and notification channels.",
+      defaultMode: "ask",
+    },
+  ],
   x_account: [
     {
       id: "write",

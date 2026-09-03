@@ -1,7 +1,9 @@
 import {
   ACTION_TOOL_CONTRACT,
   AGENT_MODEL_CATALOG,
+  CLAUDE_CODE_AGENT_MODEL_IDS,
   CLAUDE_CODE_DEFAULT_MODEL_ID,
+  CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   isClaudeCodeModelId,
@@ -21,6 +23,8 @@ import {
 } from "@opencompany/telemetry";
 import { flushLatitude, latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import {
+  WIKI_READ_TOOL_DESCRIPTION,
+  WIKI_READ_TOOL_INPUT_JSON_SCHEMA,
   WIKI_TOOL_DESCRIPTION,
   WIKI_TOOL_INPUT_JSON_SCHEMA,
   WIKI_TOOL_NAME,
@@ -73,8 +77,11 @@ import {
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
+  EDIT_WORKSPACE_SKILL_TOOL_NAME,
   type EditTaskScheduleToolInput,
   type EditTaskScheduleToolOutput,
+  type EditWorkspaceSkillToolInput,
+  type EditWorkspaceSkillToolOutput,
   LIST_ACTIONS_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
   type ListActionsToolInput,
@@ -129,6 +136,10 @@ import {
   createProductChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_NAME_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_TOOL_DESCRIPTION,
   LIST_ACTIONS_TOOL_DESCRIPTION,
   LIST_SKILLS_QUERY_DESCRIPTION,
   LIST_SKILLS_TOOL_DESCRIPTION,
@@ -275,6 +286,10 @@ export type CreateWorkspaceSkillRunner = (
   input: CreateWorkspaceSkillToolInput,
   context: { toolCallId: string },
 ) => Promise<CreateWorkspaceSkillToolOutput>;
+export type EditWorkspaceSkillRunner = (
+  input: EditWorkspaceSkillToolInput,
+  context: { toolCallId: string },
+) => Promise<EditWorkspaceSkillToolOutput>;
 export type ActionDispatcher = {
   // The action catalog resolved server-side from real connection state; ids
   // become the dispatch enum, so a disconnected provider's actions cannot be
@@ -369,6 +384,7 @@ export async function runProductChatAgent(input: {
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
+  editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
@@ -388,7 +404,7 @@ export async function runProductChatAgent(input: {
   userContext?: ProductChatSystemPromptInput["userContext"];
   recurringSchedules?: ProductChatSystemPromptInput["recurringSchedules"];
   taskToolsEnabled?: boolean;
-  brainCaptureEnabled?: boolean;
+  wikiToolReadOnly?: boolean;
   activeBrain?: ProductChatSystemPromptInput["activeBrain"];
   connectedIntegrations?: ProductChatSystemPromptInput["connectedIntegrations"];
   // Surface-specific prompt blocks appended after the shared system prompt
@@ -423,9 +439,12 @@ export async function runProductChatAgent(input: {
     ...(input.editTaskSchedule ? { editTaskSchedule: input.editTaskSchedule } : {}),
     ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
     ...(input.createWorkspaceSkill ? { createWorkspaceSkill: input.createWorkspaceSkill } : {}),
+    ...(input.editWorkspaceSkill ? { editWorkspaceSkill: input.editWorkspaceSkill } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
-    ...(input.runWiki ? { runWiki: input.runWiki } : {}),
+    ...(input.runWiki
+      ? { runWiki: input.runWiki, wikiToolReadOnly: Boolean(input.wikiToolReadOnly) }
+      : {}),
     ...(input.sendUserMessage ? { sendUserMessage: input.sendUserMessage } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
@@ -444,9 +463,8 @@ export async function runProductChatAgent(input: {
     ...(input.userContext ? { userContext: input.userContext } : {}),
     ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
     ...(input.taskToolsEnabled !== undefined ? { taskToolsEnabled: input.taskToolsEnabled } : {}),
-    ...(input.brainCaptureEnabled !== undefined
-      ? { brainCaptureEnabled: input.brainCaptureEnabled }
-      : {}),
+    wikiToolEnabled: Boolean(input.runWiki),
+    wikiToolReadOnly: Boolean(input.wikiToolReadOnly),
     ...(input.activeBrain !== undefined ? { activeBrain: input.activeBrain } : {}),
     ...(input.connectedIntegrations !== undefined
       ? { connectedIntegrations: input.connectedIntegrations }
@@ -554,9 +572,11 @@ export function createProductChatToolContext(input: {
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
+  editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
+  wikiToolReadOnly?: boolean;
   sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
@@ -616,24 +636,22 @@ export function createProductChatToolContext(input: {
       >[0])
     : BRAIN_READ_TOOL_AI_SCHEMA;
 
-  const tools: ToolSet = {
-    [BRAIN_TOOL_NAME]: tool<BrainToolInput, BrainToolOutput, Record<string, unknown>>({
+  const tools: ToolSet = {};
+  if (input.runBrainCli) {
+    tools[BRAIN_TOOL_NAME] = tool<BrainToolInput, BrainToolOutput, Record<string, unknown>>({
       description: BRAIN_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<BrainToolInput>(brainSchema),
       execute: async (args, executionContext?: unknown) => {
-        if (!input.runBrainCli) {
-          throw new Error("brain is not configured for this chat.");
-        }
         visibleToolActivity = true;
         // Multi-brain runners receive the raw args (including `brain`) and own
         // normalization after extracting the target.
         const toolArgs = multiBrain ? args : normalizeBrainToolInput(args);
         return executionContext === undefined
-          ? input.runBrainCli(toolArgs)
-          : input.runBrainCli(toolArgs, executionContext);
+          ? input.runBrainCli!(toolArgs)
+          : input.runBrainCli!(toolArgs, executionContext);
       },
-    }),
-  };
+    });
+  }
 
   const startTrackedTask = async (
     create: () => Promise<StartedTask>,
@@ -655,6 +673,13 @@ export function createProductChatToolContext(input: {
 
   const startTask = input.startTask;
   if (startTask) {
+    const taskEngineHint = input.requestedEngine ?? inferStartTaskEngine(input.latestUserMessage);
+    const availableTaskModels =
+      taskEngineHint === "codex"
+        ? CODEX_AGENT_MODEL_IDS
+        : taskEngineHint === "claude_code"
+          ? CLAUDE_CODE_AGENT_MODEL_IDS
+          : AGENT_MODEL_CATALOG.map((model) => model.id);
     tools[START_TASK_TOOL_NAME] = tool<
       StartTaskToolInput,
       StartTaskToolOutput,
@@ -684,7 +709,7 @@ export function createProductChatToolContext(input: {
           },
           model: {
             type: "string",
-            enum: AGENT_MODEL_CATALOG.map((model) => model.id),
+            enum: [...availableTaskModels],
             description: START_TASK_MODEL_DESCRIPTION,
           },
         },
@@ -784,9 +809,11 @@ export function createProductChatToolContext(input: {
   const runWiki = input.runWiki;
   if (runWiki) {
     tools[WIKI_TOOL_NAME] = tool<WikiToolInput, WikiToolOutput, Record<string, unknown>>({
-      description: WIKI_TOOL_DESCRIPTION,
+      description: input.wikiToolReadOnly ? WIKI_READ_TOOL_DESCRIPTION : WIKI_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<WikiToolInput>(
-        WIKI_TOOL_INPUT_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0],
+        (input.wikiToolReadOnly
+          ? WIKI_READ_TOOL_INPUT_JSON_SCHEMA
+          : WIKI_TOOL_INPUT_JSON_SCHEMA) as unknown as Parameters<typeof jsonSchema>[0],
       ),
       execute: async (args, executionContext) => {
         visibleToolActivity = true;
@@ -846,6 +873,61 @@ export function createProductChatToolContext(input: {
             ? executionContext.toolCallId
             : `ai-sdk:create-workspace-skill:${++internalWorkspaceSkillInvocationSequence}`;
         return createWorkspaceSkill(
+          {
+            name: args.name.trim(),
+            description: args.description.trim(),
+            instructions: args.instructions.trim(),
+          },
+          { toolCallId },
+        );
+      },
+    });
+  }
+
+  const editWorkspaceSkill = input.editWorkspaceSkill;
+  if (editWorkspaceSkill) {
+    tools[EDIT_WORKSPACE_SKILL_TOOL_NAME] = tool<
+      EditWorkspaceSkillToolInput,
+      EditWorkspaceSkillToolOutput,
+      Record<string, unknown>
+    >({
+      description: EDIT_WORKSPACE_SKILL_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<EditWorkspaceSkillToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: {
+            type: "string",
+            minLength: 1,
+            maxLength: 64,
+            pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            description: EDIT_WORKSPACE_SKILL_NAME_DESCRIPTION,
+          },
+          description: {
+            type: "string",
+            minLength: 1,
+            maxLength: 1_024,
+            description: EDIT_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION,
+          },
+          instructions: {
+            type: "string",
+            minLength: 1,
+            maxLength: 512 * 1_024,
+            description: EDIT_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION,
+          },
+        },
+        required: ["name", "description", "instructions"],
+      }),
+      execute: async (args, executionContext) => {
+        visibleToolActivity = true;
+        const toolCallId =
+          executionContext &&
+          typeof executionContext === "object" &&
+          "toolCallId" in executionContext &&
+          typeof executionContext.toolCallId === "string"
+            ? executionContext.toolCallId
+            : `ai-sdk:edit-workspace-skill:${++internalWorkspaceSkillInvocationSequence}`;
+        return editWorkspaceSkill(
           {
             name: args.name.trim(),
             description: args.description.trim(),

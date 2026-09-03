@@ -12,6 +12,7 @@ import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  defaultSigNozToolsState,
   GitHubPluginDetail,
   GitHubPluginDetailView,
   GoogleCalendarPluginDetail,
@@ -24,6 +25,7 @@ import {
   NeonPluginDetailView,
   neonToolsStateFromPlugin,
   type PluginToolsState,
+  SigNozPluginDetail,
   SlackPluginDetail,
   slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
@@ -118,6 +120,20 @@ const appData = vi.hoisted(() => ({
       ],
       linear: [],
       neon: [],
+      signoz: [
+        {
+          integrationId: "gint_signoz",
+          provider: "signoz",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "SigNoz",
+          connectionLabel: "SigNoz",
+          statusReason: null,
+          scopes: [],
+          capabilityModes: { read: "on", query: "ask", write: "ask" },
+        },
+      ],
       slack: [
         {
           integrationId: "gint_slack",
@@ -726,6 +742,22 @@ const googleCalendarPlugin = {
   ],
 } as const satisfies PluginInstallationDto;
 
+const slackPreview = {
+  ...officialPreview,
+  manifest: slackPlugin.manifest,
+  source: slackPlugin.source,
+  integrity: slackPlugin.integrity,
+  skills: [],
+  remoteMcpServers: slackPlugin.remoteMcpServers.map(
+    ({ name, type, connectionProvider, capabilities }: PluginRemoteMcpServerDto) => ({
+      name,
+      type,
+      connectionProvider,
+      capabilities,
+    }),
+  ),
+} as const satisfies PluginImportPreviewDto;
+
 describe("Linear plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
@@ -777,6 +809,28 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read GitHub");
     expect(html).toContain("Manage GitHub");
     expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps the personal SigNoz connection onto the official plugin surface", () => {
+    const signozPlugin = {
+      ...plugin,
+      id: "plugin_signoz",
+      name: "signoz",
+      manifest: { name: "signoz", description: "Investigate SigNoz telemetry." },
+      source: { ...plugin.source, path: "signoz" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <SigNozPluginDetail
+        pluginState={{ status: "ready", plugin: signozPlugin }}
+        toolsState={defaultSigNozToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("SigNoz");
+    expect(html).toContain("Read SigNoz documentation");
+    expect(html).toContain("Inspect observability data");
+    expect(html).toContain("Manage SigNoz");
   });
 
   it("shows provenance, accounts, discovered tools, and read-only skills", async () => {
@@ -889,6 +943,7 @@ describe("Linear plugin settings", () => {
       expectedResolvedCommit: officialPreview.source.resolvedCommit,
       expectedIntegrity: officialPreview.integrity,
     });
+    expect(toasts.success).toHaveBeenCalledWith("Linear installed.");
     expect(router.refresh).toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
@@ -1395,6 +1450,32 @@ describe("Linear plugin settings", () => {
         { id: "write", defaultMode: "ask" },
       ],
     });
+  });
+
+  it("reviews and installs Slack from the pinned package on its detail page", async () => {
+    commands.previewHeadlessPluginImport.mockResolvedValue(slackPreview);
+    commands.importHeadlessPlugin.mockResolvedValue({ plugin: slackPlugin, replayed: false });
+
+    render(<SlackPluginDetail pluginState={{ status: "ready", plugin: null }} canEdit />);
+
+    expect(screen.getByRole("button", { name: "Loading package…" })).toBeDisabled();
+    expect(await screen.findByText("Search public Slack")).toBeInTheDocument();
+    const installButton = screen.getByRole("button", { name: "Install" });
+    expect(installButton).toBeEnabled();
+
+    await userEvent.click(installButton);
+
+    await waitFor(() => expect(commands.importHeadlessPlugin).toHaveBeenCalledTimes(1));
+    expect(commands.previewHeadlessPluginImport).toHaveBeenCalledWith({
+      url: SLACK_PLUGIN_SOURCE,
+    });
+    expect(commands.importHeadlessPlugin).toHaveBeenCalledWith({
+      url: SLACK_PLUGIN_SOURCE,
+      expectedResolvedCommit: slackPreview.source.resolvedCommit,
+      expectedIntegrity: slackPreview.integrity,
+    });
+    expect(toasts.success).toHaveBeenCalledWith("Slack installed.");
+    expect(router.refresh).toHaveBeenCalled();
   });
 
   it("builds the two-bucket advanced fallback with ask defaults", () => {

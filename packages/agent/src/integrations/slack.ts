@@ -22,10 +22,32 @@ export type SlackIntegrationStatePayload = {
 export type SlackOAuthResult = {
   teamId: string;
   teamName: string | null;
-  authedUserId: string;
+  authedUserId: string | null;
   accessToken: string;
   scopes: string[];
 };
+
+export type SlackOAuthResponseShape = {
+  credentialLocation: "absent" | "top_level" | "nested" | "both";
+  hasAuthedUserId: boolean;
+  hasTeamId: boolean;
+  hasEnterpriseId: boolean;
+  isEnterpriseInstall: boolean | null;
+};
+
+export type SlackOAuthRequiredResponseField = "access_token" | "team.id";
+
+export class SlackOAuthResponseError extends Error {
+  readonly code = "slack_oauth_response_invalid";
+
+  constructor(
+    readonly missingFields: readonly SlackOAuthRequiredResponseField[],
+    readonly responseShape: SlackOAuthResponseShape,
+  ) {
+    super(`Slack OAuth response missing required fields: ${missingFields.join(", ")}.`);
+    this.name = "SlackOAuthResponseError";
+  }
+}
 
 const SLACK_PROVIDER = "slack" as const;
 const SLACK_INTEGRATION_ENVS = [
@@ -140,9 +162,11 @@ export function buildSlackAuthorizationUrl(state: string) {
 export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult> {
   const result = await slackApiRequest<{
     team?: { id?: string; name?: string };
+    enterprise?: { id?: string; name?: string };
     authed_user?: { id?: string; access_token?: string; scope?: string; token_type?: string };
     access_token?: string;
     scope?: string;
+    is_enterprise_install?: boolean;
   }>({
     method: "oauth.v2.user.access",
     form: {
@@ -156,38 +180,77 @@ export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult>
   const teamId = result.team?.id?.trim();
   const authedUserId = result.authed_user?.id?.trim();
   const accessToken = result.access_token?.trim();
-  if (!teamId || !authedUserId || !accessToken) {
-    throw new Error("Slack did not return a user token.");
+  const nestedAccessToken = result.authed_user?.access_token?.trim();
+  const missingFields: SlackOAuthRequiredResponseField[] = [];
+  if (!teamId) missingFields.push("team.id");
+  if (!accessToken) missingFields.push("access_token");
+  if (!teamId || !accessToken) {
+    throw new SlackOAuthResponseError(missingFields, {
+      credentialLocation:
+        accessToken && nestedAccessToken
+          ? "both"
+          : accessToken
+            ? "top_level"
+            : nestedAccessToken
+              ? "nested"
+              : "absent",
+      hasAuthedUserId: Boolean(authedUserId),
+      hasTeamId: Boolean(teamId),
+      hasEnterpriseId: Boolean(result.enterprise?.id?.trim()),
+      isEnterpriseInstall:
+        typeof result.is_enterprise_install === "boolean" ? result.is_enterprise_install : null,
+    });
   }
 
   return {
     teamId,
     teamName: result.team?.name?.trim() || null,
-    authedUserId,
+    authedUserId: authedUserId || null,
     accessToken,
     scopes: result.scope?.split(",").filter(Boolean) ?? [],
   };
 }
 
-export async function fetchSlackIdentity(input: { accessToken: string; authedUserId: string }) {
-  const [userResult, teamDomain] = await Promise.all([
-    slackApiRequest<{
-      user?: { real_name?: string; name?: string; profile?: { email?: string } };
-    }>({
-      method: "users.info",
-      token: input.accessToken,
-      form: { user: input.authedUserId },
-    }),
-    slackApiRequest<{ url?: string }>({
-      method: "auth.test",
-      token: input.accessToken,
-    }).then((result) => slackTeamDomainFromUrl(result.url)),
-  ]);
+export async function fetchSlackIdentity(input: {
+  accessToken: string;
+  authedUserId: string | null;
+  teamId: string;
+}) {
+  // The dedicated user-token endpoint can omit `authed_user` from an otherwise valid response.
+  // Resolve the token holder through auth.test and cross-check any identity OAuth did provide.
+  const authResult = await slackApiRequest<{ url?: string; user_id?: string; team_id?: string }>({
+    method: "auth.test",
+    token: input.accessToken,
+  });
+  const oauthUserId = input.authedUserId?.trim() || null;
+  const authenticatedUserId = authResult.user_id?.trim() || null;
+  const authenticatedTeamId = authResult.team_id?.trim() || null;
+
+  if (authenticatedTeamId && authenticatedTeamId !== input.teamId) {
+    throw new Error("Slack authenticated token did not match the OAuth workspace.");
+  }
+  if (oauthUserId && authenticatedUserId && oauthUserId !== authenticatedUserId) {
+    throw new Error("Slack authenticated token did not match the OAuth user.");
+  }
+
+  const authedUserId = oauthUserId ?? authenticatedUserId;
+  if (!authedUserId) {
+    throw new Error("Slack identity response did not include a user ID.");
+  }
+
+  const userResult = await slackApiRequest<{
+    user?: { real_name?: string; name?: string; profile?: { email?: string } };
+  }>({
+    method: "users.info",
+    token: input.accessToken,
+    form: { user: authedUserId },
+  });
 
   return {
+    authedUserId,
     userName: userResult.user?.real_name?.trim() || userResult.user?.name?.trim() || null,
     userEmail: userResult.user?.profile?.email?.trim() || null,
-    teamDomain,
+    teamDomain: slackTeamDomainFromUrl(authResult.url),
   };
 }
 

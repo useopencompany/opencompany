@@ -4,19 +4,28 @@ export type OfficialMcpPluginName =
   | "google-calendar"
   | "linear"
   | "neon"
+  | "signoz"
   | "slack";
+export type OfficialSkillPluginName = "yc-advise";
+export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
 
-export type OfficialMcpPluginMetadata = {
-  name: OfficialMcpPluginName;
+type OfficialPluginMetadataBase = {
+  name: OfficialPluginName;
   label: string;
   description: string;
   source: string;
+};
+
+export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
+  name: OfficialMcpPluginName;
+  kind: "mcp";
   connectionProvider:
     | "betterstack"
     | "github_user"
     | "google_calendar"
     | "linear"
     | "neon"
+    | "signoz"
     | "slack";
   connectHref: string;
   accountLabel?: string;
@@ -25,10 +34,18 @@ export type OfficialMcpPluginMetadata = {
   ingestionLabel?: string;
 };
 
+export type OfficialSkillPluginMetadata = OfficialPluginMetadataBase & {
+  name: OfficialSkillPluginName;
+  kind: "skills";
+};
+
+export type OfficialPluginMetadata = OfficialMcpPluginMetadata | OfficialSkillPluginMetadata;
+
 // The public repository is the reviewed trust boundary. Keep every source pinned to a full commit.
 export const OFFICIAL_MCP_PLUGIN_METADATA = {
   betterstack: {
     name: "betterstack",
+    kind: "mcp",
     label: "Better Stack",
     description:
       "Investigate observability data and manage monitoring, incidents, dashboards, and team access.",
@@ -40,6 +57,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   },
   github: {
     name: "github",
+    kind: "mcp",
     label: "GitHub as you",
     description: "Work with repositories, issues, pull requests, and Actions as yourself.",
     source:
@@ -51,6 +69,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   },
   "google-calendar": {
     name: "google-calendar",
+    kind: "mcp",
     label: "Google Calendar",
     description: "List calendars, read your schedule, and create calendar events.",
     source:
@@ -62,6 +81,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   },
   linear: {
     name: "linear",
+    kind: "mcp",
     label: "Linear",
     description: "Work with Linear issues, projects, comments, and team workflows.",
     source:
@@ -74,6 +94,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   },
   neon: {
     name: "neon",
+    kind: "mcp",
     label: "Neon",
     description:
       "Inspect Neon projects and database structure, and run permission-gated read-only SQL.",
@@ -83,8 +104,20 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref: "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
     accountDescription: "The account opencompany uses when you run Neon tools.",
   },
+  signoz: {
+    name: "signoz",
+    kind: "mcp",
+    label: "SigNoz",
+    description: "Investigate logs, metrics, traces, alerts, and dashboards in SigNoz US Cloud.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
+    connectionProvider: "signoz",
+    connectHref: "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz",
+    accountDescription: "The SigNoz US Cloud account opencompany uses when you run SigNoz tools.",
+  },
   slack: {
     name: "slack",
+    kind: "mcp",
     label: "Slack",
     description: "Search Slack and, with approval, read private content or make changes.",
     source:
@@ -95,6 +128,24 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginMetadata>;
 
+export const OFFICIAL_SKILL_PLUGIN_METADATA = {
+  "yc-advise": {
+    name: "yc-advise",
+    kind: "skills",
+    label: "YC Advise",
+    description:
+      "Independent YC-style startup advice and structured founder office hours, based on public principles and not affiliated with Y Combinator.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/2e092c3bc518622f1dc4ac1a6777d87ae3695ec6/yc-advise",
+  },
+} as const satisfies Record<OfficialSkillPluginName, OfficialSkillPluginMetadata>;
+
 export function isOfficialMcpPluginName(value: string): value is OfficialMcpPluginName {
   return value === value.toLocaleLowerCase() && Object.hasOwn(OFFICIAL_MCP_PLUGIN_METADATA, value);
+}
+
+export function isOfficialSkillPluginName(value: string): value is OfficialSkillPluginName {
+  return (
+    value === value.toLocaleLowerCase() && Object.hasOwn(OFFICIAL_SKILL_PLUGIN_METADATA, value)
+  );
 }

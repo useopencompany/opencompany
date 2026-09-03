@@ -44,6 +44,8 @@ vi.mock("@/components/AppDataProvider", () => ({
     featureFlags: {
       taskSpawning: true,
       autoModelRouting: false,
+      imessage: false,
+      legacyBrain: false,
     },
   }),
 }));
@@ -135,6 +137,24 @@ describe("TaskDetailPanel", () => {
       id: "goat_chat_task_1",
       title: "Acme interview follow-up",
     });
+  });
+
+  it("shows a generated Task title that arrives after the page loads", () => {
+    const initialRun = buildHarnessRun({ task: task(), messages: [], events: [] });
+    const view = render(<TaskDetailPanel initialRun={initialRun} />);
+
+    expect(screen.getByTestId("opencompany-surface")).toHaveTextContent("Morning workflow");
+
+    mocks.tasks = [
+      {
+        id: "goat_task_1",
+        name: "Acme interview follow-up",
+        status: "succeeded",
+      },
+    ];
+    view.rerender(<TaskDetailPanel initialRun={initialRun} />);
+
+    expect(screen.getByTestId("opencompany-surface")).toHaveTextContent("Acme interview follow-up");
   });
 
   it("isolates sessionless history behind the read-only compatibility boundary", () => {

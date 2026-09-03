@@ -37,7 +37,7 @@ export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
   return (
     <SettingsContent
       title="Slack bot"
-      description="Answer questions from your brains directly in Slack. Beta."
+      description="Answer questions from your workspace Wiki directly in Slack. Beta."
     >
       {data.setup === "error" ? (
         <Banner tone="error">
@@ -96,8 +96,8 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
               Add opencompany to your Slack workspace
             </span>
             <p className="text-[13px] leading-5 text-ink-subtle">
-              Once installed, mention @opencompany in a channel to get answers from your brains —
-              for example “@opencompany what did we learn from customers this week?”.
+              Once installed, mention @opencompany in a channel to get answers from your Wiki — for
+              example “@opencompany what did we learn from customers this week?”.
             </p>
           </div>
         </div>
@@ -159,23 +159,14 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-[13px] leading-5 text-ink-subtle">
             <li>Invite @opencompany to the Slack channels where you want answers.</li>
             <li>
-              Enable the bot per brain under{" "}
-              <Link href="/" prefetch className="text-ink underline underline-offset-2">
-                Brain settings → Destinations
-              </Link>{" "}
-              and pick its channels.
-            </li>
-            <li>
-              Mention @opencompany in one of those channels and ask a question — replies in the
-              thread continue the conversation without another mention, and team members can DM the
-              bot directly.
+              Mention @opencompany in that channel and ask a question — replies use the workspace
+              Wiki, the thread continues without another mention, and team members can DM the bot
+              directly.
             </li>
           </ol>
-          <p className="text-[12px] leading-4 text-ink-subtle">
-            {data.destinationCount > 0
-              ? `${data.destinationCount} brain${data.destinationCount === 1 ? "" : "s"} currently answer${data.destinationCount === 1 ? "s" : ""} in Slack.`
-              : "No brains are connected to Slack channels yet."}
-          </p>
+          <Link href="/wiki" prefetch className="text-[12px] text-ink underline underline-offset-2">
+            Open the workspace Wiki
+          </Link>
         </div>
       ) : null}
 

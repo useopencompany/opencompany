@@ -1,4 +1,5 @@
 import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/agent/chat-agent";
+import { CODEX_DEFAULT_MODEL_ID, isCodexModelId } from "@opencompany/agent-runtime";
 import type {
   HarnessSpec,
   TaskDebugTrace,
@@ -28,10 +29,6 @@ export const PLANNER_MODEL = "anthropic/claude-sonnet-4.6";
 const DEFAULT_MAX_MODEL_STEPS = 16;
 const MAX_MODEL_STEPS = 32;
 const MIN_BROWSER_MODEL_STEPS = 16;
-const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
-const DEFAULT_CODEX_GOAL_TOKEN_BUDGET = 200_000;
-const MIN_CODEX_GOAL_TOKEN_BUDGET = 1;
-const MAX_CODEX_GOAL_TOKEN_BUDGET = 1_000_000;
 
 export async function planHarnessForTask(input: {
   prompt: string;
@@ -171,23 +168,6 @@ function harnessSpecResponseSchema(
           repository: { type: ["string", "null"] },
           createPullRequest: { type: "boolean" },
           reasoningEffort: { type: "string", enum: ["low", "medium", "high", "xhigh"] },
-          goalMode: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              objective: {
-                type: "string",
-                minLength: 1,
-                maxLength: CODEX_GOAL_OBJECTIVE_MAX_LENGTH,
-              },
-              tokenBudget: {
-                type: ["integer", "null"],
-                minimum: MIN_CODEX_GOAL_TOKEN_BUDGET,
-                maximum: MAX_CODEX_GOAL_TOKEN_BUDGET,
-              },
-            },
-            required: ["objective"],
-          },
         },
       },
     },
@@ -298,8 +278,12 @@ function readHarnessModel(
 ): HarnessSpec["model"] | null {
   const model = readNonEmptyString(value);
   if (engine === "codex") {
-    const codexModel = availableModels.find((candidate) => candidate.startsWith("openai/"));
-    return codexModel ?? null;
+    if (model && availableModels.includes(model as HarnessSpec["model"]) && isCodexModelId(model)) {
+      return model;
+    }
+    return availableModels.includes(CODEX_DEFAULT_MODEL_ID)
+      ? CODEX_DEFAULT_MODEL_ID
+      : (availableModels.find(isCodexModelId) ?? null);
   }
   return model && availableModels.includes(model as HarnessSpec["model"])
     ? (model as HarnessSpec["model"])
@@ -318,12 +302,10 @@ function readCodexHarnessConfig(
     inferCodexRepositoryFromPrompt(prompt, githubRepositories) ??
     plannedRepository;
   const promptPullRequestIntent = readPullRequestIntent(prompt);
-  const goalMode = readCodexGoalMode(record.goalMode);
   return {
     repository,
     createPullRequest: promptPullRequestIntent ?? record.createPullRequest === true,
     reasoningEffort: readCodexReasoningEffort(record.reasoningEffort),
-    ...(goalMode ? { goalMode } : {}),
   };
 }
 
@@ -331,25 +313,6 @@ function readCodexReasoningEffort(value: unknown) {
   return value === "low" || value === "medium" || value === "high" || value === "xhigh"
     ? value
     : "high";
-}
-
-function readCodexGoalMode(value: unknown): NonNullable<HarnessSpec["codex"]>["goalMode"] | null {
-  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-  if (!record) return null;
-  const objective = readNonEmptyString(record.objective);
-  if (!objective) return null;
-  const hasTokenBudget = Object.prototype.hasOwnProperty.call(record, "tokenBudget");
-  const tokenBudget = !hasTokenBudget
-    ? DEFAULT_CODEX_GOAL_TOKEN_BUDGET
-    : record.tokenBudget === null
-      ? null
-      : typeof record.tokenBudget === "number"
-        ? clampInteger(record.tokenBudget, MIN_CODEX_GOAL_TOKEN_BUDGET, MAX_CODEX_GOAL_TOKEN_BUDGET)
-        : DEFAULT_CODEX_GOAL_TOKEN_BUDGET;
-  return {
-    objective: objective.slice(0, CODEX_GOAL_OBJECTIVE_MAX_LENGTH),
-    tokenBudget,
-  };
 }
 
 function inferCodexRepositoryFromPrompt(prompt: string, githubRepositories: readonly string[]) {

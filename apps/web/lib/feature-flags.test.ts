@@ -24,4 +24,11 @@ describe("featureFlagsFromUser", () => {
     expect(featureFlagsFromUser({ imessageEnabled: true }).imessage).toBe(true);
     expect(featureFlagsFromUser({ imessageEnabled: false }).imessage).toBe(false);
   });
+
+  it("keeps legacy Brain off unless the workspace explicitly enables it", () => {
+    expect(featureFlagsFromUser({}).legacyBrain).toBe(false);
+    expect(featureFlagsFromUser({ legacyBrainEnabled: null }).legacyBrain).toBe(false);
+    expect(featureFlagsFromUser({ legacyBrainEnabled: true }).legacyBrain).toBe(true);
+    expect(featureFlagsFromUser({ legacyBrainEnabled: false }).legacyBrain).toBe(false);
+  });
 });

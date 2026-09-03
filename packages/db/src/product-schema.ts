@@ -165,6 +165,7 @@ export type IntegrationProvider =
   | "fathom"
   | "attio"
   | "betterstack"
+  | "signoz"
   | "stripe"
   | "latitude"
   | "posthog"
@@ -173,7 +174,7 @@ export type IntegrationProvider =
   | "x_account";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
-// Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, X) are always personal. Installation-bound
+// Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, SigNoz, X) are always personal. Installation-bound
 // connections (GitHub App org installs, Jamie webhook secrets, the Slack
 // answer-bot install) are workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
@@ -710,13 +711,13 @@ export const users = productSchema.table(
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     imessageEnabled: boolean("imessage_enabled").notNull().default(false),
-    // Preview flag for the workspace wiki (brain v2). Gates the /wiki surface
-    // and the `wiki` agent tool per user while brain keeps running unchanged.
+    // Retained for rollback compatibility after the wiki became the default.
+    // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
     // Board vs list layout for the Tasks page; persisted per user across devices.
     taskViewMode: text("task_view_mode").notNull().default("board").$type<TaskViewMode>(),
     preferredMcpClient: text("preferred_mcp_client").$type<McpClient>(),
-    // Set exactly once, when this user first completes a successful Brain query over MCP.
+    // Set exactly once, when this user first completes a successful knowledge query over MCP.
     mcpSetupCompletedAt: timestamp("mcp_setup_completed_at", { withTimezone: true }),
     // Set when the user finishes the onboarding flow; null gates them into it.
     onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
@@ -750,6 +751,9 @@ export const workspaces = productSchema.table(
     capabilitySessionBudgetUsdMicros: bigint("capability_session_budget_usd_micros", {
       mode: "number",
     }),
+    // Reversible cutover switch for the retired Brain UI and agent tools.
+    // Wiki is the default knowledge system for every workspace.
+    legacyBrainEnabled: boolean("legacy_brain_enabled").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1597,7 +1601,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1647,7 +1651,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1697,7 +1701,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",

@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createAutomationTaskCreator,
   mapWorkflowPreparationError,
-  refineWorkflowTaskTitle,
+  shouldRefineWorkflowTaskTitle,
 } from "./automations";
 
 const actor: Actor = {
@@ -17,55 +17,6 @@ const actor: Actor = {
   permissions: ["task:write"],
   authenticationMethod: "session",
 };
-
-describe("automation behavior adapters", () => {
-  it("refines a Workflow Task title through the canonical Task service", async () => {
-    const updateTask = vi.fn(async () => ({}));
-    const generateTitle = vi.fn(async () => "Competitor launch review");
-
-    await refineWorkflowTaskTitle({
-      service: { updateTask } as never,
-      actor,
-      taskId: "task_1",
-      conversationId: "conversation_1",
-      workflowName: "Weekly research",
-      description: "Focus on competitor launches.",
-      apiKey: "gateway-key",
-      generateTitle,
-    });
-
-    expect(generateTitle).toHaveBeenCalledWith({
-      content: "Focus on competitor launches.",
-      fallbackTitle: "Weekly research",
-      apiKey: "gateway-key",
-      userWorkosId: "user_1",
-      chatSessionId: "conversation_1",
-    });
-    expect(updateTask).toHaveBeenCalledWith(actor, "task_1", {
-      name: "Competitor launch review",
-    });
-  });
-
-  it("keeps the Workflow name when title generation is unavailable or unchanged", async () => {
-    const updateTask = vi.fn(async () => ({}));
-    const generateTitle = vi.fn(async () => "Weekly research");
-    const input = {
-      service: { updateTask } as never,
-      actor,
-      taskId: "task_1",
-      conversationId: "conversation_1",
-      workflowName: "Weekly research",
-      description: "Research changes.",
-      generateTitle,
-    };
-
-    await refineWorkflowTaskTitle(input);
-    await refineWorkflowTaskTitle({ ...input, apiKey: "gateway-key" });
-
-    expect(generateTitle).toHaveBeenCalledTimes(1);
-    expect(updateTask).not.toHaveBeenCalled();
-  });
-});
 
 describe("mapWorkflowPreparationError", () => {
   it("maps skill and workflow mention problems to invalid_argument", () => {
@@ -164,5 +115,43 @@ describe("createAutomationTaskCreator", () => {
       // Rejecting with the insert sentinel — not the "does not match its
       // canonical command" invariant error — proves validation passed.
     ).rejects.toThrow("__insert_reached__");
+  });
+
+  it("refines a newly created workflow Task after canonical name normalization", () => {
+    expect(
+      shouldRefineWorkflowTaskTitle({
+        source: "workflow",
+        workflowName: "ship-feature",
+        taskName: "Ship-feature",
+        idempotentReplay: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("repairs only idempotent replays that still have the canonical workflow fallback", () => {
+    expect(
+      shouldRefineWorkflowTaskTitle({
+        source: "workflow",
+        workflowName: "ship-feature",
+        taskName: "Ship-feature",
+        idempotentReplay: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRefineWorkflowTaskTitle({
+        source: "workflow",
+        workflowName: "ship-feature",
+        taskName: "Add one-click plugin installs",
+        idempotentReplay: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRefineWorkflowTaskTitle({
+        source: "schedule",
+        workflowName: "ship-feature",
+        taskName: "Ship-feature",
+        idempotentReplay: false,
+      }),
+    ).toBe(false);
   });
 });

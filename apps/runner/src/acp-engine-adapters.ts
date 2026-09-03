@@ -43,7 +43,6 @@ export const CODEX_ACP_ENGINE_ADAPTER: AcpEngineAdapter = {
       values: { default: "default", plan: "plan" },
     },
   },
-  goalControlMethod: "_session/goal",
   steeringControlMethod: "_session/steering",
 };
 

@@ -45,6 +45,7 @@ import {
   DEFAULT_BRAIN_SLUG,
   getBrainAccess,
   getWorkspaceRole,
+  isLegacyBrainEnabledForWorkspace,
   listAccessibleBrains,
 } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
@@ -956,9 +957,10 @@ async function resolveProductChatRuntime(input: {
   if (!workspaceRole) {
     throw new Error("You no longer have access to this chat's workspace.");
   }
+  const legacyBrainEnabled = await isLegacyBrainEnabledForWorkspace(workspaceId, { db: getDb() });
 
   let brain = null;
-  if (session.brainRef) {
+  if (legacyBrainEnabled && session.brainRef) {
     const access = await getBrainAccess(
       { userWorkosId: turn.userWorkosId, brainRef: session.brainRef },
       { db: getDb() },
@@ -967,7 +969,7 @@ async function resolveProductChatRuntime(input: {
       throw new Error("You no longer have access to this chat's Brain.");
     }
     brain = access.brain;
-  } else {
+  } else if (legacyBrainEnabled) {
     const brains = await listAccessibleBrains(
       { userWorkosId: turn.userWorkosId, workspaceId },
       { db: getDb() },
@@ -981,29 +983,26 @@ async function resolveProductChatRuntime(input: {
     signal,
     approvalContinuation: Boolean(turn.settings.approvalContinuation),
   });
-  const hostTools = taskContext
-    ? null
-    : await loadHostTools({
-        sessionId: session.id,
-        turnId: turn.id,
-        env,
-        signal,
-        mentionedSkillIds: (turn.settings.mentions ?? []).map((mention) => mention.id),
-        approvalContinuation: Boolean(turn.settings.approvalContinuation),
-      });
-  if (!taskContext && (!actionDispatcher || !hostTools)) {
+  const hostTools = await loadHostTools({
+    sessionId: session.id,
+    turnId: turn.id,
+    env,
+    signal,
+    mentionedSkillIds: (turn.settings.mentions ?? []).map((mention) => mention.id),
+    approvalContinuation: Boolean(turn.settings.approvalContinuation),
+  });
+  if (!actionDispatcher || !hostTools) {
     throw new Error("The durable Chat host gateways are not configured.");
   }
 
   const currentDate = new Date();
-  const brainCapture =
-    brain && !taskContext
-      ? createBrainCaptureRunner({
-          sessionId: session.id,
-          turnId: turn.id,
-          signal,
-        })
-      : null;
+  const brainCapture = brain
+    ? createBrainCaptureRunner({
+        sessionId: session.id,
+        turnId: turn.id,
+        signal,
+      })
+    : null;
   const exaApiKey = env.exaApiKey?.trim();
   const imessageDelivery =
     resolveImessageProvider() !== null
@@ -1045,6 +1044,7 @@ async function resolveProductChatRuntime(input: {
     ...(hostTools?.createWorkspaceSkill
       ? { createWorkspaceSkill: hostTools.createWorkspaceSkill }
       : {}),
+    ...(hostTools?.editWorkspaceSkill ? { editWorkspaceSkill: hostTools.editWorkspaceSkill } : {}),
     ...(hostTools?.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
     ...(hostTools?.browserTools ? { browserTools: hostTools.browserTools } : {}),
     ...(hostTools?.browserProfiles ? { browserProfiles: hostTools.browserProfiles } : {}),
@@ -1101,7 +1101,7 @@ async function resolveProductChatRuntime(input: {
     browserToolsEnabled: Boolean(hostTools?.browserTools),
     taskToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
     scheduleToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
-    brainCaptureEnabled: Boolean(brainCapture),
+    wikiToolEnabled: Boolean(hostTools?.runWiki),
     activeBrain: brain
       ? {
           name: brain.name,

@@ -183,14 +183,12 @@ export function Sidebar({
               />
             </>
           ) : null}
-          {featureFlags.wiki ? (
-            <SidebarNavRow href="/wiki" icon={BookOpen} label="Wiki" active={wikiActive} />
-          ) : null}
+          <SidebarNavRow href="/wiki" icon={BookOpen} label="Wiki" active={wikiActive} />
           {!mcpSetup.completedAt ? (
             <SidebarNavRow
               href="/settings/mcp"
               icon={PlugZap}
-              label="Connect your brain"
+              label="Connect MCP"
               active={mcpSetupActive}
               incomplete
             />
@@ -198,9 +196,11 @@ export function Sidebar({
         </nav>
 
         {/* Brains */}
-        <div className="px-2 pt-4">
-          <BrainSwitcher />
-        </div>
+        {featureFlags.legacyBrain ? (
+          <div className="px-2 pt-4">
+            <BrainSwitcher />
+          </div>
+        ) : null}
 
         {/* Recent chats */}
         <SidebarRecentChats />

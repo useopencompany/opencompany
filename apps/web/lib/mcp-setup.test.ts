@@ -34,10 +34,10 @@ describe("opencompany MCP setup", () => {
     });
 
     expect(prompt).toContain("Use the opencompany connector");
-    expect(prompt).toContain('query for "Ada Lovelace"');
+    expect(prompt).toContain('search it for "Ada Lovelace"');
     expect(prompt).toContain("at Analytical Engines");
-    expect(prompt).toContain("list my brains");
-    expect(prompt).toContain("Cite the brain pages");
+    expect(prompt).toContain("workspace Wiki tree");
+    expect(prompt).toContain("Cite the Wiki pages");
     expect(prompt).not.toContain("@");
   });
 

@@ -20,6 +20,7 @@ import {
   type ActionGatewayResponse,
   type ExternalEngineGatewayTicketPayload,
   isActionHostToolContractVersion,
+  isWikiHostToolContractVersion,
   verifyExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import { type ActionTurnRef, resolveActionApproval } from "@opencompany/db/action-governance";
@@ -156,7 +157,7 @@ export function registerAcpToolsMcpRoute(
           signal: request.signal,
         });
       }
-      if (authorizedContext.brainRef) {
+      if (authorizedContext.legacyBrainEnabled && authorizedContext.brainRef) {
         registerBrainTools({
           server,
           capability,
@@ -260,7 +261,13 @@ export async function executeExternalActionWithApproval(input: {
   dependencies: ActionApprovalDependencies;
 }): Promise<ActionGatewayResponse> {
   if (input.signal.aborted) return canceledActionError(input.request);
-  if (input.request.operation !== "execute") return input.dependencies.executeAction(input);
+  const dispatch = () =>
+    input.dependencies.executeAction({
+      request: input.request,
+      signal: input.signal,
+      ...(input.reportProgress ? { reportProgress: input.reportProgress } : {}),
+    });
+  if (input.request.operation !== "execute") return dispatch();
 
   const approval = await input.dependencies.evaluateApproval({
     request: { ...input.request, operation: "approval" },
@@ -268,7 +275,7 @@ export async function executeExternalActionWithApproval(input: {
   });
   if (input.signal.aborted) return canceledActionError(input.request);
   if (!approval.ok || !("needsApproval" in approval)) return approval;
-  if (!approval.needsApproval) return input.dependencies.executeAction(input);
+  if (!approval.needsApproval) return dispatch();
 
   const approvalId = await input.dependencies.requestApproval({
     capability: input.capability,
@@ -332,7 +339,7 @@ export async function executeExternalActionWithApproval(input: {
   }
   if (!(await input.authorizeOperation())) return authorityActionError();
   if (input.signal.aborted) return canceledActionError(input.request);
-  return input.dependencies.executeAction(input);
+  return dispatch();
 }
 
 async function requestGatewayActionApproval(input: {
@@ -581,9 +588,7 @@ function rowsFromExecute<Row>(result: unknown): Row[] {
 function wikiToolEnabled(
   context: NonNullable<Awaited<ReturnType<typeof authorizePersistedExternalEngineToolCapability>>>,
 ) {
-  return (
-    context.wikiEnabled && context.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION
-  );
+  return isWikiHostToolContractVersion(context.hostToolContractVersion);
 }
 
 function registerExternalEngineWikiTool(input: {
@@ -621,7 +626,6 @@ function registerExternalEngineWikiTool(input: {
         const current = userWorkosId === initialContext.actorId ? await currentContext() : null;
         return current
           ? {
-              enabled: true,
               workspaces: [
                 {
                   id: current.workspaceId,
@@ -630,7 +634,7 @@ function registerExternalEngineWikiTool(input: {
                 },
               ],
             }
-          : { enabled: false, workspaces: [] };
+          : { workspaces: [] };
       },
       execute: async ({ userWorkosId, workspaceId, command, idempotencyKey }) => {
         const current =
@@ -674,10 +678,11 @@ function registerBrainTools(input: {
   signal: AbortSignal;
 }) {
   const brainRef = input.authorizedContext.brainRef;
-  if (!brainRef) return;
+  if (!input.authorizedContext.legacyBrainEnabled || !brainRef) return;
   const checkAbort = async () => {
     if (input.signal.aborted) throw new Error("The tool call was canceled.");
-    if (!(await input.authorizeOperation())) {
+    const current = await input.authorizeOperation();
+    if (!current?.legacyBrainEnabled || current.brainRef !== brainRef) {
       throw new Error("This engine turn is no longer active.");
     }
   };

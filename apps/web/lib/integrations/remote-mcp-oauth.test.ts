@@ -23,6 +23,7 @@ import {
 } from "@/lib/integrations/linear-mcp";
 import { startNeonMcpOAuth, verifyNeonMcpState } from "@/lib/integrations/neon-mcp";
 import { startPostHogMcpOAuth, verifyPostHogMcpState } from "@/lib/integrations/posthog-mcp";
+import { startSigNozMcpOAuth, verifySigNozMcpState } from "@/lib/integrations/signoz-mcp";
 
 const observed = vi.hoisted(() => ({
   callbackUrl: "",
@@ -229,6 +230,27 @@ describe("opencompany remote MCP OAuth", () => {
     expect(() => verifyLinearMcpState(observed.state)).toThrow(
       "Invalid Linear MCP provider state.",
     );
+  });
+
+  it("connects SigNoz only to the reviewed US Cloud MCP endpoint", async () => {
+    await startSigNozMcpOAuth({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/signoz",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ serverUrl: "https://mcp.us.signoz.cloud/mcp" }),
+    );
+    expect(observed.clientMetadata).not.toHaveProperty("scope");
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/signoz/callback",
+    );
+    expect(verifySigNozMcpState(observed.state)).toMatchObject({
+      provider: "signoz",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/signoz",
+    });
   });
 
   it("accepts provider-less legacy state only for Linear", async () => {

@@ -41,6 +41,7 @@ import {
   PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_HEADER,
+  V1_BROWSER_REQUEST_HEADERS,
 } from "@opencompany/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
@@ -1309,28 +1310,53 @@ describe("canonical Hono API", () => {
   });
 
   it("returns a retryable typed error when external Skill resolution is unavailable", async () => {
-    const app = testApp(fakeRepository(), {
-      skillImports: fakeSkillImportService(
-        {},
-        {
-          resolve: async () => {
-            throw new CoreError("unavailable", "Couldn't read that skill right now.");
+    const upstreamError = Object.assign(new Error("GitHub artifact request was rate limited."), {
+      upstreamService: "github",
+      upstreamOperation: "resolve_commit",
+      upstreamStatus: 403,
+      failureKind: "rate_limit",
+      rateLimitRemaining: 0,
+    });
+    const failure = new CoreError("unavailable", "Couldn't read that skill right now.", {
+      cause: upstreamError,
+    });
+    const captureException = vi.fn();
+    setExceptionReporter({ captureException });
+    try {
+      const app = testApp(fakeRepository(), {
+        skillImports: fakeSkillImportService(
+          {},
+          {
+            resolve: async () => {
+              throw failure;
+            },
           },
-        },
-      ),
-    });
+        ),
+      });
 
-    const response = await app.request("/v1/skills/imports/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: "github.com/o/r" }),
-    });
+      const response = await app.request("/v1/skills/imports/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "github.com/o/r" }),
+      });
 
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "unavailable", retryable: true },
-      meta: { apiVersion: "v1" },
-    });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "unavailable", retryable: true },
+        meta: { apiVersion: "v1" },
+      });
+      expect(captureException).toHaveBeenCalledWith(
+        failure,
+        expect.objectContaining({
+          event: "opencompany.api_request_failed",
+          method: "POST",
+          path: "/v1/skills/imports/preview",
+          request_id: expect.stringMatching(/^request_/u),
+        }),
+      );
+    } finally {
+      setExceptionReporter(undefined);
+    }
   });
 
   it("serves and mutates browser profiles through the authenticated owner boundary", async () => {
@@ -1633,6 +1659,8 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/neon/callback", "mcp.callback.neon"],
       ["GET", "/integrations/latitude/start", "mcp.start.latitude"],
       ["GET", "/integrations/latitude/callback", "mcp.callback.latitude"],
+      ["GET", "/integrations/signoz/start", "mcp.start.signoz"],
+      ["GET", "/integrations/signoz/callback", "mcp.callback.signoz"],
       ["GET", "/integrations/x-account/start", "x-account.start"],
       ["GET", "/integrations/x-account/callback", "x-account.callback"],
       ["GET", "/integrations/slack-bot/start", "slack-bot.start"],
@@ -1665,10 +1693,9 @@ describe("canonical Hono API", () => {
     expect(allowed.status).toBe(204);
     expect(allowed.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true");
-    expect(allowed.headers.get("access-control-allow-headers")).toContain("Idempotency-Key");
-    expect(allowed.headers.get("access-control-allow-headers")).toContain(
-      "X-OpenCompany-Protocol-Version",
-    );
+    const allowedHeaders = allowed.headers.get("access-control-allow-headers")?.toLowerCase();
+    expect(allowedHeaders).toContain("idempotency-key");
+    expect(allowedHeaders).toContain("x-opencompany-protocol-version");
     expect(allowed.headers.get("access-control-allow-methods")).toContain("PUT");
     expect(allowed.headers.get("access-control-allow-methods")).toContain("DELETE");
 
@@ -1681,6 +1708,29 @@ describe("canonical Hono API", () => {
     });
     expect(disallowed.status).toBe(204);
     expect(disallowed.headers.has("access-control-allow-origin")).toBe(false);
+  });
+
+  it("allows conditional cross-origin Message presentation reads", async () => {
+    const app = testApp(fakeRepository(), {
+      browserOrigins: ["https://my.opencompany.chat"],
+    });
+    const response = await app.request(
+      "/v1/conversations/conversation_1/messages/message_assistant_1/presentation",
+      {
+        method: "OPTIONS",
+        headers: {
+          Origin: "https://my.opencompany.chat",
+          "Access-Control-Request-Method": "GET",
+          "Access-Control-Request-Headers": "if-none-match",
+        },
+      },
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
+    expect(response.headers.get("access-control-allow-headers")?.split(",")).toEqual(
+      expect.arrayContaining([...V1_BROWSER_REQUEST_HEADERS]),
+    );
   });
 
   it("rejects cookie mutations without an allowed Origin while preserving bearer clients", async () => {
@@ -2327,7 +2377,7 @@ describe("canonical Hono API", () => {
           workspaceId: actor.workspaceId,
           role: actor.role,
           taskSpawningEnabled: true,
-          wikiEnabled: true,
+          legacyBrainEnabled: true,
         },
       ],
     }));
@@ -2920,7 +2970,7 @@ describe("canonical Hono API", () => {
     const updatePreferences = vi.fn(async () => ({
       timezone: "Europe/Berlin",
       taskSpawningEnabled: true,
-      wikiEnabled: false,
+      wikiEnabled: true as const,
       taskViewMode: "list" as const,
       imessageEnabled: false,
       autoModelRoutingEnabled: true,
@@ -4521,7 +4571,6 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       imessageEnabled: false,
-      wikiEnabled: true,
       taskViewMode: "board" as const,
       preferredMcpClient: null,
       mcpSetupCompletedAt: null,
@@ -4535,6 +4584,7 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
         name: "Workspace",
         slug: "workspace",
         role: "admin" as const,
+        legacyBrainEnabled: true,
       },
     ],
     activeWorkspaceId: actor.workspaceId,

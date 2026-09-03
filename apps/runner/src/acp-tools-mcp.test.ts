@@ -1,7 +1,14 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { ACTION_EFFECTS_READ, type ResolvedActionCatalog } from "@opencompany/agent/actions/types";
+import type { ActionGatewayServiceDependencies } from "@opencompany/agent/application/action-gateway";
+import {
+  createActionGateway,
+  createActionHostGateway,
+} from "@opencompany/agent/application/persisted-action-gateway";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
   createExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
@@ -32,7 +39,7 @@ const authorized = {
   workspaceId: "workspace_1",
   workspaceName: "Acme",
   workspaceSlug: "acme",
-  wikiEnabled: true,
+  legacyBrainEnabled: false,
   conversationId: "conversation_1",
   sandboxId: "sandbox_1",
   engine: "claude_code" as const,
@@ -137,6 +144,81 @@ describe("runner ACP tools MCP", () => {
     }
   });
 
+  it("dispatches execute operations through the persisted action gateway", async () => {
+    const catalog: ResolvedActionCatalog = {
+      providers: [{ id: "gmail", label: "Gmail", description: "Email" }],
+      actions: [
+        {
+          id: "gmail.search",
+          provider: "gmail",
+          capability: "read",
+          effects: ACTION_EFFECTS_READ,
+          description: "Search Gmail.",
+          params: { type: "object" },
+          permissionMode: "on",
+          execute: vi.fn(async () => ({ messages: [] })),
+        },
+      ],
+    };
+    const providerExecuteAction = vi.fn<ActionGatewayServiceDependencies["executeAction"]>(
+      async ({ actionId }) => ({
+        ok: true,
+        action: actionId,
+        result: { messages: [] },
+      }),
+    );
+    const serviceDependencies = {
+      loadContext: vi.fn(async () => ({
+        actorId: authorized.actorId,
+        workspaceId: authorized.workspaceId,
+        conversationId: authorized.conversationId,
+        userTimezone: "Europe/Berlin",
+        policy: "foregroundInteractive" as const,
+      })),
+      resolveCatalog: vi.fn(async () => catalog),
+      claimInvocation: vi.fn(async () => ({
+        ok: true as const,
+        callCount: 1,
+        duplicate: false,
+      })),
+      recordSourceDiscovery: vi.fn(async () => undefined),
+      executeAction: providerExecuteAction,
+    } satisfies Partial<ActionGatewayServiceDependencies>;
+    const executeAction = vi.fn(createActionGateway(serviceDependencies));
+    const request = {
+      operation: "execute" as const,
+      sessionId: capability.codexChatSessionId,
+      turnId: capability.codexChatTurnId,
+      action: "gmail.search",
+      params: { query: "from:ada" },
+      invocationId: "invocation_1",
+    };
+    const signal = new AbortController().signal;
+
+    const result = await executeExternalActionWithApproval({
+      request,
+      signal,
+      capability: { ...capability, v: 2, expiresAt: Date.now() + 60_000 },
+      authorizedContext: authorized,
+      authorizeOperation: vi.fn(async () => authorized),
+      dependencies: {
+        executeAction,
+        evaluateApproval: createActionHostGateway(serviceDependencies),
+        requestApproval: vi.fn(),
+        waitForApproval: vi.fn(),
+        resolveApproval: vi.fn(),
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      action: "gmail.search",
+      result: { messages: [] },
+    });
+    expect(executeAction).toHaveBeenCalledWith({ request, signal });
+    expect(providerExecuteAction).toHaveBeenCalledOnce();
+  });
+
   it("proxies the scoped wiki tool through the canonical API boundary", async () => {
     const authorize = vi.fn(async () => authorized);
     const executeWikiCommand = vi.fn(async () => ({
@@ -194,8 +276,8 @@ describe("runner ACP tools MCP", () => {
     }
   });
 
-  it("does not advertise wiki when the user has it disabled", async () => {
-    const authorize = vi.fn(async () => ({ ...authorized, wikiEnabled: false }));
+  it("advertises wiki when legacy Brain is disabled", async () => {
+    const authorize = vi.fn(async () => ({ ...authorized, legacyBrainEnabled: false }));
     const app = Fastify();
     apps.push(app);
     registerAcpToolsMcpRoute(app, env, { authorize });
@@ -218,6 +300,7 @@ describe("runner ACP tools MCP", () => {
         "publish_artifact",
         "list_actions",
         "use_action",
+        "wiki",
       ]);
     } finally {
       await client.close();
@@ -497,6 +580,7 @@ describe("runner ACP tools MCP", () => {
       ...authorized,
       engine: "codex" as const,
       brainRef: "brain_1",
+      legacyBrainEnabled: true,
     }));
     const app = Fastify();
     apps.push(app);
@@ -534,6 +618,7 @@ describe("runner ACP tools MCP", () => {
       ...authorized,
       engine: "codex" as const,
       brainRef: "brain_1",
+      legacyBrainEnabled: true,
       hostToolContractVersion: CODEX_BRAIN_TOOL_CONTRACT_VERSION,
     }));
     const app = Fastify();
@@ -554,7 +639,39 @@ describe("runner ACP tools MCP", () => {
 
     try {
       await client.connect(transport as Parameters<typeof client.connect>[0]);
-      expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["goat_brain"]);
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+        "wiki",
+        "goat_brain",
+      ]);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("registers the Wiki tool for retained v2 host-tool sessions", async () => {
+    const authorize = vi.fn(async () => ({
+      ...authorized,
+      hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+    }));
+    const app = Fastify();
+    apps.push(app);
+    registerAcpToolsMcpRoute(app, env, { authorize });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+    const ticket = createExternalEngineGatewayTicket({
+      ...capability,
+      secret: env.internalToken,
+    }).ticket;
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+      { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+    );
+    const client = new Client({ name: "runner-test", version: "0.1.0" });
+
+    try {
+      await client.connect(transport as Parameters<typeof client.connect>[0]);
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("wiki");
     } finally {
       await client.close();
     }
