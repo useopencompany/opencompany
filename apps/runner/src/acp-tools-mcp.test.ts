@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
   createExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
@@ -561,6 +562,35 @@ describe("runner ACP tools MCP", () => {
         "wiki",
         "goat_brain",
       ]);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("registers the Wiki tool for retained v2 host-tool sessions", async () => {
+    const authorize = vi.fn(async () => ({
+      ...authorized,
+      hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+    }));
+    const app = Fastify();
+    apps.push(app);
+    registerAcpToolsMcpRoute(app, env, { authorize });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+    const ticket = createExternalEngineGatewayTicket({
+      ...capability,
+      secret: env.internalToken,
+    }).ticket;
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+      { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+    );
+    const client = new Client({ name: "runner-test", version: "0.1.0" });
+
+    try {
+      await client.connect(transport as Parameters<typeof client.connect>[0]);
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("wiki");
     } finally {
       await client.close();
     }

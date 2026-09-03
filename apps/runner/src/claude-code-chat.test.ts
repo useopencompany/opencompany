@@ -1,6 +1,7 @@
 import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
   verifyExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import type {
@@ -447,7 +448,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       turn: claudeTurn(),
       session: claudeSession({
         workspaceId: "workspace_1",
-        hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
+        hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
       }),
       canonicalAttemptId: "attempt_1",
       env: env({ runnerPublicUrl: "https://runner.example.com" }),

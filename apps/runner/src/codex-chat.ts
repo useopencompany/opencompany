@@ -10,10 +10,10 @@ import {
   createExternalEngineGatewayTicket,
   isActionHostToolContractVersion,
   isCodexReasoningEffort,
+  isWikiHostToolContractVersion,
   shellQuote,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
-import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 import { getWorkflowHarnessPluginSkillBundleIds } from "@opencompany/db/harness";
 import {
   loadChatSessionPluginRuntime,
@@ -388,8 +388,7 @@ export async function runCodexChatTurn(input: {
     const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
     const canonicalAttemptId = input.canonicalAttemptId;
     const actionHostEnabled = isActionHostToolContractVersion(session.hostToolContractVersion);
-    const brainReadHostEnabled =
-      actionHostEnabled || session.hostToolContractVersion === CODEX_BRAIN_TOOL_CONTRACT_VERSION;
+    const brainReadHostEnabled = isWikiHostToolContractVersion(session.hostToolContractVersion);
     const hostGatewayEnabled =
       brainReadHostEnabled &&
       Boolean(session.workspaceId) &&
@@ -404,7 +403,8 @@ export async function runCodexChatTurn(input: {
       hostGatewayEnabled && legacyBrainEnabled && actionHostEnabled && Boolean(session.brainRef);
     const actionToolsEnabled = hostGatewayEnabled && actionHostEnabled;
     const artifactToolsEnabled = hostGatewayEnabled && actionHostEnabled;
-    const wikiToolsSupported = hostGatewayEnabled;
+    const wikiToolsSupported =
+      hostGatewayEnabled && isWikiHostToolContractVersion(session.hostToolContractVersion);
     const toolGatewayTicket =
       hostGatewayEnabled && canonicalAttemptId
         ? createExternalEngineGatewayTicket({

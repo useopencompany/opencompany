@@ -29,6 +29,27 @@ describe("knowledge tools", () => {
     expect(WIKI_TOOL_NAME in legacyBrainOnly).toBe(false);
     expect(BRAIN_TOOL_NAME in legacyBrainOnly).toBe(true);
   });
+
+  it("advertises only read commands for a read-only Wiki runner", () => {
+    const wiki = createProductChatToolContext({
+      model,
+      runWiki: vi.fn(),
+      wikiToolReadOnly: true,
+    }).tools[WIKI_TOOL_NAME] as unknown as {
+      description: string;
+      inputSchema: { jsonSchema: { properties: { command: { enum: string[] } } } };
+    };
+
+    expect(wiki.description).toContain("Read-only workspace wiki");
+    expect(wiki.inputSchema.jsonSchema.properties.command.enum).toEqual([
+      "tree",
+      "read",
+      "grep",
+      "search",
+      "recent",
+      "timeline",
+    ]);
+  });
 });
 
 describe("create_workspace_skill tool", () => {

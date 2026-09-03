@@ -1,7 +1,11 @@
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createWorkOsApiAuthenticator, createWorkOsApiIdentityVerifier } from "./auth";
+import {
+  createWorkOsApiAuthenticator,
+  createWorkOsApiIdentityVerifier,
+  resolveWikiServiceActor,
+} from "./auth";
 
 function compiledActorQuery(execute: ReturnType<typeof vi.fn>) {
   const query = execute.mock.calls[0]?.[0] as SQL;
@@ -501,6 +505,34 @@ describe("API authentication", () => {
     expect(result.refreshedSessionCookie).toContain("wos-session=rotated-session");
     expect(result.refreshedSessionCookie).toContain("HttpOnly");
     expect(result.refreshedSessionCookie).not.toContain("Domain=");
+  });
+
+  it("resolves a Wiki service actor from membership without requiring completed onboarding", async () => {
+    const execute = vi.fn(async () => ({
+      rows: [
+        {
+          workspaceId: "workspace_1",
+          role: "member",
+          taskSpawningEnabled: false,
+          legacyBrainEnabled: false,
+        },
+      ],
+    }));
+
+    await expect(
+      resolveWikiServiceActor(execute, {
+        userWorkosId: "user_invited",
+        workspaceId: "workspace_1",
+      }),
+    ).resolves.toMatchObject({
+      userId: "user_invited",
+      workspaceId: "workspace_1",
+      role: "member",
+      permissions: expect.arrayContaining(["wiki:read", "wiki:write"]),
+    });
+
+    const compiled = compiledActorQuery(execute);
+    expect(compiled.sql).not.toContain("onboarded_at");
   });
 });
 

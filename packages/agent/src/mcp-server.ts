@@ -66,7 +66,6 @@ import type { BrainToolInput } from "./chat-ui";
 // application service the browser and runner use.
 export type McpWikiGateway = {
   getAccess(userWorkosId: string): Promise<{
-    enabled: boolean;
     workspaces: Array<{ id: string; name: string; slug: string | null }>;
   }>;
   execute(input: {

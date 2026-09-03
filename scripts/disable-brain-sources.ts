@@ -5,9 +5,10 @@
 //   DATABASE_URL=postgres://... bun scripts/disable-brain-sources.ts --workspace <id> [--dry-run]
 
 import { parseArgs } from "node:util";
+import { setBrainSourceEnabled } from "@opencompany/db/brain-sources";
 import { getDb } from "@opencompany/db/client";
 import { brainSources, brains, workspaces } from "@opencompany/db/product-schema";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 const { values: args } = parseArgs({
   options: {
@@ -55,14 +56,13 @@ for (const source of enabledSources) {
 
 if (dryRun || enabledSources.length === 0) process.exit(0);
 
-const updated = await db
-  .update(brainSources)
-  .set({ enabled: false, updatedAt: new Date() })
-  .where(
-    inArray(
-      brainSources.id,
-      enabledSources.map((source) => source.id),
-    ),
-  )
-  .returning({ id: brainSources.id });
-console.log(`Disabled ${updated.length} Brain source(s).`);
+let disabledCount = 0;
+for (const source of enabledSources) {
+  const disabled = await setBrainSourceEnabled({
+    brainRef: source.brainId,
+    sourceId: source.id,
+    enabled: false,
+  });
+  if (disabled) disabledCount += 1;
+}
+console.log(`Disabled ${disabledCount} Brain source(s) and canceled their active ingest jobs.`);

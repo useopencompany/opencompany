@@ -21,6 +21,8 @@ import {
 } from "@opencompany/telemetry";
 import { flushLatitude, latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import {
+  WIKI_READ_TOOL_DESCRIPTION,
+  WIKI_READ_TOOL_INPUT_JSON_SCHEMA,
   WIKI_TOOL_DESCRIPTION,
   WIKI_TOOL_INPUT_JSON_SCHEMA,
   WIKI_TOOL_NAME,
@@ -388,7 +390,7 @@ export async function runProductChatAgent(input: {
   userContext?: ProductChatSystemPromptInput["userContext"];
   recurringSchedules?: ProductChatSystemPromptInput["recurringSchedules"];
   taskToolsEnabled?: boolean;
-  brainCaptureEnabled?: boolean;
+  wikiToolReadOnly?: boolean;
   activeBrain?: ProductChatSystemPromptInput["activeBrain"];
   connectedIntegrations?: ProductChatSystemPromptInput["connectedIntegrations"];
   // Surface-specific prompt blocks appended after the shared system prompt
@@ -425,7 +427,9 @@ export async function runProductChatAgent(input: {
     ...(input.createWorkspaceSkill ? { createWorkspaceSkill: input.createWorkspaceSkill } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
-    ...(input.runWiki ? { runWiki: input.runWiki } : {}),
+    ...(input.runWiki
+      ? { runWiki: input.runWiki, wikiToolReadOnly: Boolean(input.wikiToolReadOnly) }
+      : {}),
     ...(input.sendUserMessage ? { sendUserMessage: input.sendUserMessage } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
@@ -444,9 +448,8 @@ export async function runProductChatAgent(input: {
     ...(input.userContext ? { userContext: input.userContext } : {}),
     ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
     ...(input.taskToolsEnabled !== undefined ? { taskToolsEnabled: input.taskToolsEnabled } : {}),
-    ...(input.brainCaptureEnabled !== undefined
-      ? { brainCaptureEnabled: input.brainCaptureEnabled }
-      : {}),
+    wikiToolEnabled: Boolean(input.runWiki),
+    wikiToolReadOnly: Boolean(input.wikiToolReadOnly),
     ...(input.activeBrain !== undefined ? { activeBrain: input.activeBrain } : {}),
     ...(input.connectedIntegrations !== undefined
       ? { connectedIntegrations: input.connectedIntegrations }
@@ -557,6 +560,7 @@ export function createProductChatToolContext(input: {
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
+  wikiToolReadOnly?: boolean;
   sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
@@ -782,9 +786,11 @@ export function createProductChatToolContext(input: {
   const runWiki = input.runWiki;
   if (runWiki) {
     tools[WIKI_TOOL_NAME] = tool<WikiToolInput, WikiToolOutput, Record<string, unknown>>({
-      description: WIKI_TOOL_DESCRIPTION,
+      description: input.wikiToolReadOnly ? WIKI_READ_TOOL_DESCRIPTION : WIKI_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<WikiToolInput>(
-        WIKI_TOOL_INPUT_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0],
+        (input.wikiToolReadOnly
+          ? WIKI_READ_TOOL_INPUT_JSON_SCHEMA
+          : WIKI_TOOL_INPUT_JSON_SCHEMA) as unknown as Parameters<typeof jsonSchema>[0],
       ),
       execute: async (args, executionContext) => {
         visibleToolActivity = true;

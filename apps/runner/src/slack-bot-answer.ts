@@ -31,12 +31,14 @@ import {
 } from "@opencompany/analytics/product/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { ensureMonthlyIncludedUsage, isCreditsEnforcementEnabled } from "@opencompany/db/billing";
+import { getDb } from "@opencompany/db/client";
 import {
   hasPositiveCreditBalance,
   recordCreditDebit,
   recordSubscriptionCoveredUsage,
 } from "@opencompany/db/credits";
 import { loadIntegrationCredential } from "@opencompany/db/integrations";
+import { workspaces } from "@opencompany/db/product-schema";
 import {
   getSlackBotThreadParticipation,
   listEnabledSlackBotBrainRoutes,
@@ -50,11 +52,15 @@ import {
   DEFAULT_BRAIN_SLUG,
   isLegacyBrainEnabledForWorkspace,
   listAccessibleBrains,
-  listWorkspacesForUser,
 } from "@opencompany/db/workspaces";
 import { recordModelCost } from "@opencompany/telemetry";
-import type { WikiToolInput, WikiToolOutput } from "@opencompany/wiki/tool";
+import {
+  WIKI_READ_COMMANDS,
+  type WikiToolInput,
+  type WikiToolOutput,
+} from "@opencompany/wiki/tool";
 import type { LanguageModelUsage } from "ai";
+import { eq } from "drizzle-orm";
 import { executeApiWikiCommand } from "./api-wiki-client";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { runTaskBrainRead } from "./codex-brain-tool";
@@ -163,6 +169,11 @@ export async function processSlackBotDirectMessage(
 
 type AnswerOutcome = "handled" | "duplicate" | { kind: "unmapped_dm"; botToken: string };
 
+export function slackChannelWikiAccessRefusal(sender: SlackSenderResolution): string | null {
+  if (sender.kind === "member") return null;
+  return "I couldn't match your Slack account to a member of this opencompany workspace, so I can't use its Wiki in this channel. Ask a workspace admin to add or verify your account, then try again.";
+}
+
 async function answerForIntegration(
   integration: SlackBotIntegrationForTeam,
   input: SlackBotEventInput,
@@ -204,6 +215,11 @@ async function answerForIntegration(
   });
   if (mode === "dm" && sender.kind !== "member") {
     return { kind: "unmapped_dm", botToken };
+  }
+  const channelAccessRefusal = mode === "dm" ? null : slackChannelWikiAccessRefusal(sender);
+  if (channelAccessRefusal) {
+    await reply(channelAccessRefusal);
+    return "handled";
   }
 
   const legacyBrains = (await isLegacyBrainEnabledForWorkspace(integration.workspaceId))
@@ -440,9 +456,9 @@ async function runSlackChatAgent(input: {
     : ((await getUserBasics(input.identity.userWorkosId)) ?? undefined);
   const userTimezone = userContext?.timezone || "UTC";
 
-  // Never expose the installing admin's private integrations to an unmapped
-  // Slack sender using the fallback identity. DMs already require a mapped
-  // member; channel fallbacks get only the shared workspace Wiki.
+  // Only mapped members can use their private integrations. A mapped member
+  // may still use the legacy Brain fallback identity when routed Brain access
+  // has drifted, and that fallback must not inherit the installer's actions.
   const actions = input.identity.member
     ? await resolveSlackActionDispatcher({
         userWorkosId: input.identity.userWorkosId,
@@ -454,11 +470,7 @@ async function runSlackChatAgent(input: {
         userTimezone,
       })
     : null;
-  const workspaceName = primaryBrain
-    ? (await listWorkspacesForUser(input.identity.userWorkosId)).find(
-        (entry) => entry.workspace.id === input.integration.workspaceId,
-      )?.workspace.name
-    : null;
+  const workspaceName = primaryBrain ? await getWorkspaceName(input.integration.workspaceId) : null;
 
   // In channels the final turn names the asker like the reconstructed history
   // does, so the model knows who to address among several humans.
@@ -487,7 +499,6 @@ async function runSlackChatAgent(input: {
     taskToolsEnabled: false,
     ...(primaryBrain
       ? {
-          brainCaptureEnabled: true,
           activeBrain: {
             name: primaryBrain.brainName,
             workspaceName: workspaceName ?? "this workspace",
@@ -551,7 +562,8 @@ async function runSlackChatAgent(input: {
             };
           },
         }
-      : { brainCaptureEnabled: false, activeBrain: null }),
+      : { activeBrain: null }),
+    wikiToolReadOnly: true,
     ...(actions ? { connectedIntegrations: actions.catalog.providers } : {}),
     extraSystemBlocks: [createSlackSurfacePromptBlock({ isDirectMessage: input.mode === "dm" })],
     userWorkosId: input.identity.userWorkosId,
@@ -600,6 +612,9 @@ export async function runSlackWikiCommand(
   },
   execute: typeof executeApiWikiCommand = executeApiWikiCommand,
 ): Promise<WikiToolOutput> {
+  if (!WIKI_READ_COMMANDS.includes(input.toolInput.command)) {
+    return { ok: false, error: "I can't write to the Wiki from Slack yet." };
+  }
   try {
     return await execute({
       origin: input.origin,
@@ -691,6 +706,15 @@ async function connectedIntegrations(teamId: string) {
 
 export function isDirectMessageChannel(channelId: string) {
   return channelId.startsWith("D");
+}
+
+async function getWorkspaceName(workspaceId: string): Promise<string | null> {
+  const [row] = await getDb()
+    .select({ name: workspaces.name })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  return row?.name ?? null;
 }
 
 async function postPlainSlackReply(

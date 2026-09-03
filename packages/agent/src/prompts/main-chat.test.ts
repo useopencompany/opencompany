@@ -151,14 +151,38 @@ describe("createProductChatSystemPrompt integrations", () => {
     expect(block.length).toBeLessThan(800);
   });
 
-  it("keeps Wiki-fill guidance when legacy Brain capture is disabled", () => {
+  it("keeps Wiki-fill guidance when the writable Wiki tool is available", () => {
     const prompt = createProductChatSystemPrompt({
       connectedIntegrations: CONNECTED_INTEGRATIONS,
-      brainCaptureEnabled: false,
+      wikiToolEnabled: true,
     });
 
     expect(prompt).toContain("<action_sources>");
     expect(prompt).toContain("<wiki_fill>");
+  });
+
+  it("omits Wiki behavior when a task turn has no Wiki tool", () => {
+    const prompt = createProductChatSystemPrompt({
+      wikiToolEnabled: false,
+      connectedIntegrations: CONNECTED_INTEGRATIONS,
+    });
+
+    expect(prompt).not.toMatch(/wiki/iu);
+    expect(prompt).not.toContain("<wiki_fill>");
+  });
+
+  it("keeps read guidance but omits write guidance on a read-only Wiki surface", () => {
+    const prompt = createProductChatSystemPrompt({
+      wikiToolEnabled: true,
+      wikiToolReadOnly: true,
+      connectedIntegrations: CONNECTED_INTEGRATIONS,
+    });
+
+    expect(prompt).toContain("Use the wiki tool only to recall, search, and inspect");
+    expect(prompt).toContain("you can't write to the Wiki from here yet");
+    expect(prompt).not.toContain("Use the wiki tool whenever the user wants something kept");
+    expect(prompt).not.toContain("create a focused Wiki page");
+    expect(prompt).not.toContain("<wiki_fill>");
   });
 
   it("keeps multi-step action research in chat when task tools are disabled", () => {

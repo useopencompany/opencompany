@@ -338,8 +338,9 @@ function actorPermissions(row: {
 // Reconstructs an Actor for an explicit (userWorkosId, workspaceId) pair from
 // Postgres, for internal service calls (e.g. the runner→API wiki command
 // endpoint) that name their tenancy but must never be trusted for permissions.
-// Requires the user to exist, have finished onboarding, and hold an accessible
-// membership of the named workspace.
+// Requires the user to exist and hold a membership of the named workspace.
+// Invite acceptance can create that membership before onboarding finishes, so
+// membership remains the Wiki authorization boundary in that valid state.
 export async function resolveWikiServiceActor(
   execute: ChatSqlExecute,
   input: { userWorkosId: string; workspaceId: string },
@@ -356,7 +357,6 @@ export async function resolveWikiServiceActor(
     JOIN goat.workspaces AS workspace
       ON workspace.id = member.workspace_id
     WHERE actor_user.workos_user_id = ${input.userWorkosId}
-      AND actor_user.onboarded_at IS NOT NULL
       AND workspace.id = ${input.workspaceId}
     LIMIT 1
   `);

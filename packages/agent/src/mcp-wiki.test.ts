@@ -21,7 +21,6 @@ function register(input: {
     gatewayApiKey: "gateway_test",
     wiki: {
       getAccess: vi.fn(async () => ({
-        enabled: true,
         workspaces: [{ id: "workspace_1", name: "Acme", slug: "acme" }],
       })),
       execute: input.execute,

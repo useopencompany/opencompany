@@ -20,9 +20,9 @@ import {
   type ActionGatewayResponse,
   type ExternalEngineGatewayTicketPayload,
   isActionHostToolContractVersion,
+  isWikiHostToolContractVersion,
   verifyExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
-import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 import { type ActionTurnRef, resolveActionApproval } from "@opencompany/db/action-governance";
 import { RUN_EVENT_NOTIFY_CHANNEL } from "@opencompany/db/chat-repository";
 import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
@@ -582,10 +582,7 @@ function rowsFromExecute<Row>(result: unknown): Row[] {
 function wikiToolEnabled(
   context: NonNullable<Awaited<ReturnType<typeof authorizePersistedExternalEngineToolCapability>>>,
 ) {
-  return (
-    context.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION ||
-    context.hostToolContractVersion === CODEX_BRAIN_TOOL_CONTRACT_VERSION
-  );
+  return isWikiHostToolContractVersion(context.hostToolContractVersion);
 }
 
 function registerExternalEngineWikiTool(input: {
@@ -623,7 +620,6 @@ function registerExternalEngineWikiTool(input: {
         const current = userWorkosId === initialContext.actorId ? await currentContext() : null;
         return current
           ? {
-              enabled: true,
               workspaces: [
                 {
                   id: current.workspaceId,
@@ -632,7 +628,7 @@ function registerExternalEngineWikiTool(input: {
                 },
               ],
             }
-          : { enabled: false, workspaces: [] };
+          : { workspaces: [] };
       },
       execute: async ({ userWorkosId, workspaceId, command, idempotencyKey }) => {
         const current =

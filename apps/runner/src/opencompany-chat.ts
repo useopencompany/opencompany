@@ -1103,7 +1103,7 @@ async function resolveProductChatRuntime(input: {
     browserToolsEnabled: Boolean(hostTools?.browserTools),
     taskToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
     scheduleToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
-    brainCaptureEnabled: Boolean(brainCapture),
+    wikiToolEnabled: Boolean(hostTools?.runWiki),
     activeBrain: brain
       ? {
           name: brain.name,

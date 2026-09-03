@@ -1,5 +1,4 @@
-import { isActionHostToolContractVersion } from "@opencompany/agent-runtime";
-import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
+import { isWikiHostToolContractVersion } from "@opencompany/agent-runtime";
 
 export type ExternalEngineToolCapability = {
   codexChatSessionId: string;
@@ -71,8 +70,7 @@ export function authorizeExternalEngineToolCapability(input: {
     (state.engine !== "claude_code" && state.engine !== "codex") ||
     state.sessionStatus !== "running" ||
     state.activeTurnId !== capability.codexChatTurnId ||
-    (!isActionHostToolContractVersion(state.hostToolContractVersion) &&
-      state.hostToolContractVersion !== CODEX_BRAIN_TOOL_CONTRACT_VERSION) ||
+    !isWikiHostToolContractVersion(state.hostToolContractVersion) ||
     !state.workspaceId ||
     !state.sandboxId ||
     state.turnStatus !== "running" ||

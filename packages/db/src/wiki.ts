@@ -86,7 +86,6 @@ function firstRow<T>(rows: T[], context: string): T {
 // ---------------------------------------------------------------------------
 
 export type WikiAccess = {
-  enabled: boolean;
   workspaces: Array<{ id: string; name: string; slug: string | null }>;
 };
 
@@ -100,7 +99,6 @@ export async function getWikiAccessForUser(
 ): Promise<WikiAccess> {
   const memberships = await listWorkspacesForUser(userWorkosId, { db });
   return {
-    enabled: memberships.length > 0,
     workspaces: memberships.map(({ workspace }) => ({
       id: workspace.id,
       name: workspace.name,

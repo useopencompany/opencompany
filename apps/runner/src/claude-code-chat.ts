@@ -9,6 +9,7 @@ import {
   createExternalEngineGatewayTicket,
   isActionHostToolContractVersion,
   isCodexReasoningEffort,
+  isWikiHostToolContractVersion,
   shellQuote,
 } from "@opencompany/agent-runtime";
 import {
@@ -457,7 +458,7 @@ export async function runClaudeCodeChatTurn(input: {
     const actionToolsEnabled = hostGatewayEnabled;
     const artifactToolsEnabled = hostGatewayEnabled;
     const wikiToolsSupported =
-      hostGatewayEnabled && session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION;
+      hostGatewayEnabled && isWikiHostToolContractVersion(session.hostToolContractVersion);
     const legacyBrainEnabled = session.workspaceId
       ? await isLegacyBrainEnabledForWorkspace(session.workspaceId, { db: getDb() })
       : false;
