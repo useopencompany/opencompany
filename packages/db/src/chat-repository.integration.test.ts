@@ -1660,10 +1660,11 @@ describe("Postgres Chat repositories", () => {
         session_id: string;
         host_tool_contract_version: string;
         run_owner: string;
+        run_settings: Record<string, unknown>;
       }>(`
         SELECT
           task.status, task.session_id, runtime.host_tool_contract_version,
-          run.user_workos_id AS run_owner
+          run.user_workos_id AS run_owner, run.settings AS run_settings
         FROM goat.tasks AS task
         JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = task.session_id
         JOIN goat.codex_chat_turns AS run ON run.id = '${created.runId}'
@@ -1676,6 +1677,7 @@ describe("Postgres Chat repositories", () => {
           session_id: "task_conversation_1",
           host_tool_contract_version: CHAT_HOST_TOOL_CONTRACT_VERSION,
           run_owner: "user_1",
+          run_settings: { taskResultMode: "assistant_final" },
         },
       ],
     });

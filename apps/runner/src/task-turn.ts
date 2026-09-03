@@ -1,9 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  UPDATE_TASK_STATUS_TOOL_DESCRIPTION,
-  UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA,
-} from "@opencompany/agent/chat-agent";
-import {
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
   hostToolContractVersionForEngine,
@@ -48,6 +44,7 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { getAvailableGitHubRepositoryNamesForRunner } from "./harness-planner";
 import { rowsFromExecute } from "./sql-exec";
+import { systemBlocksForTaskResultMode, systemPromptForTaskResultMode } from "./task-result-mode";
 import { normalizeTaskToolNames } from "./task-tool-names";
 
 const TASK_OUTCOME_COMMENT_MAX_LENGTH = 200;
@@ -86,6 +83,26 @@ export type TaskCommentThreadEntry = {
   author: "user" | "orchestrator" | "system";
   body: string;
 };
+
+export function resolveTaskTurnContext(task: Task, turn: CodexChatTurn): TaskTurnContext {
+  const resultMode = turn.settings.taskResultMode;
+  if (!resultMode || resultMode === task.harnessSpec.resultMode) {
+    return { task, harnessSpec: task.harnessSpec };
+  }
+  return {
+    task,
+    harnessSpec: {
+      ...task.harnessSpec,
+      resultMode,
+      systemPrompt: systemPromptForTaskResultMode(task.harnessSpec.systemPrompt, resultMode),
+      ...(task.harnessSpec.systemBlocks
+        ? {
+            systemBlocks: systemBlocksForTaskResultMode(task.harnessSpec.systemBlocks, resultMode),
+          }
+        : {}),
+    },
+  };
+}
 
 type TaskNextTurn = {
   id: string;
@@ -491,7 +508,7 @@ export function buildTaskTurnCompletion(input: {
     : null;
   let outcomeComment =
     input.outcomeComment?.trim().slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH) || null;
-  let harnessSpec = input.context.harnessSpec;
+  let harnessSpec = input.context.task.harnessSpec;
   let nextTurn: TaskNextTurn | null = null;
 
   if (workflow?.steps?.length) {
@@ -536,8 +553,8 @@ export function buildTaskTurnCompletion(input: {
         engine: nextStep.engine,
         model: nextStep.model,
         ...(nextStepCodexConfig ? { codex: nextStepCodexConfig } : {}),
-        systemPrompt: nextStep.systemPrompt,
-        systemBlocks: nextStep.systemBlocks,
+        systemPrompt: systemPromptForTaskResultMode(nextStep.systemPrompt, harnessSpec.resultMode),
+        systemBlocks: systemBlocksForTaskResultMode(nextStep.systemBlocks, harnessSpec.resultMode),
         workflow: {
           ...harnessSpec.workflow!,
           currentStepIndex: currentStepIndex + 1,
@@ -573,7 +590,7 @@ export function buildTaskTurnCompletion(input: {
     taskName: input.context.task.name,
     harnessSpec,
     result: input.result.trim(),
-    disposition: disposition as TaskRunDisposition,
+    disposition,
     reportedOutcome,
     outcomeComment,
     nextTurn,
@@ -587,11 +604,15 @@ export function buildTaskFailureCompletion(input: {
 }): TaskTurnCompletion {
   const error = input.error.trim().slice(0, CODING_ERROR_MAX_LENGTH);
   const retry = input.decision?.disposition === "retry" && input.context.task.attempts < 2;
+  const resultModeOverride =
+    input.context.harnessSpec.resultMode !== input.context.task.harnessSpec.resultMode
+      ? input.context.harnessSpec.resultMode
+      : null;
   return {
     taskId: input.context.task.id,
     taskDisplayId: input.context.task.displayId,
     taskName: input.context.task.name,
-    harnessSpec: input.context.harnessSpec,
+    harnessSpec: input.context.task.harnessSpec,
     result: "",
     disposition: input.decision ? (retry ? "retry" : "fail") : null,
     reportedOutcome: null,
@@ -599,8 +620,16 @@ export function buildTaskFailureCompletion(input: {
       input.decision?.comment.trim().slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH) || null,
     nextTurn: retry
       ? createNextTaskTurn({
-          harnessSpec: input.context.harnessSpec,
+          harnessSpec: input.context.task.harnessSpec,
           prompt: taskRetryPrompt(error),
+          ...(resultModeOverride
+            ? {
+                settings: {
+                  ...taskTurnSettingsForHarness(input.context.harnessSpec),
+                  taskResultMode: resultModeOverride,
+                },
+              }
+            : {}),
         })
       : null,
   };
@@ -635,7 +664,7 @@ export function buildTaskTerminalProjection(context: TaskTurnContext): TaskTurnC
     taskId: context.task.id,
     taskDisplayId: context.task.displayId,
     taskName: context.task.name,
-    harnessSpec: context.harnessSpec,
+    harnessSpec: context.task.harnessSpec,
     result: "",
     disposition: null,
     reportedOutcome: null,
@@ -1302,12 +1331,7 @@ function createNextTaskTurn(input: {
     chatModel: input.harnessSpec.model,
     runtimeModel,
     hostToolContractVersion: hostToolContractVersionForEngine(input.harnessSpec.engine),
-    settings: input.settings ?? {
-      ...(input.harnessSpec.codex?.reasoningEffort
-        ? { reasoningEffort: input.harnessSpec.codex.reasoningEffort }
-        : {}),
-      ...(input.harnessSpec.codex?.goalMode ? { goalMode: input.harnessSpec.codex.goalMode } : {}),
-    },
+    settings: input.settings ?? taskTurnSettingsForHarness(input.harnessSpec),
     assistantDebugTrace: {
       schemaVersion:
         input.harnessSpec.engine === "opencompany"
@@ -1316,6 +1340,15 @@ function createNextTaskTurn(input: {
       model: runtimeModel,
       uiMessageParts: [],
     },
+  };
+}
+
+function taskTurnSettingsForHarness(harnessSpec: HarnessSpec): CodexChatTurnSettings {
+  return {
+    ...(harnessSpec.codex?.reasoningEffort
+      ? { reasoningEffort: harnessSpec.codex.reasoningEffort }
+      : {}),
+    ...(harnessSpec.codex?.goalMode ? { goalMode: harnessSpec.codex.goalMode } : {}),
   };
 }
 

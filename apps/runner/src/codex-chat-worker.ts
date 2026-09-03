@@ -31,7 +31,7 @@ import type { RunnerEnv } from "./env";
 import { recoveryReasonForDeployVersions, runnerDeployVersion } from "./runner-deploy-version";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
-import { orchestrateTaskFailure, type TaskTurnContext } from "./task-turn";
+import { orchestrateTaskFailure, resolveTaskTurnContext, type TaskTurnContext } from "./task-turn";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -267,7 +267,7 @@ export async function runClaimedTurn(
     throw new Error(`Codex chat session ${turn.codexChatSessionId} not found.`);
   }
   const { session, task } = claimedSession;
-  const taskContext = task ? { task, harnessSpec: task.harnessSpec } : null;
+  const taskContext = task ? resolveTaskTurnContext(task, turn) : null;
   const execution = new PostgresRunExecutionRepository((query) => getDb().execute(query));
   const deployVersion = runnerDeployVersion();
   const requestedAttemptId = `run_attempt_${randomUUID()}`;

@@ -784,6 +784,7 @@ describe("Postgres Task repository", () => {
         user_task_id: string;
         assistant_content: string;
         run_prompt: string;
+        run_result_mode: string;
         run_status: string;
         run_owner: string;
         event_type: string;
@@ -801,6 +802,7 @@ describe("Postgres Task repository", () => {
            user_message.task_id AS user_task_id,
            assistant_message.content AS assistant_content,
            run.prompt AS run_prompt,
+           run.settings->>'taskResultMode' AS run_result_mode,
            run.status AS run_status,
            run.user_workos_id AS run_owner,
            event.type AS event_type,
@@ -831,6 +833,7 @@ describe("Postgres Task repository", () => {
           user_task_id: created.task.id,
           assistant_content: "",
           run_prompt: body,
+          run_result_mode: "assistant_final",
           run_status: "queued",
           run_owner: "user_1",
           event_type: "run.queued",

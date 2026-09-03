@@ -952,7 +952,8 @@ export class PostgresTaskRepository implements TaskRepository {
           ${messageId}, ${assistantMessageId}, 'queued', ${input.command.body},
           jsonb_strip_nulls(jsonb_build_object(
             'reasoningEffort', task.harness_spec #>> '{codex,reasoningEffort}',
-            'goalMode', task.harness_spec #> '{codex,goalMode}'
+            'goalMode', task.harness_spec #> '{codex,goalMode}',
+            'taskResultMode', 'assistant_final'
           )),
           1, ${now}, ${now}
         FROM eligible AS task
