@@ -1,4 +1,5 @@
 import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/agent/chat-agent";
+import { CODEX_DEFAULT_MODEL_ID, isCodexModelId } from "@opencompany/agent-runtime";
 import type {
   HarnessSpec,
   TaskDebugTrace,
@@ -298,8 +299,12 @@ function readHarnessModel(
 ): HarnessSpec["model"] | null {
   const model = readNonEmptyString(value);
   if (engine === "codex") {
-    const codexModel = availableModels.find((candidate) => candidate.startsWith("openai/"));
-    return codexModel ?? null;
+    if (model && availableModels.includes(model as HarnessSpec["model"]) && isCodexModelId(model)) {
+      return model;
+    }
+    return availableModels.includes(CODEX_DEFAULT_MODEL_ID)
+      ? CODEX_DEFAULT_MODEL_ID
+      : (availableModels.find(isCodexModelId) ?? null);
   }
   return model && availableModels.includes(model as HarnessSpec["model"])
     ? (model as HarnessSpec["model"])
