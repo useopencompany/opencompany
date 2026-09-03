@@ -254,8 +254,8 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/yc-advise",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(8);
-    expect(screen.getAllByText("Official package")).toHaveLength(7);
+    expect(screen.getAllByText("Not installed")).toHaveLength(9);
+    expect(screen.getAllByText("Official package")).toHaveLength(8);
     expect(screen.getByText("Official skill package")).toBeInTheDocument();
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
@@ -288,7 +288,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(8);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(9);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });
