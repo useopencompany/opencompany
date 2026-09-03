@@ -41,6 +41,8 @@ workspace list before ensuring the workspace's WorkOS organization.
 
 `API_BROWSER_ORIGINS` controls credentialed CORS. Unsafe cookie-authenticated requests additionally
 require an exact allowed `Origin`; bearer-authenticated clients retain their token contract.
+The allowed browser request headers are owned by the protocol transport contract and checked against
+every OpenAPI operation, rather than maintained separately by the API runtime.
 Authentication completion forwards the newly sealed browser session and the trusted web origin to
 `POST /v1/identity/sync`.
 
