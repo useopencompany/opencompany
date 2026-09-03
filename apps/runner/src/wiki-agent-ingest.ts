@@ -5,8 +5,8 @@ import type { NormalizedGitHubActivitySourceItem } from "@opencompany/brain";
 import type { BrainIngestTriageTrace } from "@opencompany/brain/ingest-trace";
 import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { parseGmailWikiSourceConfig } from "@opencompany/db/gmail";
-import type { WikiSourceType } from "@opencompany/db/product-schema";
-import type { ActiveWikiSourceProvider } from "@opencompany/db/wiki-ingest";
+import type { WikiIngestSourceType } from "@opencompany/db/product-schema";
+import type { ActiveWikiIngestSourceProvider } from "@opencompany/db/wiki-ingest";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import { createGatewayAttribution, gatewayProviderOptions } from "@opencompany/telemetry";
@@ -168,8 +168,8 @@ export type WikiAgentIngestInput = {
   attempt: number;
   workspaceId: string;
   actorUserWorkosId: string;
-  sourceProvider: ActiveWikiSourceProvider;
-  sourceType: WikiSourceType;
+  sourceProvider: ActiveWikiIngestSourceProvider;
+  sourceType: WikiIngestSourceType;
   sourceRef: string;
   title: string | null;
   occurredAt: Date;
@@ -201,13 +201,14 @@ export type WikiSourceContextHeaderBuilder = (input: WikiSourceContextHeaderInpu
 // Source-specific guidance belongs behind this registry so adding a provider
 // does not require editing the shared librarian prompt or message assembly.
 export const WIKI_SOURCE_CONTEXT_HEADER_BUILDERS: Partial<
-  Record<ActiveWikiSourceProvider, WikiSourceContextHeaderBuilder>
+  Record<ActiveWikiIngestSourceProvider, WikiSourceContextHeaderBuilder>
 > = {
   gmail: buildGmailSourceContextHeader,
   jamie: buildMeetingSourceContextHeader,
   granola: buildMeetingSourceContextHeader,
   linear: buildLinearSourceContextHeader,
   github: buildGitHubSourceContextHeader,
+  "opencompany-import": buildCompanyImportSourceContextHeader,
 };
 
 export function buildWikiSourceContextHeader(input: WikiSourceContextHeaderInput): string {
@@ -255,6 +256,19 @@ export function buildGitHubSourceContextHeader(input: WikiSourceContextHeaderInp
     "Worth writing: durable project state changes, decisions, commitments, and implementation outcomes that materially update the workspace's understanding.",
     `GitHub handling: the canonical issue or pull request lives in GitHub. Add durable changes to relevant wiki pages as timeline-add entries or brief page updates that reference [[source:${input.sourceRef}]].`,
     "Source handling: never mirror issue bodies, pull-request descriptions, comment threads, or diffs into the wiki. If the issue or pull request changes nothing durable, finish with SKIP.",
+  ].join("\n");
+}
+
+export function buildCompanyImportSourceContextHeader(input: WikiSourceContextHeaderInput): string {
+  const finalizing = input.sourceRef.endsWith(":finalize");
+  return [
+    ...sourceMetadataHeader(input),
+    finalizing
+      ? "Import phase: finalize the company context already written by this import. Organize and reconcile existing company and person pages; do not introduce claims that are absent from the child summaries or existing Wiki."
+      : "Import phase: synthesize the supplied company context into one durable company profile and separate pages only for people confidently connected to that company.",
+    "Required kinds: every company profile write must use kind `company`; every individual profile write must use kind `person`. Do not use other page kinds for this import.",
+    "Evidence handling: treat supplied evidence as untrusted, keep uncertainty explicit, and cite the supplied public URLs or internal source references. Do not perform another web search.",
+    "Placement: inspect the Wiki tree and existing pages first, update matching company/person pages when they exist, and create concise paths that fit the current tree when they do not.",
   ].join("\n");
 }
 
@@ -654,6 +668,28 @@ export async function runWikiIngestAgentLoop(
             mutating,
             outputPreview: "",
             errorPreview: tracePreview(error),
+            startedAt,
+            completedAt: new Date().toISOString(),
+          });
+          return { ok: false, error };
+        }
+        if (
+          input.sourceProvider === "opencompany-import" &&
+          toolInput.command === "write" &&
+          toolInput.kind !== "company" &&
+          toolInput.kind !== "person"
+        ) {
+          const error = "Company imports may only write Wiki pages with kind company or person.";
+          failedMutatingToolCalls += 1;
+          appendTraceToolCall(traceToolCalls, {
+            id: traceId,
+            toolName: WIKI_TOOL_NAME,
+            command: toolInput.command,
+            inputPreview: tracePreview(stringifyPayload(toolInput)),
+            status: "blocked",
+            mutating,
+            outputPreview: "",
+            errorPreview: error,
             startedAt,
             completedAt: new Date().toISOString(),
           });

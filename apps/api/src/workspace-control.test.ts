@@ -90,7 +90,7 @@ describe("workspace control service", () => {
     ] as never);
     vi.mocked(provisionWorkspace).mockResolvedValue({
       workspace: { ...workspace, id: "goat_ws_new", workosOrganizationId: "org_new" },
-      brain: { id: "brain_new" },
+      brain: null,
     } as never);
     workos.userManagement.listInvitations.mockResolvedValue({ data: [] });
     workos.userManagement.listOrganizationMemberships.mockResolvedValue({ data: [] });
@@ -195,7 +195,7 @@ describe("workspace control service", () => {
     ).resolves.toEqual({
       workspaceId: "goat_ws_new",
       organizationId: "org_new",
-      brainId: "brain_new",
+      brainId: null,
     });
     expect(provisionWorkspace).toHaveBeenCalledWith(
       {

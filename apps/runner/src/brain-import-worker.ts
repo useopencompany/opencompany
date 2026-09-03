@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { executeExaSearchRequest } from "@opencompany/agent-runtime";
 import {
   BrainSourceNormalizationError,
@@ -14,6 +14,7 @@ import {
   completeBrainImportDiscovery,
   discoverStoredBrainImportCandidates,
   getBrainImportJobProgress,
+  getWikiImportJobProgress,
 } from "@opencompany/db/brain-import";
 import { upsertBrainSourceItemAndEnqueue } from "@opencompany/db/brain-ingest";
 import { FATHOM_CREDENTIAL_KIND, FATHOM_PROVIDER } from "@opencompany/db/fathom";
@@ -27,6 +28,10 @@ import {
   brainIngestJobs,
   brainSourceItems,
 } from "@opencompany/db/product-schema";
+import {
+  type NormalizedWikiSourceItem,
+  upsertWikiSourceItemAndEnqueue,
+} from "@opencompany/db/wiki-ingest";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, eq, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
@@ -41,6 +46,7 @@ import {
   listGranolaNotes,
 } from "./granola-api";
 import { createPollingWorker } from "./polling-worker";
+import { wakeWikiIngestWorker } from "./wiki-ingest-worker";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -150,8 +156,15 @@ export async function processNextBrainImportRun(
   try {
     signal?.throwIfAborted();
     if (claimed.status === "discovering") await discoverImport(claimed, env, signal);
-    else if (claimed.status === "ingesting") await monitorChildren(claimed, signal);
-    else if (claimed.status === "finalizing") await finishImport(claimed, signal);
+    else if (claimed.status === "ingesting") {
+      await (claimed.workspaceId
+        ? monitorWikiChildren(claimed, signal)
+        : monitorChildren(claimed, signal));
+    } else if (claimed.status === "finalizing") {
+      await (claimed.workspaceId
+        ? finishWikiImport(claimed, signal)
+        : finishImport(claimed, signal));
+    }
     signal?.throwIfAborted();
   } catch (error) {
     if (signal?.aborted) {
@@ -184,7 +197,10 @@ async function discoverImport(run: BrainImportRun, env: RunnerEnv, signal?: Abor
   if (!run.leaseId) throw new Error("Import discovery lease is missing.");
   const db = getDb();
   const summary: BrainImportDiscoverySummary = {};
-  for (const provider of PROVIDERS) {
+  const providers = run.workspaceId
+    ? PROVIDERS.filter((provider) => provider !== "fathom")
+    : PROVIDERS;
+  for (const provider of providers) {
     signal?.throwIfAborted();
     if (!(await renewImportLease(run, "discovering"))) return;
     const selection = run.sourceSelection[provider];
@@ -604,6 +620,79 @@ async function monitorChildren(run: BrainImportRun, signal?: AbortSignal) {
   if (enqueued) wakeBrainIngestWorker();
 }
 
+async function monitorWikiChildren(run: BrainImportRun, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const db = getDb();
+  const workspaceId = requireWikiTarget(run);
+  await enqueuePendingWikiCandidates(run);
+  const progress = await getWikiImportJobProgress(run.id, db);
+  if (!progress.terminal) {
+    await releaseForPoll(run, "ingesting");
+    return;
+  }
+  const childSummary = progress.rows.map((row) => {
+    const summary = jobSummary(row);
+    return {
+      provider: importProviderForJob(row),
+      status: row.status as "succeeded" | "failed" | "skipped",
+      ...(summary ? { summary } : {}),
+    };
+  });
+  const item = normalizeImportRun({
+    phase: "finalize",
+    importRunId: run.id,
+    companyUrl: run.companyUrl,
+    companyDomain: run.companyDomain,
+    ...(run.companyName ? { companyName: run.companyName } : {}),
+    ...(run.focus ? { focus: run.focus } : {}),
+    childSummary,
+  });
+  if (!run.leaseId) return;
+  const leaseId = run.leaseId;
+  const enqueued = await db.transaction(async (tx) => {
+    const [transitioned] = await tx
+      .update(brainImportRuns)
+      .set({ status: "finalizing", updatedAt: new Date() })
+      .where(
+        and(
+          eq(brainImportRuns.id, run.id),
+          eq(brainImportRuns.status, "ingesting"),
+          eq(brainImportRuns.leaseId, leaseId),
+        ),
+      )
+      .returning({ id: brainImportRuns.id });
+    if (!transitioned) return false;
+    await upsertWikiSourceItemAndEnqueue({
+      workspaceId,
+      sourceConnectionId: run.id,
+      integrationId: null,
+      item: wikiImportFinalizerItem(run, item),
+      rawPayload: item.content,
+      importRunId: run.id,
+      db: tx,
+    });
+    await tx
+      .update(brainImportRuns)
+      .set({
+        result: { childSummary },
+        nextRunAt: new Date(Date.now() + POLL_INTERVAL_MS),
+        leaseId: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(brainImportRuns.id, run.id),
+          eq(brainImportRuns.status, "finalizing"),
+          eq(brainImportRuns.leaseId, leaseId),
+        ),
+      );
+    return true;
+  });
+  if (enqueued) wakeWikiIngestWorker();
+}
+
 async function enqueuePendingCandidates(run: BrainImportRun) {
   if (!run.leaseId) throw new Error("Import ingestion lease is missing.");
   const leaseId = run.leaseId;
@@ -671,7 +760,7 @@ async function enqueuePendingCandidates(run: BrainImportRun) {
               eq(brainIngestJobs.sourceItemId, candidate.sourceItemId),
               eq(brainIngestJobs.contentHash, candidate.contentHash),
               eq(brainIngestJobs.kind, "brain_agent_ingest"),
-              eq(brainIngestJobs.brainRef, run.brainRef),
+              eq(brainIngestJobs.brainRef, run.brainRef!),
             ),
           )
           .limit(1);
@@ -696,6 +785,135 @@ async function enqueuePendingCandidates(run: BrainImportRun) {
     if (!enqueued) throw new Error("Import ingestion lease was lost while enqueueing candidates.");
   }
   if (candidates.length > 0) wakeBrainIngestWorker();
+}
+
+export async function enqueuePendingWikiCandidates(run: BrainImportRun) {
+  if (!run.leaseId) throw new Error("Import ingestion lease is missing.");
+  const leaseId = run.leaseId;
+  const workspaceId = requireWikiTarget(run);
+  const db = getDb();
+  const candidates = await db
+    .select({
+      id: brainImportCandidates.id,
+      provider: brainImportCandidates.provider,
+      sourceItemId: brainSourceItems.id,
+      sourceRef: brainSourceItems.sourceRef,
+      title: brainSourceItems.title,
+      occurredAt: brainSourceItems.occurredAt,
+      capturedAt: brainSourceItems.capturedAt,
+      contentHash: brainSourceItems.contentHash,
+      normalizedPayload: brainSourceItems.normalizedPayload,
+      rawPayload: brainSourceItems.rawPayload,
+      rawEventCount: brainSourceItems.rawEventCount,
+    })
+    .from(brainImportCandidates)
+    .innerJoin(brainSourceItems, eq(brainSourceItems.id, brainImportCandidates.sourceItemId))
+    .where(
+      and(
+        eq(brainImportCandidates.importRunId, run.id),
+        eq(brainImportCandidates.selected, true),
+        isNull(brainImportCandidates.wikiIngestJobId),
+      ),
+    )
+    .orderBy(asc(brainImportCandidates.rank), asc(brainImportCandidates.createdAt));
+
+  for (const candidate of candidates) {
+    const enqueued = await db.transaction(async (tx) => {
+      const [activeRun] = await tx
+        .update(brainImportRuns)
+        .set({ leaseExpiresAt: new Date(Date.now() + LEASE_TTL_MS), updatedAt: new Date() })
+        .where(
+          and(
+            eq(brainImportRuns.id, run.id),
+            eq(brainImportRuns.status, "ingesting"),
+            eq(brainImportRuns.leaseId, leaseId),
+          ),
+        )
+        .returning({ id: brainImportRuns.id });
+      if (!activeRun) return false;
+      const item = wikiImportCandidateItem(run, candidate);
+      const result = await upsertWikiSourceItemAndEnqueue({
+        workspaceId,
+        sourceConnectionId: run.id,
+        integrationId: null,
+        item,
+        rawPayload: candidate.rawPayload,
+        rawEventCount: candidate.rawEventCount,
+        importRunId: run.id,
+        db: tx,
+      });
+      if (!result.jobId)
+        throw new Error(`Could not enqueue Wiki import candidate ${candidate.id}.`);
+      await tx
+        .update(brainImportCandidates)
+        .set({ wikiIngestJobId: result.jobId, updatedAt: new Date() })
+        .where(
+          and(
+            eq(brainImportCandidates.id, candidate.id),
+            isNull(brainImportCandidates.wikiIngestJobId),
+          ),
+        );
+      return true;
+    });
+    if (!enqueued) throw new Error("Import ingestion lease was lost while enqueueing candidates.");
+  }
+  if (candidates.length > 0) wakeWikiIngestWorker();
+}
+
+export function wikiImportCandidateItem(
+  run: Pick<BrainImportRun, "id" | "companyUrl" | "companyDomain" | "companyName" | "focus">,
+  candidate: {
+    id: string;
+    provider: BrainImportProvider;
+    sourceRef: string;
+    title: string | null;
+    occurredAt: Date;
+    capturedAt: Date;
+    contentHash: string;
+    normalizedPayload: unknown;
+  },
+): NormalizedWikiSourceItem {
+  const externalId = `${run.id}:${candidate.provider}:${candidate.id}`;
+  const sourceRef = `opencompany-import:run:${run.id}:candidate:${candidate.provider}:${candidate.id}`;
+  return {
+    sourceProvider: "opencompany-import",
+    sourceType: "run",
+    externalId,
+    sourceRef,
+    title: candidate.title ?? `${candidate.provider} company context`,
+    occurredAt: candidate.occurredAt.toISOString(),
+    capturedAt: candidate.capturedAt.toISOString(),
+    contentHash: createHash("sha256")
+      .update(`${sourceRef}\n${candidate.contentHash}`)
+      .digest("hex"),
+    content: {
+      phase: "research",
+      importRunId: run.id,
+      companyUrl: run.companyUrl,
+      companyDomain: run.companyDomain,
+      ...(run.companyName ? { companyName: run.companyName } : {}),
+      ...(run.focus ? { focus: run.focus } : {}),
+      evidence: {
+        provider: candidate.provider,
+        sourceRef: candidate.sourceRef,
+        normalizedPayload: candidate.normalizedPayload,
+      },
+    },
+  };
+}
+
+export function wikiImportFinalizerItem(
+  run: Pick<BrainImportRun, "id">,
+  item: NormalizedBrainSourceItem,
+): NormalizedWikiSourceItem {
+  const sourceRef = `opencompany-import:run:${run.id}:finalize`;
+  return {
+    ...item,
+    sourceProvider: "opencompany-import",
+    sourceType: "run",
+    sourceRef,
+    contentHash: createHash("sha256").update(`${sourceRef}\n${item.contentHash}`).digest("hex"),
+  };
 }
 
 async function finishImport(run: BrainImportRun, signal?: AbortSignal) {
@@ -740,12 +958,63 @@ async function finishImport(run: BrainImportRun, signal?: AbortSignal) {
     );
 }
 
+async function finishWikiImport(run: BrainImportRun, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  requireWikiTarget(run);
+  const db = getDb();
+  const progress = await getWikiImportJobProgress(run.id, db);
+  const finalizer = progress.rows.find(isFinalizerJob);
+  if (!finalizer || !["succeeded", "failed", "skipped"].includes(finalizer.status)) {
+    await releaseForPoll(run, "finalizing");
+    return;
+  }
+  const useful = progress.rows.some((row) => !isFinalizerJob(row) && row.status === "succeeded");
+  const failed = progress.rows.some((row) => row.status === "failed");
+  const status = failed ? (useful ? "partial" : "failed") : "succeeded";
+  const jobs = progress.rows.map((row) => {
+    const summary = jobSummary(row);
+    return {
+      provider: importProviderForJob(row),
+      status: row.status,
+      ...(summary ? { summary } : {}),
+    };
+  });
+  if (!run.leaseId) return;
+  await db
+    .update(brainImportRuns)
+    .set({
+      status,
+      result: { ...run.result, jobs },
+      completedAt: new Date(),
+      leaseId: null,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(brainImportRuns.id, run.id),
+        eq(brainImportRuns.status, "finalizing"),
+        eq(brainImportRuns.leaseId, run.leaseId),
+      ),
+    );
+}
+
+function requireWikiTarget(run: BrainImportRun) {
+  if (!run.workspaceId || run.brainRef) throw new Error("Wiki import target is invalid.");
+  return run.workspaceId;
+}
+
 function isFinalizerJob(row: { sourceRef: string }) {
   return row.sourceRef.endsWith(":finalize");
 }
 
 function importProviderForJob(row: { provider: string; sourceRef: string }) {
-  return row.sourceRef.endsWith(":research") ? "public_web" : row.provider;
+  if (row.sourceRef.endsWith(":research")) return "public_web";
+  if (row.provider === "opencompany-import" && row.sourceRef.includes(":candidate:")) {
+    return row.sourceRef.split(":candidate:")[1]?.split(":")[0] ?? row.provider;
+  }
+  return row.provider;
 }
 
 function jobSummary(row: { result: Record<string, unknown>; lastError: string | null }) {

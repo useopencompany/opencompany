@@ -4,7 +4,7 @@ import { PGlite } from "@electric-sql/pglite";
 import type { Actor } from "@opencompany/core";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { startBrainImportRunIdempotent } from "./brain-import";
+import { startBrainImportRunIdempotent, startWikiImportRunIdempotent } from "./brain-import";
 
 const migrationPaths = [
   "drizzle/0208_goat_headless_knowledge_idempotency.sql",
@@ -165,6 +165,22 @@ describe("startBrainImportRunIdempotent", () => {
       }),
     ).rejects.toThrow("Enter a public company website.");
   });
+
+  it("creates a workspace-scoped Wiki import without a brain", async () => {
+    const created = await startWikiImportRunIdempotent({
+      actor: actor(),
+      idempotencyKey: "wiki-import-1",
+      companyUrl: "acme.com",
+      sourceSelection: { public_web: { enabled: true } },
+      db,
+    });
+
+    expect(created.run).toMatchObject({
+      brainRef: null,
+      workspaceId: "workspace_1",
+      status: "discovering",
+    });
+  });
 });
 
 function actor(overrides: Partial<Actor> = {}): Actor {
@@ -192,7 +208,8 @@ INSERT INTO goat.brains (id, workspace_id)
   VALUES ('brain_1', 'workspace_1'), ('brain_2', 'workspace_2');
 CREATE TABLE goat.brain_import_runs (
   id text PRIMARY KEY,
-  brain_ref text NOT NULL REFERENCES goat.brains(id) ON DELETE CASCADE,
+  brain_ref text REFERENCES goat.brains(id) ON DELETE CASCADE,
+  workspace_id text REFERENCES goat.workspaces(id) ON DELETE CASCADE,
   user_workos_id text NOT NULL REFERENCES goat.users(workos_user_id) ON DELETE CASCADE,
   company_url text NOT NULL,
   company_domain text NOT NULL,
@@ -216,5 +233,13 @@ CREATE TABLE goat.brain_import_runs (
 );
 CREATE UNIQUE INDEX goat_brain_import_runs_active_brain_idx
   ON goat.brain_import_runs (brain_ref)
-  WHERE status IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing');
+  WHERE brain_ref IS NOT NULL
+    AND status IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing');
+CREATE UNIQUE INDEX opencompany_brain_import_runs_active_workspace_idx
+  ON goat.brain_import_runs (workspace_id)
+  WHERE workspace_id IS NOT NULL
+    AND status IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing');
+ALTER TABLE goat.brain_import_runs ADD CONSTRAINT opencompany_brain_import_runs_target_check
+  CHECK ((brain_ref IS NOT NULL AND workspace_id IS NULL)
+    OR (brain_ref IS NULL AND workspace_id IS NOT NULL));
 `;

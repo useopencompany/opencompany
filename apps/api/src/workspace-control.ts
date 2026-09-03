@@ -272,7 +272,7 @@ export function createWorkspaceControlService(input: {
       return {
         workspaceId: created.workspace.id,
         organizationId,
-        brainId: created.brain.id,
+        brainId: created.brain?.id ?? null,
       };
     },
 

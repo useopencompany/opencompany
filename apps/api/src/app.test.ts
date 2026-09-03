@@ -135,6 +135,7 @@ describe("canonical Hono API", () => {
       wikiSources: fakeWikiSources(),
       brainSources: fakeBrainSources(),
       brainImports: fakeBrainImports(),
+      wikiImports: fakeWikiImports(),
       browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
       pluginImports: fakePluginImportService(),
@@ -1198,6 +1199,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({ start, confirm, cancel, retry }),
+      wikiImports: fakeWikiImports(),
     });
 
     const started = await app.request("/v1/brains/brain_1/imports", {
@@ -1266,6 +1268,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({ start }),
+      wikiImports: fakeWikiImports(),
     });
 
     const missingKey = await app.request("/v1/brains/brain_1/imports", {
@@ -1289,6 +1292,58 @@ describe("canonical Hono API", () => {
     expect(start).not.toHaveBeenCalled();
   });
 
+  it("drives the workspace Wiki import lifecycle without a Brain parameter", async () => {
+    const start = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    }));
+    const confirm = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "ingesting" as const,
+      replayed: false,
+    }));
+    const cancel = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "canceled" as const,
+      replayed: false,
+    }));
+    const retry = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    }));
+    const app = testApp(fakeRepository(), {
+      wikiImports: wikiImportService({ start, confirm, cancel, retry }),
+    });
+
+    const started = await app.request("/v1/wiki/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "wiki-import-1" },
+      body: JSON.stringify({
+        companyUrl: "acme.com",
+        sourceSelection: { public_web: { enabled: true } },
+      }),
+    });
+    expect(started.status).toBe(201);
+    expect(start).toHaveBeenCalledWith(actor, {
+      idempotencyKey: "wiki-import-1",
+      companyUrl: "acme.com",
+      sourceSelection: { public_web: { enabled: true } },
+    });
+
+    await app.request("/v1/wiki/imports/gbimp_wiki/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabledProviders: ["public_web"] }),
+    });
+    expect(confirm).toHaveBeenCalledWith(actor, "gbimp_wiki", ["public_web"]);
+    await app.request("/v1/wiki/imports/gbimp_wiki/cancel", { method: "POST" });
+    expect(cancel).toHaveBeenCalledWith(actor, "gbimp_wiki");
+    await app.request("/v1/wiki/imports/gbimp_wiki/retry", { method: "POST" });
+    expect(retry).toHaveBeenCalledWith(actor, "gbimp_wiki");
+  });
+
   it("maps import state conflicts to typed conflict responses", async () => {
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({
@@ -1299,6 +1354,7 @@ describe("canonical Hono API", () => {
           );
         },
       }),
+      wikiImports: fakeWikiImports(),
     });
     const response = await app.request("/v1/brains/brain_1/imports/gbimp_1/confirm", {
       method: "POST",
@@ -4424,6 +4480,7 @@ function testApp(
     wikiSources: fakeWikiSources(),
     brainSources: fakeBrainSources(),
     brainImports: fakeBrainImports(),
+    wikiImports: fakeWikiImports(),
     browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
     pluginImports: fakePluginImportService(),
@@ -4676,10 +4733,41 @@ function fakeBrainImports(): Parameters<typeof createApiApp>[0]["brainImports"] 
   };
 }
 
+function fakeWikiImports(): Parameters<typeof createApiApp>[0]["wikiImports"] {
+  return {
+    start: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    })),
+    confirm: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "ingesting" as const,
+      replayed: false,
+    })),
+    cancel: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "canceled" as const,
+      replayed: false,
+    })),
+    retry: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    })),
+  };
+}
+
 function brainImportService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["brainImports"]>,
 ): Parameters<typeof createApiApp>[0]["brainImports"] {
   return { ...fakeBrainImports(), ...overrides };
+}
+
+function wikiImportService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["wikiImports"]>,
+): Parameters<typeof createApiApp>[0]["wikiImports"] {
+  return { ...fakeWikiImports(), ...overrides };
 }
 
 function fakeUserSettings(): Parameters<typeof createApiApp>[0]["userSettings"] {

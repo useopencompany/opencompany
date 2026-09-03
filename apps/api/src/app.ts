@@ -3,7 +3,10 @@ import {
   AutoModelRoutingError,
   type AutoModelRoutingResolution,
 } from "@opencompany/agent/application/auto-model-routing";
-import type { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
+import type {
+  BrainImportApplicationService,
+  WikiImportApplicationService,
+} from "@opencompany/agent/brain-imports";
 import type { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import type { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import type {
@@ -158,6 +161,7 @@ export type CreateApiAppInput = {
   wikiSources: WikiSourceService;
   brainSources: Pick<BrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
   brainImports: Pick<BrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
+  wikiImports: Pick<WikiImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
   browserProfiles: Pick<
     BrowserProfileApplicationService,
     | "list"
@@ -916,6 +920,38 @@ export function createApiApp(input: CreateApiAppInput) {
         },
         200,
       );
+    },
+    startWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.wikiImports.start(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    confirmWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const result = await input.wikiImports.confirm(
+        actor,
+        params.importRunId,
+        c.req.valid("json").enabledProviders,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    cancelWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.wikiImports.cancel(actor, c.req.valid("param").importRunId);
+      return c.json({ data: result, meta }, 200);
+    },
+    retryWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.wikiImports.retry(actor, c.req.valid("param").importRunId);
+      return c.json({ data: result, meta }, 200);
     },
     createBrainDocument: async (c) => {
       const actor = actorFrom(c);
