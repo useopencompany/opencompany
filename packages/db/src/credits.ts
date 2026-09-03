@@ -591,7 +591,7 @@ export async function recordAutoRefillCredit(input: {
         ${input.amountCents}::bigint * ${USD_MICROS_PER_CENT},
         'stripe_topup',
         ${`pi:${input.paymentIntentId}`},
-        jsonb_build_object('kind', 'auto_refill', 'stripePaymentIntentId', ${input.paymentIntentId})
+        jsonb_build_object('kind', 'auto_refill', 'stripePaymentIntentId', ${input.paymentIntentId}::text)
       )
       ON CONFLICT DO NOTHING
       RETURNING id, workspace_id, amount_cents, amount_usd_micros

@@ -723,6 +723,37 @@ describe("runClaimedTurn", () => {
     );
   });
 
+  it("forces a minimal settlement when the failure write itself throws", async () => {
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(
+      new Error("could not determine data type of parameter $51"),
+    );
+    eventMocks.fail.mockRejectedValueOnce(
+      new Error("could not determine data type of parameter $51"),
+    );
+
+    await expect(runClaimedTurn(turn(), env())).resolves.toBeUndefined();
+
+    const force = dbMock.execute.mock.calls
+      .map(([query]) => sqlText(query))
+      .find((text) => text.includes("WITH failed_turn AS"));
+    expect(force).toBeDefined();
+    expect(force).toContain("SET status = 'failed'");
+    expect(force).toContain("UPDATE goat.run_attempts");
+    expect(force).toContain("UPDATE goat.codex_chat_sessions");
+    expect(force).toContain("UPDATE goat.tasks");
+  });
+
+  it("does not force settlement when the failure write reports lease loss", async () => {
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(new Error("history projection failed"));
+    eventMocks.fail.mockRejectedValueOnce(new CodexChatLeaseLostError());
+
+    await expect(runClaimedTurn(turn(), env())).rejects.toBeInstanceOf(CodexChatLeaseLostError);
+
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH failed_turn AS")),
+    ).toBe(false);
+  });
+
   it("terminally settles retryable infrastructure failures after the retry budget", async () => {
     chatMocks.runCodexChatTurn.mockRejectedValueOnce(
       new CodexChatRetryableInfrastructureError(

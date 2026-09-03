@@ -261,8 +261,8 @@ async function cancelActiveBrainIngestJobsForSource(input: {
           last_error = NULL,
           result = job.result || jsonb_build_object(
             'skipped', true,
-            'reason', ${reason},
-            'summary', ${reason}
+            'reason', ${reason}::text,
+            'summary', ${reason}::text
           ),
           completed_at = ${input.now},
           updated_at = ${input.now}

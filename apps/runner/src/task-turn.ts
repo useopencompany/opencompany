@@ -164,7 +164,7 @@ export async function markTaskTurnRunning(input: {
       SELECT
         ${activityId}, task.id, 'system', 'run_started',
         jsonb_build_object(
-          'runId', ${input.turn.id},
+          'runId', ${input.turn.id}::text,
           'attempt', task.attempts
         ) || ${stringifyPostgresJson(stepMetadata)}::jsonb,
         ${now}
@@ -975,7 +975,7 @@ export async function settleDurableTurn(input: {
       SELECT
         ${commentActivityId}, task.id, 'orchestrator', 'comment',
         ${completion?.outcomeComment ?? null},
-        jsonb_build_object('runId', ${target.turnId}),
+        jsonb_build_object('runId', ${target.turnId}::text),
         ${new Date(input.completedAt.getTime() + 1)}
       FROM projected_task AS task
       WHERE ${completion?.outcomeComment ?? null}::text IS NOT NULL
@@ -988,8 +988,8 @@ export async function settleDurableTurn(input: {
       SELECT
         ${retryActivityId}, task.id, 'system', 'retry', ${next?.prompt ?? null},
         jsonb_build_object(
-          'runId', ${target.turnId},
-          'nextRunId', ${next?.id ?? null},
+          'runId', ${target.turnId}::text,
+          'nextRunId', ${next?.id ?? null}::text,
           'attempt', task.attempts
         ),
         ${new Date(input.completedAt.getTime() + 2)}
