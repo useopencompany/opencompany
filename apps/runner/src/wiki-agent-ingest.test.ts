@@ -260,6 +260,16 @@ describe("opencompany wiki librarian agent", () => {
         sourceConfig: {},
       }),
     ).toContain("kind `company`");
+    expect(
+      buildCompanyImportSourceContextHeader({
+        sourceProvider: "opencompany-import",
+        sourceType: "run",
+        sourceRef: "opencompany-import:run:gbimp_1:candidate:gmail:gbimpc_1",
+        title: "Acme customer context",
+        occurredAt,
+        sourceConfig: {},
+      }),
+    ).toContain("supplied company context");
   });
 
   it("uses one wiki tool and classifies a successful mutation", async () => {
