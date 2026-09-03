@@ -342,8 +342,9 @@ export class CoreError extends Error {
       | "idempotency_conflict"
       | "unavailable",
     message: string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "CoreError";
   }
 }

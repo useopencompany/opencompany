@@ -1294,28 +1294,53 @@ describe("canonical Hono API", () => {
   });
 
   it("returns a retryable typed error when external Skill resolution is unavailable", async () => {
-    const app = testApp(fakeRepository(), {
-      skillImports: fakeSkillImportService(
-        {},
-        {
-          resolve: async () => {
-            throw new CoreError("unavailable", "Couldn't read that skill right now.");
+    const upstreamError = Object.assign(new Error("GitHub artifact request was rate limited."), {
+      upstreamService: "github",
+      upstreamOperation: "resolve_commit",
+      upstreamStatus: 403,
+      failureKind: "rate_limit",
+      rateLimitRemaining: 0,
+    });
+    const failure = new CoreError("unavailable", "Couldn't read that skill right now.", {
+      cause: upstreamError,
+    });
+    const captureException = vi.fn();
+    setExceptionReporter({ captureException });
+    try {
+      const app = testApp(fakeRepository(), {
+        skillImports: fakeSkillImportService(
+          {},
+          {
+            resolve: async () => {
+              throw failure;
+            },
           },
-        },
-      ),
-    });
+        ),
+      });
 
-    const response = await app.request("/v1/skills/imports/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: "github.com/o/r" }),
-    });
+      const response = await app.request("/v1/skills/imports/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "github.com/o/r" }),
+      });
 
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "unavailable", retryable: true },
-      meta: { apiVersion: "v1" },
-    });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "unavailable", retryable: true },
+        meta: { apiVersion: "v1" },
+      });
+      expect(captureException).toHaveBeenCalledWith(
+        failure,
+        expect.objectContaining({
+          event: "opencompany.api_request_failed",
+          method: "POST",
+          path: "/v1/skills/imports/preview",
+          request_id: expect.stringMatching(/^request_/u),
+        }),
+      );
+    } finally {
+      setExceptionReporter(undefined);
+    }
   });
 
   it("serves and mutates browser profiles through the authenticated owner boundary", async () => {
