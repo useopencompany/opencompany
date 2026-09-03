@@ -260,6 +260,7 @@ async function callGateway(
       defer: (work) => {
         void work;
       },
+      gatewayApiKey: context.env.vercelAiGatewayApiKey,
       // Wiki commands cross the authenticated HTTP boundary into apps/api; the
       // runner never touches the wiki database directly.
       executeWikiCommand: (wikiInput) =>
