@@ -1,4 +1,8 @@
-import { CLAUDE_CODE_DEFAULT_MODEL_ID, CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
+import {
+  CLAUDE_CODE_DEFAULT_MODEL_ID,
+  CODEX_AGENT_MODEL_IDS,
+  CODEX_DEFAULT_MODEL_ID,
+} from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
   CHAT_MAX_STEPS,
@@ -147,7 +151,22 @@ describe("start_task tool", () => {
     },
   );
 
-  it("preserves an already Codex-compatible task model", async () => {
+  it("advertises only GPT 5.6 models when the user requests a Codex task", () => {
+    const context = createProductChatToolContext({
+      model,
+      latestUserMessage: "Use Codex to fix the repository.",
+      startTask: vi.fn(),
+    });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as unknown as {
+      inputSchema: { jsonSchema: { properties: { model: { enum: string[] } } } };
+    };
+
+    expect(startTaskTool.inputSchema.jsonSchema.properties.model.enum).toEqual(
+      CODEX_AGENT_MODEL_IDS,
+    );
+  });
+
+  it("preserves an already Codex-compatible GPT 5.6 task model", async () => {
     const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
       id: "task_1",
       displayId: "TASK-1",
@@ -155,7 +174,7 @@ describe("start_task tool", () => {
       prompt: task.prompt,
     }));
     const context = createProductChatToolContext({
-      model: "openai/gpt-5.5" as never,
+      model: "openai/gpt-5.6-terra" as never,
       requestedEngine: "codex",
       startTask,
     });
@@ -172,7 +191,7 @@ describe("start_task tool", () => {
       {
         name: "Test repo access",
         prompt: "Check repo access and report whether development work can start.",
-        model: "openai/gpt-5.5",
+        model: "openai/gpt-5.6-terra",
         engine: "codex",
       },
       { toolCallId: expect.any(String) },
@@ -254,6 +273,24 @@ describe("start_task tool", () => {
         prompt: "Review the code.",
         engine: "codex",
         model: "anthropic/claude-sonnet-5",
+      }),
+    ).rejects.toThrow("not available for the Codex engine");
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retired Codex model for a new task", async () => {
+    const startTask = vi.fn();
+    const context = createProductChatToolContext({ model, startTask });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await expect(
+      startTaskTool.execute({
+        name: "Review code",
+        prompt: "Review the code.",
+        engine: "codex",
+        model: "openai/gpt-5.5",
       }),
     ).rejects.toThrow("not available for the Codex engine");
     expect(startTask).not.toHaveBeenCalled();
