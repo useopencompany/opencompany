@@ -4,6 +4,7 @@ import { getAppUrl } from "../app-url";
 import { GMAIL_COMPOSE_SCOPE, GMAIL_READ_SCOPE } from "./gmail-scopes";
 import {
   GOOGLE_DOCS_WRITE_SCOPE,
+  GOOGLE_DRIVE_FILE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
   GOOGLE_SHEETS_WRITE_SCOPE,
 } from "./google-drive-scopes";
@@ -55,6 +56,20 @@ export const GOOGLE_PROVIDER_CONFIG: Record<GoogleIntegrationProvider, GooglePro
     ],
   },
 };
+
+export function googleAuthorizationConfigForReturnTo(
+  config: GoogleProviderConfig,
+  returnTo: string,
+): GoogleProviderConfig {
+  const returnPath = new URL(sanitizeReturnTo(returnTo), "https://opencompany.invalid").pathname;
+  if (config.provider !== "google_drive" || returnPath !== "/settings/plugins/google-drive") {
+    return config;
+  }
+  return {
+    ...config,
+    scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, ...OPENID_SCOPES],
+  };
+}
 
 const GOOGLE_INTEGRATION_ENVS = [
   "GOOGLE_OAUTH_CLIENT_ID",

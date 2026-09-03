@@ -30,6 +30,7 @@ const BROWSER_TOOLS = [
 export async function getGoogleIntegrationState(userWorkosId: string) {
   const rows = await getDb()
     .select({
+      id: integrations.id,
       provider: integrations.provider,
       accountEmail: integrations.accountEmail,
       accountName: integrations.accountName,

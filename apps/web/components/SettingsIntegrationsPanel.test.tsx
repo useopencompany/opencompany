@@ -574,7 +574,7 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
-  it("shows Drive read and write controls plus an OAuth upgrade when writes are unavailable", () => {
+  it("keeps Google Drive out of legacy integrations now that its account lives under Plugins", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_drive",
@@ -590,32 +590,10 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const driveCard = screen
-      .getByText("Sync files and folders you choose into opencompany.")
-      .closest("div.rounded-2xl");
-    expect(driveCard).not.toBeNull();
-    const readPermission = within(driveCard as HTMLElement).getByRole("group", {
-      name: "Find & read files permission",
-    });
-    const writePermission = within(driveCard as HTMLElement).getByRole("group", {
-      name: "Edit Docs & Sheets permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
     expect(
-      within(driveCard as HTMLElement).getByRole("link", {
-        name: "Enable Docs & Sheets editing",
-      }),
-    ).toHaveAttribute(
-      "href",
-      "/api/integrations/google-drive/start?returnTo=/settings/integrations",
-    );
+      screen.queryByText("Sync files and folders you choose into opencompany."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("founder@example.com")).not.toBeInTheDocument();
   });
 
   it("connects Latitude as a personal OAuth integration with guarded writes", () => {

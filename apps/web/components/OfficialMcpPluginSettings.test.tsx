@@ -14,7 +14,9 @@ import {
   betterStackToolsStateFromPlugin,
   GitHubPluginDetail,
   GitHubPluginDetailView,
+  GoogleDrivePluginDetail,
   githubToolsStateFromPlugin,
+  googleDriveToolsStateFromPlugin,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -29,6 +31,7 @@ import {
 import {
   BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
+  GOOGLE_DRIVE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
@@ -73,6 +76,13 @@ const appData = vi.hoisted(() => ({
       teamName: "Acme",
       integrationId: "gint_slack",
     },
+    google_drive: {
+      connected: true,
+      status: "connected",
+      integrationId: "gint_google_drive_latest",
+      accountEmail: "founder@example.com",
+      accountName: "Founder",
+    },
     personalAccounts: {
       betterstack: [],
       github_user: [
@@ -87,6 +97,32 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: [],
           capabilityModes: { read: "on", write: "ask" },
+        },
+      ],
+      google_drive: [
+        {
+          integrationId: "gint_google_drive_older",
+          provider: "google_drive",
+          status: "connected",
+          connected: true,
+          accountEmail: "older@example.com",
+          accountName: "Older",
+          connectionLabel: null,
+          statusReason: null,
+          scopes: [],
+          capabilityModes: {},
+        },
+        {
+          integrationId: "gint_google_drive_latest",
+          provider: "google_drive",
+          status: "connected",
+          connected: true,
+          accountEmail: "founder@example.com",
+          accountName: "Founder",
+          connectionLabel: null,
+          statusReason: null,
+          scopes: [],
+          capabilityModes: { read: "ask", query: "ask", write: "ask" },
         },
       ],
       linear: [],
@@ -524,6 +560,82 @@ const githubPlugin = {
   ],
 } as const satisfies PluginInstallationDto;
 
+const googleDrivePlugin = {
+  ...plugin,
+  id: "plugin_google_drive",
+  name: "google-drive",
+  manifest: {
+    name: "google-drive",
+    description: "Search, inspect, read, create, and copy files through Google Drive.",
+  },
+  source: {
+    ...plugin.source,
+    path: "google-drive",
+    resolvedCommit: "d08d9130d5d7550baf32dcf6b1e412329e25200d",
+  },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "google-drive",
+      type: "streamable-http",
+      connectionProvider: "google-drive",
+      capabilities: [
+        {
+          id: "read",
+          label: "Browse Drive files",
+          defaultMode: "ask",
+          tools: ["get_file_metadata", "list_recent_files", "search_files"],
+        },
+        {
+          id: "query",
+          label: "Read files & permissions",
+          defaultMode: "ask",
+          tools: ["download_file_content", "get_file_permissions", "read_file_content"],
+        },
+        {
+          id: "write",
+          label: "Create & copy files",
+          defaultMode: "ask",
+          tools: ["copy_file", "create_file"],
+        },
+      ],
+      tools: [
+        driveTool("get_file_metadata", "read"),
+        driveTool("list_recent_files", "read"),
+        driveTool("search_files", "read"),
+        driveTool("download_file_content", "query"),
+        driveTool("get_file_permissions", "query"),
+        driveTool("read_file_content", "query"),
+        driveTool("copy_file", "write"),
+        driveTool("create_file", "write"),
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-03T06:00:00.000Z",
+      refreshAfter: "2026-09-03T07:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
+function driveTool(name: string, capabilityId: "read" | "query" | "write") {
+  const capabilityLabel = {
+    read: "Browse Drive files",
+    query: "Read files & permissions",
+    write: "Create & copy files",
+  }[capabilityId];
+  return {
+    name,
+    description: `${name} from Google Drive.`,
+    classification: {
+      capabilityId,
+      capabilityLabel,
+      defaultMode: "ask" as const,
+      bucket: capabilityId === "write" ? ("write" as const) : ("read" as const),
+      curated: true,
+    },
+  };
+}
+
 const slackPlugin = {
   ...plugin,
   id: "plugin_slack",
@@ -657,6 +769,68 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read GitHub");
     expect(html).toContain("Manage GitHub");
     expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("presents the selected Drive account and all reviewed tools with Ask defaults", () => {
+    const toolsState = googleDriveToolsStateFromPlugin(googleDrivePlugin);
+    render(
+      <GoogleDrivePluginDetail
+        pluginState={{ status: "ready", plugin: googleDrivePlugin }}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByText("founder@example.com")).toBeInTheDocument();
+    expect(screen.queryByText("older@example.com")).not.toBeInTheDocument();
+    expect(screen.getByText("Needs reconnect")).toBeInTheDocument();
+    expect(screen.queryByText("Enable Docs & Sheets editing")).not.toBeInTheDocument();
+    expect(screen.getByText(/most recently connected Google Drive account/i)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Connect Google Drive account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
+    );
+    expect(
+      screen.getByRole("link", { name: "Configure Google Drive ingestion in Wiki sources" }),
+    ).toHaveAttribute("href", "/wiki/sources");
+    for (const label of ["Browse Drive files", "Read files & permissions", "Create & copy files"]) {
+      expect(
+        within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
+          name: "Ask",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    }
+    expect(toolsState).toMatchObject({
+      status: "ready",
+      discovery: { status: "ready", toolCount: 8 },
+    });
+    if (toolsState.status !== "ready") throw new Error("Expected discovered Drive tools.");
+    expect(
+      toolsState.groups.map((group) => ({
+        id: group.id,
+        defaultMode: group.defaultMode,
+        tools: group.tools.map((tool) => tool.name),
+      })),
+    ).toEqual([
+      {
+        id: "read",
+        defaultMode: "ask",
+        tools: ["Get file metadata", "List recent files", "Search files"],
+      },
+      {
+        id: "query",
+        defaultMode: "ask",
+        tools: ["Download file content", "Get file permissions", "Read file content"],
+      },
+      {
+        id: "write",
+        defaultMode: "ask",
+        tools: ["Copy file", "Create file"],
+      },
+    ]);
+    expect(GOOGLE_DRIVE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/d08d9130d5d7550baf32dcf6b1e412329e25200d/google-drive",
+    );
   });
 
   it("shows provenance, accounts, discovered tools, and read-only skills", async () => {

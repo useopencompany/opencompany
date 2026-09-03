@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   getGitHubState: vi.fn(),
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
+  getGoogleDriveState: vi.fn(),
+  loadGoogleDriveConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
   getBetterStackState: vi.fn(),
@@ -46,6 +48,11 @@ vi.mock("./integrations/github-user-mcp", () => ({
   GITHUB_USER_MCP_ENDPOINT_URL: "https://api.githubcopilot.com/mcp/",
   getGitHubUserMcpIntegrationState: mocks.getGitHubState,
   loadGitHubUserMcpWorkerConnection: mocks.loadGitHubConnection,
+}));
+vi.mock("./integrations/google-drive-mcp", () => ({
+  GOOGLE_DRIVE_MCP_ENDPOINT_URL: "https://drivemcp.googleapis.com/mcp/v1",
+  getGoogleDriveMcpIntegrationState: mocks.getGoogleDriveState,
+  loadGoogleDriveMcpWorkerConnection: mocks.loadGoogleDriveConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
   POSTHOG_MCP_ENDPOINT_URL: "https://mcp.posthog.com/mcp",
@@ -218,6 +225,43 @@ describe("plugin gateway registration cache", () => {
       {
         ...githubRecord,
         server: { ...githubRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Google Drive credentials only to Google's exact hosted MCP endpoint", async () => {
+    const googleDriveRecord = record({
+      pluginName: "google-drive",
+      pluginLabel: "google-drive",
+      pluginDescription: "Google Drive plugin tools.",
+      connectionProvider: "google-drive",
+      server: {
+        name: "google-drive",
+        type: "streamable-http",
+        url: "https://drivemcp.googleapis.com/mcp/v1",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([googleDriveRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:google-drive:google-drive",
+        connectionProvider: "google_drive",
+        getState: mocks.getGoogleDriveState,
+        loadConnection: mocks.loadGoogleDriveConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...googleDriveRecord,
+        server: {
+          ...googleDriveRecord.server,
+          url: "https://drivemcp.googleapis.com.evil.example/mcp/v1",
+        },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

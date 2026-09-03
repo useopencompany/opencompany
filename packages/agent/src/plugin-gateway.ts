@@ -25,6 +25,11 @@ import {
   loadGitHubUserMcpWorkerConnection,
 } from "./integrations/github-user-mcp";
 import {
+  GOOGLE_DRIVE_MCP_ENDPOINT_URL,
+  getGoogleDriveMcpIntegrationState,
+  loadGoogleDriveMcpWorkerConnection,
+} from "./integrations/google-drive-mcp";
+import {
   getLatitudeIntegrationState,
   LATITUDE_MCP_ENDPOINT_URL,
   loadLatitudeMcpWorkerConnection,
@@ -70,6 +75,12 @@ const providerBindings = {
     endpointUrl: GITHUB_USER_MCP_ENDPOINT_URL,
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
+  },
+  "google-drive": {
+    provider: "google_drive",
+    endpointUrl: GOOGLE_DRIVE_MCP_ENDPOINT_URL,
+    getState: getGoogleDriveMcpIntegrationState,
+    loadConnection: loadGoogleDriveMcpWorkerConnection,
   },
   linear: {
     provider: "linear",

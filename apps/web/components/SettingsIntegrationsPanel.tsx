@@ -384,7 +384,6 @@ const WORKSPACE_ACCOUNT_PROVIDERS = [
 const PERSONAL_ACCOUNT_PROVIDERS = [
   "gmail",
   "google_calendar",
-  "google_drive",
   "latitude",
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
 
@@ -487,10 +486,6 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="google_calendar"
               accounts={integrations.personalAccounts.google_calendar}
-            />
-            <IntegrationProviderGroupCard
-              provider="google_drive"
-              accounts={integrations.personalAccounts.google_drive}
             />
             <IntegrationProviderGroupCard
               provider="latitude"
@@ -1035,6 +1030,7 @@ export function IntegrationAccountRow({
           account.integrationId
         : account.accountEmail || account.accountName || account.integrationId;
   const needsGoogleDriveWriteScope =
+    showCapabilityModes &&
     account.provider === "google_drive" &&
     account.connected &&
     !hasGoogleDriveWriteScope(account.scopes);

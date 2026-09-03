@@ -368,9 +368,14 @@ function AppLiveDataSubscriptions({
     return {
       ...liveIntegrations,
       // Slack's MCP gateway deliberately selects the most recently updated
-      // account. Preserve the server-selected primary while personalAccounts
-      // continues to update live, so the plugin page edits that same account.
+      // account. Google Drive follows the same rule. Preserve those
+      // server-selected primaries while personalAccounts continues to update
+      // live, so each plugin page edits the account its gateway will use.
       slack: initialData.integrations.slack,
+      google_drive: {
+        ...liveIntegrations.google_drive,
+        integrationId: initialData.integrations.google_drive.integrationId,
+      },
       codex: initialData.integrations.codex,
       claude_code: initialData.integrations.claude_code,
       infisical: initialData.integrations.infisical,

@@ -396,6 +396,60 @@ describe("resolvePlugin", () => {
       issues: [],
     });
   });
+
+  it("loads the official Google Drive package with every reviewed tool classified", async () => {
+    const fixtureRoot = fileURLToPath(
+      new URL("./test-fixtures/plugins/google-drive", import.meta.url),
+    );
+    const files = await fixtureFiles(fixtureRoot, "google-drive");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "google-drive",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "google-drive", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "google-drive",
+        type: "streamable-http",
+        url: "https://drivemcp.googleapis.com/mcp/v1",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      {
+        id: "read",
+        label: "Browse Drive files",
+        defaultMode: "ask",
+        tools: ["get_file_metadata", "list_recent_files", "search_files"],
+      },
+      {
+        id: "query",
+        label: "Read files & permissions",
+        defaultMode: "ask",
+        tools: ["download_file_content", "get_file_permissions", "read_file_content"],
+      },
+      {
+        id: "write",
+        label: "Create & copy files",
+        defaultMode: "ask",
+        tools: ["copy_file", "create_file"],
+      },
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(8);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "google-drive", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
 });
 
 function text(value: string) {

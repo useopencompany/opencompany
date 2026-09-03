@@ -1,11 +1,17 @@
-export type OfficialMcpPluginName = "betterstack" | "github" | "linear" | "neon" | "slack";
+export type OfficialMcpPluginName =
+  | "betterstack"
+  | "github"
+  | "google-drive"
+  | "linear"
+  | "neon"
+  | "slack";
 
 export type OfficialMcpPluginMetadata = {
   name: OfficialMcpPluginName;
   label: string;
   description: string;
   source: string;
-  connectionProvider: "betterstack" | "github_user" | "linear" | "neon" | "slack";
+  connectionProvider: "betterstack" | "github_user" | "google_drive" | "linear" | "neon" | "slack";
   connectHref: string;
   accountLabel?: string;
   accountDescription: string;
@@ -36,6 +42,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref: "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
     accountLabel: "GitHub",
     accountDescription: "The personal GitHub account opencompany uses when it works as you.",
+  },
+  "google-drive": {
+    name: "google-drive",
+    label: "Google Drive",
+    description: "Browse, read, create, and copy files through Google's official Drive MCP server.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/d08d9130d5d7550baf32dcf6b1e412329e25200d/google-drive",
+    connectionProvider: "google_drive",
+    connectHref: "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
+    accountDescription:
+      "The most recently connected Google Drive account powers plugin tools. Other accounts remain available for Wiki ingestion.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure Google Drive ingestion in Wiki sources",
   },
   linear: {
     name: "linear",

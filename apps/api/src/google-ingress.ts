@@ -9,6 +9,7 @@ import {
   fetchGoogleUserInfo,
   GOOGLE_PROVIDER_CONFIG,
   type GoogleIntegrationProvider,
+  googleAuthorizationConfigForReturnTo,
   googleOAuthRedirectUri,
   isGoogleIntegrationConfigured,
   verifyGoogleIntegrationState,
@@ -39,6 +40,10 @@ export type GoogleIngressService = {
 export function createGoogleIngress(input: {
   db: DbLike;
   identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
 }): GoogleIngressService {
   return {
     start: (provider, request) => handleStart(input, provider, request),
@@ -47,7 +52,14 @@ export function createGoogleIngress(input: {
   };
 }
 
-type IngressInput = { db: DbLike; identify: ApiIdentityVerifier };
+type IngressInput = {
+  db: DbLike;
+  identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
+};
 
 async function handleStart(
   input: IngressInput,
@@ -59,6 +71,7 @@ async function handleStart(
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
   const config = GOOGLE_PROVIDER_CONFIG[provider];
+  const authorizationConfig = googleAuthorizationConfigForReturnTo(config, returnTo);
   const oauthRedirectUri = googleOAuthRedirectUri(config);
 
   if (!isGoogleIntegrationConfigured()) {
@@ -70,7 +83,10 @@ async function handleStart(
     userWorkosId: session.userId,
     returnTo,
   });
-  return sessionRedirect(session, buildGoogleAuthorizationUrl(config, state, oauthRedirectUri));
+  return sessionRedirect(
+    session,
+    buildGoogleAuthorizationUrl(authorizationConfig, state, oauthRedirectUri),
+  );
 }
 
 async function handleCallback(
@@ -127,6 +143,7 @@ async function handleCallback(
   }
 
   try {
+    const authorizationConfig = googleAuthorizationConfigForReturnTo(config, state.returnTo);
     const { tokens, expiresAt } = await exchangeGoogleCode(
       config,
       code,
@@ -141,7 +158,7 @@ async function handleCallback(
       accountName: userInfo.name ?? null,
       tokens,
       expiresAt,
-      scopes: readScopes(tokens.scope, config.scopes),
+      scopes: readScopes(tokens.scope, authorizationConfig.scopes),
       db: input.db,
     });
     await captureIntegrationAddedAnalytics({
@@ -149,6 +166,7 @@ async function handleCallback(
       workspaceId: session.workspaceId,
       provider,
     });
+    if (provider === "google_drive") await refreshDrivePluginAfterConnection(input, session);
 
     return statusRedirect(session, state.returnTo, provider, "connected");
   } catch (error) {
@@ -159,6 +177,24 @@ async function handleCallback(
       error_message: error instanceof Error ? error.message : String(error),
     });
     return errorRedirect(state.returnTo);
+  }
+}
+
+async function refreshDrivePluginAfterConnection(
+  input: IngressInput,
+  session: Extract<Awaited<ReturnType<typeof resolveIngressSession>>, { kind: "actor" }>,
+) {
+  if (!input.refreshPluginRegistrations) return;
+  try {
+    await input.refreshPluginRegistrations({
+      userWorkosId: session.userId,
+      workspaceIds: session.workspaces.map((entry) => entry.workspace.id),
+    });
+  } catch (error) {
+    logger.warn("Google Drive plugin discovery refresh after connection failed", {
+      event: "goat.google_drive_plugin_reconnect_refresh_failed",
+      error_message: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

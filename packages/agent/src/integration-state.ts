@@ -5,6 +5,7 @@ export type GoogleProviderState = {
   provider: "gmail" | "google_calendar" | "google_drive";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
   accountEmail: string | null;
   accountName: string | null;
 };
@@ -450,6 +451,7 @@ function googleProviderState(
       provider,
       connected: false,
       status: "not_connected",
+      integrationId: null,
       accountEmail: null,
       accountName: null,
     };
@@ -459,6 +461,7 @@ function googleProviderState(
     provider,
     connected: row.status === "connected",
     status: row.status,
+    integrationId: row.id ?? null,
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
   };

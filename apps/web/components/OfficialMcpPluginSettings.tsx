@@ -62,6 +62,10 @@ import {
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
 import { type IntegrationAccountView, type IntegrationState } from "@/lib/integration-state";
+import {
+  GOOGLE_DRIVE_MCP_RECONNECT_REASON,
+  googleDriveMcpScopesSatisfied,
+} from "@/lib/integrations/google-drive-scopes";
 import type { OfficialMcpPluginName } from "@/lib/official-mcp-plugins";
 
 const NO_CONNECTION_DISCOVERY_ERROR =
@@ -159,6 +163,25 @@ export function GitHubPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.github}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function GoogleDrivePluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS["google-drive"]}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -294,6 +317,28 @@ export function GitHubPluginDetailView({
   return (
     <OfficialMcpPluginDetailView
       config={OFFICIAL_MCP_PLUGINS.github}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+export function GoogleDrivePluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS["google-drive"]}
       pluginState={pluginState}
       accountsState={accountsState}
       toolsState={toolsState}
@@ -1127,14 +1172,29 @@ function pluginAccountsFromState(
   if (
     config.connectionProvider === "betterstack" ||
     config.connectionProvider === "github_user" ||
+    config.connectionProvider === "google_drive" ||
     config.connectionProvider === "neon" ||
     config.connectionProvider === "slack"
   ) {
     const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
-      account,
+      account:
+        config.connectionProvider === "google_drive" &&
+        account.status === "connected" &&
+        !googleDriveMcpScopesSatisfied(account.scopes)
+          ? {
+              ...account,
+              status: "needs_reauth" as const,
+              connected: false,
+              statusReason: GOOGLE_DRIVE_MCP_RECONNECT_REASON,
+            }
+          : account,
     }));
     const primaryIntegrationId =
-      config.connectionProvider === "slack" ? state.slack.integrationId : null;
+      config.connectionProvider === "slack"
+        ? state.slack.integrationId
+        : config.connectionProvider === "google_drive"
+          ? state.google_drive.integrationId
+          : null;
     return {
       accounts,
       permissionConnection:
@@ -1170,6 +1230,10 @@ export function defaultLinearToolsState(): PluginToolsState {
 
 export function defaultGitHubToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("github");
+}
+
+export function defaultGoogleDriveToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("google-drive");
 }
 
 export function defaultNeonToolsState(): PluginToolsState {
@@ -1214,6 +1278,12 @@ export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null)
 
 export function githubToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "github");
+}
+
+export function googleDriveToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "google-drive");
 }
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
@@ -1311,6 +1381,12 @@ export function linearToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
 
 export function githubToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "github");
+}
+
+export function googleDriveToolsStateFromPreview(
+  preview: PluginImportPreviewDto,
+): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "google-drive");
 }
 
 export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {

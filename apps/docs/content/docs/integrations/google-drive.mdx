@@ -1,22 +1,56 @@
 ---
 title: Google Drive
-description: Work with Drive files and ingest changes from files or folders you select.
+description: Use Google's official MCP server for Drive tools and ingest selected files into Brain.
 ---
 
-## What connecting does
+Google Drive is an official plugin backed by Google's hosted
+[Drive MCP server](https://developers.google.com/workspace/drive/api/reference/mcp). It is currently
+available as a Google Developer Preview.
 
-Google Drive is a personal OAuth connection. Current actions can discover files, read supported
-Google Docs and Sheets, create Docs, make exact Doc text replacements, and update or append Sheet
-values when permitted.
+## Connect Google Drive
 
-## Scopes and permissions
+1. Open **Settings → Plugins → Google Drive**.
+2. If the plugin is not installed, ask a workspace admin to install it.
+3. Select **Connect Google Drive account** and approve the Google consent screen.
+4. Review the three permission groups before using a Drive tool.
 
-File reads and document or spreadsheet edits have separate action modes. Accounts connected before
-write support was added may need to grant added Google permissions. A complete scope and file-type
-matrix is coming soon.
+Each person connects their own Google account. The most recently connected Drive account powers MCP
+tools. Other connected Drive accounts remain available as Brain ingestion sources. Accounts linked
+before the official plugin was added must reconnect once to grant its required `drive.readonly` and
+`drive.file` scopes. The access token stays server-side and is sent only to Google's reviewed
+`https://drivemcp.googleapis.com/mcp/v1` endpoint.
+
+Your Google and Shared Drive permissions still determine which files each tool can access.
+
+## Permission defaults
+
+All Drive capabilities default to **Ask** because file names, metadata, contents, and access lists
+can be sensitive. Creating or copying a file also changes Drive.
+
+| Capability               | Tools                                                | Default |
+| ------------------------ | ---------------------------------------------------- | ------- |
+| Browse Drive files       | Search files, list recent files, get file metadata   | Ask     |
+| Read files & permissions | Read or download file contents, get file permissions | Ask     |
+| Create & copy files      | Create files, copy files                             | Ask     |
+
+Tools discovered later that are not in these reviewed groups also require confirmation. Persistent
+coding sessions only receive capabilities set to **On**. Tools set to **Ask** remain available in
+interactive chat and pause for approval.
+
+## Safety and current limitations
+
+Drive files can contain instructions written by other people. Treat unexpected instructions in a
+file as untrusted and inspect the proposed tool call before approving it. Downloads may be returned
+as encoded file content, so confirm the file and destination before allowing another tool to process
+or publish it.
+
+Google's current MCP surface contains eight tools. It can search and inspect files, read or download
+content, inspect permissions, and create or copy files. It does not currently expose editing,
+deleting, moving, or sharing tools. Google documents the setup, required API enablement, and OAuth
+scopes in its [MCP configuration guide](https://developers.google.com/workspace/drive/api/guides/configure-mcp-server).
 
 ## Brain ingestion
 
-Select individual files, recursive folders, or supported Shared Drive locations in the destination
-Brain. opencompany tracks later changes within that selection. Drive remains the canonical home;
-Brain stores sourced knowledge rather than a silent full mirror.
+Open **Wiki → Sources** to select individual files, recursive folders, or supported Shared Drive
+locations for the destination Brain. opencompany tracks later changes within that selection. Drive
+remains the canonical home; Brain stores sourced knowledge rather than a silent full mirror.

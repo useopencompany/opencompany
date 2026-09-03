@@ -261,7 +261,17 @@ const app = createApiApp({
         connectionProvider: "github",
       }),
   }),
-  googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
+  googleIngress: createGoogleIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider: "google-drive",
+      }),
+  }),
   slackIngress: createSlackIngress({
     db: database.db,
     identify: identityVerifier,
