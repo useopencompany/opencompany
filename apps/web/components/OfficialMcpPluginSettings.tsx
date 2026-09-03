@@ -66,7 +66,7 @@ import {
   GOOGLE_DRIVE_MCP_RECONNECT_REASON,
   googleDriveMcpScopesSatisfied,
 } from "@/lib/integrations/google-drive-scopes";
-import type { OfficialMcpPluginName } from "@/lib/official-mcp-plugins";
+import type { OfficialMcpPluginName } from "@/lib/official-plugins";
 
 const NO_CONNECTION_DISCOVERY_ERROR =
   "No usable provider connection was available for MCP discovery.";

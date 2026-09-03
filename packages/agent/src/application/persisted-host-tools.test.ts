@@ -11,6 +11,7 @@ function executeHostTool(input: {
     runtime: {
       wakeTaskWorker: vi.fn(),
       defer: vi.fn(),
+      gatewayApiKey: "gateway-key",
       planHarness: vi.fn(),
     },
     ...(input.dependencies ? { dependencies: input.dependencies } : {}),
