@@ -2176,16 +2176,18 @@ function withoutAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T):
   return { ...message, providerOptions };
 }
 
-// prepareStep hook: keep the static breakpoints on the first two messages and
-// place the moving breakpoint on the last message of this step. Earlier
+// prepareStep hook: keep the static breakpoint on the source user message and
+// place the moving breakpoint on the last message of this step. The system
+// prompt is supplied separately through AI SDK's `instructions` option and
+// carries its own static breakpoint. Earlier
 // non-static messages are stripped defensively so breakpoints never accumulate
 // past Anthropic's limit of 4, whatever the SDK does with prior step edits.
 export function placeMovingAnthropicCacheBreakpoint(
   messages: ai.ModelMessage[],
 ): ai.ModelMessage[] {
-  if (messages.length <= 2) return messages;
+  if (messages.length <= 1) return messages;
   return messages.map((message, index) => {
-    if (index < 2) return message;
+    if (index === 0) return message;
     if (index < messages.length - 1) return withoutAnthropicCacheBreakpoint(message);
     return withAnthropicCacheBreakpoint(withoutAnthropicCacheBreakpoint(message));
   });
@@ -2631,14 +2633,15 @@ export async function runIngestAgentLoop(input: {
     const result = await generateText({
       model: gateway(input.model),
       maxOutputTokens: BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS,
-      // The system prompt rides in messages (not the system param) so it can
-      // carry its own cache breakpoint; it is byte-stable for the whole job.
+      // AI SDK 7 rejects system-role entries in `messages`. `instructions`
+      // accepts a SystemModelMessage, preserving the provider cache breakpoint
+      // while using the SDK-owned system-prompt boundary.
+      instructions: {
+        role: "system",
+        content: system,
+        providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
+      },
       messages: [
-        {
-          role: "system",
-          content: system,
-          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
-        },
         {
           role: "user",
           content: input.files?.length
