@@ -5,7 +5,13 @@ import {
   loadClaudeCodeAuthStatus,
   saveClaudeCodeCredential,
 } from "@opencompany/db/claude-code-auth";
-import { deleteCodexCredential, loadCodexAuthStatus } from "@opencompany/db/codex-auth";
+import {
+  deleteCodexCredential,
+  disableWorkspaceCodexEngineAccount,
+  loadCodexAuthStatus,
+  loadWorkspaceCodexEngineAccount,
+  setWorkspaceCodexEngineAccount,
+} from "@opencompany/db/codex-auth";
 import {
   disconnectInfisicalConnection,
   isInfisicalHost,
@@ -28,6 +34,18 @@ export type EngineAuthConnectionStatus = {
   statusReason: string | null;
   lastValidatedAt: string | null;
   lastRotatedAt: string | null;
+};
+
+export type CodexAuthStatus = EngineAuthConnectionStatus & {
+  workspaceEngine: {
+    enabled: boolean;
+    providerDisplayName: string;
+    providerEmail: string;
+    credentialStatus: "connected" | "needs_reauth";
+    credentialStatusReason: string | null;
+    lastValidatedAt: string | null;
+    isCurrentUser: boolean;
+  } | null;
 };
 
 export type InfisicalAuthStatus = {
@@ -61,7 +79,8 @@ export type EngineAuthService = {
   getClaudeCodeStatus(actor: Actor): Promise<EngineAuthConnectionStatus>;
   saveClaudeCodeToken(actor: Actor, token: string): Promise<EngineAuthConnectionStatus>;
   disconnectClaudeCode(actor: Actor): Promise<void>;
-  getCodexStatus(actor: Actor): Promise<EngineAuthConnectionStatus>;
+  getCodexStatus(actor: Actor): Promise<CodexAuthStatus>;
+  setCodexWorkspaceEngine(actor: Actor, enabled: boolean): Promise<CodexAuthStatus>;
   startCodexDeviceAuth(actor: Actor): Promise<CodexDeviceAuthFlow>;
   pollCodexDeviceAuth(actor: Actor, flowId: string): Promise<CodexDeviceAuthFlow>;
   disconnectCodex(actor: Actor): Promise<void>;
@@ -87,13 +106,56 @@ export function createEngineAuthService(input: {
   }
 
   async function getCodexStatus(actor: Actor) {
-    const row = await loadCodexAuthStatus({ db, userWorkosId: actor.userId });
-    return connectionStatusDto(row);
+    const [row, workspaceAccount] = await Promise.all([
+      loadCodexAuthStatus({ db, userWorkosId: actor.userId }),
+      loadWorkspaceCodexEngineAccount({ db, workspaceId: actor.workspaceId }),
+    ]);
+    return {
+      ...connectionStatusDto(row),
+      workspaceEngine: workspaceAccount
+        ? {
+            enabled: workspaceAccount.enabled,
+            providerDisplayName: workspaceAccount.providerDisplayName,
+            providerEmail: workspaceAccount.providerEmail,
+            credentialStatus: workspaceAccount.credentialStatus,
+            credentialStatusReason: workspaceAccount.credentialStatusReason,
+            lastValidatedAt: workspaceAccount.lastValidatedAt?.toISOString() ?? null,
+            isCurrentUser: workspaceAccount.providerUserWorkosId === actor.userId,
+          }
+        : null,
+    };
   }
 
   return {
     getClaudeCodeStatus,
     getCodexStatus,
+
+    async setCodexWorkspaceEngine(actor, enabled) {
+      requireAdmin(actor, "Only workspace admins can manage subscription-backed models.");
+      try {
+        if (enabled) {
+          await setWorkspaceCodexEngineAccount({
+            db,
+            workspaceId: actor.workspaceId,
+            providerUserWorkosId: actor.userId,
+            updatedByWorkosId: actor.userId,
+          });
+        } else {
+          await disableWorkspaceCodexEngineAccount({
+            db,
+            workspaceId: actor.workspaceId,
+            updatedByWorkosId: actor.userId,
+          });
+        }
+      } catch (error) {
+        throw commandFailure(
+          error,
+          "Could not update subscription-backed model routing.",
+          "codex_workspace_engine_update",
+        );
+      }
+      return getCodexStatus(actor);
+    },
 
     async saveClaudeCodeToken(actor, token) {
       const validated = validateClaudeCodeToken(token);

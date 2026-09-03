@@ -111,6 +111,7 @@ describe("v1 protocol contract", () => {
     expect(
       ConversationReadModelSchema.parse({
         ...conversation,
+        messageShapeEpoch: 3,
         archivedAt: null,
         pinnedAt: null,
         lastSeenAt: null,
@@ -274,6 +275,7 @@ describe("v1 protocol contract", () => {
       "/v1/chat-artifacts/{artifactId}",
       "/v1/chat-artifacts/{artifactId}/versions/{versionId}",
       "/v1/chat-attachments/{messageId}/{attachmentId}",
+      "/v1/conversations/{conversationId}/messages/{messageId}/presentation",
       "/v1/chat-screenshots/{conversationId}/{filename}",
       "/public/chat-shares/{shareId}",
       "/public/chat-shares/{shareId}/metadata",
@@ -312,6 +314,7 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/{integrationId}",
       "/v1/engine-auth/claude-code",
       "/v1/engine-auth/codex",
+      "/v1/engine-auth/codex/workspace",
       "/v1/engine-auth/codex/device",
       "/v1/engine-auth/codex/device/{flowId}/poll",
       "/v1/engine-auth/infisical",
@@ -333,6 +336,7 @@ describe("v1 protocol contract", () => {
       "/v1/plugins/{name}/disable",
       "/v1/plugins/{name}/mcp/approve",
       "/v1/plugins/{name}/mcp/revoke",
+      "/v1/plugins/{name}/mcp/refresh",
       "/v1/plugins/{name}/data/delete",
     ]);
     expect(document.paths?.["/v1/skills"]).toHaveProperty("get");

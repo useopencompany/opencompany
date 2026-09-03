@@ -5,6 +5,8 @@ import {
   CHAT_ATTACHMENT_FORMATS,
   type ChatAttachmentFormat,
   type ConversationRuntimeStatus,
+  type PluginCapabilityDefinition,
+  type PluginGatewayDiscoveredTool,
   type PluginInstallReport,
   type PluginManifest,
   type PluginStatus,
@@ -154,6 +156,7 @@ export type IntegrationProvider =
   | "google_drive"
   | "linear"
   | "github"
+  | "github_user"
   | "jamie"
   | "slack"
   | "slack_bot"
@@ -161,6 +164,8 @@ export type IntegrationProvider =
   | "granola"
   | "fathom"
   | "attio"
+  | "betterstack"
+  | "signoz"
   | "stripe"
   | "latitude"
   | "posthog"
@@ -169,7 +174,7 @@ export type IntegrationProvider =
   | "x_account";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
-// Calendar, Slack user token, Linear, PostHog, Neon, X) are always personal. Installation-bound
+// Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, SigNoz, X) are always personal. Installation-bound
 // connections (GitHub App org installs, Jamie webhook secrets, the Slack
 // answer-bot install) are workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
@@ -219,6 +224,8 @@ export type BrainSourceProvider =
   | "granola"
   | "fathom"
   | "attio";
+// The persisted source unions still include Slack so historical rows remain
+// readable during the cutover. Active API schemas and workers exclude it.
 // "slack_bot" rows are answer *destinations* (which channels a brain answers
 // in via the Slack bot), not ingestion sources; no ingestion path reads them.
 export type BrainSourceConfigProvider =
@@ -437,6 +444,7 @@ export type CreditLedgerSource =
   | "included_usage_expiration"
   | "stripe_topup"
   | "chat_model_usage"
+  | "subscription_covered"
   | "capability_usage"
   | "frontier_ingest"
   | "ingest_overage"
@@ -713,13 +721,13 @@ export const users = productSchema.table(
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     imessageEnabled: boolean("imessage_enabled").notNull().default(false),
-    // Preview flag for the workspace wiki (brain v2). Gates the /wiki surface
-    // and the `wiki` agent tool per user while brain keeps running unchanged.
+    // Retained for rollback compatibility after the wiki became the default.
+    // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
     // Board vs list layout for the Tasks page; persisted per user across devices.
     taskViewMode: text("task_view_mode").notNull().default("board").$type<TaskViewMode>(),
     preferredMcpClient: text("preferred_mcp_client").$type<McpClient>(),
-    // Set exactly once, when this user first completes a successful Brain query over MCP.
+    // Set exactly once, when this user first completes a successful knowledge query over MCP.
     mcpSetupCompletedAt: timestamp("mcp_setup_completed_at", { withTimezone: true }),
     // Set when the user finishes the onboarding flow; null gates them into it.
     onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
@@ -753,6 +761,9 @@ export const workspaces = productSchema.table(
     capabilitySessionBudgetUsdMicros: bigint("capability_session_budget_usd_micros", {
       mode: "number",
     }),
+    // Reversible cutover switch for the retired Brain UI and agent tools.
+    // Wiki is the default knowledge system for every workspace.
+    legacyBrainEnabled: boolean("legacy_brain_enabled").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1064,7 +1075,7 @@ export const creditLedger = productSchema.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'chat_model_usage', 'subscription_covered', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );
@@ -1248,8 +1259,8 @@ export const brainDocuments = productSchema.table(
       .references(() => users.workosUserId, { onDelete: "cascade" }),
     // Who originally put this document in the brain (set once at insert, never
     // on update — unlike userWorkosId, which tracks the last actor). Null when
-    // no human originated it, e.g. Slack-window ingestion: the integration
-    // owner connected the channel but did not author its content.
+    // no human originated it, e.g. externally authored source ingestion: the
+    // integration owner connected the source but did not author its content.
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
     }),
@@ -1547,6 +1558,12 @@ export const integrations = productSchema.table(
       .$type<Partial<Record<string, "on" | "off" | "ask">>>()
       .notNull()
       .default(sql`'{}'::jsonb`),
+    // Sparse per-tool overrides layered over capability_modes. Keeping these on the durable
+    // connection makes advanced plugin permissions survive package archive/reinstall cycles.
+    toolModes: jsonb("tool_modes")
+      .$type<Partial<Record<string, "on" | "off" | "ask">>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1594,11 +1611,15 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
       sql`${table.status} IN ('connected', 'needs_reauth', 'sync_failed', 'disconnected')`,
+    ),
+    toolModesCheck: check(
+      "integrations_tool_modes_check",
+      sql`jsonb_typeof(${table.toolModes}) = 'object'`,
     ),
   }),
 );
@@ -1619,6 +1640,7 @@ export const integrationCredentials = productSchema.table(
     encryptionKeyVersion: integer("encryption_key_version").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    refreshLeaseUntil: timestamp("refresh_lease_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1639,7 +1661,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1689,7 +1711,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -2531,10 +2553,8 @@ export const slackBotThreadParticipation = productSchema.table(
   }),
 );
 
-// Raw Slack message buffer: the events webhook inserts one row per relevant
-// message; the runner's flush sweeper batches unflushed rows per channel into a
-// conversation-window source item after a quiet period (source_item_id NULL =
-// unflushed).
+// Retired Slack-ingestion storage. Kept temporarily so this cutover does not
+// delete customer data; no webhook or runner path writes or flushes these rows.
 export const slackMessageEvents = productSchema.table(
   "slack_message_events",
   {
@@ -3355,6 +3375,81 @@ export const plugins = productSchema.table(
   }),
 );
 
+// A remote mcp.json entry registered for server-side gateway discovery and dispatch. The package
+// remains immutable; discovery is a cached projection that may be refreshed as the vendor adds or
+// removes tools. Disabled Plugins are excluded by the active-registration query; archive deletes
+// these rows without touching the provider connection.
+export const pluginGatewayRegistrations = productSchema.table(
+  "plugin_gateway_registrations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    pluginId: text("plugin_id").notNull(),
+    serverName: text("server_name").notNull(),
+    connectionProvider: text("connection_provider").notNull(),
+    transport: text("transport").$type<"streamable-http" | "sse">().notNull(),
+    serverUrl: text("server_url").notNull(),
+    headers: jsonb("headers").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    capabilities: jsonb("capabilities")
+      .$type<PluginCapabilityDefinition[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    discoverySnapshot: jsonb("discovery_snapshot")
+      .$type<PluginGatewayDiscoveredTool[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    discoveredAt: timestamp("discovered_at", { withTimezone: true }),
+    refreshAfter: timestamp("refresh_after", { withTimezone: true }).notNull().defaultNow(),
+    lastDiscoveryError: text("last_discovery_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pluginServerIdx: uniqueIndex("plugin_gateway_registrations_plugin_server_idx").on(
+      table.pluginId,
+      table.serverName,
+    ),
+    workspaceProviderIdx: index("plugin_gateway_registrations_workspace_provider_idx").on(
+      table.workspaceId,
+      table.connectionProvider,
+      table.refreshAfter,
+    ),
+    workspacePluginFk: foreignKey({
+      columns: [table.workspaceId, table.pluginId],
+      foreignColumns: [plugins.workspaceId, plugins.id],
+      name: "plugin_gateway_registrations_workspace_plugin_fk",
+    }).onDelete("cascade"),
+    serverNameCheck: check(
+      "plugin_gateway_registrations_server_name_check",
+      sql`char_length(${table.serverName}) BETWEEN 1 AND 200`,
+    ),
+    connectionProviderCheck: check(
+      "plugin_gateway_registrations_connection_provider_check",
+      sql`char_length(${table.connectionProvider}) BETWEEN 1 AND 64`,
+    ),
+    transportCheck: check(
+      "plugin_gateway_registrations_transport_check",
+      sql`${table.transport} IN ('streamable-http', 'sse')`,
+    ),
+    serverUrlCheck: check(
+      "plugin_gateway_registrations_server_url_check",
+      sql`${table.serverUrl} ~ '^https?://'`,
+    ),
+    headersCheck: check(
+      "plugin_gateway_registrations_headers_check",
+      sql`jsonb_typeof(${table.headers}) = 'object'`,
+    ),
+    capabilitiesCheck: check(
+      "plugin_gateway_registrations_capabilities_check",
+      sql`jsonb_typeof(${table.capabilities}) = 'array'`,
+    ),
+    discoverySnapshotCheck: check(
+      "plugin_gateway_registrations_discovery_snapshot_check",
+      sql`jsonb_typeof(${table.discoverySnapshot}) = 'array'`,
+    ),
+  }),
+);
+
 export const pluginFiles = productSchema.table(
   "plugin_files",
   {
@@ -4068,9 +4163,7 @@ export const actionTurns = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    policy: text("policy")
-      .$type<"foregroundInteractive" | "cloudReadOnly" | "headless">()
-      .notNull(),
+    policy: text("policy").$type<"foregroundInteractive" | "headless">().notNull(),
     actionCallCount: integer("action_call_count").notNull().default(0),
     invocationIds: jsonb("invocation_ids").$type<string[]>().notNull().default([]),
     listedSourceIds: jsonb("listed_source_ids").$type<string[]>().notNull().default([]),
@@ -4079,6 +4172,10 @@ export const actionTurns = productSchema.table(
       .default(0),
     admittedInvocationIds: jsonb("admitted_invocation_ids").$type<string[]>().notNull().default([]),
     capabilityQuotes: jsonb("capability_quotes")
+      .$type<Record<string, Record<string, unknown>>>()
+      .notNull()
+      .default({}),
+    approvalRecords: jsonb("approval_records")
       .$type<Record<string, Record<string, unknown>>>()
       .notNull()
       .default({}),
@@ -4096,7 +4193,7 @@ export const actionTurns = productSchema.table(
     expiresIdx: index("goat_action_turns_expires_idx").on(table.expiresAt),
     policyCheck: check(
       "goat_action_turns_policy_check",
-      sql`${table.policy} IN ('foregroundInteractive', 'cloudReadOnly', 'headless')`,
+      sql`${table.policy} IN ('foregroundInteractive', 'headless')`,
     ),
     countersCheck: check(
       "goat_action_turns_counters_check",
@@ -4999,6 +5096,12 @@ export const conversationReadModelV1 = productSchema.table(
     activeRunId: text("active_run_id"),
     runtimeHasError: boolean("runtime_has_error"),
     runtimeUpdatedAt: timestamp("runtime_updated_at", { withTimezone: true }),
+    messageShapeEpoch: bigint("message_shape_epoch", { mode: "number" }).notNull().default(0),
+    messageShapeBytesSinceEpoch: bigint("message_shape_bytes_since_epoch", {
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
@@ -5027,6 +5130,14 @@ export const conversationReadModelV1 = productSchema.table(
         AND ${table.runtimeUpdatedAt} IS NOT NULL
       )`,
     ),
+    messageShapeEpochCheck: check(
+      "opencompany_conversation_read_model_v1_message_shape_epoch_check",
+      sql`${table.messageShapeEpoch} >= 0`,
+    ),
+    messageShapeBytesCheck: check(
+      "opencompany_conversation_read_model_v1_message_shape_bytes_check",
+      sql`${table.messageShapeBytesSinceEpoch} >= 0`,
+    ),
   }),
 );
 
@@ -5041,6 +5152,7 @@ export const messageReadModelV1 = productSchema.table(
     content: text("content").notNull(),
     taskId: text("task_id"),
     presentation: jsonb("presentation").$type<ChatMessageDebugTrace>(),
+    presentationSummary: jsonb("presentation_summary").$type<ChatMessageDebugTrace>(),
     attachments: jsonb("attachments").$type<ChatMessageAttachment[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
@@ -5518,6 +5630,8 @@ export const codexCredentials = productSchema.table(
     statusReason: text("status_reason"),
     lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
     lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    refreshLockId: text("refresh_lock_id"),
+    refreshLockExpiresAt: timestamp("refresh_lock_expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -5527,6 +5641,39 @@ export const codexCredentials = productSchema.table(
       "goat_codex_credentials_status_check",
       sql`${table.status} IN ('connected', 'needs_reauth')`,
     ),
+  }),
+);
+
+// A workspace can designate one member's connected Codex credential as the
+// subscription-backed account for opencompany-engine frontier model turns.
+// The membership and credential foreign keys intentionally cascade: removing
+// the provider from the workspace or disconnecting Codex clears designation
+// instead of leaving a routing record that could silently fall back to billing.
+export const workspaceCodexEngineAccounts = productSchema.table(
+  "workspace_codex_engine_accounts",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    providerUserWorkosId: text("provider_user_workos_id").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedByWorkosId: text("updated_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    providerMembershipFk: foreignKey({
+      name: "workspace_codex_engine_accounts_membership_fk",
+      columns: [table.workspaceId, table.providerUserWorkosId],
+      foreignColumns: [workspaceMembers.workspaceId, workspaceMembers.userWorkosId],
+    }).onDelete("cascade"),
+    providerCredentialFk: foreignKey({
+      name: "workspace_codex_engine_accounts_credential_fk",
+      columns: [table.providerUserWorkosId],
+      foreignColumns: [codexCredentials.userWorkosId],
+    }).onDelete("cascade"),
   }),
 );
 
@@ -5694,6 +5841,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   brainSourceItems: many(brainSourceItems),
   brainIngestJobs: many(brainIngestJobs),
   codexDeviceAuthFlows: many(codexDeviceAuthFlows),
+  providedWorkspaceCodexEngineAccounts: many(workspaceCodexEngineAccounts),
 }));
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
@@ -5716,6 +5864,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   skillInstallations: many(skillInstallations),
   plugins: many(plugins),
   pluginData: many(workspacePluginData),
+  codexEngineAccount: one(workspaceCodexEngineAccounts),
 }));
 
 export const workspaceBillingRelations = relations(workspaceBilling, ({ one }) => ({
@@ -5735,6 +5884,24 @@ export const workspaceMembersRelations = relations(workspaceMembers, ({ one }) =
     references: [users.workosUserId],
   }),
 }));
+
+export const workspaceCodexEngineAccountsRelations = relations(
+  workspaceCodexEngineAccounts,
+  ({ one }) => ({
+    workspace: one(workspaces, {
+      fields: [workspaceCodexEngineAccounts.workspaceId],
+      references: [workspaces.id],
+    }),
+    provider: one(users, {
+      fields: [workspaceCodexEngineAccounts.providerUserWorkosId],
+      references: [users.workosUserId],
+    }),
+    credential: one(codexCredentials, {
+      fields: [workspaceCodexEngineAccounts.providerUserWorkosId],
+      references: [codexCredentials.userWorkosId],
+    }),
+  }),
+);
 
 export const workspaceCapabilitiesRelations = relations(workspaceCapabilities, ({ one }) => ({
   workspace: one(workspaces, {
@@ -6509,8 +6676,19 @@ export const pluginsRelations = relations(plugins, ({ one, many }) => ({
   }),
   files: many(pluginFiles),
   skills: many(pluginSkills),
+  gatewayRegistrations: many(pluginGatewayRegistrations),
   chatSessions: many(chatSessionPlugins),
 }));
+
+export const pluginGatewayRegistrationsRelations = relations(
+  pluginGatewayRegistrations,
+  ({ one }) => ({
+    plugin: one(plugins, {
+      fields: [pluginGatewayRegistrations.pluginId],
+      references: [plugins.id],
+    }),
+  }),
+);
 
 export const pluginFilesRelations = relations(pluginFiles, ({ one }) => ({
   plugin: one(plugins, {
@@ -6578,6 +6756,7 @@ export type IntegrationCredential = typeof integrationCredentials.$inferSelect;
 export type BrainSourceItem = typeof brainSourceItems.$inferSelect;
 export type BrainIngestJob = typeof brainIngestJobs.$inferSelect;
 export type CodexCredential = typeof codexCredentials.$inferSelect;
+export type WorkspaceCodexEngineAccount = typeof workspaceCodexEngineAccounts.$inferSelect;
 export type ClaudeCodeCredential = typeof claudeCodeCredentials.$inferSelect;
 export type CodexDeviceAuthFlow = typeof codexDeviceAuthFlows.$inferSelect;
 export type TaskSchedule = typeof taskSchedules.$inferSelect;
@@ -6608,6 +6787,7 @@ export type SkillBundle = typeof skillBundles.$inferSelect;
 export type SkillBundleFile = typeof skillBundleFiles.$inferSelect;
 export type SkillInstallation = typeof skillInstallations.$inferSelect;
 export type Plugin = typeof plugins.$inferSelect;
+export type PluginGatewayRegistration = typeof pluginGatewayRegistrations.$inferSelect;
 export type PluginFile = typeof pluginFiles.$inferSelect;
 export type PluginSkill = typeof pluginSkills.$inferSelect;
 export type WorkspacePluginData = typeof workspacePluginData.$inferSelect;

@@ -4,6 +4,7 @@ import {
   codexChatTurns,
   runAttempts,
   workspaceMembers,
+  workspaces,
 } from "@opencompany/db/product-schema";
 import { and, eq } from "drizzle-orm";
 import {
@@ -45,6 +46,9 @@ async function loadPersistedAuthorityState(
       activeTurnId: codexChatSessions.activeTurnId,
       hostToolContractVersion: codexChatSessions.hostToolContractVersion,
       workspaceId: codexChatSessions.workspaceId,
+      workspaceName: workspaces.name,
+      workspaceSlug: workspaces.slug,
+      legacyBrainEnabled: workspaces.legacyBrainEnabled,
       actorId: codexChatSessions.userWorkosId,
       conversationId: codexChatSessions.chatSessionId,
       sandboxId: codexChatSessions.sandboxId,
@@ -78,6 +82,7 @@ async function loadPersistedAuthorityState(
         eq(workspaceMembers.userWorkosId, codexChatSessions.userWorkosId),
       ),
     )
+    .innerJoin(workspaces, eq(workspaces.id, codexChatSessions.workspaceId))
     .where(eq(codexChatSessions.id, capability.codexChatSessionId))
     .limit(1);
   return row ?? null;

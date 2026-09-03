@@ -10,12 +10,14 @@ import {
   claimActionInvocation,
   getActionCapabilityTurnState,
   recordActionSourceDiscovery,
+  registerActionApproval,
   releaseActionAsyncRun,
   releaseActionCapabilityQuote,
   storeActionCapabilityQuote,
 } from "@opencompany/db/action-governance";
 import { getDb } from "@opencompany/db/client";
 import {
+  chatSessions,
   codexChatSessions,
   codexChatTurns,
   users,
@@ -56,33 +58,68 @@ const defaultDependencies: ActionGatewayServiceDependencies = {
     recordActionSourceDiscovery({ turn: actionTurnRef(run), sourceId }),
   claimInvocation: ({ run, ...input }) =>
     claimActionInvocation({ turn: actionTurnRef(run), ...input }),
+  registerApproval: ({ run, ...input }) =>
+    registerActionApproval({ turn: actionTurnRef(run), ...input }),
   evaluateApproval: evaluateActionApproval,
   now: () => new Date(),
 };
 
-export function executeActionGateway(input: {
+type ActionGatewayInput = {
   request: ActionGatewayRequest;
   signal: AbortSignal;
-  dependencies?: Partial<ActionGatewayServiceDependencies>;
-}): Promise<ActionGatewayResponse> {
-  return executeActionGatewayService({
-    request: actionServiceRequest(input.request),
-    signal: input.signal,
-    dependencies: { ...defaultDependencies, ...input.dependencies },
-  });
-}
+};
 
-export function executeActionHostGateway(input: {
+type ActionHostGatewayInput = {
   request: ActionHostGatewayRequest;
   signal: AbortSignal;
-  dependencies?: Partial<ActionGatewayServiceDependencies>;
-}): Promise<ActionGatewayResponse> {
-  return executeActionHostGatewayService({
-    request: actionServiceRequest(input.request),
-    signal: input.signal,
-    dependencies: { ...defaultDependencies, ...input.dependencies },
-  });
+};
+
+type ActionPrincipalGatewayInput = ActionHostGatewayInput & {
+  principal: ActionPrincipal & { policy: "headless" };
+};
+
+export function createActionGateway(
+  overrides: Partial<ActionGatewayServiceDependencies> = {},
+): (input: ActionGatewayInput) => Promise<ActionGatewayResponse> {
+  const dependencies = { ...defaultDependencies, ...overrides };
+  return (input) =>
+    executeActionGatewayService({
+      request: actionServiceRequest(input.request),
+      signal: input.signal,
+      dependencies,
+    });
 }
+
+export function createActionHostGateway(
+  overrides: Partial<ActionGatewayServiceDependencies> = {},
+): (input: ActionHostGatewayInput) => Promise<ActionGatewayResponse> {
+  const dependencies = { ...defaultDependencies, ...overrides };
+  return (input) =>
+    executeActionHostGatewayService({
+      request: actionServiceRequest(input.request),
+      signal: input.signal,
+      dependencies,
+    });
+}
+
+export function createActionPrincipalGateway(
+  overrides: Partial<ActionGatewayServiceDependencies> = {},
+): (input: ActionPrincipalGatewayInput) => Promise<ActionGatewayResponse> {
+  const dependencies = { ...defaultDependencies, ...overrides };
+  return (input) =>
+    executeActionHostGatewayService({
+      request: actionServiceRequest(input.request),
+      signal: input.signal,
+      dependencies: {
+        ...dependencies,
+        loadContext: async () => input.principal,
+      },
+    });
+}
+
+export const executeActionGateway = createActionGateway();
+export const executeActionHostGateway = createActionHostGateway();
+export const executeActionPrincipalGateway = createActionPrincipalGateway();
 
 async function evaluateActionApproval(input: {
   request: Extract<ActionServiceRequest, { operation: "approval" }>;
@@ -124,7 +161,7 @@ function getCodexActionCapabilityTurnState(
     runId: request.runId,
     actorId: context.actorId,
     workspaceId: context.workspaceId,
-    policy: context.policy ?? "cloudReadOnly",
+    policy: context.policy ?? "foregroundInteractive",
   });
   return {
     quotedTotalUsdMicros: 0,
@@ -176,6 +213,7 @@ async function loadCodexActionContext(
       userTimezone: users.timezone,
       engine: codexChatSessions.engine,
       assistantMessageId: codexChatTurns.assistantMessageId,
+      chatKind: chatSessions.kind,
     })
     .from(codexChatSessions)
     .innerJoin(
@@ -187,6 +225,7 @@ async function loadCodexActionContext(
       ),
     )
     .innerJoin(users, eq(users.workosUserId, codexChatSessions.userWorkosId))
+    .innerJoin(chatSessions, eq(chatSessions.id, codexChatSessions.chatSessionId))
     .innerJoin(
       workspaceMembers,
       and(
@@ -214,7 +253,7 @@ async function loadCodexActionContext(
     userTimezone: row.userTimezone,
     engine: row.engine,
     assistantMessageId: row.assistantMessageId,
-    policy: row.engine === "opencompany" ? "foregroundInteractive" : "cloudReadOnly",
+    policy: row.chatKind === "task" ? "headless" : "foregroundInteractive",
   };
 }
 

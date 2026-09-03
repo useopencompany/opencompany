@@ -75,14 +75,17 @@ export async function executeExaSearchRequest(input: {
   const body = await readJsonResponse(response, "search");
   if (!response.ok) {
     const message =
-      isRecord(body) && typeof body.error === "string" ? body.error : response.statusText;
+      isRecord(body) && typeof body.error === "string"
+        ? normalizeExternalText(body.error)
+        : response.statusText;
     throw new Error(`Exa search failed (${response.status}): ${message}`);
   }
   if (!isRecord(body) || !Array.isArray(body.results)) {
     throw new Error("Exa search returned an unexpected response shape.");
   }
 
-  const requestId = typeof body.requestId === "string" ? body.requestId : undefined;
+  const requestId =
+    typeof body.requestId === "string" ? normalizeExternalText(body.requestId) : undefined;
   const searchType =
     typeof body.searchType === "string" && isExaSearchType(body.searchType)
       ? body.searchType
@@ -226,7 +229,7 @@ function readString(record: Record<string, unknown>, key: string) {
 
 function readOptionalString(record: Record<string, unknown>, key: string) {
   const value = record[key];
-  return typeof value === "string" && value.trim() ? value : undefined;
+  return typeof value === "string" && value.trim() ? normalizeExternalText(value) : undefined;
 }
 
 function readOptionalNumber(record: Record<string, unknown>, key: string) {
@@ -242,7 +245,13 @@ function readOptionalBoolean(record: Record<string, unknown>, key: string) {
 function readOptionalStringArray(record: Record<string, unknown>, key: string) {
   const value = record[key];
   if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => (typeof item === "string" && item.trim() ? [item.trim()] : []));
+  return value.flatMap((item) =>
+    typeof item === "string" && item.trim() ? [normalizeExternalText(item.trim())] : [],
+  );
+}
+
+function normalizeExternalText(value: string) {
+  return value.toWellFormed().replaceAll("\0", "\uFFFD");
 }
 
 function nonEmptyArray<T>(value: T[]) {

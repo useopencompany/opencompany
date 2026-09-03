@@ -78,6 +78,7 @@ export type Conversation = {
   title: string;
   engine: ChatEngine;
   model: string;
+  messageShapeEpoch: number;
   runtime: ConversationRuntime | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;
@@ -341,8 +342,9 @@ export class CoreError extends Error {
       | "idempotency_conflict"
       | "unavailable",
     message: string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "CoreError";
   }
 }

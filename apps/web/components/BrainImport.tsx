@@ -23,7 +23,6 @@ const PROVIDERS = [
   ["granola", "Granola"],
   ["fathom", "Fathom"],
   ["gmail", "Gmail"],
-  ["slack", "Slack"],
   ["linear", "Linear"],
 ] as const;
 
@@ -155,7 +154,7 @@ export function BrainImport({
         brainRef,
         importRunId: run.id,
         enabledProviders: Array.from(enabledAtConfirm) as Array<
-          "public_web" | "github" | "jamie" | "granola" | "fathom" | "gmail" | "slack" | "linear"
+          "public_web" | "github" | "jamie" | "granola" | "fathom" | "gmail" | "linear"
         >,
       });
       if (!result.ok) toast.error(result.message);
@@ -410,8 +409,6 @@ function integrationFor(
       return details.fathom.integration;
     case "gmail":
       return details.gmail.integration;
-    case "slack":
-      return details.slack.integration;
     case "linear":
       return details.linear.integration;
     default:

@@ -1,4 +1,5 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import { type SQLWrapper, sql } from "drizzle-orm";
 
 export const USD_MICROS_PER_CENT = 10_000;
@@ -756,8 +757,8 @@ export async function recordWorkspaceUsageDebit(input: WorkspaceUsageDebitInput)
         ${input.sandboxUsageId ?? null},
         ${input.providerCostUsdMicros},
         ${input.platformFeeUsdMicros},
-        ${JSON.stringify(input.costBasis)}::jsonb,
-        ${JSON.stringify(metadata)}::jsonb
+        ${stringifyPostgresJson(input.costBasis)}::jsonb,
+        ${stringifyPostgresJson(metadata)}::jsonb
       FROM session_row
       ON CONFLICT DO NOTHING
       RETURNING workspace_id, id, amount_usd_micros

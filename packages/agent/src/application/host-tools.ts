@@ -26,7 +26,7 @@ export type ChatHostContext = {
   timezone: string;
   taskToolsEnabled: boolean;
   skillToolsEnabled: boolean;
-  wikiEnabled: boolean;
+  legacyBrainEnabled: boolean;
 };
 
 export type ChatHostToolCommand = {
@@ -132,6 +132,11 @@ export type ChatHostToolServiceDependencies = {
     idempotencyKey: string;
     skill: { name: string; description: string; instructions: string };
   }) => Promise<{ created: true; name: string; command: string; bundleId: string }>;
+  updateWorkspaceSkill: (input: {
+    actor: Actor;
+    name: string;
+    skill: { description: string; instructions: string };
+  }) => Promise<{ updated: true; name: string; command: string; bundleId: string }>;
   createTask: (input: {
     actorId: string;
     workspaceId: string;
@@ -308,6 +313,23 @@ async function executeOperation(
         },
       });
     }
+    case "edit_workspace_skill": {
+      assertSkillTools(context);
+      return dependencies.updateWorkspaceSkill({
+        actor: {
+          userId: context.actorId,
+          workspaceId: context.workspaceId,
+          role: "admin",
+          permissions: [SKILL_WRITE_PERMISSION],
+          authenticationMethod: "service",
+        },
+        name: requiredString(toolInput.name, "name"),
+        skill: {
+          description: requiredString(toolInput.description, "description"),
+          instructions: requiredString(toolInput.instructions, "instructions"),
+        },
+      });
+    }
     case "start_task": {
       assertTaskTools(context);
       const model = requiredModel(toolInput.model);
@@ -458,7 +480,6 @@ async function executeOperation(
       });
     }
     case "wiki":
-      if (!context.wikiEnabled) throw new Error("Wiki is not enabled for this user.");
       return dependencies.runWikiTool({
         workspaceId: context.workspaceId,
         actorId: context.actorId,
@@ -509,7 +530,6 @@ async function bootstrap(
     workspaceName: context.workspaceName,
     taskToolsEnabled: context.taskToolsEnabled,
     skillToolsEnabled: context.skillToolsEnabled,
-    wikiEnabled: context.wikiEnabled,
     browserToolsEnabled: true,
     browserProfiles: browserProfiles.map(({ id, name, siteHost }) => ({ id, name, siteHost })),
     skills,
@@ -528,6 +548,7 @@ async function activeBrainRef(
   context: ChatHostContext,
   dependencies: ChatHostToolServiceDependencies,
 ) {
+  if (!context.legacyBrainEnabled) return null;
   if (context.brainRef) return context.brainRef;
   const brains = await dependencies.listBrains({
     actorId: context.actorId,
@@ -579,7 +600,7 @@ function assertTaskTools(context: ChatHostContext) {
 
 function assertSkillTools(context: ChatHostContext) {
   if (!context.skillToolsEnabled) {
-    throw new Error("Only workspace admins can create Skills from Chat.");
+    throw new Error("Only workspace admins can manage Skills from Chat.");
   }
 }
 

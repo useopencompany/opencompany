@@ -1,10 +1,12 @@
 import type { Harness } from "@opencompany/agent-runtime";
-import { isRetryableCommandStreamError, type SandboxHandle } from "./sandbox";
+import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
+import { commandExitResult, type SandboxHandle } from "./sandbox";
 
 const ACP_REQUEST_TIMEOUT_MS = 30_000;
 const ACP_ABORT_POLL_INTERVAL_MS = 500;
 const ACP_CANCEL_GRACE_MS = 5_000;
 const ACP_STDERR_TAIL_LIMIT = 4_000;
+const ACP_FAILURE_DIAGNOSTIC_LIMIT = 2_000;
 const ACP_COMMAND_STREAM_RECONNECT_ATTEMPTS = 3;
 
 export type AcpMcpServer =
@@ -68,7 +70,6 @@ export type AcpEngineAdapter = {
       values: Record<"default" | "plan", string>;
     };
   };
-  goalControlMethod?: string;
   steeringControlMethod?: string;
 };
 
@@ -164,7 +165,9 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
           _meta: { "subagent-transcript": true },
         },
       });
-      const capabilities = readRecord(readRecord(initialized)?.agentCapabilities) ?? {};
+      const initializedRecord = readRecord(initialized);
+      const capabilities = readRecord(initializedRecord?.agentCapabilities) ?? {};
+      const goalControlMethod = readGoalControlMethod(initializedRecord);
       for (const request of input.extensionRequests ?? []) {
         await client.request(request.method, request.params);
       }
@@ -228,19 +231,26 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
 
       projectUpdates = true;
       await input.onRuntimeEvents([{ method: "session/started", params: { sessionId } }]);
-      if (input.goal) {
-        const controlMethod = input.adapter.goalControlMethod;
-        if (!controlMethod) {
-          throw new Error(`${input.adapter.displayName} does not advertise ACP goal controls.`);
-        }
-        await client.request(controlMethod, {
+      // Setting a Goal can itself run a backend turn before the control request returns. Treat it
+      // as execution, and share one deadline with the ordinary prompt that follows.
+      const executionDeadline = Date.now() + input.timeoutMs;
+      if (input.goal && goalControlMethod) {
+        await requestGoalWithAbort({
+          client,
+          input,
           sessionId,
-          action: "set",
-          objective: input.goal.objective,
-          ...(input.goal.tokenBudget != null ? { tokenBudget: input.goal.tokenBudget } : {}),
+          deadline: executionDeadline,
+          controlMethod: goalControlMethod,
+          goal: input.goal,
         });
       }
-      const promptResponse = await requestPromptWithAbort({ client, input, sessionId, prompt });
+      const promptResponse = await requestPromptWithAbort({
+        client,
+        input,
+        sessionId,
+        prompt,
+        deadline: executionDeadline,
+      });
       await client.flush();
       await input.onRuntimeEvents([
         {
@@ -328,7 +338,9 @@ async function requestPromptWithAbort(input: {
   input: AcpHarnessTurnInput;
   sessionId: string;
   prompt: AcpPromptBlock[];
+  deadline: number;
 }) {
+  const requestTimeoutMs = Math.max(1, input.deadline - Date.now()) + ACP_CANCEL_GRACE_MS;
   const outcome = input.client
     .request(
       "session/prompt",
@@ -336,7 +348,7 @@ async function requestPromptWithAbort(input: {
         sessionId: input.sessionId,
         prompt: input.prompt,
       },
-      input.input.timeoutMs + ACP_CANCEL_GRACE_MS,
+      requestTimeoutMs,
     )
     .then(
       (value) => ({ type: "prompt" as const, ok: true as const, value: readRecord(value) ?? {} }),
@@ -346,8 +358,6 @@ async function requestPromptWithAbort(input: {
   let nextSteering = steeringIterator
     ?.next()
     .then((value) => ({ type: "steering" as const, value }));
-  const deadline = Date.now() + input.input.timeoutMs;
-
   while (true) {
     const settled = await Promise.race([
       outcome,
@@ -391,7 +401,7 @@ async function requestPromptWithAbort(input: {
     } catch (error) {
       abortError = error;
     }
-    if (!abortError && Date.now() >= deadline) {
+    if (!abortError && Date.now() >= input.deadline) {
       abortError = new Error(`${input.input.adapter.displayName} ACP turn timed out.`);
     }
     if (!abortError) continue;
@@ -405,6 +415,70 @@ async function requestPromptWithAbort(input: {
     await steeringIterator?.return?.();
     throw abortError;
   }
+}
+
+async function requestGoalWithAbort(input: {
+  client: AcpJsonRpcClient;
+  input: AcpHarnessTurnInput;
+  sessionId: string;
+  deadline: number;
+  controlMethod: string;
+  goal: { objective: string; tokenBudget?: number | null };
+}) {
+  const requestTimeoutMs = Math.max(1, input.deadline - Date.now()) + ACP_CANCEL_GRACE_MS;
+  const outcome = input.client
+    .request(
+      input.controlMethod,
+      {
+        sessionId: input.sessionId,
+        action: "set",
+        objective: input.goal.objective,
+        ...(input.goal.tokenBudget != null ? { tokenBudget: input.goal.tokenBudget } : {}),
+      },
+      requestTimeoutMs,
+    )
+    .then(
+      (value) => ({ ok: true as const, value: readRecord(value) ?? {} }),
+      (error) => ({ ok: false as const, error }),
+    );
+
+  while (true) {
+    const settled = await Promise.race([
+      outcome,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ACP_ABORT_POLL_INTERVAL_MS)),
+    ]);
+    if (settled) {
+      if (settled.ok) return settled.value;
+      throw settled.error;
+    }
+
+    let abortError: unknown = null;
+    try {
+      await input.input.checkAbort();
+    } catch (error) {
+      abortError = error;
+    }
+    if (!abortError && Date.now() >= input.deadline) {
+      abortError = new Error(`${input.input.adapter.displayName} ACP turn timed out.`);
+    }
+    if (!abortError) continue;
+
+    await input.client.notify("session/cancel", { sessionId: input.sessionId }).catch(() => {});
+    await Promise.race([
+      outcome,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ACP_CANCEL_GRACE_MS)),
+    ]);
+    await input.client.flush().catch(() => {});
+    throw abortError;
+  }
+}
+
+function readGoalControlMethod(initialized: Record<string, unknown> | null) {
+  const goal = readRecord(readRecord(initialized?._meta)?.goal);
+  if (goal?.version !== 1) return null;
+  const actions = Array.isArray(goal.actions) ? goal.actions : [];
+  if (!actions.includes("set")) return null;
+  return readString(goal.controlMethod);
 }
 
 type AcpJsonRpcRequest = {
@@ -609,12 +683,15 @@ class AcpJsonRpcClient {
       },
       (error) => {
         if (this.stopping || generation !== this.watchGeneration) return;
-        const transportError = asError(error);
-        if (!isRetryableCommandStreamError(transportError)) {
-          this.fail(transportError);
+        const watchError = asError(error);
+        if (commandExitResult(watchError)) {
+          this.fail(watchError);
           return;
         }
-        void this.reconnect(handle, generation, transportError);
+        // Application failures arrive as JSON-RPC error responses. A rejected command watch is
+        // therefore a transport failure regardless of the SDK error class or message spelling,
+        // except for an explicit non-zero adapter exit reported by the command handle itself.
+        void this.reconnect(handle, generation, watchError);
       },
     );
   }
@@ -622,7 +699,7 @@ class AcpJsonRpcClient {
   private async reconnect(handle: unknown, generation: number, streamError: Error) {
     const pid = commandHandlePid(handle);
     if (pid == null) {
-      this.fail(streamError);
+      this.fail(this.retryableStreamFailure(streamError));
       return;
     }
 
@@ -652,7 +729,20 @@ class AcpJsonRpcClient {
         // retry classification if the adapter process cannot be reattached.
       }
     }
-    if (!this.stopping && generation === this.watchGeneration) this.fail(streamError);
+    if (!this.stopping && generation === this.watchGeneration) {
+      this.fail(this.retryableStreamFailure(streamError));
+    }
+  }
+
+  private retryableStreamFailure(cause: Error) {
+    return new CodexChatRetryableInfrastructureError(
+      `${this.input.adapterName} lost contact with its sandbox command stream before the turn completed.`,
+      cause,
+      `[run_turn] ${cause.name}: ${this.input.redact(cause.message)}`.slice(
+        0,
+        ACP_FAILURE_DIAGNOSTIC_LIMIT,
+      ),
+    );
   }
 
   private fail(error: Error) {

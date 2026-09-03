@@ -2,6 +2,7 @@ import { executePersistedChatHostTool } from "@opencompany/agent/application/per
 import type {
   BrowserToolRunner,
   CreateWorkspaceSkillRunner,
+  EditWorkspaceSkillRunner,
   SkillDispatcher,
   StartedTask,
   WorkflowDispatcher,
@@ -21,6 +22,7 @@ import {
   listSkillCatalog,
   readChatSkillFile,
   resolveSkillMentions,
+  updateWorkspaceSkillForActor,
 } from "@opencompany/agent/skills";
 import type {
   ChatHostBootstrap,
@@ -67,6 +69,7 @@ export type HostTools = {
     input: DeleteTaskScheduleToolInput,
   ) => Promise<DeleteTaskScheduleToolOutput>;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
+  editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runWiki?: (input: Record<string, unknown>, context: { toolCallId: string }) => Promise<unknown>;
   skills?: SkillDispatcher;
   workflows?: WorkflowDispatcher;
@@ -126,14 +129,16 @@ export async function loadHostTools(
               input,
               toolContext.toolCallId,
             ) as ReturnType<CreateWorkspaceSkillRunner>,
+          editWorkspaceSkill: (input, toolContext) =>
+            call(
+              "edit_workspace_skill",
+              input,
+              toolContext.toolCallId,
+            ) as ReturnType<EditWorkspaceSkillRunner>,
         }
       : {}),
-    ...(bootstrap.wikiEnabled
-      ? {
-          runWiki: (input: Record<string, unknown>, wikiContext: { toolCallId: string }) =>
-            call("wiki", input, wikiContext.toolCallId),
-        }
-      : {}),
+    runWiki: (input: Record<string, unknown>, wikiContext: { toolCallId: string }) =>
+      call("wiki", input, wikiContext.toolCallId),
     ...(bootstrap.browserToolsEnabled
       ? {
           browserTools: ({ name, args }) =>
@@ -244,12 +249,14 @@ async function callGateway(
       readSkillFile: ({ conversationId, ...input }) =>
         readChatSkillFile({ ...input, chatSessionId: conversationId, db: getDb() }),
       createWorkspaceSkill: (input) => createWorkspaceSkillForActor({ ...input, db: getDb() }),
+      updateWorkspaceSkill: (input) => updateWorkspaceSkillForActor({ ...input, db: getDb() }),
     },
     runtime: {
       wakeTaskWorker: wakeCodexChatWorker,
       defer: (work) => {
         void work;
       },
+      gatewayApiKey: context.env.vercelAiGatewayApiKey,
       // Wiki commands cross the authenticated HTTP boundary into apps/api; the
       // runner never touches the wiki database directly.
       executeWikiCommand: (wikiInput) =>

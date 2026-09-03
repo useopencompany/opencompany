@@ -39,11 +39,26 @@ describe("opencompany onboarding integrations", () => {
     expect(onboardingConnectionError("neon", "neon_denied")).toBe(
       "Neon authorization was cancelled.",
     );
+    expect(onboardingConnectionError("betterstack", "betterstack_denied")).toBe(
+      "Better Stack authorization was cancelled.",
+    );
+    expect(onboardingConnectionError("signoz", "signoz_denied")).toBe(
+      "SigNoz authorization was cancelled.",
+    );
     expect(onboardingConnectionError("github", "missing_code")).toContain(
       "did not return a valid authorization",
     );
     expect(onboardingConnectionError("github", "invalid_state")).toContain(
       "did not return a valid authorization",
+    );
+    expect(onboardingConnectionError("github_user", "github_user_denied")).toBe(
+      "GitHub authorization was cancelled.",
+    );
+    expect(onboardingConnectionError("github_user", "connection_sync_failed")).toBe(
+      "GitHub authorized successfully, but setup could not be completed. Please try again.",
+    );
+    expect(onboardingConnectionError("github_user", "installation_not_authorized")).toBe(
+      "The selected GitHub App installation is not available to this GitHub account.",
     );
     expect(onboardingConnectionError(null, "something_new")).toBe(
       "This source could not be connected. Please try again.",
@@ -55,6 +70,9 @@ describe("opencompany onboarding integrations", () => {
     expect(integrationConnectionSuccess("google_drive")).toBe("Google Drive connected.");
     expect(integrationConnectionSuccess("posthog")).toBe("PostHog connected.");
     expect(integrationConnectionSuccess("neon")).toBe("Neon connected.");
+    expect(integrationConnectionSuccess("betterstack")).toBe("Better Stack connected.");
+    expect(integrationConnectionSuccess("signoz")).toBe("SigNoz connected.");
+    expect(integrationConnectionSuccess("github_user")).toBe("GitHub connected.");
     expect(integrationConnectionSuccess(null)).toBe("Integration connected.");
   });
 });

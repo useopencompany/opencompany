@@ -380,6 +380,7 @@ export const ChatReadModelSchema = z.enum([
   "chat-conversations-v1",
   "chat-conversations-v2",
   "chat-messages-v1",
+  "chat-messages-v2",
   "chat-runs-v1",
   "engine-sessions-v1",
 ]);
@@ -424,6 +425,7 @@ export const IntegrationAccountReadModelSchema = z
       "google_drive",
       "linear",
       "github",
+      "github_user",
       "jamie",
       "slack",
       "slack_bot",
@@ -431,6 +433,8 @@ export const IntegrationAccountReadModelSchema = z
       "granola",
       "fathom",
       "attio",
+      "betterstack",
+      "signoz",
       "stripe",
       "latitude",
       "posthog",
@@ -482,6 +486,7 @@ export const ConversationReadModelSchema = ConversationReadModelV1Schema.extend(
   runtime: ConversationRuntimeSchema.nullable(),
   activityState: ConversationActivityStateSchema,
   hasUnseen: z.boolean(),
+  messageShapeEpoch: z.number().int().min(0),
 })
   .strict()
   .openapi("ConversationReadModelV2");
@@ -500,6 +505,23 @@ export const MessageReadModelSchema = z
   })
   .strict()
   .openapi("MessageReadModelV1");
+
+export const MessageSummaryReadModelSchema = MessageReadModelSchema.omit({
+  presentation: true,
+})
+  .extend({
+    presentationSummary: z.record(z.string(), z.unknown()).nullable(),
+  })
+  .strict()
+  .openapi("MessageReadModelV2");
+
+export const MessagePresentationSchema = z
+  .object({
+    presentation: z.record(z.string(), z.unknown()).nullable(),
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("MessagePresentation");
 
 export const RunReadModelSchema = z
   .object({
@@ -783,7 +805,6 @@ export const BrainSourceConfigProviderSchema = z.enum([
   "gmail",
   "google_drive",
   "github",
-  "slack",
   "linear",
   "slack_bot",
   "hubspot",
@@ -855,14 +876,6 @@ const JamieSourceProviderStateSchema = z
     apiKeyConfigured: z.boolean(),
   })
   .strict();
-const SlackSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("slack"),
-    ...BrainSourceProviderBaseShape,
-    accountName: NullableLabelSchema,
-    teamName: NullableLabelSchema,
-  })
-  .strict();
 const LinearSourceProviderStateSchema = z
   .object({
     provider: z.literal("linear"),
@@ -930,7 +943,6 @@ export const BrainSourceDetailsSchema = z
     sources: z.array(BrainSourceViewSchema),
     ownAccounts: z
       .object({
-        slack: z.array(BrainSourceAccountSchema),
         linear: z.array(BrainSourceAccountSchema),
         gmail: z.array(BrainSourceAccountSchema),
         google_drive: z.array(BrainSourceAccountSchema),
@@ -947,7 +959,6 @@ export const BrainSourceDetailsSchema = z
         isDefaultBrain: z.boolean(),
       })
       .strict(),
-    slack: z.object({ integration: SlackSourceProviderStateSchema }).strict(),
     linear: z.object({ integration: LinearSourceProviderStateSchema }).strict(),
     github: z.object({ integration: GitHubSourceProviderStateSchema }).strict(),
     gmail: z.object({ integration: GmailSourceProviderStateSchema }).strict(),
@@ -1014,15 +1025,6 @@ export const SetBrainSourceBodySchema = z
         operation: z.literal("set_enabled"),
         provider: BrainSourceConfigProviderSchema,
         enabled: z.boolean(),
-      })
-      .strict(),
-    z
-      .object({
-        operation: z.literal("configure"),
-        provider: z.literal("slack"),
-        enabled: z.boolean(),
-        channels: z.array(NamedSourceRefSchema).max(500),
-        dms: z.array(NamedSourceRefSchema).max(500),
       })
       .strict(),
     z
@@ -1112,7 +1114,6 @@ export const BrainSourceDeleteEnvelopeSchema = z
   .openapi("BrainSourceDeleteEnvelope");
 
 export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
-  z.object({ provider: z.literal("slack") }).strict(),
   z.object({ provider: z.literal("linear") }).strict(),
   z.object({ provider: z.literal("github") }).strict(),
   z
@@ -1125,11 +1126,6 @@ export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
     .strict(),
 ]);
 
-const SlackChannelOptionSchema = NamedSourceRefSchema.extend({
-  isPrivate: z.boolean(),
-  isSlackConnect: z.boolean(),
-}).strict();
-const SlackDmOptionSchema = NamedSourceRefSchema.extend({ isSlackConnect: z.boolean() }).strict();
 const GoogleDriveOptionSchema = z
   .object({
     id: z.string().min(1).max(512),
@@ -1143,14 +1139,6 @@ const GoogleDriveOptionSchema = z
 
 export const BrainSourceOptionsSchema = z
   .discriminatedUnion("provider", [
-    z
-      .object({
-        provider: z.literal("slack"),
-        channels: z.array(SlackChannelOptionSchema),
-        dms: z.array(SlackDmOptionSchema),
-        partial: z.boolean(),
-      })
-      .strict(),
     z
       .object({
         provider: z.literal("linear"),
@@ -1186,7 +1174,6 @@ export const BrainImportProviderSchema = z.enum([
   "granola",
   "fathom",
   "gmail",
-  "slack",
   "linear",
 ]);
 
@@ -1326,14 +1313,7 @@ export const WikiPageReadModelSchema = WikiPageSchema.openapi("WikiPageReadModel
 export const WikiTimelineReadModelSchema =
   WikiTimelineEntrySchema.openapi("WikiTimelineReadModelV1");
 
-export const WikiSourceProviderSchema = z.enum([
-  "gmail",
-  "slack",
-  "jamie",
-  "granola",
-  "linear",
-  "github",
-]);
+export const WikiSourceProviderSchema = z.enum(["gmail", "jamie", "granola", "linear", "github"]);
 
 export const WikiSourceConfigSchema = z
   .record(z.string().min(1).max(128), z.unknown())
@@ -1458,7 +1438,7 @@ export const SkillBundleSummarySchema = z
 
 export const SkillBundleSchema = SkillBundleSummarySchema.extend({
   body: z.string(),
-  files: z.array(SkillBundleFileMetadataSchema).max(64),
+  files: z.array(SkillBundleFileMetadataSchema).max(512),
 })
   .strict()
   .openapi("SkillBundle");
@@ -1499,6 +1479,14 @@ export const SkillImportCandidateSchema = z
   .strict()
   .openapi("SkillImportCandidate");
 
+export const SkillImportWarningSchema = z
+  .object({
+    code: z.literal("source_directory_normalized"),
+    message: z.string().min(1).max(1_024),
+  })
+  .strict()
+  .openapi("SkillImportWarning");
+
 export const SkillImportPreviewSchema = z
   .discriminatedUnion("status", [
     z
@@ -1512,13 +1500,14 @@ export const SkillImportPreviewSchema = z
         allowedTools: z.string().optional(),
         source: ExternalSkillSourceSchema,
         integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/iu),
-        files: z.array(SkillImportFileMetadataSchema).min(1).max(64),
-        fileCount: z.number().int().min(1).max(64),
+        files: z.array(SkillImportFileMetadataSchema).min(1).max(512),
+        fileCount: z.number().int().min(1).max(512),
         totalBytes: z
           .number()
           .int()
           .min(0)
           .max(1024 * 1024),
+        warnings: z.array(SkillImportWarningSchema).max(10),
       })
       .strict(),
     z
@@ -1587,7 +1576,7 @@ export const PluginStdioServerSchema = z
 export const PluginMcpServerReportSchema = z
   .object({
     name: z.string(),
-    status: z.enum(["selected", "unsupported", "invalid"]),
+    status: z.enum(["selected", "gateway-registered", "unsupported", "invalid"]),
     transport: z.enum(["stdio", "streamable-http", "sse"]).optional(),
     reason: z.string().optional(),
   })
@@ -1648,6 +1637,25 @@ export const PluginValidationReportSchema = z
     ignoredManifestFields: z.array(z.string()),
     skills: z.array(PluginSkillReportSchema),
     mcp: PluginMcpReportSchema,
+    capabilities: z
+      .discriminatedUnion("status", [
+        z.object({ status: z.literal("absent") }).strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("ignored"),
+            reason: z.string(),
+          })
+          .strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("parsed"),
+            issues: z.array(z.string()),
+          })
+          .strict(),
+      ])
+      .optional(),
   })
   .strict()
   .openapi("PluginValidationReport");
@@ -1668,6 +1676,57 @@ export const PluginSkillSummarySchema = z
   })
   .strict()
   .openapi("PluginSkillSummary");
+
+export const PluginCapabilityDefinitionSchema = z
+  .object({
+    id: z.enum(["read", "query", "write"]),
+    label: z.string().min(1).max(128),
+    defaultMode: z.enum(["on", "ask", "off"]),
+    tools: z.array(z.string().min(1).max(256)).max(512),
+  })
+  .strict()
+  .openapi("PluginCapabilityDefinition");
+
+export const PluginDiscoveredToolSchema = z
+  .object({
+    name: z.string().min(1).max(256),
+    description: z.string().max(4_096).optional(),
+    classification: z
+      .object({
+        capabilityId: z.enum(["read", "query", "write"]),
+        capabilityLabel: z.string().min(1).max(128),
+        defaultMode: z.enum(["on", "ask", "off"]),
+        bucket: z.enum(["read", "write"]),
+        curated: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict()
+  .openapi("PluginDiscoveredTool");
+
+export const PluginRemoteMcpServerSchema = z
+  .object({
+    name: z.string().min(1).max(128),
+    type: z.enum(["streamable-http", "sse"]),
+    connectionProvider: z.string().min(1).max(64),
+    capabilities: z.array(PluginCapabilityDefinitionSchema).max(64),
+    tools: z.array(PluginDiscoveredToolSchema).max(512),
+    discoveryStatus: z.enum(["pending", "ready", "stale", "error"]),
+    discoveredAt: TimestampSchema.nullable(),
+    refreshAfter: TimestampSchema,
+    lastDiscoveryError: z.string().max(2_000).nullable(),
+  })
+  .strict()
+  .openapi("PluginRemoteMcpServer");
+
+export const PluginRemoteMcpPreviewServerSchema = PluginRemoteMcpServerSchema.pick({
+  name: true,
+  type: true,
+  connectionProvider: true,
+  capabilities: true,
+})
+  .strict()
+  .openapi("PluginRemoteMcpPreviewServer");
 
 const PluginBaseSchema = z
   .object({
@@ -1700,6 +1759,7 @@ export const PluginInstallationSchema = PluginBaseSchema.extend({
   files: z.array(PluginFileMetadataSchema).min(1).max(512),
   skills: z.array(PluginSkillSummarySchema),
   stdioServers: z.array(PluginStdioServerSchema),
+  remoteMcpServers: z.array(PluginRemoteMcpServerSchema),
 })
   .strict()
   .openapi("PluginInstallation");
@@ -1723,7 +1783,7 @@ export const PluginImportPreviewSchema = z
           name: z.string().min(1).max(64),
           description: z.string().min(1).max(1_024),
           integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
-          fileCount: z.number().int().min(1).max(64),
+          fileCount: z.number().int().min(1).max(512),
           totalBytes: z
             .number()
             .int()
@@ -1733,6 +1793,7 @@ export const PluginImportPreviewSchema = z
         .strict(),
     ),
     stdioServers: z.array(PluginStdioServerSchema),
+    remoteMcpServers: z.array(PluginRemoteMcpPreviewServerSchema),
     report: PluginValidationReportSchema,
   })
   .strict()
@@ -1984,7 +2045,7 @@ export const WikiCommandSchema = z
   .strict();
 
 // Body of POST /internal/wiki/commands. The API never trusts the caller-supplied
-// tenancy: it reloads the user, onboarding, wiki flag, membership, role, and
+// tenancy: it reloads the user, onboarding, membership, role, and
 // permissions from Postgres before executing the command.
 export const InternalWikiCommandRequestSchema = z
   .object({
@@ -2176,6 +2237,88 @@ export const ErrorEnvelopeSchema = z
   })
   .strict()
   .openapi("ErrorEnvelope");
+
+export type GitHubRepositoryAccessItemDto = {
+  id: string;
+  name: string;
+  fullName: string;
+  private: boolean;
+  htmlUrl: string;
+};
+
+export type GitHubInstallationAccessDto = {
+  id: string;
+  account: {
+    id: string;
+    login: string;
+    type: "Organization" | "User";
+    avatarUrl: string | null;
+    htmlUrl: string | null;
+  };
+  repositorySelection: "all" | "selected";
+  permissions: Record<string, string>;
+  pendingPermissions: string[];
+  suspendedAt: string | null;
+  repositories: GitHubRepositoryAccessItemDto[];
+};
+
+export type GitHubRepositoryAccessTargetDto = {
+  owner: string;
+  repo: string | null;
+  state: "available" | "missing_installation" | "missing_repository" | "suspended";
+};
+
+export type GitHubRepositoryAccessDto = {
+  checkedAt: string;
+  installations: GitHubInstallationAccessDto[];
+  target: GitHubRepositoryAccessTargetDto | null;
+};
+
+export const GitHubRepositoryAccessItemSchema: z.ZodType<GitHubRepositoryAccessItemDto> = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    fullName: z.string().min(1),
+    private: z.boolean(),
+    htmlUrl: z.url(),
+  })
+  .strict();
+
+export const GitHubInstallationAccessSchema: z.ZodType<GitHubInstallationAccessDto> = z
+  .object({
+    id: z.string().min(1),
+    account: z
+      .object({
+        id: z.string().min(1),
+        login: z.string().min(1),
+        type: z.enum(["Organization", "User"]),
+        avatarUrl: z.url().nullable(),
+        htmlUrl: z.url().nullable(),
+      })
+      .strict(),
+    repositorySelection: z.enum(["all", "selected"]),
+    permissions: z.record(z.string(), z.string()),
+    pendingPermissions: z.array(z.string()),
+    suspendedAt: TimestampSchema.nullable(),
+    repositories: z.array(GitHubRepositoryAccessItemSchema),
+  })
+  .strict();
+
+export const GitHubRepositoryAccessTargetSchema: z.ZodType<GitHubRepositoryAccessTargetDto> = z
+  .object({
+    owner: z.string().min(1),
+    repo: z.string().min(1).nullable(),
+    state: z.enum(["available", "missing_installation", "missing_repository", "suspended"]),
+  })
+  .strict();
+
+export const GitHubRepositoryAccessSchema: z.ZodType<GitHubRepositoryAccessDto> = z
+  .object({
+    checkedAt: TimestampSchema,
+    installations: z.array(GitHubInstallationAccessSchema),
+    target: GitHubRepositoryAccessTargetSchema.nullable(),
+  })
+  .strict();
 
 export const BillingOverviewSchema = z
   .object({
@@ -2746,6 +2889,11 @@ export const ChatArtifactDeleteEnvelopeSchema = z
   })
   .strict()
   .openapi("ChatArtifactDeleteEnvelopeV1");
+
+export const MessagePresentationEnvelopeSchema = z
+  .object({ data: MessagePresentationSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("MessagePresentationEnvelopeV1");
 
 export const MessagePageSchema = z
   .object({
@@ -3376,7 +3524,8 @@ export const IdentityUserSchema = z
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
     imessageEnabled: z.boolean(),
-    wikiEnabled: z.boolean(),
+    /** @deprecated Wiki is always enabled. */
+    wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
     preferredMcpClient: McpClientSchema.nullable(),
     mcpSetupCompletedAt: TimestampSchema.nullable(),
@@ -3393,6 +3542,7 @@ export const IdentityWorkspaceSchema = z
     name: z.string().min(1).max(80),
     slug: z.string().max(40).nullable(),
     role: z.enum(["admin", "member"]),
+    legacyBrainEnabled: z.boolean(),
   })
   .strict()
   .openapi("IdentityWorkspace");
@@ -3431,7 +3581,8 @@ export const UserPreferencesSchema = z
   .object({
     timezone: z.string().min(1).max(100),
     taskSpawningEnabled: z.boolean(),
-    wikiEnabled: z.boolean(),
+    /** @deprecated Wiki is always enabled. */
+    wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
     imessageEnabled: z.boolean(),
     autoModelRoutingEnabled: z.boolean(),
@@ -3443,6 +3594,7 @@ export const UpdateUserPreferencesBodySchema = z
   .object({
     timezone: z.string().min(1).max(100).optional(),
     taskSpawningEnabled: z.boolean().optional(),
+    /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */
     wikiEnabled: z.boolean().optional(),
     taskViewMode: TaskViewModeSchema.optional(),
     imessageEnabled: z.boolean().optional(),
@@ -3587,11 +3739,14 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "google_calendar",
   "google_drive",
   "linear",
+  "github_user",
   "slack",
   "hubspot",
   "granola",
   "fathom",
   "attio",
+  "betterstack",
+  "signoz",
   "latitude",
   "neon",
   "x_account",
@@ -3949,6 +4104,18 @@ export const CodexAuthStatusSchema = z
     statusReason: z.string().nullable(),
     lastValidatedAt: TimestampSchema.nullable(),
     lastRotatedAt: TimestampSchema.nullable(),
+    workspaceEngine: z
+      .object({
+        enabled: z.boolean(),
+        providerDisplayName: z.string().min(1),
+        providerEmail: z.string().email(),
+        credentialStatus: EngineAuthConnectionStatusSchema,
+        credentialStatusReason: z.string().nullable(),
+        lastValidatedAt: TimestampSchema.nullable(),
+        isCurrentUser: z.boolean(),
+      })
+      .strict()
+      .nullable(),
   })
   .strict()
   .openapi("CodexAuthStatus");
@@ -3957,6 +4124,11 @@ export const CodexAuthStatusEnvelopeSchema = z
   .object({ data: CodexAuthStatusSchema, meta: ProtocolMetadataSchema })
   .strict()
   .openapi("CodexAuthStatusEnvelope");
+
+export const UpdateCodexWorkspaceEngineBodySchema = z
+  .object({ enabled: z.boolean() })
+  .strict()
+  .openapi("UpdateCodexWorkspaceEngineBody");
 
 export const EngineAuthFlowIdSchema = z
   .string()
@@ -4091,7 +4263,7 @@ export type DeleteBrainFolderBody = z.infer<typeof DeleteBrainFolderBodySchema>;
 export type WikiPageDto = z.infer<typeof WikiPageSchema>;
 export type WikiPageReadModel = z.infer<typeof WikiPageReadModelSchema>;
 export type WikiTimelineReadModel = z.infer<typeof WikiTimelineReadModelSchema>;
-export type WikiSourceProvider = "gmail" | "slack" | "jamie" | "granola" | "linear" | "github";
+export type WikiSourceProvider = "gmail" | "jamie" | "granola" | "linear" | "github";
 export type WikiSourceDto = z.infer<typeof WikiSourceSchema>;
 export type WikiIngestActivityItemDto = {
   id: string;
@@ -4130,6 +4302,7 @@ export type SkillImportFileMetadataDto = z.infer<typeof SkillImportFileMetadataS
 export type SkillFileChunkDto = z.infer<typeof SkillFileChunkSchema>;
 export type SkillCatalogItemDto = z.infer<typeof SkillCatalogItemSchema>;
 export type SkillImportCandidateDto = z.infer<typeof SkillImportCandidateSchema>;
+export type SkillImportWarningDto = z.infer<typeof SkillImportWarningSchema>;
 export type SkillImportPreviewDto = z.infer<typeof SkillImportPreviewSchema>;
 export type SkillImportPreviewBody = z.infer<typeof SkillImportPreviewBodySchema>;
 export type ImportSkillBody = z.infer<typeof ImportSkillBodySchema>;
@@ -4137,6 +4310,7 @@ export type CreateWorkspaceSkillBody = z.infer<typeof CreateWorkspaceSkillBodySc
 export type UpdateWorkspaceSkillBody = z.infer<typeof UpdateWorkspaceSkillBodySchema>;
 export type PluginManifestDto = z.infer<typeof PluginManifestSchema>;
 export type PluginSourceDto = z.infer<typeof PluginSourceSchema>;
+export type PluginRemoteMcpServerDto = z.infer<typeof PluginRemoteMcpServerSchema>;
 export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;
 export type PluginInstallationDto = z.infer<typeof PluginInstallationSchema>;
 export type PluginImportPreviewDto = z.infer<typeof PluginImportPreviewSchema>;
@@ -4153,6 +4327,8 @@ export type SetTaskScheduleEnabledBody = z.infer<typeof SetTaskScheduleEnabledBo
 export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
 export type ConversationReadModelV1 = z.infer<typeof ConversationReadModelV1Schema>;
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
+export type MessageSummaryReadModel = z.infer<typeof MessageSummaryReadModelSchema>;
+export type MessagePresentation = z.infer<typeof MessagePresentationSchema>;
 export type RunReadModel = z.infer<typeof RunReadModelSchema>;
 export type EngineSessionReadModel = z.infer<typeof EngineSessionReadModelSchema>;
 export type EngineRuntimeStatus = z.infer<typeof EngineRuntimeStatusSchema>;

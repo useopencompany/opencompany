@@ -73,6 +73,19 @@ const ERROR_DIAGNOSTIC_FIELDS = [
   ["file", "file"],
   ["line", "line"],
   ["routine", "routine"],
+  ["failureKind", "failure_kind"],
+  ["upstreamService", "upstream_service"],
+  ["upstreamOperation", "upstream_operation"],
+  ["upstreamStatus", "upstream_status"],
+  ["upstreamDurationMs", "upstream_duration_ms"],
+  ["rateLimitLimit", "rate_limit_limit"],
+  ["rateLimitRemaining", "rate_limit_remaining"],
+  ["rateLimitReset", "rate_limit_reset"],
+  ["rateLimitResource", "rate_limit_resource"],
+  ["retryAfterSeconds", "retry_after_seconds"],
+  ["upstreamRequestId", "upstream_request_id"],
+  ["networkErrorName", "network_error_name"],
+  ["networkErrorCode", "network_error_code"],
 ] as const;
 
 const defaultTimingLogger = createLogger({ service: "opencompany" });

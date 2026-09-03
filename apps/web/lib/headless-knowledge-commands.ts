@@ -333,6 +333,13 @@ export async function revokeHeadlessPluginMcp(name: string, options: ClientOptio
   return responseData(response, "Plugin MCP revocation failed");
 }
 
+export async function refreshHeadlessPluginMcp(name: string, options: ClientOptions = {}) {
+  const response = await knowledgeClient(options).v1.plugins[":name"].mcp.refresh.$post({
+    param: { name },
+  });
+  return responseData(response, "Plugin MCP discovery refresh failed");
+}
+
 export async function deleteHeadlessPluginData(name: string, options: ClientOptions = {}) {
   const response = await knowledgeClient(options).v1.plugins[":name"].data.delete.$post({
     param: { name },

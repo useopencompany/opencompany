@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { calculateHostedToolUsageCost, recordWorkspaceUsageDebit } from "@opencompany/billing";
+import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import { createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
@@ -214,7 +215,7 @@ export function createDbBrokerTokenStore(): BrokerTokenStore {
             ${input.streamed}, ${input.upstreamStatus},
             ${input.inputTokens}, ${input.inputCacheReadTokens}, ${input.inputCacheWriteTokens},
             ${input.outputTokens}, ${input.costUsdMicros}, ${input.usageParsed},
-            ${input.latencyMs}, ${JSON.stringify(input.rawUsage)}::jsonb
+            ${input.latencyMs}, ${stringifyPostgresJson(input.rawUsage)}::jsonb
           )
           RETURNING token_id
         )
@@ -331,7 +332,7 @@ export function createDbBrokerTokenStore(): BrokerTokenStore {
         VALUES (
           ${input.sessionId}, ${input.messageId}, NULL, ${input.toolCallId}, ${input.toolName},
           ${input.provider}, ${input.operation}, ${input.providerRequestId}, ${input.costUsdMicros},
-          ${JSON.stringify(input.rawUsage)}::jsonb
+          ${stringifyPostgresJson(input.rawUsage)}::jsonb
         )
         ON CONFLICT (provider_request_id) WHERE provider_request_id LIKE 'broker:%'
         DO UPDATE SET raw_usage = agent_session_tool_usage.raw_usage

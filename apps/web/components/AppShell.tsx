@@ -33,7 +33,10 @@ import { getWorkspaceSettingsAction } from "@/lib/workspace-actions";
 
 export async function AppShell({ children }: { children: ReactNode }) {
   const { authUser, user, workspace, role, workspaces, brains, activeBrain } = await currentUser();
-  const featureFlags = featureFlagsFromUser(user);
+  const featureFlags = featureFlagsFromUser({
+    ...user,
+    legacyBrainEnabled: workspace.legacyBrainEnabled,
+  });
   const emptyIntegrations = integrationStateFromRows([]);
   const [
     schedules,
@@ -125,6 +128,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
       statusReason: null,
       lastValidatedAt: null,
       lastRotatedAt: null,
+      workspaceEngine: null,
     }),
     loadOptionalAppShellData("claude_code_auth", loadCurrentClaudeCodeAuthSettings, {
       status: null,
@@ -173,8 +177,8 @@ export async function AppShell({ children }: { children: ReactNode }) {
       lastName: member.lastName,
       avatarUrl: member.avatarUrl,
     })),
-    brains: brains.map(brainSummaryView),
-    activeBrain: activeBrain ? brainSummaryView(activeBrain) : null,
+    brains: featureFlags.legacyBrain ? brains.map(brainSummaryView) : [],
+    activeBrain: featureFlags.legacyBrain && activeBrain ? brainSummaryView(activeBrain) : null,
     // Task metadata hydrates from the API-owned Electric read model. Keeping the server snapshot
     // empty prevents the Next.js composition root from regaining a direct Task database reader.
     tasks: [],
@@ -200,6 +204,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
         status: codex.status ?? "not_connected",
         statusReason: codex.statusReason,
         lastValidatedAt: codex.lastValidatedAt,
+        workspaceEngine: codex.workspaceEngine,
       },
       claudeCode: {
         provider: "claude_code",

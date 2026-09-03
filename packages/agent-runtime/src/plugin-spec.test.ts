@@ -4,6 +4,7 @@ import {
   PluginSpecError,
   type PluginTreeEntry,
   parseMcpConfig,
+  parsePluginCapabilities,
   parsePluginManifest,
 } from "./plugin-spec";
 
@@ -114,12 +115,118 @@ describe("discoverPluginSkillDirectories", () => {
   });
 });
 
+describe("parsePluginCapabilities", () => {
+  test("parses valid reviewed capability groups and ignores unknown fields", () => {
+    const result = parsePluginCapabilities(
+      {
+        "so.opencompany.capabilities": {
+          read: {
+            label: "Read Linear",
+            defaultMode: "on",
+            tools: ["list_issues", "get_issue", "list_issues"],
+            future: true,
+          },
+          write: {
+            label: "Manage issues",
+            defaultMode: "ask",
+            tools: ["save_issue", "save_comment"],
+          },
+          query: {
+            label: "Query data",
+            defaultMode: "ask",
+            tools: ["run_sql"],
+          },
+          future: { label: "Future", defaultMode: "ask", tools: [] },
+        },
+        "com.example.unknown": { anything: true },
+      },
+      { trusted: true },
+    );
+
+    expect(result.definitions).toEqual([
+      {
+        id: "read",
+        label: "Read Linear",
+        defaultMode: "on",
+        tools: ["list_issues", "get_issue"],
+      },
+      {
+        id: "write",
+        label: "Manage issues",
+        defaultMode: "ask",
+        tools: ["save_issue", "save_comment"],
+      },
+      {
+        id: "query",
+        label: "Query data",
+        defaultMode: "ask",
+        tools: ["run_sql"],
+      },
+    ]);
+    expect(result.report).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [
+        "Unknown field `read.future` was ignored.",
+        "Unknown capability group `future` was ignored.",
+      ],
+    });
+  });
+
+  test.each([
+    {
+      label: "namespace is not an object",
+      value: [],
+      issue: /must be an object/u,
+    },
+    {
+      label: "group is not an object",
+      value: { read: [] },
+      issue: /group `read` must be an object/u,
+    },
+    {
+      label: "group fields are malformed",
+      value: { read: { label: "", defaultMode: "yes", tools: [1] } },
+      issue: /read\.label/u,
+    },
+    {
+      label: "tool belongs to multiple groups",
+      value: {
+        read: { label: "Read", defaultMode: "on", tools: ["shared"] },
+        write: { label: "Write", defaultMode: "ask", tools: ["shared"] },
+      },
+      issue: /multiple capability groups/u,
+    },
+  ])("reports malformed definitions without rejecting the package: $label", ({ value, issue }) => {
+    const result = parsePluginCapabilities(
+      { "so.opencompany.capabilities": value },
+      { trusted: true },
+    );
+    expect(result.report.status).toBe("parsed");
+    if (result.report.status !== "parsed") return;
+    expect(result.report.issues.join("\n")).toMatch(issue);
+  });
+
+  test("retains but never honors third-party capability claims", () => {
+    const result = parsePluginCapabilities(
+      {
+        "so.opencompany.capabilities": {
+          read: { label: "Everything is safe", defaultMode: "on", tools: ["delete_all"] },
+        },
+      },
+      { trusted: false },
+    );
+    expect(result.definitions).toEqual([]);
+    expect(result.report).toMatchObject({ present: true, status: "ignored" });
+  });
+});
+
 describe("parseMcpConfig", () => {
   function mcp(servers: Record<string, unknown>): string {
     return JSON.stringify({ $schema: MCP_SCHEMA, mcpServers: servers });
   }
 
-  test("selects stdio servers and reports http/sse as unsupported", () => {
+  test("keeps stdio selected and registers http/sse with the gateway", () => {
     const result = parseMcpConfig(
       mcp({
         local: {
@@ -144,8 +251,26 @@ describe("parseMcpConfig", () => {
       env: { API_MODE: "prod" },
       cwd: "${PLUGIN_DATA}",
     });
+    expect(result.remoteServers).toEqual([
+      {
+        name: "remote",
+        type: "streamable-http",
+        url: "https://mcp.example.com/x",
+        headers: {},
+      },
+      {
+        name: "legacy",
+        type: "sse",
+        url: "https://mcp.example.com/sse",
+        headers: {},
+      },
+    ]);
     const byName = Object.fromEntries(result.reports.map((r) => [r.name, r.status]));
-    expect(byName).toEqual({ local: "selected", remote: "unsupported", legacy: "unsupported" });
+    expect(byName).toEqual({
+      local: "selected",
+      remote: "gateway-registered",
+      legacy: "gateway-registered",
+    });
   });
 
   test("skips invalid server entries but keeps valid ones", () => {

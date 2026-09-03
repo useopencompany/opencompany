@@ -46,13 +46,23 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   );
 
   assertExcludes([...groups.api.required, ...groups.api.optional], ["BETTER_STACK_ERRORS_DSN"]);
+  assertIncludes(groups.api.required, [
+    "WORKOS_MOBILE_CLIENT_ID",
+    "GITHUB_USER_APP_SLUG",
+    "GITHUB_USER_APP_CLIENT_ID",
+    "GITHUB_USER_APP_CLIENT_SECRET",
+    "GITHUB_USER_APP_STATE_SECRET",
+  ]);
 
   assertIncludes(groups.runner.required, [
     "BLOB_READ_WRITE_TOKEN",
     "GOOGLE_OAUTH_CLIENT_ID",
     "GOOGLE_OAUTH_CLIENT_SECRET",
+    "GITHUB_USER_APP_CLIENT_ID",
+    "GITHUB_USER_APP_CLIENT_SECRET",
     "MONID_API_KEY",
     "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
+    "RUNNER_SANDBOX_NAMESPACE",
   ]);
   assertExcludes(
     [...groups.runner.required, ...groups.runner.optional],

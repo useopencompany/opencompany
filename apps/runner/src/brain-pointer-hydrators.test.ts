@@ -1,4 +1,4 @@
-import { normalizeBrainPointerCapture, normalizeSlackConversationWindow } from "@opencompany/brain";
+import { normalizeBrainPointerCapture, normalizeGmailThreadWindow } from "@opencompany/brain";
 import { describe, expect, it, vi } from "vitest";
 import { runBrainPointerHydrate } from "./brain-pointer-hydrators";
 
@@ -8,7 +8,7 @@ const ENV = {
 
 function pointerItem(fallbackText?: string) {
   return normalizeBrainPointerCapture({
-    sourceRef: "slack:conversation:T123:C456:1234.5678",
+    sourceRef: "gmail:thread:thread_123",
     title: "Launch decision",
     ...(fallbackText ? { fallbackText } : {}),
     chatSessionId: "session_1",
@@ -19,20 +19,18 @@ function pointerItem(fallbackText?: string) {
   });
 }
 
-function hydratedSlackItem() {
-  return normalizeSlackConversationWindow({
-    windowId: "pointer:slack:conversation:T123:C456:1234.5678",
-    teamId: "T123",
-    teamDomain: "acme",
-    channelId: "C456",
-    channelName: "launch",
-    channelType: "channel",
+function hydratedGmailItem() {
+  return normalizeGmailThreadWindow({
+    windowId: "pointer:gmail:thread:thread_123",
+    threadId: "thread_123",
+    subject: "Launch decision",
     messages: [
       {
-        ts: "1234.5678",
-        userId: "U123",
-        userName: "Ada",
-        text: "Approved the launch plan.",
+        messageId: "message_123",
+        direction: "received",
+        from: "ada@example.com",
+        sentAt: "2026-07-22T10:00:00.000Z",
+        bodyText: "Approved the launch plan.",
       },
     ],
     flushedAt: "2026-07-22T10:01:00.000Z",
@@ -44,7 +42,7 @@ function runInput(fallbackText?: string) {
     jobId: "goat_brain_job_1",
     userWorkosId: "user_1",
     brainRef: "goat_brain_1",
-    integrationId: "gint_slack_1",
+    integrationId: "gint_gmail_1",
     item: pointerItem(fallbackText),
     env: ENV,
   };
@@ -52,18 +50,18 @@ function runInput(fallbackText?: string) {
 
 describe("runBrainPointerHydrate", () => {
   it("delegates a hydrated source to its existing provider ingest", async () => {
-    const hydrated = hydratedSlackItem();
-    const runSlack = vi.fn(async () => ({ handled: true, traceId: "trace_1" }));
+    const hydrated = hydratedGmailItem();
+    const runGmail = vi.fn(async () => ({ handled: true, traceId: "trace_1" }));
 
     const result = await runBrainPointerHydrate(runInput(), {
       hydrate: vi.fn(async () => hydrated),
-      runSlack,
+      runGmail,
     });
 
-    expect(runSlack).toHaveBeenCalledWith(
+    expect(runGmail).toHaveBeenCalledWith(
       expect.objectContaining({
         jobId: "goat_brain_job_1",
-        integrationId: "gint_slack_1",
+        integrationId: "gint_gmail_1",
         item: hydrated,
         signal: expect.any(AbortSignal),
       }),
@@ -72,7 +70,7 @@ describe("runBrainPointerHydrate", () => {
       handled: true,
       traceId: "trace_1",
       pointerHydrated: true,
-      sourceRef: "slack:conversation:T123:C456:1234.5678",
+      sourceRef: "gmail:thread:thread_123",
       hydratedContentHash: hydrated.contentHash,
     });
   });
@@ -89,7 +87,7 @@ describe("runBrainPointerHydrate", () => {
       skipped: true,
       reason: "pointer_source_unreachable",
       summary: "pointer_source_unreachable",
-      sourceRef: "slack:conversation:T123:C456:1234.5678",
+      sourceRef: "gmail:thread:thread_123",
     });
     expect(runFallback).not.toHaveBeenCalled();
   });
@@ -108,7 +106,7 @@ describe("runBrainPointerHydrate", () => {
         item: expect.objectContaining({
           sourceProvider: "goat-chat",
           sourceType: "capture",
-          sourceRef: "slack:conversation:T123:C456:1234.5678",
+          sourceRef: "gmail:thread:thread_123",
           content: expect.objectContaining({
             capture: expect.objectContaining({
               text: "The team approved the launch plan.",
@@ -121,7 +119,7 @@ describe("runBrainPointerHydrate", () => {
     expect(result).toMatchObject({
       handled: true,
       pointerFallback: true,
-      sourceRef: "slack:conversation:T123:C456:1234.5678",
+      sourceRef: "gmail:thread:thread_123",
     });
   });
 });

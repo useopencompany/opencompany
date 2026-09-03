@@ -9,10 +9,14 @@ import {
 import {
   discoverPluginSkillDirectories,
   type McpConfigResult,
+  type PluginCapabilitiesReport,
+  type PluginCapabilityDefinition,
   type PluginManifest,
   PluginSpecError,
   parseMcpConfig,
+  parsePluginCapabilities,
   parsePluginManifest,
+  type RemoteMcpServer,
   type StdioMcpServer,
 } from "./plugin-spec";
 import {
@@ -22,7 +26,7 @@ import {
   type SkillResolverFetcher,
   type SkillTreeEntry,
 } from "./skill-resolver";
-import { parseSkillDocument, SkillSpecError } from "./skill-spec";
+import { parseSkillDirectoryDocument, SkillSpecError } from "./skill-spec";
 
 export class PluginResolverError extends Error {
   constructor(message: string) {
@@ -68,6 +72,7 @@ export type PluginValidationReport = {
   ignoredManifestFields: string[];
   skills: PluginSkillValidationReport[];
   mcp: PluginMcpValidationReport;
+  capabilities: PluginCapabilitiesReport;
 };
 
 export type ResolvedPlugin = {
@@ -80,6 +85,10 @@ export type ResolvedPlugin = {
   totalBytes: number;
   skills: ResolvedPluginSkill[];
   stdioServers: StdioMcpServer[];
+  // Server-side only registration material. Callers must never pass these URLs or headers to a
+  // sandbox or a model-visible catalog.
+  remoteServers: RemoteMcpServer[];
+  capabilities: PluginCapabilityDefinition[];
   report: PluginValidationReport;
 };
 
@@ -91,6 +100,9 @@ export async function resolvePlugin(input: {
   url: string;
   fetcher: SkillResolverFetcher;
   selectedPath?: string;
+  // Exact, case-insensitive owner/repository allowlist for packages whose opencompany capability
+  // extension was authored and reviewed by us. An omitted allowlist is deliberately untrusted.
+  trustedCapabilitySources?: readonly string[];
 }): Promise<ResolvedPlugin> {
   let parsed: ReturnType<typeof parseSkillUrl>;
   try {
@@ -145,6 +157,9 @@ export async function resolvePlugin(input: {
     if (error instanceof PluginSpecError) throw new PluginResolverError(error.message);
     throw error;
   }
+  const capabilities = parsePluginCapabilities(manifestResult.manifest.extensions, {
+    trusted: isTrustedCapabilitySource(parsed.owner, parsed.repo, input.trustedCapabilitySources),
+  });
 
   const files = await gatherPluginFiles({
     entries: tree.entries,
@@ -177,6 +192,7 @@ export async function resolvePlugin(input: {
 
   const mcpFile = files.find((file) => file.path === "mcp.json");
   let stdioServers: StdioMcpServer[] = [];
+  let remoteServers: RemoteMcpServer[] = [];
   let mcpReport: PluginMcpValidationReport = { status: "absent" };
   if (mcpFile) {
     let parsedMcp: McpConfigResult;
@@ -192,6 +208,7 @@ export async function resolvePlugin(input: {
       mcpReport = { present: true, status: "disabled", reason: parsedMcp.reason };
     } else {
       stdioServers = parsedMcp.servers;
+      remoteServers = parsedMcp.remoteServers;
       mcpReport = { present: true, status: "parsed", reports: parsedMcp.reports };
     }
   }
@@ -208,12 +225,24 @@ export async function resolvePlugin(input: {
     totalBytes,
     skills,
     stdioServers,
+    remoteServers,
+    capabilities: capabilities.definitions,
     report: {
       ignoredManifestFields: manifestResult.ignoredFields,
       skills: skillReports,
       mcp: mcpReport,
+      capabilities: capabilities.report,
     },
   };
+}
+
+function isTrustedCapabilitySource(
+  owner: string,
+  repo: string,
+  allowlist: readonly string[] | undefined,
+) {
+  const source = `${owner}/${repo}`.toLowerCase();
+  return allowlist?.some((entry) => entry.trim().toLowerCase() === source) === true;
 }
 
 function selectPluginRoot(entries: SkillTreeEntry[], requestedRoot?: string) {
@@ -354,9 +383,12 @@ async function resolvePluginSkill(files: ArtifactFile[], directory: string) {
   const skillMarkdown = skillFiles.find((file) => file.path === "SKILL.md");
   if (!skillMarkdown) throw new PluginResolverError("Skill is missing SKILL.md at its root.");
 
-  let document: ReturnType<typeof parseSkillDocument>;
+  let document: ReturnType<typeof parseSkillDirectoryDocument>;
   try {
-    document = parseSkillDocument(decodeUtf8(skillMarkdown.content, "SKILL.md"), directory);
+    document = parseSkillDirectoryDocument(
+      decodeUtf8(skillMarkdown.content, "SKILL.md"),
+      directory,
+    );
   } catch (error) {
     if (error instanceof SkillSpecError) throw new PluginResolverError(error.message);
     throw error;

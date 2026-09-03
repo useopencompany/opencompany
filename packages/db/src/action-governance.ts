@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./client";
+import { stringifyPostgresJson } from "./postgres-json";
 import { actionTurns } from "./product-schema";
 
 type DbLike = any;
 
-export type ActionTurnPolicy = "foregroundInteractive" | "cloudReadOnly" | "headless";
+export type ActionTurnPolicy = "foregroundInteractive" | "headless";
 
 export type ActionTurnRef = {
   sessionId: string;
@@ -24,7 +25,150 @@ export type ActionCapabilityQuoteRecord = {
   runId?: string;
 };
 
+export type ActionApprovalRecord = {
+  actionId: string;
+  sourceId: string;
+  capabilityId: string;
+  inputHash: string;
+  status: "pending" | "approved" | "denied";
+  requestedAt: string;
+  resolvedAt?: string;
+};
+
 const ACTION_TURN_TTL_MS = 6 * 60 * 60 * 1000;
+
+export async function registerActionApproval(input: {
+  turn: ActionTurnRef;
+  invocationId: string;
+  actionId: string;
+  sourceId: string;
+  capabilityId: string;
+  params: Record<string, unknown>;
+  decision?: "pending" | "denied";
+  now?: Date;
+  db?: DbLike;
+}): Promise<ActionApprovalRecord | null> {
+  const db = input.db ?? getDb();
+  await ensureActionTurn(input.turn, db);
+  const now = input.now ?? new Date();
+  const record: ActionApprovalRecord = {
+    actionId: input.actionId,
+    sourceId: input.sourceId,
+    capabilityId: input.capabilityId,
+    inputHash: actionApprovalInputHash(input.params),
+    status: input.decision ?? "pending",
+    requestedAt: now.toISOString(),
+    ...(input.decision === "denied" ? { resolvedAt: now.toISOString() } : {}),
+  };
+  const recordJson = stringifyPostgresJson(record);
+  const [stored] = await db
+    .update(actionTurns)
+    .set({
+      approvalRecords: sql`CASE
+        WHEN NOT (${actionTurns.approvalRecords} ? ${input.invocationId})
+          THEN ${actionTurns.approvalRecords}
+            || jsonb_build_object(${input.invocationId}::text, ${recordJson}::jsonb)
+        WHEN ${input.decision === "denied"}::boolean
+          AND ${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'status' = 'pending'
+          THEN jsonb_set(
+            ${actionTurns.approvalRecords},
+            ARRAY[${input.invocationId}]::text[],
+            (${actionTurns.approvalRecords} -> ${input.invocationId}) || jsonb_build_object(
+              'status', 'denied'::text,
+              'resolvedAt', ${now.toISOString()}::text
+            )
+          )
+        ELSE ${actionTurns.approvalRecords}
+      END`,
+      updatedAt: now,
+      expiresAt: actionTurnExpiresAt(now),
+    })
+    .where(
+      and(
+        actionTurnMatches(input.turn),
+        sql`(
+          NOT (${actionTurns.approvalRecords} ? ${input.invocationId})
+          OR (
+            ${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'actionId'
+              = ${record.actionId}
+            AND ${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'sourceId'
+              = ${record.sourceId}
+            AND ${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'capabilityId'
+              = ${record.capabilityId}
+            AND ${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'inputHash'
+              = ${record.inputHash}
+          )
+        )`,
+      ),
+    )
+    .returning({ approvalRecords: actionTurns.approvalRecords });
+  return actionApprovalRecord(stored?.approvalRecords?.[input.invocationId]);
+}
+
+export async function getActionApproval(input: {
+  turn: ActionTurnRef;
+  invocationId: string;
+  db?: DbLike;
+}): Promise<ActionApprovalRecord | null> {
+  const db = input.db ?? getDb();
+  const [row] = await db
+    .select({ approvalRecords: actionTurns.approvalRecords })
+    .from(actionTurns)
+    .where(actionTurnMatches(input.turn))
+    .limit(1);
+  return actionApprovalRecord(row?.approvalRecords?.[input.invocationId]);
+}
+
+export async function resolveActionApproval(input: {
+  turn: ActionTurnRef;
+  invocationId: string;
+  decision: "approved" | "denied";
+  now?: Date;
+  db?: DbLike;
+}): Promise<
+  | { ok: true; record: ActionApprovalRecord; duplicate: boolean }
+  | { ok: false; reason: "not_found" | "conflict" }
+> {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const [resolved] = await db
+    .update(actionTurns)
+    .set({
+      approvalRecords: sql`jsonb_set(
+        ${actionTurns.approvalRecords},
+        ARRAY[${input.invocationId}]::text[],
+        (${actionTurns.approvalRecords} -> ${input.invocationId}) || jsonb_build_object(
+          'status', ${input.decision}::text,
+          'resolvedAt', ${now.toISOString()}::text
+        )
+      )`,
+      updatedAt: now,
+      expiresAt: actionTurnExpiresAt(now),
+    })
+    .where(
+      and(
+        actionTurnMatches(input.turn),
+        sql`${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'status' = 'pending'`,
+      ),
+    )
+    .returning({ approvalRecords: actionTurns.approvalRecords });
+  const resolvedRecord = actionApprovalRecord(resolved?.approvalRecords?.[input.invocationId]);
+  if (resolvedRecord) return { ok: true, record: resolvedRecord, duplicate: false };
+
+  const existing = await getActionApproval({
+    turn: input.turn,
+    invocationId: input.invocationId,
+    db,
+  });
+  if (!existing) return { ok: false, reason: "not_found" };
+  return existing.status === input.decision
+    ? { ok: true, record: existing, duplicate: true }
+    : { ok: false, reason: "conflict" };
+}
+
+export function actionApprovalInputHash(params: Record<string, unknown>) {
+  return createHash("sha256").update(stableJson(params)).digest("hex");
+}
 
 export async function recordActionSourceDiscovery(input: {
   turn: ActionTurnRef;
@@ -33,7 +177,7 @@ export async function recordActionSourceDiscovery(input: {
 }) {
   const db = input.db ?? getDb();
   await ensureActionTurn(input.turn, db);
-  const sourceIds = JSON.stringify([input.sourceId]);
+  const sourceIds = stringifyPostgresJson([input.sourceId]);
   await db
     .update(actionTurns)
     .set({
@@ -60,8 +204,8 @@ export async function claimActionInvocation(input: {
 > {
   const db = input.db ?? getDb();
   await ensureActionTurn(input.turn, db);
-  const sourceIds = JSON.stringify([input.sourceId]);
-  const invocationIds = JSON.stringify([input.invocationId]);
+  const sourceIds = stringifyPostgresJson([input.sourceId]);
+  const invocationIds = stringifyPostgresJson([input.invocationId]);
   const [claimed] = await db
     .update(actionTurns)
     .set({
@@ -137,8 +281,8 @@ export async function storeActionCapabilityQuote(input: {
 }) {
   const db = input.db ?? getDb();
   await ensureActionTurn(input.turn, db);
-  const quoteJson = JSON.stringify({ [input.invocationId]: input.quote });
-  const invocationIds = JSON.stringify([input.invocationId]);
+  const quoteJson = stringifyPostgresJson({ [input.invocationId]: input.quote });
+  const invocationIds = stringifyPostgresJson([input.invocationId]);
   const [stored] = await db
     .update(actionTurns)
     .set({
@@ -187,7 +331,7 @@ export async function releaseActionCapabilityQuote(input: {
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
-  const invocationIds = JSON.stringify([input.invocationId]);
+  const invocationIds = stringifyPostgresJson([input.invocationId]);
   await db
     .update(actionTurns)
     .set({
@@ -216,7 +360,7 @@ export async function claimActionAsyncRun(input: {
 }) {
   const db = input.db ?? getDb();
   await ensureActionTurn(input.turn, db);
-  const invocationIds = JSON.stringify([input.invocationId]);
+  const invocationIds = stringifyPostgresJson([input.invocationId]);
   const [claimed] = await db
     .update(actionTurns)
     .set({
@@ -252,7 +396,7 @@ export async function releaseActionAsyncRun(input: {
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
-  const invocationIds = JSON.stringify([input.invocationId]);
+  const invocationIds = stringifyPostgresJson([input.invocationId]);
   await db
     .update(actionTurns)
     .set({
@@ -309,6 +453,40 @@ function actionTurnMatches(turn: ActionTurnRef) {
   );
 }
 
-function actionTurnExpiresAt() {
-  return new Date(Date.now() + ACTION_TURN_TTL_MS);
+function actionTurnExpiresAt(now = new Date()) {
+  return new Date(now.getTime() + ACTION_TURN_TTL_MS);
+}
+
+function actionApprovalRecord(value: unknown): ActionApprovalRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.actionId !== "string" ||
+    typeof record.sourceId !== "string" ||
+    typeof record.capabilityId !== "string" ||
+    typeof record.inputHash !== "string" ||
+    (record.status !== "pending" && record.status !== "approved" && record.status !== "denied") ||
+    typeof record.requestedAt !== "string" ||
+    !(record.resolvedAt === undefined || typeof record.resolvedAt === "string")
+  ) {
+    return null;
+  }
+  return {
+    actionId: record.actionId,
+    sourceId: record.sourceId,
+    capabilityId: record.capabilityId,
+    inputHash: record.inputHash,
+    status: record.status,
+    requestedAt: record.requestedAt,
+    ...(typeof record.resolvedAt === "string" ? { resolvedAt: record.resolvedAt } : {}),
+  };
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
+    .join(",")}}`;
 }

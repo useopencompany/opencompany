@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { CLAUDE_ACP_ENGINE_ADAPTER, CODEX_ACP_ENGINE_ADAPTER } from "./acp-engine-adapters";
 import { AcpHarness, type AcpHarnessTurnInput } from "./acp-harness";
+import { CodexChatRetryableInfrastructureError } from "./codex-chat-errors";
 import type { SandboxHandle } from "./sandbox";
 
 type JsonRpcMessage = Record<string, unknown>;
@@ -194,16 +195,28 @@ describe("AcpHarness", () => {
   it.each([
     {
       failure: "times out",
+      errorName: "SandboxError",
       message: "2: [unknown] The operation timed out.",
     },
     {
       failure: "loses its control socket",
+      errorName: "SandboxError",
       message:
         "2: [unknown] The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()",
     },
+    {
+      failure: "receives an incomplete envelope",
+      errorName: "InvalidArgumentError",
+      message: "3: [invalid_argument] protocol error: incomplete envelope",
+    },
+    {
+      failure: "rejects with a new SDK error shape",
+      errorName: "UnexpectedDecoderError",
+      message: "The command stream decoder rejected a frame.",
+    },
   ])(
     "reattaches to the running ACP process when its E2B command watch $failure",
-    async ({ message: streamErrorMessage }) => {
+    async ({ errorName, message: streamErrorMessage }) => {
       let rejectInitialWatch: ((error: Error) => void) | null = null;
       const initialWatch = new Promise<never>((_resolve, reject) => {
         rejectInitialWatch = reject;
@@ -254,7 +267,7 @@ describe("AcpHarness", () => {
             );
           } else if (message.method === "session/prompt") {
             const streamError = new Error(streamErrorMessage);
-            streamError.name = "SandboxError";
+            streamError.name = errorName;
             rejectInitialWatch?.(streamError);
             await connected;
             await onStdout?.(
@@ -286,6 +299,122 @@ describe("AcpHarness", () => {
       expect(kill).toHaveBeenCalledWith(41);
     },
   );
+
+  it("keeps a non-zero ACP adapter exit terminal", async () => {
+    let rejectInitialWatch: ((error: Error) => void) | null = null;
+    const initialWatch = new Promise<never>((_resolve, reject) => {
+      rejectInitialWatch = reject;
+    });
+    let onStdout: ((data: string) => void | Promise<void>) | null = null;
+    const exitError = Object.assign(new Error("ACP adapter exited with code 1."), {
+      name: "CommandExitError",
+      result: { exitCode: 1, stdout: "", stderr: "adapter crashed" },
+    });
+    const connect = vi.fn(async () => {
+      throw new Error("should not reconnect");
+    });
+    const kill = vi.fn(async () => true);
+    const run = vi.fn(
+      async (_command: string, options: { onStdout?: (data: string) => void | Promise<void> }) => {
+        onStdout = options.onStdout ?? null;
+        return { pid: 41, wait: () => initialWatch };
+      },
+    );
+    const sendStdin = vi.fn(async (_pid: number, data: string) => {
+      for (const line of data.split("\n").filter(Boolean)) {
+        const message = JSON.parse(line) as JsonRpcMessage;
+        if (message.method === "initialize") {
+          await onStdout?.(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { agentCapabilities: { loadSession: true } },
+            })}\n`,
+          );
+        } else if (message.method === "session/new") {
+          await onStdout?.(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { sessionId: "session_exit" },
+            })}\n`,
+          );
+        } else if (message.method === "session/prompt") {
+          rejectInitialWatch?.(exitError);
+        }
+      }
+    });
+    const sandbox = {
+      commands: { run, connect, sendStdin, kill },
+    } as unknown as SandboxHandle;
+
+    await expect(new AcpHarness().runTurn(harnessInput(sandbox))).rejects.toBe(exitError);
+    expect(connect).not.toHaveBeenCalled();
+    expect(kill).toHaveBeenCalledWith(41);
+  });
+
+  it("defers the durable turn when every command-watch reconnect attempt fails", async () => {
+    let rejectInitialWatch: ((error: Error) => void) | null = null;
+    const initialWatch = new Promise<never>((_resolve, reject) => {
+      rejectInitialWatch = reject;
+    });
+    let onStdout: ((data: string) => void | Promise<void>) | null = null;
+    const streamError = new Error("The command stream decoder rejected a frame.");
+    streamError.name = "UnexpectedDecoderError";
+    const connectError = new Error("The process could not be reattached.");
+    const connect = vi.fn(async () => {
+      throw connectError;
+    });
+    const kill = vi.fn(async () => true);
+    const run = vi.fn(
+      async (_command: string, options: { onStdout?: (data: string) => void | Promise<void> }) => {
+        onStdout = options.onStdout ?? null;
+        return { pid: 41, wait: () => initialWatch };
+      },
+    );
+    const sendStdin = vi.fn(async (_pid: number, data: string) => {
+      for (const line of data.split("\n").filter(Boolean)) {
+        const message = JSON.parse(line) as JsonRpcMessage;
+        if (message.method === "initialize") {
+          await onStdout?.(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { agentCapabilities: { loadSession: true } },
+            })}\n`,
+          );
+        } else if (message.method === "session/new") {
+          await onStdout?.(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { sessionId: "session_disconnect" },
+            })}\n`,
+          );
+        } else if (message.method === "session/prompt") {
+          rejectInitialWatch?.(streamError);
+        }
+      }
+    });
+    const sandbox = {
+      commands: { run, connect, sendStdin, kill },
+    } as unknown as SandboxHandle;
+
+    await expect(
+      new AcpHarness().runTurn(
+        harnessInput(sandbox, {
+          redact: (value) => value.replaceAll("decoder", "[redacted]"),
+        }),
+      ),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: streamError,
+      diagnosticMessage:
+        "[run_turn] UnexpectedDecoderError: The command stream [redacted] rejected a frame.",
+    });
+    expect(connect).toHaveBeenCalledTimes(3);
+    expect(kill).toHaveBeenCalledWith(41);
+  });
 
   // Any application-level (JSON-RPC) session/load failure means the saved thread is unusable on
   // this process — including the sticky variants that previously escaped the message-regex allowlist
@@ -401,7 +530,16 @@ describe("AcpHarness", () => {
         await emit({
           jsonrpc: "2.0",
           id: message.id,
-          result: { agentCapabilities: { loadSession: true } },
+          result: {
+            agentCapabilities: { loadSession: true },
+            _meta: {
+              goal: {
+                version: 1,
+                controlMethod: "_custom/session_goal",
+                actions: ["set", "pause", "resume", "clear"],
+              },
+            },
+          },
         });
       } else if (message.method === "session/new") {
         await emit({
@@ -419,7 +557,7 @@ describe("AcpHarness", () => {
         });
       } else if (
         message.method === "session/set_config_option" ||
-        message.method === "_session/goal"
+        message.method === "_custom/session_goal"
       ) {
         await emit({ jsonrpc: "2.0", id: message.id, result: {} });
       } else if (message.method === "session/prompt") {
@@ -481,7 +619,7 @@ describe("AcpHarness", () => {
     expect(transport.requests).toContainEqual({
       jsonrpc: "2.0",
       id: expect.any(Number),
-      method: "_session/goal",
+      method: "_custom/session_goal",
       params: {
         sessionId: "codex_session",
         action: "set",
@@ -507,6 +645,95 @@ describe("AcpHarness", () => {
       id: "elicitation_1",
       result: { action: "accept", content: { branch: "feature/acp" } },
     });
+  });
+
+  it("falls back to a normal prompt when the adapter does not advertise Goal controls", async () => {
+    const transport = fakeAcpSandbox(async (message, emit) => {
+      if (message.method === "initialize") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { agentCapabilities: { loadSession: true } },
+        });
+      } else if (message.method === "session/new") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { sessionId: "codex_session", configOptions: [] },
+        });
+      } else if (message.method === "session/prompt") {
+        await emit({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { stopReason: "end_turn" },
+        });
+      }
+    });
+
+    await new AcpHarness().runTurn(
+      harnessInput(transport.sandbox, {
+        adapter: CODEX_ACP_ENGINE_ADAPTER,
+        goal: { objective: "Finish issue 1324" },
+      }),
+    );
+
+    expect(transport.requests.some((request) => String(request.method).includes("goal"))).toBe(
+      false,
+    );
+    expect(transport.requests.some((request) => request.method === "session/prompt")).toBe(true);
+  });
+
+  it("lets an advertised Goal control run beyond the setup request timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = fakeAcpSandbox(async (message, emit) => {
+        if (message.method === "initialize") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              agentCapabilities: { loadSession: true },
+              _meta: {
+                goal: {
+                  version: 1,
+                  controlMethod: "_session/goal",
+                  actions: ["set"],
+                },
+              },
+            },
+          });
+        } else if (message.method === "session/new") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { sessionId: "codex_session", configOptions: [] },
+          });
+        } else if (message.method === "_session/goal") {
+          setTimeout(() => {
+            void emit({ jsonrpc: "2.0", id: message.id, result: {} });
+          }, 31_000);
+        } else if (message.method === "session/prompt") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { stopReason: "end_turn" },
+          });
+        }
+      });
+      const run = new AcpHarness().runTurn(
+        harnessInput(transport.sandbox, {
+          adapter: CODEX_ACP_ENGINE_ADAPTER,
+          goal: { objective: "Finish issue 1324" },
+          timeoutMs: 60_000,
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      await expect(run).resolves.toMatchObject({ promptResponse: { stopReason: "end_turn" } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("loads a stored session without projecting its replayed transcript", async () => {

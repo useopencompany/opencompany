@@ -5,6 +5,7 @@ import {
   normalizeScheduleTimezone,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
+import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
 import { taskSchedules, users } from "@opencompany/db/product-schema";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
@@ -109,7 +110,7 @@ export async function createTaskScheduleForUser(
       ${parsed.value.cron},
       ${parsed.value.timezone},
       ${parsed.value.prompt},
-      ${JSON.stringify(plannedHarnessSpec)}::jsonb,
+      ${stringifyPostgresJson(plannedHarnessSpec)}::jsonb,
       true,
       ${nextRunAt},
       ${now},

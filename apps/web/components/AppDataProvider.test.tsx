@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
     preloadHeadlessChatMessages: vi.fn(async (conversationId: string) => {
       void conversationId;
     }),
+    syncHeadlessChatMessageShapeEpochs: vi.fn(async () => {}),
     getHeadlessIntegrationAccounts: vi.fn(() => ({})),
     getHeadlessTaskSchedules: vi.fn(() => ({})),
     getHeadlessTasks: vi.fn(() => ({})),
@@ -33,6 +34,7 @@ vi.mock("@tanstack/react-db", () => ({
 vi.mock("@/lib/headless-chat-collections", () => ({
   getHeadlessChatConversations: mocks.getHeadlessChatConversations,
   preloadHeadlessChatMessages: mocks.preloadHeadlessChatMessages,
+  syncHeadlessChatMessageShapeEpochs: mocks.syncHeadlessChatMessageShapeEpochs,
 }));
 
 vi.mock("@/lib/headless-integration-collections", () => ({
@@ -59,6 +61,7 @@ describe("AppDataProvider", () => {
     mocks.getHeadlessTaskSchedules.mockClear();
     mocks.getHeadlessIntegrationAccounts.mockClear();
     mocks.preloadHeadlessChatMessages.mockClear();
+    mocks.syncHeadlessChatMessageShapeEpochs.mockClear();
     mocks.listLegacyTaskCompatibility.mockClear();
     mocks.useLiveQuery.mockReset();
     mocks.useLiveQuery.mockImplementation(() => mocks.liveQueryResult);
@@ -104,6 +107,7 @@ describe("AppDataProvider", () => {
       // sidebar hover/focus, so boot must not fan out a shape for them.
       activityState: (index === 1 || index === 3 ? "working" : "idle") as "working" | "idle",
       hasUnseen: false,
+      messageShapeEpoch: index,
       createdAt: new Date(now - index * 1_000).toISOString(),
       updatedAt: new Date(now - index * 1_000).toISOString(),
     }));
@@ -136,6 +140,13 @@ describe("AppDataProvider", () => {
     expect(
       mocks.preloadHeadlessChatMessages.mock.calls.map(([chatId]) => chatId).toSorted(),
     ).toEqual(["chat_preload_1", "chat_preload_3"]);
+    expect(mocks.syncHeadlessChatMessageShapeEpochs).toHaveBeenCalledWith(
+      chatRows.map(({ id, activityState, messageShapeEpoch }) => ({
+        id,
+        activityState,
+        messageShapeEpoch,
+      })),
+    );
   });
 
   it("does not fan out transcript preloads from the server fallback", () => {
@@ -517,7 +528,12 @@ function initialData(): AppInitialData {
     schedules: [],
     recentChats: [],
     integrations: {} as AppInitialData["integrations"],
-    featureFlags: { taskSpawning: false, autoModelRouting: false, imessage: false, wiki: false },
+    featureFlags: {
+      taskSpawning: false,
+      autoModelRouting: false,
+      imessage: false,
+      legacyBrain: false,
+    },
     codexConnected: false,
     claudeCodeConnected: false,
     mcpSetup: { preferredClient: null, completedAt: null },

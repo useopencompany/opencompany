@@ -1,12 +1,19 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { SKILL_LIMITS } from "./artifact-policy";
 import {
+  createGitHubSkillFetcher,
   discoverSkillDirectories,
+  GitHubArtifactFetchError,
   parseSkillUrl,
   resolveSkill,
   SkillResolverError,
   type SkillResolverFetcher,
   type SkillTreeEntry,
 } from "./skill-resolver";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -73,6 +80,77 @@ describe("parseSkillUrl", () => {
 
   test("normalizes repeated separators in a subpath", () => {
     expect(parseSkillUrl("o/r///skills////safe///").subpath).toBe("skills/safe");
+  });
+});
+
+describe("createGitHubSkillFetcher", () => {
+  test("reports GitHub rate-limit diagnostics without repository details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 403,
+          headers: {
+            "x-github-request-id": "ABCD:1234:5678:90AB",
+            "x-ratelimit-limit": "60",
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": "1788422400",
+            "x-ratelimit-resource": "core",
+          },
+        }),
+      ),
+    );
+
+    const error = await createGitHubSkillFetcher()
+      .resolveCommit("private-owner", "private-repo", "main")
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GitHubArtifactFetchError);
+    expect(error).toMatchObject({
+      name: "GitHubArtifactFetchError",
+      code: "github_artifact_fetch_failed",
+      message: "GitHub artifact request was rate limited.",
+      upstreamService: "github",
+      upstreamOperation: "resolve_commit",
+      upstreamStatus: 403,
+      failureKind: "rate_limit",
+      rateLimitLimit: 60,
+      rateLimitRemaining: 0,
+      rateLimitReset: 1788422400,
+      rateLimitResource: "core",
+      upstreamRequestId: "ABCD:1234:5678:90AB",
+      upstreamDurationMs: expect.any(Number),
+    });
+    expect(JSON.stringify(error)).not.toMatch(/private-owner|private-repo/u);
+  });
+
+  test("reduces network failures to allowlisted diagnostics", async () => {
+    const socketError = Object.assign(new Error("token=do-not-expose"), {
+      code: "ECONNRESET",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(
+        new TypeError("request included token=do-not-expose", {
+          cause: socketError,
+        }),
+      ),
+    );
+
+    const error = await createGitHubSkillFetcher()
+      .fetchTree("private-owner", "private-repo", "a".repeat(40))
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GitHubArtifactFetchError);
+    expect(error).toMatchObject({
+      message: "GitHub artifact request failed before receiving a response.",
+      upstreamOperation: "fetch_tree",
+      failureKind: "network",
+      networkErrorName: "TypeError",
+      networkErrorCode: "ECONNRESET",
+    });
+    expect(error).not.toHaveProperty("cause");
+    expect(JSON.stringify(error)).not.toMatch(/do-not-expose|private-owner|private-repo/u);
   });
 });
 
@@ -247,6 +325,46 @@ describe("resolveSkill: happy paths", () => {
     if (result.status !== "resolved") return;
     expect(result.skill.name).toBe("improve-codebase-architecture");
   });
+
+  test("skills.sh installs a large skill by declared name when its source directory differs", async () => {
+    const tree: SkillTreeEntry[] = [
+      {
+        path: "skills/react-best-practices/SKILL.md",
+        type: "blob",
+        mode: "100644",
+      },
+      { path: "skills/other/SKILL.md", type: "blob", mode: "100644" },
+    ];
+    const blobs: Record<string, Blob> = {
+      "skills/react-best-practices/SKILL.md": skillMd("vercel-react-best-practices"),
+      "skills/other/SKILL.md": skillMd("other"),
+    };
+    for (let index = 0; index < 75; index += 1) {
+      const path = `skills/react-best-practices/rules/rule-${index}.md`;
+      tree.push({ path, type: "blob", mode: "100644" });
+      blobs[path] = `Rule ${index}.`;
+    }
+
+    const result = await resolveSkill({
+      url: "https://www.skills.sh/vercel-labs/agent-skills/vercel-react-best-practices",
+      fetcher: fakeFetcher({ tree, blobs }),
+    });
+
+    expect(result.status).toBe("resolved");
+    if (result.status !== "resolved") return;
+    expect(result.skill).toMatchObject({
+      name: "vercel-react-best-practices",
+      fileCount: 76,
+      source: { path: "skills/react-best-practices" },
+      warnings: [
+        {
+          code: "source_directory_normalized",
+          message:
+            'Source directory "react-best-practices" will be installed as "vercel-react-best-practices" to match the Skill name.',
+        },
+      ],
+    });
+  });
 });
 
 describe("resolveSkill: rejection fixtures", () => {
@@ -300,12 +418,6 @@ describe("resolveSkill: rejection fixtures", () => {
       match: /\.git/,
     },
     {
-      label: "directory-name mismatch",
-      tree: [{ path: "skills/foo/SKILL.md", type: "blob", mode: "100644" }],
-      blobs: { "skills/foo/SKILL.md": skillMd("bar") },
-      match: /must match its directory name/,
-    },
-    {
       label: "unknown frontmatter field",
       tree: [{ path: "skills/foo/SKILL.md", type: "blob", mode: "100644" }],
       blobs: {
@@ -343,7 +455,7 @@ describe("resolveSkill: rejection fixtures", () => {
   test("too many files exceeds the skill file-count limit", async () => {
     const tree: SkillTreeEntry[] = [{ path: "s/SKILL.md", type: "blob", mode: "100644" }];
     const blobs: Record<string, Blob> = { "s/SKILL.md": skillMd("s") };
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < SKILL_LIMITS.maxFileCount; i++) {
       tree.push({ path: `s/f${i}.txt`, type: "blob", mode: "100644" });
       blobs[`s/f${i}.txt`] = "x";
     }

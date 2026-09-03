@@ -4,6 +4,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
   Blocks,
+  BrainCircuit,
   CircleDollarSign,
   CreditCard,
   FolderGit2,
@@ -70,6 +71,12 @@ const NAV_GROUPS: SettingsNavGroup[] = [
   {
     label: "Workspace",
     items: [
+      {
+        href: "/settings/workspace/inference",
+        icon: BrainCircuit,
+        label: "Inference",
+        isActive: (pathname) => pathname === "/settings/workspace/inference",
+      },
       {
         href: "/settings/workspace/capabilities",
         icon: SearchCheck,

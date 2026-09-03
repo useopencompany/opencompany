@@ -31,7 +31,7 @@ import {
   WikiIngestActivityFeed,
   WikiIngestActivitySkeleton,
 } from "@/components/WikiIngestActivityFeed";
-import { WikiGmailSourceEditor, WikiSlackChannelPicker } from "@/components/WikiSourceScopeEditors";
+import { WikiGmailSourceEditor } from "@/components/WikiSourceScopeEditors";
 import { WikiGitHubRepoPicker, WikiLinearTeamPicker } from "@/components/WikiSourceScopePickers";
 import {
   getHeadlessIntegrationAccounts,
@@ -260,16 +260,6 @@ function WikiSourcesLivePanel({
   const renderScopeSlot = (entry: WikiSourceEntry) => {
     if (entry.status !== "connected") return null;
     const canConfigure = entry.source?.canConfigure ?? entry.canToggle;
-    if (entry.provider === "slack") {
-      if (!canConfigure) return null;
-      return (
-        <WikiSlackChannelPicker
-          integrationId={entry.integrationId}
-          source={entry.source}
-          onSave={(config) => saveScopeConfig(entry, config)}
-        />
-      );
-    }
     if (entry.provider === "gmail") {
       if (!canConfigure) return null;
       return (
@@ -499,10 +489,7 @@ function WikiSourceCard({
           >
             Reconnect
           </Link>
-        ) : provider.id === "gmail" ||
-          provider.id === "slack" ||
-          provider.id === "linear" ||
-          provider.id === "granola" ? (
+        ) : provider.id === "gmail" || provider.id === "linear" || provider.id === "granola" ? (
           <Link
             href={provider.connectHref}
             className={buttonVariants({ variant: "ghost", size: "sm" })}
@@ -618,7 +605,7 @@ function wikiSourceIntegrationRowsFromState(
   if (!integrations) return [];
 
   const rows: HeadlessIntegrationAccountReadModel[] = [];
-  for (const provider of ["gmail", "slack", "linear", "granola"] as const) {
+  for (const provider of ["gmail", "linear", "granola"] as const) {
     for (const account of integrations.personalAccounts[provider]) {
       rows.push({
         id: account.integrationId,
@@ -664,14 +651,6 @@ function wikiSourceIntegrationRowsFromState(
 }
 
 function connectionLabel(entry: WikiSourceEntry) {
-  if (entry.provider === "slack") {
-    return (
-      [entry.connectionLabel, entry.accountName].filter(Boolean).join(" · ") ||
-      entry.accountEmail ||
-      entry.ownerName ||
-      "Slack connection"
-    );
-  }
   if (entry.provider === "linear") {
     return (
       entry.connectionLabel ??

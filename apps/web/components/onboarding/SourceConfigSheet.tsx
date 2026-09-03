@@ -17,7 +17,6 @@ import {
   HubspotObjectPicker,
   LinearTeamPicker,
   resolveBrainSourceState,
-  SlackChannelPicker,
 } from "@/components/BrainSourceCards";
 import type { BrainSourcesDetails } from "@/lib/brain-source-actions";
 import type { BrainSourceProviderDef } from "@/lib/brain-sources/registry";
@@ -25,8 +24,6 @@ import type { BrainSourceProviderDef } from "@/lib/brain-sources/registry";
 // Per-provider framing for the focused config surface. Kept intentionally short
 // and action-first: the picker below already carries the mechanics.
 const CONFIG_HINT: Partial<Record<BrainSourceProviderDef["id"], string>> = {
-  slack:
-    "Pick the channels whose conversations should flow into your Brain. Start with your most active ones — you can change this anytime.",
   linear: "Choose the teams whose issue and comment activity should feed your Brain.",
   github: "Choose the repositories whose pull requests and issues should feed your Brain.",
   gmail:
@@ -123,10 +120,8 @@ function SourcePicker({
   ...props
 }: {
   providerId: BrainSourceProviderDef["id"];
-} & React.ComponentProps<typeof SlackChannelPicker>) {
+} & React.ComponentProps<typeof LinearTeamPicker>) {
   switch (providerId) {
-    case "slack":
-      return <SlackChannelPicker {...props} />;
     case "linear":
       return <LinearTeamPicker {...props} />;
     case "github":

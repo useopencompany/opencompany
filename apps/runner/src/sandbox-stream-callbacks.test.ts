@@ -32,11 +32,22 @@ describe("guardCommandStreamCallbacks", () => {
 
 describe("isRetryableCommandStreamError", () => {
   it.each([
-    "2: [unknown] The operation timed out.",
-    "2: [unknown] The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()",
-  ])("recognizes a lost E2B command stream: %s", (message) => {
+    {
+      name: "SandboxError",
+      message: "2: [unknown] The operation timed out.",
+    },
+    {
+      name: "SandboxError",
+      message:
+        "2: [unknown] The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()",
+    },
+    {
+      name: "InvalidArgumentError",
+      message: "3: [invalid_argument] protocol error: incomplete envelope",
+    },
+  ])("recognizes a lost E2B command stream: $message", ({ name, message }) => {
     const error = new Error(message);
-    error.name = "SandboxError";
+    error.name = name;
 
     expect(isRetryableCommandStreamError(error)).toBe(true);
   });
@@ -46,6 +57,9 @@ describe("isRetryableCommandStreamError", () => {
       name: "Error",
     }),
     Object.assign(new Error("2: [unknown] The command failed."), { name: "SandboxError" }),
+    Object.assign(new Error("The command arguments are invalid."), {
+      name: "InvalidArgumentError",
+    }),
   ])("keeps unrelated failures terminal", (error) => {
     expect(isRetryableCommandStreamError(error)).toBe(false);
   });

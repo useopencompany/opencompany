@@ -161,6 +161,19 @@ describe("integration account service", () => {
             scopes: [],
             capabilityModes: {},
           },
+          {
+            id: "gint_betterstack_mcp",
+            provider: "betterstack",
+            workspaceId: null,
+            externalId: "betterstack_mcp",
+            accountEmail: "ada@example.com",
+            accountName: "Ada's team",
+            connectionLabel: "Better Stack tool access",
+            statusReason: null,
+            status: "connected",
+            scopes: ["read", "write"],
+            capabilityModes: { read: "on", query: "ask", write: "ask" },
+          },
         ],
       ]),
     });
@@ -177,6 +190,18 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["gmail.readonly"],
         capabilityModes: { read: "on" },
+      },
+      {
+        integrationId: "gint_betterstack_mcp",
+        provider: "betterstack",
+        status: "connected",
+        connected: true,
+        accountEmail: "ada@example.com",
+        accountName: "Ada's team",
+        connectionLabel: "Better Stack tool access",
+        statusReason: null,
+        scopes: ["read", "write"],
+        capabilityModes: { read: "on", query: "ask", write: "ask" },
       },
     ]);
   });
@@ -195,6 +220,16 @@ describe("integration account service", () => {
     const service = createIntegrationAccountService({ db });
     await expect(service.getUsage(member, "gint_x")).resolves.toEqual({
       affectedBrainSourceCount: 4,
+    });
+  });
+
+  it("does not report retired Slack source rows as active account usage", async () => {
+    const service = createIntegrationAccountService({
+      db: fakeDb([[{ id: "gint_slack", provider: "slack" }]]),
+    });
+
+    await expect(service.getUsage(member, "gint_slack")).resolves.toEqual({
+      affectedBrainSourceCount: 0,
     });
   });
 

@@ -1,4 +1,7 @@
-import { ACTION_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
+import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
+  CHAT_HOST_TOOL_CONTRACT_VERSION,
+} from "@opencompany/agent-runtime";
 import type { CodexChatTurn, HarnessSpec, Task } from "@opencompany/db/product-schema";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -135,6 +138,7 @@ describe("session-backed task turns", () => {
 
     expect(completion.nextTurn).toMatchObject({
       engine: "opencompany",
+      hostToolContractVersion: CHAT_HOST_TOOL_CONTRACT_VERSION,
       prompt: expect.stringContaining("Step 2/2 — Implement"),
     });
     expect(completion.harnessSpec.codex).toBeUndefined();
@@ -313,6 +317,26 @@ describe("session-backed task turns", () => {
     expect(query.params).toContain("Scheduled check-in: Wait for CI");
     expect(query.params).toContainEqual(new Date("2026-07-30T09:40:00.000Z"));
     expect(query.params).toContain('{"reasoningEffort":"high","wakeupChain":1}');
+  });
+
+  it("preserves the chat host-tool contract for opencompany scheduled wakeups", () => {
+    const completion = buildTaskTurnCompletion({
+      context: context(workflowSpec()),
+      result: "The external operation is still pending.",
+      scheduledWakeup: {
+        wakeup: {
+          delaySeconds: 600,
+          reason: "Wait for completion",
+          prompt: "Check the operation again.",
+        },
+        parentSettings: {},
+      },
+    });
+
+    expect(completion.nextTurn).toMatchObject({
+      engine: "opencompany",
+      hostToolContractVersion: CHAT_HOST_TOOL_CONTRACT_VERSION,
+    });
   });
 
   it("classifies an already-terminal task as an interrupt while the turn lease is held", async () => {

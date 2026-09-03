@@ -1,3 +1,4 @@
+import { resolvePluginGatewayRegistrations } from "../plugin-gateway";
 import { resolveAttioActions } from "./attio";
 import { resolveGitHubActions } from "./github";
 import { resolveGmailActions } from "./gmail";
@@ -7,8 +8,8 @@ import { resolveLatitudeActions } from "./latitude";
 import { resolveLinearActions } from "./linear";
 import { resolveNeonActions } from "./neon";
 import { resolvePostHogActions } from "./posthog";
+import { type RemoteMcpGatewayRegistration, resolveRemoteMcpActions } from "./remote-mcp";
 import { resolveRevolutActions } from "./revolut";
-import { resolveSlackActions } from "./slack";
 import { resolveStripeActions } from "./stripe";
 import type {
   ActionProviderCatalog,
@@ -31,6 +32,10 @@ export type ManagedCapabilitiesResolver = (
 export type ActionCatalogDeps = {
   // Omit this for background surfaces whose policy does not permit paid capabilities.
   resolveManagedCapabilities?: ManagedCapabilitiesResolver;
+  // Registration is server-side composition data. Plugin/account binding supplies these records;
+  // no endpoint URL or credential material is copied into the returned action descriptors.
+  remoteMcpRegistrations?: readonly RemoteMcpGatewayRegistration[];
+  resolveRemoteMcpRegistrations?: typeof resolvePluginGatewayRegistrations;
 };
 
 // Environment kill switch: disables chat actions for everyone without a
@@ -50,20 +55,45 @@ export async function resolveActionCatalog(
   },
   deps: ActionCatalogDeps = {},
 ): Promise<ResolvedActionCatalog> {
+  const remoteMcpRegistrations =
+    deps.remoteMcpRegistrations ??
+    (await (deps.resolveRemoteMcpRegistrations ?? resolvePluginGatewayRegistrations)(input).catch(
+      () => [],
+    ));
+  const linearPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:linear:"),
+  );
+  const githubPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:github:"),
+  );
+  const githubPluginConnected =
+    githubPluginInstalled &&
+    (
+      await Promise.all(
+        remoteMcpRegistrations
+          .filter((registration) => registration.source.startsWith("plugin:github:"))
+          .map((registration) => registration.getState(input).catch(() => null)),
+      )
+    ).some((state) => state?.connected && state.integrationId);
+  const neonPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:neon:"),
+  );
   const resolved = await Promise.all([
-    resolveSlackActions(input.userWorkosId).catch(() => null),
     resolveGmailActions(input.userWorkosId).catch(() => null),
     resolveGoogleCalendarActions(input.userWorkosId).catch(() => null),
     resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
-    resolveLinearActions(input.userWorkosId).catch(() => null),
+    linearPluginInstalled ? null : resolveLinearActions(input.userWorkosId).catch(() => null),
     resolvePostHogActions(input.userWorkosId).catch(() => null),
     resolveLatitudeActions(input.userWorkosId).catch(() => null),
-    resolveNeonActions(input.userWorkosId).catch(() => null),
+    neonPluginInstalled ? null : resolveNeonActions(input.userWorkosId).catch(() => null),
     resolveAttioActions(input.userWorkosId).catch(() => null),
-    resolveGitHubActions(input.workspaceId).catch(() => null),
+    githubPluginConnected ? null : resolveGitHubActions(input.workspaceId).catch(() => null),
     resolveStripeActions(input.workspaceId).catch(() => null),
     resolveRevolutActions(input.workspaceId).catch(() => null),
     resolveXAccountActions(input.userWorkosId).catch(() => null),
+    ...remoteMcpRegistrations.map((registration) =>
+      resolveRemoteMcpActions(input, registration).catch(() => null),
+    ),
   ]);
   const providers = resolved.filter(
     (entry): entry is ActionProviderCatalog => entry !== null && entry.actions.length > 0,

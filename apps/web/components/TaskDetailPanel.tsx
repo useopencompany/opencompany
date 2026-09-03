@@ -4,6 +4,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useMemo } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { Surface } from "@/components/Surface";
+import { useHydrated } from "@/components/useHydrated";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import {
   getHeadlessChatRuns,
@@ -27,14 +28,25 @@ function CanonicalTaskDetailPanel({
   run: HarnessRunViewModel;
   conversationId: string;
 }) {
-  const data = useAppData();
-  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
+  const hydrated = useHydrated();
+  if (!hydrated) {
+    return <CanonicalTaskDetailView run={run} conversationId={conversationId} activeRun={null} />;
+  }
+  return <LiveCanonicalTaskDetailPanel run={run} conversationId={conversationId} />;
+}
+
+function LiveCanonicalTaskDetailPanel({
+  run,
+  conversationId,
+}: {
+  run: HarnessRunViewModel;
+  conversationId: string;
+}) {
   const runsCollection = useMemo(() => getHeadlessChatRuns(conversationId), [conversationId]);
   const { data: runRows } = useLiveQuery(
     (query) => query.from({ run: runsCollection }),
     [runsCollection],
   );
-  const liveTask = data.tasks?.find((task) => task.id === run.task.id);
   const activeRun = useMemo(
     () =>
       ((runRows ?? []) as HeadlessChatRunReadModel[])
@@ -42,15 +54,33 @@ function CanonicalTaskDetailPanel({
         .toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null,
     [runRows],
   );
+
+  return (
+    <CanonicalTaskDetailView run={run} conversationId={conversationId} activeRun={activeRun} />
+  );
+}
+
+function CanonicalTaskDetailView({
+  run,
+  conversationId,
+  activeRun,
+}: {
+  run: HarnessRunViewModel;
+  conversationId: string;
+  activeRun: HeadlessChatRunReadModel | null;
+}) {
+  const data = useAppData();
+  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
+  const liveTask = data.tasks?.find((task) => task.id === run.task.id);
   const initialChat: ChatSessionView = useMemo(
     () => ({
       id: conversationId,
-      title: taskDetailTitle(run),
+      title: liveTask?.name.trim() || taskDetailTitle(run),
       model: normalizeModel(run.task.model),
       engine: run.task.engine,
       messages: run.chat?.messages ?? [],
     }),
-    [conversationId, run],
+    [conversationId, liveTask?.name, run],
   );
 
   return (

@@ -10,7 +10,7 @@ export type TaskViewMode = "board" | "list";
 type UserPreferences = {
   timezone: string;
   taskSpawningEnabled: boolean;
-  wikiEnabled: boolean;
+  wikiEnabled: true;
   taskViewMode: TaskViewMode;
   imessageEnabled: boolean;
   autoModelRoutingEnabled: boolean;
@@ -26,14 +26,6 @@ export async function updateTaskSpawningAction(enabled: boolean) {
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.taskSpawningEnabled } as const;
-}
-
-export async function updateWikiEnabledAction(enabled: boolean) {
-  const preferences = await patchPreferences({ wikiEnabled: enabled === true });
-  revalidatePath("/");
-  revalidatePath("/settings/preferences");
-  revalidatePath("/wiki");
-  return { ok: true, enabled: preferences.wikiEnabled } as const;
 }
 
 export async function updateTaskViewModeAction(mode: TaskViewMode) {

@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "braintrust": "^3.28.0",
+    "braintrust": "^3.29.0",
     "zod": "^4.1.11"
   },
   "devDependencies": {

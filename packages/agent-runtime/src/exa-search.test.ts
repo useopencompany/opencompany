@@ -106,6 +106,45 @@ describe("Exa search helper", () => {
     });
   });
 
+  it("normalizes invalid Unicode from provider results", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              requestId: "exa\ud800request",
+              results: [
+                {
+                  title: "Company\ud800Brain",
+                  author: "Founder\0Name",
+                  highlights: ["Valid 🧠", "Broken\udfffhighlight"],
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const result = await executeExaSearchRequest({
+      apiKey: "exa_test",
+      args: { query: "company brain" },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.output).toMatchObject({
+      requestId: "exa�request",
+      results: [
+        {
+          title: "Company�Brain",
+          author: "Founder�Name",
+          highlights: ["Valid 🧠", "Broken�highlight"],
+        },
+      ],
+    });
+  });
+
   it("surfaces Exa HTTP errors", async () => {
     vi.stubGlobal(
       "fetch",

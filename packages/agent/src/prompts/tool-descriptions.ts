@@ -13,7 +13,7 @@ export const BRAIN_TOOL_DESCRIPTION =
   "Read-only access to the user's durable opencompany Brain (structured memory stored as Markdown files). Use it to recall and inspect existing knowledge, never to write. Use query for recall/search, list for inventory, get for a known brain id, timeline for a record's history, help for command-specific usage, and doctor for validation. Query returns curated pages by default; pass kind: \"evidence\" only when raw source material is explicitly needed. Use query with since windows like 6h, 2d, 1w, or an ISO timestamp to search or browse recent Brain pages; omit text when the user only wants recent entries. Query output includes pagination. When pagination.hasMore is true, repeat the same query with all filters unchanged and offset set to pagination.nextOffset. Use includeMerged only when inspecting duplicate/merged history and includeArchived only for retired records. To add or edit Brain content — new pages, evidence, corrections, links, or merges — use save_to_brain instead; the background curation agent files it. Do not treat Brain as a chat scratchpad.";
 
 export const SAVE_TO_BRAIN_TOOL_DESCRIPTION =
-  "Save something the user wants remembered - a reference, idea, thought, note, decision, pasted content, connected-integration item, or an attached file - into their Brain. This captures a draft page in the inbox immediately and queues background curation. When saving an item returned by use_action, pass its canonical sourceRef so the Brain cites the Slack, Gmail, or Linear source instead of this chat. A bare integration pointer can be saved without content when its integrationId is also passed; the worker then re-fetches the full source before curation. To save files attached in this conversation, pass their attachment ids via attachmentIds instead of copying the content field.";
+  "Save something the user wants remembered - a reference, idea, thought, note, decision, pasted content, connected-integration item, or an attached file - into their Brain. This captures a draft page in the inbox immediately and queues background curation. When saving an item returned by use_action, pass its canonical sourceRef so the Brain cites the Slack, Gmail, or Linear source instead of this chat. A bare Gmail or Linear pointer can be saved without content when its integrationId is also passed; the worker then re-fetches the full source before curation. Slack findings must include the content to save. To save files attached in this conversation, pass their attachment ids via attachmentIds instead of copying the content field.";
 
 export const SAVE_TO_BRAIN_CONTENT_DESCRIPTION =
   "The content to save, verbatim or lightly cleaned. Preserve the user's wording, links, and details; do not summarize away specifics. Omit when saving attached files or a bare hydratable integration source.";
@@ -22,7 +22,7 @@ export const SAVE_TO_BRAIN_SOURCE_REF_DESCRIPTION =
   "Canonical provenance for the saved item. Pass the sourceRef returned by use_action (for example slack:conversation:T123:C123:1234.5678, gmail:thread:abc, or linear:issue:ENG-123), or the public URL returned by web_fetch or web_search.";
 
 export const SAVE_TO_BRAIN_INTEGRATION_ID_DESCRIPTION =
-  "For a bare Slack, Gmail, or Linear sourceRef with no content, pass the integrationId returned alongside that use_action result so the background worker can re-fetch it. Omit for copied content, public URLs, and attachments.";
+  "For a bare Gmail or Linear sourceRef with no content, pass the integrationId returned alongside that use_action result so the background worker can re-fetch it. Omit for Slack findings, copied content, public URLs, and attachments.";
 
 export const SAVE_TO_BRAIN_FALLBACK_CONTENT_DESCRIPTION =
   "Optional one-line fallback for a bare integration pointer. It is curated only if the original source was deleted or is no longer readable.";
@@ -79,6 +79,18 @@ export const CREATE_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION =
 
 export const CREATE_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION =
   "The complete focused Markdown operating instructions. Capture the reusable method, not a transcript summary.";
+
+export const EDIT_WORKSPACE_SKILL_TOOL_DESCRIPTION =
+  "Publish a new immutable version of one existing workspace-authored Skill. Call this only when the user's latest message explicitly asks to edit, update, revise, or improve that Skill. Before editing, call list_skills to confirm the exact id and use_skill to inspect its current instructions. Preserve unaffected guidance while applying the requested changes, and never use this tool to edit an imported or plugin-provided Skill, create a missing Skill, rename a Skill, or modify a different Skill. The name must remain the exact existing id. Include the complete revised description and instructions because this replaces the full Skill bundle.";
+
+export const EDIT_WORKSPACE_SKILL_NAME_DESCRIPTION =
+  "The exact lowercase kebab-case id of the existing workspace-authored Skill. Editing never renames it.";
+
+export const EDIT_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION =
+  "The complete revised description, including what the Skill does and when the agent should use it.";
+
+export const EDIT_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION =
+  "The complete revised Markdown instructions, preserving all unaffected guidance from the current Skill.";
 
 export const SCHEDULE_TASK_TOOL_DESCRIPTION =
   "Create a recurring opencompany task schedule from the user's request. Use only when the user clearly asks for repeated, recurring, scheduled, or cron-like work. Convert the recurrence to a valid 5-field cron expression and save directly; if the recurrence is ambiguous or not cron-expressible, ask a short follow-up instead of calling this tool.";

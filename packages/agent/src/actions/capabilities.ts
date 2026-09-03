@@ -73,6 +73,22 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  github_user: [
+    {
+      id: "read",
+      label: "Read GitHub",
+      description:
+        "Inspect repositories, code, issues, pull requests, releases, and GitHub Actions results.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Manage GitHub",
+      description:
+        "Change repository content, issues, and pull requests, including merging pull requests.",
+      defaultMode: "ask",
+    },
+  ],
   linear: [
     {
       id: "read",
@@ -104,9 +120,22 @@ export const PROVIDER_CAPABILITIES: Partial<
   slack: [
     {
       id: "read",
-      label: "Read Slack",
-      description: "Search and read channels, direct messages, threads, and people in Slack.",
+      label: "Search public Slack",
+      description: "Search public channels, users, and emoji available to your Slack account.",
       defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read private Slack",
+      description:
+        "Read private channels, direct messages, threads, canvases, files, and profiles.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Change Slack",
+      description: "Send or schedule messages, upload files, add reactions, and change canvases.",
+      defaultMode: "ask",
     },
   ],
   attio: [
@@ -150,6 +179,50 @@ export const PROVIDER_CAPABILITIES: Partial<
       id: "query",
       label: "Query database data",
       description: "Run provider-enforced read-only SQL against databases you can access in Neon.",
+      defaultMode: "ask",
+    },
+  ],
+  betterstack: [
+    {
+      id: "read",
+      label: "Search Better Stack docs",
+      description: "Search Better Stack's public product documentation.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Inspect observability data",
+      description:
+        "Read monitors, incidents, on-call schedules, logs, metrics, errors, dashboards, and team access.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage Better Stack",
+      description:
+        "Change monitoring, incidents, dashboards, alerts, status pages, error state, and team access.",
+      defaultMode: "ask",
+    },
+  ],
+  signoz: [
+    {
+      id: "read",
+      label: "Read SigNoz documentation",
+      description: "Search SigNoz's public product documentation.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Inspect observability data",
+      description:
+        "Query logs, metrics, traces, alerts, dashboards, views, and notification channels.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage SigNoz",
+      description:
+        "Create, update, import, or delete alerts, dashboards, views, and notification channels.",
       defaultMode: "ask",
     },
   ],

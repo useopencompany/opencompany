@@ -60,6 +60,7 @@ describe("Latitude actions", () => {
       accountName: "Latitude",
       statusReason: null,
       capabilityModes: {},
+      toolModes: {},
     });
     vi.mocked(loadLatitudeMcpWorkerConnection).mockResolvedValue({
       ok: true,

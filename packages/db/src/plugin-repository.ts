@@ -4,6 +4,7 @@ import {
   computeArtifactIntegrity,
   PLUGIN_LIMITS,
   parseMcpConfig,
+  parsePluginCapabilities,
   parsePluginManifest,
 } from "@opencompany/agent-runtime";
 import {
@@ -11,6 +12,8 @@ import {
   type PluginInstallation,
   type PluginInstallationListItem,
   type PluginInstallReport,
+  type PluginRemoteMcpDiscoveryStatus,
+  type PluginRemoteMcpServer,
   type PluginRepository,
   type PluginSkillCollision,
   type ResolvedPluginPackage,
@@ -20,6 +23,7 @@ import { del } from "@vercel/blob";
 import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 import {
   pluginFiles,
+  pluginGatewayRegistrations,
   pluginSkills,
   plugins,
   skillBundles,
@@ -133,6 +137,21 @@ export class PostgresPluginRepository implements PluginRepository {
           installReport: initialReport,
           mcpApprovedIntegrity: null,
         });
+        if (input.plugin.remoteServers.length > 0) {
+          await tx.insert(pluginGatewayRegistrations).values(
+            input.plugin.remoteServers.map((server) => ({
+              id: deterministicId("plugin_gateway", pluginId, server.name),
+              workspaceId: input.actor.workspaceId,
+              pluginId,
+              serverName: server.name,
+              connectionProvider: input.plugin.manifest.name,
+              transport: server.type,
+              serverUrl: server.url,
+              headers: server.headers,
+              capabilities: input.plugin.capabilities,
+            })),
+          );
+        }
         await tx.insert(pluginFiles).values(
           input.plugin.files.map((file) => ({
             pluginId,
@@ -185,7 +204,7 @@ export class PostgresPluginRepository implements PluginRepository {
       .where(and(eq(plugins.workspaceId, input.actor.workspaceId), ne(plugins.status, "archived")))
       .orderBy(desc(plugins.updatedAt))) as PluginRow[];
     const hydrated = await Promise.all(rows.map((row) => hydratePlugin(this.db, row)));
-    return hydrated.map(({ files, skills, stdioServers, ...plugin }) => ({
+    return hydrated.map(({ files, skills, stdioServers, remoteMcpServers: _, ...plugin }) => ({
       ...plugin,
       fileCount: files.length,
       skillCount: skills.length,
@@ -279,23 +298,34 @@ export class PostgresPluginRepository implements PluginRepository {
     name: string;
   }) {
     const now = new Date();
-    const rows = await this.db
-      .update(plugins)
-      .set({
-        status: "archived",
-        archivedAt: now,
-        updatedAt: now,
-        mcpApprovedIntegrity: null,
-      })
-      .where(
+    await this.db.transaction(async (tx: DbClient) => {
+      const rows = await tx
+        .update(plugins)
+        .set({
+          status: "archived",
+          archivedAt: now,
+          updatedAt: now,
+          mcpApprovedIntegrity: null,
+        })
+        .where(
+          and(
+            eq(plugins.workspaceId, input.actor.workspaceId),
+            eq(plugins.name, input.name),
+            inArray(plugins.status, ["enabled", "disabled"]),
+          ),
+        )
+        .returning({ id: plugins.id });
+      if (rows.length === 0) throw new CoreError("not_found", "Plugin not found.");
+      await tx.delete(pluginGatewayRegistrations).where(
         and(
-          eq(plugins.workspaceId, input.actor.workspaceId),
-          eq(plugins.name, input.name),
-          inArray(plugins.status, ["enabled", "disabled"]),
+          eq(pluginGatewayRegistrations.workspaceId, input.actor.workspaceId),
+          inArray(
+            pluginGatewayRegistrations.pluginId,
+            rows.map((row: { id: string }) => row.id),
+          ),
         ),
-      )
-      .returning({ id: plugins.id });
-    if (rows.length === 0) throw new CoreError("not_found", "Plugin not found.");
+      );
+    });
   }
 
   async deleteData(input: {
@@ -375,7 +405,7 @@ async function pluginByName(db: DbClient, workspaceId: string, name: string) {
 }
 
 async function hydratePlugin(db: DbClient, row: PluginRow): Promise<PluginInstallation> {
-  const [files, skills, collisions] = await Promise.all([
+  const [files, skills, remoteMcpServers, collisions] = await Promise.all([
     db
       .select({
         path: pluginFiles.path,
@@ -411,6 +441,25 @@ async function hydratePlugin(db: DbClient, row: PluginRow): Promise<PluginInstal
       )
       .where(and(eq(pluginSkills.pluginId, row.id), eq(pluginSkills.workspaceId, row.workspaceId)))
       .orderBy(asc(pluginSkills.skillName)),
+    db
+      .select({
+        name: pluginGatewayRegistrations.serverName,
+        type: pluginGatewayRegistrations.transport,
+        connectionProvider: pluginGatewayRegistrations.connectionProvider,
+        capabilities: pluginGatewayRegistrations.capabilities,
+        tools: pluginGatewayRegistrations.discoverySnapshot,
+        discoveredAt: pluginGatewayRegistrations.discoveredAt,
+        refreshAfter: pluginGatewayRegistrations.refreshAfter,
+        lastDiscoveryError: pluginGatewayRegistrations.lastDiscoveryError,
+      })
+      .from(pluginGatewayRegistrations)
+      .where(
+        and(
+          eq(pluginGatewayRegistrations.pluginId, row.id),
+          eq(pluginGatewayRegistrations.workspaceId, row.workspaceId),
+        ),
+      )
+      .orderBy(asc(pluginGatewayRegistrations.serverName)),
     currentSkillCollisions(db, row.workspaceId),
   ]);
   const relevantCollisions = collisions.filter(
@@ -434,12 +483,31 @@ async function hydratePlugin(db: DbClient, row: PluginRow): Promise<PluginInstal
     files: files as SkillBundleFileMetadata[],
     skills,
     stdioServers: row.stdioMcpServers,
+    remoteMcpServers: (remoteMcpServers as PluginRemoteMcpServerRow[]).map((server) => ({
+      ...server,
+      tools: server.tools.map(({ name, description, classification }) => ({
+        name,
+        ...(description !== undefined ? { description } : {}),
+        classification,
+      })),
+      discoveryStatus: pluginDiscoveryStatus(server),
+    })),
     installReport: { ...row.installReport, collisions: relevantCollisions },
     mcpApprovedIntegrity: row.mcpApprovedIntegrity,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     archivedAt: row.archivedAt,
   };
+}
+
+type PluginRemoteMcpServerRow = Omit<PluginRemoteMcpServer, "discoveryStatus">;
+
+function pluginDiscoveryStatus(server: {
+  discoveredAt: Date | null;
+  lastDiscoveryError: string | null;
+}): PluginRemoteMcpDiscoveryStatus {
+  if (server.lastDiscoveryError) return server.discoveredAt ? "stale" : "error";
+  return server.discoveredAt ? "ready" : "pending";
 }
 
 export async function currentSkillCollisions(
@@ -508,18 +576,37 @@ async function validateResolvedPlugin(plugin: ResolvedPluginPackage) {
 
   const mcpFile = packageFiles.get("mcp.json");
   let parsedServers: ResolvedPluginPackage["stdioServers"] = [];
+  let parsedRemoteServers: ResolvedPluginPackage["remoteServers"] = [];
   if (mcpFile) {
     try {
       const parsed = parseMcpConfig(
         new TextDecoder("utf-8", { fatal: true }).decode(mcpFile.content),
       );
-      if (parsed.status === "parsed") parsedServers = parsed.servers;
+      if (parsed.status === "parsed") {
+        parsedServers = parsed.servers;
+        parsedRemoteServers = parsed.remoteServers;
+      }
     } catch {
       parsedServers = [];
+      parsedRemoteServers = [];
     }
   }
   if (JSON.stringify(parsedServers) !== JSON.stringify(plugin.stdioServers)) {
     throw new CoreError("invalid_argument", "The Plugin MCP entries do not match mcp.json.");
+  }
+  if (JSON.stringify(parsedRemoteServers) !== JSON.stringify(plugin.remoteServers)) {
+    throw new CoreError("invalid_argument", "The Plugin remote MCP entries do not match mcp.json.");
+  }
+
+  const parsedCapabilities =
+    plugin.report.capabilities?.status === "parsed"
+      ? parsePluginCapabilities(parsedManifest.extensions, { trusted: true }).definitions
+      : [];
+  if (JSON.stringify(parsedCapabilities) !== JSON.stringify(plugin.capabilities)) {
+    throw new CoreError(
+      "invalid_argument",
+      "The Plugin capability definitions do not match plugin.json.",
+    );
   }
 
   const skillNames = new Set<string>();

@@ -17,7 +17,6 @@ import {
   isNormalizedImportSourceItem,
   isNormalizedJamieMeetingSourceItem,
   isNormalizedLinearIssueSourceItem,
-  isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
   type NormalizedBrainPointerSourceItem,
   type NormalizedBrainSourceItem,
@@ -27,6 +26,7 @@ import { normalizeBrainIngestTrace } from "@opencompany/brain/ingest-trace";
 import { releasePendingIngestionReservations } from "@opencompany/db/billing";
 import { brainFilePathFor, listBrainFiles, upsertBrainFile } from "@opencompany/db/brain-files";
 import { recordCreditDebit } from "@opencompany/db/credits";
+import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import {
   type BrainIngestJob,
   type BrainIngestJobKind,
@@ -64,7 +64,6 @@ import {
   runImportAgentIngest,
   runJamieMeetingAgentIngest,
   runLinearIssueAgentIngest,
-  runSlackConversationAgentIngest,
   runUploadAssetAgentIngest,
 } from "./brain-agent-ingest";
 import {
@@ -181,11 +180,6 @@ const CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
 const POINTER_HYDRATE_DESCRIPTORS = [
   {
     kind: "brain_pointer_hydrate",
-    sourceProvider: "slack",
-    sourceType: "pointer",
-  },
-  {
-    kind: "brain_pointer_hydrate",
     sourceProvider: "gmail",
     sourceType: "pointer",
   },
@@ -200,12 +194,6 @@ const UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "upload",
   sourceType: "asset",
-} as const satisfies BrainIngestJobDescriptor;
-
-const SLACK_CONVERSATION_AGENT_INGEST_DESCRIPTOR = {
-  kind: "brain_agent_ingest",
-  sourceProvider: "slack",
-  sourceType: "conversation",
 } as const satisfies BrainIngestJobDescriptor;
 
 const LINEAR_ISSUE_AGENT_INGEST_DESCRIPTOR = {
@@ -287,11 +275,6 @@ const BRAIN_INGEST_HANDLERS: readonly BrainIngestHandler[] = [
     descriptor: UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedUploadAssetSourceItem,
     run: runTypedBrainIngestHandler(runUploadAssetAgentIngest),
-  },
-  {
-    descriptor: SLACK_CONVERSATION_AGENT_INGEST_DESCRIPTOR,
-    isPayload: isNormalizedSlackConversationSourceItem,
-    run: runTypedBrainIngestHandler(runSlackConversationAgentIngest),
   },
   {
     descriptor: LINEAR_ISSUE_AGENT_INGEST_DESCRIPTOR,
@@ -502,7 +485,7 @@ export function createDbBrainIngestStore(): BrainIngestStore {
     },
 
     async complete(input) {
-      const resultJson = JSON.stringify(input.result);
+      const resultJson = stringifyPostgresJson(input.result);
       const result = await getDb().execute(sql`
         WITH completed_job AS (
           UPDATE goat.brain_ingest_jobs
@@ -541,7 +524,7 @@ export function createDbBrainIngestStore(): BrainIngestStore {
     },
 
     async skip(input) {
-      const resultJson = JSON.stringify(input.result);
+      const resultJson = stringifyPostgresJson(input.result);
       const result = await getDb().execute(sql`
         WITH skipped_job AS (
           UPDATE goat.brain_ingest_jobs
@@ -582,14 +565,14 @@ export function createDbBrainIngestStore(): BrainIngestStore {
       // Append this attempt's error to result.attemptErrors so retry causes
       // survive the retries (last_error alone is overwritten per attempt and
       // cleared when a later attempt succeeds or skips).
-      const attemptErrorJson = JSON.stringify([
+      const attemptErrorJson = stringifyPostgresJson([
         {
           attempt: input.attempts,
           at: input.now.toISOString(),
           error: input.error.slice(0, ATTEMPT_ERROR_MAX_CHARS),
         },
       ]);
-      const failureResultJson = JSON.stringify(input.result ?? {});
+      const failureResultJson = stringifyPostgresJson(input.result ?? {});
       const result = await getDb().execute(sql`
         WITH failed_job AS (
           UPDATE goat.brain_ingest_jobs

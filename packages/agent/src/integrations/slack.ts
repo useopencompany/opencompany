@@ -1,9 +1,16 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import { integrations } from "@opencompany/db/product-schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import type { SlackProviderState } from "../integration-state";
+import {
+  SLACK_MCP_RECONNECT_REASON,
+  SLACK_MCP_USER_SCOPES,
+  slackMcpScopesSatisfied,
+} from "./slack-scopes";
+
+export { SLACK_MCP_USER_SCOPES } from "./slack-scopes";
 
 export type SlackIntegrationStatePayload = {
   userWorkosId: string;
@@ -15,35 +22,38 @@ export type SlackIntegrationStatePayload = {
 export type SlackOAuthResult = {
   teamId: string;
   teamName: string | null;
-  authedUserId: string;
+  authedUserId: string | null;
   accessToken: string;
   scopes: string[];
 };
+
+export type SlackOAuthResponseShape = {
+  credentialLocation: "absent" | "top_level" | "nested" | "both";
+  hasAuthedUserId: boolean;
+  hasTeamId: boolean;
+  hasEnterpriseId: boolean;
+  isEnterpriseInstall: boolean | null;
+};
+
+export type SlackOAuthRequiredResponseField = "access_token" | "team.id";
+
+export class SlackOAuthResponseError extends Error {
+  readonly code = "slack_oauth_response_invalid";
+
+  constructor(
+    readonly missingFields: readonly SlackOAuthRequiredResponseField[],
+    readonly responseShape: SlackOAuthResponseShape,
+  ) {
+    super(`Slack OAuth response missing required fields: ${missingFields.join(", ")}.`);
+    this.name = "SlackOAuthResponseError";
+  }
+}
 
 const SLACK_PROVIDER = "slack" as const;
 const SLACK_INTEGRATION_ENVS = [
   "OPENCOMPANY_SLACK_CLIENT_ID",
   "OPENCOMPANY_SLACK_CLIENT_SECRET",
-  "OPENCOMPANY_SLACK_SIGNING_SECRET",
   "OPENCOMPANY_SLACK_STATE_SECRET",
-] as const;
-
-// User-token scopes: the app reads what the connected user can read (their
-// channels and DMs) and never gets a bot presence in the workspace. The
-// search:read scope powers search.messages for the chat capability; connections
-// created before it was added keep working without search until reconnected.
-export const SLACK_USER_SCOPES = [
-  "channels:history",
-  "groups:history",
-  "im:history",
-  "mpim:history",
-  "channels:read",
-  "groups:read",
-  "im:read",
-  "mpim:read",
-  "users:read",
-  "team:read",
-  "search:read",
 ] as const;
 
 export function isSlackIntegrationConfigured() {
@@ -51,20 +61,7 @@ export function isSlackIntegrationConfigured() {
 }
 
 export async function getSlackIntegrationState(userWorkosId: string): Promise<SlackProviderState> {
-  const [row] = await getDb()
-    .select({
-      id: integrations.id,
-      status: integrations.status,
-      accountName: integrations.accountName,
-      connectionLabel: integrations.connectionLabel,
-      statusReason: integrations.statusReason,
-    })
-    .from(integrations)
-    .where(
-      and(eq(integrations.userWorkosId, userWorkosId), eq(integrations.provider, SLACK_PROVIDER)),
-    )
-    .orderBy(desc(integrations.updatedAt))
-    .limit(1);
+  const row = await loadSlackIntegration({ userWorkosId });
 
   if (!row || row.status === "disconnected") {
     return {
@@ -78,15 +75,46 @@ export async function getSlackIntegrationState(userWorkosId: string): Promise<Sl
     };
   }
 
+  const needsPluginGrant = row.status === "connected" && !slackMcpScopesSatisfied(row.scopes ?? []);
+
   return {
     provider: SLACK_PROVIDER,
-    connected: row.status === "connected",
-    status: row.status,
+    connected: row.status === "connected" && !needsPluginGrant,
+    status: needsPluginGrant ? "needs_reauth" : row.status,
     integrationId: row.id,
     accountName: row.accountName,
     teamName: row.connectionLabel,
-    statusReason: row.statusReason,
+    statusReason: needsPluginGrant ? SLACK_MCP_RECONNECT_REASON : row.statusReason,
   };
+}
+
+type DbLike = any;
+
+export async function loadSlackIntegration(input: { userWorkosId: string; db?: DbLike }) {
+  const [row] = await (input.db ?? getDb())
+    .select({
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
+      accountName: integrations.accountName,
+      connectionLabel: integrations.connectionLabel,
+      statusReason: integrations.statusReason,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
+      toolModes: integrations.toolModes,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.userWorkosId, input.userWorkosId),
+        isNull(integrations.workspaceId),
+        eq(integrations.provider, SLACK_PROVIDER),
+        ne(integrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(integrations.updatedAt))
+    .limit(1);
+  return row;
 }
 
 export function createSlackIntegrationState(
@@ -123,10 +151,9 @@ export function verifySlackIntegrationState(state: string): SlackIntegrationStat
 }
 
 export function buildSlackAuthorizationUrl(state: string) {
-  const url = new URL("https://slack.com/oauth/v2/authorize");
+  const url = new URL("https://slack.com/oauth/v2_user/authorize");
   url.searchParams.set("client_id", requiredEnv("OPENCOMPANY_SLACK_CLIENT_ID"));
-  // user_scope (not scope): we request a user token only, no bot token.
-  url.searchParams.set("user_scope", SLACK_USER_SCOPES.join(","));
+  url.searchParams.set("scope", SLACK_MCP_USER_SCOPES.join(","));
   url.searchParams.set("redirect_uri", slackCallbackUrl());
   url.searchParams.set("state", state);
   return url.toString();
@@ -135,9 +162,13 @@ export function buildSlackAuthorizationUrl(state: string) {
 export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult> {
   const result = await slackApiRequest<{
     team?: { id?: string; name?: string };
+    enterprise?: { id?: string; name?: string };
     authed_user?: { id?: string; access_token?: string; scope?: string; token_type?: string };
+    access_token?: string;
+    scope?: string;
+    is_enterprise_install?: boolean;
   }>({
-    method: "oauth.v2.access",
+    method: "oauth.v2.user.access",
     form: {
       client_id: requiredEnv("OPENCOMPANY_SLACK_CLIENT_ID"),
       client_secret: requiredEnv("OPENCOMPANY_SLACK_CLIENT_SECRET"),
@@ -148,39 +179,78 @@ export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult>
 
   const teamId = result.team?.id?.trim();
   const authedUserId = result.authed_user?.id?.trim();
-  const accessToken = result.authed_user?.access_token?.trim();
-  if (!teamId || !authedUserId || !accessToken) {
-    throw new Error("Slack did not return a user token.");
+  const accessToken = result.access_token?.trim();
+  const nestedAccessToken = result.authed_user?.access_token?.trim();
+  const missingFields: SlackOAuthRequiredResponseField[] = [];
+  if (!teamId) missingFields.push("team.id");
+  if (!accessToken) missingFields.push("access_token");
+  if (!teamId || !accessToken) {
+    throw new SlackOAuthResponseError(missingFields, {
+      credentialLocation:
+        accessToken && nestedAccessToken
+          ? "both"
+          : accessToken
+            ? "top_level"
+            : nestedAccessToken
+              ? "nested"
+              : "absent",
+      hasAuthedUserId: Boolean(authedUserId),
+      hasTeamId: Boolean(teamId),
+      hasEnterpriseId: Boolean(result.enterprise?.id?.trim()),
+      isEnterpriseInstall:
+        typeof result.is_enterprise_install === "boolean" ? result.is_enterprise_install : null,
+    });
   }
 
   return {
     teamId,
     teamName: result.team?.name?.trim() || null,
-    authedUserId,
+    authedUserId: authedUserId || null,
     accessToken,
-    scopes: (result.authed_user?.scope ?? "").split(",").filter(Boolean),
+    scopes: result.scope?.split(",").filter(Boolean) ?? [],
   };
 }
 
-export async function fetchSlackIdentity(input: { accessToken: string; authedUserId: string }) {
-  const [userResult, teamResult] = await Promise.all([
-    slackApiRequest<{
-      user?: { real_name?: string; name?: string; profile?: { email?: string } };
-    }>({
-      method: "users.info",
-      token: input.accessToken,
-      form: { user: input.authedUserId },
-    }),
-    slackApiRequest<{ team?: { domain?: string } }>({
-      method: "team.info",
-      token: input.accessToken,
-    }),
-  ]);
+export async function fetchSlackIdentity(input: {
+  accessToken: string;
+  authedUserId: string | null;
+  teamId: string;
+}) {
+  // The dedicated user-token endpoint can omit `authed_user` from an otherwise valid response.
+  // Resolve the token holder through auth.test and cross-check any identity OAuth did provide.
+  const authResult = await slackApiRequest<{ url?: string; user_id?: string; team_id?: string }>({
+    method: "auth.test",
+    token: input.accessToken,
+  });
+  const oauthUserId = input.authedUserId?.trim() || null;
+  const authenticatedUserId = authResult.user_id?.trim() || null;
+  const authenticatedTeamId = authResult.team_id?.trim() || null;
+
+  if (authenticatedTeamId && authenticatedTeamId !== input.teamId) {
+    throw new Error("Slack authenticated token did not match the OAuth workspace.");
+  }
+  if (oauthUserId && authenticatedUserId && oauthUserId !== authenticatedUserId) {
+    throw new Error("Slack authenticated token did not match the OAuth user.");
+  }
+
+  const authedUserId = oauthUserId ?? authenticatedUserId;
+  if (!authedUserId) {
+    throw new Error("Slack identity response did not include a user ID.");
+  }
+
+  const userResult = await slackApiRequest<{
+    user?: { real_name?: string; name?: string; profile?: { email?: string } };
+  }>({
+    method: "users.info",
+    token: input.accessToken,
+    form: { user: authedUserId },
+  });
 
   return {
+    authedUserId,
     userName: userResult.user?.real_name?.trim() || userResult.user?.name?.trim() || null,
     userEmail: userResult.user?.profile?.email?.trim() || null,
-    teamDomain: teamResult.team?.domain?.trim() || null,
+    teamDomain: slackTeamDomainFromUrl(authResult.url),
   };
 }
 
@@ -227,6 +297,16 @@ function slackCallbackUrl() {
   return `${getAppUrl()}/api/integrations/slack/callback`;
 }
 
+function slackTeamDomainFromUrl(value: string | undefined) {
+  if (!value) return null;
+  try {
+    const hostname = new URL(value).hostname.toLocaleLowerCase();
+    return hostname.endsWith(".slack.com") ? hostname.slice(0, -".slack.com".length) || null : null;
+  } catch {
+    return null;
+  }
+}
+
 function isSlackIntegrationStatePayload(value: unknown): value is SlackIntegrationStatePayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
@@ -239,7 +319,7 @@ function isSlackIntegrationStatePayload(value: unknown): value is SlackIntegrati
 }
 
 function sanitizeReturnTo(value: string) {
-  if (!value.startsWith("/") || value.startsWith("//")) return "/settings";
+  if (!value.startsWith("/") || value.startsWith("//")) return "/settings/plugins/slack";
   return value;
 }
 

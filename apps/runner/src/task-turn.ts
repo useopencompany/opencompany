@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
-  ACTION_HOST_TOOL_CONTRACT_VERSION,
+  UPDATE_TASK_STATUS_TOOL_DESCRIPTION,
+  UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA,
+} from "@opencompany/agent/chat-agent";
+import {
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
+  hostToolContractVersionForEngine,
 } from "@opencompany/agent-runtime";
 import {
   captureProductLlmUsageRecorded,
@@ -13,6 +17,7 @@ import {
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { RUN_EVENT_NOTIFY_CHANNEL } from "@opencompany/db/chat-repository";
 import { recordCreditDebit } from "@opencompany/db/credits";
+import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import {
   type CodexChatSession,
   type CodexChatSessionStatus,
@@ -94,7 +99,7 @@ type TaskNextTurn = {
   engine: HarnessSpec["engine"];
   chatModel: string;
   runtimeModel: string;
-  hostToolContractVersion: string | null;
+  hostToolContractVersion: string;
   settings: CodexChatTurnSettings;
   assistantDebugTrace: Record<string, unknown>;
 };
@@ -144,7 +149,7 @@ export async function markTaskTurnRunning(input: {
         jsonb_build_object(
           'runId', ${input.turn.id},
           'attempt', task.attempts
-        ) || ${JSON.stringify(stepMetadata)}::jsonb,
+        ) || ${stringifyPostgresJson(stepMetadata)}::jsonb,
         ${now}
       FROM updated_task AS task
       WHERE task.previous_stage = 'queued'
@@ -219,8 +224,8 @@ export async function prepareCodexTaskTurn(input: {
       SET status = 'running',
           stage = 'running',
           model = ${harnessSpec.model},
-          harness_spec = ${JSON.stringify(harnessSpec)}::jsonb,
-          debug_trace = ${JSON.stringify(planned.debugTrace)}::jsonb,
+          harness_spec = ${stringifyPostgresJson(harnessSpec)}::jsonb,
+          debug_trace = ${stringifyPostgresJson(planned.debugTrace)}::jsonb,
           updated_at = ${now}
       WHERE task.id = ${task.id}
         AND task.session_id = ${input.turn.chatSessionId}
@@ -824,7 +829,7 @@ export async function settleDurableTurn(input: {
         item.value ->> 'type' AS type,
         item.value -> 'payload' AS payload,
         item.ordinality
-      FROM jsonb_array_elements(${JSON.stringify(canonicalEvents)}::jsonb)
+      FROM jsonb_array_elements(${stringifyPostgresJson(canonicalEvents)}::jsonb)
         WITH ORDINALITY AS item(value, ordinality)
     ),
     inserted_canonical_events AS (
@@ -915,7 +920,7 @@ export async function settleDurableTurn(input: {
             ELSE task.attempts
           END,
           harness_spec = COALESCE(
-            ${completion ? JSON.stringify(completion.harnessSpec) : null}::jsonb,
+            ${completion ? stringifyPostgresJson(completion.harnessSpec) : null}::jsonb,
             task.harness_spec
           ),
           updated_at = ${input.completedAt}
@@ -929,7 +934,7 @@ export async function settleDurableTurn(input: {
       )
       SELECT
         ${finishedActivityId}, task.id, 'system', 'run_finished', ${activityBody},
-        ${JSON.stringify(activityMetadata)}::jsonb,
+        ${stringifyPostgresJson(activityMetadata)}::jsonb,
         ${input.completedAt}
       FROM projected_task AS task
       RETURNING id
@@ -992,7 +997,9 @@ export async function settleDurableTurn(input: {
         'user',
         ${next?.userMessageContent ?? next?.prompt ?? null},
         task.id,
-        ${next?.userMessageDebugTrace ? JSON.stringify(next.userMessageDebugTrace) : null}::jsonb,
+        ${
+          next?.userMessageDebugTrace ? stringifyPostgresJson(next.userMessageDebugTrace) : null
+        }::jsonb,
         NULL,
         NULL,
         ${input.completedAt},
@@ -1012,7 +1019,7 @@ export async function settleDurableTurn(input: {
         'assistant',
         '',
         task.id,
-        ${next ? JSON.stringify(next.assistantDebugTrace) : null}::jsonb,
+        ${next ? stringifyPostgresJson(next.assistantDebugTrace) : null}::jsonb,
         ${new Date(input.completedAt.getTime() + 1)},
         ${new Date(input.completedAt.getTime() + 1)}
       FROM projected_task AS task
@@ -1045,7 +1052,7 @@ export async function settleDurableTurn(input: {
         ${next?.assistantMessageId ?? null},
         'queued',
         ${next?.prompt ?? null},
-        ${next ? JSON.stringify(next.settings) : null}::jsonb,
+        ${next ? stringifyPostgresJson(next.settings) : null}::jsonb,
         ${next?.runAfter ?? null},
         1,
         ${new Date(input.completedAt.getTime() + 2)},
@@ -1294,8 +1301,7 @@ function createNextTaskTurn(input: {
     engine: input.harnessSpec.engine,
     chatModel: input.harnessSpec.model,
     runtimeModel,
-    hostToolContractVersion:
-      input.harnessSpec.engine === "opencompany" ? null : ACTION_HOST_TOOL_CONTRACT_VERSION,
+    hostToolContractVersion: hostToolContractVersionForEngine(input.harnessSpec.engine),
     settings: input.settings ?? {
       ...(input.harnessSpec.codex?.reasoningEffort
         ? { reasoningEffort: input.harnessSpec.codex.reasoningEffort }

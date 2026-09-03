@@ -137,14 +137,9 @@ for (const [relativePath, fragments] of requiredCompatibilityFragments) {
   }
 }
 
-for (const [
-  label,
-  currentPattern,
-  gitPattern,
-  acceptedCutoverDelta = 0,
-] of protectedCompatibilityTokens) {
+for (const [label, currentPattern, gitPattern] of protectedCompatibilityTokens) {
   const currentCount = currentCompatibilityCorpus.match(currentPattern)?.length ?? 0;
-  const expectedCount = gitMatchCount(gitPattern) + acceptedCutoverDelta;
+  const expectedCount = gitMatchCount(gitPattern);
   if (currentCount !== expectedCount) {
     failures.push(
       `${label}: expected ${expectedCount} retained occurrences, found ${currentCount}`,
@@ -199,10 +194,19 @@ const baseEnvKeys = envKeys(
 // variables are declared here so the check accepts them.
 const addedEnvKeys = [
   "API_INTERNAL_TOKEN",
+  "GITHUB_USER_APP_CLIENT_ID",
+  "GITHUB_USER_APP_CLIENT_SECRET",
+  "GITHUB_USER_APP_SLUG",
+  "GITHUB_USER_APP_STATE_SECRET",
   "OPENCOMPANY_DESKTOP_AUTH_SECRET",
   "RUNNER_CODEX_CHAT_SELF_HEAL_ENABLED",
+  "RUNNER_SANDBOX_NAMESPACE",
+  "WORKOS_MOBILE_CLIENT_ID",
 ];
-const retiredEnvKeys = new Set([["RUNNER", "CLAUDE", "CODE", "ACP", "ENABLED"].join("_")]);
+const retiredEnvKeys = new Set([
+  ["OPENCOMPANY", "SLACK", "SIGNING", "SECRET"].join("_"),
+  ["RUNNER", "CLAUDE", "CODE", "ACP", "ENABLED"].join("_"),
+]);
 const expectedEnvKeys = [
   ...new Set([
     ...baseEnvKeys

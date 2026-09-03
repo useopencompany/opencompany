@@ -1,5 +1,11 @@
 import { getAppUrl } from "@opencompany/agent/app-url";
 import {
+  appendBetterStackMcpStatus,
+  completeBetterStackMcpOAuth,
+  startBetterStackMcpOAuth,
+  verifyBetterStackMcpState,
+} from "@opencompany/agent/integrations/betterstack-mcp";
+import {
   appendLatitudeMcpStatus,
   completeLatitudeMcpOAuth,
   startLatitudeMcpOAuth,
@@ -23,6 +29,12 @@ import {
   startPostHogMcpOAuth,
   verifyPostHogMcpState,
 } from "@opencompany/agent/integrations/posthog-mcp";
+import {
+  appendSigNozMcpStatus,
+  completeSigNozMcpOAuth,
+  startSigNozMcpOAuth,
+  verifySigNozMcpState,
+} from "@opencompany/agent/integrations/signoz-mcp";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -31,9 +43,15 @@ const logger = createLogger({ service: "opencompany-api", runtime: "mcp-oauth-in
 
 type DbLike = any;
 
-export type McpOAuthProvider = "linear" | "posthog" | "neon" | "latitude";
+export type McpOAuthProvider =
+  | "linear"
+  | "posthog"
+  | "neon"
+  | "latitude"
+  | "betterstack"
+  | "signoz";
 
-// Provider ingress composition for the four remote-MCP connectors. Each
+// Provider ingress composition for the remote-MCP connectors. Each
 // provider shares the createRemoteMcpIntegration factory; this module
 // owns only the browser-facing OAuth start/callback flows — the runner keeps
 // loading worker connections through the module-level defaults.
@@ -55,6 +73,24 @@ type McpProviderFlow = {
 };
 
 const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
+  betterstack: {
+    start: startBetterStackMcpOAuth,
+    complete: completeBetterStackMcpOAuth,
+    verifyState: verifyBetterStackMcpState,
+    appendStatus: appendBetterStackMcpStatus,
+    deniedReason: "betterstack_denied",
+    invalidStatePath:
+      "/settings/plugins/betterstack?integration=betterstack&setup=error&reason=invalid_state",
+  },
+  signoz: {
+    start: startSigNozMcpOAuth,
+    complete: completeSigNozMcpOAuth,
+    verifyState: verifySigNozMcpState,
+    appendStatus: appendSigNozMcpStatus,
+    deniedReason: "signoz_denied",
+    invalidStatePath:
+      "/settings/plugins/signoz?integration=signoz&setup=error&reason=invalid_state",
+  },
   linear: {
     start: startLinearMcpOAuth,
     complete: completeLinearMcpOAuth,
@@ -90,9 +126,16 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
   },
 };
 
+type RefreshPluginRegistrations = (input: {
+  provider: McpOAuthProvider;
+  userWorkosId: string;
+  workspaceIds: string[];
+}) => Promise<void>;
+
 export function createMcpOAuthIngress(input: {
   db: DbLike;
   identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: RefreshPluginRegistrations;
 }): McpOAuthIngressService {
   return {
     start: (provider, request) => handleStart(input, provider, request),
@@ -100,7 +143,11 @@ export function createMcpOAuthIngress(input: {
   };
 }
 
-type IngressInput = { db: DbLike; identify: ApiIdentityVerifier };
+type IngressInput = {
+  db: DbLike;
+  identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: RefreshPluginRegistrations;
+};
 
 async function handleStart(
   input: IngressInput,
@@ -120,6 +167,7 @@ async function handleStart(
       db: input.db,
     });
     if (result.status === "connected") {
+      await refreshAfterConnection(input, provider, session);
       return statusRedirect(session, flow, returnTo, "connected");
     }
     return sessionRedirect(session, result.redirectUrl);
@@ -170,6 +218,7 @@ async function handleCallback(
       state: stateValue,
       db: input.db,
     });
+    await refreshAfterConnection(input, provider, session);
     return statusRedirect(session, flow, state.returnTo, "connected");
   } catch (error) {
     logger.warn("Remote MCP OAuth completion failed", {
@@ -178,6 +227,27 @@ async function handleCallback(
       error_message: error instanceof Error ? error.message : String(error),
     });
     return statusRedirect(session, flow, state.returnTo, "error", "token_exchange_failed");
+  }
+}
+
+async function refreshAfterConnection(
+  input: IngressInput,
+  provider: McpOAuthProvider,
+  session: Extract<IngressSession, { kind: "actor" }>,
+) {
+  if (!input.refreshPluginRegistrations) return;
+  try {
+    await input.refreshPluginRegistrations({
+      provider,
+      userWorkosId: session.userId,
+      workspaceIds: session.workspaces.map((entry) => entry.workspace.id),
+    });
+  } catch (error) {
+    logger.warn("Plugin discovery refresh after MCP connection failed", {
+      event: "goat.plugin_mcp_reconnect_refresh_failed",
+      provider,
+      error_message: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

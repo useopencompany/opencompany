@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { includedUsageAllowanceCents } from "./billing-constants";
 import { getDb } from "./client";
+import { stringifyPostgresJson } from "./postgres-json";
 import type { CreditLedgerSource, WorkspacePlan } from "./product-schema";
 import { creditLedger, stripeCheckoutSessions } from "./product-schema";
 
@@ -131,8 +132,8 @@ export async function recordCreditDebit(input: CreditDebitInput) {
         ${input.reservationId ?? null},
         ${input.providerCostUsdMicros},
         ${input.platformFeeUsdMicros},
-        ${JSON.stringify(input.costBasis)}::jsonb,
-        ${JSON.stringify(input.metadata ?? {})}::jsonb
+        ${stringifyPostgresJson(input.costBasis)}::jsonb,
+        ${stringifyPostgresJson(input.metadata ?? {})}::jsonb
       )
       ON CONFLICT DO NOTHING
       RETURNING workspace_id, id, amount_usd_micros
@@ -196,6 +197,35 @@ export async function recordCreditDebit(input: CreditDebitInput) {
   };
 }
 
+export async function recordSubscriptionCoveredUsage(input: {
+  workspaceId: string;
+  userWorkosId: string;
+  idempotencyKey: string;
+  chatSessionId?: string | null;
+  metadata?: Record<string, unknown>;
+  db?: DbLike;
+}) {
+  const db = input.db ?? getDb();
+  const result = await db
+    .insert(creditLedger)
+    .values({
+      workspaceId: input.workspaceId,
+      userWorkosId: input.userWorkosId,
+      amountCents: 0,
+      amountUsdMicros: 0,
+      source: "subscription_covered",
+      idempotencyKey: input.idempotencyKey,
+      chatSessionId: input.chatSessionId ?? null,
+      providerCostUsdMicros: 0,
+      platformFeeUsdMicros: 0,
+      costBasis: { kind: "chatgpt_subscription" },
+      metadata: input.metadata ?? {},
+    })
+    .onConflictDoNothing()
+    .returning({ id: creditLedger.id });
+  return result[0] ? { ok: true as const, ledgerId: Number(result[0].id) } : { ok: false as const };
+}
+
 // Rotates the expiring included pool on the first of each UTC month. Within a
 // month the allowance only moves upward, so a Pro seat added mid-month gets
 // its full $20 immediately while removing and re-adding a seat cannot mint the
@@ -220,12 +250,12 @@ export async function grantMonthlyIncludedUsage(input: {
   const db = input.db ?? getDb();
   const grantKey = `included_usage_grant:${input.workspaceId}:${input.periodStart.toISOString()}:${targetAllowanceCents}`;
   const expireKey = `included_usage_expiration:${input.workspaceId}:${input.periodStart.toISOString()}`;
-  const expirationMetadata = JSON.stringify({
+  const expirationMetadata = stringifyPostgresJson({
     reason: "included_usage_no_rollover",
     newPeriodStart: input.periodStart.toISOString(),
     stripeEventId: input.eventId ?? null,
   });
-  const grantMetadata = JSON.stringify({
+  const grantMetadata = stringifyPostgresJson({
     reason: "monthly_included_usage",
     plan: input.plan,
     seatQuantity: input.seatQuantity,
@@ -616,7 +646,9 @@ export async function loadSpendBreakdown(
 ): Promise<SpendBreakdownRow[]> {
   const db = options.db ?? getDb();
   const now = options.now ?? new Date();
-  const since = new Date(now.getTime() - (options.days ?? 30) * 24 * 60 * 60 * 1000);
+  const days = options.days ?? 30;
+  const since = new Date(now);
+  since.setUTCDate(since.getUTCDate() - (days - 1));
   since.setUTCHours(0, 0, 0, 0);
   const result = await db.execute(sql`
     SELECT

@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
+import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import type { NormalizedGitHubActivitySourceItem } from "@opencompany/brain";
 import type { BrainIngestTriageTrace } from "@opencompany/brain/ingest-trace";
-import { BASIC_INGEST_MODEL } from "@opencompany/db/billing-constants";
+import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { parseGmailWikiSourceConfig } from "@opencompany/db/gmail";
-import type { WikiSourceProvider, WikiSourceType } from "@opencompany/db/product-schema";
+import type { WikiSourceType } from "@opencompany/db/product-schema";
+import type { ActiveWikiSourceProvider } from "@opencompany/db/wiki-ingest";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import { createGatewayAttribution, gatewayProviderOptions } from "@opencompany/telemetry";
@@ -27,7 +29,7 @@ import {
 import type { RunnerEnv } from "./env";
 import {
   buildWikiIngestTriagePrompt,
-  runWikiIngestTriage as runSlackGmailWikiIngestTriage,
+  runWikiIngestTriage as runSourceWikiIngestTriage,
   type WikiIngestTriageInput,
   type WikiIngestTriageTrace,
 } from "./wiki-ingest-triage";
@@ -37,7 +39,7 @@ const logger = createLogger({
   runtime: "goat-wiki-agent-ingest",
 });
 
-export const WIKI_AGENT_INGEST_MODEL = BASIC_INGEST_MODEL;
+export const WIKI_AGENT_INGEST_MODEL = WIKI_INGEST_MODEL;
 export const WIKI_AGENT_INGEST_MAX_STEPS = 32;
 export const WIKI_AGENT_INGEST_MAX_OUTPUT_TOKENS = 4_000;
 export const WIKI_AGENT_INGEST_TIMEOUT_MS = 10 * 60_000;
@@ -166,7 +168,7 @@ export type WikiAgentIngestInput = {
   attempt: number;
   workspaceId: string;
   actorUserWorkosId: string;
-  sourceProvider: WikiSourceProvider;
+  sourceProvider: ActiveWikiSourceProvider;
   sourceType: WikiSourceType;
   sourceRef: string;
   title: string | null;
@@ -199,9 +201,8 @@ export type WikiSourceContextHeaderBuilder = (input: WikiSourceContextHeaderInpu
 // Source-specific guidance belongs behind this registry so adding a provider
 // does not require editing the shared librarian prompt or message assembly.
 export const WIKI_SOURCE_CONTEXT_HEADER_BUILDERS: Partial<
-  Record<WikiSourceProvider, WikiSourceContextHeaderBuilder>
+  Record<ActiveWikiSourceProvider, WikiSourceContextHeaderBuilder>
 > = {
-  slack: buildSlackSourceContextHeader,
   gmail: buildGmailSourceContextHeader,
   jamie: buildMeetingSourceContextHeader,
   granola: buildMeetingSourceContextHeader,
@@ -222,16 +223,6 @@ export function buildMeetingSourceContextHeader(input: WikiSourceContextHeaderIn
     "Worth writing: durable knowledge from the meeting, especially decisions, project state, commitments, and people or company facts that will help workspace members later.",
     "Meeting handling: put durable knowledge on the relevant pages. The meeting itself should become at most a timeline-add on those pages, not a standalone transcript archive.",
     `Source handling: do NOT copy the full transcript into the wiki. Reference the meeting with [[source:${input.sourceRef}]] using this job's source reference.`,
-  ].join("\n");
-}
-
-export function buildSlackSourceContextHeader(input: WikiSourceContextHeaderInput): string {
-  return [
-    ...sourceMetadataHeader(input),
-    "Window contents: one Slack channel, group, or direct-message conversation window with chronological messages, participant names when available, file names, thread identities, and nearby conversation context when Slack returned it.",
-    "Worth writing: decisions, commitments, durable facts, meaningful project state, and substantive problems or fixes. Skip greetings, reactions, acknowledgements, repeated status pings, and other transient chatter.",
-    "Conversation handling: synthesize the durable knowledge onto the relevant people, company, product, or project pages; do not archive the conversation verbatim.",
-    `Source handling: reference this conversation window with [[source:${input.sourceRef}]] using this job's source reference.`,
   ].join("\n");
 }
 
@@ -393,14 +384,14 @@ async function runPreparedWikiIngestTriage(
   input: WikiAgentIngestInput,
   deps: WikiAgentIngestDependencies,
 ): Promise<WikiIngestTriageTrace | null> {
-  const slackOrGmailPrompt = buildWikiIngestTriagePrompt(input);
+  const sourcePrompt = buildWikiIngestTriagePrompt(input);
   const githubItem = githubItemForTriage(input);
-  if (!slackOrGmailPrompt && !githubItem) return null;
+  if (!sourcePrompt && !githubItem) return null;
 
   try {
-    const triageInput: WikiPreparedTriageInput = slackOrGmailPrompt
+    const triageInput: WikiPreparedTriageInput = sourcePrompt
       ? {
-          prompt: slackOrGmailPrompt,
+          prompt: sourcePrompt,
           gatewayApiKey: input.env.vercelAiGatewayApiKey,
           actorUserWorkosId: input.actorUserWorkosId,
           workspaceId: input.workspaceId,
@@ -419,8 +410,8 @@ async function runPreparedWikiIngestTriage(
         };
     const triage = deps.runTriage
       ? await deps.runTriage(triageInput)
-      : slackOrGmailPrompt
-        ? await runSlackGmailWikiIngestTriage(triageInput as WikiIngestTriageInput)
+      : sourcePrompt
+        ? await runSourceWikiIngestTriage(triageInput as WikiIngestTriageInput)
         : await runGitHubWikiIngestTriage(
             triageInput as Parameters<typeof runGitHubWikiIngestTriage>[0],
           );
@@ -579,37 +570,6 @@ function githubItemForTriage(
     : null;
 }
 
-const ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS = {
-  anthropic: { cacheControl: { type: "ephemeral" as const } },
-};
-
-function withAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T): T {
-  return {
-    ...message,
-    providerOptions: {
-      ...message.providerOptions,
-      ...ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
-    },
-  };
-}
-
-function withoutAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T): T {
-  if (!message.providerOptions || !("anthropic" in message.providerOptions)) return message;
-  const { anthropic: _anthropic, ...providerOptions } = message.providerOptions;
-  return { ...message, providerOptions };
-}
-
-export function placeMovingAnthropicCacheBreakpoint(
-  messages: ai.ModelMessage[],
-): ai.ModelMessage[] {
-  if (messages.length <= 2) return messages;
-  return messages.map((message, index) => {
-    if (index < 2) return message;
-    if (index < messages.length - 1) return withoutAnthropicCacheBreakpoint(message);
-    return withAnthropicCacheBreakpoint(withoutAnthropicCacheBreakpoint(message));
-  });
-}
-
 export async function runWikiIngestAgentLoop(
   input: WikiAgentIngestInput,
   triage: WikiIngestTriageTrace | null = null,
@@ -752,16 +712,11 @@ export async function runWikiIngestAgentLoop(
     const result = await generateText({
       model: gateway(WIKI_AGENT_INGEST_MODEL),
       maxOutputTokens: WIKI_AGENT_INGEST_MAX_OUTPUT_TOKENS,
+      system: WIKI_AGENT_INGEST_SYSTEM_PROMPT,
       messages: [
-        {
-          role: "system",
-          content: WIKI_AGENT_INGEST_SYSTEM_PROMPT,
-          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
-        },
         {
           role: "user",
           content: buildWikiIngestUserMessage(input, triage),
-          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
         },
       ],
       tools,
@@ -782,10 +737,7 @@ export async function runWikiIngestAgentLoop(
         () => budgetExhausted || budgetAccountingError !== null,
       ],
       abortSignal: abort.signal,
-      providerOptions: gatewayProviderOptions(attribution),
-      prepareStep: ({ messages }) => ({
-        messages: placeMovingAnthropicCacheBreakpoint(messages),
-      }),
+      providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
       onStepFinish: ({ usage }) => {
         recordModelSpend(priceModelUsage(usage));
       },

@@ -4,7 +4,10 @@ export type ProductTaskSpawnKind = "adhoc" | "workflow" | "scheduled_task" | "sc
 export type ProductTaskSpawnOrigin = "adhoc" | "workflow";
 export type ProductTaskSpawnTrigger = "manual" | "schedule";
 export type ProductAnalyticsEngine = "opencompany" | "codex" | "claude_code";
-export type ProductAnalyticsUsageSource = "owned_platform" | "external_harness";
+export type ProductAnalyticsUsageSource =
+  | "owned_platform"
+  | "external_harness"
+  | "subscription_covered";
 export type ProductOnboardingFlow = "owner" | "member";
 export type ProductOnboardingStep = "profile" | "workspace" | "sources" | "welcome" | "finish";
 
@@ -73,7 +76,7 @@ export type ProductAnalyticsEventPropertiesByName = {
   };
   llm_usage_recorded: {
     workspace_id?: string;
-    surface: "chat" | "task";
+    surface: "chat" | "task" | "slack_bot";
     stage: "generation" | "routing" | "planner" | "execution" | "closer";
     session_id?: string;
     message_id?: string;

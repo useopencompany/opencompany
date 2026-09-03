@@ -23,6 +23,7 @@ import {
 } from "@opencompany/analytics/product/server";
 import type { RunEventDraft, RunExecutionRepository } from "@opencompany/core";
 import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
+import { normalizePostgresText, stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import {
   type ChatMessageDebugTrace,
   CODEX_CHAT_EVENT_TYPES,
@@ -141,14 +142,16 @@ export function createExternalEngineProjector(input: {
   };
 
   const computeContent = () =>
-    redact(
-      parts
-        .filter(
-          (part): part is Extract<CodexUiMessagePart, { type: "text" }> => part.type === "text",
-        )
-        .map((part) => part.text)
-        .filter((text) => text.trim())
-        .join("\n\n"),
+    normalizePostgresText(
+      redact(
+        parts
+          .filter(
+            (part): part is Extract<CodexUiMessagePart, { type: "text" }> => part.type === "text",
+          )
+          .map((part) => part.text)
+          .filter((text) => text.trim())
+          .join("\n\n"),
+      ),
     );
 
   const persistAssistantMessage = async (content: string, options: AssistantWriteOptions) => {
@@ -166,7 +169,7 @@ export function createExternalEngineProjector(input: {
       await getDb().execute(sql`
         UPDATE goat.chat_messages AS message
         SET content = ${content},
-            debug_trace = ${JSON.stringify(debugTrace)}::jsonb,
+            debug_trace = ${stringifyPostgresJson(debugTrace)}::jsonb,
             updated_at = ${new Date()}
         WHERE message.id = ${target.assistantMessageId}
           AND message.role = 'assistant'
@@ -212,8 +215,8 @@ export function createExternalEngineProjector(input: {
                  ${target.turnId},
                  ${eventKey},
                  ${event.type},
-                 ${JSON.stringify(redactJson(event.payload, redact))}::jsonb,
-                 ${JSON.stringify(redactJson(event.rawEvent, redact))}::jsonb,
+                 ${stringifyPostgresJson(redactJson(event.payload, redact))}::jsonb,
+                 ${stringifyPostgresJson(redactJson(event.rawEvent, redact))}::jsonb,
                  ${new Date()}
           WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
           ON CONFLICT (codex_chat_turn_id, event_key)
@@ -502,6 +505,18 @@ export function createExternalEngineProjector(input: {
   };
 
   return {
+    appendNotice(text: string) {
+      return serializeProjection(async () => {
+        const notice = text.trim();
+        if (!notice || parts.some((part) => part.type === "text" && part.text === notice)) return;
+        parts = [
+          ...parts,
+          { type: "text", text: notice, itemId: "opencompany-github-auth-notice" },
+        ];
+        await syncAssistantMessage({ error: turnError, force: true });
+      });
+    },
+
     push(rawEvents: Record<string, unknown>[]) {
       return serializeProjection(async () => {
         for (const raw of rawEvents) {
@@ -565,7 +580,7 @@ export function createExternalEngineProjector(input: {
                  ${typeof request.params.itemId === "string" ? request.params.itemId : null},
                  ${request.method},
                  'pending',
-                 ${JSON.stringify(redactJson(request.params, redact))}::jsonb,
+                 ${stringifyPostgresJson(redactJson(request.params, redact))}::jsonb,
                  ${now},
                  ${now}
           WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
@@ -632,7 +647,7 @@ export function createExternalEngineProjector(input: {
             )
             SELECT ${approvalId}, ${target.turnId}, ${target.canonicalAttemptId ?? null},
                    ${toolCallId}, 'acp_permission', ${redact(title)},
-                   ${JSON.stringify(optionIds)}::jsonb, 'pending', ${now}, ${now}
+                   ${stringifyPostgresJson(optionIds)}::jsonb, 'pending', ${now}, ${now}
             WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
             RETURNING id
           `),

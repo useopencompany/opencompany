@@ -73,7 +73,7 @@ describe("useHeadlessChatTranscript", () => {
         role: "assistant",
         content: "Ready immediately",
         taskId: null,
-        presentation: null,
+        presentationSummary: null,
         attachments: null,
         createdAt: "2026-08-19T10:00:01.000Z",
         updatedAt: "2026-08-19T10:00:01.000Z",
@@ -84,7 +84,7 @@ describe("useHeadlessChatTranscript", () => {
         role: "user",
         content: "Open this chat",
         taskId: null,
-        presentation: null,
+        presentationSummary: null,
         attachments: null,
         createdAt: "2026-08-19T10:00:00.000Z",
         updatedAt: "2026-08-19T10:00:00.000Z",
@@ -148,7 +148,7 @@ describe("useHeadlessChatTranscript", () => {
           role: "user",
           content: "Loaded",
           taskId: null,
-          presentation: null,
+          presentationSummary: null,
           attachments: null,
           createdAt: "2026-08-19T10:00:00.000Z",
           updatedAt: "2026-08-19T10:00:00.000Z",
@@ -169,7 +169,7 @@ describe("useHeadlessChatTranscript", () => {
         role: "assistant",
         content: "Existing answer",
         taskId: null,
-        presentation: null,
+        presentationSummary: null,
         attachments: null,
         createdAt: "2026-08-19T10:00:00.000Z",
         updatedAt: "2026-08-19T10:00:00.000Z",
@@ -197,7 +197,7 @@ describe("useHeadlessChatTranscript", () => {
           role: "assistant",
           content: "Existing answer",
           taskId: null,
-          presentation: null,
+          presentationSummary: null,
           attachments: null,
           createdAt: "2026-08-19T10:00:00.000Z",
           updatedAt: "2026-08-19T10:00:00.000Z",
@@ -208,7 +208,7 @@ describe("useHeadlessChatTranscript", () => {
           role: "user",
           content: "Follow up",
           taskId: null,
-          presentation: null,
+          presentationSummary: null,
           attachments: null,
           createdAt: "2026-08-19T10:00:01.000Z",
           updatedAt: "2026-08-19T10:00:01.000Z",
@@ -221,6 +221,45 @@ describe("useHeadlessChatTranscript", () => {
       "message_1",
       "message_2",
     ]);
+  });
+
+  it("hydrates historical assistant rows from presentation summaries", () => {
+    mocks.messagesCollection.rows = [
+      {
+        id: "message_summary",
+        conversationId: "chat_1",
+        role: "assistant",
+        content: "Summary answer",
+        taskId: null,
+        presentationSummary: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          uiMessageParts: [
+            { type: "reasoning", text: "Bounded reasoning preview", presentationSummary: true },
+            { type: "text", text: "Summary answer" },
+          ],
+        },
+        attachments: null,
+        createdAt: "2026-08-19T10:00:00.000Z",
+        updatedAt: "2026-08-19T10:00:01.000Z",
+      },
+    ];
+
+    const { result } = renderHook(() => useHeadlessChatTranscript("chat_1"));
+
+    expect(result.current.messages[0]).toMatchObject({
+      id: "message_summary",
+      metadata: {
+        sessionId: "chat_1",
+        presentation: {
+          source: "summary",
+          updatedAt: "2026-08-19T10:00:01.000Z",
+        },
+      },
+      parts: [
+        { type: "reasoning", text: "Bounded reasoning preview" },
+        { type: "text", text: "Summary answer" },
+      ],
+    });
   });
 
   it("provides a stable empty snapshot during server rendering", () => {

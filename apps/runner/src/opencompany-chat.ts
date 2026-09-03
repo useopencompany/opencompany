@@ -1,7 +1,3 @@
-import { resolveActionCatalog } from "@opencompany/agent/actions/catalog";
-import { executeAction } from "@opencompany/agent/actions/execute";
-import { projectActionCatalog } from "@opencompany/agent/actions/policy";
-import type { ResolvedActionCatalog } from "@opencompany/agent/actions/types";
 import {
   CHAT_MAX_STEPS,
   CHAT_MAX_STEPS_WITH_SANDBOX,
@@ -11,7 +7,6 @@ import {
   TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
 } from "@opencompany/agent/chat-agent";
 import type {
-  ChatActionCatalog,
   ChatUiMessage,
   StoredChatMessage,
   WebFetchToolOutput,
@@ -26,6 +21,7 @@ import { executeChatExaFetch } from "@opencompany/agent/chat-web-fetch";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
 import { resolveImessageProvider } from "@opencompany/agent/imessage/provider";
 import { createSendUserMessageRunner } from "@opencompany/agent/imessage/send-user-message";
+import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import {
   AGENT_MODEL_CATALOG,
@@ -49,6 +45,7 @@ import {
   DEFAULT_BRAIN_SLUG,
   getBrainAccess,
   getWorkspaceRole,
+  isLegacyBrainEnabledForWorkspace,
   listAccessibleBrains,
 } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
@@ -60,13 +57,7 @@ import {
 } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
 import * as ai from "ai";
-import {
-  convertToModelMessages,
-  createGateway,
-  type LanguageModelUsage,
-  parsePartialJson,
-  stepCountIs,
-} from "ai";
+import { convertToModelMessages, type LanguageModelUsage, parsePartialJson, stepCountIs } from "ai";
 import { asc, eq } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
 import { runTaskBrainRead } from "./codex-brain-tool";
@@ -143,6 +134,18 @@ export async function runProductChatTurn(input: {
     throw new Error(`Session ${session.id} is not an opencompany-engine session.`);
   }
 
+  const feature = input.taskContext ? "task" : "chat";
+  const modelResolution = session.workspaceId
+    ? await resolveProductLanguageModel({
+        workspaceId: session.workspaceId,
+        modelId: session.model,
+        feature,
+        gatewayApiKey: env.vercelAiGatewayApiKey,
+        db: getDb(),
+      })
+    : null;
+  const subscriptionCovered = modelResolution?.billing === "subscription_covered";
+
   const projector = createProductChatProjector({
     target: {
       userWorkosId: turn.userWorkosId,
@@ -154,6 +157,8 @@ export async function runProductChatTurn(input: {
       assistantMessageId: turn.assistantMessageId,
       workspaceId: session.workspaceId,
       model: session.model,
+      billing: subscriptionCovered ? "subscription_covered" : "metered_gateway",
+      provider: subscriptionCovered ? "codex-backend" : "gateway",
       leaseId,
       leaseOwner,
       ...(input.canonicalAttemptId ? { canonicalAttemptId: input.canonicalAttemptId } : {}),
@@ -174,7 +179,7 @@ export async function runProductChatTurn(input: {
     return "settled";
   }
 
-  if (session.workspaceId) {
+  if (session.workspaceId && !subscriptionCovered) {
     if (!(await hasHostedTurnCredits(session.workspaceId))) {
       const message =
         "This workspace is out of credits. Hobby usage refreshes on the first of the month; Pro admins can add credits in Settings → Billing.";
@@ -224,17 +229,19 @@ export async function runProductChatTurn(input: {
       activeSkills: runtime.activeSkills,
     });
     throwIfAborted(generationController.signal);
-    const gateway = createGateway({ apiKey: env.vercelAiGatewayApiKey });
+    if (!modelResolution) {
+      throw new Error("Durable opencompany chat session is missing its workspace.");
+    }
     const { streamText } = getBraintrustAISDK(ai);
     const attribution = createGatewayAttribution({
       userWorkosId: turn.userWorkosId,
-      feature: input.taskContext ? "task" : "chat",
+      feature,
       chatSessionId: session.chatSessionId,
       ...(input.taskContext ? { taskId: input.taskContext.task.id } : {}),
       ...(runtime.brain ? { brainRef: runtime.brain.id } : {}),
     });
     const stream = streamText({
-      model: gateway(runtime.model),
+      model: modelResolution.model,
       system: runtime.system,
       messages,
       tools: runtime.toolContext.tools,
@@ -248,7 +255,8 @@ export async function runProductChatTurn(input: {
         ? { experimental_repairToolCall: runtime.toolContext.repairToolCall }
         : {}),
       abortSignal: generationController.signal,
-      providerOptions: productChatGatewayProviderOptions(attribution),
+      providerOptions:
+        modelResolution.providerOptions ?? productChatGatewayProviderOptions(attribution),
     });
 
     projection = await consumeProductChatStream({
@@ -759,7 +767,9 @@ export async function opencompanyModelMessagesFromStored(
       (options?.includeCurrentAssistantMessage && nextMessage?.role === "assistant" ? 2 : 1),
   );
   const uiMessages = replayMessages.map((message) => {
-    const uiMessage = toChatUiMessage(message);
+    // Server-side replay retains only the provider metadata needed for encrypted
+    // Responses reasoning continuity. Browser-facing serialization still strips it.
+    const uiMessage = toChatUiMessage(message, { preserveProviderMetadata: true });
     return message.id === currentUserMessageId && options?.activeSkills?.length
       ? replaceChatUiMessageText(
           uiMessage,
@@ -963,9 +973,10 @@ async function resolveProductChatRuntime(input: {
   if (!workspaceRole) {
     throw new Error("You no longer have access to this chat's workspace.");
   }
+  const legacyBrainEnabled = await isLegacyBrainEnabledForWorkspace(workspaceId, { db: getDb() });
 
   let brain = null;
-  if (session.brainRef) {
+  if (legacyBrainEnabled && session.brainRef) {
     const access = await getBrainAccess(
       { userWorkosId: turn.userWorkosId, brainRef: session.brainRef },
       { db: getDb() },
@@ -974,7 +985,7 @@ async function resolveProductChatRuntime(input: {
       throw new Error("You no longer have access to this chat's Brain.");
     }
     brain = access.brain;
-  } else {
+  } else if (legacyBrainEnabled) {
     const brains = await listAccessibleBrains(
       { userWorkosId: turn.userWorkosId, workspaceId },
       { db: getDb() },
@@ -982,81 +993,32 @@ async function resolveProductChatRuntime(input: {
     brain = brains.find((candidate) => candidate.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
   }
 
-  const resolved = await resolveActionCatalog({
-    userWorkosId: turn.userWorkosId,
-    workspaceId,
-  }).catch(() => ({ providers: [], actions: [] }) as ResolvedActionCatalog);
-  const onCatalog = projectActionCatalog(resolved, "headless");
-  const dispatcherCatalog: ChatActionCatalog = {
-    sources: onCatalog.providers.map((source) => ({
-      ...source,
-      kind: source.kind ?? "integration",
-    })),
-    actions: onCatalog.actions.map((action) => ({
-      id: action.id,
-      source: action.provider,
-      description: action.description,
-      params: action.params,
-      permissionMode: action.permissionMode,
-    })),
-  };
-  const directActionDispatcher =
-    dispatcherCatalog.actions.length > 0
-      ? {
-          catalog: dispatcherCatalog,
-          execute: (call: {
-            action: string;
-            params: Record<string, unknown>;
-            toolCallId: string;
-          }) =>
-            executeAction({
-              catalog: onCatalog,
-              actionId: call.action,
-              params: call.params,
-              userWorkosId: turn.userWorkosId,
-              workspaceId,
-              chatSessionId: session.chatSessionId,
-              toolCallId: call.toolCallId,
-              sourceTurnId: turn.id,
-              sourceMessageId: turn.assistantMessageId,
-              sourceEngine: "opencompany",
-              signal,
-              currentDate: new Date(),
-              userTimezone: "UTC",
-            }),
-        }
-      : null;
-  const actionDispatcher = taskContext
-    ? directActionDispatcher
-    : await createActionDispatcher({
-        sessionId: session.id,
-        turnId: turn.id,
-        signal,
-        approvalContinuation: Boolean(turn.settings.approvalContinuation),
-      });
-  const hostTools = taskContext
-    ? null
-    : await loadHostTools({
-        sessionId: session.id,
-        turnId: turn.id,
-        env,
-        signal,
-        mentionedSkillIds: (turn.settings.mentions ?? []).map((mention) => mention.id),
-        approvalContinuation: Boolean(turn.settings.approvalContinuation),
-      });
-  if (!taskContext && (!actionDispatcher || !hostTools)) {
+  const actionDispatcher = await createActionDispatcher({
+    sessionId: session.id,
+    turnId: turn.id,
+    signal,
+    approvalContinuation: Boolean(turn.settings.approvalContinuation),
+  });
+  const hostTools = await loadHostTools({
+    sessionId: session.id,
+    turnId: turn.id,
+    env,
+    signal,
+    mentionedSkillIds: (turn.settings.mentions ?? []).map((mention) => mention.id),
+    approvalContinuation: Boolean(turn.settings.approvalContinuation),
+  });
+  if (!actionDispatcher || !hostTools) {
     throw new Error("The durable Chat host gateways are not configured.");
   }
 
   const currentDate = new Date();
-  const brainCapture =
-    brain && !taskContext
-      ? createBrainCaptureRunner({
-          sessionId: session.id,
-          turnId: turn.id,
-          signal,
-        })
-      : null;
+  const brainCapture = brain
+    ? createBrainCaptureRunner({
+        sessionId: session.id,
+        turnId: turn.id,
+        signal,
+      })
+    : null;
   const exaApiKey = env.exaApiKey?.trim();
   const imessageDelivery =
     resolveImessageProvider() !== null
@@ -1098,6 +1060,7 @@ async function resolveProductChatRuntime(input: {
     ...(hostTools?.createWorkspaceSkill
       ? { createWorkspaceSkill: hostTools.createWorkspaceSkill }
       : {}),
+    ...(hostTools?.editWorkspaceSkill ? { editWorkspaceSkill: hostTools.editWorkspaceSkill } : {}),
     ...(hostTools?.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
     ...(hostTools?.browserTools ? { browserTools: hostTools.browserTools } : {}),
     ...(hostTools?.browserProfiles ? { browserProfiles: hostTools.browserProfiles } : {}),
@@ -1154,7 +1117,7 @@ async function resolveProductChatRuntime(input: {
     browserToolsEnabled: Boolean(hostTools?.browserTools),
     taskToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
     scheduleToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
-    brainCaptureEnabled: Boolean(brainCapture),
+    wikiToolEnabled: Boolean(hostTools?.runWiki),
     activeBrain: brain
       ? {
           name: brain.name,

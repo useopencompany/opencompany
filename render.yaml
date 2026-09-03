@@ -19,6 +19,8 @@ services:
         sync: false
       - key: WORKOS_CLIENT_ID
         sync: false
+      - key: WORKOS_MOBILE_CLIENT_ID
+        sync: false
       - key: WORKOS_API_KEY
         sync: false
       - key: WORKOS_COOKIE_PASSWORD
@@ -73,6 +75,15 @@ services:
         sync: false
       - key: GITHUB_INTEGRATION_APP_WEBHOOK_SECRET
         sync: false
+      # Dedicated user-authorized GitHub App for the official GitHub Plugin.
+      - key: GITHUB_USER_APP_SLUG
+        sync: false
+      - key: GITHUB_USER_APP_CLIENT_ID
+        sync: false
+      - key: GITHUB_USER_APP_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_USER_APP_STATE_SECRET
+        sync: false
       # Google-family OAuth ingress moved to the API in the #1203 4a2 cutover
       # (Gmail, Calendar, Drive; Drive webhook verification is row-based).
       - key: GOOGLE_OAUTH_CLIENT_ID
@@ -81,13 +92,10 @@ services:
         sync: false
       - key: GOOGLE_INTEGRATION_STATE_SECRET
         sync: false
-      # Slack ingestion + Linear ingest OAuth/webhook ingress moved to the API
-      # in the #1203 4b1 cutover.
+      # Official Slack plugin OAuth + Linear ingest OAuth/webhook ingress.
       - key: OPENCOMPANY_SLACK_CLIENT_ID
         sync: false
       - key: OPENCOMPANY_SLACK_CLIENT_SECRET
-        sync: false
-      - key: OPENCOMPANY_SLACK_SIGNING_SECRET
         sync: false
       - key: OPENCOMPANY_SLACK_STATE_SECRET
         sync: false
@@ -289,6 +297,10 @@ services:
       # preflight requires the worker gate to be explicitly enabled.
       - key: RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED
         sync: false
+      # Managed E2B sandbox creation and reconciliation share this ownership boundary.
+      # Local setup generates a different namespace even when the E2B API key is shared.
+      - key: RUNNER_SANDBOX_NAMESPACE
+        sync: false
       - key: NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN
         sync: false
       - key: NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST
@@ -350,6 +362,11 @@ services:
       - key: GITHUB_INTEGRATION_APP_ID
         sync: false
       - key: GITHUB_INTEGRATION_APP_PRIVATE_KEY
+        sync: false
+      # Refreshes the personal GitHub App user token before sandbox injection.
+      - key: GITHUB_USER_APP_CLIENT_ID
+        sync: false
+      - key: GITHUB_USER_APP_CLIENT_SECRET
         sync: false
       # Google OAuth client, used by the runner to refresh Gmail/Calendar access tokens.
       - key: GOOGLE_OAUTH_CLIENT_ID

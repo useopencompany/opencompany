@@ -21,6 +21,7 @@ describe("ensureCodexInstalled", () => {
     expect(CODEX_FALLBACK_NPM_PACKAGE).toBe("@openai/codex@0.148.0");
     expect(run).toHaveBeenCalledOnce();
     expect(run.mock.calls[0]?.[0]).toContain("codex --version");
+    expect(run.mock.calls[0]?.[1]).toEqual({ timeoutMs: 60_000 });
   });
 
   it("replaces a mismatched Codex CLI in the active home prefix", async () => {
@@ -47,6 +48,7 @@ describe("ensureCodexAcpAdapterInstalled", () => {
     await ensureCodexAcpAdapterInstalled({ commands: { run } } as never);
 
     expect(run).toHaveBeenCalledOnce();
+    expect(run.mock.calls[0]?.[1]).toEqual({ timeoutMs: 60_000 });
   });
 
   it("installs and verifies both exact versions when either one drifts", async () => {
@@ -120,6 +122,8 @@ describe("buildCodexAcpCommandEnv", () => {
     const commandEnv = buildCodexAcpCommandEnv({
       auth,
       codexHome: "/home/user/.codex-home",
+      mcpServers: [],
+      toolTimeoutMs: 10_800_000,
     });
 
     expect(commandEnv).toMatchObject({
@@ -136,6 +140,38 @@ describe("buildCodexAcpCommandEnv", () => {
           base_url: "https://runner.example.com/broker/openai/v1",
           env_key: "LLM_BROKER_TOKEN",
           wire_api: "responses",
+        },
+      },
+    });
+  });
+
+  it("sets the ACP gateway timeout in Codex's mcp_servers config", () => {
+    const config = buildCodexJsonConfigForAuth(
+      {
+        kind: "chatgpt",
+        authJson: {},
+        credentialLastRotatedAt: null,
+        brokered: false,
+      },
+      {
+        mcpServers: [
+          {
+            name: "opencompany",
+            type: "http",
+            url: "https://runner.example.com/internal/goat/acp-tools",
+            headers: [{ name: "x-opencompany-tool-ticket", value: "gateway-ticket" }],
+          },
+        ],
+        toolTimeoutMs: 10_800_000,
+      },
+    );
+
+    expect(config).toMatchObject({
+      mcp_servers: {
+        opencompany: {
+          url: "https://runner.example.com/internal/goat/acp-tools",
+          http_headers: { "x-opencompany-tool-ticket": "gateway-ticket" },
+          tool_timeout_sec: 10_800,
         },
       },
     });

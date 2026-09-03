@@ -5,8 +5,20 @@ import type {
   PluginInstallationDto,
   PluginListItemDto,
 } from "@opencompany/protocol";
+import { Button, buttonVariants } from "@opencompany/ui/components/button";
+import { toast } from "@opencompany/ui/components/sonner";
 import {
+  BetterStackIcon,
+  GitHubIcon,
+  LinearIcon,
+  NeonIcon,
+  SlackIcon,
+} from "@opencompany/ui/icons";
+import { cn } from "@opencompany/ui/lib/utils";
+import {
+  Activity,
   Archive,
+  ChevronDown,
   ExternalLink,
   FileArchive,
   Link2,
@@ -32,6 +44,16 @@ import {
   previewHeadlessPluginImport,
   revokeHeadlessPluginMcp,
 } from "@/lib/headless-knowledge-commands";
+import {
+  OFFICIAL_MCP_PLUGIN_METADATA,
+  OFFICIAL_SKILL_PLUGIN_METADATA,
+  type OfficialMcpPluginMetadata,
+  type OfficialMcpPluginName,
+  type OfficialPluginMetadata,
+  type OfficialPluginName,
+  type OfficialSkillPluginMetadata,
+  type OfficialSkillPluginName,
+} from "@/lib/official-plugins";
 
 type PluginSkillView = {
   name: string;
@@ -55,7 +77,7 @@ type PluginSkillReportView =
   | { path: string; name: string; status: "skipped"; reason: string };
 type PluginMcpEntryView = {
   name: string;
-  status: "selected" | "unsupported" | "invalid";
+  status: "selected" | "gateway-registered" | "unsupported" | "invalid";
   transport?: "stdio" | "streamable-http" | "sse";
   reason?: string;
 };
@@ -71,8 +93,131 @@ type PluginReportView = {
     | { status: "absent" }
     | { present: true; status: "disabled"; reason: string }
     | { present: true; status: "parsed"; reports: PluginMcpEntryView[] };
+  capabilities?:
+    | { status: "absent" }
+    | { present: true; status: "ignored"; reason: string }
+    | { present: true; status: "parsed"; issues: string[] };
   collisions: PluginCollisionView[];
 };
+
+type OfficialPluginAppearance = {
+  Icon: typeof LinearIcon;
+  iconClassName: string;
+};
+
+export type OfficialPluginConfig = OfficialPluginMetadata & OfficialPluginAppearance;
+export type OfficialMcpPluginConfig = OfficialMcpPluginMetadata & OfficialPluginAppearance;
+export type OfficialSkillPluginConfig = OfficialSkillPluginMetadata & OfficialPluginAppearance;
+
+export const OFFICIAL_MCP_PLUGINS = {
+  betterstack: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.betterstack,
+    Icon: BetterStackIcon,
+    iconClassName: "bg-[#1B1F23] text-white",
+  },
+  github: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.github,
+    Icon: GitHubIcon,
+    iconClassName: "bg-[#181717] text-white",
+  },
+  linear: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
+    Icon: LinearIcon,
+    iconClassName: "bg-[#5E6AD2] text-white",
+  },
+  neon: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.neon,
+    Icon: NeonIcon,
+    iconClassName: "bg-[#00E599] text-[#0B0F14]",
+  },
+  signoz: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
+    Icon: Activity,
+    iconClassName: "bg-[#FF6B35] text-white",
+  },
+  slack: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.slack,
+    Icon: SlackIcon,
+    iconClassName: "bg-white text-[#4A154B]",
+  },
+} as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginConfig>;
+
+export const OFFICIAL_SKILL_PLUGINS = {
+  "yc-advise": {
+    ...OFFICIAL_SKILL_PLUGIN_METADATA["yc-advise"],
+    Icon: Sparkles,
+    iconClassName: "bg-[#F26522] text-white",
+  },
+} as const satisfies Record<OfficialSkillPluginName, OfficialSkillPluginConfig>;
+
+export const OFFICIAL_PLUGINS = {
+  ...OFFICIAL_MCP_PLUGINS,
+  ...OFFICIAL_SKILL_PLUGINS,
+} as const satisfies Record<OfficialPluginName, OfficialPluginConfig>;
+
+export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
+export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
+export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
+export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
+export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
+export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
+export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
+export const SIGNOZ_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.signoz.name;
+export const SIGNOZ_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.signoz.source;
+export const SLACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.slack.name;
+export const SLACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.slack.source;
+export const YC_ADVISE_PLUGIN_NAME = OFFICIAL_SKILL_PLUGINS["yc-advise"].name;
+export const YC_ADVISE_PLUGIN_SOURCE = OFFICIAL_SKILL_PLUGINS["yc-advise"].source;
+
+export async function installOfficialPlugin(
+  config: OfficialPluginConfig,
+  preview?: PluginImportPreviewDto,
+) {
+  const confirmed = preview ?? (await previewHeadlessPluginImport({ url: config.source }));
+  if (confirmed.manifest.name.toLocaleLowerCase() !== config.name) {
+    throw new Error(
+      `Expected the ${config.name} plugin, but this source contains ${confirmed.manifest.name}.`,
+    );
+  }
+  const result = await importHeadlessPlugin({
+    url: config.source,
+    expectedResolvedCommit: confirmed.source.resolvedCommit,
+    expectedIntegrity: confirmed.integrity,
+  });
+  return result.plugin;
+}
+
+export function installOfficialMcpPlugin(
+  config: OfficialMcpPluginConfig,
+  preview?: PluginImportPreviewDto,
+) {
+  return installOfficialPlugin(config, preview);
+}
+
+export function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.linear, preview);
+}
+
+export function installOfficialGitHubPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.github, preview);
+}
+
+export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.neon, preview);
+}
+
+export function installOfficialBetterStackPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.betterstack, preview);
+}
+
+export function installOfficialSigNozPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.signoz, preview);
+}
+
+export function installOfficialSlackPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.slack, preview);
+}
 
 export function PluginsSettings({
   plugins,
@@ -82,83 +227,238 @@ export function PluginsSettings({
   canEdit: boolean;
 }) {
   const router = useRouter();
-  const [installing, setInstalling] = useState(false);
+  const [installingPluginName, setInstallingPluginName] = useState<OfficialPluginName | null>(null);
+  const [isInstalling, startInstall] = useTransition();
+
+  const install = (config: OfficialPluginConfig) => {
+    if (isInstalling) return;
+    setInstallingPluginName(config.name);
+    startInstall(async () => {
+      try {
+        await installOfficialPlugin(config);
+        toast.success(`${config.label} installed.`);
+        router.push(`/settings/plugins/${config.name}`);
+      } catch (cause) {
+        setInstallingPluginName(null);
+        toast.error(`Couldn't install ${config.label}. ${errorMessage(cause)}`);
+      }
+    });
+  };
 
   return (
     <SettingsContent
       title="Plugins"
       description="Immutable Agent Plugin packages installed from public GitHub sources."
     >
-      {canEdit ? (
-        <div className="-mt-2 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setInstalling(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <Link2 size={14} strokeWidth={2} />
-            Install plugin
-          </button>
-        </div>
-      ) : null}
-
-      {plugins.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-6 py-14 text-center">
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-muted text-ink-subtle">
-            <PackageOpen size={18} strokeWidth={1.75} />
-          </span>
-          <div className="flex flex-col gap-1">
-            <h2 className="text-[15px] font-semibold leading-tight text-ink">No plugins yet</h2>
-            <p className="mx-auto max-w-[390px] text-[12.5px] leading-5 text-ink-subtle">
-              {canEdit
-                ? "Install a standard Agent Plugin package from a public repository."
-                : "Workspace admins can install standard Agent Plugin packages."}
-            </p>
-          </div>
-        </div>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {plugins.map((plugin) => (
-            <li key={plugin.id}>
+      <div className="flex flex-col gap-3">
+        {Object.values(OFFICIAL_PLUGINS).map((config) => {
+          const plugin = plugins.find(
+            (candidate) => candidate.name.toLocaleLowerCase() === config.name,
+          );
+          return (
+            <div
+              key={config.name}
+              className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3"
+            >
               <Link
-                href={`/settings/plugins/${encodeURIComponent(plugin.name)}`}
-                prefetch
-                className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                href={`/settings/plugins/${config.name}`}
+                prefetch={Boolean(plugin)}
+                className="group flex min-w-0 flex-1 items-center gap-3 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
               >
+                <span
+                  className={cn(
+                    "flex size-10 shrink-0 items-center justify-center rounded-lg",
+                    config.iconClassName,
+                  )}
+                >
+                  <config.Icon className="size-5" />
+                </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-[14px] font-medium leading-tight text-ink">
-                      {plugin.manifest.name}
+                      {config.label}
                     </span>
-                    <PluginStatus status={plugin.status} />
+                    {plugin ? (
+                      <PluginStatus status={plugin.status} />
+                    ) : (
+                      <span className="inline-flex shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
+                        Not installed
+                      </span>
+                    )}
                   </span>
                   <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
-                    {plugin.manifest.description || "No description provided."}
+                    {plugin?.manifest.description || config.description}
                   </span>
                   <span className="mt-1 block text-[11.5px] leading-4 text-ink-subtle">
-                    {plugin.skillCount} {plugin.skillCount === 1 ? "skill" : "skills"} ·{" "}
-                    {plugin.stdioServerCount} stdio{" "}
-                    {plugin.stdioServerCount === 1 ? "server" : "servers"}
+                    {plugin
+                      ? `${plugin.skillCount} ${plugin.skillCount === 1 ? "skill" : "skills"} · updated ${formatRelativeTime(plugin.updatedAt)}`
+                      : config.kind === "skills"
+                        ? "Official skill package"
+                        : "Official package"}
                   </span>
                 </span>
-                <span className="shrink-0 text-[11.5px] text-ink-subtle">
-                  {formatRelativeTime(plugin.updatedAt)}
-                </span>
               </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+              {plugin ? (
+                <Link
+                  href={`/settings/plugins/${config.name}`}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "text-ink")}
+                >
+                  Manage
+                </Link>
+              ) : canEdit ? (
+                <Button
+                  size="sm"
+                  disabled={isInstalling}
+                  aria-busy={isInstalling && installingPluginName === config.name}
+                  onClick={() => install(config)}
+                >
+                  {isInstalling && installingPluginName === config.name ? (
+                    <Loader2 className="animate-spin" />
+                  ) : null}
+                  {isInstalling && installingPluginName === config.name ? "Installing…" : "Install"}
+                </Button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </SettingsContent>
+  );
+}
 
-      {installing ? (
-        <InstallPluginDialog
-          onClose={() => {
-            setInstalling(false);
-            router.refresh();
-          }}
-          onComplete={(name) => router.push(`/settings/plugins/${encodeURIComponent(name)}`)}
-        />
+type OfficialSkillPluginPreviewState =
+  | { status: "loading" }
+  | { status: "ready"; preview: PluginImportPreviewDto }
+  | { status: "error"; message: string };
+
+export function OfficialSkillPluginDetail({
+  config,
+  canEdit,
+}: {
+  config: OfficialSkillPluginConfig;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const [previewState, setPreviewState] = useState<OfficialSkillPluginPreviewState>({
+    status: "loading",
+  });
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [isInstalling, startInstall] = useTransition();
+
+  useEffect(() => {
+    let active = true;
+    void previewHeadlessPluginImport({ url: config.source })
+      .then((preview) => {
+        if (active) setPreviewState({ status: "ready", preview });
+      })
+      .catch((cause) => {
+        if (active) setPreviewState({ status: "error", message: errorMessage(cause) });
+      });
+    return () => {
+      active = false;
+    };
+  }, [config.source]);
+
+  const install = () => {
+    if (isInstalling || previewState.status !== "ready") return;
+    setInstallError(null);
+    startInstall(async () => {
+      try {
+        await installOfficialPlugin(config, previewState.preview);
+        toast.success(`${config.label} installed.`);
+        router.refresh();
+      } catch (cause) {
+        setInstallError(errorMessage(cause));
+      }
+    });
+  };
+
+  return (
+    <SettingsContent
+      title={config.label}
+      description={config.description}
+      backLink={{ href: "/settings/plugins", label: "Plugins" }}
+    >
+      <section className="flex flex-wrap items-start gap-3 rounded-lg border border-border bg-surface p-4">
+        <span
+          className={cn(
+            "flex size-11 shrink-0 items-center justify-center rounded-lg",
+            config.iconClassName,
+          )}
+        >
+          <config.Icon className="size-6" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-[15px] font-semibold text-ink">{config.label}</h2>
+            <span className="inline-flex rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium text-ink-subtle">
+              Not installed
+            </span>
+          </div>
+          <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
+            Official skills-only plugin. No account connection is required.
+          </p>
+        </div>
+        {canEdit ? (
+          <Button
+            size="sm"
+            disabled={isInstalling || previewState.status !== "ready"}
+            onClick={install}
+          >
+            {isInstalling || previewState.status === "loading" ? (
+              <Loader2 className="animate-spin" />
+            ) : null}
+            {isInstalling
+              ? "Installing…"
+              : previewState.status === "loading"
+                ? "Loading package…"
+                : previewState.status === "error"
+                  ? "Install unavailable"
+                  : "Install"}
+          </Button>
+        ) : null}
+      </section>
+
+      {!canEdit ? (
+        <p className="text-[13px] leading-5 text-ink-subtle">
+          Only workspace admins can install plugins.
+        </p>
       ) : null}
+
+      <section className="flex flex-col gap-2">
+        <SectionLabel>Included skills</SectionLabel>
+        {previewState.status === "loading" ? (
+          <div
+            aria-label={`Loading ${config.label} skill preview`}
+            className="rounded-lg border border-border bg-surface px-3 py-3 text-[12.5px] text-ink-subtle"
+          >
+            Loading package details…
+          </div>
+        ) : previewState.status === "error" ? (
+          <p className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2.5 text-[12.5px] text-danger">
+            {previewState.message}
+          </p>
+        ) : previewState.preview.skills.length === 0 ? (
+          <EmptyRow label="No valid skills were discovered." />
+        ) : (
+          <ul className="overflow-hidden rounded-lg border border-border bg-surface">
+            {previewState.preview.skills.map((skill: PluginImportPreviewDto["skills"][number]) => (
+              <li
+                key={skill.integrity}
+                className="border-b border-border px-3 py-2.5 last:border-b-0"
+              >
+                <div className="flex items-center gap-2">
+                  <Sparkles className="size-3.5 shrink-0 text-ink-subtle" />
+                  <span className="text-[13px] font-medium text-ink">{skill.name}</span>
+                </div>
+                <p className="mt-1 text-[12px] leading-4 text-ink-subtle">{skill.description}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {installError ? <p className="text-[12.5px] text-danger">{installError}</p> : null}
     </SettingsContent>
   );
 }
@@ -166,9 +466,13 @@ export function PluginsSettings({
 export function PluginDetail({
   plugin,
   canEdit,
+  title,
+  description,
 }: {
   plugin: PluginInstallationDto;
   canEdit: boolean;
+  title?: string;
+  description?: string;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -190,28 +494,15 @@ export function PluginDetail({
 
   return (
     <SettingsContent
-      title={plugin.manifest.name}
-      description="An immutable Agent Plugin package with passive Skills and separately approved MCP servers."
+      title={title ?? plugin.manifest.name}
+      description={
+        description ??
+        (plugin.stdioServers.length > 0
+          ? "An immutable Agent Plugin package with passive Skills and separately approved MCP servers."
+          : "An immutable Agent Plugin package with passive Skills and no executable MCP servers.")
+      }
       backLink={{ href: "/settings/plugins", label: "Plugins" }}
     >
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5 text-[12.5px] leading-5 text-ink-subtle">
-        <Link2 size={14} className="shrink-0" />
-        <span className="min-w-0 flex-1">
-          Installed from{" "}
-          <a
-            href={plugin.source.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-0.5 font-medium text-ink underline decoration-border underline-offset-2 hover:decoration-ink"
-          >
-            {plugin.source.url.replace(/^https:\/\//u, "")}
-            <ExternalLink size={11} />
-          </a>{" "}
-          at commit <span className="font-mono text-[11.5px]">{plugin.source.resolvedCommit}</span>.
-          Replacing this package requires archiving it and installing a new package.
-        </span>
-      </div>
-
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
           Only workspace admins can manage plugin installations.
@@ -220,11 +511,40 @@ export function PluginDetail({
 
       <section className="flex flex-col gap-2">
         <SectionLabel>Status</SectionLabel>
-        <div className="flex flex-wrap items-center gap-2">
-          <PluginStatus status={plugin.status} />
-          <span className="font-mono text-[11.5px] text-ink-subtle">{plugin.integrity}</span>
-        </div>
+        <PluginStatus status={plugin.status} />
       </section>
+
+      <details className="group rounded-lg border border-border bg-surface-muted">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12.5px] font-medium text-ink-muted">
+          <Link2 size={14} className="shrink-0" />
+          Advanced package details
+          <ChevronDown className="ml-auto size-3.5 transition-transform group-open:rotate-180" />
+        </summary>
+        <dl className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-t border-border px-3 py-2.5 text-[11.5px] leading-4">
+          <dt className="text-ink-faint">Source</dt>
+          <dd className="break-all text-ink">
+            <a
+              href={plugin.source.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 underline decoration-border underline-offset-2 hover:decoration-ink"
+            >
+              {plugin.source.url}
+              <ExternalLink size={11} />
+            </a>
+          </dd>
+          <dt className="text-ink-faint">Package path</dt>
+          <dd className="break-all font-mono text-ink">
+            {plugin.source.path || "Repository root"}
+          </dd>
+          <dt className="text-ink-faint">Requested ref</dt>
+          <dd className="break-all font-mono text-ink">{plugin.source.ref}</dd>
+          <dt className="text-ink-faint">Commit</dt>
+          <dd className="break-all font-mono text-ink">{plugin.source.resolvedCommit}</dd>
+          <dt className="text-ink-faint">Integrity</dt>
+          <dd className="break-all font-mono text-ink">{plugin.integrity}</dd>
+        </dl>
+      </details>
 
       <section className="flex flex-col gap-2">
         <SectionLabel>Passive skills ({plugin.skills.length})</SectionLabel>
@@ -254,65 +574,52 @@ export function PluginDetail({
 
       <section className="flex flex-col gap-2">
         <SectionLabel>Executable MCP servers ({plugin.stdioServers.length})</SectionLabel>
-        <div
-          className={`rounded-lg border px-3 py-2.5 text-[12.5px] leading-5 ${
-            plugin.mcpApprovedIntegrity === plugin.integrity
-              ? "border-success/30 bg-success/5 text-ink-subtle"
-              : "border-warning/30 bg-warning/5 text-ink-subtle"
-          }`}
-        >
-          <div className="flex items-start gap-2">
-            {plugin.mcpApprovedIntegrity === plugin.integrity ? (
-              <ShieldCheck size={15} className="mt-0.5 shrink-0 text-success" />
-            ) : (
-              <ShieldAlert size={15} className="mt-0.5 shrink-0 text-warning" />
-            )}
-            <span className="min-w-0 flex-1">
-              {plugin.mcpApprovedIntegrity === plugin.integrity
-                ? "Approved for this exact package integrity. Its servers are available on the next coding turn while the plugin is enabled."
-                : plugin.status === "disabled"
-                  ? "This plugin is disabled. Enable it before approving this exact package integrity."
-                  : "Installation alone never starts these processes. Review every declaration below before approving this exact package integrity."}
-            </span>
-            {canEdit &&
-            plugin.stdioServers.length > 0 &&
-            (plugin.status === "enabled" || plugin.mcpApprovedIntegrity === plugin.integrity) ? (
-              <button
-                type="button"
-                disabled={isMutating}
-                onClick={() =>
-                  mutate(() =>
-                    plugin.mcpApprovedIntegrity === plugin.integrity
-                      ? revokeHeadlessPluginMcp(plugin.name)
-                      : approveHeadlessPluginMcp(plugin.name, plugin.integrity),
-                  )
-                }
-                className="h-8 shrink-0 rounded-md border border-border bg-surface px-2.5 text-[12px] font-medium text-ink hover:bg-surface-hover disabled:opacity-60"
-              >
-                {plugin.mcpApprovedIntegrity === plugin.integrity
-                  ? "Revoke MCP"
-                  : "Approve exact package"}
-              </button>
-            ) : null}
-          </div>
-          <dl className="mt-2 grid grid-cols-[76px_minmax(0,1fr)] gap-x-2 gap-y-1 border-t border-current/10 pt-2 text-[11.5px]">
-            <dt className="text-ink-faint">Source</dt>
-            <dd className="break-all font-mono text-ink">{plugin.source.url}</dd>
-            <dt className="text-ink-faint">Package path</dt>
-            <dd className="break-all font-mono text-ink">
-              {plugin.source.path || "Repository root"}
-            </dd>
-            <dt className="text-ink-faint">Requested ref</dt>
-            <dd className="break-all font-mono text-ink">{plugin.source.ref}</dd>
-            <dt className="text-ink-faint">Commit</dt>
-            <dd className="break-all font-mono text-ink">{plugin.source.resolvedCommit}</dd>
-            <dt className="text-ink-faint">Integrity</dt>
-            <dd className="break-all font-mono text-ink">{plugin.integrity}</dd>
-          </dl>
-        </div>
         {plugin.stdioServers.length === 0 ? (
-          <EmptyRow label="No valid stdio MCP servers were declared." />
+          <EmptyRow label="This plugin does not include executable MCP servers." />
         ) : (
+          <div
+            className={`rounded-lg border px-3 py-2.5 text-[12.5px] leading-5 ${
+              plugin.mcpApprovedIntegrity === plugin.integrity
+                ? "border-success/30 bg-success/5 text-ink-subtle"
+                : "border-warning/30 bg-warning/5 text-ink-subtle"
+            }`}
+          >
+            <div className="flex items-start gap-2">
+              {plugin.mcpApprovedIntegrity === plugin.integrity ? (
+                <ShieldCheck size={15} className="mt-0.5 shrink-0 text-success" />
+              ) : (
+                <ShieldAlert size={15} className="mt-0.5 shrink-0 text-warning" />
+              )}
+              <span className="min-w-0 flex-1">
+                {plugin.mcpApprovedIntegrity === plugin.integrity
+                  ? "Approved for this exact package integrity. Its servers are available on the next coding turn while the plugin is enabled."
+                  : plugin.status === "disabled"
+                    ? "This plugin is disabled. Enable it before approving this exact package integrity."
+                    : "Installation alone never starts these processes. Review every declaration below before approving this exact package integrity."}
+              </span>
+              {canEdit &&
+              (plugin.status === "enabled" || plugin.mcpApprovedIntegrity === plugin.integrity) ? (
+                <button
+                  type="button"
+                  disabled={isMutating}
+                  onClick={() =>
+                    mutate(() =>
+                      plugin.mcpApprovedIntegrity === plugin.integrity
+                        ? revokeHeadlessPluginMcp(plugin.name)
+                        : approveHeadlessPluginMcp(plugin.name, plugin.integrity),
+                    )
+                  }
+                  className="h-8 shrink-0 rounded-md border border-border bg-surface px-2.5 text-[12px] font-medium text-ink hover:bg-surface-hover disabled:opacity-60"
+                >
+                  {plugin.mcpApprovedIntegrity === plugin.integrity
+                    ? "Revoke MCP"
+                    : "Approve exact package"}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        )}
+        {plugin.stdioServers.length > 0 ? (
           <ul className="overflow-hidden rounded-lg border border-border bg-surface">
             {plugin.stdioServers.map((server: PluginServerView) => (
               <li key={server.name} className="border-b border-border px-3 py-3 last:border-b-0">
@@ -340,7 +647,7 @@ export function PluginDetail({
               </li>
             ))}
           </ul>
-        )}
+        ) : null}
       </section>
 
       <CollisionReport collisions={plugin.installReport.collisions} />
@@ -458,14 +765,20 @@ export function PluginDetail({
   );
 }
 
-function InstallPluginDialog({
+export function InstallPluginDialog({
   onClose,
   onComplete,
+  initialUrl = "",
+  expectedName,
+  lockSource = false,
 }: {
   onClose: () => void;
   onComplete: (name: string) => void;
+  initialUrl?: string;
+  expectedName?: string;
+  lockSource?: boolean;
 }) {
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(initialUrl);
   const [preview, setPreview] = useState<PluginImportPreviewDto | null>(null);
   const [installed, setInstalled] = useState<PluginInstallationDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -489,7 +802,15 @@ function InstallPluginDialog({
     setError(null);
     startResolving(async () => {
       try {
-        setPreview(await previewHeadlessPluginImport({ url: source }));
+        const result = await previewHeadlessPluginImport({ url: source });
+        if (expectedName && result.manifest.name.toLocaleLowerCase() !== expectedName) {
+          setPreview(null);
+          setError(
+            `Expected the ${expectedName} plugin, but this source contains ${result.manifest.name}.`,
+          );
+          return;
+        }
+        setPreview(result);
       } catch (cause) {
         setPreview(null);
         setError(errorMessage(cause));
@@ -547,6 +868,7 @@ function InstallPluginDialog({
                   autoFocus
                   value={url}
                   disabled={pending}
+                  readOnly={lockSource}
                   onChange={(event) => {
                     setUrl(event.target.value);
                     setPreview(null);
@@ -677,13 +999,20 @@ function ValidationReport({ report }: { report: PluginReportView }) {
   );
   const mcpIssues =
     report.mcp.status === "parsed"
-      ? report.mcp.reports.filter((entry: PluginMcpEntryView) => entry.status !== "selected")
+      ? report.mcp.reports.filter(
+          (entry: PluginMcpEntryView) =>
+            entry.status !== "selected" && entry.status !== "gateway-registered",
+        )
       : [];
+  const capabilityIssues =
+    report.capabilities?.status === "parsed" ? report.capabilities.issues : [];
   const hasMessages =
     report.ignoredManifestFields.length > 0 ||
     skipped.length > 0 ||
     report.mcp.status === "disabled" ||
-    mcpIssues.length > 0;
+    mcpIssues.length > 0 ||
+    report.capabilities?.status === "ignored" ||
+    capabilityIssues.length > 0;
   return (
     <section className="flex flex-col gap-2">
       <SectionLabel>Validation report</SectionLabel>
@@ -710,6 +1039,12 @@ function ValidationReport({ report }: { report: PluginReportView }) {
               key={`mcp-${entry.name}`}
               label={`${entry.name}: ${entry.reason || entry.status}`}
             />
+          ))}
+          {report.capabilities?.status === "ignored" ? (
+            <ReportRow label={`Capabilities ignored: ${report.capabilities.reason}`} />
+          ) : null}
+          {capabilityIssues.map((issue) => (
+            <ReportRow key={`capability-${issue}`} label={`Capabilities: ${issue}`} />
           ))}
         </ul>
       )}

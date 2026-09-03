@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SourceProviderCard } from "@/components/BrainSourceCards";
@@ -12,13 +12,11 @@ const brainSourceActionsMock = vi.hoisted(() => ({
   listGoogleDriveResourcesAction: vi.fn(),
   listGitHubRepositoriesAction: vi.fn(),
   listLinearTeamsAction: vi.fn(),
-  listSlackConversationsAction: vi.fn(),
   setBrainAttioSourceAction: vi.fn(),
   setBrainGitHubSourceAction: vi.fn(),
   setBrainGmailSourceAction: vi.fn(),
   setBrainGoogleDriveSourceAction: vi.fn(),
   setBrainLinearSourceAction: vi.fn(),
-  setBrainSlackSourceAction: vi.fn(),
   setBrainSourceEnabledAction: vi.fn(async () => ({ ok: true })),
 }));
 
@@ -40,9 +38,6 @@ describe("BrainSourceCards", () => {
     brainSourceActionsMock.setBrainSourceEnabledAction.mockClear();
     brainSourceActionsMock.setBrainAttioSourceAction.mockReset();
     brainSourceActionsMock.setBrainAttioSourceAction.mockResolvedValue({ ok: true });
-    brainSourceActionsMock.listSlackConversationsAction.mockReset();
-    brainSourceActionsMock.setBrainSlackSourceAction.mockReset();
-    brainSourceActionsMock.setBrainSlackSourceAction.mockResolvedValue({ ok: true });
     brainSourceActionsMock.listGoogleDriveResourcesAction.mockResolvedValue({
       ok: true,
       files: [
@@ -199,85 +194,6 @@ describe("BrainSourceCards", () => {
         enabled: true,
         allFiles: true,
         resourceIds: [],
-      }),
-    );
-  });
-
-  it("surfaces Slack Connect conversations and bulk-selects each privacy group", async () => {
-    const user = userEvent.setup();
-    const provider = BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "slack");
-    if (!provider) throw new Error("Slack source provider is not registered.");
-    brainSourceActionsMock.listSlackConversationsAction.mockResolvedValue({
-      ok: true,
-      channels: [
-        { id: "C_GENERAL", name: "general", isPrivate: false, isSlackConnect: false },
-        { id: "C_CONNECT", name: "acme-partner", isPrivate: true, isSlackConnect: true },
-      ],
-      dms: [
-        { id: "D_TEAMMATE", name: "Grace", isSlackConnect: false },
-        { id: "D_CONNECT", name: "External Partner", isSlackConnect: true },
-      ],
-      partial: false,
-    });
-
-    render(
-      <SourceProviderCard
-        brainRef="goat_brain_1"
-        provider={provider}
-        details={brainSourceDetails({ sources: [slackSource()] })}
-        onChanged={async () => {}}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Choose conversations" }));
-
-    const slackConnectTitle = await screen.findByText("Slack Connect");
-    const slackConnectSection = slackConnectTitle.parentElement?.parentElement;
-    if (!slackConnectSection) throw new Error("Slack Connect section was not rendered.");
-    expect(
-      within(slackConnectSection).getByText(/people outside your Slack workspace/),
-    ).toBeInTheDocument();
-    expect(
-      within(slackConnectSection).getByRole("checkbox", { name: /External Partner/ }),
-    ).not.toBeChecked();
-
-    await user.click(
-      within(slackConnectSection).getByRole("button", {
-        name: "Select all Slack Connect conversations",
-      }),
-    );
-
-    expect(
-      within(slackConnectSection).getByRole("checkbox", { name: /acme-partner/ }),
-    ).toBeChecked();
-    expect(
-      within(slackConnectSection).getByRole("checkbox", { name: /External Partner/ }),
-    ).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: /#general/ })).not.toBeChecked();
-    expect(screen.queryByRole("checkbox", { name: "Grace" })).not.toBeInTheDocument();
-
-    const directMessagesButton = screen.getByRole("button", { name: "Direct messages" });
-    await user.click(directMessagesButton);
-    const directMessagesSection = directMessagesButton.parentElement?.parentElement;
-    if (!directMessagesSection) throw new Error("Direct messages section was not rendered.");
-    await user.click(
-      within(directMessagesSection).getByRole("button", {
-        name: "Select all direct messages",
-      }),
-    );
-    expect(screen.getByRole("checkbox", { name: "Grace" })).toBeChecked();
-    await user.click(screen.getByRole("button", { name: "Save conversations" }));
-
-    await waitFor(() =>
-      expect(brainSourceActionsMock.setBrainSlackSourceAction).toHaveBeenCalledWith({
-        brainRef: "goat_brain_1",
-        integrationId: "gint_slack_1",
-        enabled: true,
-        channels: [{ id: "C_CONNECT", name: "acme-partner" }],
-        dms: [
-          { id: "D_CONNECT", name: "External Partner" },
-          { id: "D_TEAMMATE", name: "Grace" },
-        ],
       }),
     );
   });
@@ -439,7 +355,6 @@ describe("BrainSourceCards", () => {
             }),
           ],
           ownAccounts: {
-            slack: [],
             linear: [],
             gmail: [
               {
@@ -532,7 +447,6 @@ function brainSourceDetails(
     viewer: { actorId: "user_admin_1", isAdmin: true },
     sources: [],
     ownAccounts: {
-      slack: [],
       linear: [],
       gmail: [],
       google_drive: [],
@@ -549,17 +463,6 @@ function brainSourceDetails(
       }),
       legacyDefaultDelivery: false,
       isDefaultBrain: false,
-    },
-    slack: {
-      integration: {
-        provider: "slack",
-        connected: false,
-        status: "not_connected",
-        integrationId: null,
-        accountName: null,
-        teamName: null,
-        statusReason: null,
-      },
     },
     linear: {
       integration: {
@@ -666,29 +569,6 @@ function gmailSource(overrides: Partial<BrainSourceView> = {}): BrainSourceView 
     canConfigure: false,
     canToggle: false,
     canRemove: false,
-    integrationStatus: "connected",
-    config: {},
-    ...overrides,
-  };
-}
-
-function slackSource(overrides: Partial<BrainSourceView> = {}): BrainSourceView {
-  return {
-    sourceId: "gbscfg_slack_1",
-    provider: "slack",
-    integrationId: "gint_slack_1",
-    enabled: true,
-    connectedByName: "Ada Lovelace",
-    ownerEmail: "ada@example.com",
-    ownerAvatarUrl: null,
-    accountEmail: "ada@example.com",
-    accountName: "Ada",
-    connectionLabel: "Acme",
-    ownerKind: "user",
-    isOwn: true,
-    canConfigure: true,
-    canToggle: true,
-    canRemove: true,
     integrationStatus: "connected",
     config: {},
     ...overrides,

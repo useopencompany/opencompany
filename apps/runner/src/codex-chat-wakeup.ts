@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { emptyAssistantDebugTrace, nextChatMessageCreatedAt } from "@opencompany/agent/chat-ui";
+import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import type { CodexChatTurn, CodexChatTurnSettings } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
@@ -108,7 +109,7 @@ export async function enqueueCodexChatWakeup(input: {
         ${input.parentTurn.chatSessionId},
         'user',
         ${prepared.userMessageContent},
-        ${JSON.stringify(prepared.userDebugTrace)}::jsonb,
+        ${stringifyPostgresJson(prepared.userDebugTrace)}::jsonb,
         ${now},
         ${now}
       FROM eligible_parent
@@ -123,7 +124,7 @@ export async function enqueueCodexChatWakeup(input: {
         ${input.parentTurn.chatSessionId},
         'assistant',
         '',
-        ${JSON.stringify(emptyAssistantDebugTrace(input.model))}::jsonb,
+        ${stringifyPostgresJson(emptyAssistantDebugTrace(input.model))}::jsonb,
         ${assistantCreatedAt},
         ${assistantCreatedAt}
       FROM eligible_parent
@@ -144,7 +145,7 @@ export async function enqueueCodexChatWakeup(input: {
         inserted_assistant_message.id,
         'queued',
         ${prepared.prompt},
-        ${JSON.stringify(prepared.settings)}::jsonb,
+        ${stringifyPostgresJson(prepared.settings)}::jsonb,
         ${prepared.dueAt},
         ${now},
         ${now}
@@ -213,7 +214,7 @@ export async function persistCodexChatScheduledWakeup(input: {
     SET settings = jsonb_set(
           settings,
           '{scheduledWakeup}',
-          ${JSON.stringify(input.wakeup)}::jsonb,
+          ${stringifyPostgresJson(input.wakeup)}::jsonb,
           true
         ),
         updated_at = ${now}

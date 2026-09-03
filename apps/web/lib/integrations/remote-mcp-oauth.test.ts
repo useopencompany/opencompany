@@ -7,23 +7,30 @@ import {
 } from "@opencompany/db/integrations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  startBetterStackMcpOAuth,
+  verifyBetterStackMcpState,
+} from "@/lib/integrations/betterstack-mcp";
+import {
   appendLatitudeMcpStatus,
   startLatitudeMcpOAuth,
   verifyLatitudeMcpState,
 } from "@/lib/integrations/latitude-mcp";
 import {
+  getLinearIntegrationState,
   loadLinearMcpWorkerConnection,
   startLinearMcpOAuth,
   verifyLinearMcpState,
 } from "@/lib/integrations/linear-mcp";
 import { startNeonMcpOAuth, verifyNeonMcpState } from "@/lib/integrations/neon-mcp";
 import { startPostHogMcpOAuth, verifyPostHogMcpState } from "@/lib/integrations/posthog-mcp";
+import { startSigNozMcpOAuth, verifySigNozMcpState } from "@/lib/integrations/signoz-mcp";
 
 const observed = vi.hoisted(() => ({
   callbackUrl: "",
   clientMetadata: null as unknown,
   state: "",
   dbRows: [] as unknown[],
+  dbResults: [] as unknown[][],
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -32,7 +39,7 @@ vi.mock("@opencompany/db/client", () => ({
       from: () => ({
         where: () => ({
           orderBy: () => ({
-            limit: async () => observed.dbRows,
+            limit: async () => observed.dbResults.shift() ?? observed.dbRows,
           }),
         }),
       }),
@@ -82,6 +89,7 @@ describe("opencompany remote MCP OAuth", () => {
     observed.clientMetadata = null;
     observed.state = "";
     observed.dbRows = [];
+    observed.dbResults = [];
   });
 
   it("connects Latitude with dynamic registration and its documented endpoint", async () => {
@@ -199,6 +207,52 @@ describe("opencompany remote MCP OAuth", () => {
     });
   });
 
+  it("connects Better Stack to its public hosted MCP with read and write OAuth", async () => {
+    await startBetterStackMcpOAuth({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/betterstack",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ serverUrl: "https://mcp.betterstack.com" }),
+    );
+    expect(vi.mocked(auth).mock.calls[0]?.[1]).not.toHaveProperty("scope");
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/betterstack/callback",
+    );
+    expect(observed.clientMetadata).toMatchObject({ scope: "read write" });
+    expect(verifyBetterStackMcpState(observed.state)).toMatchObject({
+      provider: "betterstack",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/betterstack",
+    });
+    expect(() => verifyLinearMcpState(observed.state)).toThrow(
+      "Invalid Linear MCP provider state.",
+    );
+  });
+
+  it("connects SigNoz only to the reviewed US Cloud MCP endpoint", async () => {
+    await startSigNozMcpOAuth({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/signoz",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ serverUrl: "https://mcp.us.signoz.cloud/mcp" }),
+    );
+    expect(observed.clientMetadata).not.toHaveProperty("scope");
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/signoz/callback",
+    );
+    expect(verifySigNozMcpState(observed.state)).toMatchObject({
+      provider: "signoz",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/signoz",
+    });
+  });
+
   it("accepts provider-less legacy state only for Linear", async () => {
     await startLinearMcpOAuth({
       userWorkosId: "user_1",
@@ -231,7 +285,7 @@ describe("opencompany remote MCP OAuth", () => {
   });
 
   it("marks remote MCP connections as needing reconnect when stored OAuth data is missing", async () => {
-    observed.dbRows = [{ id: "gint_linear", status: "connected" }];
+    observed.dbRows = [{ id: "gint_linear", userWorkosId: "user_1", status: "connected" }];
 
     await expect(
       loadLinearMcpWorkerConnection({
@@ -254,7 +308,7 @@ describe("opencompany remote MCP OAuth", () => {
   });
 
   it("marks remote MCP connections as needing reconnect when OAuth credentials are invalidated", async () => {
-    observed.dbRows = [{ id: "gint_linear", status: "connected" }];
+    observed.dbRows = [{ id: "gint_linear", userWorkosId: "user_1", status: "connected" }];
     vi.mocked(loadIntegrationCredential).mockResolvedValueOnce({
       payload: {
         clientInformation: { client_id: "dynamic_client" },
@@ -299,7 +353,7 @@ describe("opencompany remote MCP OAuth", () => {
   });
 
   it("reports existing remote MCP reauth states distinctly from missing connections", async () => {
-    observed.dbRows = [{ id: "gint_linear", status: "needs_reauth" }];
+    observed.dbRows = [{ id: "gint_linear", userWorkosId: "user_1", status: "needs_reauth" }];
 
     await expect(
       loadLinearMcpWorkerConnection({
@@ -311,5 +365,80 @@ describe("opencompany remote MCP OAuth", () => {
     ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
 
     expect(markIntegrationStatus).not.toHaveBeenCalled();
+  });
+
+  it("prefers the acting user's connection and falls back to the workspace connection", async () => {
+    observed.dbResults = [
+      [
+        {
+          id: "gint_personal",
+          userWorkosId: "user_1",
+          status: "connected",
+          accountName: "Personal Linear",
+          statusReason: null,
+          capabilityModes: { read: "on" },
+          toolModes: { list_issues: "on" },
+        },
+      ],
+    ];
+    await expect(
+      getLinearIntegrationState({ userWorkosId: "user_1", workspaceId: "workspace_1" }),
+    ).resolves.toMatchObject({
+      integrationId: "gint_personal",
+      accountName: "Personal Linear",
+      toolModes: { list_issues: "on" },
+    });
+
+    observed.dbResults = [
+      [],
+      [
+        {
+          id: "gint_workspace",
+          userWorkosId: "workspace_admin",
+          status: "connected",
+          accountName: "Workspace Linear",
+          statusReason: null,
+          capabilityModes: { read: "ask" },
+          toolModes: {},
+        },
+      ],
+    ];
+    await expect(
+      getLinearIntegrationState({ userWorkosId: "user_1", workspaceId: "workspace_1" }),
+    ).resolves.toMatchObject({
+      integrationId: "gint_workspace",
+      accountName: "Workspace Linear",
+      capabilityModes: { read: "ask" },
+    });
+
+    observed.dbResults = [
+      [],
+      [
+        {
+          id: "gint_workspace",
+          userWorkosId: "workspace_admin",
+          status: "connected",
+          accountName: "Workspace Linear",
+          statusReason: null,
+          capabilityModes: {},
+          toolModes: {},
+        },
+      ],
+    ];
+    await expect(
+      loadLinearMcpWorkerConnection({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        onAuthorizationRequired: () => {
+          throw new Error("authorization required");
+        },
+      }),
+    ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
+    expect(loadIntegrationCredential).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userWorkosId: "workspace_admin" }),
+    );
+    expect(markIntegrationStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userWorkosId: "workspace_admin" }),
+    );
   });
 });

@@ -1,5 +1,9 @@
 import { createHmac } from "node:crypto";
 import {
+  completeBetterStackMcpOAuth,
+  startBetterStackMcpOAuth,
+} from "@opencompany/agent/integrations/betterstack-mcp";
+import {
   completeLatitudeMcpOAuth,
   startLatitudeMcpOAuth,
 } from "@opencompany/agent/integrations/latitude-mcp";
@@ -12,6 +16,10 @@ import {
   completePostHogMcpOAuth,
   startPostHogMcpOAuth,
 } from "@opencompany/agent/integrations/posthog-mcp";
+import {
+  completeSigNozMcpOAuth,
+  startSigNozMcpOAuth,
+} from "@opencompany/agent/integrations/signoz-mcp";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
@@ -20,6 +28,11 @@ import { createMcpOAuthIngress, type McpOAuthProvider } from "./mcp-oauth-ingres
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listWorkspacesForUser: vi.fn(),
+}));
+vi.mock("@opencompany/agent/integrations/betterstack-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startBetterStackMcpOAuth: vi.fn(),
+  completeBetterStackMcpOAuth: vi.fn(),
 }));
 vi.mock("@opencompany/agent/integrations/linear-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -30,6 +43,11 @@ vi.mock("@opencompany/agent/integrations/posthog-mcp", async (importOriginal) =>
   ...(await importOriginal<Record<string, unknown>>()),
   startPostHogMcpOAuth: vi.fn(),
   completePostHogMcpOAuth: vi.fn(),
+}));
+vi.mock("@opencompany/agent/integrations/signoz-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startSigNozMcpOAuth: vi.fn(),
+  completeSigNozMcpOAuth: vi.fn(),
 }));
 vi.mock("@opencompany/agent/integrations/neon-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -44,7 +62,14 @@ vi.mock("@opencompany/agent/integrations/latitude-mcp", async (importOriginal) =
 
 const STATE_SECRET = "mcp-state-secret-mcp-state-secret";
 const sentinelDb = { sentinel: "db" };
-const PROVIDERS: McpOAuthProvider[] = ["linear", "posthog", "neon", "latitude"];
+const PROVIDERS: McpOAuthProvider[] = [
+  "linear",
+  "posthog",
+  "neon",
+  "latitude",
+  "betterstack",
+  "signoz",
+];
 
 // The mocked module-level start/complete wrappers, keyed like the ingress.
 const flowMocks = {
@@ -52,9 +77,20 @@ const flowMocks = {
   posthog: { start: startPostHogMcpOAuth, complete: completePostHogMcpOAuth },
   neon: { start: startNeonMcpOAuth, complete: completeNeonMcpOAuth },
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
+  betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },
+  signoz: { start: startSigNozMcpOAuth, complete: completeSigNozMcpOAuth },
 } as const;
 
-function ingress(overrides: { authError?: ApiError } = {}) {
+function ingress(
+  overrides: {
+    authError?: ApiError;
+    refreshPluginRegistrations?: (input: {
+      provider: McpOAuthProvider;
+      userWorkosId: string;
+      workspaceIds: string[];
+    }) => Promise<void>;
+  } = {},
+) {
   vi.mocked(listWorkspacesForUser).mockResolvedValue([
     { workspace: { id: "workspace_1", workosOrganizationId: null }, role: "admin" },
   ] as never);
@@ -66,10 +102,14 @@ function ingress(overrides: { authError?: ApiError } = {}) {
         userId: "user_1",
         organizationId: null,
         method: "session",
+        credentialKind: "browser_cookie",
         activeWorkspaceId: null,
         activeBrainId: null,
       };
     },
+    ...(overrides.refreshPluginRegistrations
+      ? { refreshPluginRegistrations: overrides.refreshPluginRegistrations }
+      : {}),
   });
 }
 
@@ -162,7 +202,7 @@ describe("remote MCP OAuth ingress", () => {
     expect(response.headers.get("location")).toBe("https://opencompany.example.com/signin");
   });
 
-  it("keeps Linear's legacy invalid-state target while the newer providers use /settings/integrations", async () => {
+  it("uses each provider's safe invalid-state target", async () => {
     for (const provider of PROVIDERS) {
       const response = await ingress().callback(
         provider,
@@ -170,7 +210,12 @@ describe("remote MCP OAuth ingress", () => {
           `https://api.example.com/integrations/${provider}/callback?state=garbage&code=abc`,
         ),
       );
-      const expectedPath = provider === "linear" ? "/settings" : "/settings/integrations";
+      const expectedPath =
+        provider === "linear"
+          ? "/settings"
+          : provider === "betterstack" || provider === "signoz"
+            ? `/settings/plugins/${provider}`
+            : "/settings/integrations";
       expect(response.headers.get("location"), provider).toBe(
         `https://opencompany.example.com${expectedPath}?integration=${provider}&setup=error&reason=invalid_state`,
       );
@@ -234,6 +279,25 @@ describe("remote MCP OAuth ingress", () => {
       code: "abc",
       state,
       db: sentinelDb,
+    });
+  });
+
+  it("refreshes installed plugin discovery after a provider reconnect", async () => {
+    vi.mocked(completeLinearMcpOAuth).mockResolvedValue(undefined as never);
+    const refreshPluginRegistrations = vi.fn(async () => undefined);
+    const state = mintState("linear");
+
+    await ingress({ refreshPluginRegistrations }).callback(
+      "linear",
+      new Request(
+        `https://api.example.com/integrations/linear/callback?state=${encodeURIComponent(state)}&code=abc`,
+      ),
+    );
+
+    expect(refreshPluginRegistrations).toHaveBeenCalledWith({
+      provider: "linear",
+      userWorkosId: "user_1",
+      workspaceIds: ["workspace_1"],
     });
   });
 

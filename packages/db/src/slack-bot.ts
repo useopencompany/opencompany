@@ -10,11 +10,29 @@ import {
   slackBotEventClaims,
   slackBotThreadParticipation,
 } from "./product-schema";
-import { parseSlackBrainSourceConfig, type SlackBrainSourceConfig } from "./slack";
 
 type DbLike = any;
 
 export const SLACK_BOT_EVENT_CLAIM_LEASE_MS = 5 * 60 * 1000;
+
+export type SlackConversationRef = {
+  id: string;
+  name: string;
+};
+
+export type SlackBotSourceConfig = {
+  channels?: SlackConversationRef[];
+};
+
+export function parseSlackBotSourceConfig(value: unknown): SlackBotSourceConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const channels = parseConversationRefs((value as Record<string, unknown>).channels);
+  return channels ? { channels } : {};
+}
+
+export function slackBotSelectedChannelIds(config: SlackBotSourceConfig): Set<string> {
+  return new Set((config.channels ?? []).map((channel) => channel.id));
+}
 
 export type SlackBotEventClaim = {
   eventId: string;
@@ -43,7 +61,7 @@ export type SlackBotBrainRoute = {
   brainRef: string;
   brainName: string;
   visibility: BrainVisibility;
-  config: SlackBrainSourceConfig;
+  config: SlackBotSourceConfig;
 };
 
 // All workspace installs of the bot for a Slack team. Normally one row, but
@@ -127,7 +145,7 @@ export async function listEnabledSlackBotBrainRoutes(
       brainRef: row.brainRef,
       brainName: row.brainName,
       visibility: row.visibility,
-      config: parseSlackBrainSourceConfig(row.config),
+      config: parseSlackBotSourceConfig(row.config),
     }),
   );
 }
@@ -286,4 +304,17 @@ export async function pruneSlackBotThreadParticipation(
   await db
     .delete(slackBotThreadParticipation)
     .where(lt(slackBotThreadParticipation.updatedAt, cutoff));
+}
+
+function parseConversationRefs(value: unknown): SlackConversationRef[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const refs = value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    const id = typeof record.id === "string" ? record.id.trim() : "";
+    if (!id) return [];
+    const name = typeof record.name === "string" ? record.name.trim() : "";
+    return [{ id, name: name || id }];
+  });
+  return refs.length > 0 ? refs : undefined;
 }

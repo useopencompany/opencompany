@@ -44,6 +44,11 @@ describe("Wiki source service", () => {
         integrationId: "integration_workspace",
         integrationWorkspaceId: "workspace_1",
       }),
+      sourceRow({
+        id: "gwscfg_retired_slack",
+        provider: "slack",
+        integrationId: "integration_slack",
+      }),
     ] as never);
     const service = createWikiSourceService({ db: integrationDb([]) });
 
@@ -67,7 +72,19 @@ describe("Wiki source service", () => {
     expect(listWikiSourcesForWorkspace).toHaveBeenCalledWith("workspace_1", expect.anything());
   });
 
-  it("requires the Wiki preview permission for reads and writes", async () => {
+  it("hides retired Slack activity rows", async () => {
+    vi.mocked(listWikiIngestActivityRows).mockResolvedValueOnce([
+      activityRow({ sourceProvider: "slack", sourceType: "conversation" }),
+      activityRow({ id: "gwjob_gmail", sourceProvider: "gmail", sourceType: "thread" }),
+    ] as never);
+    const service = createWikiSourceService({ db: integrationDb([]) });
+
+    await expect(service.listActivity(member, { limit: 20 })).resolves.toMatchObject({
+      items: [{ id: "gwjob_gmail", provider: "gmail" }],
+    });
+  });
+
+  it("requires Wiki permissions for reads and writes", async () => {
     const service = createWikiSourceService({ db: integrationDb([]) });
     const previewDisabled = actor({ permissions: [] });
 
@@ -288,9 +305,9 @@ function integrationDb(rows: unknown[]) {
 function activityRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "gwjob_1",
-    sourceProvider: "slack" as const,
-    sourceType: "conversation" as const,
-    title: "#product",
+    sourceProvider: "gmail" as const,
+    sourceType: "thread" as const,
+    title: "Launch update",
     occurredAt: new Date("2026-08-24T08:00:00.000Z"),
     status: "succeeded" as const,
     attempts: 1,

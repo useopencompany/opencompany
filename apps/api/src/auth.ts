@@ -18,7 +18,7 @@ import {
 import type { ChatSqlExecute } from "@opencompany/db/chat-repository";
 import { WorkOS } from "@workos-inc/node";
 import { sql } from "drizzle-orm";
-import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
+import { createRemoteJWKSet, decodeJwt, type JWTPayload, jwtVerify } from "jose";
 import { ApiError } from "./errors";
 
 const ACTIVE_WORKSPACE_COOKIE = "goat-active-workspace";
@@ -38,6 +38,7 @@ type VerifiedIdentity = {
   organizationId: string | null;
   sessionId?: string;
   method: Actor["authenticationMethod"];
+  credentialKind: "browser_cookie" | "connect_bearer" | "authkit_bearer";
   refreshedSessionCookie?: string;
 };
 
@@ -58,6 +59,7 @@ type AuthenticatorOptions = {
   cookieName?: string;
   cookiePassword?: string;
   cookieDomain?: string;
+  mobileClientId?: string;
   workos?: WorkOS;
   verifyJwt?: typeof jwtVerify;
 };
@@ -72,6 +74,8 @@ export function createWorkOsApiIdentityVerifier(
     options.authKitDomain ?? process.env.OPENCOMPANY_AUTHKIT_DOMAIN?.trim(),
   );
   const cookiePassword = options.cookiePassword ?? process.env.WORKOS_COOKIE_PASSWORD;
+  const mobileClientId =
+    options.mobileClientId?.trim() || process.env.WORKOS_MOBILE_CLIENT_ID?.trim() || null;
   let workos = options.workos;
 
   return async (request) => {
@@ -80,16 +84,30 @@ export function createWorkOsApiIdentityVerifier(
     if (authorization) {
       const token = bearerToken(authorization);
       if (!token) throw unauthorized("Invalid bearer token.");
-      if (!audience || !authKitDomain) {
-        throw new ApiError(503, "unavailable", "OAuth authentication is not configured.", true);
-      }
       try {
-        const { payload } = await (options.verifyJwt ?? jwtVerify)(token, jwksFor(authKitDomain), {
-          issuer: authKitDomain,
-          audience,
-        });
-        identity = identityFromJwt(payload);
-      } catch {
+        const unverifiedClientId = stringClaim(decodeJwt(token).client_id);
+        if (mobileClientId && unverifiedClientId === mobileClientId) {
+          const { payload } = await (options.verifyJwt ?? jwtVerify)(
+            token,
+            authKitJwksFor(mobileClientId),
+          );
+          identity = identityFromAuthKitJwt(payload, mobileClientId);
+        } else {
+          if (!audience || !authKitDomain) {
+            throw new ApiError(503, "unavailable", "OAuth authentication is not configured.", true);
+          }
+          const { payload } = await (options.verifyJwt ?? jwtVerify)(
+            token,
+            connectJwksFor(authKitDomain),
+            {
+              issuer: authKitDomain,
+              audience,
+            },
+          );
+          identity = identityFromConnectJwt(payload);
+        }
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 503) throw error;
         throw unauthorized("Invalid bearer token.");
       }
     } else {
@@ -118,11 +136,11 @@ export function createWorkOsApiIdentityVerifier(
       });
     }
 
-    const cookies = parseCookies(request.headers.get("cookie"));
+    const cookies = authorization ? null : parseCookies(request.headers.get("cookie"));
     return {
       ...identity,
-      activeWorkspaceId: cookies.get(ACTIVE_WORKSPACE_COOKIE) ?? null,
-      activeBrainId: cookies.get(ACTIVE_BRAIN_COOKIE) ?? null,
+      activeWorkspaceId: cookies?.get(ACTIVE_WORKSPACE_COOKIE) ?? null,
+      activeBrainId: cookies?.get(ACTIVE_BRAIN_COOKIE) ?? null,
     };
   };
 }
@@ -134,7 +152,7 @@ export function createWorkOsApiAuthenticator(
   const identify = createWorkOsApiIdentityVerifier(options);
   return async (request) => {
     const identity = await identify(request);
-    if (identity.method === "oauth" && !identity.organizationId) {
+    if (identity.credentialKind !== "browser_cookie" && !identity.organizationId) {
       throw unauthorized("Invalid bearer token claims.");
     }
     const actor = await resolveLocalActor(execute, identity, identity.activeWorkspaceId);
@@ -165,6 +183,7 @@ async function identityFromSession(input: {
       organizationId: result.organizationId ?? null,
       sessionId: result.sessionId,
       method: "session",
+      credentialKind: "browser_cookie",
     };
   }
   if (result.reason === "invalid_jwt") {
@@ -175,6 +194,7 @@ async function identityFromSession(input: {
         organizationId: refreshed.organizationId ?? null,
         sessionId: refreshed.sessionId,
         method: "session",
+        credentialKind: "browser_cookie",
         ...(refreshed.sealedSession
           ? {
               refreshedSessionCookie: serializeSessionCookie(
@@ -190,7 +210,7 @@ async function identityFromSession(input: {
   throw unauthorized("Authentication required.");
 }
 
-function identityFromJwt(payload: JWTPayload): VerifiedIdentity {
+function identityFromConnectJwt(payload: JWTPayload): VerifiedIdentity {
   const userId = stringClaim(payload.sub);
   const organizationId = stringClaim(payload.org_id);
   const sessionId = stringClaim(payload.sid);
@@ -199,7 +219,25 @@ function identityFromJwt(payload: JWTPayload): VerifiedIdentity {
     userId,
     organizationId,
     method: "oauth",
+    credentialKind: "connect_bearer",
     ...(sessionId ? { sessionId } : {}),
+  };
+}
+
+function identityFromAuthKitJwt(payload: JWTPayload, mobileClientId: string): VerifiedIdentity {
+  const userId = stringClaim(payload.sub);
+  const organizationId = stringClaim(payload.org_id);
+  const sessionId = stringClaim(payload.sid);
+  const clientId = stringClaim(payload.client_id);
+  if (!userId || !sessionId || clientId !== mobileClientId) {
+    throw unauthorized("Invalid bearer token claims.");
+  }
+  return {
+    userId,
+    organizationId,
+    sessionId,
+    method: "session",
+    credentialKind: "authkit_bearer",
   };
 }
 
@@ -221,7 +259,7 @@ async function resolveLocalActor(
       member.workspace_id AS "workspaceId",
       member.role,
       actor_user.task_spawning_enabled AS "taskSpawningEnabled",
-      actor_user.wiki_enabled AS "wikiEnabled"
+      workspace.legacy_brain_enabled AS "legacyBrainEnabled"
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
       ON member.user_workos_id = actor_user.workos_user_id
@@ -249,7 +287,7 @@ async function resolveLocalActor(
     workspaceId: string;
     role: string;
     taskSpawningEnabled: boolean;
-    wikiEnabled: boolean;
+    legacyBrainEnabled: boolean;
   }>(result)[0];
   if (!row) {
     throw new ApiError(
@@ -272,7 +310,7 @@ async function resolveLocalActor(
 // the request authenticator and the internal service-actor resolver.
 function actorPermissions(row: {
   role: string;
-  wikiEnabled: boolean;
+  legacyBrainEnabled: boolean;
   taskSpawningEnabled: boolean;
 }): string[] {
   return [
@@ -280,10 +318,12 @@ function actorPermissions(row: {
     CHAT_WRITE_PERMISSION,
     TASK_READ_PERMISSION,
     TASK_WRITE_PERMISSION,
-    BRAIN_READ_PERMISSION,
     SKILL_READ_PERMISSION,
-    ...(row.role === "admin" ? [BRAIN_WRITE_PERMISSION, SKILL_WRITE_PERMISSION] : []),
-    ...(row.wikiEnabled ? [WIKI_READ_PERMISSION, WIKI_WRITE_PERMISSION] : []),
+    WIKI_READ_PERMISSION,
+    WIKI_WRITE_PERMISSION,
+    ...(row.legacyBrainEnabled ? [BRAIN_READ_PERMISSION] : []),
+    ...(row.role === "admin" ? [SKILL_WRITE_PERMISSION] : []),
+    ...(row.role === "admin" && row.legacyBrainEnabled ? [BRAIN_WRITE_PERMISSION] : []),
     ...(row.taskSpawningEnabled
       ? [
           WORKFLOW_READ_PERMISSION,
@@ -298,8 +338,9 @@ function actorPermissions(row: {
 // Reconstructs an Actor for an explicit (userWorkosId, workspaceId) pair from
 // Postgres, for internal service calls (e.g. the runner→API wiki command
 // endpoint) that name their tenancy but must never be trusted for permissions.
-// Requires the user to exist, have finished onboarding, have the wiki preview
-// enabled, and hold an accessible membership of the named workspace.
+// Requires the user to exist and hold a membership of the named workspace.
+// Invite acceptance can create that membership before onboarding finishes, so
+// membership remains the Wiki authorization boundary in that valid state.
 export async function resolveWikiServiceActor(
   execute: ChatSqlExecute,
   input: { userWorkosId: string; workspaceId: string },
@@ -309,15 +350,13 @@ export async function resolveWikiServiceActor(
       member.workspace_id AS "workspaceId",
       member.role,
       actor_user.task_spawning_enabled AS "taskSpawningEnabled",
-      actor_user.wiki_enabled AS "wikiEnabled"
+      workspace.legacy_brain_enabled AS "legacyBrainEnabled"
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
       ON member.user_workos_id = actor_user.workos_user_id
     JOIN goat.workspaces AS workspace
       ON workspace.id = member.workspace_id
     WHERE actor_user.workos_user_id = ${input.userWorkosId}
-      AND actor_user.onboarded_at IS NOT NULL
-      AND actor_user.wiki_enabled = true
       AND workspace.id = ${input.workspaceId}
     LIMIT 1
   `);
@@ -325,7 +364,7 @@ export async function resolveWikiServiceActor(
     workspaceId: string;
     role: string;
     taskSpawningEnabled: boolean;
-    wikiEnabled: boolean;
+    legacyBrainEnabled: boolean;
   }>(result)[0];
   if (!row) {
     throw new ApiError(403, "forbidden", "The user cannot access the wiki in this workspace.");
@@ -339,13 +378,24 @@ export async function resolveWikiServiceActor(
   };
 }
 
-const jwks = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+const connectJwks = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+const authKitJwks = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
-function jwksFor(origin: string) {
-  const cached = jwks.get(origin);
+function connectJwksFor(origin: string) {
+  const cached = connectJwks.get(origin);
   if (cached) return cached;
   const value = createRemoteJWKSet(new URL("/oauth2/jwks", `${origin}/`));
-  jwks.set(origin, value);
+  connectJwks.set(origin, value);
+  return value;
+}
+
+function authKitJwksFor(clientId: string) {
+  const cached = authKitJwks.get(clientId);
+  if (cached) return cached;
+  const value = createRemoteJWKSet(
+    new URL(`/sso/jwks/${encodeURIComponent(clientId)}`, "https://api.workos.com"),
+  );
+  authKitJwks.set(clientId, value);
   return value;
 }
 

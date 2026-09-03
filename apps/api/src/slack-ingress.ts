@@ -7,78 +7,59 @@ import {
   exchangeSlackCode,
   fetchSlackIdentity,
   isSlackIntegrationConfigured,
+  SlackOAuthResponseError,
   verifySlackIntegrationState,
 } from "@opencompany/agent/integrations/slack";
-import { verifySlackEventSignature } from "@opencompany/agent/integrations/slack-signature";
-import {
-  connectSlackIntegration,
-  loadIntegrationCredential,
-  markIntegrationStatus,
-} from "@opencompany/db/integrations";
-import type { SlackChannelType } from "@opencompany/db/product-schema";
-import {
-  insertSlackMessageEvents,
-  listEnabledSlackBrainSourceRoutes,
-  listEnabledSlackWikiSourceRoutes,
-  listSlackIntegrationsForTeam,
-  type SlackMessageEventInsert,
-  slackSelectedConversationIds,
-} from "@opencompany/db/slack";
-import { createLogger } from "@opencompany/observability";
+import { connectSlackIntegration } from "@opencompany/db/integrations";
+import { createLogger, errorToLogFields } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
 
-const logger = createLogger({ service: "opencompany-api", runtime: "slack-ingress" });
+const logger = createLogger({ service: "opencompany-api", runtime: "slack-oauth" });
 
 type DbLike = any;
 
-// Provider ingress composition for the Slack user-token ingestion app: the
-// OAuth connect flow and the Events API webhook that buffers channel/DM
-// messages for the runner's flush worker. Public URLs stay on the web origin
-// as relays, so no Slack app configuration changes. The separate Slack answer
-// bot has its own API-owned ingress and runner-owned answer pipeline.
+type SlackCallbackFailureStage =
+  | "oauth_exchange"
+  | "identity_lookup"
+  | "connection_persistence"
+  | "integration_analytics";
+
+// OAuth boundary for the official Slack MCP plugin. Slack event ingestion was
+// retired; the separate workspace answer bot owns its own OAuth and webhook.
 export type SlackIngressService = {
   start(request: Request): Promise<Response>;
   callback(request: Request): Promise<Response>;
-  webhook(request: Request): Promise<Response>;
 };
 
 export function createSlackIngress(input: {
   db: DbLike;
   identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
 }): SlackIngressService {
   return {
     start: (request) => handleStart(input, request),
     callback: (request) => handleCallback(input, request),
-    webhook: (request) => handleWebhook(input, request),
   };
 }
 
-type IngressInput = { db: DbLike; identify: ApiIdentityVerifier };
-
-// Message subtypes that carry conversation content. Everything else
-// (message_changed, message_deleted, channel_join, bot_message, ...) is noise
-// for brain ingestion.
-const INGESTED_MESSAGE_SUBTYPES = new Set<string | undefined>([
-  undefined,
-  "file_share",
-  "thread_broadcast",
-]);
-
-const SLACK_CHANNEL_TYPES = new Set<string>(["channel", "group", "im", "mpim"]);
-
-type SlackEnvelope = {
-  type?: string;
-  challenge?: string;
-  team_id?: string;
-  event?: Record<string, unknown>;
+type IngressInput = {
+  db: DbLike;
+  identify: ApiIdentityVerifier;
+  refreshPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceIds: string[];
+  }) => Promise<void>;
 };
 
 async function handleStart(input: IngressInput, request: Request): Promise<Response> {
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/settings";
+  const returnTo = url.searchParams.get("returnTo") ?? "/settings/plugins/slack";
 
   if (!isSlackIntegrationConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");
@@ -103,7 +84,10 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
   } catch {
     return sessionRedirect(
       session,
-      new URL("/settings?integration=slack&setup=error&reason=invalid_state", getAppUrl()),
+      new URL(
+        "/settings/plugins/slack?integration=slack&setup=error&reason=invalid_state",
+        getAppUrl(),
+      ),
     );
   }
 
@@ -121,224 +105,94 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
     return statusRedirect(session, state.returnTo, "error", "missing_code");
   }
 
+  let failureStage: SlackCallbackFailureStage = "oauth_exchange";
   try {
     const oauth = await exchangeSlackCode(code);
+    failureStage = "identity_lookup";
     const identity = await fetchSlackIdentity({
       accessToken: oauth.accessToken,
       authedUserId: oauth.authedUserId,
+      teamId: oauth.teamId,
     });
 
+    failureStage = "connection_persistence";
     await connectSlackIntegration({
       userWorkosId: session.userId,
       teamId: oauth.teamId,
       teamName: oauth.teamName,
       teamDomain: identity.teamDomain,
-      authedUserId: oauth.authedUserId,
+      authedUserId: identity.authedUserId,
       accountName: identity.userName,
       accountEmail: identity.userEmail,
       accessToken: oauth.accessToken,
       scopes: oauth.scopes,
       db: input.db,
     });
+    failureStage = "integration_analytics";
     await captureIntegrationAddedAnalytics({
       userWorkosId: session.userId,
       workspaceId: session.workspaceId,
       provider: "slack",
     });
+    if (input.refreshPluginRegistrations) {
+      try {
+        await input.refreshPluginRegistrations({
+          userWorkosId: session.userId,
+          workspaceIds: session.workspaces.map((entry) => entry.workspace.id),
+        });
+      } catch (error) {
+        logger.warn("Slack plugin discovery refresh after connection failed", {
+          event: "goat.slack_plugin_reconnect_refresh_failed",
+          failure_stage: "plugin_discovery_refresh",
+          request_id: requestId(request),
+          ...observableErrorFields(error),
+        });
+      }
+    }
 
     return statusRedirect(session, state.returnTo, "connected");
   } catch (error) {
-    logger.warn("Slack integration connection failed", {
-      event: "goat.slack_integration_callback_failed",
-      error_message: error instanceof Error ? error.message : String(error),
+    logger.warn("Slack plugin connection failed", {
+      event: "goat.slack_plugin_callback_failed",
+      failure_stage: failureStage,
+      request_id: requestId(request),
+      ...observableErrorFields(error),
+      ...(error instanceof SlackOAuthResponseError
+        ? {
+            missing_response_fields: error.missingFields,
+            oauth_response_shape: {
+              credential_location: error.responseShape.credentialLocation,
+              has_authed_user_id: error.responseShape.hasAuthedUserId,
+              has_team_id: error.responseShape.hasTeamId,
+              has_enterprise_id: error.responseShape.hasEnterpriseId,
+              is_enterprise_install: error.responseShape.isEnterpriseInstall,
+            },
+          }
+        : {}),
     });
     return statusRedirect(session, state.returnTo, "error", "connection_sync_failed");
   }
 }
 
-async function handleWebhook(input: IngressInput, request: Request): Promise<Response> {
-  const rawBody = await request.text();
-  const verified = verifySlackEventSignature({
-    rawBody,
-    timestamp: request.headers.get("x-slack-request-timestamp"),
-    signature: request.headers.get("x-slack-signature"),
-  });
-  if (!verified) {
-    return Response.json({ error: "Invalid Slack signature." }, { status: 401 });
-  }
-
-  let envelope: SlackEnvelope;
-  try {
-    envelope = JSON.parse(rawBody) as SlackEnvelope;
-  } catch {
-    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
-  }
-
-  if (envelope.type === "url_verification") {
-    return Response.json({ challenge: envelope.challenge ?? "" });
-  }
-
-  // Slack disables event delivery for apps that keep failing, so after the
-  // signature check every path acks with 200 — errors are logged, not surfaced.
-  try {
-    if (envelope.type === "event_callback" && envelope.event && envelope.team_id) {
-      const retryNum = request.headers.get("x-slack-retry-num");
-      if (retryNum) {
-        logger.warn("Slack retried event delivery", {
-          event: "goat.slack_event_retried",
-          retry_num: retryNum,
-          retry_reason: request.headers.get("x-slack-retry-reason"),
-          event_type: envelope.event.type,
-        });
-      }
-      return Response.json(await handleEventCallback(input.db, envelope.team_id, envelope.event));
-    }
-  } catch (error) {
-    logger.error("Failed to process Slack event", {
-      event: "goat.slack_event_failed",
-      event_type: envelope.event?.type,
-      error_message: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  return Response.json({ ok: true });
-}
-
-async function handleEventCallback(db: DbLike, teamId: string, event: Record<string, unknown>) {
-  if (event.type === "tokens_revoked" || event.type === "app_uninstalled") {
-    return await handleRevocation(db, teamId, event);
-  }
-  if (event.type === "message") {
-    return await handleMessage(db, teamId, event);
-  }
-  return { ok: true, ignored: true };
-}
-
-async function handleRevocation(db: DbLike, teamId: string, event: Record<string, unknown>) {
-  const integrations = await listSlackIntegrationsForTeam(teamId, db);
-  const revokedUserIds = event.type === "tokens_revoked" ? extractRevokedOauthUserIds(event) : null;
-
-  let marked = 0;
-  for (const integration of integrations) {
-    if (integration.status === "disconnected") continue;
-    if (revokedUserIds) {
-      const credential = await loadIntegrationCredential({
-        userWorkosId: integration.userWorkosId,
-        integrationId: integration.id,
-        provider: "slack",
-        kind: "oauth_token",
-        db,
-      }).catch(() => null);
-      const authedUserId = credential?.payload.authed_user_id;
-      if (typeof authedUserId !== "string" || !revokedUserIds.has(authedUserId)) continue;
-    }
-    await markIntegrationStatus({
-      userWorkosId: integration.userWorkosId,
-      integrationId: integration.id,
-      provider: "slack",
-      status: "needs_reauth",
-      statusReason:
-        event.type === "app_uninstalled"
-          ? "The Slack app was uninstalled from the workspace."
-          : "The Slack token was revoked.",
-      db,
-    });
-    marked += 1;
-  }
-  return { ok: true, marked };
-}
-
-async function handleMessage(db: DbLike, teamId: string, event: Record<string, unknown>) {
-  const subtype = typeof event.subtype === "string" ? event.subtype : undefined;
-  const channelId = typeof event.channel === "string" ? event.channel : null;
-  const channelType = typeof event.channel_type === "string" ? event.channel_type : null;
-  const messageTs = typeof event.ts === "string" ? event.ts : null;
-  const slackUserId = typeof event.user === "string" ? event.user : null;
-
-  if (!INGESTED_MESSAGE_SUBTYPES.has(subtype)) {
-    if (subtype && !KNOWN_DROPPED_SUBTYPES.has(subtype)) {
-      logger.warn("Dropping Slack message with unknown subtype", {
-        event: "goat.slack_event_unknown_subtype",
-        subtype,
-      });
-    }
-    return { ok: true, dropped: true };
-  }
-  if (event.bot_id || !slackUserId) return { ok: true, dropped: true };
-  if (!channelId || !messageTs || !channelType || !SLACK_CHANNEL_TYPES.has(channelType)) {
-    return { ok: true, dropped: true };
-  }
-
-  const integrations = await listSlackIntegrationsForTeam(teamId, db);
-  const connected = integrations.filter((integration) => integration.status === "connected");
-  if (connected.length === 0) return { ok: true, dropped: true };
-
-  const integrationIds = connected.map((integration) => integration.id);
-  const [brainRoutes, wikiRoutes] = await Promise.all([
-    listEnabledSlackBrainSourceRoutes(integrationIds, db),
-    listEnabledSlackWikiSourceRoutes(integrationIds, db),
-  ]);
-  const matchedIntegrationIds = new Set(
-    [...brainRoutes, ...wikiRoutes]
-      .filter((route) => slackSelectedConversationIds(route.config).has(channelId))
-      .map((route) => route.integrationId),
+function requestId(request: Request) {
+  return (
+    request.headers.get("Rndr-Id")?.trim() || request.headers.get("X-Request-Id")?.trim() || null
   );
-  if (matchedIntegrationIds.size === 0) return { ok: true, dropped: true };
-
-  const eventTimeSeconds = Number(messageTs);
-  const inserts: SlackMessageEventInsert[] = connected
-    .filter((integration) => matchedIntegrationIds.has(integration.id))
-    .map((integration) => ({
-      integrationId: integration.id,
-      userWorkosId: integration.userWorkosId,
-      teamId,
-      channelId,
-      channelType: channelType as SlackChannelType,
-      messageTs,
-      threadTs: typeof event.thread_ts === "string" ? event.thread_ts : null,
-      slackUserId,
-      subtype: subtype ?? null,
-      text: typeof event.text === "string" ? event.text : "",
-      payload: event,
-      eventTime: Number.isFinite(eventTimeSeconds) ? new Date(eventTimeSeconds * 1000) : new Date(),
-    }));
-
-  const buffered = await insertSlackMessageEvents(inserts, db);
-  return { ok: true, buffered };
 }
 
-// Subtypes we expect to see and intentionally skip; anything outside this list
-// gets logged once per delivery so new subtypes surface in telemetry.
-const KNOWN_DROPPED_SUBTYPES = new Set([
-  "bot_message",
-  "message_changed",
-  "message_deleted",
-  "message_replied",
-  "channel_join",
-  "channel_leave",
-  "channel_topic",
-  "channel_purpose",
-  "channel_name",
-  "channel_archive",
-  "channel_unarchive",
-  "group_join",
-  "group_leave",
-  "group_topic",
-  "group_purpose",
-  "group_name",
-  "group_archive",
-  "group_unarchive",
-  "huddle_thread",
-  "assistant_app_thread",
-]);
-
-function extractRevokedOauthUserIds(event: Record<string, unknown>): Set<string> | null {
-  const tokens = event.tokens;
-  if (!tokens || typeof tokens !== "object" || Array.isArray(tokens)) return null;
-  const oauth = (tokens as Record<string, unknown>).oauth;
-  if (!Array.isArray(oauth)) return null;
-  const ids = oauth.filter((value): value is string => typeof value === "string");
-  return ids.length > 0 ? new Set(ids) : null;
+function observableErrorFields(error: unknown) {
+  const fields = errorToLogFields(error);
+  const details = fields.error;
+  const errorMessage =
+    typeof details === "string"
+      ? details
+      : details &&
+          typeof details === "object" &&
+          "message" in details &&
+          typeof details.message === "string"
+        ? details.message
+        : "Unknown error";
+  return { error_message: errorMessage, ...fields };
 }
 
 function statusRedirect(

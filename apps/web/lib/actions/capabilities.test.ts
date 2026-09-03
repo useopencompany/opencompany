@@ -30,6 +30,13 @@ describe("PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
+  it("registers personal GitHub reads on by default and all writes behind ask", () => {
+    expect(PROVIDER_CAPABILITIES.github_user).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
   it("registers Linear with read on by default and issue management behind ask", () => {
     expect(PROVIDER_CAPABILITIES.linear).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
@@ -37,9 +44,11 @@ describe("PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
-  it("registers Slack as one broad read permission", () => {
+  it("registers public Slack search on and guards private reads and writes", () => {
     expect(PROVIDER_CAPABILITIES.slack).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
@@ -54,6 +63,14 @@ describe("PROVIDER_CAPABILITIES", () => {
     expect(PROVIDER_CAPABILITIES.neon).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "query", defaultMode: "ask" }),
+    ]);
+  });
+
+  it("keeps SigNoz docs visible but gates telemetry reads and mutations", () => {
+    expect(PROVIDER_CAPABILITIES.signoz).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
@@ -112,11 +129,16 @@ describe("mode helpers", () => {
     expect(providerCapability("google_drive", "read")?.label).toBe("Find & read files");
     expect(providerCapability("google_drive", "write")?.label).toBe("Edit Docs & Sheets");
     expect(providerCapability("google_calendar", "write")?.label).toBe("Add events");
+    expect(providerCapability("github_user", "read")?.label).toBe("Read GitHub");
+    expect(providerCapability("github_user", "write")?.label).toBe("Manage GitHub");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
-    expect(providerCapability("slack", "read")?.label).toBe("Read Slack");
+    expect(providerCapability("slack", "read")?.label).toBe("Search public Slack");
     expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
     expect(providerCapability("neon", "read")?.label).toBe("Inspect Neon structure");
     expect(providerCapability("neon", "query")?.label).toBe("Query database data");
-    expect(providerCapability("slack", "write")).toBeUndefined();
+    expect(providerCapability("signoz", "read")?.label).toBe("Read SigNoz documentation");
+    expect(providerCapability("signoz", "query")?.label).toBe("Inspect observability data");
+    expect(providerCapability("slack", "query")?.label).toBe("Read private Slack");
+    expect(providerCapability("slack", "write")?.label).toBe("Change Slack");
   });
 });

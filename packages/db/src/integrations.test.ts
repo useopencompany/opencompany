@@ -4,11 +4,101 @@ import { drizzle as drizzleNodePg } from "drizzle-orm/node-postgres";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyIntegrationCapabilityMode,
+  claimIntegrationCredentialRefresh,
+  connectGitHubUserIntegration,
   connectSlackBotIntegration,
   credentialAad,
   disconnectPersonalIntegration,
   refreshIntegrationCredential,
+  rotateIntegrationCredential,
 } from "./integrations";
+
+describe("connectGitHubUserIntegration", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("upserts one personal github_user row and encrypts the rotating token pair", async () => {
+    const encryptionKey = Buffer.alloc(32, 7);
+    vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", encryptionKey.toString("base64"));
+    const now = new Date("2026-09-01T12:00:00.000Z");
+    const accessTokenExpiresAt = new Date("2026-09-01T20:00:00.000Z");
+    const refreshTokenExpiresAt = new Date("2027-03-04T12:00:00.000Z");
+    const query = vi.fn(async (statement: string, _params: unknown[], _options: object) => ({
+      rows: statement.startsWith('insert into "goat"."integrations"')
+        ? [["gint_github_user"]]
+        : [
+            [
+              "gcred_github_user",
+              accessTokenExpiresAt.toISOString(),
+              now.toISOString(),
+              now.toISOString(),
+              1,
+            ],
+          ],
+    }));
+    const db = drizzle(query as never);
+
+    await expect(
+      connectGitHubUserIntegration({
+        userWorkosId: "user_1",
+        githubUserId: "42",
+        login: "octocat",
+        name: "The Octocat",
+        email: null,
+        installationId: "123",
+        accessToken: "ghu_access",
+        refreshToken: "ghr_refresh",
+        accessTokenExpiresAt,
+        refreshTokenExpiresAt,
+        tokenType: "bearer",
+        db,
+        now,
+      }),
+    ).resolves.toEqual({ integrationId: "gint_github_user" });
+
+    const [integrationStatement, integrationParams] = query.mock.calls[0]!;
+    expect(integrationStatement.replace(/\s+/g, " ")).toContain(
+      'on conflict ("user_workos_id","provider","external_id")',
+    );
+    expect(integrationParams).toEqual(
+      expect.arrayContaining([
+        "user_1",
+        "github_user",
+        "@octocat",
+        "The Octocat",
+        "42+octocat@users.noreply.github.com",
+      ]),
+    );
+
+    const [, credentialParams] = query.mock.calls[1]!;
+    const encryptedParam = credentialParams.find(
+      (value) => typeof value === "string" && value.includes('"ciphertext"'),
+    );
+    expect(encryptedParam).toBeTypeOf("string");
+    expect(encryptedParam).not.toContain("ghu_access");
+    expect(
+      decryptJson(JSON.parse(encryptedParam as string), {
+        key: encryptionKey,
+        aad: credentialAad({
+          userWorkosId: "user_1",
+          integrationId: "gint_github_user",
+          provider: "github_user",
+          kind: "oauth_token",
+          keyVersion: 1,
+        }),
+      }),
+    ).toEqual({
+      access_token: "ghu_access",
+      refresh_token: "ghr_refresh",
+      token_type: "bearer",
+      refresh_token_expires_at: refreshTokenExpiresAt.toISOString(),
+      github_user_id: "42",
+      github_login: "octocat",
+      github_installation_id: "123",
+    });
+  });
+});
 
 describe("refreshIntegrationCredential", () => {
   afterEach(() => {
@@ -92,6 +182,98 @@ describe("refreshIntegrationCredential", () => {
 
     expect(query).toHaveBeenCalledTimes(2);
     expect(transaction).toHaveBeenCalledOnce();
+  });
+});
+
+describe("integration credential refresh leases", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("claims one expired OAuth rotation by its current rotation timestamp", async () => {
+    const query = vi.fn(async (_statement: string, _params: unknown[], _options: object) => ({
+      rows: [["gcred_123"]],
+    }));
+    const db = drizzle(query as never);
+    const lastRotatedAt = new Date("2026-09-01T11:00:00.000Z");
+    const now = new Date("2026-09-01T12:00:00.000Z");
+    const leaseUntil = new Date("2026-09-01T12:00:30.000Z");
+
+    await expect(
+      claimIntegrationCredentialRefresh({
+        userWorkosId: "user_123",
+        integrationId: "gint_123",
+        provider: "github_user",
+        kind: "oauth_token",
+        expectedLastRotatedAt: lastRotatedAt,
+        leaseUntil,
+        db,
+        now,
+      }),
+    ).resolves.toBe(true);
+
+    const [statement, params] = query.mock.calls[0]!;
+    expect(statement.replace(/\s+/g, " ")).toContain(
+      'update "goat"."integration_credentials" set "refresh_lease_until" =',
+    );
+    expect(statement).toContain('"last_rotated_at" =');
+    expect(statement).toContain('"refresh_lease_until" is null');
+    expect(params).toEqual(
+      expect.arrayContaining([
+        "user_123",
+        "gint_123",
+        "github_user",
+        "oauth_token",
+        lastRotatedAt.toISOString(),
+        now.toISOString(),
+        leaseUntil.toISOString(),
+      ]),
+    );
+  });
+
+  it("rotates only the credential that owns the lease and clears the lease", async () => {
+    vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
+    const now = new Date("2026-09-01T12:00:00.000Z");
+    const previousRotation = new Date("2026-09-01T11:00:00.000Z");
+    const leaseUntil = new Date("2026-09-01T12:00:30.000Z");
+    const expiresAt = new Date("2026-09-01T20:00:00.000Z");
+    const query = vi.fn(async (statement: string, _params: unknown[], _options: object) => ({
+      rows: statement.startsWith('update "goat"."integration_credentials"')
+        ? [["gcred_123", expiresAt.toISOString(), now.toISOString(), now.toISOString(), 1]]
+        : [],
+    }));
+    const db = drizzle(query as never);
+
+    await expect(
+      rotateIntegrationCredential({
+        userWorkosId: "user_123",
+        integrationId: "gint_123",
+        provider: "github_user",
+        kind: "oauth_token",
+        payload: { access_token: "ghu_rotated", refresh_token: "ghr_rotated" },
+        expiresAt,
+        expectedLastRotatedAt: previousRotation,
+        expectedRefreshLeaseUntil: leaseUntil,
+        db,
+        now,
+      }),
+    ).resolves.toMatchObject({ id: "gcred_123", expiresAt });
+
+    const [statement, params] = query.mock.calls[0]!;
+    const normalized = statement.replace(/\s+/g, " ");
+    expect(normalized).toContain('update "goat"."integration_credentials"');
+    expect(normalized).toContain('"refresh_lease_until" = $');
+    expect(normalized).toContain('and "goat"."integration_credentials"."refresh_lease_until" =');
+    expect(params).toEqual(
+      expect.arrayContaining([
+        "user_123",
+        "gint_123",
+        "github_user",
+        "oauth_token",
+        previousRotation.toISOString(),
+        leaseUntil.toISOString(),
+      ]),
+    );
   });
 });
 

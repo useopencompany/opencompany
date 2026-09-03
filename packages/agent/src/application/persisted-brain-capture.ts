@@ -5,7 +5,12 @@ import {
   type CodexBrainCaptureGatewayResponse,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import { chatMessages, codexChatSessions, codexChatTurns } from "@opencompany/db/product-schema";
+import {
+  chatMessages,
+  codexChatSessions,
+  codexChatTurns,
+  workspaces,
+} from "@opencompany/db/product-schema";
 import {
   DEFAULT_BRAIN_SLUG,
   getBrainAccess,
@@ -101,6 +106,7 @@ async function loadCodexBrainCaptureContext(
         eq(codexChatTurns.userWorkosId, codexChatSessions.userWorkosId),
       ),
     )
+    .innerJoin(workspaces, eq(workspaces.id, codexChatSessions.workspaceId))
     .where(
       and(
         eq(codexChatSessions.id, command.sessionId),
@@ -109,6 +115,7 @@ async function loadCodexBrainCaptureContext(
           ...CHAT_HOST_TOOL_CONTRACT_VERSIONS,
         ]),
         eq(codexChatTurns.status, "running"),
+        eq(workspaces.legacyBrainEnabled, true),
       ),
     )
     .limit(1);

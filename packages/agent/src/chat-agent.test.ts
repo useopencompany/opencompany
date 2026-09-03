@@ -1,4 +1,9 @@
-import { CLAUDE_CODE_DEFAULT_MODEL_ID, CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
+import {
+  CLAUDE_CODE_DEFAULT_MODEL_ID,
+  CODEX_AGENT_MODEL_IDS,
+  CODEX_DEFAULT_MODEL_ID,
+} from "@opencompany/agent-runtime";
+import { WIKI_TOOL_NAME } from "@opencompany/wiki/tool";
 import { describe, expect, it, vi } from "vitest";
 import {
   CHAT_MAX_STEPS,
@@ -7,12 +12,50 @@ import {
   UPDATE_TASK_STATUS_TOOL_NAME,
 } from "./chat-agent";
 import {
+  BRAIN_TOOL_NAME,
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
+  EDIT_WORKSPACE_SKILL_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
 } from "./chat-ui";
 
 const model = "moonshotai/kimi-k2.6" as never;
+
+describe("knowledge tools", () => {
+  it("injects Wiki and legacy Brain tools only when their runners are available", () => {
+    const noKnowledge = createProductChatToolContext({ model }).tools;
+    const wikiOnly = createProductChatToolContext({ model, runWiki: vi.fn() }).tools;
+    const legacyBrainOnly = createProductChatToolContext({ model, runBrainCli: vi.fn() }).tools;
+
+    expect(WIKI_TOOL_NAME in noKnowledge).toBe(false);
+    expect(BRAIN_TOOL_NAME in noKnowledge).toBe(false);
+    expect(WIKI_TOOL_NAME in wikiOnly).toBe(true);
+    expect(BRAIN_TOOL_NAME in wikiOnly).toBe(false);
+    expect(WIKI_TOOL_NAME in legacyBrainOnly).toBe(false);
+    expect(BRAIN_TOOL_NAME in legacyBrainOnly).toBe(true);
+  });
+
+  it("advertises only read commands for a read-only Wiki runner", () => {
+    const wiki = createProductChatToolContext({
+      model,
+      runWiki: vi.fn(),
+      wikiToolReadOnly: true,
+    }).tools[WIKI_TOOL_NAME] as unknown as {
+      description: string;
+      inputSchema: { jsonSchema: { properties: { command: { enum: string[] } } } };
+    };
+
+    expect(wiki.description).toContain("Read-only workspace wiki");
+    expect(wiki.inputSchema.jsonSchema.properties.command.enum).toEqual([
+      "tree",
+      "read",
+      "grep",
+      "search",
+      "recent",
+      "timeline",
+    ]);
+  });
+});
 
 describe("create_workspace_skill tool", () => {
   it("is available only when the authenticated host injects its runner", () => {
@@ -61,6 +104,54 @@ describe("create_workspace_skill tool", () => {
   });
 });
 
+describe("edit_workspace_skill tool", () => {
+  it("is available only when the authenticated host injects its runner", () => {
+    expect(EDIT_WORKSPACE_SKILL_TOOL_NAME in createProductChatToolContext({ model }).tools).toBe(
+      false,
+    );
+    expect(
+      EDIT_WORKSPACE_SKILL_TOOL_NAME in
+        createProductChatToolContext({ model, editWorkspaceSkill: vi.fn() }).tools,
+    ).toBe(true);
+  });
+
+  it("passes the complete revised Skill and stable SDK tool-call id to the host", async () => {
+    const editWorkspaceSkill = vi.fn(async () => ({
+      updated: true as const,
+      name: "add-mcp-provider-plugin",
+      command: "/add-mcp-provider-plugin",
+      bundleId: "skill_bundle_2",
+    }));
+    const context = createProductChatToolContext({ model, editWorkspaceSkill });
+    const skillTool = context.tools[EDIT_WORKSPACE_SKILL_TOOL_NAME] as {
+      description: string;
+      execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown>;
+    };
+
+    await expect(
+      skillTool.execute(
+        {
+          name: " add-mcp-provider-plugin ",
+          description: " Add an MCP provider plugin. ",
+          instructions: " Preserve existing guidance and add the provider. ",
+        },
+        { toolCallId: "call_skill_edit_1" },
+      ),
+    ).resolves.toMatchObject({ updated: true, command: "/add-mcp-provider-plugin" });
+
+    expect(skillTool.description).toContain("existing workspace-authored Skill");
+    expect(skillTool.description).toContain("use_skill");
+    expect(editWorkspaceSkill).toHaveBeenCalledWith(
+      {
+        name: "add-mcp-provider-plugin",
+        description: "Add an MCP provider plugin.",
+        instructions: "Preserve existing guidance and add the provider.",
+      },
+      { toolCallId: "call_skill_edit_1" },
+    );
+  });
+});
+
 describe("start_task tool", () => {
   it.each(["moonshotai/kimi-k3", "xai/grok-4.3", "anthropic/claude-sonnet-5"])(
     "normalizes a Codex task from %s main chat to the default Codex model",
@@ -98,7 +189,22 @@ describe("start_task tool", () => {
     },
   );
 
-  it("preserves an already Codex-compatible task model", async () => {
+  it("advertises only GPT 5.6 models when the user requests a Codex task", () => {
+    const context = createProductChatToolContext({
+      model,
+      latestUserMessage: "Use Codex to fix the repository.",
+      startTask: vi.fn(),
+    });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as unknown as {
+      inputSchema: { jsonSchema: { properties: { model: { enum: string[] } } } };
+    };
+
+    expect(startTaskTool.inputSchema.jsonSchema.properties.model.enum).toEqual(
+      CODEX_AGENT_MODEL_IDS,
+    );
+  });
+
+  it("preserves an already Codex-compatible GPT 5.6 task model", async () => {
     const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
       id: "task_1",
       displayId: "TASK-1",
@@ -106,7 +212,7 @@ describe("start_task tool", () => {
       prompt: task.prompt,
     }));
     const context = createProductChatToolContext({
-      model: "openai/gpt-5.5" as never,
+      model: "openai/gpt-5.6-terra" as never,
       requestedEngine: "codex",
       startTask,
     });
@@ -123,7 +229,7 @@ describe("start_task tool", () => {
       {
         name: "Test repo access",
         prompt: "Check repo access and report whether development work can start.",
-        model: "openai/gpt-5.5",
+        model: "openai/gpt-5.6-terra",
         engine: "codex",
       },
       { toolCallId: expect.any(String) },
@@ -205,6 +311,24 @@ describe("start_task tool", () => {
         prompt: "Review the code.",
         engine: "codex",
         model: "anthropic/claude-sonnet-5",
+      }),
+    ).rejects.toThrow("not available for the Codex engine");
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retired Codex model for a new task", async () => {
+    const startTask = vi.fn();
+    const context = createProductChatToolContext({ model, startTask });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await expect(
+      startTaskTool.execute({
+        name: "Review code",
+        prompt: "Review the code.",
+        engine: "codex",
+        model: "openai/gpt-5.5",
       }),
     ).rejects.toThrow("not available for the Codex engine");
     expect(startTask).not.toHaveBeenCalled();

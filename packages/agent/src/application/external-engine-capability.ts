@@ -1,5 +1,4 @@
-import { isActionHostToolContractVersion } from "@opencompany/agent-runtime";
-import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
+import { isWikiHostToolContractVersion } from "@opencompany/agent-runtime";
 
 export type ExternalEngineToolCapability = {
   codexChatSessionId: string;
@@ -21,6 +20,9 @@ export type ExternalEngineToolAuthorityState = {
   activeTurnId: string | null;
   hostToolContractVersion: string | null;
   workspaceId: string | null;
+  workspaceName: string;
+  workspaceSlug: string | null;
+  legacyBrainEnabled: boolean;
   actorId: string;
   conversationId: string;
   sandboxId: string | null;
@@ -38,6 +40,9 @@ export type ExternalEngineToolAuthorityState = {
 export type ExternalEngineToolAuthorizedContext = {
   actorId: string;
   workspaceId: string;
+  workspaceName: string;
+  workspaceSlug: string | null;
+  legacyBrainEnabled: boolean;
   conversationId: string;
   sandboxId: string;
   engine: "codex" | "claude_code";
@@ -65,8 +70,7 @@ export function authorizeExternalEngineToolCapability(input: {
     (state.engine !== "claude_code" && state.engine !== "codex") ||
     state.sessionStatus !== "running" ||
     state.activeTurnId !== capability.codexChatTurnId ||
-    (!isActionHostToolContractVersion(state.hostToolContractVersion) &&
-      state.hostToolContractVersion !== CODEX_BRAIN_TOOL_CONTRACT_VERSION) ||
+    !isWikiHostToolContractVersion(state.hostToolContractVersion) ||
     !state.workspaceId ||
     !state.sandboxId ||
     state.turnStatus !== "running" ||
@@ -82,10 +86,13 @@ export function authorizeExternalEngineToolCapability(input: {
   return {
     actorId: state.actorId,
     workspaceId: state.workspaceId,
+    workspaceName: state.workspaceName,
+    workspaceSlug: state.workspaceSlug,
+    legacyBrainEnabled: state.legacyBrainEnabled,
     conversationId: state.conversationId,
     sandboxId: state.sandboxId,
     engine: state.engine,
-    brainRef: state.brainRef,
+    brainRef: state.legacyBrainEnabled ? state.brainRef : null,
     userMessageId: state.userMessageId,
     assistantMessageId: state.assistantMessageId,
     hostToolContractVersion: state.hostToolContractVersion as string,

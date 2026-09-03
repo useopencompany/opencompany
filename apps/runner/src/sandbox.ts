@@ -16,6 +16,7 @@ export type SandboxLatencyObservation = {
 };
 
 export const OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY = "opencompany_managed";
+export const OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY = "opencompany_sandbox_namespace";
 export const OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY = "opencompany_owner_kind";
 export const OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY = "opencompany_owner_id";
 
@@ -25,6 +26,7 @@ export type ManagedSandboxOwnerKind =
   | "infisical_auth_flow";
 
 export function managedSandboxMetadata(input: {
+  namespace: string;
   ownerKind: ManagedSandboxOwnerKind;
   ownerId: string;
   metadata?: Record<string, string>;
@@ -32,6 +34,7 @@ export function managedSandboxMetadata(input: {
   return {
     ...input.metadata,
     [OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY]: "true",
+    [OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY]: input.namespace,
     [OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY]: input.ownerKind,
     [OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY]: input.ownerId,
   };
@@ -403,14 +406,21 @@ export function isCommandTimeoutError(error: unknown) {
 
 // E2B can lose the RPC watch for a still-running background command without raising its regular
 // TimeoutError (which means the command exceeded timeoutMs and was killed). The observed provider
-// shapes are Unknown-code SandboxErrors for a timed-out watch or an unexpectedly closed control
-// socket. Those stream losses are recoverable by reconnecting or fencing the old process and
-// resuming the durable engine turn; other SandboxErrors remain terminal to avoid replaying
-// arbitrary command failures.
+// shapes are Unknown-code SandboxErrors for a timed-out or closed control socket, plus an
+// InvalidArgumentError when connect-es receives a truncated envelope. These stream losses are
+// recoverable by reconnecting or fencing the old process and resuming the durable engine turn;
+// other sandbox errors remain terminal to avoid replaying arbitrary command failures. Callers that
+// already know an error came from a command watch should classify it by that boundary, not here.
 export function isRetryableCommandStreamError(error: unknown) {
-  if (!(error instanceof Error) || error.name !== "SandboxError") return false;
+  if (!(error instanceof Error)) return false;
 
   const message = error.message.trim();
+  if (error.name === "InvalidArgumentError") {
+    return /^(?:\d+:\s*)?\[invalid_argument\]\s+protocol error:\s*incomplete envelope\.?$/i.test(
+      message,
+    );
+  }
+  if (error.name !== "SandboxError") return false;
   return (
     /^2:\s*\[unknown\]\s+the operation timed out\.?$/i.test(message) ||
     /^2:\s*\[unknown\]\s+the socket connection was closed unexpectedly\.(?:\s+For more information, pass `verbose:\s*true` in the second argument to fetch\(\))?$/i.test(

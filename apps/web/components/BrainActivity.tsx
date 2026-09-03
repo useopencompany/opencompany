@@ -18,6 +18,7 @@ import {
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { BrainIngestTraceDialog } from "@/components/BrainIngestTraceView";
+import { useHydrated } from "@/components/useHydrated";
 import { type BrainActivityKind, buildBrainActivityEvents } from "@/lib/brain-activity";
 import { getHeadlessBrainCollections } from "@/lib/headless-knowledge-collections";
 import { listHeadlessBrainSourceItems } from "@/lib/headless-knowledge-commands";
@@ -84,8 +85,6 @@ export function BrainRecentActivity({
 
 export type BrainActivityFilter = "filed" | "received" | "skipped" | "all";
 
-// Mounted eagerly by the Overview page and lazily by the activity popover; the
-// ingest-job and source-item shapes start syncing as soon as either consumer mounts.
 function BrainActivityFeed({
   brainRef,
   onOpenTrace,
@@ -98,6 +97,38 @@ function BrainActivityFeed({
   limit?: number;
   variant?: "popover" | "overview";
   activityFilter?: BrainActivityFilter;
+}) {
+  const hydrated = useHydrated();
+
+  if (!hydrated) {
+    return <BrainActivityFeedLoading variant={variant} />;
+  }
+
+  return (
+    <LiveBrainActivityFeed
+      brainRef={brainRef}
+      onOpenTrace={onOpenTrace}
+      limit={limit}
+      variant={variant}
+      activityFilter={activityFilter}
+    />
+  );
+}
+
+// The live collection must stay below the hydration boundary. Creating it during
+// an RSC render sends an unauthenticated request and can exhaust the API rate limit.
+function LiveBrainActivityFeed({
+  brainRef,
+  onOpenTrace,
+  limit,
+  variant,
+  activityFilter,
+}: {
+  brainRef: string;
+  onOpenTrace: ((trace: SelectedBrainIngestTrace) => void) | undefined;
+  limit: number | undefined;
+  variant: "popover" | "overview";
+  activityFilter: BrainActivityFilter;
 }) {
   const brainCollections = useMemo(() => getHeadlessBrainCollections(brainRef), [brainRef]);
   const { data: jobRows, isLoading: jobsLoading } = useLiveQuery(
@@ -279,6 +310,27 @@ function BrainActivityFeed({
             );
           })
         )}
+      </div>
+    </div>
+  );
+}
+
+function BrainActivityFeedLoading({ variant }: { variant: "popover" | "overview" }) {
+  const overview = variant === "overview";
+
+  return (
+    <div className="flex flex-col">
+      {!overview ? (
+        <div className="border-b border-border-subtle px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+          Activity
+        </div>
+      ) : null}
+      <div
+        className={
+          overview ? "py-5 text-[12.5px] text-ink-subtle" : "px-3 py-3 text-[12px] text-ink-subtle"
+        }
+      >
+        Loading activity…
       </div>
     </div>
   );

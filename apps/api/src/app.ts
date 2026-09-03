@@ -61,6 +61,7 @@ import {
   PROTOCOL_VERSION_HEADER,
   PresentationDeltaEventSchema,
   RunEventSchema,
+  V1_BROWSER_REQUEST_HEADERS,
   type V1RouteHandlers,
 } from "@opencompany/protocol";
 import { SPANS, withSpan } from "@opencompany/telemetry";
@@ -86,6 +87,7 @@ import type { EngineSessionService } from "./engine-sessions";
 import { ApiError, errorResponse } from "./errors";
 import type { FeedbackService } from "./feedback";
 import type { GitHubIngressService } from "./github-ingress";
+import type { GitHubUserIngressService } from "./github-user-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
 import type { IdentityService } from "./identity";
@@ -93,6 +95,7 @@ import type { IntegrationAccountService } from "./integration-accounts";
 import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
+import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
 import type { OnboardingService } from "./onboarding";
 import type { OnboardingEmailService } from "./onboarding-emails";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
@@ -119,15 +122,9 @@ const HEARTBEAT_MS = 15_000;
 const TERMINAL_RUN_STATUSES = new Set(["paused", "completed", "failed", "canceled"]);
 const MULTIPART_ENVELOPE_BYTES = 64 * 1024;
 const SAFE_BROWSER_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const CORS_ALLOW_HEADERS = [
-  "Accept",
-  "Content-Type",
-  "Idempotency-Key",
-  "Last-Event-ID",
-  "X-OpenCompany-Protocol-Version",
-];
 const CORS_EXPOSE_HEADERS = [
   "Content-Disposition",
+  "ETag",
   "Electric-Cursor",
   "Electric-Handle",
   "Electric-Offset",
@@ -172,6 +169,7 @@ export type CreateApiAppInput = {
   pluginImports: PluginImportApplicationService;
   brainAssets: BrainAssetService;
   chatResources?: ChatResourceService;
+  messagePresentations?: MessagePresentationService;
   chatTitles?: ChatTitleService;
   captureChatMessage?: (input: {
     actor: Actor;
@@ -209,6 +207,7 @@ export type CreateApiAppInput = {
   emailLifecycleInternalSecret?: string;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
+  githubUserIngress?: GitHubUserIngressService;
   googleIngress?: GoogleIngressService;
   slackIngress?: SlackIngressService;
   linearIngress?: LinearIngressService;
@@ -850,10 +849,10 @@ export function createApiApp(input: CreateApiAppInput) {
       return c.json({ data: activation, meta }, 201);
     },
     switchWorkspace: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const identity = identityFrom(c);
+      await enforceIdentityRateLimit(rateLimiter, identity, "workspace-switch", 60);
       const activation = await input.workspaceControl.switch(
-        actor,
+        identity,
         c.req.valid("param").workspaceId,
       );
       return c.json({ data: activation, meta }, 200);
@@ -1392,6 +1391,13 @@ export function createApiApp(input: CreateApiAppInput) {
       const plugin = await input.pluginImports.revokeMcp(actor, c.req.valid("param").name);
       return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
     },
+    refreshPluginMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const plugin = await input.pluginImports.refreshMcp(actor, c.req.valid("param").name);
+      if (!plugin) throw new CoreError("not_found", "Plugin not found.");
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
     deletePluginData: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);
@@ -1672,6 +1678,25 @@ export function createApiApp(input: CreateApiAppInput) {
       });
       return chatResourceResponse(asset) as never;
     },
+    getMessagePresentation: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const params = c.req.valid("param");
+      await authorizeConversationRead(input, actor, params.conversationId);
+      if (!input.messagePresentations) {
+        throw new ApiError(503, "unavailable", "Message presentations are not configured.", true);
+      }
+      const result = await input.messagePresentations.get({ actor, ...params });
+      if (!result) throw new ApiError(404, "not_found", "Message presentation not found.");
+      const etag = messagePresentationEtag(params.messageId, result.updatedAt);
+      c.header("ETag", etag);
+      c.header("Cache-Control", "private, max-age=0, must-revalidate");
+      c.header("Vary", "Authorization, Cookie");
+      if (etagMatches(c.req.valid("header")["if-none-match"], etag)) {
+        return c.body(null, 304);
+      }
+      return c.json({ data: result, meta }, 200);
+    },
     downloadChatScreenshot: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -1891,6 +1916,18 @@ export function createApiApp(input: CreateApiAppInput) {
       if (params.readModel !== "task-activities-v1" && query.taskId) {
         throw new ApiError(400, "invalid_request", "taskId is not valid for this read model.");
       }
+      if (
+        query.messageShapeEpoch !== undefined &&
+        params.readModel !== "chat-messages-v1" &&
+        params.readModel !== "chat-messages-v2"
+      ) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "messageShapeEpoch is only valid for the Chat Message read model.",
+        );
+      }
+      let messageShapeEpoch: number | undefined;
       if (params.readModel === "task-activities-v1") {
         if (!query.taskId || query.conversationId || query.brainId) {
           throw new ApiError(
@@ -1986,7 +2023,13 @@ export function createApiApp(input: CreateApiAppInput) {
             "conversationId is required for this read model.",
           );
         }
-        await authorizeConversationRead(input, actor, query.conversationId);
+        const resource = await authorizeConversationRead(input, actor, query.conversationId);
+        if (
+          (params.readModel === "chat-messages-v1" || params.readModel === "chat-messages-v2") &&
+          "messageShapeEpoch" in resource
+        ) {
+          messageShapeEpoch = resource.messageShapeEpoch;
+        }
       } else if (query.conversationId || query.brainId) {
         throw new ApiError(
           400,
@@ -2000,6 +2043,7 @@ export function createApiApp(input: CreateApiAppInput) {
         ...(query.conversationId ? { conversationId: query.conversationId } : {}),
         ...(query.brainId ? { brainId: query.brainId } : {}),
         ...(query.taskId ? { taskId: query.taskId } : {}),
+        ...(messageShapeEpoch !== undefined ? { messageShapeEpoch } : {}),
         requestUrl: new URL(c.req.url),
       }) as never;
     },
@@ -2264,6 +2308,15 @@ export function createApiApp(input: CreateApiAppInput) {
       const status = await input.engineAuth.getCodexStatus(actor);
       return c.json({ data: status, meta }, 200);
     },
+    updateCodexWorkspaceEngine: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const status = await input.engineAuth.setCodexWorkspaceEngine(
+        actor,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: status, meta }, 200);
+    },
     startCodexDeviceAuth: async (c) => {
       const actor = actorFrom(c);
       // Flow starts open device/browser authorizations against external auth
@@ -2385,7 +2438,7 @@ export function createApiApp(input: CreateApiAppInput) {
         cors({
           origin: browserOrigins,
           allowMethods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-          allowHeaders: CORS_ALLOW_HEADERS,
+          allowHeaders: [...V1_BROWSER_REQUEST_HEADERS],
           exposeHeaders: CORS_EXPOSE_HEADERS,
           credentials: true,
           maxAge: 600,
@@ -2426,7 +2479,11 @@ export function createApiApp(input: CreateApiAppInput) {
               span.setAttributes({ "goat.http_status_code": c.res.status });
               return c.res;
             } catch (error) {
-              if (!(error instanceof ApiError) && !(error instanceof CoreError)) {
+              c.res = apiErrorResponse(c, error);
+              if (
+                c.res.status >= 500 ||
+                (!(error instanceof ApiError) && !(error instanceof CoreError))
+              ) {
                 captureException(error, {
                   ...requestFailureLogFieldsFrom(c),
                   event: "opencompany.api_request_failed",
@@ -2435,7 +2492,6 @@ export function createApiApp(input: CreateApiAppInput) {
                   path: c.req.path,
                 });
               }
-              c.res = apiErrorResponse(c, error);
               span.setAttributes({ "goat.http_status_code": c.res.status });
               if (c.res.status >= 500) {
                 span.fail(error, { "goat.http_status_code": c.res.status });
@@ -2644,6 +2700,17 @@ export function createApiApp(input: CreateApiAppInput) {
     app.use("/webhooks/github/events", ingressBodyLimit(25 * 1024 * 1024));
     app.post("/webhooks/github/events", (c) => ingress.webhook(c.req.raw));
   }
+  if (input.githubUserIngress) {
+    const ingress = input.githubUserIngress;
+    app.get("/integrations/github-user/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/github-user/callback", (c) => ingress.callback(c.req.raw));
+    app.get("/integrations/github-user/installations", (c) =>
+      ingress.installations(c.req.raw, requestIdFrom(c)),
+    );
+    app.post("/integrations/github-user/installations", (c) =>
+      ingress.installations(c.req.raw, requestIdFrom(c)),
+    );
+  }
   if (input.googleIngress) {
     const ingress = input.googleIngress;
     app.get("/integrations/gmail/start", (c) => ingress.start("gmail", c.req.raw));
@@ -2664,10 +2731,6 @@ export function createApiApp(input: CreateApiAppInput) {
     const ingress = input.slackIngress;
     app.get("/integrations/slack/start", (c) => ingress.start(c.req.raw));
     app.get("/integrations/slack/callback", (c) => ingress.callback(c.req.raw));
-    // Slack event payloads are small; Render enforces no platform body cap, so
-    // bound the unauthenticated raw-body read here.
-    app.use("/webhooks/slack/events", ingressBodyLimit(5 * 1024 * 1024));
-    app.post("/webhooks/slack/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.linearIngress) {
     const ingress = input.linearIngress;
@@ -2699,6 +2762,12 @@ export function createApiApp(input: CreateApiAppInput) {
   }
   if (input.mcpOAuthIngress) {
     const ingress = input.mcpOAuthIngress;
+    app.get("/integrations/betterstack/start", (c) => ingress.start("betterstack", c.req.raw));
+    app.get("/integrations/betterstack/callback", (c) =>
+      ingress.callback("betterstack", c.req.raw),
+    );
+    app.get("/integrations/signoz/start", (c) => ingress.start("signoz", c.req.raw));
+    app.get("/integrations/signoz/callback", (c) => ingress.callback("signoz", c.req.raw));
     app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));
     app.get("/integrations/linear/callback", (c) => ingress.callback("linear", c.req.raw));
     app.get("/integrations/posthog/start", (c) => ingress.start("posthog", c.req.raw));
@@ -2819,7 +2888,8 @@ function isIdentityTierPath(path: string) {
     path === IDENTITY_PATH ||
     path.startsWith(`${IDENTITY_PATH}/`) ||
     path === ONBOARDING_IDENTITY_PATH ||
-    path.startsWith(`${ONBOARDING_IDENTITY_PATH}/`)
+    path.startsWith(`${ONBOARDING_IDENTITY_PATH}/`) ||
+    /^\/v1\/workspaces\/[^/]+\/switch$/u.test(path)
   );
 }
 
@@ -2991,6 +3061,14 @@ function requestIdFrom(c: Context) {
   return (getContextValue(c, "requestId") as string | undefined) ?? `request_${randomUUID()}`;
 }
 
+function etagMatches(value: string | undefined, etag: string) {
+  if (!value) return false;
+  return value
+    .split(",")
+    .map((candidate) => candidate.trim())
+    .some((candidate) => candidate === "*" || candidate === etag);
+}
+
 function contentDisposition(value: string, inline = true) {
   const filename = value.replace(/[\u0000-\u001f\u007f"\\]/gu, "_").trim() || "file";
   const fallback = filename.replace(/[^\x20-\x7e]/gu, "_") || "file";
@@ -3040,6 +3118,7 @@ function conversationDto(conversation: {
   title: string;
   engine: "opencompany" | "codex" | "claude_code";
   model: string;
+  messageShapeEpoch: number;
   runtime: {
     status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
     activeRunId: string | null;
@@ -3052,8 +3131,9 @@ function conversationDto(conversation: {
   createdAt: Date;
   updatedAt: Date;
 }) {
+  const { messageShapeEpoch: _messageShapeEpoch, ...publicConversation } = conversation;
   return {
-    ...conversation,
+    ...publicConversation,
     runtime: conversation.runtime
       ? { ...conversation.runtime, updatedAt: conversation.runtime.updatedAt.toISOString() }
       : null,
@@ -3222,7 +3302,7 @@ async function authorizeConversationRead(
   actor: Actor,
   conversationId: string,
 ) {
-  await getConversationOrTask(input, actor, conversationId, { includeArchived: true });
+  return getConversationOrTask(input, actor, conversationId, { includeArchived: true });
 }
 
 async function getConversationOrTask(

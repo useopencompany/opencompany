@@ -1,6 +1,32 @@
 // Shared helpers for opencompany's Codex and Claude Code harnesses.
 
+import {
+  GitHubUserAccessAuthError,
+  getGitHubUserAccessToken,
+  loadGitHubUserCredentialIdentity,
+  loadGitHubUserIntegration,
+} from "@opencompany/agent/integrations/github-user";
+import { integrations } from "@opencompany/db/product-schema";
+import { createLogger } from "@opencompany/observability";
+import { and, desc, eq } from "drizzle-orm";
+import type { CodingChatHistory } from "./coding-chat-history";
+import { getDb } from "./db";
+import { getGitHubWorkInstallationToken } from "./github";
+
+const logger = createLogger({ service: "opencompany-runner", runtime: "coding-agent-github" });
+
 export const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
+export const GITHUB_RECONNECT_NOTICE =
+  "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.";
+export const GITHUB_UNAVAILABLE_NOTICE =
+  "GitHub access is temporarily unavailable. This turn continued without GitHub access.";
+
+export function shouldAppendGitHubAuthNotice(history: CodingChatHistory, notice: string) {
+  if (notice !== GITHUB_RECONNECT_NOTICE) return true;
+  return !history.messages.some(
+    (message) => message.role === "assistant" && message.content.includes(notice),
+  );
+}
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object");
@@ -20,11 +46,121 @@ export function gitAuthHeader(token: string) {
   )}`;
 }
 
+export type GitHubCommandAuth = {
+  githubAuthHeader: string;
+  githubToken: string;
+  provider: "github_user" | "github";
+  gitAuthorName?: string;
+  gitAuthorEmail?: string;
+};
+
+// A connected personal account is the identity the user explicitly chose for the GitHub plugin,
+// so it takes precedence over the legacy workspace installation. Refresh immediately before the
+// token enters a sandbox; getGitHubUserAccessToken delegates to the shared expiring-OAuth helper,
+// which owns both in-process single-flight and the database refresh lease used by concurrent
+// runner/gateway consumers.
+export async function loadGitHubUserAuthForUser(
+  userWorkosId: string,
+): Promise<GitHubCommandAuth | null> {
+  const db = getDb();
+  const integration = await loadGitHubUserIntegration({ userWorkosId, db });
+  if (!integration || integration.status !== "connected") return null;
+
+  return loadConnectedGitHubUserAuth(userWorkosId, integration, db);
+}
+
+async function loadConnectedGitHubUserAuth(
+  userWorkosId: string,
+  integration: NonNullable<Awaited<ReturnType<typeof loadGitHubUserIntegration>>>,
+  db: ReturnType<typeof getDb>,
+): Promise<GitHubCommandAuth> {
+  const githubToken = await getGitHubUserAccessToken(
+    {
+      userWorkosId,
+      integrationId: integration.id,
+    },
+    { db },
+  );
+  let credentialIdentity: Awaited<ReturnType<typeof loadGitHubUserCredentialIdentity>> = null;
+  let gitAuthorEmail = gitIdentityEmail(integration.accountEmail);
+  if (!gitAuthorEmail) {
+    try {
+      credentialIdentity = await loadGitHubUserCredentialIdentity({
+        userWorkosId,
+        integrationId: integration.id,
+        db,
+      });
+      gitAuthorEmail = gitHubNoReplyEmail(credentialIdentity);
+    } catch (error) {
+      logger.warn("GitHub commit identity metadata could not be loaded", {
+        event: "opencompany.github_user_commit_identity_unavailable",
+        integration_id: integration.id,
+        error_name: error instanceof Error ? error.name : typeof error,
+      });
+    }
+  }
+  const gitAuthorName = gitAuthorEmail
+    ? gitIdentityName(
+        integration.accountName,
+        integration.connectionLabel ?? credentialIdentity?.githubLogin ?? null,
+      )
+    : null;
+  return {
+    githubToken,
+    githubAuthHeader: gitAuthHeader(githubToken),
+    provider: "github_user",
+    ...(gitAuthorName && gitAuthorEmail ? { gitAuthorName, gitAuthorEmail } : {}),
+  };
+}
+
+// Missing GitHub auth is not an error: a sandbox can still work with public repositories. A
+// connected personal credential is different — refresh failures propagate rather than silently
+// switching the sandbox to the workspace App identity.
+export async function loadGitHubAuthForUser(
+  userWorkosId: string,
+): Promise<GitHubCommandAuth | null> {
+  const db = getDb();
+  const personalIntegration = await loadGitHubUserIntegration({ userWorkosId, db });
+  if (personalIntegration) {
+    if (personalIntegration.status === "needs_reauth") {
+      throw new GitHubUserAccessAuthError("Reconnect GitHub in Settings.");
+    }
+    if (personalIntegration.status !== "connected") return null;
+    return loadConnectedGitHubUserAuth(userWorkosId, personalIntegration, db);
+  }
+
+  const [integration] = await db
+    .select({ installationId: integrations.externalId })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.userWorkosId, userWorkosId),
+        eq(integrations.provider, "github"),
+        eq(integrations.status, "connected"),
+      ),
+    )
+    .orderBy(desc(integrations.updatedAt))
+    .limit(1);
+  if (!integration?.installationId) return null;
+
+  const githubToken = await getGitHubWorkInstallationToken({
+    installationId: integration.installationId,
+  }).catch(() => null);
+  if (!githubToken) return null;
+  return {
+    githubToken,
+    githubAuthHeader: gitAuthHeader(githubToken),
+    provider: "github",
+  };
+}
+
 export function buildGitHubCommandEnv(input: {
   githubAuthHeader: string;
   githubToken: string;
   toolCallId: string;
   repositoryFullName?: string;
+  gitAuthorName?: string;
+  gitAuthorEmail?: string;
 }) {
   return {
     GH_TOKEN: input.githubToken,
@@ -35,7 +171,51 @@ export function buildGitHubCommandEnv(input: {
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
     GIT_CONFIG_VALUE_0: input.githubAuthHeader,
+    ...(input.gitAuthorName
+      ? {
+          GIT_AUTHOR_NAME: input.gitAuthorName,
+          GIT_COMMITTER_NAME: input.gitAuthorName,
+        }
+      : {}),
+    ...(input.gitAuthorEmail
+      ? {
+          GIT_AUTHOR_EMAIL: input.gitAuthorEmail,
+          GIT_COMMITTER_EMAIL: input.gitAuthorEmail,
+        }
+      : {}),
   };
+}
+
+function gitIdentityName(accountName: string | null, connectionLabel: string | null) {
+  return sanitizeGitIdentity(accountName) || githubLogin(connectionLabel) || "GitHub user";
+}
+
+function gitIdentityEmail(accountEmail: string | null) {
+  const email = sanitizeGitIdentity(accountEmail);
+  if (email && /^[^<>@\s]+@[^<>@\s]+$/u.test(email)) return email;
+  return null;
+}
+
+function gitHubNoReplyEmail(
+  identity: Awaited<ReturnType<typeof loadGitHubUserCredentialIdentity>>,
+) {
+  if (!identity || !/^\d+$/u.test(identity.githubUserId)) return null;
+  const login = githubLogin(identity.githubLogin);
+  return login ? `${identity.githubUserId}+${login}@users.noreply.github.com` : null;
+}
+
+function githubLogin(connectionLabel: string | null) {
+  const login = connectionLabel?.replace(/^@/u, "").trim() ?? "";
+  return /^[A-Za-z0-9-]+$/u.test(login) ? login : "";
+}
+
+function sanitizeGitIdentity(value: string | null) {
+  return (value ?? "")
+    .replace(/[\u0000-\u001f\u007f]+/gu, " ")
+    .replace(/[<>]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 200);
 }
 
 export function createKnownSecretRedactor(secrets: Array<string | null | undefined>) {

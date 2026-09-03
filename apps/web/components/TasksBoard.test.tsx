@@ -6,7 +6,12 @@ import type { TaskRow } from "@/lib/task-collections";
 import { TASK_BOARD_COLUMN_CAP, TasksBoardRoute } from "./TasksBoard";
 
 const appDataMock = vi.hoisted(() => ({
-  featureFlags: { taskSpawning: true, autoModelRouting: false },
+  featureFlags: {
+    taskSpawning: true,
+    autoModelRouting: false,
+    imessage: false,
+    legacyBrain: false,
+  },
   workspace: { id: "workspace_1" },
   taskRows: [] as TaskRow[],
   tasksReady: true,

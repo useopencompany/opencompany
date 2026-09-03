@@ -106,6 +106,7 @@ import {
   ManagedCapabilitySourceSchema,
   McpSetupEnvelopeSchema,
   MessagePageSchema,
+  MessagePresentationEnvelopeSchema,
   OnboardingCommandEnvelopeSchema,
   OnboardingStateEnvelopeSchema,
   OnboardingWorkspaceEnvelopeSchema,
@@ -174,6 +175,7 @@ import {
   TaskSummaryEnvelopeSchema,
   UpdateBillingAutoRefillBodySchema,
   UpdateBrainDocumentBodySchema,
+  UpdateCodexWorkspaceEngineBodySchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
   UpdateMcpSetupBodySchema,
@@ -1552,6 +1554,21 @@ export const revokePluginMcpRoute = createRoute({
   },
 });
 
+export const refreshPluginMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/mcp/refresh",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin remote MCP discovery snapshot refreshed from the connected provider.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const deletePluginDataRoute = createRoute({
   method: "post",
   path: "/v1/plugins/{name}/data/delete",
@@ -1798,6 +1815,28 @@ export const downloadChatAttachmentRoute = createRoute({
   responses: { 200: binaryResponse, default: errorResponse },
 });
 
+export const getMessagePresentationRoute = createRoute({
+  method: "get",
+  path: "/v1/conversations/{conversationId}/messages/{messageId}/presentation",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: {
+    params: z.object({
+      conversationId: ResourceIdSchema,
+      messageId: ResourceIdSchema,
+    }),
+    headers: z.object({ "if-none-match": z.string().min(1).max(512).optional() }),
+  },
+  responses: {
+    200: {
+      description: "The full authorized Message presentation used for lazy trace expansion.",
+      content: { "application/json": { schema: MessagePresentationEnvelopeSchema } },
+    },
+    304: { description: "The Message presentation has not changed." },
+    default: errorResponse,
+  },
+});
+
 export const downloadChatScreenshotRoute = createRoute({
   method: "get",
   path: "/v1/chat-screenshots/{conversationId}/{filename}",
@@ -1989,6 +2028,7 @@ export const streamReadModelRoute = createRoute({
       conversationId: ResourceIdSchema.optional(),
       brainId: ResourceIdSchema.optional(),
       taskId: ResourceIdSchema.optional(),
+      messageShapeEpoch: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       offset: z.string().optional(),
       handle: z.string().optional(),
       live: z.string().optional(),
@@ -3162,6 +3202,23 @@ export const startCodexDeviceAuthRoute = createRoute({
   },
 });
 
+export const updateCodexWorkspaceEngineRoute = createRoute({
+  method: "put",
+  path: "/v1/engine-auth/codex/workspace",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: { content: { "application/json": { schema: UpdateCodexWorkspaceEngineBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Workspace subscription-backed Codex routing updated by an admin.",
+      content: { "application/json": { schema: CodexAuthStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const pollCodexDeviceAuthRoute = createRoute({
   method: "post",
   path: "/v1/engine-auth/codex/device/{flowId}/poll",
@@ -3485,6 +3542,7 @@ export type V1RouteHandlers = {
   disablePlugin: RouteHandler<typeof disablePluginRoute>;
   approvePluginMcp: RouteHandler<typeof approvePluginMcpRoute>;
   revokePluginMcp: RouteHandler<typeof revokePluginMcpRoute>;
+  refreshPluginMcp: RouteHandler<typeof refreshPluginMcpRoute>;
   deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
@@ -3499,6 +3557,7 @@ export type V1RouteHandlers = {
   deleteChatArtifact: RouteHandler<typeof deleteChatArtifactRoute>;
   downloadChatArtifact: RouteHandler<typeof downloadChatArtifactRoute>;
   downloadChatAttachment: RouteHandler<typeof downloadChatAttachmentRoute>;
+  getMessagePresentation: RouteHandler<typeof getMessagePresentationRoute>;
   downloadChatScreenshot: RouteHandler<typeof downloadChatScreenshotRoute>;
   getPublicChatShare: RouteHandler<typeof getPublicChatShareRoute>;
   getPublicChatShareMetadata: RouteHandler<typeof getPublicChatShareMetadataRoute>;
@@ -3543,6 +3602,7 @@ export type V1RouteHandlers = {
   saveClaudeCodeToken: RouteHandler<typeof saveClaudeCodeTokenRoute>;
   deleteClaudeCodeAuth: RouteHandler<typeof deleteClaudeCodeAuthRoute>;
   getCodexAuth: RouteHandler<typeof getCodexAuthRoute>;
+  updateCodexWorkspaceEngine: RouteHandler<typeof updateCodexWorkspaceEngineRoute>;
   startCodexDeviceAuth: RouteHandler<typeof startCodexDeviceAuthRoute>;
   pollCodexDeviceAuth: RouteHandler<typeof pollCodexDeviceAuthRoute>;
   deleteCodexAuth: RouteHandler<typeof deleteCodexAuthRoute>;
@@ -3682,6 +3742,7 @@ export function createV1Router(
       .openapi(deleteChatArtifactRoute, handlers.deleteChatArtifact)
       .openapi(downloadChatArtifactRoute, handlers.downloadChatArtifact)
       .openapi(downloadChatAttachmentRoute, handlers.downloadChatAttachment)
+      .openapi(getMessagePresentationRoute, handlers.getMessagePresentation)
       .openapi(downloadChatScreenshotRoute, handlers.downloadChatScreenshot)
       .openapi(getPublicChatShareRoute, handlers.getPublicChatShare)
       .openapi(getPublicChatShareMetadataRoute, handlers.getPublicChatShareMetadata)
@@ -3729,6 +3790,7 @@ export function createV1Router(
       .openapi(saveClaudeCodeTokenRoute, handlers.saveClaudeCodeToken)
       .openapi(deleteClaudeCodeAuthRoute, handlers.deleteClaudeCodeAuth)
       .openapi(getCodexAuthRoute, handlers.getCodexAuth)
+      .openapi(updateCodexWorkspaceEngineRoute, handlers.updateCodexWorkspaceEngine)
       // POST /codex/device registers before the {flowId} poll route so the
       // static segment always wins route matching.
       .openapi(startCodexDeviceAuthRoute, handlers.startCodexDeviceAuth)
@@ -3754,6 +3816,7 @@ export function createV1Router(
       .openapi(disablePluginRoute, handlers.disablePlugin)
       .openapi(approvePluginMcpRoute, handlers.approvePluginMcp)
       .openapi(revokePluginMcpRoute, handlers.revokePluginMcp)
+      .openapi(refreshPluginMcpRoute, handlers.refreshPluginMcp)
       .openapi(deletePluginDataRoute, handlers.deletePluginData)
   );
 }
@@ -4172,7 +4235,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
           viewer: { actorId: "user_contract", isAdmin: true },
           sources: [],
           ownAccounts: {
-            slack: [],
             linear: [],
             gmail: [],
             google_drive: [],
@@ -4194,17 +4256,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
             },
             legacyDefaultDelivery: false,
             isDefaultBrain: false,
-          },
-          slack: {
-            integration: {
-              provider: "slack",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountName: null,
-              teamName: null,
-              statusReason: null,
-            },
           },
           linear: {
             integration: {
@@ -4301,7 +4352,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
         data: {
           brainId: "brain_contract",
           integrationId: "integration_contract",
-          provider: "slack",
+          provider: "gmail",
           enabled: true,
         },
         meta,
@@ -4616,6 +4667,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           files: placeholderSkillBundle.files,
           fileCount: 1,
           totalBytes: 128,
+          warnings: [],
         },
         meta,
       },
@@ -4725,6 +4777,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   revokePluginMcp: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  refreshPluginMcp: (c) => c.json({ data: placeholderPlugin, meta }, 200),
   deletePluginData: (c) =>
     c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
@@ -4793,6 +4846,17 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   downloadChatAttachment: (c) =>
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
+  getMessagePresentation: (c) =>
+    c.json(
+      {
+        data: {
+          presentation: null,
+          updatedAt: placeholderTime,
+        },
+        meta,
+      },
+      200,
+    ),
   downloadChatScreenshot: (c) =>
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   getPublicChatShare: (c) =>
@@ -4886,7 +4950,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
         data: {
           timezone: "UTC",
           taskSpawningEnabled: false,
-          wikiEnabled: false,
+          wikiEnabled: true as const,
           taskViewMode: "board" as const,
           imessageEnabled: false,
           autoModelRoutingEnabled: false,
@@ -5146,6 +5210,37 @@ const contractDocumentHandlers: V1RouteHandlers = {
           statusReason: null,
           lastValidatedAt: placeholderTime,
           lastRotatedAt: placeholderTime,
+          workspaceEngine: {
+            enabled: true,
+            providerDisplayName: "Contract Owner",
+            providerEmail: "owner@example.com",
+            credentialStatus: "connected" as const,
+            credentialStatusReason: null,
+            lastValidatedAt: placeholderTime,
+            isCurrentUser: true,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  updateCodexWorkspaceEngine: (c) =>
+    c.json(
+      {
+        data: {
+          status: "connected" as const,
+          statusReason: null,
+          lastValidatedAt: placeholderTime,
+          lastRotatedAt: placeholderTime,
+          workspaceEngine: {
+            enabled: true,
+            providerDisplayName: "Contract Owner",
+            providerEmail: "owner@example.com",
+            credentialStatus: "connected" as const,
+            credentialStatusReason: null,
+            lastValidatedAt: placeholderTime,
+            isCurrentUser: true,
+          },
         },
         meta,
       },
@@ -5322,7 +5417,7 @@ function contractIdentity() {
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       imessageEnabled: false,
-      wikiEnabled: true,
+      wikiEnabled: true as const,
       taskViewMode: "board" as const,
       preferredMcpClient: null,
       mcpSetupCompletedAt: null,
@@ -5336,6 +5431,7 @@ function contractIdentity() {
         name: "Contract Workspace",
         slug: "contract-workspace",
         role: "admin" as const,
+        legacyBrainEnabled: false,
       },
     ],
     activeWorkspaceId: "goat_ws_contract",

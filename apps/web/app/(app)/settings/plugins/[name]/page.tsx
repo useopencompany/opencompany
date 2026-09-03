@@ -1,10 +1,58 @@
-import { PluginDetail } from "@/components/PluginSettings";
+import {
+  BetterStackPluginDetail,
+  GitHubPluginDetail,
+  LinearPluginDetail,
+  NeonPluginDetail,
+  type PluginLoadState,
+  SigNozPluginDetail,
+  SlackPluginDetail,
+} from "@/components/OfficialMcpPluginSettings";
+import {
+  OFFICIAL_SKILL_PLUGINS,
+  OfficialSkillPluginDetail,
+  PluginDetail,
+} from "@/components/PluginSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { currentUser } from "@/lib/auth";
 import { getHeadlessPlugin } from "@/lib/headless-knowledge-server";
+import {
+  isOfficialMcpPluginName,
+  isOfficialSkillPluginName,
+  OFFICIAL_MCP_PLUGIN_METADATA,
+} from "@/lib/official-plugins";
 
 export default async function PluginDetailPage({ params }: { params: Promise<{ name: string }> }) {
   const { name } = await params;
+  const normalizedName = name.toLocaleLowerCase();
+  if (isOfficialMcpPluginName(normalizedName)) {
+    const [context, pluginState] = await Promise.all([
+      currentUser(),
+      loadOfficialPlugin(normalizedName),
+    ]);
+    const Detail = {
+      betterstack: BetterStackPluginDetail,
+      github: GitHubPluginDetail,
+      linear: LinearPluginDetail,
+      neon: NeonPluginDetail,
+      signoz: SigNozPluginDetail,
+      slack: SlackPluginDetail,
+    }[normalizedName];
+    return <Detail pluginState={pluginState} canEdit={context.role === "admin"} />;
+  }
+  if (isOfficialSkillPluginName(normalizedName)) {
+    const [context, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(normalizedName)]);
+    const config = OFFICIAL_SKILL_PLUGINS[normalizedName];
+    return plugin ? (
+      <PluginDetail
+        plugin={plugin}
+        canEdit={context.role === "admin"}
+        title={config.label}
+        description={config.description}
+      />
+    ) : (
+      <OfficialSkillPluginDetail config={config} canEdit={context.role === "admin"} />
+    );
+  }
   const [context, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(name)]);
   if (!plugin) {
     return (
@@ -18,4 +66,20 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
     );
   }
   return <PluginDetail plugin={plugin} canEdit={context.role === "admin"} />;
+}
+
+async function loadOfficialPlugin(
+  name: keyof typeof OFFICIAL_MCP_PLUGIN_METADATA,
+): Promise<PluginLoadState> {
+  try {
+    return { status: "ready", plugin: await getHeadlessPlugin(name) };
+  } catch (error) {
+    return {
+      status: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : `${OFFICIAL_MCP_PLUGIN_METADATA[name].label} plugin details could not be loaded.`,
+    };
+  }
 }

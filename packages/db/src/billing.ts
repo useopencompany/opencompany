@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { getDb } from "./client";
+import { stringifyPostgresJson } from "./postgres-json";
 import {
   type BrainSourceProvider,
   brainIngestJobs,
@@ -260,7 +261,7 @@ async function tryAdmitIngestion(
         id,
         0,
         ${feeUsdMicros},
-        ${JSON.stringify(costBasis)}::jsonb
+        ${stringifyPostgresJson(costBasis)}::jsonb
       FROM flipped
       ON CONFLICT DO NOTHING
       RETURNING workspace_id, amount_usd_micros

@@ -1,0 +1,62 @@
+---
+title: Better Stack
+description: Investigate observability data and manage Better Stack resources through permission-gated tools.
+---
+
+## What the Plugin does
+
+Better Stack is an official Agent Plugin for main Chat and persistent Codex or Claude Code
+sessions. Its integrity-pinned package connects Better Stack's public hosted MCP server to
+opencompany's action gateway. It can search Better Stack documentation, investigate telemetry and
+incidents, and manage monitoring, dashboards, status pages, and team access.
+
+The Plugin is workspace-installed, while each person connects their own Better Stack account.
+Installing or uninstalling the package never creates or removes that personal connection. Your
+Better Stack plan must include MCP access.
+
+## Permission layers
+
+The package uses three reviewed permission groups:
+
+1. **Search Better Stack docs** defaults to **On** and contains only the documentation search tool.
+2. **Inspect observability data** defaults to **Ask** because logs, traces, errors, incidents, and
+   account configuration can contain sensitive production data.
+3. **Manage Better Stack** defaults to **Ask** because these tools can change or delete monitors,
+   alerts, dashboards, status pages, and team configuration.
+4. Newly discovered tools stay on **Ask** until a reviewed package version classifies them.
+5. Every call still passes through opencompany's permission checks and audit trail.
+
+Persistent coding sessions receive only permissions set to **On**. Keep the inspection and
+management groups on **Ask** unless you intentionally want a trusted session to use them without a
+pause.
+
+## Connect Better Stack
+
+1. Ask a workspace admin to install Better Stack under
+   **Settings → Plugins → Better Stack**.
+2. On the Better Stack Plugin page, choose **Connect Better Stack account**.
+3. Authorize the requested `read` and `write` OAuth scopes in Better Stack.
+4. Review the three tool groups and leave sensitive reads and writes on **Ask**.
+
+OAuth tokens remain encrypted and server-side. Disconnecting Better Stack removes the saved
+credential.
+
+## Production data and access
+
+Observability data can contain customer data, credentials, request payloads, and other personally
+identifiable information. Query narrowly and avoid returning raw logs when an aggregate is enough.
+Write tools can also change operational alerting or grant team access, so inspect the proposed
+action before approving it.
+
+The integration uses Better Stack's public hosted MCP endpoint at `https://mcp.betterstack.com`.
+See [Better Stack's MCP guide](https://betterstack.com/docs/getting-started/integrations/mcp/) for
+provider requirements and supported resources.
+
+## Example requests
+
+- “Search the Better Stack docs for heartbeat escalation policies.”
+- “Summarize production errors from the last hour without returning request bodies.”
+- “Show me the current monitors and their escalation policies.”
+
+Better Stack is not a Brain source. Tool results enter Brain only through an explicit supported
+capture.

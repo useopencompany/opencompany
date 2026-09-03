@@ -12,6 +12,7 @@ import {
   type CreateTaskCommentCommand,
   KnowledgeApplicationService,
   type KnowledgeRepository,
+  type PluginGatewayLifecycle,
   PluginImportApplicationService,
   type PluginImportResolver,
   type PluginInstallation,
@@ -41,10 +42,12 @@ import {
   PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_HEADER,
+  V1_BROWSER_REQUEST_HEADERS,
 } from "@opencompany/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
 import type { AttachmentUploadService } from "./attachments";
+import { createWorkOsApiAuthenticator } from "./auth";
 import type { BrainAssetService } from "./brain-assets";
 import type { ChatResourceService } from "./chat-resources";
 import { ApiError } from "./errors";
@@ -508,6 +511,7 @@ describe("canonical Hono API", () => {
     const resolve = vi.fn(async () => ({
       status: "resolved" as const,
       bundle,
+      warnings: [],
     }));
     const install = vi.fn(async () => ({
       installation: fakeSkillInstallation(),
@@ -747,7 +751,7 @@ describe("canonical Hono API", () => {
         items: [
           {
             id: "gwjob_1",
-            provider: "slack",
+            provider: "gmail",
             outcome: "succeeded",
             pages: [{ path: "projects/launch", action: "updated" }],
           },
@@ -875,7 +879,13 @@ describe("canonical Hono API", () => {
     const app = testApp(fakeRepository(), {
       skillImports: fakeSkillImportService(
         { list, get, readFile, setEnabled, replace, archive },
-        { resolve: vi.fn(async () => ({ status: "resolved" as const, bundle: resolvedBundle })) },
+        {
+          resolve: vi.fn(async () => ({
+            status: "resolved" as const,
+            bundle: resolvedBundle,
+            warnings: [],
+          })),
+        },
       ),
     });
 
@@ -937,6 +947,17 @@ describe("canonical Hono API", () => {
       totalBytes: packageBytes.length,
       skills: [],
       stdioServers: installation.stdioServers,
+      remoteServers: [
+        {
+          name: "remote",
+          type: "streamable-http",
+          url: "https://mcp.example.test",
+          headers: { Authorization: "Bearer secret-value" },
+        },
+      ],
+      capabilities: [
+        { id: "read", label: "Read tools", defaultMode: "on", tools: ["list_issues"] },
+      ],
       report: {
         ignoredManifestFields: [],
         skills: [],
@@ -946,6 +967,7 @@ describe("canonical Hono API", () => {
     const install = vi.fn(async () => ({ plugin: installation, idempotentReplay: false }));
     const {
       stdioServers: _stdioServers,
+      remoteMcpServers: _remoteMcpServers,
       files: _pluginFiles,
       skills: _pluginSkills,
       ...pluginListFields
@@ -966,10 +988,12 @@ describe("canonical Hono API", () => {
     const revokeMcp = vi.fn(async () => ({ ...installation, mcpApprovedIntegrity: null }));
     const archive = vi.fn(async () => undefined);
     const deleteData = vi.fn(async () => ({ deleted: true }));
+    const refresh = vi.fn(async () => undefined);
     const app = testApp(fakeRepository(), {
       pluginImports: fakePluginImportService(
         { install, list, get, setStatus, approveMcp, revokeMcp, archive, deleteData },
         { resolve: vi.fn(async () => resolved) },
+        { refresh },
       ),
     });
 
@@ -985,10 +1009,19 @@ describe("canonical Hono API", () => {
         manifest: { name: "quality-tools" },
         files: [{ path: "plugin.json", sizeBytes: packageBytes.length }],
         stdioServers: [{ name: "local", envKeys: ["PRIVATE_TOKEN"] }],
+        remoteMcpServers: [
+          {
+            name: "remote",
+            type: "streamable-http",
+            connectionProvider: "quality-tools",
+            capabilities: [{ id: "read", tools: ["list_issues"] }],
+          },
+        ],
       },
     });
     expect(JSON.stringify(previewBody)).not.toContain("private plugin package");
     expect(JSON.stringify(previewBody)).not.toContain("secret-value");
+    expect(JSON.stringify(previewBody)).not.toContain("https://mcp.example.test");
 
     const imported = await app.request("/v1/plugins/imports", {
       method: "POST",
@@ -1007,10 +1040,20 @@ describe("canonical Hono API", () => {
     expect(JSON.stringify(importedBody)).not.toContain("secret-value");
 
     await expect(app.request("/v1/plugins")).resolves.toMatchObject({ status: 200 });
-    await expect(app.request("/v1/plugins/quality-tools")).resolves.toMatchObject({ status: 200 });
-    await expect(
-      app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
-    ).resolves.toMatchObject({ status: 200 });
+    const inspected = await app.request("/v1/plugins/quality-tools");
+    expect(inspected.status).toBe(200);
+    await expect(inspected.json()).resolves.toMatchObject({
+      data: {
+        remoteMcpServers: [
+          {
+            name: "remote",
+            discoveryStatus: "stale",
+            tools: [{ name: "list_issues" }],
+            lastDiscoveryError: "Provider discovery timed out.",
+          },
+        ],
+      },
+    });
     await expect(
       app.request("/v1/plugins/quality-tools/mcp/approve", {
         method: "POST",
@@ -1020,6 +1063,12 @@ describe("canonical Hono API", () => {
     ).resolves.toMatchObject({ status: 200 });
     await expect(
       app.request("/v1/plugins/quality-tools/mcp/revoke", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/mcp/refresh", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
     ).resolves.toMatchObject({ status: 200 });
     await expect(
       app.request("/v1/plugins/quality-tools/data/delete", { method: "POST" }),
@@ -1035,6 +1084,11 @@ describe("canonical Hono API", () => {
       integrity: installation.integrity,
     });
     expect(revokeMcp).toHaveBeenCalledWith({ actor, name: "quality-tools" });
+    expect(refresh).toHaveBeenLastCalledWith({
+      actor,
+      pluginName: "quality-tools",
+      reason: "explicit",
+    });
     expect(deleteData).toHaveBeenCalledWith({ actor, name: "quality-tools" });
     expect(archive).toHaveBeenCalledWith({ actor, name: "quality-tools" });
   });
@@ -1279,28 +1333,53 @@ describe("canonical Hono API", () => {
   });
 
   it("returns a retryable typed error when external Skill resolution is unavailable", async () => {
-    const app = testApp(fakeRepository(), {
-      skillImports: fakeSkillImportService(
-        {},
-        {
-          resolve: async () => {
-            throw new CoreError("unavailable", "Couldn't read that skill right now.");
+    const upstreamError = Object.assign(new Error("GitHub artifact request was rate limited."), {
+      upstreamService: "github",
+      upstreamOperation: "resolve_commit",
+      upstreamStatus: 403,
+      failureKind: "rate_limit",
+      rateLimitRemaining: 0,
+    });
+    const failure = new CoreError("unavailable", "Couldn't read that skill right now.", {
+      cause: upstreamError,
+    });
+    const captureException = vi.fn();
+    setExceptionReporter({ captureException });
+    try {
+      const app = testApp(fakeRepository(), {
+        skillImports: fakeSkillImportService(
+          {},
+          {
+            resolve: async () => {
+              throw failure;
+            },
           },
-        },
-      ),
-    });
+        ),
+      });
 
-    const response = await app.request("/v1/skills/imports/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: "github.com/o/r" }),
-    });
+      const response = await app.request("/v1/skills/imports/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "github.com/o/r" }),
+      });
 
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "unavailable", retryable: true },
-      meta: { apiVersion: "v1" },
-    });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "unavailable", retryable: true },
+        meta: { apiVersion: "v1" },
+      });
+      expect(captureException).toHaveBeenCalledWith(
+        failure,
+        expect.objectContaining({
+          event: "opencompany.api_request_failed",
+          method: "POST",
+          path: "/v1/skills/imports/preview",
+          request_id: expect.stringMatching(/^request_/u),
+        }),
+      );
+    } finally {
+      setExceptionReporter(undefined);
+    }
   });
 
   it("serves and mutates browser profiles through the authenticated owner boundary", async () => {
@@ -1523,6 +1602,11 @@ describe("canonical Hono API", () => {
         callback: record("github.callback", calls),
         webhook: record("github.webhook", calls),
       },
+      githubUserIngress: {
+        start: record("github-user.start", calls),
+        callback: record("github-user.callback", calls),
+        installations: record("github-user.installations", calls),
+      },
       googleIngress: {
         start: record("google.start", calls),
         callback: record("google.callback", calls),
@@ -1531,7 +1615,6 @@ describe("canonical Hono API", () => {
       slackIngress: {
         start: record("slack.start", calls),
         callback: record("slack.callback", calls),
-        webhook: record("slack.webhook", calls),
       },
       linearIngress: {
         start: record("linear.start", calls),
@@ -1569,6 +1652,10 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/github/start", "github.start"],
       ["GET", "/integrations/github/callback", "github.callback"],
       ["POST", "/webhooks/github/events", "github.webhook"],
+      ["GET", "/integrations/github-user/start", "github-user.start"],
+      ["GET", "/integrations/github-user/callback", "github-user.callback"],
+      ["GET", "/integrations/github-user/installations", "github-user.installations"],
+      ["POST", "/integrations/github-user/installations", "github-user.installations"],
       ["GET", "/integrations/gmail/start", "google.start"],
       ["GET", "/integrations/gmail/callback", "google.callback"],
       ["GET", "/integrations/google-calendar/start", "google.start"],
@@ -1578,7 +1665,6 @@ describe("canonical Hono API", () => {
       ["POST", "/webhooks/google-drive", "google.driveWebhook"],
       ["GET", "/integrations/slack/start", "slack.start"],
       ["GET", "/integrations/slack/callback", "slack.callback"],
-      ["POST", "/webhooks/slack/events", "slack.webhook"],
       ["GET", "/integrations/linear-ingest/start", "linear.start"],
       ["GET", "/integrations/linear-ingest/callback", "linear.callback"],
       ["POST", "/webhooks/linear/events", "linear.webhook"],
@@ -1596,6 +1682,8 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/neon/callback", "mcp.callback.neon"],
       ["GET", "/integrations/latitude/start", "mcp.start.latitude"],
       ["GET", "/integrations/latitude/callback", "mcp.callback.latitude"],
+      ["GET", "/integrations/signoz/start", "mcp.start.signoz"],
+      ["GET", "/integrations/signoz/callback", "mcp.callback.signoz"],
       ["GET", "/integrations/x-account/start", "x-account.start"],
       ["GET", "/integrations/x-account/callback", "x-account.callback"],
       ["GET", "/integrations/slack-bot/start", "slack-bot.start"],
@@ -1607,6 +1695,9 @@ describe("canonical Hono API", () => {
       expect(response.status, `${method} ${path}`).toBe(200);
       await expect(response.json()).resolves.toMatchObject({ ok: true, service });
     }
+    expect(
+      (await app.request("/webhooks/slack/events", { method: "POST", body: "{}" })).status,
+    ).toBe(404);
   });
 
   it("allows credentialed browser preflight only for configured origins", async () => {
@@ -1625,10 +1716,9 @@ describe("canonical Hono API", () => {
     expect(allowed.status).toBe(204);
     expect(allowed.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true");
-    expect(allowed.headers.get("access-control-allow-headers")).toContain("Idempotency-Key");
-    expect(allowed.headers.get("access-control-allow-headers")).toContain(
-      "X-OpenCompany-Protocol-Version",
-    );
+    const allowedHeaders = allowed.headers.get("access-control-allow-headers")?.toLowerCase();
+    expect(allowedHeaders).toContain("idempotency-key");
+    expect(allowedHeaders).toContain("x-opencompany-protocol-version");
     expect(allowed.headers.get("access-control-allow-methods")).toContain("PUT");
     expect(allowed.headers.get("access-control-allow-methods")).toContain("DELETE");
 
@@ -1641,6 +1731,29 @@ describe("canonical Hono API", () => {
     });
     expect(disallowed.status).toBe(204);
     expect(disallowed.headers.has("access-control-allow-origin")).toBe(false);
+  });
+
+  it("allows conditional cross-origin Message presentation reads", async () => {
+    const app = testApp(fakeRepository(), {
+      browserOrigins: ["https://my.opencompany.chat"],
+    });
+    const response = await app.request(
+      "/v1/conversations/conversation_1/messages/message_assistant_1/presentation",
+      {
+        method: "OPTIONS",
+        headers: {
+          Origin: "https://my.opencompany.chat",
+          "Access-Control-Request-Method": "GET",
+          "Access-Control-Request-Headers": "if-none-match",
+        },
+      },
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
+    expect(response.headers.get("access-control-allow-headers")?.split(",")).toEqual(
+      expect.arrayContaining([...V1_BROWSER_REQUEST_HEADERS]),
+    );
   });
 
   it("rejects cookie mutations without an allowed Origin while preserving bearer clients", async () => {
@@ -1761,6 +1874,7 @@ describe("canonical Hono API", () => {
       statusReason: null,
       lastValidatedAt: null,
       lastRotatedAt: null,
+      workspaceEngine: null,
     }));
     const app = testApp(repository, {
       engineAuth: engineAuthService({ getCodexStatus }),
@@ -2279,6 +2393,111 @@ describe("canonical Hono API", () => {
     });
   });
 
+  it("lets an org-bound mobile AuthKit session use the existing workspace-scoped conversation list", async () => {
+    const execute = vi.fn(async () => ({
+      rows: [
+        {
+          workspaceId: actor.workspaceId,
+          role: actor.role,
+          taskSpawningEnabled: true,
+          legacyBrainEnabled: true,
+        },
+      ],
+    }));
+    const authenticate = createWorkOsApiAuthenticator(execute, {
+      mobileClientId: "client_mobile",
+      verifyJwt: vi.fn(async () => ({
+        payload: {
+          sub: actor.userId,
+          sid: "session_mobile",
+          client_id: "client_mobile",
+          org_id: "org_workspace_1",
+        },
+        protectedHeader: { alg: "RS256" },
+      })) as never,
+    });
+    const app = testApp(fakeRepository(), { authenticate });
+
+    const response = await app.request("/v1/conversations", {
+      headers: {
+        Authorization: `Bearer ${compactJwt({ client_id: "client_mobile" })}`,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: [{ id: "conversation_1" }],
+    });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("serves an authorized full Message presentation with ETag revalidation", async () => {
+    const get = vi.fn(async () => ({
+      presentation: {
+        schemaVersion: "opencompany.chat.debug.v1",
+        uiMessageParts: [
+          {
+            type: "tool-search",
+            state: "output-available",
+            input: { query: "launch" },
+            output: { detail: "Full provider result" },
+          },
+        ],
+      },
+      updatedAt: "2026-08-10T20:00:01.000Z",
+    }));
+    const app = testApp(fakeRepository(), { messagePresentations: { get } });
+
+    const response = await app.request(
+      "/v1/conversations/conversation_1/messages/message_assistant_1/presentation",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, max-age=0, must-revalidate");
+    expect(response.headers.get("etag")).toMatch(/^W\//u);
+    expect(get).toHaveBeenCalledWith({
+      actor,
+      conversationId: "conversation_1",
+      messageId: "message_assistant_1",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        presentation: {
+          uiMessageParts: [{ output: { detail: "Full provider result" } }],
+        },
+        updatedAt: "2026-08-10T20:00:01.000Z",
+      },
+    });
+
+    const notModified = await app.request(
+      "/v1/conversations/conversation_1/messages/message_assistant_1/presentation",
+      { headers: { "If-None-Match": response.headers.get("etag")! } },
+    );
+    expect(notModified.status).toBe(304);
+    await expect(notModified.text()).resolves.toBe("");
+  });
+
+  it("authorizes Task presentations through the canonical Task conversation boundary", async () => {
+    const repository = fakeRepository();
+    repository.getConversation = vi.fn(async () => null);
+    const get = vi.fn(async () => ({
+      presentation: null,
+      updatedAt: "2026-08-10T20:00:01.000Z",
+    }));
+    const app = testApp(repository, { messagePresentations: { get } });
+
+    const response = await app.request(
+      "/v1/conversations/conversation_task_1/messages/message_task_1/presentation",
+    );
+
+    expect(response.status).toBe(200);
+    expect(get).toHaveBeenCalledWith({
+      actor,
+      conversationId: "conversation_task_1",
+      messageId: "message_task_1",
+    });
+  });
+
   it("authorizes a conversation-scoped v2 summary before contacting Electric", async () => {
     const repository = fakeRepository();
     const getConversation = vi.fn(repository.getConversation);
@@ -2329,6 +2548,25 @@ describe("canonical Hono API", () => {
     expect(stream).not.toHaveBeenCalled();
   });
 
+  it("uses the authorized Conversation epoch instead of a client-selected Message shape epoch", async () => {
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(fakeRepository(), { readModels: { stream } });
+
+    const response = await app.request(
+      "/v1/read-models/chat-messages-v2?conversationId=conversation_1&messageShapeEpoch=999",
+    );
+
+    expect(response.status).toBe(200);
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor,
+        readModel: "chat-messages-v2",
+        conversationId: "conversation_1",
+        messageShapeEpoch: 4,
+      }),
+    );
+  });
+
   it("authorizes canonical Message and Run read models through their owning Task", async () => {
     const repository = fakeRepository();
     repository.getConversation = vi.fn(async () => null);
@@ -2336,14 +2574,14 @@ describe("canonical Hono API", () => {
     const app = testApp(repository, { readModels: { stream } });
 
     const response = await app.request(
-      "/v1/read-models/chat-messages-v1?conversationId=conversation_task_1",
+      "/v1/read-models/chat-messages-v2?conversationId=conversation_task_1",
     );
 
     expect(response.status).toBe(200);
     expect(stream).toHaveBeenCalledWith(
       expect.objectContaining({
         actor,
-        readModel: "chat-messages-v1",
+        readModel: "chat-messages-v2",
         conversationId: "conversation_task_1",
       }),
     );
@@ -2667,7 +2905,11 @@ describe("canonical Hono API", () => {
       brainId: "brain_1",
       folderPath: "projects",
       idempotencyKey: "asset-create-1",
-      file,
+      file: expect.objectContaining({
+        name: "plan.pdf",
+        size: 13,
+        type: "application/pdf",
+      }),
     });
 
     const replaceForm = new FormData();
@@ -2687,7 +2929,11 @@ describe("canonical Hono API", () => {
       brainId: "brain_1",
       documentId: "document_1",
       idempotencyKey: "asset-replace-1",
-      file,
+      file: expect.objectContaining({
+        name: "plan.pdf",
+        size: 13,
+        type: "application/pdf",
+      }),
     });
   });
 
@@ -2775,7 +3021,7 @@ describe("canonical Hono API", () => {
     const updatePreferences = vi.fn(async () => ({
       timezone: "Europe/Berlin",
       taskSpawningEnabled: true,
-      wikiEnabled: false,
+      wikiEnabled: true as const,
       taskViewMode: "list" as const,
       imessageEnabled: false,
       autoModelRoutingEnabled: true,
@@ -3270,6 +3516,7 @@ describe("canonical Hono API", () => {
       statusReason: null,
       lastValidatedAt: null,
       lastRotatedAt: null,
+      workspaceEngine: null,
     }));
     const getInfisicalStatus = vi.fn(async () => ({
       status: "needs_reauth" as const,
@@ -3842,7 +4089,10 @@ describe("canonical Hono API", () => {
 
     const switched = await app.request("/v1/workspaces/goat_ws_next/switch", { method: "POST" });
     expect(switched.status).toBe(200);
-    expect(switchWorkspace).toHaveBeenCalledWith(actor, "goat_ws_next");
+    expect(switchWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: actor.userId, credentialKind: "browser_cookie" }),
+      "goat_ws_next",
+    );
   });
 
   it("routes identity reads and synchronization through the pre-onboarding identity tier", async () => {
@@ -3852,6 +4102,7 @@ describe("canonical Hono API", () => {
       activeWorkspaceId: null,
       activeBrainId: null,
       method: "session" as const,
+      credentialKind: "browser_cookie" as const,
     };
     const authenticate = vi.fn(async () => {
       throw new Error("The actor tier must not run for identity.");
@@ -3869,6 +4120,50 @@ describe("canonical Hono API", () => {
     expect(authenticate).not.toHaveBeenCalled();
   });
 
+  it("routes workspace switching through verified identity and rate-limits by WorkOS user", async () => {
+    const workspaceId = "workspace_next";
+    const identity = {
+      userId: "user_mobile",
+      organizationId: null,
+      activeWorkspaceId: null,
+      activeBrainId: null,
+      method: "session" as const,
+      credentialKind: "authkit_bearer" as const,
+    };
+    const authenticate = vi.fn(async () => {
+      throw new Error("The actor tier must not run for workspace switching.");
+    });
+    const identify = vi.fn(async () => identity);
+    const switchWorkspace = vi.fn(async () => ({
+      workspaceId,
+      organizationId: "org_next",
+      brainId: "brain_general",
+    }));
+    const consume = vi.fn(async () => ({ allowed: true, retryAfterSeconds: 0 }));
+    const app = testApp(fakeRepository(), {
+      authenticate,
+      identify,
+      rateLimiter: { consume } as ApiRateLimiter,
+      workspaceControl: { ...fakeWorkspaceControl(), switch: switchWorkspace },
+    });
+
+    const response = await app.request(`/v1/workspaces/${workspaceId}/switch`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${compactJwt({ client_id: "client_mobile" })}` },
+    });
+
+    expect(response.status).toBe(200);
+    expect(switchWorkspace).toHaveBeenCalledWith(identity, workspaceId);
+    expect(consume).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: "user_mobile",
+        bucket: "workspace-switch",
+        limit: 60,
+      }),
+    );
+    expect(authenticate).not.toHaveBeenCalled();
+  });
+
   it("routes onboarding through verified identity without the onboarded actor gate", async () => {
     const identity = {
       userId: "user_mid_onboarding",
@@ -3876,6 +4171,7 @@ describe("canonical Hono API", () => {
       activeWorkspaceId: null,
       activeBrainId: null,
       method: "session" as const,
+      credentialKind: "browser_cookie" as const,
       refreshedSessionCookie: "wos-session=refreshed; Path=/; HttpOnly",
     };
     const authenticate = vi.fn(async () => {
@@ -4180,6 +4476,7 @@ function testApp(
       activeWorkspaceId: actor.workspaceId,
       activeBrainId: null,
       method: actor.authenticationMethod,
+      credentialKind: "browser_cookie" as const,
     }),
     defaultModel: "provider/default",
     ...overrides,
@@ -4188,6 +4485,11 @@ function testApp(
 
 async function responseBody(response: Response | Promise<Response>) {
   return (await response).text();
+}
+
+function compactJwt(payload: Record<string, unknown>) {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "RS256", typ: "JWT" })}.${encode(payload)}.signature`;
 }
 
 function rawHttpResponse(port: number, path: string) {
@@ -4320,7 +4622,6 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       imessageEnabled: false,
-      wikiEnabled: true,
       taskViewMode: "board" as const,
       preferredMcpClient: null,
       mcpSetupCompletedAt: null,
@@ -4334,6 +4635,7 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
         name: "Workspace",
         slug: "workspace",
         role: "admin" as const,
+        legacyBrainEnabled: true,
       },
     ],
     activeWorkspaceId: actor.workspaceId,
@@ -4561,6 +4863,9 @@ function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
     getCodexStatus: async () => {
       throw new Error("Unexpected Codex status read.");
     },
+    setCodexWorkspaceEngine: async () => {
+      throw new Error("Unexpected Codex workspace engine mutation.");
+    },
     startCodexDeviceAuth: async () => {
       throw new Error("Unexpected Codex device auth start.");
     },
@@ -4637,9 +4942,9 @@ function wikiSourceService(
 function wikiActivityItem() {
   return {
     id: "gwjob_1",
-    provider: "slack" as const,
-    sourceType: "conversation" as const,
-    title: "#product",
+    provider: "gmail" as const,
+    sourceType: "thread" as const,
+    title: "Launch update",
     outcome: "succeeded" as const,
     reason: null,
     pages: [{ path: "projects/launch", title: "Launch", action: "updated" as const }],
@@ -4737,7 +5042,6 @@ function brainSourceDetails() {
     viewer: { actorId: actor.userId, isAdmin: true },
     sources: [],
     ownAccounts: {
-      slack: [],
       linear: [],
       gmail: [],
       google_drive: [],
@@ -4756,14 +5060,6 @@ function brainSourceDetails() {
       },
       legacyDefaultDelivery: false,
       isDefaultBrain: false,
-    },
-    slack: {
-      integration: {
-        ...unavailableBase,
-        provider: "slack" as const,
-        accountName: null,
-        teamName: null,
-      },
     },
     linear: {
       integration: {
@@ -4912,6 +5208,7 @@ function fakeSkillImportService(
 function fakePluginImportService(
   repositoryOverrides: Partial<PluginRepository> = {},
   resolverOverrides: Partial<PluginImportResolver> = {},
+  gatewayLifecycle?: PluginGatewayLifecycle,
 ) {
   const unexpected = async (): Promise<never> => {
     throw new Error("Unexpected Plugin installation operation.");
@@ -4933,7 +5230,7 @@ function fakePluginImportService(
     },
     ...resolverOverrides,
   };
-  return new PluginImportApplicationService(repository, resolver);
+  return new PluginImportApplicationService(repository, resolver, gatewayLifecycle);
 }
 
 function knowledgeService(overrides: Partial<KnowledgeRepository>) {
@@ -5055,6 +5352,33 @@ function fakePluginInstallation(): PluginInstallation {
         command: "./server",
         args: [],
         env: { PRIVATE_TOKEN: "secret-value" },
+      },
+    ],
+    remoteMcpServers: [
+      {
+        name: "remote",
+        type: "streamable-http",
+        connectionProvider: "quality-tools",
+        capabilities: [
+          { id: "read", label: "Read tools", defaultMode: "on", tools: ["list_issues"] },
+        ],
+        tools: [
+          {
+            name: "list_issues",
+            description: "List issues.",
+            classification: {
+              capabilityId: "read",
+              capabilityLabel: "Read tools",
+              defaultMode: "on",
+              bucket: "read",
+              curated: true,
+            },
+          },
+        ],
+        discoveryStatus: "stale",
+        discoveredAt: createdAt,
+        refreshAfter: createdAt,
+        lastDiscoveryError: "Provider discovery timed out.",
       },
     ],
     installReport: {
@@ -5392,6 +5716,7 @@ function fakeRepository(): FakeRepository {
           title: "Chat",
           engine: "opencompany",
           model: "provider/default",
+          messageShapeEpoch: 4,
           runtime: {
             status: "running",
             activeRunId: "run_1",
@@ -5412,6 +5737,7 @@ function fakeRepository(): FakeRepository {
       title: "Chat",
       engine: "opencompany",
       model: "provider/default",
+      messageShapeEpoch: 4,
       runtime: {
         status: "running",
         activeRunId: "run_1",

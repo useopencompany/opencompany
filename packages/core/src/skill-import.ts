@@ -57,8 +57,17 @@ export type SkillImportCandidate = {
   description: string;
 };
 
+export type SkillImportWarning = {
+  code: "source_directory_normalized";
+  message: string;
+};
+
 export type SkillImportResolution =
-  | { status: "resolved"; bundle: ExternalResolvedSkillBundle }
+  | {
+      status: "resolved";
+      bundle: ExternalResolvedSkillBundle;
+      warnings: SkillImportWarning[];
+    }
   | {
       status: "ambiguous";
       candidates: SkillImportCandidate[];
@@ -79,6 +88,7 @@ export type SkillImportPreview =
       files: SkillImportFileMetadata[];
       fileCount: number;
       totalBytes: number;
+      warnings: SkillImportWarning[];
     }
   | {
       status: "ambiguous";
@@ -195,7 +205,7 @@ export class SkillImportApplicationService {
     requireSkillWrite(actor);
     const resolution = await this.resolve(input);
     if (resolution.status === "ambiguous") return resolution;
-    return publicPreview(resolution.bundle);
+    return publicPreview(resolution.bundle, resolution.warnings);
   }
 
   async install(
@@ -367,6 +377,7 @@ export function createSkillFileChunk(
 
 function publicPreview(
   bundle: ExternalResolvedSkillBundle,
+  warnings: SkillImportWarning[],
 ): Extract<SkillImportPreview, { status: "resolved" }> {
   return {
     status: "resolved",
@@ -384,6 +395,7 @@ function publicPreview(
     })),
     fileCount: bundle.fileCount,
     totalBytes: bundle.totalBytes,
+    warnings,
   };
 }
 

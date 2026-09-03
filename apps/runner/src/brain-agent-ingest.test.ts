@@ -8,7 +8,6 @@ import {
   normalizeGoogleDriveDocument,
   normalizeHubspotObjectWindow,
   normalizeJamieMeetingCompletedWebhook,
-  normalizeSlackConversationWindow,
   normalizeUploadAsset,
 } from "@opencompany/brain";
 import type { BrainIngestTrace, BrainIngestTriageTrace } from "@opencompany/brain/ingest-trace";
@@ -101,7 +100,6 @@ import {
   buildGoogleDriveDocumentAgentIngestPrompt,
   buildHubspotObjectAgentIngestPrompt,
   buildJamieMeetingAgentIngestPrompt,
-  buildSlackConversationAgentIngestPrompt,
   CHAT_CAPTURE_INGEST_PROFILE,
   CHAT_CAPTURE_INGEST_SYSTEM_PROMPT,
   formatBrainFolderInventoryPrompt,
@@ -114,7 +112,6 @@ import {
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
   runJamieMeetingAgentIngest,
-  runSlackConversationAgentIngest,
   UPLOAD_ASSET_INGEST_PROFILE,
   validateBrainAgentInvocation,
 } from "./brain-agent-ingest";
@@ -190,33 +187,6 @@ function githubActivityItem() {
   );
   if (!item) throw new Error("Expected a normalized GitHub activity item.");
   return item;
-}
-
-function slackItem() {
-  return normalizeSlackConversationWindow({
-    windowId: "gslkwin_test1",
-    teamId: "T012345",
-    teamDomain: "acme",
-    channelId: "C09ABC",
-    channelName: "product",
-    channelType: "channel",
-    messages: [
-      {
-        ts: "1783950060.000100",
-        userId: "U01",
-        userName: "Jamie",
-        text: "Where did we land on onboarding?",
-      },
-      {
-        ts: "1783950120.000200",
-        threadTs: "1783950060.000100",
-        userId: "U02",
-        userName: "Ada",
-        text: "We decided to ship the new flow next week.",
-      },
-    ],
-    flushedAt: "2026-07-13T10:30:00.000Z",
-  });
 }
 
 function gmailItem() {
@@ -749,89 +719,6 @@ describe("buildAttioObjectAgentIngestPrompt", () => {
   });
 });
 
-describe("buildSlackConversationAgentIngestPrompt", () => {
-  it("carries the transcript, per-message refs, permalinks, and thread markers", () => {
-    const item = slackItem();
-    const prompt = buildSlackConversationAgentIngestPrompt(item);
-
-    expect(prompt).toContain("#product");
-    expect(prompt).toContain(item.sourceRef);
-    expect(prompt).toContain("slack:message:T012345:C09ABC:<message ts>");
-    expect(prompt).toContain("https://acme.slack.com/archives/C09ABC/p");
-    expect(prompt).toContain("Jamie (ts 1783950060.000100): Where did we land on onboarding?");
-    expect(prompt).toContain("↳ [");
-    expect(prompt).toContain("We decided to ship the new flow next week.");
-  });
-
-  it("routes standalone evidence snapshots into the evidence/slack provenance subfolder", () => {
-    const prompt = buildSlackConversationAgentIngestPrompt(slackItem());
-
-    expect(prompt).toContain("append-evidence --folder evidence/slack");
-  });
-
-  it("omits the permalink hint without a team domain", () => {
-    const item = normalizeSlackConversationWindow({
-      windowId: "gslkwin_test2",
-      teamId: "T012345",
-      channelId: "D09DM",
-      channelName: "Ada",
-      channelType: "im",
-      messages: [{ ts: "1783950060.000100", userId: "U02", text: "hi" }],
-      flushedAt: "2026-07-13T10:30:00.000Z",
-    });
-    const prompt = buildSlackConversationAgentIngestPrompt(item);
-    expect(prompt).not.toContain("permalinks");
-    expect(prompt).toContain("the DM with Ada");
-  });
-
-  it("renders bounded Slack context as interpretive context", () => {
-    const item = normalizeSlackConversationWindow({
-      windowId: "gslkwin_test3",
-      teamId: "T012345",
-      teamDomain: "acme",
-      channelId: "C09ABC",
-      channelName: "product",
-      channelType: "channel",
-      messages: [{ ts: "1783950120.000200", userId: "U02", text: "Yes, let's ship that." }],
-      context: {
-        previousMessages: [
-          {
-            ts: "1783950060.000100",
-            userId: "U01",
-            userName: "Jamie",
-            text: "Do we want to launch onboarding next week?",
-          },
-        ],
-        threads: [
-          {
-            threadTs: "1783950000.000050",
-            messages: [
-              {
-                ts: "1783950030.000080",
-                threadTs: "1783950000.000050",
-                userId: "U03",
-                text: "Earlier thread setup.",
-              },
-            ],
-          },
-        ],
-      },
-      flushedAt: "2026-07-13T10:30:00.000Z",
-    });
-
-    const prompt = buildSlackConversationAgentIngestPrompt(item);
-
-    expect(prompt).toContain("The current window is the primary ingest target");
-    expect(prompt).toContain("Query the brain first");
-    expect(prompt).toContain("## Prior context");
-    expect(prompt).toContain("### Previous channel messages");
-    expect(prompt).toContain("### Thread context for 1783950000.000050");
-    expect(prompt).toContain("Do we want to launch onboarding next week?");
-    expect(prompt).toContain("## Current window transcript");
-    expect(prompt).toContain("Yes, let's ship that.");
-  });
-});
-
 describe("buildGmailThreadAgentIngestPrompt", () => {
   it("carries the evidence pointer, per-message refs, and the owner's instructions", () => {
     const item = gmailItem();
@@ -958,86 +845,6 @@ describe("cheap source triage", () => {
         },
       },
     });
-  });
-
-  it("passes triage entity hints into the full Slack agent and shares its cost budget", async () => {
-    let seenPrompt = "";
-    aiMock.generateText.mockImplementationOnce(
-      async (options: {
-        tools: Record<string, CapturedTool>;
-        messages: CapturedMessage[];
-        onStepFinish?: (event: { usage: Record<string, unknown> }) => Promise<void> | void;
-      }) => {
-        seenPrompt = userPromptFrom(options);
-        await options.tools.goat_brain?.execute({
-          command: "timeline-add",
-          args: ["onboarding", "--body", "Ship decision."],
-        });
-        const totalUsage = { inputTokens: 100, outputTokens: 50, totalTokens: 150 };
-        await options.onStepFinish?.({ usage: totalUsage });
-        return { text: "Updated onboarding.", steps: [{}, {}], totalUsage };
-      },
-    );
-
-    const result = await runSlackConversationAgentIngest(
-      {
-        jobId: "job_slack_ingest",
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: slackItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      {
-        runCli: okCli,
-        runTriage: vi.fn(async () =>
-          triageResult("ingest", { entityHints: ["Onboarding", "Acme"] }),
-        ),
-      },
-    );
-
-    expect(seenPrompt).toContain("## Cheap triage handoff");
-    expect(seenPrompt).toContain("Query likely matching entities before writing.");
-    expect(seenPrompt).toContain("- Onboarding");
-    expect(seenPrompt).toContain("- Acme");
-    expect(result).toMatchObject({
-      skipped: false,
-      budget: {
-        // $0.000525 triage + $0.000350 Haiku full-agent step.
-        modelCostUsdMicros: 875,
-        totalCostUsdMicros: 875,
-      },
-      trace: {
-        model: BRAIN_AGENT_INGEST_BASIC_MODEL,
-        triage: {
-          decision: "ingest",
-          entityHints: ["Onboarding", "Acme"],
-        },
-      },
-    });
-  });
-
-  it("falls back to the full agent when cheap triage fails", async () => {
-    mockAgentRun({ finalText: "SKIP" });
-
-    const result = await runSlackConversationAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: slackItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      {
-        runCli: okCli,
-        runTriage: vi.fn(async () => {
-          throw new Error("triage provider unavailable");
-        }),
-      },
-    );
-
-    expect(brainFilesMock.materializeBrainFilesToRoot).toHaveBeenCalled();
-    expect(brainFilesMock.syncBrainFilesFromRoot).toHaveBeenCalled();
-    expect(result).toMatchObject({ skipped: true, skipMode: "explicit" });
-    expect(result).not.toHaveProperty("triageSkippedBeforeMaterialization");
   });
 
   it("triages Attio activity before starting the full agent", async () => {
@@ -1212,79 +1019,6 @@ describe("runGmailThreadAgentIngest", () => {
       status: "completed",
       mutating: false,
     });
-  });
-});
-
-describe("runSlackConversationAgentIngest", () => {
-  it("runs the ingest loop and reports window metadata", async () => {
-    mockAgentRun({
-      finalText: "Updated onboarding page.",
-      toolInvocations: [
-        { command: "timeline-add", args: ["onboarding", "--body", "Ship decision."] },
-      ],
-    });
-
-    const result = await runSlackConversationAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: slackItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({
-      brainRef: "gbrain_123",
-      skipped: false,
-      channelId: "C09ABC",
-      messageCount: 2,
-      windowStartTs: "1783950060.000100",
-      windowEndTs: "1783950120.000200",
-    });
-  });
-
-  it("treats a SKIP reply with no writes as a clean skip", async () => {
-    mockAgentRun({ finalText: "SKIP" });
-
-    const result = await runSlackConversationAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: slackItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({ skipped: true, mutations: 0 });
-  });
-
-  it("does not infer a skip when a mutating command fails", async () => {
-    mockAgentRun({
-      finalText: "No update made.",
-      toolInvocations: [{ command: "timeline-add", args: ["onboarding", "--body", "Ship it."] }],
-    });
-    const failingCli: BrainAgentCliRunner = vi.fn(async () => ({
-      ok: false,
-      exitCode: 1,
-      stdout: "",
-      stderr: "missing page",
-      error: "opencompany-brain CLI failed.",
-    }));
-
-    await expect(
-      runSlackConversationAgentIngest(
-        {
-          userWorkosId: "user_123",
-          brainRef: "gbrain_123",
-          item: slackItem(),
-          env: { vercelAiGatewayApiKey: "gw_test" },
-        },
-        { runCli: failingCli },
-      ),
-    ).rejects.toThrow("attempted 1 mutating command");
-    expect(brainFilesMock.syncBrainFilesFromRoot).not.toHaveBeenCalled();
   });
 });
 

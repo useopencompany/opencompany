@@ -36,6 +36,7 @@ vi.mock("@/components/useHydrated", () => ({
 vi.mock("@/lib/codex-auth", () => ({
   disconnectCodexAuth: vi.fn(),
   pollCodexDeviceAuth: vi.fn(),
+  setCodexWorkspaceEngineEnabled: vi.fn(),
   startCodexDeviceAuth: vi.fn(),
 }));
 
@@ -150,10 +151,12 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    // Workspace scope is shown first: GitHub is a workspace-owned connection and
+    // Workspace scope is shown first: GitHub ingestion is a workspace-owned connection and
     // Gmail (personal) is hidden.
     expect(
-      screen.getByText("Bring pull requests and issues from your repositories into opencompany."),
+      screen.getByText(
+        "Ingest pull requests and issues from selected repositories through webhooks.",
+      ),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Let opencompany read and act on your email."),
@@ -164,8 +167,29 @@ describe("SettingsIntegrationsPanel", () => {
     // Personal scope reveals the personal connections and hides the workspace ones.
     expect(screen.getByText("Let opencompany read and act on your email.")).toBeInTheDocument();
     expect(
-      screen.queryByText("Bring pull requests and issues from your repositories into opencompany."),
+      screen.queryByText(
+        "Ingest pull requests and issues from selected repositories through webhooks.",
+      ),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps subscription-backed model routing out of Integrations", () => {
+    const integrations = integrationStateFromRows([]) as IntegrationState;
+    integrations.codex.workspaceEngine = {
+      enabled: true,
+      providerDisplayName: "Provider Admin",
+      providerEmail: "provider@example.com",
+      credentialStatus: "connected",
+      credentialStatusReason: null,
+      lastValidatedAt: null,
+      isCurrentUser: false,
+    };
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    expect(screen.getByRole("button", { name: "Workspace" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Workspace 1" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Subscription-backed models")).not.toBeInTheDocument();
   });
 
   it("lets workspace admins complete the Infisical browser-token handoff", async () => {
@@ -315,13 +339,14 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
+    expect(screen.getByText("GitHub workspace ingestion")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Configure repositories" })).toHaveAttribute(
       "href",
       "/settings/repositories",
     );
   });
 
-  it("renders the Linear MCP connection instead of the separate brain-source accounts", () => {
+  it("keeps Linear out of the legacy Integrations panel", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_linear_mcp",
@@ -342,66 +367,30 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
-    // Linear lives under the Workspace scope, which is shown first.
-    const linearCard = screen
-      .getByText("Connect issues, projects, and comments from Linear.")
-      .closest("div.rounded-2xl");
-    expect(linearCard).not.toBeNull();
-    expect(within(linearCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
     expect(
-      within(linearCard as HTMLElement).queryByText("Source workspace"),
+      screen.queryByText("Connect issues, projects, and comments from Linear."),
     ).not.toBeInTheDocument();
-    expect(within(linearCard as HTMLElement).queryByRole("link", { name: "Connect" })).toBeNull();
-    const readPermission = within(linearCard as HTMLElement).getByRole("group", {
-      name: "Read Linear permission",
-    });
-    const writePermission = within(linearCard as HTMLElement).getByRole("group", {
-      name: "Manage issues permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.queryByText("Source workspace")).not.toBeInTheDocument();
   });
 
-  it("flags a Linear MCP auth error and lets the user reconnect from integrations settings", () => {
+  it("keeps Slack out of the legacy Integrations panel", () => {
     const integrations = integrationStateFromRows([
       {
-        id: "gint_linear_mcp",
-        provider: "linear",
-        externalId: "linear_mcp",
-        accountName: "Linear",
-        status: "needs_reauth",
-        statusReason: "Linear authorization expired. Reconnect Linear in Settings.",
+        id: "gint_slack",
+        provider: "slack",
+        externalId: "T123",
+        connectionLabel: "Acme",
+        accountName: "Louis",
+        status: "connected",
         capabilityModes: {},
       },
     ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const linearCard = screen
-      .getByText("Connect issues, projects, and comments from Linear.")
-      .closest("div.rounded-2xl");
-    expect(linearCard).not.toBeNull();
-    expect(within(linearCard as HTMLElement).getByText("Needs reconnect")).toBeInTheDocument();
-    expect(
-      within(linearCard as HTMLElement).getByText(
-        "Linear authorization expired. Reconnect Linear in Settings.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(linearCard as HTMLElement).getByRole("link", { name: "Reconnect" }),
-    ).toHaveAttribute("href", "/api/integrations/linear/start?returnTo=/settings/integrations");
-    expect(within(linearCard as HTMLElement).queryByText("Connected")).not.toBeInTheDocument();
-    expect(
-      within(linearCard as HTMLElement).queryByRole("group", {
-        name: "Read Linear permission",
-      }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Acme")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Personal" })).not.toHaveTextContent("1");
   });
 
   it("shows PostHog with read-on and create-insights-ask permissions", () => {
@@ -629,40 +618,6 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
-  it("shows one broad Slack read permission for each connected workspace", () => {
-    const integrations = integrationStateFromRows([
-      {
-        id: "gint_slack",
-        provider: "slack",
-        externalId: "T123",
-        connectionLabel: "Acme",
-        accountName: "Louis",
-        status: "connected",
-        capabilityModes: {},
-      },
-    ]) as IntegrationState;
-
-    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
-    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
-
-    const slackCard = screen
-      .getByText("Let opencompany search and read your Slack conversations.")
-      .closest("div.rounded-2xl");
-    expect(slackCard).not.toBeNull();
-    const readPermission = within(slackCard as HTMLElement).getByRole("group", {
-      name: "Read Slack permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(
-      within(slackCard as HTMLElement).queryByRole("group", {
-        name: /write|send/i,
-      }),
-    ).not.toBeInTheDocument();
-  });
-
   it("connects Latitude as a personal OAuth integration with guarded writes", () => {
     const integrations = integrationStateFromRows([
       {
@@ -698,7 +653,7 @@ describe("SettingsIntegrationsPanel", () => {
     ).toHaveAttribute("href", "/api/integrations/latitude/start?returnTo=/settings/integrations");
   });
 
-  it("connects Neon personally with structure On and database queries Ask", () => {
+  it("keeps Neon out of legacy integrations now that its account lives under Plugins", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_neon",
@@ -714,28 +669,11 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const neonCard = screen
-      .getByText("Inspect Neon projects and schemas, and run permission-gated read-only SQL.")
-      .closest("div.rounded-2xl");
-    expect(neonCard).not.toBeNull();
-    expect(within(neonCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
-    const structurePermission = within(neonCard as HTMLElement).getByRole("group", {
-      name: "Inspect Neon structure permission",
-    });
-    const queryPermission = within(neonCard as HTMLElement).getByRole("group", {
-      name: "Query database data permission",
-    });
-    expect(within(structurePermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(queryPermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
     expect(
-      within(neonCard as HTMLElement).getByRole("link", { name: "Reconnect" }),
-    ).toHaveAttribute("href", "/api/integrations/neon/start?returnTo=/settings/integrations");
+      screen.queryByText(
+        "Inspect Neon projects and schemas, and run permission-gated read-only SQL.",
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it("shows two connected X identities and keeps the add-account path available", () => {

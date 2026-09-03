@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { V1_BROWSER_REQUEST_HEADERS } from "./browser-transport";
 import { createApiClient } from "./client";
 import { decodeEventCursor, encodeEventCursor, RunEventSchema } from "./events";
 import { createOpenApiDocument } from "./routes";
@@ -8,6 +9,7 @@ import {
   CreateTaskBodySchema,
   InvokeWorkflowBodySchema,
   MessageReadModelSchema,
+  MessageSummaryReadModelSchema,
   ReadModelSchema,
   ResolveApprovalBodySchema,
   TaskActivityReadModelSchema,
@@ -15,6 +17,46 @@ import {
 } from "./schemas";
 
 describe("headless protocol", () => {
+  it("keeps the browser request-header contract aligned with every OpenAPI operation", () => {
+    type HeaderParameter = { in?: string; name?: string } | { $ref: string };
+    type Operation = { parameters?: HeaderParameter[] };
+    const methods = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
+    const document = createOpenApiDocument() as unknown as {
+      paths?: Record<
+        string,
+        Partial<Record<(typeof methods)[number], Operation>> & {
+          parameters?: HeaderParameter[];
+        }
+      >;
+    };
+    const declaredHeaders = new Set<string>();
+    const collectHeaders = (parameters: HeaderParameter[] | undefined) => {
+      for (const parameter of parameters ?? []) {
+        if (!("$ref" in parameter) && parameter.in === "header" && parameter.name) {
+          declaredHeaders.add(parameter.name.toLowerCase());
+        }
+      }
+    };
+    for (const path of Object.values(document.paths ?? {})) {
+      collectHeaders(path.parameters);
+      for (const method of methods) collectHeaders(path[method]?.parameters);
+    }
+
+    const expectedHeaders = new Set([
+      // Fetch metadata and JSON request bodies are represented by OpenAPI media types rather than
+      // operation header parameters. Bearer auth is represented by the security scheme.
+      "accept",
+      "authorization",
+      "content-type",
+      ...declaredHeaders,
+    ]);
+    const browserHeaders = new Set(
+      V1_BROWSER_REQUEST_HEADERS.map((header) => header.toLowerCase()),
+    );
+
+    expect(browserHeaders).toEqual(expectedHeaders);
+  });
+
   it("publishes every canonical /v1 operation in OpenAPI", () => {
     const document = createOpenApiDocument();
     expect(Object.keys(document.paths ?? {})).toEqual([
@@ -108,6 +150,7 @@ describe("headless protocol", () => {
       "/v1/chat-artifacts/{artifactId}",
       "/v1/chat-artifacts/{artifactId}/versions/{versionId}",
       "/v1/chat-attachments/{messageId}/{attachmentId}",
+      "/v1/conversations/{conversationId}/messages/{messageId}/presentation",
       "/v1/chat-screenshots/{conversationId}/{filename}",
       "/public/chat-shares/{shareId}",
       "/public/chat-shares/{shareId}/metadata",
@@ -146,6 +189,7 @@ describe("headless protocol", () => {
       "/v1/integration-accounts/{integrationId}",
       "/v1/engine-auth/claude-code",
       "/v1/engine-auth/codex",
+      "/v1/engine-auth/codex/workspace",
       "/v1/engine-auth/codex/device",
       "/v1/engine-auth/codex/device/{flowId}/poll",
       "/v1/engine-auth/infisical",
@@ -167,6 +211,7 @@ describe("headless protocol", () => {
       "/v1/plugins/{name}/disable",
       "/v1/plugins/{name}/mcp/approve",
       "/v1/plugins/{name}/mcp/revoke",
+      "/v1/plugins/{name}/mcp/refresh",
       "/v1/plugins/{name}/data/delete",
     ]);
     expect(document.components?.securitySchemes).toHaveProperty("bearerAuth");
@@ -218,6 +263,22 @@ describe("headless protocol", () => {
         actor_id: "must-not-cross",
       }).success,
     ).toBe(false);
+    expect(
+      MessageSummaryReadModelSchema.safeParse({
+        id: "message_1",
+        conversationId: "conversation_1",
+        role: "assistant",
+        content: "Done",
+        taskId: null,
+        presentationSummary: {
+          uiMessageParts: [{ type: "reasoning", text: "Preview" }],
+        },
+        attachments: null,
+        createdAt: "2026-08-10T00:00:00.000Z",
+        updatedAt: "2026-08-10T00:00:00.000Z",
+      }).success,
+    ).toBe(true);
+    expect(ChatReadModelSchema.safeParse("chat-messages-v2").success).toBe(true);
     expect(ReadModelSchema.safeParse("workflows-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("task-activities-v1").success).toBe(true);
     expect(ReadModelSchema.safeParse("workflow-schedules-v1").success).toBe(true);
@@ -335,6 +396,45 @@ describe("headless protocol", () => {
           detail: "bun test",
           kind: "execute",
           parentToolCallId: "subagent_1",
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts sanitized approval inputs while preserving legacy approvals", () => {
+    const base = {
+      id: "event_1",
+      runId: "run_1",
+      attemptId: "attempt_1",
+      cursor: "v1:1",
+      schemaVersion: 1 as const,
+      occurredAt: "2026-08-10T00:00:00.000Z",
+      type: "approval.requested" as const,
+    };
+
+    expect(
+      RunEventSchema.safeParse({
+        ...base,
+        payload: {
+          approvalId: "approval_1",
+          kind: "use_action",
+          prompt: "Approve?",
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      RunEventSchema.safeParse({
+        ...base,
+        payload: {
+          approvalId: "approval_2",
+          toolCallId: "tool_2",
+          kind: "use_action",
+          prompt: "Approve gmail.send?",
+          action: "gmail.send",
+          input: {
+            action: "gmail.send",
+            params: { to: "customer@example.com", subject: "Hello" },
+          },
         },
       }).success,
     ).toBe(true);

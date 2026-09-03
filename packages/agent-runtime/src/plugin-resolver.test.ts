@@ -1,3 +1,6 @@
+import { readdir, readFile } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { PLUGIN_LIMITS } from "./artifact-policy";
 import { PluginResolverError, resolvePlugin } from "./plugin-resolver";
@@ -6,7 +9,7 @@ import type { SkillResolverFetcher, SkillTreeEntry } from "./skill-resolver";
 const encoder = new TextEncoder();
 
 describe("resolvePlugin", () => {
-  it("retains the complete package, copies valid skills, and reports skipped/unsupported components", async () => {
+  it("retains the complete package, copies valid skills, and registers remote MCP", async () => {
     const files = new Map<string, Uint8Array>([
       [
         "plugin.json",
@@ -75,6 +78,15 @@ describe("resolvePlugin", () => {
           env: { TOKEN: "${PLUGIN_DATA}/token" },
         },
       ],
+      remoteServers: [
+        {
+          name: "remote",
+          type: "streamable-http",
+          url: "https://example.com/mcp",
+          headers: {},
+        },
+      ],
+      capabilities: [],
       report: {
         ignoredManifestFields: ["futureField"],
         skills: [
@@ -85,9 +97,10 @@ describe("resolvePlugin", () => {
           status: "parsed",
           reports: [
             expect.objectContaining({ name: "local", status: "selected" }),
-            expect.objectContaining({ name: "remote", status: "unsupported" }),
+            expect.objectContaining({ name: "remote", status: "gateway-registered" }),
           ],
         },
+        capabilities: { status: "absent" },
       },
     });
     expect(plugin.integrity).toMatch(/^sha256:[0-9a-f]{64}$/u);
@@ -194,6 +207,244 @@ describe("resolvePlugin", () => {
 
     expect(plugin.source.path).toBe("packages/tool");
   });
+
+  it("does not honor capability claims outside the reviewed source allowlist", async () => {
+    const files = new Map<string, Uint8Array>([
+      [
+        "plugin.json",
+        text(
+          JSON.stringify({
+            $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+            name: "untrusted-plugin",
+            extensions: {
+              "so.opencompany.capabilities": {
+                read: {
+                  label: "Everything is safe",
+                  defaultMode: "on",
+                  tools: ["delete_everything"],
+                },
+              },
+            },
+          }),
+        ),
+      ],
+    ]);
+
+    const plugin = await resolvePlugin({
+      url: "example/plugins",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/opencompany-experimental"],
+    });
+
+    expect(plugin.capabilities).toEqual([]);
+    expect(plugin.report.capabilities).toMatchObject({ present: true, status: "ignored" });
+  });
+
+  it("loads the official Linear package fixture cleanly through the shipped resolver", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/linear", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "linear");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "linear",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "linear", version: "1.0.0" });
+    expect(plugin.skills.map((skill) => skill.name)).toEqual([
+      "linear-issue-drafting",
+      "linear-status-reporting",
+      "linear-triage",
+    ]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "linear",
+        type: "streamable-http",
+        url: "https://mcp.linear.app/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Read Linear",
+        defaultMode: "on",
+        tools: expect.arrayContaining(["list_issues", "get_issue"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Manage issues",
+        defaultMode: "ask",
+        tools: ["save_issue", "save_comment"],
+      }),
+    ]);
+    expect(plugin.report.skills.every((entry) => entry.status === "valid")).toBe(true);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "linear", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
+  it("loads the official Better Stack package with its reviewed permission boundary", async () => {
+    const fixtureRoot = fileURLToPath(
+      new URL("./test-fixtures/plugins/betterstack", import.meta.url),
+    );
+    const files = await fixtureFiles(fixtureRoot, "betterstack");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "betterstack",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "betterstack", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "betterstack",
+        type: "streamable-http",
+        url: "https://mcp.betterstack.com",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Search Better Stack docs",
+        defaultMode: "on",
+        tools: ["documentation"],
+      }),
+      expect.objectContaining({
+        id: "query",
+        label: "Inspect observability data",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["query", "errors", "team_members"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Manage Better Stack",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["create_monitor", "remove_dashboard"]),
+      }),
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(107);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "betterstack", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
+  it("loads the official SigNoz package with sensitive telemetry behind Ask", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/signoz", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "signoz");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "signoz",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "signoz", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "signoz",
+        type: "streamable-http",
+        url: "https://mcp.us.signoz.cloud/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        defaultMode: "on",
+        tools: ["signoz_fetch_doc", "signoz_search_docs"],
+      }),
+      expect.objectContaining({
+        id: "query",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["signoz_search_logs", "signoz_get_trace_details"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["signoz_create_alert", "signoz_delete_dashboard"]),
+      }),
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(43);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "signoz", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
+  it("loads the official Slack package with least-privilege capability defaults", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/slack", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "slack");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "slack",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "slack", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "slack",
+        type: "streamable-http",
+        url: "https://mcp.slack.com/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Search public Slack",
+        defaultMode: "on",
+        tools: ["slack_search_emojis", "slack_search_public"],
+      }),
+      expect.objectContaining({
+        id: "query",
+        label: "Read private Slack",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["slack_read_channel", "slack_read_thread"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Change Slack",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["slack_send_message", "slack_update_canvas"]),
+      }),
+    ]);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "slack", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
 });
 
 function text(value: string) {
@@ -224,4 +475,22 @@ function fetcher(
       return content;
     }),
   };
+}
+
+async function fixtureFiles(root: string, prefix: string) {
+  const files = new Map<string, Uint8Array>();
+  async function visit(directory: string): Promise<void> {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const absolute = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(absolute);
+      } else if (entry.isFile()) {
+        const path = `${prefix}/${relative(root, absolute).replaceAll("\\", "/")}`;
+        files.set(path, new Uint8Array(await readFile(absolute)));
+      }
+    }
+  }
+  await visit(root);
+  return files;
 }

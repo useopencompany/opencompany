@@ -17,6 +17,7 @@ import {
   previewHeadlessPluginImport,
   previewHeadlessSkillImport,
   readHeadlessSkillFile,
+  refreshHeadlessPluginMcp,
   replaceHeadlessSkill,
   revokeHeadlessPluginMcp,
   updateHeadlessWorkspaceSkill,
@@ -142,6 +143,7 @@ describe("headless knowledge commands", () => {
               files: [{ path: "SKILL.md", sizeBytes: 128 }],
               fileCount: 1,
               totalBytes: 128,
+              warnings: [],
             },
             meta,
           })
@@ -266,6 +268,7 @@ describe("headless knowledge commands", () => {
     await disableHeadlessPlugin("quality-tools", options);
     await approveHeadlessPluginMcp("quality-tools", command.expectedIntegrity, options);
     await revokeHeadlessPluginMcp("quality-tools", options);
+    await refreshHeadlessPluginMcp("quality-tools", options);
     await deleteHeadlessPluginData("quality-tools", options);
     await archiveHeadlessPlugin("quality-tools", options);
 
@@ -277,6 +280,7 @@ describe("headless knowledge commands", () => {
         "POST /v1/plugins/quality-tools/disable",
         "POST /v1/plugins/quality-tools/mcp/approve",
         "POST /v1/plugins/quality-tools/mcp/revoke",
+        "POST /v1/plugins/quality-tools/mcp/refresh",
         "POST /v1/plugins/quality-tools/data/delete",
         "POST /v1/plugins/quality-tools/archive",
       ],

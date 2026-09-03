@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { reserveWorkspaceIngestion } from "./billing";
 import { getDb } from "./client";
+import { stringifyPostgresJson } from "./postgres-json";
 import {
   type WikiIngestJob,
   type WikiIngestJobStatus,
@@ -12,6 +13,8 @@ import {
   wikiSourceItems,
 } from "./product-schema";
 
+export type ActiveWikiSourceProvider = Exclude<WikiSourceProvider, "slack">;
+
 type DbLike = any;
 
 export const WIKI_INGEST_LEASE_TTL_MS = 5 * 60_000;
@@ -19,7 +22,7 @@ export const WIKI_INGEST_MAX_ATTEMPTS = 5;
 const ATTEMPT_ERROR_MAX_CHARS = 500;
 
 export type NormalizedWikiSourceItem<TContent = unknown> = {
-  sourceProvider: WikiSourceProvider;
+  sourceProvider: ActiveWikiSourceProvider;
   sourceType: WikiSourceType;
   externalId: string;
   sourceRef: string;
@@ -48,7 +51,8 @@ type PersistedWikiIngestJob = {
   skipReason: string | null;
 };
 
-export type ClaimedWikiIngestJob = WikiIngestJob & {
+export type ClaimedWikiIngestJob = Omit<WikiIngestJob, "sourceProvider"> & {
+  sourceProvider: ActiveWikiSourceProvider;
   sourceType: WikiSourceType;
   sourceRef: string;
   title: string | null;
@@ -106,6 +110,7 @@ export async function listWikiIngestActivityRows(input: {
       ON source.id = job.source_item_id
      AND source.workspace_id = job.workspace_id
     WHERE job.workspace_id = ${input.workspaceId}
+      AND job.source_provider <> 'slack'
       AND (
         ${beforeCreatedAt}::timestamptz IS NULL
         OR (job.created_at, job.id) < (${beforeCreatedAt}::timestamptz, ${beforeId})
@@ -301,6 +306,7 @@ export async function claimNextWikiIngestJob(input: {
           (job.status = 'queued' AND job.next_retry_at <= ${now})
           OR (job.status = 'running' AND job.lease_expires_at < ${now})
         )
+        AND job.source_provider <> 'slack'
         AND EXISTS (
           SELECT 1
           FROM goat.wiki_sources AS source
@@ -425,7 +431,7 @@ export async function completeWikiIngestJob(input: {
 }): Promise<boolean> {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
-  const resultJson = JSON.stringify(input.result);
+  const resultJson = stringifyPostgresJson(input.result);
   const completed = await db.execute(sql`
     WITH completed_job AS (
       UPDATE goat.wiki_ingest_jobs
@@ -480,14 +486,14 @@ export async function failWikiIngestJobWithBackoff(input: {
   const now = input.now ?? new Date();
   const terminal = input.attempts >= (input.maxAttempts ?? WIKI_INGEST_MAX_ATTEMPTS);
   const nextRetryAt = terminal ? now : wikiIngestRetryAt(now, input.attempts);
-  const attemptErrorJson = JSON.stringify([
+  const attemptErrorJson = stringifyPostgresJson([
     {
       attempt: input.attempts,
       at: now.toISOString(),
       error: input.error.slice(0, ATTEMPT_ERROR_MAX_CHARS),
     },
   ]);
-  const failureResultJson = JSON.stringify(input.result ?? {});
+  const failureResultJson = stringifyPostgresJson(input.result ?? {});
   const failed = await db.execute(sql`
     WITH failed_job AS (
       UPDATE goat.wiki_ingest_jobs
@@ -542,7 +548,7 @@ export async function skipWikiIngestJob(input: {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   const reason = input.reason?.trim() || null;
-  const resultJson = JSON.stringify(input.result);
+  const resultJson = stringifyPostgresJson(input.result);
   const skipped = await db.execute(sql`
     WITH skipped_job AS (
       UPDATE goat.wiki_ingest_jobs

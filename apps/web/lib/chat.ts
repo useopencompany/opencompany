@@ -2,7 +2,7 @@ import "server-only";
 
 import type { ConversationDto } from "@opencompany/protocol";
 import type { ChatSessionView, ChatSummaryView } from "@/lib/chat-ui";
-import { normalizeModel } from "@/lib/model-options";
+import { normalizeConversationModel } from "@/lib/model-options";
 import { serverApiClient, serverApiError } from "@/lib/server-api-client";
 
 const RECENT_CHAT_LIMIT = "100";
@@ -39,7 +39,7 @@ function toChatSessionView(conversation: ConversationDto): ChatSessionView {
   return {
     id: conversation.id,
     title: conversation.title,
-    model: normalizeModel(conversation.model),
+    model: normalizeConversationModel(conversation.engine, conversation.model),
     engine: conversation.engine,
     codexComposerSettings: null,
     runtime: conversation.runtime,
@@ -55,7 +55,7 @@ function toChatSummaryView(conversation: ConversationDto): ChatSummaryView {
   return {
     id: conversation.id,
     title: conversation.title,
-    model: normalizeModel(conversation.model),
+    model: normalizeConversationModel(conversation.engine, conversation.model),
     engine: conversation.engine,
     codexComposerSettings: null,
     runtime: conversation.runtime,

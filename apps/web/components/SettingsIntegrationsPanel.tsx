@@ -4,6 +4,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import {
   AnthropicIcon,
   AttioIcon,
+  BetterStackIcon,
   FathomIcon,
   GitHubIcon,
   GmailIcon,
@@ -16,7 +17,6 @@ import {
   NeonIcon,
   OpenAIIcon,
   PostHogIcon,
-  SlackIcon,
   StripeIcon,
   XIcon,
 } from "@opencompany/ui/icons";
@@ -25,8 +25,10 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { ExternalLink, Globe2, Loader2, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { useHydrated } from "@/components/useHydrated";
 import {
+  type CapabilityId,
   type CapabilityMode,
   effectiveCapabilityMode,
   type ProviderCapability,
@@ -75,7 +77,6 @@ import {
   type LinearProviderState,
   type PersonalAccountProvider,
   type PostHogProviderState,
-  type SlackProviderState,
   type StripeProviderState,
 } from "@/lib/integration-state";
 import { hasGmailDraftScope, hasGmailSendScope } from "@/lib/integrations/gmail-scopes";
@@ -89,8 +90,10 @@ import {
 // monogram fallback where no square vector mark exists), the colored logo tile,
 // and a short connection-focused description. Keyed by provider so the card
 // components derive everything from the provider string.
+type SettingsPersonalAccountProvider = Exclude<PersonalAccountProvider, "slack">;
+
 type IntegrationMetaKey =
-  | PersonalAccountProvider
+  | SettingsPersonalAccountProvider
   | "github"
   | "jamie"
   | "posthog"
@@ -112,8 +115,14 @@ type IntegrationMeta = {
 
 const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   github: {
-    label: "GitHub",
-    description: "Bring pull requests and issues from your repositories into opencompany.",
+    label: "GitHub workspace ingestion",
+    description: "Ingest pull requests and issues from selected repositories through webhooks.",
+    Icon: GitHubIcon,
+    tileClass: "bg-[#181717] text-white",
+  },
+  github_user: {
+    label: "GitHub as you",
+    description: "Let opencompany work with repositories, issues, and pull requests as you.",
     Icon: GitHubIcon,
     tileClass: "bg-[#181717] text-white",
   },
@@ -165,12 +174,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: NeonIcon,
     tileClass: "bg-[#00E599] text-[#0B0F14]",
   },
-  slack: {
-    label: "Slack",
-    description: "Let opencompany search and read your Slack conversations.",
-    Icon: SlackIcon,
-    tileClass: "bg-[#4A154B] text-white",
-  },
   hubspot: {
     label: "HubSpot",
     description: "Sync CRM activity on contacts, companies, and deals.",
@@ -182,6 +185,18 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Sync CRM records and notes from Attio.",
     Icon: AttioIcon,
     tileClass: "bg-[#111111] text-white",
+  },
+  betterstack: {
+    label: "Better Stack",
+    description: "Investigate observability data and manage monitoring and incident response.",
+    Icon: BetterStackIcon,
+    tileClass: "bg-[#1B1F23] text-white",
+  },
+  signoz: {
+    label: "SigNoz",
+    description: "Investigate observability data and manage alerts and dashboards.",
+    monogram: "S",
+    tileClass: "bg-[#FF6B35] text-white",
   },
   stripe: {
     label: "Stripe",
@@ -273,7 +288,7 @@ export function SettingsIntegrationsPanel({
   );
 }
 
-function IntegrationSetupFeedback() {
+export function IntegrationSetupFeedback() {
   const handled = useRef(false);
 
   useEffect(() => {
@@ -364,26 +379,24 @@ const INFISICAL_REGIONS = [
 // Group-card providers surfaced under each scope. These are all user-owned in the
 // data model (each member connects their own account), but the CRM / meeting /
 // issue-tracking tools read as shared workspace tooling, so we present them under
-// the Workspace scope; Gmail / Calendar / Drive / Slack stay personal.
+// the Workspace scope; Gmail / Calendar / Drive stay personal.
 const WORKSPACE_ACCOUNT_PROVIDERS = [
   "hubspot",
   "attio",
   "granola",
   "fathom",
-] as const satisfies readonly PersonalAccountProvider[];
+] as const satisfies readonly SettingsPersonalAccountProvider[];
 
 const PERSONAL_ACCOUNT_PROVIDERS = [
   "gmail",
   "google_calendar",
   "google_drive",
-  "slack",
   "latitude",
-  "neon",
-] as const satisfies readonly PersonalAccountProvider[];
+] as const satisfies readonly SettingsPersonalAccountProvider[];
 
 function countConnectedAccounts(
   integrations: IntegrationState,
-  providers: readonly PersonalAccountProvider[],
+  providers: readonly SettingsPersonalAccountProvider[],
 ) {
   let count = 0;
   for (const provider of providers) {
@@ -396,7 +409,6 @@ function countWorkspaceConnected(integrations: IntegrationState) {
   return (
     (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
-    (integrationStatus(integrations.linear) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.posthog) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
     (integrations.infisical.connected ? 1 : 0) +
@@ -448,7 +460,6 @@ function IntegrationCards({
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
-            <IntegrationCardRow integration={integrations.linear} />
             <IntegrationCardRow integration={integrations.posthog} />
             <IntegrationCardRow integration={integrations.stripe} canConnect={isWorkspaceAdmin} />
             <IntegrationProviderGroupCard
@@ -488,16 +499,8 @@ function IntegrationCards({
               accounts={integrations.personalAccounts.google_drive}
             />
             <IntegrationProviderGroupCard
-              provider="slack"
-              accounts={integrations.personalAccounts.slack}
-            />
-            <IntegrationProviderGroupCard
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
-            />
-            <IntegrationProviderGroupCard
-              provider="neon"
-              accounts={integrations.personalAccounts.neon}
             />
             <IntegrationProviderGroupCard
               provider="x_account"
@@ -866,7 +869,6 @@ function IntegrationCardRow({
     | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
-    | SlackProviderState
     | StripeProviderState;
   canConnect?: boolean;
 }) {
@@ -887,9 +889,7 @@ function IntegrationCardRow({
             ? [integration.accountName, integration.livemode === false ? "Test mode" : null]
                 .filter(Boolean)
                 .join(" · ") || null
-            : integration.provider === "slack"
-              ? [integration.teamName, integration.accountName].filter(Boolean).join(" · ") || null
-              : (integration.accountEmail ?? integration.accountName);
+            : (integration.accountEmail ?? integration.accountName);
   const capabilityBody =
     connected &&
     (integration.provider === "linear" || integration.provider === "posthog") &&
@@ -956,9 +956,15 @@ function IntegrationCardRow({
 function IntegrationProviderGroupCard({
   provider,
   accounts,
+  capabilityIds,
+  capabilityOverrides,
 }: {
-  provider: PersonalAccountProvider;
+  provider: SettingsPersonalAccountProvider;
   accounts: IntegrationAccountView[];
+  capabilityIds?: readonly CapabilityId[];
+  capabilityOverrides?: Partial<
+    Record<CapabilityId, Partial<Pick<ProviderCapability, "label" | "description">>>
+  >;
 }) {
   const meta = INTEGRATION_META[provider];
   const connectHref = integrationConnectHref(provider);
@@ -973,7 +979,12 @@ function IntegrationProviderGroupCard({
       body={
         <div className="flex flex-col gap-1.5">
           {accounts.map((account) => (
-            <IntegrationAccountRow key={account.integrationId} account={account} />
+            <IntegrationAccountRow
+              key={account.integrationId}
+              account={account}
+              {...(capabilityIds ? { capabilityIds } : {})}
+              {...(capabilityOverrides ? { capabilityOverrides } : {})}
+            />
           ))}
         </div>
       }
@@ -993,7 +1004,23 @@ function IntegrationProviderGroupCard({
   );
 }
 
-function IntegrationAccountRow({ account }: { account: IntegrationAccountView }) {
+export function IntegrationAccountRow({
+  account,
+  purposeLabel,
+  reconnectHref,
+  showCapabilityModes = true,
+  capabilityIds,
+  capabilityOverrides,
+}: {
+  account: IntegrationAccountView;
+  purposeLabel?: string;
+  reconnectHref?: string;
+  showCapabilityModes?: boolean;
+  capabilityIds?: readonly CapabilityId[];
+  capabilityOverrides?: Partial<
+    Record<CapabilityId, Partial<Pick<ProviderCapability, "label" | "description">>>
+  >;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState<{
@@ -1018,6 +1045,7 @@ function IntegrationAccountRow({ account }: { account: IntegrationAccountView })
     account.connected &&
     !hasGoogleDriveWriteScope(account.scopes);
   const needsReconnect = account.status === "needs_reauth" || account.status === "sync_failed";
+  const accountConnectHref = reconnectHref ?? integrationConnectHref(account.provider);
   const gmailScopeUpgradeLabel =
     account.provider === "gmail" && account.connected && !hasGmailDraftScope(account.scopes)
       ? hasGmailSendScope(account.scopes)
@@ -1064,6 +1092,11 @@ function IntegrationAccountRow({ account }: { account: IntegrationAccountView })
           {identity}
         </span>
         <div className="flex shrink-0 items-center gap-1.5">
+          {purposeLabel ? (
+            <span className="rounded-full border border-border px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+              {purposeLabel}
+            </span>
+          ) : null}
           {account.connected ? (
             <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
               Connected
@@ -1074,7 +1107,7 @@ function IntegrationAccountRow({ account }: { account: IntegrationAccountView })
             </span>
           ) : (
             <a
-              href={integrationConnectHref(account.provider)}
+              href={accountConnectHref}
               className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
             >
               Reconnect
@@ -1112,18 +1145,20 @@ function IntegrationAccountRow({ account }: { account: IntegrationAccountView })
             <p className="text-[12px] leading-4 text-warning">{account.statusReason}</p>
           ) : null}
           <a
-            href={integrationConnectHref(account.provider)}
+            href={accountConnectHref}
             className="w-fit rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
           >
             Reconnect
           </a>
         </div>
       ) : null}
-      {account.connected ? (
+      {account.connected && showCapabilityModes ? (
         <CapabilityModeRows
           integrationId={account.integrationId}
           provider={account.provider}
           capabilityModes={account.capabilityModes}
+          {...(capabilityIds ? { capabilityIds } : {})}
+          {...(capabilityOverrides ? { capabilityOverrides } : {})}
         />
       ) : null}
       {confirming ? (
@@ -1164,12 +1199,20 @@ function CapabilityModeRows({
   integrationId,
   provider,
   capabilityModes,
+  capabilityIds,
+  capabilityOverrides,
 }: {
   integrationId: string;
   provider: PersonalAccountProvider | "posthog";
   capabilityModes: Record<string, unknown>;
+  capabilityIds?: readonly CapabilityId[];
+  capabilityOverrides?: Partial<
+    Record<CapabilityId, Partial<Pick<ProviderCapability, "label" | "description">>>
+  >;
 }) {
-  const capabilities = providerCapabilities(provider);
+  const capabilities = providerCapabilities(provider)
+    .filter((capability) => !capabilityIds || capabilityIds.includes(capability.id))
+    .map((capability) => ({ ...capability, ...capabilityOverrides?.[capability.id] }));
   if (capabilities.length === 0) return null;
   return (
     <div className="flex flex-col gap-1 border-t border-border/60 pt-1.5">
@@ -1184,15 +1227,6 @@ function CapabilityModeRows({
     </div>
   );
 }
-
-const CAPABILITY_MODE_OPTIONS: Array<{
-  mode: CapabilityMode;
-  label: string;
-}> = [
-  { mode: "on", label: "On" },
-  { mode: "ask", label: "Ask" },
-  { mode: "off", label: "Off" },
-];
 
 function CapabilityModeRow({
   integrationId,
@@ -1238,32 +1272,12 @@ function CapabilityModeRow({
           {capability.label}
         </div>
       </div>
-      <div
-        role="group"
-        aria-label={`${capability.label} permission`}
-        className="flex shrink-0 items-center rounded-full bg-surface-muted p-0.5"
-      >
-        {CAPABILITY_MODE_OPTIONS.map((option) => {
-          const active = option.mode === currentMode;
-          return (
-            <button
-              key={option.mode}
-              type="button"
-              aria-pressed={active}
-              disabled={isPending}
-              onClick={() => select(option.mode)}
-              className={cn(
-                "rounded-full px-2 py-0.5 text-[11px] font-medium leading-4 transition-colors duration-150",
-                active
-                  ? "bg-surface text-ink shadow-sm"
-                  : "text-ink-subtle hover:text-ink disabled:opacity-60",
-              )}
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
+      <CapabilityModeToggle
+        label={capability.label}
+        mode={currentMode}
+        disabled={isPending}
+        onChange={select}
+      />
     </div>
   );
 }
@@ -1773,7 +1787,6 @@ function integrationStatus(
     | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
-    | SlackProviderState
     | StripeProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
@@ -1793,7 +1806,6 @@ function integrationNeedsReconnect(
     | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
-    | SlackProviderState
     | StripeProviderState,
 ) {
   return integration.status === "needs_reauth" || integration.status === "sync_failed";
@@ -1806,14 +1818,13 @@ function integrationStatusReason(
     | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
-    | SlackProviderState
     | StripeProviderState,
 ) {
   return "statusReason" in integration ? integration.statusReason : null;
 }
 
 function integrationConnectHref(
-  provider: Exclude<IntegrationMetaKey, "codex" | "claude_code" | "infisical">,
+  provider: Exclude<IntegrationMetaKey, "codex" | "claude_code" | "infisical"> | "slack",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -1824,18 +1835,26 @@ function integrationConnectHref(
   }
   if (provider === "github")
     return "/api/integrations/github/start?returnTo=/settings/integrations";
+  if (provider === "github_user")
+    return "/api/integrations/github-user/start?returnTo=/settings/plugins/github";
   if (provider === "jamie") return "/settings/jamie";
   if (provider === "imessage") return "/settings/imessage";
   if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
   if (provider === "attio") return "/settings/attio";
   if (provider === "stripe") return "/settings/stripe";
-  if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
+  if (provider === "slack") return "/settings/plugins/slack";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
   if (provider === "latitude")
     return "/api/integrations/latitude/start?returnTo=/settings/integrations";
   if (provider === "neon") return "/api/integrations/neon/start?returnTo=/settings/integrations";
+  if (provider === "betterstack") {
+    return "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack";
+  }
+  if (provider === "signoz") {
+    return "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz";
+  }
   if (provider === "posthog")
     return "/api/integrations/posthog/start?returnTo=/settings/integrations";
   if (provider === "x_account")

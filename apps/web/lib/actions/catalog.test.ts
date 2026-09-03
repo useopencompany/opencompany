@@ -1,9 +1,8 @@
 import { ACTION_EFFECTS_READ } from "@opencompany/agent/actions/types";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   resolveAttioActions: vi.fn(),
-  resolveSlackActions: vi.fn(),
   resolveGmailActions: vi.fn(),
   resolveGoogleCalendarActions: vi.fn(),
   resolveGoogleDriveActions: vi.fn(),
@@ -14,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   resolveGitHubActions: vi.fn(),
   resolveStripeActions: vi.fn(),
   resolveRevolutActions: vi.fn(),
+  resolvePluginGatewayRegistrations: vi.fn(async () => []),
+  resolveRemoteMcpActions: vi.fn(),
   listWorkspaceCapabilities: vi.fn(),
 }));
 
@@ -23,9 +24,6 @@ vi.mock("@opencompany/db/capabilities", () => ({
 
 vi.mock("@opencompany/agent/actions/attio", () => ({
   resolveAttioActions: mocks.resolveAttioActions,
-}));
-vi.mock("@opencompany/agent/actions/slack", () => ({
-  resolveSlackActions: mocks.resolveSlackActions,
 }));
 vi.mock("@opencompany/agent/actions/gmail", () => ({
   resolveGmailActions: mocks.resolveGmailActions,
@@ -57,13 +55,18 @@ vi.mock("@opencompany/agent/actions/stripe", () => ({
 vi.mock("@opencompany/agent/actions/revolut", () => ({
   resolveRevolutActions: mocks.resolveRevolutActions,
 }));
+vi.mock("@opencompany/agent/plugin-gateway", () => ({
+  resolvePluginGatewayRegistrations: mocks.resolvePluginGatewayRegistrations,
+}));
+vi.mock("@opencompany/agent/actions/remote-mcp", () => ({
+  resolveRemoteMcpActions: mocks.resolveRemoteMcpActions,
+}));
 
 import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
 import type { ActionProviderCatalog } from "@/lib/actions/types";
 
 function providerCatalog(
   id:
-    | "slack"
     | "gmail"
     | "google_calendar"
     | "google_drive"
@@ -95,6 +98,11 @@ function providerCatalog(
   };
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.resolvePluginGatewayRegistrations.mockResolvedValue([]);
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -112,8 +120,7 @@ describe("isChatActionsKilled", () => {
 
 describe("resolveActionCatalog", () => {
   it("includes only connected providers", async () => {
-    mocks.resolveSlackActions.mockResolvedValue(providerCatalog("slack"));
-    mocks.resolveGmailActions.mockResolvedValue(null);
+    mocks.resolveGmailActions.mockResolvedValue(providerCatalog("gmail"));
     mocks.resolveGoogleCalendarActions.mockResolvedValue(providerCatalog("google_calendar"));
     mocks.resolveGoogleDriveActions.mockResolvedValue(providerCatalog("google_drive"));
     mocks.resolveLinearActions.mockResolvedValue(providerCatalog("linear"));
@@ -130,7 +137,7 @@ describe("resolveActionCatalog", () => {
       workspaceId: "workspace_1",
     });
     expect(catalog.providers.map((provider) => provider.id)).toEqual([
-      "slack",
+      "gmail",
       "google_calendar",
       "google_drive",
       "linear",
@@ -143,7 +150,7 @@ describe("resolveActionCatalog", () => {
       "revolut",
     ]);
     expect(catalog.providers.map((provider) => provider.description)).toEqual([
-      "slack description",
+      "gmail description",
       "google_calendar description",
       "google_drive description",
       "linear description",
@@ -156,7 +163,7 @@ describe("resolveActionCatalog", () => {
       "revolut description",
     ]);
     expect(catalog.actions.map((action) => action.id)).toEqual([
-      "slack.read_something",
+      "gmail.read_something",
       "google_calendar.read_something",
       "google_drive.read_something",
       "linear.read_something",
@@ -174,9 +181,8 @@ describe("resolveActionCatalog", () => {
   });
 
   it("keeps other providers when one resolver throws", async () => {
-    mocks.resolveSlackActions.mockRejectedValue(new Error("boom"));
-    mocks.resolveGmailActions.mockResolvedValue(providerCatalog("gmail"));
-    mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
+    mocks.resolveGmailActions.mockRejectedValue(new Error("boom"));
+    mocks.resolveGoogleCalendarActions.mockResolvedValue(providerCatalog("google_calendar"));
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolvePostHogActions.mockResolvedValue(null);
@@ -191,11 +197,10 @@ describe("resolveActionCatalog", () => {
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
-    expect(catalog.providers.map((provider) => provider.id)).toEqual(["gmail"]);
+    expect(catalog.providers.map((provider) => provider.id)).toEqual(["google_calendar"]);
   });
 
   it("returns an empty catalog when nothing is connected", async () => {
-    mocks.resolveSlackActions.mockResolvedValue(null);
     mocks.resolveGmailActions.mockResolvedValue(null);
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
@@ -215,10 +220,107 @@ describe("resolveActionCatalog", () => {
     expect(catalog).toEqual({ providers: [], actions: [] });
   });
 
+  it("uses the installed Linear plugin catalog exactly once and falls back when absent", async () => {
+    for (const resolver of [
+      mocks.resolveGmailActions,
+      mocks.resolveGoogleCalendarActions,
+      mocks.resolveGoogleDriveActions,
+      mocks.resolvePostHogActions,
+      mocks.resolveLatitudeActions,
+      mocks.resolveNeonActions,
+      mocks.resolveAttioActions,
+      mocks.resolveGitHubActions,
+      mocks.resolveStripeActions,
+      mocks.resolveRevolutActions,
+    ]) {
+      resolver.mockResolvedValue(null);
+    }
+    const pluginAction = {
+      ...providerCatalog("linear").actions[0]!,
+      id: "plugin:linear:linear.list_issues",
+      provider: "plugin:linear:linear" as const,
+    };
+    mocks.resolveLinearActions.mockResolvedValue(providerCatalog("linear"));
+    mocks.resolvePluginGatewayRegistrations.mockResolvedValue([
+      { source: "plugin:linear:linear" },
+    ] as never);
+    mocks.resolveRemoteMcpActions.mockResolvedValue({
+      id: "plugin:linear:linear",
+      label: "Linear",
+      description: "Plugin Linear tools",
+      actions: [pluginAction],
+    });
+
+    const pluginCatalog = await resolveActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(mocks.resolveLinearActions).not.toHaveBeenCalled();
+    expect(pluginCatalog.actions.map((action) => action.id)).toEqual([
+      "plugin:linear:linear.list_issues",
+    ]);
+
+    mocks.resolvePluginGatewayRegistrations.mockResolvedValue([]);
+    const fallbackCatalog = await resolveActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(mocks.resolveLinearActions).toHaveBeenCalledWith("user_1");
+    expect(fallbackCatalog.actions.map((action) => action.id)).toEqual(["linear.read_something"]);
+  });
+
+  it("uses the installed Neon plugin catalog exactly once and falls back when absent", async () => {
+    for (const resolver of [
+      mocks.resolveGmailActions,
+      mocks.resolveGoogleCalendarActions,
+      mocks.resolveGoogleDriveActions,
+      mocks.resolveLinearActions,
+      mocks.resolvePostHogActions,
+      mocks.resolveLatitudeActions,
+      mocks.resolveAttioActions,
+      mocks.resolveGitHubActions,
+      mocks.resolveStripeActions,
+      mocks.resolveRevolutActions,
+    ]) {
+      resolver.mockResolvedValue(null);
+    }
+    const pluginAction = {
+      ...providerCatalog("neon").actions[0]!,
+      id: "plugin:neon:neon.list_projects",
+      provider: "plugin:neon:neon" as const,
+    };
+    mocks.resolveNeonActions.mockResolvedValue(providerCatalog("neon"));
+    mocks.resolvePluginGatewayRegistrations.mockResolvedValue([
+      { source: "plugin:neon:neon" },
+    ] as never);
+    mocks.resolveRemoteMcpActions.mockResolvedValue({
+      id: "plugin:neon:neon",
+      label: "Neon",
+      description: "Plugin Neon tools",
+      actions: [pluginAction],
+    });
+
+    const pluginCatalog = await resolveActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(mocks.resolveNeonActions).not.toHaveBeenCalled();
+    expect(pluginCatalog.actions.map((action) => action.id)).toEqual([
+      "plugin:neon:neon.list_projects",
+    ]);
+
+    mocks.resolvePluginGatewayRegistrations.mockResolvedValue([]);
+    const fallbackCatalog = await resolveActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(mocks.resolveNeonActions).toHaveBeenCalledWith("user_1");
+    expect(fallbackCatalog.actions.map((action) => action.id)).toEqual(["neon.read_something"]);
+  });
+
   it("adds enabled managed sources to the same compact catalog", async () => {
     vi.stubEnv("MONID_API_KEY", "monid_test");
     vi.stubEnv("OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH", "");
-    mocks.resolveSlackActions.mockResolvedValue(null);
     mocks.resolveGmailActions.mockResolvedValue(null);
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
@@ -278,8 +380,7 @@ describe("resolveActionCatalog", () => {
   it("removes managed sources behind the dedicated global kill switch", async () => {
     vi.stubEnv("MONID_API_KEY", "monid_test");
     vi.stubEnv("OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH", "true");
-    mocks.resolveSlackActions.mockResolvedValue(providerCatalog("slack"));
-    mocks.resolveGmailActions.mockResolvedValue(null);
+    mocks.resolveGmailActions.mockResolvedValue(providerCatalog("gmail"));
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
@@ -295,7 +396,7 @@ describe("resolveActionCatalog", () => {
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
     });
-    expect(catalog.providers.map((source) => source.id)).toEqual(["slack"]);
+    expect(catalog.providers.map((source) => source.id)).toEqual(["gmail"]);
     expect(mocks.listWorkspaceCapabilities).not.toHaveBeenCalled();
   });
 });

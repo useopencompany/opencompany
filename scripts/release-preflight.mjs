@@ -65,6 +65,7 @@ const groups = {
     required: [
       "API_DATABASE_URL",
       "WORKOS_CLIENT_ID",
+      "WORKOS_MOBILE_CLIENT_ID",
       "WORKOS_API_KEY",
       "WORKOS_COOKIE_PASSWORD",
       "WORKOS_COOKIE_DOMAIN",
@@ -88,14 +89,17 @@ const groups = {
       "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
       "GITHUB_INTEGRATION_STATE_SECRET",
       "GITHUB_INTEGRATION_APP_WEBHOOK_SECRET",
+      "GITHUB_USER_APP_SLUG",
+      "GITHUB_USER_APP_CLIENT_ID",
+      "GITHUB_USER_APP_CLIENT_SECRET",
+      "GITHUB_USER_APP_STATE_SECRET",
       // Google-family OAuth ingress (#1203 4a2).
       "GOOGLE_OAUTH_CLIENT_ID",
       "GOOGLE_OAUTH_CLIENT_SECRET",
       "GOOGLE_INTEGRATION_STATE_SECRET",
-      // Slack ingestion + Linear ingest OAuth/webhook ingress (#1203 4b1).
+      // Official Slack MCP plugin OAuth + Linear ingest OAuth/webhook ingress.
       "OPENCOMPANY_SLACK_CLIENT_ID",
       "OPENCOMPANY_SLACK_CLIENT_SECRET",
-      "OPENCOMPANY_SLACK_SIGNING_SECRET",
       "OPENCOMPANY_SLACK_STATE_SECRET",
       "OPENCOMPANY_LINEAR_CLIENT_ID",
       "OPENCOMPANY_LINEAR_CLIENT_SECRET",
@@ -213,6 +217,8 @@ const groups = {
       "BLOB_READ_WRITE_TOKEN",
       "GITHUB_INTEGRATION_APP_ID",
       "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
+      "GITHUB_USER_APP_CLIENT_ID",
+      "GITHUB_USER_APP_CLIENT_SECRET",
       "GOOGLE_OAUTH_CLIENT_ID",
       "GOOGLE_OAUTH_CLIENT_SECRET",
       "OPENCOMPANY_X_CLIENT_ID",
@@ -222,6 +228,7 @@ const groups = {
       "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
       "REDIS_URL",
       "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
+      "RUNNER_SANDBOX_NAMESPACE",
     ],
     optional: [
       "EXA_API_KEY",
@@ -457,6 +464,12 @@ const githubIntegrationStateSecret = process.env.GITHUB_INTEGRATION_STATE_SECRET
 if (!isUnset(githubIntegrationStateSecret) && githubIntegrationStateSecret.length < 32) {
   failed = true;
   console.log("\nGITHUB_INTEGRATION_STATE_SECRET must be at least 32 characters.");
+}
+
+const githubUserAppStateSecret = process.env.GITHUB_USER_APP_STATE_SECRET;
+if (!isUnset(githubUserAppStateSecret) && githubUserAppStateSecret.length < 32) {
+  failed = true;
+  console.log("\nGITHUB_USER_APP_STATE_SECRET must be at least 32 characters.");
 }
 
 const webRedirectUri = process.env.OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI;

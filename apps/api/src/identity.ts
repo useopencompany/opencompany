@@ -129,17 +129,20 @@ export function createIdentityService(input: {
       workos,
       db,
     });
+    const isOrganizationlessBearer =
+      identity.credentialKind !== "browser_cookie" && !identity.organizationId;
     const first = workspaces[0];
-    const active = first
-      ? (workspaces.find(
-          (entry) =>
-            identity.organizationId &&
-            entry.workspace.workosOrganizationId === identity.organizationId,
-        ) ??
-        workspaces.find((entry) => entry.workspace.id === identity.activeWorkspaceId) ??
-        first)
-      : null;
-    const brains = active
+    const active =
+      !isOrganizationlessBearer && first
+        ? (workspaces.find(
+            (entry) =>
+              identity.organizationId &&
+              entry.workspace.workosOrganizationId === identity.organizationId,
+          ) ??
+          workspaces.find((entry) => entry.workspace.id === identity.activeWorkspaceId) ??
+          first)
+        : null;
+    const brains = active?.workspace.legacyBrainEnabled
       ? await listAccessibleBrains(
           { userWorkosId: identity.userId, workspaceId: active.workspace.id },
           { db },
@@ -163,7 +166,7 @@ export function createIdentityService(input: {
         autoModelRoutingEnabled: user.autoModelRoutingEnabled,
         chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
         imessageEnabled: user.imessageEnabled,
-        wikiEnabled: user.wikiEnabled,
+        wikiEnabled: true as const,
         taskViewMode: user.taskViewMode,
         preferredMcpClient: user.preferredMcpClient,
         mcpSetupCompletedAt: user.mcpSetupCompletedAt?.toISOString() ?? null,
@@ -176,6 +179,7 @@ export function createIdentityService(input: {
         name: entry.workspace.name,
         slug: entry.workspace.slug,
         role: entry.role,
+        legacyBrainEnabled: entry.workspace.legacyBrainEnabled,
       })),
       activeWorkspaceId: active?.workspace.id ?? null,
       brains: brains.map((brain) => ({

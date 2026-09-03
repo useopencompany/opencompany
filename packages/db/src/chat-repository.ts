@@ -1,8 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  ACTION_HOST_TOOL_CONTRACT_VERSION,
-  CHAT_HOST_TOOL_CONTRACT_VERSION,
-} from "@opencompany/agent-runtime";
+import { hostToolContractVersionForEngine } from "@opencompany/agent-runtime";
 import {
   type Actor,
   type ChatAttachmentFormat,
@@ -26,6 +23,7 @@ import {
   type RunStatus,
 } from "@opencompany/core";
 import { type SQL, sql } from "drizzle-orm";
+import { stringifyPostgresJson } from "./postgres-json";
 import type { ChatMessageAttachment } from "./product-schema";
 import { type ResolvedWorkspaceSkill, resolveSkillCandidates } from "./skill-catalog";
 
@@ -198,6 +196,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.active_run_id AS "activeRunId",
         conversation.runtime_has_error AS "runtimeHasError",
         conversation.runtime_updated_at AS "runtimeUpdatedAt",
+        conversation.message_shape_epoch AS "messageShapeEpoch",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
         conversation.pinned_at AS "pinnedAt",
@@ -248,6 +247,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.active_run_id AS "activeRunId",
         conversation.runtime_has_error AS "runtimeHasError",
         conversation.runtime_updated_at AS "runtimeUpdatedAt",
+        conversation.message_shape_epoch AS "messageShapeEpoch",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
         conversation.pinned_at AS "pinnedAt",
@@ -598,9 +598,9 @@ export class PostgresChatRepository implements ChatRepository {
     const now = this.options.now?.() ?? new Date();
     const attachmentIds = input.command.attachmentIds ?? [];
     const resolvedAttachments = await this.resolveAttachments(input.actor, attachmentIds);
-    const attachmentsJson = JSON.stringify(resolvedAttachments.attachments);
+    const attachmentsJson = stringifyPostgresJson(resolvedAttachments.attachments);
     const attachmentTextsJson = serializeAttachmentTexts(resolvedAttachments.attachmentTexts);
-    const settingsJson = JSON.stringify({
+    const settingsJson = stringifyPostgresJson({
       ...(input.command.settings ?? {}),
       ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
     });
@@ -610,7 +610,7 @@ export class PostgresChatRepository implements ChatRepository {
         mention.kind === "skill" ? [mention.id] : [],
       ) ?? [],
     );
-    const resolvedMentionSkillsJson = JSON.stringify(
+    const resolvedMentionSkillsJson = stringifyPostgresJson(
       resolvedMentionSkills.map((skill) => ({
         bundle_id: skill.bundleId,
         source_kind: skill.sourceKind,
@@ -907,14 +907,7 @@ export class PostgresChatRepository implements ChatRepository {
         SELECT
           ${runtimeId}, target_chat.owner_user_workos_id, target_chat.id, ${input.command.engine},
           ${runtimeModel}, ${input.actor.workspaceId},
-          CASE WHEN target_chat.task_id IS NULL
-            THEN ${
-              input.command.engine === "opencompany"
-                ? CHAT_HOST_TOOL_CONTRACT_VERSION
-                : ACTION_HOST_TOOL_CONTRACT_VERSION
-            }
-            ELSE NULL
-          END,
+          ${hostToolContractVersionForEngine(input.command.engine)},
           ${runId}, 'queued', ${now}, ${now}
         FROM target_chat
         ON CONFLICT (chat_session_id) DO UPDATE
@@ -1038,7 +1031,7 @@ export class PostgresChatRepository implements ChatRepository {
         SELECT
           reservation.assistant_message_id, target_chat.id, 'assistant', '',
           target_chat.task_id,
-          ${JSON.stringify(assistantDebugTrace)}::jsonb,
+          ${stringifyPostgresJson(assistantDebugTrace)}::jsonb,
           ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true
@@ -1397,6 +1390,7 @@ export class PostgresChatRepository implements ChatRepository {
     }
     const now = this.options.now?.() ?? new Date();
     const eventId = (this.options.ids ?? defaultIds).event();
+    const liveEventId = (this.options.ids ?? defaultIds).event();
     const response = { resolution: input.command.resolution, answer: input.command.answer };
     const approvalResponse = {
       id: input.command.approvalId,
@@ -1451,12 +1445,34 @@ export class PostgresChatRepository implements ChatRepository {
         UPDATE goat.run_approvals AS approval
         SET status = ${input.command.resolution === "canceled" ? "canceled" : "resolved"},
             resolution = ${input.command.resolution},
-            response = ${JSON.stringify(response)}::jsonb,
+            response = ${stringifyPostgresJson(response)}::jsonb,
             resolved_at = ${now},
             updated_at = ${now}
         WHERE approval.id IN (SELECT id FROM authorized)
           AND approval.status = 'pending'
-        RETURNING approval.id, approval.run_id, approval.tool_call_id
+        RETURNING approval.id, approval.run_id, approval.tool_call_id, approval.kind
+      ),
+      resolved_action_approval AS MATERIALIZED (
+        UPDATE goat.action_turns AS action_turn
+        SET approval_records = jsonb_set(
+              action_turn.approval_records,
+              ARRAY[changed.tool_call_id]::text[],
+              (action_turn.approval_records -> changed.tool_call_id) || jsonb_build_object(
+                'status', CASE
+                  WHEN ${input.command.resolution === "approved"}::boolean
+                    THEN 'approved'::text
+                  ELSE 'denied'::text
+                END,
+                'resolvedAt', ${now.toISOString()}::text
+              )
+            ),
+            updated_at = ${now}
+        FROM changed
+        WHERE changed.tool_call_id IS NOT NULL
+          AND action_turn.turn_id = changed.run_id
+          AND action_turn.approval_records ? changed.tool_call_id
+          AND action_turn.approval_records -> changed.tool_call_id ->> 'status' = 'pending'
+        RETURNING action_turn.id
       ),
       transitioned_capability AS MATERIALIZED (
         UPDATE goat.capability_runs AS capability
@@ -1504,7 +1520,7 @@ export class PostgresChatRepository implements ChatRepository {
                         AND part.value -> 'approval' ->> 'id' = ${input.command.approvalId}
                       THEN part.value || jsonb_build_object(
                         'state', 'approval-responded',
-                        'approval', ${JSON.stringify(approvalResponse)}::jsonb
+                        'approval', ${stringifyPostgresJson(approvalResponse)}::jsonb
                       )
                       ELSE part.value
                     END
@@ -1555,6 +1571,16 @@ export class PostgresChatRepository implements ChatRepository {
           AND EXISTS (SELECT 1 FROM rewritten_assistant)
         RETURNING run.id, run.event_sequence, run.status, run.codex_chat_session_id
       ),
+      advanced_live_run AS MATERIALIZED (
+        UPDATE goat.codex_chat_turns AS run
+        SET event_sequence = run.event_sequence + 1,
+            updated_at = ${now}
+        FROM changed
+        WHERE run.id = changed.run_id
+          AND run.status = 'running'
+          AND changed.kind = 'use_action'
+        RETURNING run.id, run.event_sequence, changed.tool_call_id
+      ),
       queued_runtime AS MATERIALIZED (
         UPDATE goat.codex_chat_sessions AS runtime
         SET status = 'queued',
@@ -1572,7 +1598,7 @@ export class PostgresChatRepository implements ChatRepository {
         )
         SELECT
           ${eventId}, advanced_run.id, advanced_run.event_sequence, 1, 'approval.resolved',
-          ${JSON.stringify({
+          ${stringifyPostgresJson({
             approvalId: input.command.approvalId,
             resolution: input.command.resolution,
           })}::jsonb,
@@ -1580,19 +1606,39 @@ export class PostgresChatRepository implements ChatRepository {
         FROM advanced_run
         RETURNING id, run_id, sequence
       ),
+      inserted_live_event AS (
+        INSERT INTO goat.run_events (
+          id, run_id, sequence, schema_version, type, payload, created_at
+        )
+        SELECT
+          ${liveEventId}, advanced.id, advanced.event_sequence, 1, 'approval.resolved',
+          jsonb_build_object(
+            'approvalId', ${input.command.approvalId}::text,
+            'toolCallId', advanced.tool_call_id,
+            'resolution', ${input.command.resolution}::text
+          ),
+          ${now}
+        FROM advanced_live_run AS advanced
+        RETURNING id, run_id, sequence
+      ),
       notified AS MATERIALIZED (
         SELECT pg_notify(
           ${RUN_EVENT_NOTIFY_CHANNEL},
           jsonb_build_object('runId', run_id, 'sequence', sequence)::text
         )
-        FROM inserted_event
+        FROM (
+          SELECT run_id, sequence FROM inserted_event
+          UNION ALL
+          SELECT run_id, sequence FROM inserted_live_event
+        ) AS event
       )
       SELECT
         approval.run_id AS "runId",
         approval.response,
         NOT EXISTS (SELECT 1 FROM changed) AS replayed,
         (SELECT count(*) FROM notified) AS "notifyCount",
-        (SELECT count(*) FROM transitioned_capability) AS "capabilityTransitionCount"
+        (SELECT count(*) FROM transitioned_capability) AS "capabilityTransitionCount",
+        (SELECT count(*) FROM resolved_action_approval) AS "actionApprovalTransitionCount"
       FROM goat.run_approvals AS approval
       JOIN authorized ON authorized.id = approval.id
     `);
@@ -1676,7 +1722,7 @@ export class PostgresChatRepository implements ChatRepository {
       WITH resolved_interaction AS MATERIALIZED (
         UPDATE goat.codex_chat_interactions AS interaction
         SET status = 'resolved',
-            response = ${JSON.stringify(interactionResponse)}::jsonb,
+            response = ${stringifyPostgresJson(interactionResponse)}::jsonb,
             resolved_at = ${now},
             updated_at = ${now}
         WHERE interaction.id = ${input.approvalId}
@@ -1693,7 +1739,7 @@ export class PostgresChatRepository implements ChatRepository {
       UPDATE goat.run_approvals AS approval
       SET status = 'resolved',
           resolution = 'answered',
-          response = ${JSON.stringify(approvalResponse)}::jsonb,
+          response = ${stringifyPostgresJson(approvalResponse)}::jsonb,
           resolved_at = ${now},
           updated_at = ${now}
       WHERE approval.id IN (SELECT id FROM resolved_interaction)
@@ -1881,7 +1927,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
   async appendEvents(input: Parameters<RunExecutionRepository["appendEvents"]>[0]) {
     if (input.events.length === 0) return [];
     const createdAt = this.now();
-    const eventJson = JSON.stringify(input.events);
+    const eventJson = stringifyPostgresJson(input.events);
     const rows = await this.rows<RunEventRow>(sql`
       WITH input_events AS MATERIALIZED (
         SELECT
@@ -1991,7 +2037,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           item.value ->> 'prompt' AS prompt,
           item.value -> 'options' AS options,
           item.ordinality
-        FROM jsonb_array_elements(${JSON.stringify(input.approvals)}::jsonb)
+        FROM jsonb_array_elements(${stringifyPostgresJson(input.approvals)}::jsonb)
           WITH ORDINALITY AS item(value, ordinality)
       ),
       inserted_approvals AS MATERIALIZED (
@@ -2044,7 +2090,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           item.value ->> 'type' AS type,
           item.value -> 'payload' AS payload,
           item.ordinality
-        FROM jsonb_array_elements(${JSON.stringify(eventDrafts)}::jsonb)
+        FROM jsonb_array_elements(${stringifyPostgresJson(eventDrafts)}::jsonb)
           WITH ORDINALITY AS item(value, ordinality)
       ),
       inserted_events AS MATERIALIZED (
@@ -2126,6 +2172,7 @@ type ConversationRow = {
   activeRunId: string | null;
   runtimeHasError: boolean | null;
   runtimeUpdatedAt: Date | string | null;
+  messageShapeEpoch: number | string;
   activityState: Conversation["activityState"];
   hasUnseen: boolean;
   pinnedAt: Date | string | null;
@@ -2372,6 +2419,7 @@ function mapConversation(row: ConversationRow): Conversation {
     title: row.title,
     engine: row.engine,
     model: row.model,
+    messageShapeEpoch: Number(row.messageShapeEpoch),
     runtime:
       row.runtimeStatus !== null && row.runtimeHasError !== null && row.runtimeUpdatedAt !== null
         ? {
@@ -2452,7 +2500,7 @@ function serializeAttachmentTexts(
   attachmentTexts: ResolvedChatAttachments["attachmentTexts"],
 ): string | null {
   return attachmentTexts && Object.keys(attachmentTexts).length > 0
-    ? JSON.stringify(attachmentTexts)
+    ? stringifyPostgresJson(attachmentTexts)
     : null;
 }
 

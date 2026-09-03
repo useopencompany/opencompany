@@ -38,7 +38,9 @@ const migrationPaths = [
   "0227_goat_chat_skill_bundle_snapshots.sql",
   "0228_goat_plugins.sql",
   "0229_goat_chat_skill_bundle_names.sql",
-  "0233_goat_task_activities.sql",
+  "0235_goat_chat_message_shape_epochs.sql",
+  "0236_goat_chat_message_presentation_summaries.sql",
+  "0243_goat_task_activities.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -140,6 +142,143 @@ describe("Postgres Chat repositories", () => {
   it("keeps pre-existing durable rows while adding the canonical event cursor", () => {
     expect(legacySurvivedMigration).toBe(true);
     expect(legacyRuntimeSurvivedMigration).toBe(true);
+  });
+
+  it("accounts projected Message bytes and rotates the shape epoch only after a Run settles", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "message-shape-epoch",
+      content: "Grow the durable transcript.",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', updated_at = '2026-08-10T20:01:00Z'
+       WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.conversation_read_model_v1
+       SET message_shape_bytes_since_epoch = 16 * 1024 * 1024 - 1
+       WHERE id = $1`,
+      [created.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.chat_messages
+       SET content = $2, updated_at = '2026-08-10T20:02:00Z'
+       WHERE id = $1`,
+      [created.assistantMessageId, "x".repeat(1_024)],
+    );
+
+    await expect(
+      database.query<{ message_shape_epoch: number; message_shape_bytes_since_epoch: number }>(
+        `SELECT message_shape_epoch, message_shape_bytes_since_epoch
+         FROM goat.conversation_read_model_v1
+         WHERE id = $1`,
+        [created.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          message_shape_epoch: 0,
+          message_shape_bytes_since_epoch: expect.any(Number),
+        },
+      ],
+    });
+
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'completed', completed_at = '2026-08-10T20:03:00Z',
+           updated_at = '2026-08-10T20:03:00Z'
+       WHERE id = $1`,
+      [created.runId],
+    );
+    expect(
+      (
+        await database.query<{
+          message_shape_epoch: number;
+          message_shape_bytes_since_epoch: number;
+        }>(
+          `SELECT message_shape_epoch, message_shape_bytes_since_epoch
+           FROM goat.conversation_read_model_v1
+           WHERE id = $1`,
+          [created.conversationId],
+        )
+      ).rows,
+    ).toEqual([{ message_shape_epoch: 1, message_shape_bytes_since_epoch: 0 }]);
+  });
+
+  it("projects bounded presentation summaries while retaining full lazy-load detail", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "presentation-summary",
+      content: "Measure the historical trace.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    const longReasoning = "reasoning ".repeat(800);
+    const longToolOutput = "provider detail ".repeat(400);
+    const toolParts = Array.from({ length: 200 }, (_, index) => ({
+      type: "dynamic-tool",
+      toolName: "history_search",
+      toolCallId: `tool_${index + 1}`,
+      state: "output-available",
+      input: { query: `launch-${index + 1}` },
+      output: { detail: longToolOutput },
+    }));
+    await database.query(
+      `UPDATE goat.chat_messages
+       SET content = 'Trace complete', debug_trace = $2::jsonb,
+           updated_at = '2026-08-10T20:02:00Z'
+       WHERE id = $1`,
+      [
+        created.assistantMessageId,
+        JSON.stringify({
+          schemaVersion: "goat.codex_chat.debug.v1",
+          model: "provider/model",
+          uiMessageParts: [
+            { type: "reasoning", text: longReasoning, state: "done" },
+            ...toolParts,
+            { type: "text", text: "Trace complete" },
+          ],
+        }),
+      ],
+    );
+
+    const projection = await database.query<{
+      presentation: { uiMessageParts: Array<Record<string, unknown>> };
+      presentation_summary: { uiMessageParts: Array<Record<string, unknown>> };
+      presentation_bytes: number;
+      summary_bytes: number;
+    }>(
+      `SELECT presentation, presentation_summary,
+              octet_length(presentation::text)::int AS presentation_bytes,
+              octet_length(presentation_summary::text)::int AS summary_bytes
+       FROM goat.message_read_model_v1
+       WHERE id = $1`,
+      [created.assistantMessageId],
+    );
+    const row = projection.rows[0]!;
+    const summaryReasoning = row.presentation_summary.uiMessageParts[0]!;
+    const summaryTool = row.presentation_summary.uiMessageParts[1]!;
+    const fullTool = row.presentation.uiMessageParts[1]!;
+
+    expect(String(summaryReasoning.text)).toHaveLength(160);
+    expect(String(summaryReasoning.text)).toMatch(/\.\.\.$/u);
+    expect(summaryReasoning.presentationSummary).toBe(true);
+    expect(summaryTool).toMatchObject({
+      type: "dynamic-tool",
+      toolName: "history_search",
+      toolCallId: "tool_1",
+      state: "output-available",
+      presentationSummary: true,
+      input: { query: "launch-1" },
+    });
+    expect(String((summaryTool.output as { detail: string }).detail)).toHaveLength(160);
+    expect(String((fullTool.output as { detail: string }).detail).length).toBeGreaterThan(5_000);
+    expect(
+      row.presentation_summary.uiMessageParts.filter((part) => part.type === "dynamic-tool"),
+    ).toHaveLength(200);
+    expect(row.summary_bytes * 10).toBeLessThan(row.presentation_bytes);
   });
 
   it.each(["opencompany", "codex", "claude_code"] as const)(
@@ -826,6 +965,103 @@ describe("Postgres Chat repositories", () => {
     ]);
   });
 
+  it("resolves a gateway approval without pausing its running engine turn", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "live-gateway-approval",
+      content: "Send the customer update",
+      engine: "codex",
+      model: "provider/model",
+    });
+    await database.query(`UPDATE goat.codex_chat_turns SET status = 'running' WHERE id = $1`, [
+      created.runId,
+    ]);
+    await database.query(
+      `INSERT INTO goat.run_approvals (id, run_id, tool_call_id, kind, prompt, options)
+       VALUES (
+         'gateway_approval_1', $1, 'gateway_tool_call_1', 'use_action',
+         'Approve gmail.send?', '["approved","denied"]'
+       )`,
+      [created.runId],
+    );
+    await database.query(
+      `INSERT INTO goat.action_turns (
+         id, session_id, turn_id, user_workos_id, workspace_id, policy,
+         approval_records, expires_at
+       ) VALUES (
+         'action_turn_1', $1, $2, 'user_1', 'workspace_1', 'foregroundInteractive',
+         jsonb_build_object(
+           'gateway_tool_call_1',
+           jsonb_build_object(
+             'actionId', 'gmail.send',
+             'sourceId', 'gmail',
+             'capabilityId', 'write',
+             'inputHash', repeat('a', 64),
+             'status', 'pending',
+             'requestedAt', '2026-08-10T19:59:00.000Z'
+           )
+         ),
+         '2026-08-11T02:00:00Z'
+       )`,
+      [created.conversationId, created.runId],
+    );
+
+    const command = {
+      runId: created.runId,
+      approvalId: "gateway_approval_1",
+      resolution: "approved" as const,
+    };
+    await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
+      resolution: "approved",
+      idempotentReplay: false,
+    });
+    await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
+      idempotentReplay: true,
+    });
+
+    expect(
+      await database.query<{
+        status: string;
+        approval_status: string;
+        resolved_at: string;
+      }>(
+        `SELECT run.status,
+                action.approval_records -> 'gateway_tool_call_1' ->> 'status' AS approval_status,
+                action.approval_records -> 'gateway_tool_call_1' ->> 'resolvedAt' AS resolved_at
+         FROM goat.codex_chat_turns AS run
+         JOIN goat.action_turns AS action ON action.turn_id = run.id
+         WHERE run.id = $1`,
+        [created.runId],
+      ),
+    ).toMatchObject({
+      rows: [
+        {
+          status: "running",
+          approval_status: "approved",
+          resolved_at: "2026-08-10T20:00:00.000Z",
+        },
+      ],
+    });
+    expect(
+      await database.query<{ type: string; payload: Record<string, unknown> }>(
+        `SELECT type, payload
+         FROM goat.run_events
+         WHERE run_id = $1 AND type = 'approval.resolved'`,
+        [created.runId],
+      ),
+    ).toMatchObject({
+      rows: [
+        {
+          type: "approval.resolved",
+          payload: {
+            approvalId: "gateway_approval_1",
+            toolCallId: "gateway_tool_call_1",
+            resolution: "approved",
+          },
+        },
+      ],
+    });
+  });
+
   it("fences Attempts and allocates semantic event cursors monotonically per Run", async () => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "send-worker",
@@ -870,11 +1106,16 @@ describe("Postgres Chat repositories", () => {
         {
           id: "event_content",
           type: "message.content_updated",
-          payload: { messageId: "assistant_1", content: "Done", complete: true },
+          payload: {
+            messageId: "assistant_1",
+            content: "Done\ud800\0",
+            complete: true,
+          },
         },
       ],
     });
     expect(events.map((event) => event.sequence)).toEqual([2, 3]);
+    expect(events[1]?.payload).toMatchObject({ content: "Done��" });
     await expect(
       execution.appendEvents({
         worker: { workerId: "other_worker" },
@@ -1433,7 +1674,7 @@ describe("Postgres Chat repositories", () => {
         {
           status: "running",
           session_id: "task_conversation_1",
-          host_tool_contract_version: "goat.action.v1",
+          host_tool_contract_version: CHAT_HOST_TOOL_CONTRACT_VERSION,
           run_owner: "user_1",
         },
       ],
@@ -1773,7 +2014,7 @@ async function seedTerminalTask(database: PGlite) {
       host_tool_contract_version, status
     ) VALUES (
       'task_runtime_1', 'user_1', 'task_conversation_1', 'opencompany', 'provider/model',
-      'workspace_1', 'goat.action.v1', 'idle'
+      'workspace_1', NULL, 'idle'
     );
     INSERT INTO goat.codex_chat_turns (
       id, user_workos_id, codex_chat_session_id, chat_session_id,
@@ -1861,6 +2102,18 @@ const BASE_SCHEMA = `
     status text NOT NULL,
     approval_expires_at timestamptz,
     approved_at timestamptz,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE goat.action_turns (
+    id text PRIMARY KEY,
+    session_id text NOT NULL,
+    turn_id text NOT NULL,
+    user_workos_id text NOT NULL,
+    workspace_id text NOT NULL,
+    policy text NOT NULL,
+    approval_records jsonb NOT NULL DEFAULT '{}',
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   );
   CREATE TABLE goat.tasks (

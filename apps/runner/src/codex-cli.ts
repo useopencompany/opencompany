@@ -1,4 +1,6 @@
 import { shellQuote } from "@opencompany/agent-runtime";
+import type { AcpMcpServer } from "./acp-harness";
+import { ACP_TOOLS_MCP_SERVER_NAME } from "./acp-tools-client";
 import {
   CODEX_ACP_ADAPTER_PACKAGE,
   CODEX_ACP_ADAPTER_VERSION_OUTPUT,
@@ -10,6 +12,7 @@ import type { SandboxHandle } from "./sandbox";
 const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
 const CODEX_ACP_PREFIX = '"$HOME/.codex-acp"';
 const CODEX_ACP_BIN_PATH = '"$HOME/.codex-acp/bin"';
+const CODEX_VERSION_CHECK_TIMEOUT_MS = 60_000;
 export const CODEX_FALLBACK_NPM_PACKAGE = CODEX_CLI_PACKAGE;
 const CODEX_PROVIDER_ID = "opencompany";
 const CODEX_PROVIDER_NAME = "opencompany";
@@ -32,7 +35,7 @@ export type CodexCliAuth =
 export async function ensureCodexInstalled(sandbox: SandboxHandle) {
   const check = await sandbox.commands.run(
     `export PATH=${CODEX_BIN_PATH}:"$PATH" && codex --version 2>/dev/null || true`,
-    { timeoutMs: 30_000 },
+    { timeoutMs: CODEX_VERSION_CHECK_TIMEOUT_MS },
   );
   if (String(check.stdout ?? "").trim() === CODEX_CLI_VERSION_OUTPUT) return;
   await sandbox.commands.run(
@@ -52,7 +55,7 @@ export async function ensureCodexAcpAdapterInstalled(sandbox: SandboxHandle) {
       "codex-acp --version 2>/dev/null || true",
       "codex --version 2>/dev/null || true",
     ].join(" && "),
-    { timeoutMs: 30_000 },
+    { timeoutMs: CODEX_VERSION_CHECK_TIMEOUT_MS },
   );
   const output = String(check.stdout ?? "");
   if (
@@ -98,8 +101,13 @@ export function buildCodexAcpCommandEnv(input: {
   auth: CodexCliAuth;
   codexHome: string;
   githubEnv?: Record<string, string>;
+  mcpServers: AcpMcpServer[];
+  toolTimeoutMs: number;
 }) {
-  const config = buildCodexJsonConfigForAuth(input.auth);
+  const config = buildCodexJsonConfigForAuth(input.auth, {
+    mcpServers: input.mcpServers,
+    toolTimeoutMs: input.toolTimeoutMs,
+  });
   return {
     ...(input.githubEnv ?? {}),
     CODEX_HOME: input.codexHome,
@@ -158,11 +166,15 @@ export function buildCodexConfigForAuth(auth: CodexCliAuth) {
   });
 }
 
-export function buildCodexJsonConfigForAuth(auth: CodexCliAuth): Record<string, unknown> {
+export function buildCodexJsonConfigForAuth(
+  auth: CodexCliAuth,
+  mcp?: { mcpServers: AcpMcpServer[]; toolTimeoutMs: number },
+): Record<string, unknown> {
   const common = {
     model_verbosity: "medium",
     features: { goals: true },
     sandbox_workspace_write: { network_access: true },
+    ...(mcp ? codexAcpToolsConfig(mcp) : {}),
   };
   if (auth.kind === "chatgpt") {
     return {
@@ -180,6 +192,25 @@ export function buildCodexJsonConfigForAuth(auth: CodexCliAuth): Record<string, 
         base_url: auth.baseUrl,
         env_key: auth.apiKeyEnvVar,
         wire_api: "responses",
+      },
+    },
+  };
+}
+
+function codexAcpToolsConfig(input: {
+  mcpServers: AcpMcpServer[];
+  toolTimeoutMs: number;
+}): Record<string, unknown> {
+  const server = input.mcpServers.find((candidate) => candidate.name === ACP_TOOLS_MCP_SERVER_NAME);
+  if (!server || !("type" in server) || server.type !== "http") return {};
+  // codex-acp deduplicates ACP-provided servers against CODEX_CONFIG. Preconfigure this one so the
+  // resulting mcp_servers entry carries Codex's per-tool timeout, which ACP itself cannot express.
+  return {
+    mcp_servers: {
+      [ACP_TOOLS_MCP_SERVER_NAME]: {
+        url: server.url,
+        http_headers: Object.fromEntries(server.headers.map(({ name, value }) => [name, value])),
+        tool_timeout_sec: Math.max(1, Math.ceil(input.toolTimeoutMs / 1_000)),
       },
     },
   };
