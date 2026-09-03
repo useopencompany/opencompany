@@ -60,6 +60,7 @@ export function SharedChatView({ chat }: { chat: PublicChatView }) {
               taskLookup={taskLookup}
               readOnly
               isTaskSession={chat.kind === "task"}
+              compactTrace={isCloudCodingEngine(chat.engine)}
               attachmentSrc={attachmentSrc}
               artifactHref={artifactHref}
             />

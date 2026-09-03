@@ -1,6 +1,7 @@
 "use client";
 
 import type { PublishedChatArtifact } from "@opencompany/agent-runtime";
+import { ChevronRight } from "lucide-react";
 import { type ReactNode, useCallback, useState } from "react";
 import type { ChatUiAttachment, ChatUiMessage } from "@/lib/chat-ui";
 import { loadHeadlessChatMessagePresentation } from "@/lib/headless-chat-presentations";
@@ -35,6 +36,7 @@ export function MessageBubble({
   allowActionApproval = false,
   readOnly = false,
   isTaskSession = false,
+  compactTrace = false,
   attachmentSrc,
   artifactHref,
 }: {
@@ -48,6 +50,7 @@ export function MessageBubble({
   allowActionApproval?: boolean;
   readOnly?: boolean;
   isTaskSession?: boolean;
+  compactTrace?: boolean;
   attachmentSrc?: (messageId: string, attachment: ChatUiAttachment) => string | undefined;
   artifactHref?: (artifact: PublishedChatArtifact) => string;
 }) {
@@ -66,6 +69,7 @@ export function MessageBubble({
       allowActionApproval={allowActionApproval}
       readOnly={readOnly}
       isTaskSession={isTaskSession}
+      compactTrace={compactTrace}
       {...(artifactHref ? { artifactHref } : {})}
     />
   );
@@ -82,6 +86,7 @@ function AssistantTurn({
   allowActionApproval,
   readOnly,
   isTaskSession,
+  compactTrace,
   artifactHref,
 }: {
   message: ChatUiMessage;
@@ -94,8 +99,10 @@ function AssistantTurn({
   allowActionApproval: boolean;
   readOnly: boolean;
   isTaskSession: boolean;
+  compactTrace: boolean;
   artifactHref?: (artifact: PublishedChatArtifact) => string;
 }) {
+  const [traceExpanded, setTraceExpanded] = useState(false);
   const presentationKey =
     message.metadata?.presentation?.source === "summary"
       ? `${message.id}:${message.metadata.presentation.updatedAt}`
@@ -150,6 +157,7 @@ function AssistantTurn({
     stopped: stopped || resolvedMessage.metadata?.aborted === true,
     includeMetadataTaskCard: !isTaskSession,
   });
+  const compactedTrace = compactTrace ? compactAssistantTrace(items) : null;
   // `nested` is set when rendering a subagent's own trace: its steps are historical, so they render
   // as plain read-only rows (no plan-implement / approval affordances).
   const renderItem = (item: AssistantRenderItem, nested: boolean): ReactNode => {
@@ -209,9 +217,109 @@ function AssistantTurn({
 
   return (
     <div className="flex flex-col gap-2">
-      {items.map((item) => renderItem(item, false))}
+      {compactedTrace ? (
+        <>
+          <div className="-ml-1 max-w-[92%] text-[11.5px] leading-5 text-ink-muted">
+            <button
+              type="button"
+              aria-expanded={traceExpanded}
+              onClick={() => setTraceExpanded((expanded) => !expanded)}
+              className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            >
+              <ChevronRight
+                size={11}
+                strokeWidth={1.9}
+                className={`shrink-0 text-ink-subtle transition-transform ${traceExpanded ? "rotate-90" : ""}`}
+              />
+              <span className="font-medium text-ink/65">
+                {assistantTraceSummary(compactedTrace)}
+              </span>
+            </button>
+            {traceExpanded ? (
+              <div className="ml-2 mt-1 flex flex-col gap-2 border-l border-border pl-3">
+                {compactedTrace.hiddenItems.map((item) => renderItem(item, false))}
+              </div>
+            ) : null}
+          </div>
+          {compactedTrace.visibleItems.map((item) => renderItem(item, false))}
+        </>
+      ) : (
+        items.map((item) => renderItem(item, false))
+      )}
       {error ? <TurnErrorNotice error={error} hasPartialOutput={items.length > 0} /> : null}
       {typeof durationMs === "number" ? <TurnDuration durationMs={durationMs} /> : null}
     </div>
   );
+}
+
+type CompactedAssistantTrace = {
+  hiddenItems: AssistantRenderItem[];
+  visibleItems: AssistantRenderItem[];
+  messageCount: number;
+  toolCallCount: number;
+};
+
+function compactAssistantTrace(items: AssistantRenderItem[]): CompactedAssistantTrace | null {
+  const finalMessageIndex = items.findLastIndex((item) => item.type === "text");
+  if (finalMessageIndex <= 0) return null;
+
+  const hiddenItems = items.slice(0, finalMessageIndex);
+  // Artifact and task cards are user-facing outputs, not implementation trace. Keep the whole turn
+  // expanded rather than moving or hiding those cards. The same applies to an unresolved tool.
+  if (
+    hiddenItems.some(
+      (item) =>
+        item.type === "artifact" ||
+        item.type === "task" ||
+        ((item.type === "tool" || item.type === "subagent") && hasUnresolvedTool(item)),
+    )
+  ) {
+    return null;
+  }
+
+  const counts = countAssistantTraceItems(hiddenItems);
+  if (counts.messageCount === 0 && counts.toolCallCount === 0) return null;
+  return {
+    hiddenItems,
+    visibleItems: items.slice(finalMessageIndex),
+    ...counts,
+  };
+}
+
+function hasUnresolvedTool(
+  item: Extract<AssistantRenderItem, { type: "tool" | "subagent" }>,
+): boolean {
+  if (item.type === "tool") return item.tool.status === "running" || item.tool.status === "waiting";
+  if (item.subagent.tool.status === "running" || item.subagent.tool.status === "waiting")
+    return true;
+  return item.subagent.children.some(
+    (child) => (child.type === "tool" || child.type === "subagent") && hasUnresolvedTool(child),
+  );
+}
+
+function countAssistantTraceItems(items: readonly AssistantRenderItem[]) {
+  let messageCount = 0;
+  let toolCallCount = 0;
+  for (const item of items) {
+    if (item.type === "text" || item.type === "reasoning") messageCount += 1;
+    if (item.type === "tool") toolCallCount += 1;
+    if (item.type === "subagent") {
+      toolCallCount += 1;
+      const childCounts = countAssistantTraceItems(item.subagent.children);
+      messageCount += childCounts.messageCount;
+      toolCallCount += childCounts.toolCallCount;
+    }
+  }
+  return { messageCount, toolCallCount };
+}
+
+function assistantTraceSummary({ messageCount, toolCallCount }: CompactedAssistantTrace) {
+  const parts: string[] = [];
+  if (toolCallCount > 0) {
+    parts.push(`${toolCallCount} ${toolCallCount === 1 ? "tool call" : "tool calls"}`);
+  }
+  if (messageCount > 0) {
+    parts.push(`${messageCount} ${messageCount === 1 ? "message" : "messages"}`);
+  }
+  return parts.join(", ");
 }

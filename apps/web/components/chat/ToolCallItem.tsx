@@ -77,6 +77,21 @@ export function ToolCallItem({
   readOnly?: boolean;
   detail?: HistoricalPresentationDetailController;
 }) {
+  // Summary-backed messages retain the approval id, action, and bounded params. The latest
+  // authorized approval must use those fields before the historical-detail guard collapses it.
+  if (
+    !readOnly &&
+    tool.name === USE_ACTION_TOOL_NAME &&
+    tool.state === "approval-requested" &&
+    tool.approvalId &&
+    allowActionApproval &&
+    onActionApproval
+  ) {
+    if (managedCapabilityActionFromTool(tool)) {
+      return <CapabilityApprovalCard tool={tool} onDecision={onActionApproval} />;
+    }
+    return <ActionApprovalCard tool={tool} onDecision={onActionApproval} />;
+  }
   if (detail && detail.state !== "loaded") return <ToolCallRow tool={tool} detail={detail} />;
   // Shared transcripts are intentionally observational: repository recovery
   // acts on the signed-in viewer's private GitHub connection, so only an
@@ -117,20 +132,6 @@ export function ToolCallItem({
   }
   if (tool.name === USE_ACTION_TOOL_NAME && capabilityApprovalFromTool(tool)) {
     return <LegacyCapabilityApprovalRow tool={tool} />;
-  }
-  if (
-    tool.name === USE_ACTION_TOOL_NAME &&
-    tool.state === "approval-requested" &&
-    tool.approvalId
-  ) {
-    // A pending approval mid-thread (the user kept chatting past it) stays a
-    // plain row: only the latest assistant message is actionable.
-    if (allowActionApproval && onActionApproval) {
-      if (managedCapabilityActionFromTool(tool)) {
-        return <CapabilityApprovalCard tool={tool} onDecision={onActionApproval} />;
-      }
-      return <ActionApprovalCard tool={tool} onDecision={onActionApproval} />;
-    }
   }
   const target = githubInstallGapCandidate(tool);
   const row = <ToolCallRow tool={tool} {...(detail ? { detail } : {})} />;

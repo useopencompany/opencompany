@@ -5,12 +5,19 @@ export type OfficialMcpPluginName =
   | "linear"
   | "neon"
   | "slack";
+export type OfficialSkillPluginName = "yc-advise";
+export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
 
-export type OfficialMcpPluginMetadata = {
-  name: OfficialMcpPluginName;
+type OfficialPluginMetadataBase = {
+  name: OfficialPluginName;
   label: string;
   description: string;
   source: string;
+};
+
+export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
+  name: OfficialMcpPluginName;
+  kind: "mcp";
   connectionProvider: "betterstack" | "github_user" | "gmail" | "linear" | "neon" | "slack";
   connectHref: string;
   accountLabel?: string;
@@ -19,10 +26,18 @@ export type OfficialMcpPluginMetadata = {
   ingestionLabel?: string;
 };
 
+export type OfficialSkillPluginMetadata = OfficialPluginMetadataBase & {
+  name: OfficialSkillPluginName;
+  kind: "skills";
+};
+
+export type OfficialPluginMetadata = OfficialMcpPluginMetadata | OfficialSkillPluginMetadata;
+
 // The public repository is the reviewed trust boundary. Keep every source pinned to a full commit.
 export const OFFICIAL_MCP_PLUGIN_METADATA = {
   betterstack: {
     name: "betterstack",
+    kind: "mcp",
     label: "Better Stack",
     description:
       "Investigate observability data and manage monitoring, incidents, dashboards, and team access.",
@@ -34,6 +49,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   },
   github: {
     name: "github",
+    kind: "mcp",
     label: "GitHub as you",
     description: "Work with repositories, issues, pull requests, and Actions as yourself.",
     source:
@@ -45,6 +61,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   },
   gmail: {
     name: "gmail",
+    kind: "mcp",
     label: "Gmail",
     description: "Search and read Gmail, create drafts, and organize messages with approval.",
     source:
@@ -57,6 +74,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   },
   linear: {
     name: "linear",
+    kind: "mcp",
     label: "Linear",
     description: "Work with Linear issues, projects, comments, and team workflows.",
     source:
@@ -69,6 +87,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   },
   neon: {
     name: "neon",
+    kind: "mcp",
     label: "Neon",
     description:
       "Inspect Neon projects and database structure, and run permission-gated read-only SQL.",
@@ -80,6 +99,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   },
   slack: {
     name: "slack",
+    kind: "mcp",
     label: "Slack",
     description: "Search Slack and, with approval, read private content or make changes.",
     source:
@@ -90,6 +110,24 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginMetadata>;
 
+export const OFFICIAL_SKILL_PLUGIN_METADATA = {
+  "yc-advise": {
+    name: "yc-advise",
+    kind: "skills",
+    label: "YC Advise",
+    description:
+      "Independent YC-style startup advice and structured founder office hours, based on public principles and not affiliated with Y Combinator.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/2e092c3bc518622f1dc4ac1a6777d87ae3695ec6/yc-advise",
+  },
+} as const satisfies Record<OfficialSkillPluginName, OfficialSkillPluginMetadata>;
+
 export function isOfficialMcpPluginName(value: string): value is OfficialMcpPluginName {
   return value === value.toLocaleLowerCase() && Object.hasOwn(OFFICIAL_MCP_PLUGIN_METADATA, value);
+}
+
+export function isOfficialSkillPluginName(value: string): value is OfficialSkillPluginName {
+  return (
+    value === value.toLocaleLowerCase() && Object.hasOwn(OFFICIAL_SKILL_PLUGIN_METADATA, value)
+  );
 }

@@ -157,6 +157,16 @@ describe("@opencompany/telemetry", () => {
       "budget",
     );
     expect(categorizeFailure(new TypeError("Cannot read properties of undefined"))).toBe("bug");
+    expect(
+      categorizeFailure(
+        new Error("Couldn't read that plugin right now.", {
+          cause: Object.assign(new Error("safe upstream failure"), {
+            upstreamService: "github",
+            failureKind: "rate_limit",
+          }),
+        }),
+      ),
+    ).toBe("integration");
   });
 
   it("no-ops safely when disabled", () => {

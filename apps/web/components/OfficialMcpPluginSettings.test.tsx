@@ -633,6 +633,22 @@ const slackPlugin = {
   ],
 } as const satisfies PluginInstallationDto;
 
+const slackPreview = {
+  ...officialPreview,
+  manifest: slackPlugin.manifest,
+  source: slackPlugin.source,
+  integrity: slackPlugin.integrity,
+  skills: [],
+  remoteMcpServers: slackPlugin.remoteMcpServers.map(
+    ({ name, type, connectionProvider, capabilities }: PluginRemoteMcpServerDto) => ({
+      name,
+      type,
+      connectionProvider,
+      capabilities,
+    }),
+  ),
+} as const satisfies PluginImportPreviewDto;
+
 const gmailPlugin = {
   ...plugin,
   id: "plugin_gmail",
@@ -653,24 +669,9 @@ const gmailPlugin = {
       type: "streamable-http",
       connectionProvider: "gmail",
       capabilities: [
-        {
-          id: "query",
-          label: "Read Gmail",
-          defaultMode: "ask",
-          tools: ["get_message"],
-        },
-        {
-          id: "draft",
-          label: "Create drafts",
-          defaultMode: "ask",
-          tools: ["create_draft"],
-        },
-        {
-          id: "write",
-          label: "Organize Gmail",
-          defaultMode: "ask",
-          tools: ["trash_message"],
-        },
+        { id: "query", label: "Read Gmail", defaultMode: "ask", tools: ["get_message"] },
+        { id: "draft", label: "Create drafts", defaultMode: "ask", tools: ["create_draft"] },
+        { id: "write", label: "Organize Gmail", defaultMode: "ask", tools: ["trash_message"] },
       ],
       tools: [
         {
@@ -878,6 +879,7 @@ describe("Linear plugin settings", () => {
       expectedResolvedCommit: officialPreview.source.resolvedCommit,
       expectedIntegrity: officialPreview.integrity,
     });
+    expect(toasts.success).toHaveBeenCalledWith("Linear installed.");
     expect(router.refresh).toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
@@ -1352,6 +1354,32 @@ describe("Linear plugin settings", () => {
     });
   });
 
+  it("reviews and installs Slack from the pinned package on its detail page", async () => {
+    commands.previewHeadlessPluginImport.mockResolvedValue(slackPreview);
+    commands.importHeadlessPlugin.mockResolvedValue({ plugin: slackPlugin, replayed: false });
+
+    render(<SlackPluginDetail pluginState={{ status: "ready", plugin: null }} canEdit />);
+
+    expect(screen.getByRole("button", { name: "Loading package…" })).toBeDisabled();
+    expect(await screen.findByText("Search public Slack")).toBeInTheDocument();
+    const installButton = screen.getByRole("button", { name: "Install" });
+    expect(installButton).toBeEnabled();
+
+    await userEvent.click(installButton);
+
+    await waitFor(() => expect(commands.importHeadlessPlugin).toHaveBeenCalledTimes(1));
+    expect(commands.previewHeadlessPluginImport).toHaveBeenCalledWith({
+      url: SLACK_PLUGIN_SOURCE,
+    });
+    expect(commands.importHeadlessPlugin).toHaveBeenCalledWith({
+      url: SLACK_PLUGIN_SOURCE,
+      expectedResolvedCommit: slackPreview.source.resolvedCommit,
+      expectedIntegrity: slackPreview.integrity,
+    });
+    expect(toasts.success).toHaveBeenCalledWith("Slack installed.");
+    expect(router.refresh).toHaveBeenCalled();
+  });
+
   it("presents Gmail with every sensitive capability gated on Ask", () => {
     const state = gmailToolsStateFromPlugin(gmailPlugin);
     render(<GmailPluginDetail pluginState={{ status: "ready", plugin: gmailPlugin }} canEdit />);
@@ -1362,9 +1390,6 @@ describe("Linear plugin settings", () => {
       "href",
       "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
     );
-    expect(
-      screen.getByRole("link", { name: "Configure Gmail ingestion in Wiki sources" }),
-    ).toHaveAttribute("href", "/wiki/sources");
     for (const label of ["Read Gmail", "Create drafts", "Organize Gmail"]) {
       expect(
         within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
@@ -1395,7 +1420,6 @@ describe("Linear plugin settings", () => {
     appData.integrations.personalAccounts.gmail = [other, primary];
 
     render(<GmailPluginDetail pluginState={{ status: "ready", plugin: gmailPlugin }} canEdit />);
-
     await userEvent.click(
       within(screen.getByRole("group", { name: "Read Gmail permission" })).getByRole("button", {
         name: "On",
