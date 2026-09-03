@@ -13,6 +13,7 @@ import type {
   ImessageProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
+import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { McpService } from "@opencompany/agent/mcp-http";
 import type { BillingApplicationService } from "@opencompany/billing/application-service";
 import {
@@ -2088,6 +2089,15 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
     },
+    connectRenderAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectRender(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: renderStateDto(state) }, meta }, 200);
+    },
     startImessagePairing: async (c) => {
       const actor = actorFrom(c);
       // Pairing sends a real text message, so it gets its own small bucket
@@ -3373,6 +3383,19 @@ function granolaStateDto(state: GranolaProviderState) {
     accountEmail: state.accountEmail,
     accountName: state.accountName,
     statusReason: state.statusReason,
+  };
+}
+
+function renderStateDto(state: RenderProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountName: state.accountName,
+    statusReason: state.statusReason,
+    capabilityModes: state.capabilityModes,
+    toolModes: state.toolModes,
   };
 }
 

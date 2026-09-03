@@ -95,6 +95,8 @@ function providerName(provider: string | null) {
       return "Neon";
     case "betterstack":
       return "Better Stack";
+    case "render":
+      return "Render";
     case "signoz":
       return "SigNoz";
     case "x_account":
