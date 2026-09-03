@@ -1,0 +1,76 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "signoz",
+  "version": "1.0.0",
+  "description": "Investigate SigNoz logs, metrics, traces, alerts, and dashboards, with permission-gated management tools.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://signoz.io/docs/ai/signoz-mcp-server/",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/signoz",
+  "license": "MIT",
+  "keywords": ["signoz", "observability", "monitoring", "logs", "metrics", "traces"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Read SigNoz documentation",
+        "defaultMode": "on",
+        "tools": ["signoz_fetch_doc", "signoz_search_docs"]
+      },
+      "query": {
+        "label": "Inspect observability data",
+        "defaultMode": "ask",
+        "tools": [
+          "signoz_aggregate_logs",
+          "signoz_aggregate_traces",
+          "signoz_check_metric_cardinality",
+          "signoz_check_metric_usage",
+          "signoz_execute_builder_query",
+          "signoz_get_alert",
+          "signoz_get_alert_history",
+          "signoz_get_dashboard",
+          "signoz_get_field_keys",
+          "signoz_get_field_values",
+          "signoz_get_notification_channel",
+          "signoz_get_org_overview",
+          "signoz_get_service_top_operations",
+          "signoz_get_top_metrics",
+          "signoz_get_trace_details",
+          "signoz_get_view",
+          "signoz_list_alert_rules",
+          "signoz_list_alerts",
+          "signoz_list_dashboard_templates",
+          "signoz_list_dashboards",
+          "signoz_list_metrics",
+          "signoz_list_notification_channels",
+          "signoz_list_services",
+          "signoz_list_views",
+          "signoz_query_metrics",
+          "signoz_search_logs",
+          "signoz_search_traces"
+        ]
+      },
+      "write": {
+        "label": "Manage SigNoz",
+        "defaultMode": "ask",
+        "tools": [
+          "signoz_create_alert",
+          "signoz_create_dashboard",
+          "signoz_create_notification_channel",
+          "signoz_create_view",
+          "signoz_delete_alert",
+          "signoz_delete_dashboard",
+          "signoz_delete_notification_channel",
+          "signoz_delete_view",
+          "signoz_import_dashboard",
+          "signoz_patch_dashboard",
+          "signoz_update_alert",
+          "signoz_update_dashboard",
+          "signoz_update_notification_channel",
+          "signoz_update_view"
+        ]
+      }
+    }
+  }
+}

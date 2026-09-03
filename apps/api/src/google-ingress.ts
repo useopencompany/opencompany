@@ -41,6 +41,7 @@ export function createGoogleIngress(input: {
   db: DbLike;
   identify: ApiIdentityVerifier;
   refreshPluginRegistrations?: (input: {
+    provider: Extract<GoogleIntegrationProvider, "google_calendar" | "google_drive">;
     userWorkosId: string;
     workspaceIds: string[];
   }) => Promise<void>;
@@ -56,6 +57,7 @@ type IngressInput = {
   db: DbLike;
   identify: ApiIdentityVerifier;
   refreshPluginRegistrations?: (input: {
+    provider: Extract<GoogleIntegrationProvider, "google_calendar" | "google_drive">;
     userWorkosId: string;
     workspaceIds: string[];
   }) => Promise<void>;
@@ -166,7 +168,9 @@ async function handleCallback(
       workspaceId: session.workspaceId,
       provider,
     });
-    if (provider === "google_drive") await refreshDrivePluginAfterConnection(input, session);
+    if (provider === "google_calendar" || provider === "google_drive") {
+      await refreshGooglePluginAfterConnection(input, session, provider);
+    }
 
     return statusRedirect(session, state.returnTo, provider, "connected");
   } catch (error) {
@@ -180,19 +184,25 @@ async function handleCallback(
   }
 }
 
-async function refreshDrivePluginAfterConnection(
+async function refreshGooglePluginAfterConnection(
   input: IngressInput,
   session: Extract<Awaited<ReturnType<typeof resolveIngressSession>>, { kind: "actor" }>,
+  provider: Extract<GoogleIntegrationProvider, "google_calendar" | "google_drive">,
 ) {
   if (!input.refreshPluginRegistrations) return;
   try {
     await input.refreshPluginRegistrations({
+      provider,
       userWorkosId: session.userId,
       workspaceIds: session.workspaces.map((entry) => entry.workspace.id),
     });
   } catch (error) {
-    logger.warn("Google Drive plugin discovery refresh after connection failed", {
-      event: "goat.google_drive_plugin_reconnect_refresh_failed",
+    logger.warn("Google plugin discovery refresh after connection failed", {
+      event:
+        provider === "google_drive"
+          ? "goat.google_drive_plugin_reconnect_refresh_failed"
+          : "goat.google_calendar_plugin_reconnect_refresh_failed",
+      provider,
       error_message: error instanceof Error ? error.message : String(error),
     });
   }

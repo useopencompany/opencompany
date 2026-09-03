@@ -97,9 +97,8 @@ describe("planHarness", () => {
     expect(request.system).toContain("<goat_harness_planner>");
     expect(request.system).toContain("<tool_policy>");
     expect(request.system).toContain("<skill_policy>");
-    expect(request.system).toContain("<codex_goal_policy>");
-    expect(request.system).toContain("set codex.goalMode only");
-    expect(request.system).toContain("grounded in task_prompt");
+    expect(request.system).not.toContain("<codex_goal_policy>");
+    expect(JSON.stringify(request.schema)).not.toContain('"goalMode"');
     expect(request.system).toContain("<result_contract>");
     expect(request.system).toContain("there is no final-result tool");
     expect(request.system).toContain('resultMode "brain_markdown_report"');
@@ -488,7 +487,7 @@ describe("planHarness", () => {
     expect(prompt).toContain("<requested_engine>\ncodex\n</requested_engine>");
   });
 
-  it("normalizes planner-selected Codex goal mode with a default token budget", async () => {
+  it("drops planner-selected Codex goal mode while automatic task goals are disabled", async () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {
         schemaVersion: "goat.harness.v1",
@@ -511,24 +510,16 @@ describe("planHarness", () => {
       },
     });
 
-    await expect(
-      planHarness({
-        prompt: "Use Codex to fix the flaky test suite in octo/repo and verify it.",
-        model,
-        availableTools: ["exa_search", "github_clone_repository", "github_shell"],
-        githubRepositories: ["octo/repo"],
-        gatewayApiKey: "gateway",
-      }),
-    ).resolves.toMatchObject({
-      engine: "codex",
-      codex: {
-        repository: "octo/repo",
-        goalMode: {
-          objective: "Fix the flaky tests in octo/repo and verify the suite passes.",
-          tokenBudget: 200_000,
-        },
-      },
+    const harness = await planHarness({
+      prompt: "Use Codex to fix the flaky test suite in octo/repo and verify it.",
+      model,
+      availableTools: ["exa_search", "github_clone_repository", "github_shell"],
+      githubRepositories: ["octo/repo"],
+      gatewayApiKey: "gateway",
     });
+
+    expect(harness).toMatchObject({ engine: "codex", codex: { repository: "octo/repo" } });
+    expect(harness.codex).not.toHaveProperty("goalMode");
   });
 
   it("infers a Codex repository and PR intent from connected repository names", async () => {

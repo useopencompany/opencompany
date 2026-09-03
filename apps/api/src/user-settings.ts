@@ -11,13 +11,15 @@ type DbLike = any;
 export type UserPreferenceSet = {
   timezone: string;
   taskSpawningEnabled: boolean;
-  wikiEnabled: boolean;
+  wikiEnabled: true;
   taskViewMode: TaskViewMode;
   imessageEnabled: boolean;
   autoModelRoutingEnabled: boolean;
 };
 
-export type UpdateUserPreferencesCommand = Partial<UserPreferenceSet>;
+export type UpdateUserPreferencesCommand = Partial<Omit<UserPreferenceSet, "wikiEnabled">> & {
+  wikiEnabled?: boolean;
+};
 
 export type McpSetupStatus = {
   preferredClient: McpClient | null;
@@ -37,7 +39,6 @@ export type UserSettingsService = {
 const PREFERENCE_COLUMNS = {
   timezone: users.timezone,
   taskSpawningEnabled: users.taskSpawningEnabled,
-  wikiEnabled: users.wikiEnabled,
   taskViewMode: users.taskViewMode,
   imessageEnabled: users.imessageEnabled,
   autoModelRoutingEnabled: users.autoModelRoutingEnabled,
@@ -59,7 +60,6 @@ export function createUserSettingsService(input: {
       }
       for (const field of [
         "taskSpawningEnabled",
-        "wikiEnabled",
         "imessageEnabled",
         "autoModelRoutingEnabled",
       ] as const) {
@@ -79,7 +79,7 @@ export function createUserSettingsService(input: {
         .where(eq(users.workosUserId, actor.userId))
         .returning(PREFERENCE_COLUMNS);
       if (!updated) throw missingUser();
-      return updated as UserPreferenceSet;
+      return alwaysOnWikiPreferences(updated);
     },
 
     async getMcpSetup(actor) {
@@ -117,7 +117,11 @@ async function currentPreferences(db: DbLike, actor: Actor): Promise<UserPrefere
     .where(eq(users.workosUserId, actor.userId))
     .limit(1);
   if (!row) throw missingUser();
-  return row as UserPreferenceSet;
+  return alwaysOnWikiPreferences(row);
+}
+
+function alwaysOnWikiPreferences(row: Omit<UserPreferenceSet, "wikiEnabled">): UserPreferenceSet {
+  return { ...row, wikiEnabled: true };
 }
 
 function mcpSetupStatus(row: {

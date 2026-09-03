@@ -55,6 +55,13 @@ import {
   saveJamieWebhookApiKey,
 } from "@opencompany/agent/integrations/jamie";
 import {
+  connectRenderMcpIntegration,
+  getRenderIntegrationState,
+  isValidRenderApiKey,
+  type RenderProviderState,
+  validateRenderApiKey,
+} from "@opencompany/agent/integrations/render-mcp";
+import {
   connectStripeIntegration,
   disconnectStripeIntegration,
   getStripeIntegrationState,
@@ -118,6 +125,7 @@ export type IntegrationAccountService = {
   disconnectAttio(actor: Actor, integrationId: string): Promise<void>;
   connectFathom(actor: Actor, apiKey: string): Promise<FathomProviderState>;
   connectGranola(actor: Actor, apiKey: string): Promise<GranolaProviderState>;
+  connectRender(actor: Actor, apiKey: string): Promise<RenderProviderState>;
   startImessagePairing(actor: Actor, phone: string): Promise<void>;
   confirmImessagePairing(actor: Actor, code: string): Promise<ImessageProviderState>;
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
@@ -133,6 +141,10 @@ export function createIntegrationAccountService(input: {
   resolveImessageProvider?: () => ImessageProvider | null;
   generatePairingCode?: () => string;
   runner?: RunnerClient;
+  refreshRenderPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceId: string;
+  }) => Promise<void>;
 }): IntegrationAccountService {
   const db = input.db;
   const now = input.now ?? (() => new Date());
@@ -351,6 +363,41 @@ export function createIntegrationAccountService(input: {
         return await getGranolaIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(error, "Could not save the Granola API key.", "granola_connect");
+      }
+    },
+
+    async connectRender(actor, apiKey) {
+      const trimmed = apiKey.trim();
+      if (!isValidRenderApiKey(trimmed)) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "Render API keys start with rnd_. Check the key and try again.",
+        );
+      }
+      try {
+        const validation = await validateRenderApiKey(trimmed);
+        if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
+        await connectRenderMcpIntegration({
+          userWorkosId: actor.userId,
+          apiKey: trimmed,
+          owner: validation.owner,
+          db,
+        });
+        await input
+          .refreshRenderPluginRegistrations?.({
+            userWorkosId: actor.userId,
+            workspaceId: actor.workspaceId,
+          })
+          .catch((error) => {
+            logger.warn("Render connected but plugin discovery refresh failed", {
+              event: "opencompany.render_plugin_refresh_failed",
+              error_message: error instanceof Error ? error.message : String(error),
+            });
+          });
+        return await getRenderIntegrationState(actor.userId, db);
+      } catch (error) {
+        throw commandFailure(error, "Could not save the Render API key.", "render_connect");
       }
     },
 

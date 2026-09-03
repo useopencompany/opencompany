@@ -1,7 +1,7 @@
 import { getDb } from "@opencompany/db/client";
 import type { IntegrationProvider, TaskToolName } from "@opencompany/db/product-schema";
 import { integrations } from "@opencompany/db/product-schema";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import {
   type GmailSourceProviderState,
   type GoogleDriveSourceProviderState,
@@ -13,6 +13,7 @@ import { getLatitudeIntegrationState } from "./latitude-mcp";
 import { getLinearIntegrationState } from "./linear-mcp";
 
 const GOOGLE_PROVIDERS: IntegrationProvider[] = ["gmail", "google_calendar", "google_drive"];
+type DbLike = any;
 const BROWSER_TOOLS = [
   "browser_open",
   "browser_snapshot",
@@ -49,6 +50,60 @@ export async function getGoogleIntegrationState(userWorkosId: string) {
     .orderBy(integrations.provider, integrations.updatedAt);
 
   return googleIntegrationStateFromRows(rows);
+}
+
+export async function loadGoogleCalendarIntegration(input: { userWorkosId: string; db?: DbLike }) {
+  const [row] = await (input.db ?? getDb())
+    .select({
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
+      toolModes: integrations.toolModes,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.userWorkosId, input.userWorkosId),
+        isNull(integrations.workspaceId),
+        eq(integrations.provider, "google_calendar"),
+        ne(integrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(integrations.updatedAt))
+    .limit(1);
+  return row;
+}
+
+export async function loadGoogleDriveIntegration(input: { userWorkosId: string; db?: DbLike }) {
+  const [row] = await (input.db ?? getDb())
+    .select({
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
+      toolModes: integrations.toolModes,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.userWorkosId, input.userWorkosId),
+        isNull(integrations.workspaceId),
+        eq(integrations.provider, "google_drive"),
+        ne(integrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(integrations.updatedAt))
+    .limit(1);
+  return row;
 }
 
 // Gmail-as-a-brain-source state: same integration rows as the Gmail tool

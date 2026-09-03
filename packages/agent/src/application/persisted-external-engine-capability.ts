@@ -3,7 +3,6 @@ import {
   codexChatSessions,
   codexChatTurns,
   runAttempts,
-  users,
   workspaceMembers,
   workspaces,
 } from "@opencompany/db/product-schema";
@@ -49,7 +48,7 @@ async function loadPersistedAuthorityState(
       workspaceId: codexChatSessions.workspaceId,
       workspaceName: workspaces.name,
       workspaceSlug: workspaces.slug,
-      wikiEnabled: users.wikiEnabled,
+      legacyBrainEnabled: workspaces.legacyBrainEnabled,
       actorId: codexChatSessions.userWorkosId,
       conversationId: codexChatSessions.chatSessionId,
       sandboxId: codexChatSessions.sandboxId,
@@ -83,7 +82,6 @@ async function loadPersistedAuthorityState(
         eq(workspaceMembers.userWorkosId, codexChatSessions.userWorkosId),
       ),
     )
-    .innerJoin(users, eq(users.workosUserId, codexChatSessions.userWorkosId))
     .innerJoin(workspaces, eq(workspaces.id, codexChatSessions.workspaceId))
     .where(eq(codexChatSessions.id, capability.codexChatSessionId))
     .limit(1);

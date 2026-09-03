@@ -13,7 +13,7 @@ vi.mock("next/headers", () => ({ headers: vi.fn() }));
 const preferences = {
   timezone: "Europe/Berlin",
   taskSpawningEnabled: false,
-  wikiEnabled: false,
+  wikiEnabled: true,
   taskViewMode: "list",
   imessageEnabled: false,
   autoModelRoutingEnabled: true,

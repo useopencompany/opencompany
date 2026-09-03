@@ -1,13 +1,13 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "google-drive",
-  "version": "1.0.0",
-  "description": "Search, inspect, read, create, and copy files through your Google Drive account.",
+  "version": "1.1.0",
+  "description": "Search, inspect, read, create, and copy files through opencompany's Google Drive MCP.",
   "author": {
     "name": "opencompany",
     "url": "https://opencompany.com"
   },
-  "homepage": "https://developers.google.com/workspace/drive/api/guides/configure-mcp-server",
+  "homepage": "https://github.com/useopencompany/plugins/tree/main/google-drive",
   "repository": "https://github.com/useopencompany/plugins/tree/main/google-drive",
   "license": "MIT",
   "keywords": ["google-drive", "files", "documents", "storage", "workspace"],

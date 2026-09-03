@@ -1,11 +1,12 @@
 ---
 title: Google Drive
-description: Use Google's official MCP server for Drive tools and ingest selected files into Brain.
+description: Connect opencompany's Google Drive MCP and ingest selected files into Wiki.
 ---
 
-Google Drive is an official plugin backed by Google's hosted
-[Drive MCP server](https://developers.google.com/workspace/drive/api/reference/mcp). It is currently
-available as a Google Developer Preview.
+Google Drive is an official opencompany Agent Plugin backed by opencompany's MCP wrapper around the
+stable [Drive REST API](https://developers.google.com/workspace/drive/api/reference/rest/v3). It can
+search and inspect files, read or download bounded file content, inspect permissions, and create or
+copy files without depending on Google's Developer Preview MCP service.
 
 ## Connect Google Drive
 
@@ -17,8 +18,10 @@ available as a Google Developer Preview.
 Each person connects their own Google account. The most recently connected Drive account powers MCP
 tools. Other connected Drive accounts remain available as Brain ingestion sources. Accounts linked
 before the official plugin was added must reconnect once to grant its required `drive.readonly` and
-`drive.file` scopes. The access token stays server-side and is sent only to Google's reviewed
-`https://drivemcp.googleapis.com/mcp/v1` endpoint.
+`drive.file` scopes. Google access and refresh tokens stay server-side. The plugin gateway sends
+only a short-lived signed ticket to `https://api.opencompany.chat/mcp/plugins/google-drive`; the
+endpoint rechecks the installed plugin, connected account, OAuth scopes, and current tool
+permission before calling Google.
 
 Your Google and Shared Drive permissions still determine which files each tool can access.
 
@@ -44,10 +47,11 @@ file as untrusted and inspect the proposed tool call before approving it. Downlo
 as encoded file content, so confirm the file and destination before allowing another tool to process
 or publish it.
 
-Google's current MCP surface contains eight tools. It can search and inspect files, read or download
-content, inspect permissions, and create or copy files. It does not currently expose editing,
-deleting, moving, or sharing tools. Google documents the setup, required API enablement, and OAuth
-scopes in its [MCP configuration guide](https://developers.google.com/workspace/drive/api/guides/configure-mcp-server).
+The initial surface contains eight reviewed tools. Downloads and uploads are limited to 5 MB, while
+natural-language reads accept supported documents up to 20 MB and return at most 200 KB of extracted
+Markdown. Unsupported, encrypted, scanned, or image-only files fail clearly. The plugin does not
+expose editing, deleting, moving, or sharing tools. Operators need only the stable Drive API; the
+Google Drive MCP API (`drivemcp.googleapis.com`) is not used or required.
 
 ## Brain ingestion
 

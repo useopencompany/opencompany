@@ -142,7 +142,7 @@ export function createIdentityService(input: {
           workspaces.find((entry) => entry.workspace.id === identity.activeWorkspaceId) ??
           first)
         : null;
-    const brains = active
+    const brains = active?.workspace.legacyBrainEnabled
       ? await listAccessibleBrains(
           { userWorkosId: identity.userId, workspaceId: active.workspace.id },
           { db },
@@ -166,7 +166,7 @@ export function createIdentityService(input: {
         autoModelRoutingEnabled: user.autoModelRoutingEnabled,
         chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
         imessageEnabled: user.imessageEnabled,
-        wikiEnabled: user.wikiEnabled,
+        wikiEnabled: true as const,
         taskViewMode: user.taskViewMode,
         preferredMcpClient: user.preferredMcpClient,
         mcpSetupCompletedAt: user.mcpSetupCompletedAt?.toISOString() ?? null,
@@ -179,6 +179,7 @@ export function createIdentityService(input: {
         name: entry.workspace.name,
         slug: entry.workspace.slug,
         role: entry.role,
+        legacyBrainEnabled: entry.workspace.legacyBrainEnabled,
       })),
       activeWorkspaceId: active?.workspace.id ?? null,
       brains: brains.map((brain) => ({

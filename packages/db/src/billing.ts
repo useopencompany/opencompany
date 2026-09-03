@@ -4,10 +4,10 @@ import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { getDb } from "./client";
 import { stringifyPostgresJson } from "./postgres-json";
 import {
-  type BrainSourceProvider,
   brainIngestJobs,
   creditBalances,
   creditLedger,
+  type IngestionReservationSourceProvider,
   type StripeSubscriptionStatus,
   stripeWebhookEvents,
   type WorkspacePlan,
@@ -296,7 +296,7 @@ export async function reserveWorkspaceIngestion(input: {
   workspaceId: string;
   sourceItemId: string;
   sourceKind?: "brain" | "wiki";
-  sourceProvider: BrainSourceProvider;
+  sourceProvider: IngestionReservationSourceProvider;
   rawEventCount: number;
   now?: Date;
   db?: DbLike;
@@ -555,10 +555,12 @@ export async function loadBillingOverview(workspaceId: string, options: { db?: D
     topUpBalanceUsdMicros: creditBalance.topUpBalanceUsdMicros,
     ingestedThisMonth: Number(usage[0]?.total ?? 0),
     pending: Number(pending[0]?.total ?? 0),
-    providers: providerRows.map((row: { provider: BrainSourceProvider; total: number }) => ({
-      provider: row.provider,
-      count: Number(row.total),
-    })),
+    providers: providerRows.map(
+      (row: { provider: IngestionReservationSourceProvider; total: number }) => ({
+        provider: row.provider,
+        count: Number(row.total),
+      }),
+    ),
     recent: recentRows,
     autoRefill: {
       enabled: billing.autoRefillEnabled,

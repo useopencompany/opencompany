@@ -3,7 +3,7 @@
   "mcpServers": {
     "google-drive": {
       "type": "streamable-http",
-      "url": "https://drivemcp.googleapis.com/mcp/v1"
+      "url": "https://api.opencompany.chat/mcp/plugins/google-drive"
     }
   }
 }

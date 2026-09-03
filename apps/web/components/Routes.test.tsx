@@ -31,7 +31,12 @@ const appDataMock = vi.hoisted(() => ({
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
     workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
-    featureFlags: { taskSpawning: false, autoModelRouting: false },
+    featureFlags: {
+      taskSpawning: false,
+      autoModelRouting: false,
+      imessage: false,
+      legacyBrain: true,
+    },
     integrations: {},
     mcpSetup: { preferredClient: null, completedAt: null },
   },
@@ -40,7 +45,6 @@ const appDataMock = vi.hoisted(() => ({
 const userPreferencesMock = vi.hoisted(() => ({
   updateTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
-  updateWikiEnabledAction: vi.fn(async () => ({ ok: true, enabled: true })),
   updateImessageEnabledAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
@@ -172,7 +176,6 @@ vi.mock("@/lib/user-preferences", () => ({
   updateTaskSpawningAction: userPreferencesMock.updateTaskSpawningAction,
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
   updateImessageEnabledAction: userPreferencesMock.updateImessageEnabledAction,
-  updateWikiEnabledAction: userPreferencesMock.updateWikiEnabledAction,
 }));
 
 vi.mock("@/lib/headless-automation-commands", () => ({

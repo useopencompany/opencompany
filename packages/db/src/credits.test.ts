@@ -13,7 +13,7 @@ import {
 } from "./credits";
 
 function fakeDb(rows: unknown[]) {
-  return { execute: vi.fn(async () => ({ rows })) };
+  return { execute: vi.fn(async (_query: unknown) => ({ rows })) };
 }
 
 describe("opencompany credits", () => {
@@ -265,6 +265,19 @@ describe("opencompany credits", () => {
         platformFeeUsdMicros: 24_000,
       },
     ]);
+  });
+
+  it("queries an inclusive 30-day UTC reporting window", async () => {
+    const db = fakeDb([]);
+    await loadSpendBreakdown("workspace_1", {
+      db,
+      days: 30,
+      now: new Date("2026-09-03T18:00:00.000Z"),
+    });
+
+    const dialect = new PgDialect();
+    const query = dialect.sqlToQuery(db.execute.mock.calls[0]![0] as SQL);
+    expect(query.params).toContain("2026-08-05T00:00:00.000Z");
   });
 
   it("keeps paid capability spend in its own usage category", async () => {

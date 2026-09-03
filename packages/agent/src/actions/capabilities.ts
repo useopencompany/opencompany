@@ -68,14 +68,20 @@ export const PROVIDER_CAPABILITIES: Partial<
   google_calendar: [
     {
       id: "read",
-      label: "Read calendar",
-      description: "Look up events on your calendars.",
-      defaultMode: "on",
+      label: "Check calendars & availability",
+      description: "List calendars and inspect availability without reading event details.",
+      defaultMode: "ask",
+    },
+    {
+      id: "query",
+      label: "Read calendar events",
+      description: "Search and read event details from your calendars.",
+      defaultMode: "ask",
     },
     {
       id: "write",
-      label: "Add events",
-      description: "Create new events on your calendars.",
+      label: "Manage calendar events",
+      description: "Create, update, delete, and respond to events on your calendars.",
       defaultMode: "ask",
     },
   ],
@@ -207,6 +213,49 @@ export const PROVIDER_CAPABILITIES: Partial<
       label: "Manage Better Stack",
       description:
         "Change monitoring, incidents, dashboards, alerts, status pages, error state, and team access.",
+      defaultMode: "ask",
+    },
+  ],
+  render: [
+    {
+      id: "read",
+      label: "Inspect Render resources",
+      description: "List workspaces, services, deploys, Postgres databases, and Key Value stores.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read operational data",
+      description: "Read logs and metrics, and run provider-enforced read-only database queries.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage Render infrastructure",
+      description:
+        "Create services and datastores, change environment variables, and trigger deploys.",
+      defaultMode: "ask",
+    },
+  ],
+  signoz: [
+    {
+      id: "read",
+      label: "Read SigNoz documentation",
+      description: "Search SigNoz's public product documentation.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Inspect observability data",
+      description:
+        "Query logs, metrics, traces, alerts, dashboards, views, and notification channels.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage SigNoz",
+      description:
+        "Create, update, import, or delete alerts, dashboards, views, and notification channels.",
       defaultMode: "ask",
     },
   ],

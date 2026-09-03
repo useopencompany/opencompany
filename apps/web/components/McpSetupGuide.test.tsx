@@ -70,7 +70,9 @@ describe("McpSetupGuide", () => {
 
     expect(screen.getByText(/\/mcp$/)).toBeInTheDocument();
     expect(screen.getByText(/Use the opencompany connector/)).toBeInTheDocument();
-    expect(screen.getByText(/query for "Ada Lovelace"/)).toHaveTextContent(/at Analytical Engines/);
+    expect(screen.getByText(/search it for "Ada Lovelace"/)).toHaveTextContent(
+      /at Analytical Engines/,
+    );
     expect(screen.queryByText(/ada@example\.com/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Brain" })).not.toBeInTheDocument();
   });
@@ -87,7 +89,7 @@ describe("McpSetupGuide", () => {
   it("hides the guide header when embedded under a page-level header", () => {
     renderGuide({ initialClient: "claude", hideHeader: true });
 
-    expect(screen.queryByText("Use your brain where you already work")).not.toBeInTheDocument();
+    expect(screen.queryByText("Use your Wiki where you already work")).not.toBeInTheDocument();
   });
 
   it("starts waiting after copying the first question and refreshes after verification", async () => {
@@ -110,7 +112,7 @@ describe("McpSetupGuide", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy first question" }));
 
-    expect(await screen.findByText(/Waiting for your first Brain query/)).toBeInTheDocument();
+    expect(await screen.findByText(/Waiting for your first Wiki query/)).toBeInTheDocument();
     await waitFor(() => expect(actionsMock.checkStatus).toHaveBeenCalledTimes(1));
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });

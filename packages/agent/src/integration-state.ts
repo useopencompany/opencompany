@@ -1,4 +1,8 @@
 import type { IntegrationProvider, IntegrationStatus } from "@opencompany/db/product-schema";
+import {
+  GOOGLE_CALENDAR_MCP_RECONNECT_REASON,
+  googleCalendarMcpScopesSatisfied,
+} from "./integrations/google-calendar-scopes";
 import { SLACK_MCP_RECONNECT_REASON, slackMcpScopesSatisfied } from "./integrations/slack-scopes";
 
 export type GoogleProviderState = {
@@ -244,6 +248,8 @@ export type PersonalAccountProvider =
   | "fathom"
   | "attio"
   | "betterstack"
+  | "render"
+  | "signoz"
   | "latitude"
   | "neon"
   | "x_account";
@@ -315,6 +321,8 @@ export function personalAccountsFromRows(
     fathom: [],
     attio: [],
     betterstack: [],
+    render: [],
+    signoz: [],
     latitude: [],
     neon: [],
     x_account: [],
@@ -339,6 +347,8 @@ export function personalAccountsFromRows(
       row.provider === "fathom" ||
       row.provider === "attio" ||
       row.provider === "betterstack" ||
+      row.provider === "render" ||
+      row.provider === "signoz" ||
       row.provider === "latitude" ||
       row.provider === "neon" ||
       row.provider === "x_account"
@@ -424,17 +434,24 @@ function accountViewFromRow(
     : [];
   const needsSlackPluginGrant =
     provider === "slack" && row.status === "connected" && !slackMcpScopesSatisfied(scopes);
+  const needsGoogleCalendarPluginGrant =
+    provider === "google_calendar" &&
+    row.status === "connected" &&
+    !googleCalendarMcpScopesSatisfied(scopes);
+  const needsPluginGrant = needsSlackPluginGrant || needsGoogleCalendarPluginGrant;
   return {
     integrationId: row.id ?? "",
     provider,
-    status: needsSlackPluginGrant ? "needs_reauth" : row.status,
-    connected: row.status === "connected" && !needsSlackPluginGrant,
+    status: needsPluginGrant ? "needs_reauth" : row.status,
+    connected: row.status === "connected" && !needsPluginGrant,
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     connectionLabel: row.connectionLabel ?? row.connection_label ?? null,
     statusReason: needsSlackPluginGrant
       ? SLACK_MCP_RECONNECT_REASON
-      : (row.statusReason ?? row.status_reason ?? null),
+      : needsGoogleCalendarPluginGrant
+        ? GOOGLE_CALENDAR_MCP_RECONNECT_REASON
+        : (row.statusReason ?? row.status_reason ?? null),
     scopes,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };

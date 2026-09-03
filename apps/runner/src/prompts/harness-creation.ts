@@ -220,14 +220,6 @@ export const HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
   "Include github_open_pull_request only when the user explicitly asked to publish, push, or open a pull request.",
 ]);
 
-export const HARNESS_CREATION_CODEX_GOAL_POLICY = promptBlock("codex_goal_policy", [
-  'For engine "codex", set codex.goalMode only when the task has an iterative path, a clear finish line, and a verification surface such as tests, build output, reproduced bug behavior, or a review checklist.',
-  "Use Goal mode for multi-step coding tasks where Codex should keep working across evidence-based continuation until the objective is complete, blocked, budget-limited, usage-limited, or timed out.",
-  "Do not set codex.goalMode for simple one-shot edits, straightforward explanations, quick lookups, or tasks that can finish in a single normal Codex turn.",
-  "When setting codex.goalMode, write a concise objective grounded in task_prompt with only the concrete success criteria the user asked for or that are inherent to the requested coding workflow, such as running relevant tests after a fix. The objective must be non-empty and no more than 4,000 characters.",
-  "Omit codex.goalMode.tokenBudget unless the task clearly needs a custom budget. The runner applies a 200000-token default when it is omitted.",
-]);
-
 export const HARNESS_CREATION_SKILL_POLICY = promptBlock("skill_policy", [
   "Select zero or more skills from available_skills when they materially improve execution.",
   "Skills are reasoning and operating guidance, not operation-level tools. They do not grant external access.",
@@ -248,7 +240,6 @@ export const HARNESS_CREATION_SYSTEM_PROMPT = promptBlock("goat_harness_planner"
   HARNESS_CREATION_MODEL_SELECTION,
   HARNESS_CREATION_PROMPT_CONTRACT,
   HARNESS_CREATION_TOOL_POLICY,
-  HARNESS_CREATION_CODEX_GOAL_POLICY,
   HARNESS_CREATION_SKILL_POLICY,
   HARNESS_CREATION_RESULT_CONTRACT,
 ]);
