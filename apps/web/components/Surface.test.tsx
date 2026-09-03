@@ -1254,6 +1254,7 @@ describe("Surface chat streaming UI", () => {
 
   it("posts a session-backed Task comment verbatim without a Chat LLM hop", async () => {
     const user = userEvent.setup();
+    const taskId = "goat_task_1";
 
     render(
       <Surface
@@ -1288,7 +1289,7 @@ describe("Surface chat streaming UI", () => {
           ],
         }}
         taskConversation={{
-          taskId: "goat_task_1",
+          taskId,
           status: "succeeded",
           startedAtMs: Date.now(),
         }}
@@ -1308,7 +1309,7 @@ describe("Surface chat streaming UI", () => {
 
     await waitFor(() =>
       expect(taskCommandMocks.comment).toHaveBeenCalledWith(
-        "goat_task_1",
+        taskId,
         { id: "task_activity_comment_test", body },
         { scopeKey: "workspace_1" },
       ),
@@ -1359,6 +1360,7 @@ describe("Surface chat streaming UI", () => {
 
   it("treats slash text in a Task comment as verbatim content, not a Skill mention", async () => {
     const user = userEvent.setup();
+    const taskId = "goat_task_1";
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
       {
         id: "product-work",
@@ -1379,7 +1381,7 @@ describe("Surface chat streaming UI", () => {
           messages: [],
         }}
         taskConversation={{
-          taskId: "goat_task_1",
+          taskId,
           status: "succeeded",
           startedAtMs: Date.now(),
         }}
@@ -1394,7 +1396,7 @@ describe("Surface chat streaming UI", () => {
 
     await waitFor(() =>
       expect(taskCommandMocks.comment).toHaveBeenCalledWith(
-        "goat_task_1",
+        taskId,
         { id: "task_activity_comment_test", body: "/prod investigate the mention menu" },
         { scopeKey: "" },
       ),
