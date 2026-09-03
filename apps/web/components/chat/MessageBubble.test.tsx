@@ -32,6 +32,66 @@ afterEach(() => {
 });
 
 describe("MessageBubble historical presentation details", () => {
+  it("renders a summary-backed pending use_action approval without loading historical detail", () => {
+    const onActionApproval = vi.fn(async () => undefined);
+    const summaryMessage = {
+      id: "assistant_pending_approval_summary",
+      role: "assistant",
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: {
+          source: "summary",
+          updatedAt: "2026-09-03T10:00:00.000Z",
+        },
+      },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_slack_search",
+          state: "approval-requested",
+          input: {
+            action: "plugin:slack:slack.slack_search_public_and_private",
+            params: { query: "launch plan", include_private: true },
+          },
+          approval: { id: "approval_slack_search" },
+        },
+      ],
+    } as ChatUiMessage;
+
+    const { rerender } = render(
+      <MessageBubble
+        message={summaryMessage}
+        taskLookup={emptyTaskLookup}
+        onActionApproval={onActionApproval}
+        allowActionApproval
+      />,
+    );
+
+    expect(screen.getByTestId("chat-action-approval")).toBeVisible();
+    expect(screen.getByText("Run Slack · Slack Search Public And Private?")).toBeVisible();
+    expect(screen.getByText("launch plan")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Accept" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Always allow" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Decline" })).toBeVisible();
+    expect(presentationMocks.load).not.toHaveBeenCalled();
+    expect(onActionApproval).not.toHaveBeenCalled();
+
+    rerender(
+      <MessageBubble
+        message={summaryMessage}
+        taskLookup={emptyTaskLookup}
+        onActionApproval={onActionApproval}
+      />,
+    );
+
+    expect(screen.queryByTestId("chat-action-approval")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-tool-call-use_action")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Decline" })).not.toBeInTheDocument();
+    expect(presentationMocks.load).not.toHaveBeenCalled();
+  });
+
   it("shows loading and retry states before replacing a compact tool summary with full detail", async () => {
     const user = userEvent.setup();
     const summaryMessage = {
