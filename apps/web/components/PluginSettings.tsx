@@ -5,7 +5,7 @@ import type {
   PluginInstallationDto,
   PluginListItemDto,
 } from "@opencompany/protocol";
-import { Button, buttonVariants } from "@opencompany/ui/components/button";
+import { buttonVariants } from "@opencompany/ui/components/button";
 import {
   BetterStackIcon,
   GitHubIcon,
@@ -182,26 +182,6 @@ export function PluginsSettings({
   plugins: PluginListItemDto[];
   canEdit: boolean;
 }) {
-  const router = useRouter();
-  const [installError, setInstallError] = useState<string | null>(null);
-  const [installingName, setInstallingName] = useState<OfficialMcpPluginName | null>(null);
-  const [isInstalling, startInstall] = useTransition();
-  const install = (config: OfficialMcpPluginConfig) => {
-    if (isInstalling) return;
-    setInstallError(null);
-    setInstallingName(config.name);
-    startInstall(async () => {
-      try {
-        const plugin = await installOfficialMcpPlugin(config);
-        router.push(`/settings/plugins/${encodeURIComponent(plugin.name)}`);
-      } catch (cause) {
-        setInstallError(errorMessage(cause));
-      } finally {
-        setInstallingName(null);
-      }
-    });
-  };
-
   return (
     <SettingsContent
       title="Plugins"
@@ -212,7 +192,6 @@ export function PluginsSettings({
           const plugin = plugins.find(
             (candidate) => candidate.name.toLocaleLowerCase() === config.name,
           );
-          const installing = isInstalling && installingName === config.name;
           return (
             <div
               key={config.name}
@@ -250,7 +229,7 @@ export function PluginsSettings({
                   <span className="mt-1 block text-[11.5px] leading-4 text-ink-subtle">
                     {plugin
                       ? `${plugin.skillCount} ${plugin.skillCount === 1 ? "skill" : "skills"} · updated ${formatRelativeTime(plugin.updatedAt)}`
-                      : "Official package · ready to install"}
+                      : "Official package · review before installing"}
                   </span>
                 </span>
               </Link>
@@ -262,21 +241,17 @@ export function PluginsSettings({
                   Manage
                 </Link>
               ) : canEdit ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={isInstalling}
-                  onClick={() => install(config)}
+                <Link
+                  href={`/settings/plugins/${config.name}`}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "text-ink")}
                 >
-                  {installing ? <Loader2 className="animate-spin" /> : null}
-                  {installing ? "Installing…" : "Install"}
-                </Button>
+                  Review
+                </Link>
               ) : null}
             </div>
           );
         })}
       </div>
-      {installError ? <p className="text-[12.5px] text-danger">{installError}</p> : null}
     </SettingsContent>
   );
 }

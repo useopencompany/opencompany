@@ -1,4 +1,8 @@
-import { type AgentModelDefinition, getAgentModelDefinition } from "@opencompany/agent-runtime";
+import {
+  type AgentModelDefinition,
+  CODEX_AGENT_MODEL_IDS,
+  getAgentModelDefinition,
+} from "@opencompany/agent-runtime";
 import type {
   HarnessEngine,
   HarnessSpec,
@@ -39,6 +43,13 @@ export type HarnessSkillOption = {
   guidance: string;
 };
 
+const CODEX_HARNESS_MODEL_GUIDANCE = {
+  "openai/gpt-5.6-sol": "Default Codex model. Use for complex coding, research, and computer use.",
+  "openai/gpt-5.6-terra": "Use for capable, efficient everyday Codex work.",
+  "openai/gpt-5.6-luna":
+    "Use for fast, affordable Codex work with clear and repeatable requirements.",
+} as const satisfies Record<(typeof CODEX_AGENT_MODEL_IDS)[number], string>;
+
 const HARNESS_MODEL_CONFIG = [
   {
     id: "moonshotai/kimi-k2.6",
@@ -61,10 +72,7 @@ const HARNESS_MODEL_CONFIG = [
     guidance:
       "Premium fallback. Use when the user asks for Claude/Sonnet, explicitly prioritizes maximum quality over cost, or needs premium polished writing/editorial judgment, vision, or file-input strengths. Do not choose merely because research is deep.",
   },
-  {
-    id: "openai/gpt-5.5",
-    guidance: "Use for coding-related work, sharper analysis, and deeper thinking.",
-  },
+  ...CODEX_AGENT_MODEL_IDS.map((id) => ({ id, guidance: CODEX_HARNESS_MODEL_GUIDANCE[id] })),
 ] as const satisfies readonly {
   id: HarnessSpec["model"];
   guidance: string;
