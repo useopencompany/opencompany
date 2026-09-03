@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workflow tasks get a proper generated title instead of keeping the raw workflow name (#1524, #1538) — @louis.
 - Follow-up questions on report-producing tasks now answer in the conversation instead of creating another report when you ask for a summary or clarification (#1540) — @louis.
 - Scheduled follow-ups from Claude tasks now run at the requested time instead of appearing scheduled and then never starting (#1546) — @louis.
+- Wiki commands no longer fail when GPT 5.6 leaves an optional input blank, so tasks can keep browsing and updating pages (#1547) — @louis.
 - Messages with emoji or other unusual characters save reliably instead of sometimes failing a reply midway (#1511) — @louis.
 
 ## [1.21.0] - 2026-09-01
