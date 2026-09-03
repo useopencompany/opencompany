@@ -1,6 +1,5 @@
 import type { ChatMessageAttachment } from "@opencompany/agent/chat-attachment-formats";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { generateChatTitle } from "@/lib/chat-title";
 
 const mocks = vi.hoisted(() => ({
   createTaskForUser: vi.fn(),
@@ -9,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   getAvailableHarnessTools: vi.fn(),
   resolveSkillMentions: vi.fn(),
   resolveWorkflowMention: vi.fn(),
-  updateTaskForActor: vi.fn(),
 }));
 
 vi.mock("@/lib/tasks", () => ({ createTaskForUser: mocks.createTaskForUser }));
@@ -22,21 +20,15 @@ vi.mock("@/lib/codex-auth", () => ({
 vi.mock("@/lib/integrations/google-data", () => ({
   getAvailableHarnessTools: mocks.getAvailableHarnessTools,
 }));
-vi.mock("@/lib/chat-title", () => ({ generateChatTitle: vi.fn() }));
 vi.mock("@/lib/skills", () => ({ resolveSkillMentions: mocks.resolveSkillMentions }));
 vi.mock("@/lib/workflows", () => ({
   resolveWorkflowMention: mocks.resolveWorkflowMention,
   WorkflowMentionError: class WorkflowMentionError extends Error {},
 }));
-vi.mock("@opencompany/agent/application/task-creation", () => ({
-  updateTaskForActor: mocks.updateTaskForActor,
-}));
-
 const {
   compileWorkflowHarnessSpec,
   createTaskFromWorkflow,
   extractWorkflowSkillMentionRefs,
-  generateWorkflowTaskTitle,
   resolveWorkflowStepSelection,
 } = await import("@/lib/workflow-tasks");
 
@@ -487,49 +479,6 @@ describe("createTaskFromWorkflow", () => {
         attachmentTexts: { [attachment.id]: "Extracted report text." },
       }),
     );
-  });
-});
-
-describe("generateWorkflowTaskTitle", () => {
-  it("keeps the task chat session title in sync with the generated task title", async () => {
-    vi.mocked(generateChatTitle).mockResolvedValue("Acme interview follow-up");
-
-    await generateWorkflowTaskTitle({
-      taskId: "goat_task_1",
-      userWorkosId: "user_1",
-      workspaceId: "ws_1",
-      workflowName: "Customer interview synthesis",
-      description: "Synthesize the Acme interview using the confirmed pricing concern.",
-      apiKey: "test-key",
-    });
-
-    expect(generateChatTitle).toHaveBeenCalledWith({
-      content: "Synthesize the Acme interview using the confirmed pricing concern.",
-      fallbackTitle: "Customer interview synthesis",
-      apiKey: "test-key",
-      userWorkosId: "user_1",
-    });
-    expect(mocks.updateTaskForActor).toHaveBeenCalledWith({
-      actorId: "user_1",
-      workspaceId: "ws_1",
-      taskId: "goat_task_1",
-      name: "Acme interview follow-up",
-    });
-  });
-
-  it("keeps the workflow fallback without issuing a Task update", async () => {
-    vi.mocked(generateChatTitle).mockResolvedValue("Customer interview synthesis");
-
-    await generateWorkflowTaskTitle({
-      taskId: "goat_task_1",
-      userWorkosId: "user_1",
-      workspaceId: "ws_1",
-      workflowName: "Customer interview synthesis",
-      description: "Synthesize the Acme interview using the confirmed pricing concern.",
-      apiKey: "test-key",
-    });
-
-    expect(mocks.updateTaskForActor).not.toHaveBeenCalled();
   });
 });
 

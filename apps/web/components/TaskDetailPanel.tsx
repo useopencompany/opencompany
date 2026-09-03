@@ -75,12 +75,12 @@ function CanonicalTaskDetailView({
   const initialChat: ChatSessionView = useMemo(
     () => ({
       id: conversationId,
-      title: taskDetailTitle(run),
+      title: liveTask?.name.trim() || taskDetailTitle(run),
       model: normalizeModel(run.task.model),
       engine: run.task.engine,
       messages: run.chat?.messages ?? [],
     }),
-    [conversationId, run],
+    [conversationId, liveTask?.name, run],
   );
 
   return (
