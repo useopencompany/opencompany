@@ -14,6 +14,7 @@ import {
   CoreError,
   TaskApplicationService,
   TaskScheduleApplicationService,
+  taskNameFromGoal,
   WorkflowApplicationService,
 } from "@opencompany/core";
 import type { ResolvedChatAttachments } from "@opencompany/db/chat-repository";
@@ -143,9 +144,14 @@ export function createAutomationTaskCreator(
         ...(command.scheduleId ? { scheduleId: command.scheduleId } : {}),
         ...(command.attachmentIds ? { attachmentIds: command.attachmentIds } : {}),
       });
-      // A replay also repairs an earlier best-effort generation failure. Once the Task has a
-      // refined name, subsequent idempotent requests skip the model call.
-      if (command.source === "workflow" && created.task.name === command.name) {
+      if (
+        shouldRefineWorkflowTaskTitle({
+          source: command.source,
+          workflowName: command.name,
+          taskName: created.task.name,
+          idempotentReplay: created.idempotentReplay,
+        })
+      ) {
         const updated = await refineWorkflowTaskTitle(
           {
             taskId: created.task.id,
@@ -164,6 +170,20 @@ export function createAutomationTaskCreator(
       return created;
     },
   };
+}
+
+export function shouldRefineWorkflowTaskTitle(input: {
+  source: "workflow" | "schedule";
+  workflowName: string;
+  taskName: string;
+  idempotentReplay: boolean;
+}) {
+  if (input.source !== "workflow") return false;
+  // New Tasks always get one refinement attempt. On replay, compare against the same canonical
+  // normalization used by Task creation so names such as "ship-feature" and "Ship-feature" do
+  // not incorrectly look like a previously refined title.
+  if (!input.idempotentReplay) return true;
+  return input.taskName === taskNameFromGoal(input.workflowName);
 }
 
 async function prepareWorkflow(
