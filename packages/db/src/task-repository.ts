@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  ACTION_HOST_TOOL_CONTRACT_VERSION,
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
   getAgentModelDefinition,
+  hostToolContractVersionForEngine,
   isCodexModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
@@ -630,7 +630,7 @@ export class PostgresTaskRepository implements TaskRepository {
           SELECT
             winner.runtime_id, ${input.actor.userId}, task.session_id, ${input.command.engine},
             ${runtimeModel}, (SELECT id FROM resolved_brain), ${input.actor.workspaceId},
-            ${input.command.engine === "opencompany" ? null : ACTION_HOST_TOOL_CONTRACT_VERSION},
+            ${hostToolContractVersionForEngine(input.command.engine)},
             winner.run_id, 'queued', ${now}, ${now}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
