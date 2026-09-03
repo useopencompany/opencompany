@@ -10,8 +10,10 @@ const mocks = vi.hoisted(() => ({
   discoverSnapshot: vi.fn(),
   getState: vi.fn(),
   getGitHubState: vi.fn(),
+  getGmailState: vi.fn(),
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
+  loadGmailConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
   getBetterStackState: vi.fn(),
@@ -46,6 +48,11 @@ vi.mock("./integrations/github-user-mcp", () => ({
   GITHUB_USER_MCP_ENDPOINT_URL: "https://api.githubcopilot.com/mcp/",
   getGitHubUserMcpIntegrationState: mocks.getGitHubState,
   loadGitHubUserMcpWorkerConnection: mocks.loadGitHubConnection,
+}));
+vi.mock("./integrations/gmail-mcp", () => ({
+  GMAIL_MCP_ENDPOINT_URL: "https://gmailmcp.googleapis.com/mcp/v1",
+  getGmailMcpIntegrationState: mocks.getGmailState,
+  loadGmailMcpWorkerConnection: mocks.loadGmailConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
   POSTHOG_MCP_ENDPOINT_URL: "https://mcp.posthog.com/mcp",
@@ -218,6 +225,51 @@ describe("plugin gateway registration cache", () => {
       {
         ...githubRecord,
         server: { ...githubRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Gmail credentials only to Google's exact hosted MCP endpoint", async () => {
+    const gmailRecord = record({
+      pluginName: "gmail",
+      pluginLabel: "gmail",
+      pluginDescription: "Gmail plugin tools.",
+      connectionProvider: "gmail",
+      server: {
+        name: "gmail",
+        type: "streamable-http",
+        url: "https://gmailmcp.googleapis.com/mcp/v1",
+        headers: {},
+      },
+      capabilities: [
+        {
+          id: "draft",
+          label: "Create drafts",
+          defaultMode: "ask",
+          tools: ["create_draft"],
+        },
+      ],
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([gmailRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:gmail:gmail",
+        connectionProvider: "gmail",
+        getState: mocks.getGmailState,
+        loadConnection: mocks.loadGmailConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...gmailRecord,
+        server: {
+          ...gmailRecord.server,
+          url: "https://gmailmcp.googleapis.com.evil.example/mcp/v1",
+        },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

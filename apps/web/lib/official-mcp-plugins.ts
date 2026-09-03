@@ -1,11 +1,17 @@
-export type OfficialMcpPluginName = "betterstack" | "github" | "linear" | "neon" | "slack";
+export type OfficialMcpPluginName =
+  | "betterstack"
+  | "github"
+  | "gmail"
+  | "linear"
+  | "neon"
+  | "slack";
 
 export type OfficialMcpPluginMetadata = {
   name: OfficialMcpPluginName;
   label: string;
   description: string;
   source: string;
-  connectionProvider: "betterstack" | "github_user" | "linear" | "neon" | "slack";
+  connectionProvider: "betterstack" | "github_user" | "gmail" | "linear" | "neon" | "slack";
   connectHref: string;
   accountLabel?: string;
   accountDescription: string;
@@ -36,6 +42,18 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref: "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
     accountLabel: "GitHub",
     accountDescription: "The personal GitHub account opencompany uses when it works as you.",
+  },
+  gmail: {
+    name: "gmail",
+    label: "Gmail",
+    description: "Search and read Gmail, create drafts, and organize messages with approval.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/27c6666fd61b9f939295b9617e447b7bdce64b66/gmail",
+    connectionProvider: "gmail",
+    connectHref: "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+    accountDescription: "The most recently connected Gmail account powers Gmail tools.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure Gmail ingestion in Wiki sources",
   },
   linear: {
     name: "linear",

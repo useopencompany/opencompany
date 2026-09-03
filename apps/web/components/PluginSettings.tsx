@@ -9,6 +9,7 @@ import { Button, buttonVariants } from "@opencompany/ui/components/button";
 import {
   BetterStackIcon,
   GitHubIcon,
+  GmailIcon,
   LinearIcon,
   NeonIcon,
   SlackIcon,
@@ -109,6 +110,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: GitHubIcon,
     iconClassName: "bg-[#181717] text-white",
   },
+  gmail: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.gmail,
+    Icon: GmailIcon,
+    iconClassName: "bg-white text-[#EA4335]",
+  },
   linear: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
     Icon: LinearIcon,
@@ -128,6 +134,8 @@ export const OFFICIAL_MCP_PLUGINS = {
 
 export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
 export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
+export const GMAIL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.gmail.name;
+export const GMAIL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.gmail.source;
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
@@ -161,6 +169,10 @@ export function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialGitHubPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.github, preview);
+}
+
+export function installOfficialGmailPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.gmail, preview);
 }
 
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {

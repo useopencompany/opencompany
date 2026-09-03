@@ -25,6 +25,11 @@ import {
   loadGitHubUserMcpWorkerConnection,
 } from "./integrations/github-user-mcp";
 import {
+  GMAIL_MCP_ENDPOINT_URL,
+  getGmailMcpIntegrationState,
+  loadGmailMcpWorkerConnection,
+} from "./integrations/gmail-mcp";
+import {
   getLatitudeIntegrationState,
   LATITUDE_MCP_ENDPOINT_URL,
   loadLatitudeMcpWorkerConnection,
@@ -70,6 +75,12 @@ const providerBindings = {
     endpointUrl: GITHUB_USER_MCP_ENDPOINT_URL,
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
+  },
+  gmail: {
+    provider: "gmail",
+    endpointUrl: GMAIL_MCP_ENDPOINT_URL,
+    getState: getGmailMcpIntegrationState,
+    loadConnection: loadGmailMcpWorkerConnection,
   },
   linear: {
     provider: "linear",

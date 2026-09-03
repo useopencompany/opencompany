@@ -51,7 +51,7 @@ export type PluginRemoteServer = {
   headers: Record<string, string>;
 };
 
-export type PluginCapabilityId = "read" | "query" | "write";
+export type PluginCapabilityId = "read" | "query" | "draft" | "write";
 export type PluginCapabilityBucket = "read" | "write";
 export type PluginCapabilityMode = "on" | "ask" | "off";
 

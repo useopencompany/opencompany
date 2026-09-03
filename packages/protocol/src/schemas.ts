@@ -1654,7 +1654,7 @@ export const PluginSkillSummarySchema = z
 
 export const PluginCapabilityDefinitionSchema = z
   .object({
-    id: z.enum(["read", "query", "write"]),
+    id: z.enum(["read", "query", "draft", "write"]),
     label: z.string().min(1).max(128),
     defaultMode: z.enum(["on", "ask", "off"]),
     tools: z.array(z.string().min(1).max(256)).max(512),
@@ -1668,7 +1668,7 @@ export const PluginDiscoveredToolSchema = z
     description: z.string().max(4_096).optional(),
     classification: z
       .object({
-        capabilityId: z.enum(["read", "query", "write"]),
+        capabilityId: z.enum(["read", "query", "draft", "write"]),
         capabilityLabel: z.string().min(1).max(128),
         defaultMode: z.enum(["on", "ask", "off"]),
         bucket: z.enum(["read", "write"]),

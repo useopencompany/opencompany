@@ -14,7 +14,10 @@ import {
   betterStackToolsStateFromPlugin,
   GitHubPluginDetail,
   GitHubPluginDetailView,
+  GmailPluginDetail,
+  GmailPluginDetailView,
   githubToolsStateFromPlugin,
+  gmailToolsStateFromPlugin,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -29,6 +32,7 @@ import {
 import {
   BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
+  GMAIL_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
@@ -75,6 +79,20 @@ const appData = vi.hoisted(() => ({
     },
     personalAccounts: {
       betterstack: [],
+      gmail: [
+        {
+          integrationId: "gint_gmail",
+          provider: "gmail",
+          status: "connected",
+          connected: true,
+          accountEmail: "ada@example.com",
+          accountName: "Ada",
+          connectionLabel: "ada@example.com",
+          statusReason: null,
+          scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+          capabilityModes: { query: "ask", draft: "ask", write: "ask" },
+        },
+      ],
       github_user: [
         {
           integrationId: "gint_github_user",
@@ -601,6 +619,88 @@ const slackPlugin = {
       discoveryStatus: "ready",
       discoveredAt: "2026-09-02T08:00:00.000Z",
       refreshAfter: "2026-09-02T09:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
+const gmailPlugin = {
+  ...plugin,
+  id: "plugin_gmail",
+  name: "gmail",
+  manifest: {
+    name: "gmail",
+    description: "Search and read Gmail, create drafts, and organize messages.",
+  },
+  source: {
+    ...plugin.source,
+    path: "gmail",
+    resolvedCommit: "27c6666fd61b9f939295b9617e447b7bdce64b66",
+  },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "gmail",
+      type: "streamable-http",
+      connectionProvider: "gmail",
+      capabilities: [
+        {
+          id: "query",
+          label: "Read Gmail",
+          defaultMode: "ask",
+          tools: ["get_message"],
+        },
+        {
+          id: "draft",
+          label: "Create drafts",
+          defaultMode: "ask",
+          tools: ["create_draft"],
+        },
+        {
+          id: "write",
+          label: "Organize Gmail",
+          defaultMode: "ask",
+          tools: ["trash_message"],
+        },
+      ],
+      tools: [
+        {
+          name: "get_message",
+          description: "Get a Gmail message.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Read Gmail",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "create_draft",
+          description: "Create a Gmail draft.",
+          classification: {
+            capabilityId: "draft",
+            capabilityLabel: "Create drafts",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+        {
+          name: "trash_message",
+          description: "Move a Gmail message to trash.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Organize Gmail",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-03T08:00:00.000Z",
+      refreshAfter: "2026-09-03T09:00:00.000Z",
       lastDiscoveryError: null,
     },
   ],
@@ -1241,6 +1341,61 @@ describe("Linear plugin settings", () => {
         { id: "write", defaultMode: "ask" },
       ],
     });
+  });
+
+  it("presents Gmail with every sensitive capability gated on Ask", () => {
+    const state = gmailToolsStateFromPlugin(gmailPlugin);
+    render(<GmailPluginDetail pluginState={{ status: "ready", plugin: gmailPlugin }} canEdit />);
+
+    expect(screen.getByRole("heading", { level: 1, name: "Gmail" })).toBeInTheDocument();
+    expect(screen.getByText("ada@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Gmail account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+    );
+    expect(
+      screen.getByRole("link", { name: "Configure Gmail ingestion in Wiki sources" }),
+    ).toHaveAttribute("href", "/wiki/sources");
+    for (const label of ["Read Gmail", "Create drafts", "Organize Gmail"]) {
+      expect(
+        within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
+          name: "Ask",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    }
+    expect(state).toMatchObject({
+      groups: [
+        { id: "query", defaultMode: "ask", tools: [{ readOnly: true }] },
+        { id: "draft", defaultMode: "ask", tools: [{ readOnly: false }] },
+        { id: "write", defaultMode: "ask", tools: [{ readOnly: false }] },
+      ],
+    });
+    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/27c6666fd61b9f939295b9617e447b7bdce64b66/gmail");
+  });
+
+  it("prompts older Gmail connections to grant the full MCP scope", () => {
+    const oldGrant = {
+      ...account("gint_gmail_old", "ada@example.com", {}, "gmail"),
+      accountEmail: "ada@example.com",
+      scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    } satisfies IntegrationAccountView;
+    render(
+      <GmailPluginDetailView
+        pluginState={{ status: "ready", plugin: gmailPlugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: oldGrant }],
+          permissionConnection: oldGrant,
+        }}
+        toolsState={gmailToolsStateFromPlugin(gmailPlugin)}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Enable full Gmail tools" })).toHaveAttribute(
+      "href",
+      "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+    );
   });
 
   it("builds the two-bucket advanced fallback with ask defaults", () => {

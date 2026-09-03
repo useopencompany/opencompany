@@ -166,6 +166,23 @@ describe("remote MCP classification", () => {
     ).toMatchObject({ curated: false, capability: { defaultMode: "ask" } });
   });
 
+  it("classifies a curated draft tool as a write effect with an Ask default", () => {
+    expect(
+      classifyRemoteTool({ name: "create_draft" }, [
+        {
+          id: "draft",
+          label: "Create drafts",
+          defaultMode: "ask",
+          tools: ["create_draft"],
+        },
+      ]),
+    ).toMatchObject({
+      capability: { id: "draft", defaultMode: "ask" },
+      bucket: "write",
+      curated: true,
+    });
+  });
+
   it("keeps Better Stack telemetry and mutations behind Ask while docs stay On", () => {
     const capabilities = [
       {

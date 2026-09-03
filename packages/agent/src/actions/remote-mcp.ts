@@ -273,7 +273,7 @@ export function classifyRemoteTool(
     const capability = matches[0]!;
     return {
       capability,
-      bucket: capability.id === "write" ? "write" : "read",
+      bucket: capability.id === "read" || capability.id === "query" ? "read" : "write",
       curated: true,
     };
   }

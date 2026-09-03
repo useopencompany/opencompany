@@ -4,6 +4,7 @@ import {
   createGoogleIntegrationState,
   GOOGLE_PROVIDER_CONFIG,
   googleOAuthRedirectUri,
+  googleProviderConfigForAccess,
   verifyGoogleIntegrationState,
 } from "./google-oauth";
 
@@ -27,13 +28,32 @@ describe("opencompany Google OAuth", () => {
 
     expect(verifyGoogleIntegrationState(state)).toMatchObject({
       provider: "gmail",
+      access: "default",
       userWorkosId: "user_123",
       returnTo: "/settings",
     });
   });
 
-  it("requests draft-capable Gmail, writable Calendar, and read-plus-edit Drive scopes", () => {
+  it("preserves the Gmail MCP access intent in signed state", () => {
+    const state = createGoogleIntegrationState({
+      provider: "gmail",
+      access: "gmail_mcp",
+      userWorkosId: "user_123",
+      returnTo: "/settings/plugins/gmail",
+    });
+
+    expect(verifyGoogleIntegrationState(state)).toMatchObject({
+      provider: "gmail",
+      access: "gmail_mcp",
+      returnTo: "/settings/plugins/gmail",
+    });
+  });
+
+  it("keeps the default Gmail grant narrow and requests full access only for MCP", () => {
     const gmailUrl = new URL(buildGoogleAuthorizationUrl(GOOGLE_PROVIDER_CONFIG.gmail, "state"));
+    const gmailMcpUrl = new URL(
+      buildGoogleAuthorizationUrl(googleProviderConfigForAccess("gmail", "gmail_mcp"), "state"),
+    );
     const calendarUrl = new URL(
       buildGoogleAuthorizationUrl(GOOGLE_PROVIDER_CONFIG.google_calendar, "state"),
     );
@@ -51,6 +71,10 @@ describe("opencompany Google OAuth", () => {
     );
     expect(gmailScopes).toContain("https://www.googleapis.com/auth/gmail.compose");
     expect(gmailScopes).not.toContain("https://www.googleapis.com/auth/gmail.send");
+    expect(gmailScopes).not.toContain("https://www.googleapis.com/auth/gmail.modify");
+    expect(gmailMcpUrl.searchParams.get("scope")?.split(" ")).toContain(
+      "https://www.googleapis.com/auth/gmail.modify",
+    );
     expect(calendarUrl.searchParams.get("scope")).not.toContain("calendar.events.readonly");
     expect(driveUrl.searchParams.get("scope")).toContain(
       "https://www.googleapis.com/auth/drive.readonly",

@@ -87,6 +87,21 @@ describe("Google ingress", () => {
       "https://opencompany.example.com/api/integrations/gmail/callback",
     );
     expect(location.searchParams.get("state")).toBeTruthy();
+    expect(location.searchParams.get("scope")).not.toContain("gmail.modify");
+  });
+
+  it("requests the full Gmail scope only for the official MCP plugin", async () => {
+    const response = await ingress().start(
+      "gmail",
+      new Request(
+        "https://api.example.com/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+      ),
+    );
+    const location = new URL(response.headers.get("location") ?? "");
+
+    expect(location.searchParams.get("scope")?.split(" ")).toContain(
+      "https://www.googleapis.com/auth/gmail.modify",
+    );
   });
 
   it("redirects anonymous browsers to the web sign-in", async () => {
@@ -151,7 +166,7 @@ describe("Google ingress", () => {
       tokens: {
         access_token: "at",
         refresh_token: "rt",
-        scope: "openid email https://www.googleapis.com/auth/gmail.readonly",
+        scope: "openid email https://www.googleapis.com/auth/gmail.modify",
       },
       expiresAt: new Date(Date.now() + 3_600_000),
     } as never);
@@ -164,8 +179,9 @@ describe("Google ingress", () => {
 
     const state = createGoogleIntegrationState({
       provider: "gmail",
+      access: "gmail_mcp",
       userWorkosId: "user_1",
-      returnTo: "/settings",
+      returnTo: "/settings/plugins/gmail",
     });
     const response = await ingress().callback(
       "gmail",
@@ -176,7 +192,16 @@ describe("Google ingress", () => {
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location") ?? "");
     expect(location.origin).toBe("https://opencompany.example.com");
+    expect(location.pathname).toBe("/settings/plugins/gmail");
     expect(location.searchParams.get("setup")).toBe("connected");
+    expect(exchangeGoogleCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "gmail",
+        scopes: expect.arrayContaining(["https://www.googleapis.com/auth/gmail.modify"]),
+      }),
+      "abc",
+      "https://opencompany.example.com/api/integrations/gmail/callback",
+    );
     expect(connectGoogleIntegration).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: "gmail",

@@ -7,9 +7,9 @@ import {
   createGoogleIntegrationState,
   exchangeGoogleCode,
   fetchGoogleUserInfo,
-  GOOGLE_PROVIDER_CONFIG,
   type GoogleIntegrationProvider,
   googleOAuthRedirectUri,
+  googleProviderConfigForAccess,
   isGoogleIntegrationConfigured,
   verifyGoogleIntegrationState,
 } from "@opencompany/agent/integrations/google-oauth";
@@ -58,7 +58,9 @@ async function handleStart(
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
-  const config = GOOGLE_PROVIDER_CONFIG[provider];
+  const access =
+    provider === "gmail" && url.searchParams.get("access") === "mcp" ? "gmail_mcp" : "default";
+  const config = googleProviderConfigForAccess(provider, access);
   const oauthRedirectUri = googleOAuthRedirectUri(config);
 
   if (!isGoogleIntegrationConfigured()) {
@@ -67,6 +69,7 @@ async function handleStart(
 
   const state = createGoogleIntegrationState({
     provider,
+    access,
     userWorkosId: session.userId,
     returnTo,
   });
@@ -81,7 +84,6 @@ async function handleCallback(
   const session = await resolveIngressSession(input, request);
   if (session.kind === "redirect") return session.response;
   const url = new URL(request.url);
-  const config = GOOGLE_PROVIDER_CONFIG[provider];
   const errorRedirect = (returnTo: string) => statusRedirect(session, returnTo, provider, "error");
 
   let state: ReturnType<typeof verifyGoogleIntegrationState>;
@@ -105,6 +107,7 @@ async function handleCallback(
     });
     return errorRedirect(state.returnTo);
   }
+  const config = googleProviderConfigForAccess(provider, state.access);
 
   if (!isGoogleIntegrationConfigured()) {
     return errorRedirect(state.returnTo);

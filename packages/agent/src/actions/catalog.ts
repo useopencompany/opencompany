@@ -66,6 +66,9 @@ export async function resolveActionCatalog(
   const githubPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:github:"),
   );
+  const gmailPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:gmail:"),
+  );
   const githubPluginConnected =
     githubPluginInstalled &&
     (
@@ -79,7 +82,7 @@ export async function resolveActionCatalog(
     registration.source.startsWith("plugin:neon:"),
   );
   const resolved = await Promise.all([
-    resolveGmailActions(input.userWorkosId).catch(() => null),
+    gmailPluginInstalled ? null : resolveGmailActions(input.userWorkosId).catch(() => null),
     resolveGoogleCalendarActions(input.userWorkosId).catch(() => null),
     resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
     linearPluginInstalled ? null : resolveLinearActions(input.userWorkosId).catch(() => null),

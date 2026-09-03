@@ -10,6 +10,7 @@ import {
 import {
   BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
+  GMAIL_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   PluginDetail,
@@ -201,14 +202,21 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/github",
     );
+    expect(screen.getByRole("link", { name: /gmail/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/gmail",
+    );
     expect(screen.getByRole("link", { name: /slack/i })).toHaveAttribute(
       "href",
       "/settings/plugins/slack",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(5);
-    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(5);
+    expect(screen.getAllByText("Not installed")).toHaveLength(6);
+    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(6);
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
+    );
+    expect(GMAIL_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/27c6666fd61b9f939295b9617e447b7bdce64b66/gmail",
     );
     expect(LINEAR_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/linear$/u,

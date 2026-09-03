@@ -136,6 +136,11 @@ describe("parsePluginCapabilities", () => {
             defaultMode: "ask",
             tools: ["run_sql"],
           },
+          draft: {
+            label: "Create drafts",
+            defaultMode: "ask",
+            tools: ["create_draft"],
+          },
           future: { label: "Future", defaultMode: "ask", tools: [] },
         },
         "com.example.unknown": { anything: true },
@@ -161,6 +166,12 @@ describe("parsePluginCapabilities", () => {
         label: "Query data",
         defaultMode: "ask",
         tools: ["run_sql"],
+      },
+      {
+        id: "draft",
+        label: "Create drafts",
+        defaultMode: "ask",
+        tools: ["create_draft"],
       },
     ]);
     expect(result.report).toEqual({

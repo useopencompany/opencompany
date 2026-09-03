@@ -1,6 +1,7 @@
 import {
   BetterStackPluginDetail,
   GitHubPluginDetail,
+  GmailPluginDetail,
   LinearPluginDetail,
   NeonPluginDetail,
   type PluginLoadState,
@@ -23,6 +24,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
     const Detail = {
       betterstack: BetterStackPluginDetail,
       github: GitHubPluginDetail,
+      gmail: GmailPluginDetail,
       linear: LinearPluginDetail,
       neon: NeonPluginDetail,
       slack: SlackPluginDetail,

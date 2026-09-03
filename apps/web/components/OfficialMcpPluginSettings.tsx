@@ -166,6 +166,25 @@ export function GitHubPluginDetail({
   );
 }
 
+export function GmailPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.gmail}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function LinearPluginDetail({
   pluginState,
   canEdit,
@@ -294,6 +313,28 @@ export function GitHubPluginDetailView({
   return (
     <OfficialMcpPluginDetailView
       config={OFFICIAL_MCP_PLUGINS.github}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+export function GmailPluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS.gmail}
       pluginState={pluginState}
       accountsState={accountsState}
       toolsState={toolsState}
@@ -1127,6 +1168,7 @@ function pluginAccountsFromState(
   if (
     config.connectionProvider === "betterstack" ||
     config.connectionProvider === "github_user" ||
+    config.connectionProvider === "gmail" ||
     config.connectionProvider === "neon" ||
     config.connectionProvider === "slack"
   ) {
@@ -1172,6 +1214,10 @@ export function defaultGitHubToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("github");
 }
 
+export function defaultGmailToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("gmail");
+}
+
 export function defaultNeonToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("neon");
 }
@@ -1214,6 +1260,10 @@ export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null)
 
 export function githubToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "github");
+}
+
+export function gmailToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "gmail");
 }
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
@@ -1266,6 +1316,7 @@ function officialPluginToolsStateFromPlugin(
     id: definition.id,
     label: definition.label,
     description:
+      officialCapabilityDescription(provider, definition.id) ??
       knownCapabilities.find((capability) => capability.id === definition.id)?.description ??
       `${definition.label} tools supplied by the installed plugin.`,
     modeKey: definition.id,
@@ -1313,6 +1364,10 @@ export function githubToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
   return officialPluginToolsStateFromPreview(preview, "github");
 }
 
+export function gmailToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "gmail");
+}
+
 export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "neon");
 }
@@ -1339,6 +1394,7 @@ function officialPluginToolsStateFromPreview(
         id: capability.id,
         label: capability.label,
         description:
+          officialCapabilityDescription(provider, capability.id) ??
           knownCapabilities.find((known) => known.id === capability.id)?.description ??
           `${capability.label} tools supplied by the official package.`,
         modeKey: capability.id,
@@ -1348,7 +1404,7 @@ function officialPluginToolsStateFromPreview(
           id: `${server.name}:${tool}`,
           name: displayToolName(tool),
           description: null,
-          readOnly: capability.id !== "write",
+          readOnly: capability.id === "read" || capability.id === "query",
         })),
       });
     }
@@ -1364,6 +1420,16 @@ function officialPluginToolsStateFromPreview(
       lastDiscoveryError: null,
     },
   };
+}
+
+function officialCapabilityDescription(
+  provider: OfficialMcpPluginName,
+  capabilityId: CapabilityId,
+): string | null {
+  if (provider === "gmail" && capabilityId === "write") {
+    return "Add or remove labels, create labels, move mail to trash, and mark or unmark spam.";
+  }
+  return null;
 }
 
 export function uncuratedPluginToolGroups(tools: readonly PluginToolView[]): PluginToolGroupView[] {
