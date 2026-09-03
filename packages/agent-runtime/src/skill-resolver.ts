@@ -16,6 +16,77 @@ const MAX_CANDIDATE_RESULTS = 25;
 const MAX_CONCURRENT_BLOB_READS = 8;
 const GITHUB_FETCH_TIMEOUT_MS = 10_000;
 
+export type GitHubArtifactOperation =
+  | "repository_metadata"
+  | "resolve_commit"
+  | "fetch_tree"
+  | "fetch_blob";
+
+export type GitHubArtifactFailureKind =
+  | "http"
+  | "rate_limit"
+  | "network"
+  | "timeout"
+  | "invalid_response";
+
+type GitHubArtifactFetchErrorInput = {
+  operation: GitHubArtifactOperation;
+  failureKind: GitHubArtifactFailureKind;
+  durationMs: number;
+  status?: number;
+  rateLimitLimit?: number;
+  rateLimitRemaining?: number;
+  rateLimitReset?: number;
+  rateLimitResource?: string;
+  retryAfterSeconds?: number;
+  upstreamRequestId?: string;
+  networkErrorName?: string;
+  networkErrorCode?: string;
+};
+
+// Carries only bounded, non-user-controlled diagnostics. Import boundaries retain this as the
+// cause of their client-safe CoreError so request logs and spans can explain GitHub failures
+// without exposing repository URLs, response bodies, credentials, or arbitrary error messages.
+export class GitHubArtifactFetchError extends Error {
+  readonly code = "github_artifact_fetch_failed";
+  readonly upstreamService = "github";
+  readonly upstreamOperation: GitHubArtifactOperation;
+  readonly failureKind: GitHubArtifactFailureKind;
+  readonly upstreamDurationMs: number;
+  readonly upstreamStatus?: number;
+  readonly rateLimitLimit?: number;
+  readonly rateLimitRemaining?: number;
+  readonly rateLimitReset?: number;
+  readonly rateLimitResource?: string;
+  readonly retryAfterSeconds?: number;
+  readonly upstreamRequestId?: string;
+  readonly networkErrorName?: string;
+  readonly networkErrorCode?: string;
+
+  constructor(input: GitHubArtifactFetchErrorInput) {
+    super(githubArtifactErrorMessage(input.failureKind, input.status));
+    this.name = "GitHubArtifactFetchError";
+    this.upstreamOperation = input.operation;
+    this.failureKind = input.failureKind;
+    this.upstreamDurationMs = input.durationMs;
+    if (input.status !== undefined) this.upstreamStatus = input.status;
+    if (input.rateLimitLimit !== undefined) this.rateLimitLimit = input.rateLimitLimit;
+    if (input.rateLimitRemaining !== undefined) {
+      this.rateLimitRemaining = input.rateLimitRemaining;
+    }
+    if (input.rateLimitReset !== undefined) this.rateLimitReset = input.rateLimitReset;
+    if (input.rateLimitResource !== undefined) this.rateLimitResource = input.rateLimitResource;
+    if (input.retryAfterSeconds !== undefined) {
+      this.retryAfterSeconds = input.retryAfterSeconds;
+    }
+    if (input.upstreamRequestId !== undefined) {
+      this.upstreamRequestId = input.upstreamRequestId;
+    }
+    if (input.networkErrorName !== undefined) this.networkErrorName = input.networkErrorName;
+    if (input.networkErrorCode !== undefined) this.networkErrorCode = input.networkErrorCode;
+  }
+}
+
 export class SkillResolverError extends Error {
   constructor(message: string) {
     super(message);
@@ -120,8 +191,199 @@ function githubApiHeaders(): Record<string, string> {
   };
 }
 
-function fetchGitHub(url: string, init: RequestInit = {}) {
-  return fetch(url, { ...init, signal: AbortSignal.timeout(GITHUB_FETCH_TIMEOUT_MS) });
+type GitHubResponse = {
+  response: Response;
+  startedAt: number;
+};
+
+async function fetchGitHub(
+  operation: GitHubArtifactOperation,
+  url: string,
+  init: RequestInit = {},
+): Promise<GitHubResponse> {
+  const startedAt = performance.now();
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(GITHUB_FETCH_TIMEOUT_MS),
+    });
+    return { response, startedAt };
+  } catch (error) {
+    throw githubTransportError(operation, startedAt, error);
+  }
+}
+
+function githubArtifactErrorMessage(kind: GitHubArtifactFailureKind, status?: number) {
+  if (kind === "rate_limit") return "GitHub artifact request was rate limited.";
+  if (kind === "timeout") return "GitHub artifact request timed out.";
+  if (kind === "network") return "GitHub artifact request failed before receiving a response.";
+  if (kind === "invalid_response") return "GitHub artifact request returned an invalid response.";
+  return `GitHub artifact request returned HTTP ${status ?? "unknown"}.`;
+}
+
+function githubResponseError(
+  operation: GitHubArtifactOperation,
+  startedAt: number,
+  response: Response,
+) {
+  const rateLimitRemaining = numericHeader(response.headers, "x-ratelimit-remaining");
+  const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get("retry-after"));
+  const rateLimited =
+    response.status === 429 ||
+    (response.status === 403 && (rateLimitRemaining === 0 || retryAfterSeconds !== undefined));
+
+  return new GitHubArtifactFetchError({
+    operation,
+    failureKind: rateLimited ? "rate_limit" : "http",
+    durationMs: githubDurationMs(startedAt),
+    status: response.status,
+    ...optionalDiagnostic("rateLimitLimit", numericHeader(response.headers, "x-ratelimit-limit")),
+    ...optionalDiagnostic("rateLimitRemaining", rateLimitRemaining),
+    ...optionalDiagnostic("rateLimitReset", numericHeader(response.headers, "x-ratelimit-reset")),
+    ...optionalDiagnostic(
+      "rateLimitResource",
+      boundedDiagnosticHeader(response.headers, "x-ratelimit-resource"),
+    ),
+    ...optionalDiagnostic("retryAfterSeconds", retryAfterSeconds),
+    ...optionalDiagnostic(
+      "upstreamRequestId",
+      boundedDiagnosticHeader(response.headers, "x-github-request-id"),
+    ),
+  });
+}
+
+function githubTransportError(
+  operation: GitHubArtifactOperation,
+  startedAt: number,
+  error: unknown,
+) {
+  const signal = transportErrorSignal(error);
+  const timedOut =
+    signal.name === "TimeoutError" ||
+    signal.name === "AbortError" ||
+    signal.code === "ETIMEDOUT" ||
+    signal.code === "UND_ERR_CONNECT_TIMEOUT" ||
+    signal.code === "UND_ERR_HEADERS_TIMEOUT" ||
+    signal.code === "UND_ERR_BODY_TIMEOUT";
+
+  return new GitHubArtifactFetchError({
+    operation,
+    failureKind: timedOut ? "timeout" : "network",
+    durationMs: githubDurationMs(startedAt),
+    ...optionalDiagnostic("networkErrorName", signal.name),
+    ...optionalDiagnostic("networkErrorCode", signal.code),
+  });
+}
+
+function githubInvalidResponseError(
+  operation: GitHubArtifactOperation,
+  startedAt: number,
+  response: Response,
+) {
+  return new GitHubArtifactFetchError({
+    operation,
+    failureKind: "invalid_response",
+    durationMs: githubDurationMs(startedAt),
+    status: response.status,
+    ...optionalDiagnostic(
+      "upstreamRequestId",
+      boundedDiagnosticHeader(response.headers, "x-github-request-id"),
+    ),
+  });
+}
+
+async function readGitHubJson<T>(input: GitHubResponse, operation: GitHubArtifactOperation) {
+  try {
+    return (await input.response.json()) as T;
+  } catch {
+    throw githubInvalidResponseError(operation, input.startedAt, input.response);
+  }
+}
+
+async function readGitHubBytes(input: GitHubResponse, operation: GitHubArtifactOperation) {
+  try {
+    return new Uint8Array(await input.response.arrayBuffer());
+  } catch (error) {
+    throw githubTransportError(operation, input.startedAt, error);
+  }
+}
+
+function githubDurationMs(startedAt: number) {
+  return Math.max(0, Math.round(performance.now() - startedAt));
+}
+
+function numericHeader(headers: Headers, name: string) {
+  const value = headers.get(name);
+  if (value === null || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function parseRetryAfterSeconds(value: string | null) {
+  if (value === null) return undefined;
+  if (/^\d+$/.test(value)) {
+    const seconds = Number(value);
+    return Number.isSafeInteger(seconds) ? seconds : undefined;
+  }
+  const retryAt = Date.parse(value);
+  if (!Number.isFinite(retryAt)) return undefined;
+  return Math.max(0, Math.ceil((retryAt - Date.now()) / 1_000));
+}
+
+function boundedDiagnosticHeader(headers: Headers, name: string) {
+  const value = headers.get(name)?.trim();
+  if (!value || value.length > 128 || !/^[A-Za-z0-9_.:-]+$/.test(value)) return undefined;
+  return value;
+}
+
+function optionalDiagnostic<Key extends string, Value>(key: Key, value: Value | undefined) {
+  return value === undefined ? {} : ({ [key]: value } as Record<Key, Value>);
+}
+
+const SAFE_NETWORK_ERROR_NAMES = new Set([
+  "AbortError",
+  "DOMException",
+  "Error",
+  "TimeoutError",
+  "TypeError",
+]);
+const SAFE_NETWORK_ERROR_CODES = new Set([
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
+
+function transportErrorSignal(error: unknown) {
+  let current = error;
+  let name: string | undefined;
+  let code: string | undefined;
+  for (let depth = 0; depth < 4 && current && typeof current === "object"; depth += 1) {
+    const candidateName = readErrorField(current, "name");
+    if (!name && typeof candidateName === "string" && SAFE_NETWORK_ERROR_NAMES.has(candidateName)) {
+      name = candidateName;
+    }
+    const candidateCode = readErrorField(current, "code");
+    if (!code && typeof candidateCode === "string" && SAFE_NETWORK_ERROR_CODES.has(candidateCode)) {
+      code = candidateCode;
+    }
+    current = readErrorField(current, "cause");
+  }
+  return { name, code };
+}
+
+function readErrorField(value: object, key: string) {
+  try {
+    return (value as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
 }
 
 function encodeRepoPath(path: string): string {
@@ -136,40 +398,49 @@ function encodeRepoPath(path: string): string {
 export function createGitHubSkillFetcher(): SkillResolverFetcher {
   return {
     async defaultBranch(owner, repo) {
-      const response = await fetchGitHub(
+      const request = await fetchGitHub(
+        "repository_metadata",
         `${GITHUB_API_HOST}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
         { headers: githubApiHeaders() },
       );
+      const { response } = request;
       if (!response.ok) {
-        throw new Error(`Couldn't read repository ${owner}/${repo} (${response.status}).`);
+        throw githubResponseError("repository_metadata", request.startedAt, response);
       }
-      const json = (await response.json()) as { default_branch?: string };
+      const json = await readGitHubJson<{ default_branch?: string }>(
+        request,
+        "repository_metadata",
+      );
       return json.default_branch ?? "main";
     },
     async resolveCommit(owner, repo, ref) {
-      const response = await fetchGitHub(
+      const request = await fetchGitHub(
+        "resolve_commit",
         `${GITHUB_API_HOST}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(ref)}`,
         { headers: githubApiHeaders() },
       );
+      const { response } = request;
       if (response.status === 404 || response.status === 422) return null;
       if (!response.ok) {
-        throw new Error(`Couldn't resolve ${owner}/${repo}@${ref} (${response.status}).`);
+        throw githubResponseError("resolve_commit", request.startedAt, response);
       }
-      const json = (await response.json()) as { sha?: string };
+      const json = await readGitHubJson<{ sha?: string }>(request, "resolve_commit");
       return typeof json.sha === "string" ? json.sha : null;
     },
     async fetchTree(owner, repo, commit) {
-      const response = await fetchGitHub(
+      const request = await fetchGitHub(
+        "fetch_tree",
         `${GITHUB_API_HOST}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${commit}?recursive=1`,
         { headers: githubApiHeaders() },
       );
+      const { response } = request;
       if (!response.ok) {
-        throw new Error(`Couldn't read repository tree (${response.status}).`);
+        throw githubResponseError("fetch_tree", request.startedAt, response);
       }
-      const json = (await response.json()) as {
+      const json = await readGitHubJson<{
         truncated?: boolean;
         tree?: Array<{ path?: string; type?: string; mode?: string; size?: number }>;
-      };
+      }>(request, "fetch_tree");
       const rawEntries = Array.isArray(json.tree) ? json.tree : [];
       const entries = rawEntries.flatMap<SkillTreeEntry>((entry) => {
         if (typeof entry.path !== "string" || typeof entry.mode !== "string") return [];
@@ -186,14 +457,16 @@ export function createGitHubSkillFetcher(): SkillResolverFetcher {
       return { entries, truncated: json.truncated === true };
     },
     async fetchBlob(owner, repo, commit, path) {
-      const response = await fetchGitHub(
+      const request = await fetchGitHub(
+        "fetch_blob",
         `${GITHUB_RAW_HOST}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${commit}/${encodeRepoPath(path)}`,
         { headers: { "User-Agent": "opencompany-skills" } },
       );
+      const { response } = request;
       if (!response.ok) {
-        throw new Error(`Couldn't read ${path} (${response.status}).`);
+        throw githubResponseError("fetch_blob", request.startedAt, response);
       }
-      return new Uint8Array(await response.arrayBuffer());
+      return readGitHubBytes(request, "fetch_blob");
     },
   };
 }

@@ -4,6 +4,7 @@ import {
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
   getAgentModelDefinition,
+  isCodexModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import {
@@ -1107,7 +1108,7 @@ function hashTaskCommand(command: CreateTaskCommand) {
 }
 
 function runtimeModelName(engine: CreateTaskCommand["engine"], model: string) {
-  if (engine === "codex") return codexCliModelNameForModelId(model);
+  if (engine === "codex") return isCodexModelId(model) ? codexCliModelNameForModelId(model) : null;
   if (engine === "claude_code") return claudeCodeCliModelNameForModelId(model);
   return model;
 }

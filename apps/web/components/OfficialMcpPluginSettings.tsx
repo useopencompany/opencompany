@@ -62,7 +62,7 @@ import {
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
 import { type IntegrationAccountView, type IntegrationState } from "@/lib/integration-state";
-import type { OfficialMcpPluginName } from "@/lib/official-mcp-plugins";
+import type { OfficialMcpPluginName } from "@/lib/official-plugins";
 
 const NO_CONNECTION_DISCOVERY_ERROR =
   "No usable provider connection was available for MCP discovery.";
@@ -470,6 +470,7 @@ function PluginHeaderSection({
           config,
           previewState.status === "ready" ? previewState.preview : undefined,
         );
+        toast.success(`${config.label} installed.`);
         router.refresh();
       } catch (cause) {
         setError(errorMessage(cause));
@@ -557,13 +558,23 @@ function PluginHeaderSection({
                 </Button>
               </>
             ) : (
-              <Button size="sm" disabled={isPending} onClick={install}>
-                {isPending ? (
+              <Button
+                size="sm"
+                disabled={isPending || previewState.status !== "ready"}
+                onClick={install}
+              >
+                {isPending || previewState.status === "loading" ? (
                   <Loader2 className="size-3.5 animate-spin" />
                 ) : (
                   <PlugZap className="size-3.5" />
                 )}
-                {isPending ? "Installing…" : "Install"}
+                {isPending
+                  ? "Installing…"
+                  : previewState.status === "loading"
+                    ? "Loading package…"
+                    : previewState.status === "error"
+                      ? "Install unavailable"
+                      : "Install"}
               </Button>
             )
           ) : null}

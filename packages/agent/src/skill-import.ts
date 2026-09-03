@@ -1,5 +1,6 @@
 import {
   createGitHubSkillFetcher,
+  GitHubArtifactFetchError,
   resolveSkill,
   SkillResolverError,
 } from "@opencompany/agent-runtime";
@@ -56,6 +57,13 @@ async function resolveSkillOrThrow(input: { url: string; selectedPath?: string }
   } catch (error) {
     if (error instanceof SkillResolverError) {
       throw new CoreError("invalid_argument", error.message);
+    }
+    if (error instanceof GitHubArtifactFetchError) {
+      throw new CoreError(
+        "unavailable",
+        "Couldn't read that skill right now. Check the URL and try again.",
+        { cause: error },
+      );
     }
     throw new CoreError(
       "unavailable",

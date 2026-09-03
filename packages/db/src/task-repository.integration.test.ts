@@ -527,6 +527,21 @@ describe("Postgres Task repository", () => {
     ).rejects.toMatchObject({ code: "idempotency_conflict" });
   });
 
+  it("rejects retired models when creating a new Codex Task", async () => {
+    await expect(
+      service.createTask(actor(), {
+        idempotencyKey: "retired-codex-model",
+        goal: "Review the repository",
+        engine: "codex",
+        model: "openai/gpt-5.5",
+        source: "manual",
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_argument",
+      message: "Unsupported codex Task model.",
+    });
+  });
+
   it("snapshots currently enabled Plugin IDs into the Workflow Harness at Task creation", async () => {
     await database.exec(`
       INSERT INTO goat.plugins (
