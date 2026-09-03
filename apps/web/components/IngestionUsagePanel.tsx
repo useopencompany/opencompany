@@ -2,10 +2,19 @@ import type { BillingUsageDto } from "@opencompany/protocol";
 import { AlertCircle, DatabaseZap } from "lucide-react";
 import Link from "next/link";
 import { SettingsContent } from "@/components/SettingsChrome";
+import {
+  formatUsdMicros,
+  type SpendCategory,
+  SpendChart,
+  type SpendDay,
+  type SpendSeries,
+} from "@/components/SpendChart";
 
 export type UsageData = BillingUsageDto;
 
-const CATEGORY_LABELS: Record<BillingUsageDto["breakdown"][number]["category"], string> = {
+const CATEGORY_ORDER: readonly SpendCategory[] = ["chat", "ingestion", "capabilities", "other"];
+
+const CATEGORY_LABELS: Record<SpendCategory, string> = {
   chat: "Chat",
   ingestion: "Ingestion",
   capabilities: "Paid capabilities",
@@ -13,9 +22,14 @@ const CATEGORY_LABELS: Record<BillingUsageDto["breakdown"][number]["category"], 
 };
 
 export function UsagePanel({ data }: { data: UsageData }) {
-  const days = groupByDay(data.breakdown);
   const totalSpend = data.breakdown.reduce((sum, row) => sum + row.spendUsdMicros, 0);
   const totalProviderCost = data.breakdown.reduce((sum, row) => sum + row.providerCostUsdMicros, 0);
+  const totalFee = data.breakdown.reduce((sum, row) => sum + row.platformFeeUsdMicros, 0);
+
+  const days = buildDailySeries(data.breakdown);
+  const series = buildSeries(data.breakdown);
+  const avgPerDay = days.length ? totalSpend / days.length : 0;
+
   return (
     <SettingsContent
       title="Usage"
@@ -35,39 +49,27 @@ export function UsagePanel({ data }: { data: UsageData }) {
         </div>
       ) : null}
 
-      <section className="grid gap-2 sm:grid-cols-3">
-        <StatTile label="Spent (30 days)" value={formatUsdMicros(totalSpend)} />
-        <StatTile label="Provider cost" value={formatUsdMicros(totalProviderCost)} />
-        <StatTile label="Usage fee" value="$0.00" />
+      <section className="flex flex-col gap-1">
+        <span className="text-[11px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Spent · last 30 days
+        </span>
+        <span className="text-[34px] font-semibold leading-none tracking-tight text-ink">
+          {formatUsdMicros(totalSpend)}
+        </span>
+        <span className="text-[12.5px] text-ink-subtle">
+          {formatUsdMicros(totalProviderCost)} provider cost · {formatUsdMicros(totalFee)} usage fee
+          {days.length ? ` · ${formatUsdMicros(avgPerDay)}/day avg` : ""}
+        </span>
       </section>
 
-      <section className="flex flex-col gap-2">
+      <section className="flex flex-col gap-3">
         <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Daily spend
         </h2>
         {days.length ? (
-          days.map((day) => (
-            <div key={day.day} className="rounded-lg border border-border bg-canvas px-3 py-2">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-[13px] font-medium text-ink">{formatDay(day.day)}</span>
-                <span className="text-[13px] tabular-nums text-ink">
-                  {formatUsdMicros(day.total)}
-                </span>
-              </div>
-              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
-                {day.rows.map((row) => (
-                  <span
-                    key={row.category}
-                    className="text-[11.5px] leading-4 tabular-nums text-ink-subtle"
-                  >
-                    {CATEGORY_LABELS[row.category]}: {formatUsdMicros(row.spendUsdMicros)}
-                    {" ("}
-                    {formatUsdMicros(row.providerCostUsdMicros)} provider cost{")"}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))
+          <div className="rounded-xl border border-border bg-canvas p-4">
+            <SpendChart days={days} series={series} />
+          </div>
         ) : (
           <p className="text-[12.5px] text-ink-subtle">No spend in the last 30 days.</p>
         )}
@@ -120,48 +122,41 @@ export function UsagePanel({ data }: { data: UsageData }) {
   );
 }
 
-function StatTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-canvas p-3">
-      <div className="text-[11px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-        {label}
-      </div>
-      <div className="mt-1 text-[17px] font-semibold tracking-tight text-ink">{value}</div>
-    </div>
-  );
-}
-
-function groupByDay(rows: BillingUsageDto["breakdown"]) {
-  const byDay = new Map<string, BillingUsageDto["breakdown"]>();
+// Collapse the breakdown into one contiguous column per calendar day (gaps filled with zero) so
+// the chart reads as a continuous timeline rather than skipping days with no spend.
+function buildDailySeries(rows: BillingUsageDto["breakdown"]): SpendDay[] {
+  const byDay = new Map<string, SpendDay>();
   for (const row of rows) {
-    const entry = byDay.get(row.day);
-    if (entry) entry.push(row);
-    else byDay.set(row.day, [row]);
+    let entry = byDay.get(row.day);
+    if (!entry) {
+      entry = { day: row.day, chat: 0, ingestion: 0, capabilities: 0, other: 0, total: 0 };
+      byDay.set(row.day, entry);
+    }
+    entry[row.category] += row.spendUsdMicros;
+    entry.total += row.spendUsdMicros;
   }
-  return [...byDay.entries()]
-    .sort(([a], [b]) => (a < b ? 1 : -1))
-    .map(([day, dayRows]) => ({
-      day,
-      rows: dayRows,
-      total: dayRows.reduce((sum, row) => sum + row.spendUsdMicros, 0),
-    }));
+  if (byDay.size === 0) return [];
+
+  const keys = [...byDay.keys()].sort();
+  const start = new Date(`${keys[0]}T00:00:00.000Z`);
+  const end = new Date(`${keys[keys.length - 1]}T00:00:00.000Z`);
+  const out: SpendDay[] = [];
+  for (let t = start.getTime(), guard = 0; t <= end.getTime() && guard < 400; t += 86_400_000) {
+    const key = new Date(t).toISOString().slice(0, 10);
+    out.push(
+      byDay.get(key) ?? { day: key, chat: 0, ingestion: 0, capabilities: 0, other: 0, total: 0 },
+    );
+    guard += 1;
+  }
+  return out;
 }
 
-function formatUsdMicros(usdMicros: number) {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(usdMicros / 1_000_000);
-}
-
-function formatDay(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00.000Z`));
+function buildSeries(rows: BillingUsageDto["breakdown"]): SpendSeries[] {
+  return CATEGORY_ORDER.map((key) => ({
+    key,
+    label: CATEGORY_LABELS[key],
+    total: rows.reduce((sum, row) => (row.category === key ? sum + row.spendUsdMicros : sum), 0),
+  })).filter((s) => s.total > 0);
 }
 
 function formatProvider(provider: string) {
