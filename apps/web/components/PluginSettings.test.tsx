@@ -12,7 +12,6 @@ import {
   GITHUB_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
-  OFFICIAL_SKILL_PLUGINS,
   OfficialSkillPluginDetail,
   PluginDetail,
   PluginsSettings,
@@ -340,7 +339,7 @@ describe("Plugin settings", () => {
       replayed: false,
     });
 
-    render(<OfficialSkillPluginDetail config={OFFICIAL_SKILL_PLUGINS["yc-advise"]} canEdit />);
+    render(<OfficialSkillPluginDetail name="yc-advise" canEdit />);
 
     expect(screen.getByRole("button", { name: "Loading package…" })).toBeDisabled();
     expect(await screen.findByText("yc-office-hours")).toBeInTheDocument();

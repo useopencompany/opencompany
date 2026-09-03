@@ -332,12 +332,13 @@ type OfficialSkillPluginPreviewState =
   | { status: "error"; message: string };
 
 export function OfficialSkillPluginDetail({
-  config,
+  name,
   canEdit,
 }: {
-  config: OfficialSkillPluginConfig;
+  name: OfficialSkillPluginName;
   canEdit: boolean;
 }) {
+  const config = OFFICIAL_SKILL_PLUGINS[name];
   const router = useRouter();
   const [previewState, setPreviewState] = useState<OfficialSkillPluginPreviewState>({
     status: "loading",
