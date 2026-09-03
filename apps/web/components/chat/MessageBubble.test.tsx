@@ -58,7 +58,7 @@ describe("MessageBubble historical presentation details", () => {
       ],
     } as ChatUiMessage;
 
-    render(
+    const { rerender } = render(
       <MessageBubble
         message={summaryMessage}
         taskLookup={emptyTaskLookup}
@@ -75,6 +75,21 @@ describe("MessageBubble historical presentation details", () => {
     expect(screen.getByRole("button", { name: "Decline" })).toBeVisible();
     expect(presentationMocks.load).not.toHaveBeenCalled();
     expect(onActionApproval).not.toHaveBeenCalled();
+
+    rerender(
+      <MessageBubble
+        message={summaryMessage}
+        taskLookup={emptyTaskLookup}
+        onActionApproval={onActionApproval}
+      />,
+    );
+
+    expect(screen.queryByTestId("chat-action-approval")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-tool-call-use_action")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Decline" })).not.toBeInTheDocument();
+    expect(presentationMocks.load).not.toHaveBeenCalled();
   });
 
   it("shows loading and retry states before replacing a compact tool summary with full detail", async () => {
