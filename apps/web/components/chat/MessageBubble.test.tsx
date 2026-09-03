@@ -1072,6 +1072,43 @@ describe("MessageBubble Codex interactions", () => {
     expect(screen.getByText("Inspect viewer")).toBeVisible();
   });
 
+  it("waits for the assistant turn to finish before compacting completed work", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_active_trace",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "I’m checking the viewer now." },
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_completed",
+          state: "output-available",
+          input: { description: "Inspect viewer", command: "rg MessageBubble" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+        { type: "text", text: "The first check passed. I’ll verify the lifecycle next." },
+      ],
+    };
+
+    const { rerender } = render(
+      <MessageBubble message={message} taskLookup={emptyTaskLookup} compactTrace turnActive />,
+    );
+
+    expect(screen.queryByText("1 tool call, 1 message")).not.toBeInTheDocument();
+    expect(screen.getByText("I’m checking the viewer now.")).toBeVisible();
+    expect(screen.getByText("Inspect viewer")).toBeVisible();
+
+    rerender(<MessageBubble message={message} taskLookup={emptyTaskLookup} compactTrace />);
+
+    expect(screen.getByRole("button", { name: "1 tool call, 1 message" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByText("I’m checking the viewer now.")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("The first check passed. I’ll verify the lifecycle next."),
+    ).toBeVisible();
+  });
+
   it("renders described commands without shell wrappers or internal tool constants", () => {
     const message: ChatUiMessage = {
       id: "assistant_command",
