@@ -7,8 +7,11 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskTurnTerminalError } from "./codex-chat-errors";
 import {
+  buildTaskTerminalProjection,
   buildTaskTurnCompletion,
+  finalizeTaskResult,
   markTaskTurnRunning,
+  resolveTaskTurnContext,
   settleDurableTurn,
   type TaskTurnContext,
 } from "./task-turn";
@@ -49,6 +52,61 @@ describe("session-backed task turns", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.execute.mockResolvedValue({ rows: [{ id: "runtime_1" }] });
+  });
+
+  it("makes direct user continuations conversational after a Brain report", async () => {
+    const spec = workflowSpec();
+    spec.resultMode = "brain_markdown_report";
+    spec.systemPrompt = [
+      "Audit the repository.",
+      "",
+      "<brain_markdown_report_result_contract>",
+      "Finish with only the complete Markdown report body.",
+      "</brain_markdown_report_result_contract>",
+    ].join("\n");
+    spec.systemBlocks = [spec.systemPrompt];
+    const turn = durableTurn();
+    turn.prompt = "Give me the summary here.";
+    turn.settings = { taskResultMode: "assistant_final" };
+
+    const resolved = resolveTaskTurnContext(task(spec), turn);
+
+    expect(resolved.harnessSpec.resultMode).toBe("assistant_final");
+    expect(resolved.harnessSpec.systemPrompt).toBe("Audit the repository.");
+    expect(resolved.harnessSpec.systemBlocks).toEqual(["Audit the repository."]);
+    expect(resolved.task.harnessSpec.resultMode).toBe("brain_markdown_report");
+    await expect(
+      finalizeTaskResult({ context: resolved, assistantContent: "Here is the summary." }),
+    ).resolves.toBe("Here is the summary.");
+
+    const completion = buildTaskTurnCompletion({
+      context: resolved,
+      result: "Here is the summary.",
+      reportedOutcome: "done",
+    });
+    expect(completion.harnessSpec.resultMode).toBe("brain_markdown_report");
+    expect(completion.nextTurn?.harnessSpec.resultMode).toBe("brain_markdown_report");
+    expect(completion.nextTurn?.harnessSpec.systemPrompt).toContain(
+      "<brain_markdown_report_result_contract>",
+    );
+    expect(completion.nextTurn?.harnessSpec.systemBlocks).toEqual([
+      "Implement and verify the change.",
+      expect.stringContaining("<brain_markdown_report_result_contract>"),
+    ]);
+
+    const terminalProjection = buildTaskTerminalProjection(resolved);
+    expect(terminalProjection.harnessSpec.resultMode).toBe("brain_markdown_report");
+    expect(terminalProjection.harnessSpec.systemPrompt).toBe(spec.systemPrompt);
+  });
+
+  it("preserves the planned result mode for internal task turns", () => {
+    const spec = workflowSpec();
+    spec.resultMode = "brain_markdown_report";
+    const originalTask = task(spec);
+
+    const resolved = resolveTaskTurnContext(originalTask, durableTurn());
+
+    expect(resolved).toEqual({ task: originalTask, harnessSpec: spec });
   });
 
   it("turns a completed workflow step into the next engine-specific durable turn", () => {
@@ -195,6 +253,7 @@ describe("session-backed task turns", () => {
         },
         parentSettings: {
           reasoningEffort: "high",
+          taskResultMode: "assistant_final",
           scheduledWakeup: {
             delaySeconds: 600,
             reason: "Wait for CI",
