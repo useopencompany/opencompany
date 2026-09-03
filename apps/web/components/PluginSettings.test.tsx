@@ -22,7 +22,7 @@ import {
 } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
-const toasts = vi.hoisted(() => ({ success: vi.fn() }));
+const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 vi.mock("@opencompany/ui/components/sonner", () => ({ toast: toasts }));
@@ -172,6 +172,7 @@ describe("Plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
     router.refresh.mockReset();
+    toasts.error.mockReset();
     toasts.success.mockReset();
     vi.mocked(previewHeadlessPluginImport).mockReset();
     vi.mocked(previewHeadlessPluginImport).mockResolvedValue(officialPreview);
@@ -214,7 +215,7 @@ describe("Plugin settings", () => {
     expect(screen.getByText(/1 skill · updated/i)).toBeInTheDocument();
   });
 
-  it("routes every uninstalled official package through review before installation", () => {
+  it("offers one-click installation for every uninstalled official package", () => {
     render(<PluginsSettings plugins={[]} canEdit />);
 
     const linearLink = screen.getByRole("link", { name: /linear/i });
@@ -245,10 +246,8 @@ describe("Plugin settings", () => {
       "/settings/plugins/yc-advise",
     );
     expect(screen.getAllByText("Not installed")).toHaveLength(7);
-    expect(screen.getAllByText("Official package · review before installing")).toHaveLength(6);
-    expect(
-      screen.getByText("Official skill package · review before installing"),
-    ).toBeInTheDocument();
+    expect(screen.getAllByText("Official package")).toHaveLength(6);
+    expect(screen.getByText("Official skill package")).toBeInTheDocument();
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
@@ -271,13 +270,62 @@ describe("Plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/2e092c3bc518622f1dc4ac1a6777d87ae3695ec6/yc-advise",
     );
     expect(linearCard).not.toBeNull();
-    expect(within(linearCard as HTMLElement).getByRole("link", { name: "Review" })).toHaveAttribute(
-      "href",
-      "/settings/plugins/linear",
-    );
-    expect(screen.getAllByRole("link", { name: "Review" })).toHaveLength(7);
+    expect(
+      within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
+    ).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(7);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
+  });
+
+  it("installs from the overview and opens the installed plugin page", async () => {
+    const user = userEvent.setup();
+    let finishPreview: ((preview: PluginImportPreviewDto) => void) | undefined;
+    vi.mocked(previewHeadlessPluginImport).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishPreview = resolve;
+        }),
+    );
+
+    render(<PluginsSettings plugins={[]} canEdit />);
+
+    await user.click(screen.getAllByRole("button", { name: "Install" })[2]!);
+
+    expect(screen.getByRole("button", { name: "Installing…" })).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "Install" })[0]).toBeDisabled();
+
+    finishPreview?.(officialPreview);
+
+    await waitFor(() => {
+      expect(router.push).toHaveBeenCalledWith("/settings/plugins/linear");
+    });
+    expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: LINEAR_PLUGIN_SOURCE });
+    expect(importHeadlessPlugin).toHaveBeenCalledWith({
+      url: LINEAR_PLUGIN_SOURCE,
+      expectedResolvedCommit: officialPreview.source.resolvedCommit,
+      expectedIntegrity: officialPreview.integrity,
+    });
+    expect(toasts.success).toHaveBeenCalledWith("Linear installed.");
+  });
+
+  it("keeps the user on the overview and allows a retry when installation fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(previewHeadlessPluginImport).mockRejectedValue(
+      new Error("Package source unavailable."),
+    );
+
+    render(<PluginsSettings plugins={[]} canEdit />);
+
+    await user.click(screen.getAllByRole("button", { name: "Install" })[2]!);
+
+    await waitFor(() => {
+      expect(toasts.error).toHaveBeenCalledWith(
+        "Couldn't install Linear. Package source unavailable.",
+      );
+    });
+    expect(router.push).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("button", { name: "Install" })[2]).toBeEnabled();
   });
 
   it("previews and installs an official skills-only package from its detail page", async () => {
