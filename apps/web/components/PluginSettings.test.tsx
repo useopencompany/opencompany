@@ -16,6 +16,7 @@ import {
   OfficialSkillPluginDetail,
   PluginDetail,
   PluginsSettings,
+  RENDER_PLUGIN_SOURCE,
   SIGNOZ_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
   YC_ADVISE_PLUGIN_SOURCE,
@@ -245,6 +246,10 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/signoz",
     );
+    expect(screen.getByRole("link", { name: /render/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/render",
+    );
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
       "/settings/plugins/yc-advise",
@@ -263,6 +268,9 @@ describe("Plugin settings", () => {
     );
     expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
+    );
+    expect(RENDER_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
     );
     expect(SIGNOZ_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",

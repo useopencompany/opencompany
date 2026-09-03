@@ -136,6 +136,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: NeonIcon,
     iconClassName: "bg-[#00E599] text-[#0B0F14]",
   },
+  render: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.render,
+    Icon: ServerCog,
+    iconClassName: "bg-[#0B0D0E] text-white",
+  },
   signoz: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
     Icon: Activity,
@@ -169,6 +174,8 @@ export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;
+export const RENDER_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.render.source;
 export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
 export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
 export const SIGNOZ_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.signoz.name;

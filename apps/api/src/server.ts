@@ -203,7 +203,17 @@ const app = createApiApp({
   userSettings: createUserSettingsService({ db: database.db }),
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),
-  integrationAccounts: createIntegrationAccountService({ db: database.db, runner: runnerClient }),
+  integrationAccounts: createIntegrationAccountService({
+    db: database.db,
+    runner: runnerClient,
+    refreshRenderPluginRegistrations: ({ userWorkosId, workspaceId }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds: [workspaceId],
+        connectionProvider: "render",
+      }),
+  }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
   mcp: createMcpService({
     // The API-hosted MCP tool runs the same command service in-process — no

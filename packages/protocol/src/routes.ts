@@ -123,6 +123,7 @@ import {
   RenameBrainDocumentBodySchema,
   RenameBrainFolderBodySchema,
   RenameWorkspaceBodySchema,
+  RenderAccountStateEnvelopeSchema,
   RepoConfigDeleteEnvelopeSchema,
   RepoConfigListEnvelopeSchema,
   RepoConfigMutationEnvelopeSchema,
@@ -2818,6 +2819,27 @@ export const connectGranolaAccountRoute = createRoute({
   },
 });
 
+export const connectRenderAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/render",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Render connected (or reconnected) for the acting user. The API key never appears in the response.",
+      content: { "application/json": { schema: RenderAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const startImessagePairingRoute = createRoute({
   method: "post",
   path: "/v1/integration-accounts/imessage/pairing",
@@ -3557,6 +3579,7 @@ export type V1RouteHandlers = {
   disconnectAttioAccount: RouteHandler<typeof disconnectAttioAccountRoute>;
   connectFathomAccount: RouteHandler<typeof connectFathomAccountRoute>;
   connectGranolaAccount: RouteHandler<typeof connectGranolaAccountRoute>;
+  connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
   startImessagePairing: RouteHandler<typeof startImessagePairingRoute>;
   confirmImessagePairing: RouteHandler<typeof confirmImessagePairingRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
@@ -3744,6 +3767,7 @@ export function createV1Router(
       .openapi(disconnectAttioAccountRoute, handlers.disconnectAttioAccount)
       .openapi(connectFathomAccountRoute, handlers.connectFathomAccount)
       .openapi(connectGranolaAccountRoute, handlers.connectGranolaAccount)
+      .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
       .openapi(startImessagePairingRoute, handlers.startImessagePairing)
       .openapi(confirmImessagePairingRoute, handlers.confirmImessagePairing)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
@@ -5000,6 +5024,25 @@ const contractDocumentHandlers: V1RouteHandlers = {
             accountEmail: null,
             accountName: null,
             statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  connectRenderAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "render" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            accountName: "Contract",
+            statusReason: null,
+            capabilityModes: {},
+            toolModes: {},
           },
         },
         meta,

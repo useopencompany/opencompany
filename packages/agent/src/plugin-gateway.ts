@@ -51,6 +51,11 @@ import {
   POSTHOG_MCP_ENDPOINT_URL,
 } from "./integrations/posthog-mcp";
 import {
+  getRenderIntegrationState,
+  loadRenderMcpWorkerConnection,
+  RENDER_MCP_ENDPOINT_URL,
+} from "./integrations/render-mcp";
+import {
   getSigNozIntegrationState,
   loadSigNozMcpWorkerConnection,
   SIGNOZ_MCP_ENDPOINT_URL,
@@ -99,6 +104,12 @@ const providerBindings = {
     endpointUrl: POSTHOG_MCP_ENDPOINT_URL,
     getState: getPostHogIntegrationState,
     loadConnection: loadPostHogMcpWorkerConnection,
+  },
+  render: {
+    provider: "render",
+    endpointUrl: RENDER_MCP_ENDPOINT_URL,
+    getState: getRenderIntegrationState,
+    loadConnection: loadRenderMcpWorkerConnection,
   },
   neon: {
     provider: "neon",

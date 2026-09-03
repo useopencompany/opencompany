@@ -43,6 +43,7 @@ import {
   OFFICIAL_MCP_PLUGINS,
   type OfficialMcpPluginConfig,
 } from "@/components/PluginSettings";
+import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
   IntegrationAccountRow,
@@ -216,6 +217,25 @@ export function NeonPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.neon}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function RenderPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.render}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -724,9 +744,16 @@ function AccountsSection({
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <a href={config.connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
-          Connect {accountLabel} account
-        </a>
+        {config.name === "render" ? (
+          <RenderApiKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />
+        ) : (
+          <a
+            href={config.connectHref}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            Connect {accountLabel} account
+          </a>
+        )}
         {config.ingestionHref && config.ingestionLabel ? (
           <Link
             href={config.ingestionHref}
@@ -1178,6 +1205,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "github_user" ||
     config.connectionProvider === "google_calendar" ||
     config.connectionProvider === "neon" ||
+    config.connectionProvider === "render" ||
     config.connectionProvider === "signoz" ||
     config.connectionProvider === "slack"
   ) {
