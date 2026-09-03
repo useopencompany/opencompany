@@ -102,6 +102,7 @@ import {
   armSandboxActiveTimeoutById,
   armSandboxIdleTimeout,
   createOrConnectSandbox,
+  isCommandTimeoutError,
   isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError,
   managedSandboxMetadata,
@@ -490,7 +491,18 @@ export async function runCodexChatTurn(input: {
       checkExternalAbort();
     }
     executionStage = "ensure_codex_acp";
-    await ensureCodexAcpAdapterInstalled(sandbox);
+    try {
+      await ensureCodexAcpAdapterInstalled(sandbox);
+    } catch (error) {
+      if (isCommandTimeoutError(error)) {
+        throw new CodexChatRetryableInfrastructureError(
+          "Codex runtime setup timed out before the turn started.",
+          error,
+          failureDiagnostic(executionStage, error, redact),
+        );
+      }
+      throw error;
+    }
     checkExternalAbort();
     executionStage = "load_skills";
     const [sessionSkills, workflowSkills, pluginRuntime] = await Promise.all([
@@ -708,7 +720,10 @@ export async function runCodexChatTurn(input: {
       reasoningEffort,
       permissionMode: "bypassPermissions",
       collaborationMode: planMode ? "plan" : "default",
-      goal: taskContext?.harnessSpec.codex?.goalMode ?? settings.goalMode,
+      // Durable task planning currently suppresses Goal mode while its experimental ACP
+      // lifecycle is stabilized. Ignore already-persisted task Goal specs as well, so queued
+      // tasks fall back to the proven prompt path instead of retaining the broken behavior.
+      goal: taskContext ? null : settings.goalMode,
       timeoutMs: env.codexTimeoutMs,
       redact,
       checkAbort: checkRuntimeAbort,

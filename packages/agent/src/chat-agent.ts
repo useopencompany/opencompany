@@ -1,7 +1,9 @@
 import {
   ACTION_TOOL_CONTRACT,
   AGENT_MODEL_CATALOG,
+  CLAUDE_CODE_AGENT_MODEL_IDS,
   CLAUDE_CODE_DEFAULT_MODEL_ID,
+  CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   isClaudeCodeModelId,
@@ -75,8 +77,11 @@ import {
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
+  EDIT_WORKSPACE_SKILL_TOOL_NAME,
   type EditTaskScheduleToolInput,
   type EditTaskScheduleToolOutput,
+  type EditWorkspaceSkillToolInput,
+  type EditWorkspaceSkillToolOutput,
   LIST_ACTIONS_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
   type ListActionsToolInput,
@@ -131,6 +136,10 @@ import {
   createProductChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_NAME_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_TOOL_DESCRIPTION,
   LIST_ACTIONS_TOOL_DESCRIPTION,
   LIST_SKILLS_QUERY_DESCRIPTION,
   LIST_SKILLS_TOOL_DESCRIPTION,
@@ -277,6 +286,10 @@ export type CreateWorkspaceSkillRunner = (
   input: CreateWorkspaceSkillToolInput,
   context: { toolCallId: string },
 ) => Promise<CreateWorkspaceSkillToolOutput>;
+export type EditWorkspaceSkillRunner = (
+  input: EditWorkspaceSkillToolInput,
+  context: { toolCallId: string },
+) => Promise<EditWorkspaceSkillToolOutput>;
 export type ActionDispatcher = {
   // The action catalog resolved server-side from real connection state; ids
   // become the dispatch enum, so a disconnected provider's actions cannot be
@@ -371,6 +384,7 @@ export async function runProductChatAgent(input: {
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
+  editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
@@ -425,6 +439,7 @@ export async function runProductChatAgent(input: {
     ...(input.editTaskSchedule ? { editTaskSchedule: input.editTaskSchedule } : {}),
     ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
     ...(input.createWorkspaceSkill ? { createWorkspaceSkill: input.createWorkspaceSkill } : {}),
+    ...(input.editWorkspaceSkill ? { editWorkspaceSkill: input.editWorkspaceSkill } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
     ...(input.runWiki
@@ -557,6 +572,7 @@ export function createProductChatToolContext(input: {
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
+  editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
@@ -657,6 +673,13 @@ export function createProductChatToolContext(input: {
 
   const startTask = input.startTask;
   if (startTask) {
+    const taskEngineHint = input.requestedEngine ?? inferStartTaskEngine(input.latestUserMessage);
+    const availableTaskModels =
+      taskEngineHint === "codex"
+        ? CODEX_AGENT_MODEL_IDS
+        : taskEngineHint === "claude_code"
+          ? CLAUDE_CODE_AGENT_MODEL_IDS
+          : AGENT_MODEL_CATALOG.map((model) => model.id);
     tools[START_TASK_TOOL_NAME] = tool<
       StartTaskToolInput,
       StartTaskToolOutput,
@@ -686,7 +709,7 @@ export function createProductChatToolContext(input: {
           },
           model: {
             type: "string",
-            enum: AGENT_MODEL_CATALOG.map((model) => model.id),
+            enum: [...availableTaskModels],
             description: START_TASK_MODEL_DESCRIPTION,
           },
         },
@@ -850,6 +873,61 @@ export function createProductChatToolContext(input: {
             ? executionContext.toolCallId
             : `ai-sdk:create-workspace-skill:${++internalWorkspaceSkillInvocationSequence}`;
         return createWorkspaceSkill(
+          {
+            name: args.name.trim(),
+            description: args.description.trim(),
+            instructions: args.instructions.trim(),
+          },
+          { toolCallId },
+        );
+      },
+    });
+  }
+
+  const editWorkspaceSkill = input.editWorkspaceSkill;
+  if (editWorkspaceSkill) {
+    tools[EDIT_WORKSPACE_SKILL_TOOL_NAME] = tool<
+      EditWorkspaceSkillToolInput,
+      EditWorkspaceSkillToolOutput,
+      Record<string, unknown>
+    >({
+      description: EDIT_WORKSPACE_SKILL_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<EditWorkspaceSkillToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: {
+            type: "string",
+            minLength: 1,
+            maxLength: 64,
+            pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            description: EDIT_WORKSPACE_SKILL_NAME_DESCRIPTION,
+          },
+          description: {
+            type: "string",
+            minLength: 1,
+            maxLength: 1_024,
+            description: EDIT_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION,
+          },
+          instructions: {
+            type: "string",
+            minLength: 1,
+            maxLength: 512 * 1_024,
+            description: EDIT_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION,
+          },
+        },
+        required: ["name", "description", "instructions"],
+      }),
+      execute: async (args, executionContext) => {
+        visibleToolActivity = true;
+        const toolCallId =
+          executionContext &&
+          typeof executionContext === "object" &&
+          "toolCallId" in executionContext &&
+          typeof executionContext.toolCallId === "string"
+            ? executionContext.toolCallId
+            : `ai-sdk:edit-workspace-skill:${++internalWorkspaceSkillInvocationSequence}`;
+        return editWorkspaceSkill(
           {
             name: args.name.trim(),
             description: args.description.trim(),

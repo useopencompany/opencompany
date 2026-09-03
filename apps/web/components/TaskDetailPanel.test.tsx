@@ -139,6 +139,24 @@ describe("TaskDetailPanel", () => {
     });
   });
 
+  it("shows a generated Task title that arrives after the page loads", () => {
+    const initialRun = buildHarnessRun({ task: task(), messages: [], events: [] });
+    const view = render(<TaskDetailPanel initialRun={initialRun} />);
+
+    expect(screen.getByTestId("opencompany-surface")).toHaveTextContent("Morning workflow");
+
+    mocks.tasks = [
+      {
+        id: "goat_task_1",
+        name: "Acme interview follow-up",
+        status: "succeeded",
+      },
+    ];
+    view.rerender(<TaskDetailPanel initialRun={initialRun} />);
+
+    expect(screen.getByTestId("opencompany-surface")).toHaveTextContent("Acme interview follow-up");
+  });
+
   it("isolates sessionless history behind the read-only compatibility boundary", () => {
     const run = buildHarnessRun({
       task: { ...task(), sessionId: null },

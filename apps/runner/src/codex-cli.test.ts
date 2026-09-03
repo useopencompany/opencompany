@@ -21,6 +21,7 @@ describe("ensureCodexInstalled", () => {
     expect(CODEX_FALLBACK_NPM_PACKAGE).toBe("@openai/codex@0.148.0");
     expect(run).toHaveBeenCalledOnce();
     expect(run.mock.calls[0]?.[0]).toContain("codex --version");
+    expect(run.mock.calls[0]?.[1]).toEqual({ timeoutMs: 60_000 });
   });
 
   it("replaces a mismatched Codex CLI in the active home prefix", async () => {
@@ -47,6 +48,7 @@ describe("ensureCodexAcpAdapterInstalled", () => {
     await ensureCodexAcpAdapterInstalled({ commands: { run } } as never);
 
     expect(run).toHaveBeenCalledOnce();
+    expect(run.mock.calls[0]?.[1]).toEqual({ timeoutMs: 60_000 });
   });
 
   it("installs and verifies both exact versions when either one drifts", async () => {

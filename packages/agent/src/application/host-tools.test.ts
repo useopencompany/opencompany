@@ -177,9 +177,83 @@ describe("opencompany Chat Task host tools", () => {
       }),
     ).resolves.toEqual({
       ok: false,
-      error: "Only workspace admins can create Skills from Chat.",
+      error: "Only workspace admins can manage Skills from Chat.",
     });
     expect(createWorkspaceSkill).not.toHaveBeenCalled();
+  });
+
+  it("updates a workspace Skill as the authenticated admin", async () => {
+    const updateWorkspaceSkill = vi.fn(async () => ({
+      updated: true as const,
+      name: "add-mcp-provider-plugin",
+      command: "/add-mcp-provider-plugin",
+      bundleId: "skill_bundle_2",
+    }));
+    const dependencies = testDependencies({ updateWorkspaceSkill });
+
+    await expect(
+      executeChatHostToolService({
+        command: {
+          operation: "edit_workspace_skill",
+          sessionId: "runtime_1",
+          runId: "turn_1",
+          toolCallId: "call_2",
+          input: {
+            name: "add-mcp-provider-plugin",
+            description: "Add an MCP provider plugin.",
+            instructions: "Keep the existing workflow and add the provider steps.",
+          },
+        },
+        dependencies,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: { updated: true, command: "/add-mcp-provider-plugin" },
+    });
+
+    expect(updateWorkspaceSkill).toHaveBeenCalledWith({
+      actor: {
+        userId: "user_1",
+        workspaceId: "workspace_1",
+        role: "admin",
+        permissions: ["skill:write"],
+        authenticationMethod: "service",
+      },
+      name: "add-mcp-provider-plugin",
+      skill: {
+        description: "Add an MCP provider plugin.",
+        instructions: "Keep the existing workflow and add the provider steps.",
+      },
+    });
+  });
+
+  it("rejects workspace Skill editing when the authenticated member is not an admin", async () => {
+    const updateWorkspaceSkill = vi.fn();
+    const dependencies = testDependencies({
+      loadContext: vi.fn(async () => ({ ...context, skillToolsEnabled: false })),
+      updateWorkspaceSkill,
+    });
+
+    await expect(
+      executeChatHostToolService({
+        command: {
+          operation: "edit_workspace_skill",
+          sessionId: "runtime_1",
+          runId: "turn_1",
+          toolCallId: "call_2",
+          input: {
+            name: "review",
+            description: "Review work.",
+            instructions: "Review it carefully.",
+          },
+        },
+        dependencies,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: "Only workspace admins can manage Skills from Chat.",
+    });
+    expect(updateWorkspaceSkill).not.toHaveBeenCalled();
   });
 
   it("delegates an agent-created Task through the authenticated Task creator", async () => {
@@ -392,6 +466,7 @@ function testDependencies(
     activateAndListSkills: vi.fn(async () => []),
     readSkillFile: vi.fn(),
     createWorkspaceSkill: vi.fn(),
+    updateWorkspaceSkill: vi.fn(),
     createTask: vi.fn(async () => taskResult),
     listSchedules: vi.fn(async () => []),
     createSchedule: vi.fn(),

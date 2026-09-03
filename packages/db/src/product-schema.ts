@@ -165,6 +165,7 @@ export type IntegrationProvider =
   | "fathom"
   | "attio"
   | "betterstack"
+  | "signoz"
   | "stripe"
   | "latitude"
   | "posthog"
@@ -173,7 +174,7 @@ export type IntegrationProvider =
   | "x_account";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
-// Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, X) are always personal. Installation-bound
+// Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, SigNoz, X) are always personal. Installation-bound
 // connections (GitHub App org installs, Jamie webhook secrets, the Slack
 // answer-bot install) are workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
@@ -1600,7 +1601,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1650,7 +1651,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1700,7 +1701,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",

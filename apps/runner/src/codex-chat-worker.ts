@@ -40,7 +40,7 @@ const logger = createLogger({
 const CODEX_CHAT_SANDBOX_SWEEP_INTERVAL_MS = 60_000;
 const CODEX_CHAT_RETRY_BASE_DELAY_MS = 5_000;
 const CODEX_CHAT_RETRY_MAX_DELAY_MS = 60_000;
-export const CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS = 5;
+export const CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS = 4;
 const CODEX_CHAT_UNEXPECTED_FAILURE_MESSAGE =
   "This chat run failed unexpectedly. Send your message again to retry.";
 const CODEX_CHAT_INFRASTRUCTURE_RETRY_EXHAUSTED_MESSAGE =
@@ -588,11 +588,13 @@ export async function deferCodexChatTurnForRetry(input: {
   }
 }
 
-export function codexChatRetryAt(now: Date, attempts: number) {
-  const delayMs = Math.min(
+export function codexChatRetryAt(now: Date, attempts: number, jitter = Math.random()) {
+  const baseDelayMs = Math.min(
     CODEX_CHAT_RETRY_MAX_DELAY_MS,
     CODEX_CHAT_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attempts - 1),
   );
+  const jitterFactor = 0.75 + Math.max(0, Math.min(1, jitter)) * 0.5;
+  const delayMs = Math.min(CODEX_CHAT_RETRY_MAX_DELAY_MS, Math.round(baseDelayMs * jitterFactor));
   return new Date(now.getTime() + delayMs);
 }
 

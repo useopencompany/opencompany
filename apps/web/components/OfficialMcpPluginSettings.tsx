@@ -62,7 +62,7 @@ import {
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
 import { type IntegrationAccountView, type IntegrationState } from "@/lib/integration-state";
-import type { OfficialMcpPluginName } from "@/lib/official-mcp-plugins";
+import type { OfficialMcpPluginName } from "@/lib/official-plugins";
 
 const NO_CONNECTION_DISCOVERY_ERROR =
   "No usable provider connection was available for MCP discovery.";
@@ -216,6 +216,25 @@ export function SlackPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.slack}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function SigNozPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.signoz}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -470,6 +489,7 @@ function PluginHeaderSection({
           config,
           previewState.status === "ready" ? previewState.preview : undefined,
         );
+        toast.success(`${config.label} installed.`);
         router.refresh();
       } catch (cause) {
         setError(errorMessage(cause));
@@ -557,13 +577,23 @@ function PluginHeaderSection({
                 </Button>
               </>
             ) : (
-              <Button size="sm" disabled={isPending} onClick={install}>
-                {isPending ? (
+              <Button
+                size="sm"
+                disabled={isPending || previewState.status !== "ready"}
+                onClick={install}
+              >
+                {isPending || previewState.status === "loading" ? (
                   <Loader2 className="size-3.5 animate-spin" />
                 ) : (
                   <PlugZap className="size-3.5" />
                 )}
-                {isPending ? "Installing…" : "Install"}
+                {isPending
+                  ? "Installing…"
+                  : previewState.status === "loading"
+                    ? "Loading package…"
+                    : previewState.status === "error"
+                      ? "Install unavailable"
+                      : "Install"}
               </Button>
             )
           ) : null}
@@ -1128,6 +1158,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "betterstack" ||
     config.connectionProvider === "github_user" ||
     config.connectionProvider === "neon" ||
+    config.connectionProvider === "signoz" ||
     config.connectionProvider === "slack"
   ) {
     const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
@@ -1184,6 +1215,10 @@ export function defaultSlackToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("slack");
 }
 
+export function defaultSigNozToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("signoz");
+}
+
 function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): PluginToolsState {
   return {
     status: "ready",
@@ -1228,6 +1263,10 @@ export function betterStackToolsStateFromPlugin(
 
 export function slackToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "slack");
+}
+
+export function signozToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "signoz");
 }
 
 function officialPluginToolsStateFromPlugin(
@@ -1325,6 +1364,10 @@ export function betterStackToolsStateFromPreview(
 
 export function slackToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "slack");
+}
+
+export function signozToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "signoz");
 }
 
 function officialPluginToolsStateFromPreview(

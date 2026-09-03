@@ -1,4 +1,8 @@
-import { type AgentModelDefinition, getAgentModelDefinition } from "@opencompany/agent-runtime";
+import {
+  type AgentModelDefinition,
+  CODEX_AGENT_MODEL_IDS,
+  getAgentModelDefinition,
+} from "@opencompany/agent-runtime";
 import type {
   HarnessEngine,
   HarnessSpec,
@@ -39,6 +43,13 @@ export type HarnessSkillOption = {
   guidance: string;
 };
 
+const CODEX_HARNESS_MODEL_GUIDANCE = {
+  "openai/gpt-5.6-sol": "Default Codex model. Use for complex coding, research, and computer use.",
+  "openai/gpt-5.6-terra": "Use for capable, efficient everyday Codex work.",
+  "openai/gpt-5.6-luna":
+    "Use for fast, affordable Codex work with clear and repeatable requirements.",
+} as const satisfies Record<(typeof CODEX_AGENT_MODEL_IDS)[number], string>;
+
 const HARNESS_MODEL_CONFIG = [
   {
     id: "moonshotai/kimi-k2.6",
@@ -61,10 +72,7 @@ const HARNESS_MODEL_CONFIG = [
     guidance:
       "Premium fallback. Use when the user asks for Claude/Sonnet, explicitly prioritizes maximum quality over cost, or needs premium polished writing/editorial judgment, vision, or file-input strengths. Do not choose merely because research is deep.",
   },
-  {
-    id: "openai/gpt-5.5",
-    guidance: "Use for coding-related work, sharper analysis, and deeper thinking.",
-  },
+  ...CODEX_AGENT_MODEL_IDS.map((id) => ({ id, guidance: CODEX_HARNESS_MODEL_GUIDANCE[id] })),
 ] as const satisfies readonly {
   id: HarnessSpec["model"];
   guidance: string;
@@ -212,14 +220,6 @@ export const HARNESS_CREATION_TOOL_POLICY = promptBlock("tool_policy", [
   "Include github_open_pull_request only when the user explicitly asked to publish, push, or open a pull request.",
 ]);
 
-export const HARNESS_CREATION_CODEX_GOAL_POLICY = promptBlock("codex_goal_policy", [
-  'For engine "codex", set codex.goalMode only when the task has an iterative path, a clear finish line, and a verification surface such as tests, build output, reproduced bug behavior, or a review checklist.',
-  "Use Goal mode for multi-step coding tasks where Codex should keep working across evidence-based continuation until the objective is complete, blocked, budget-limited, usage-limited, or timed out.",
-  "Do not set codex.goalMode for simple one-shot edits, straightforward explanations, quick lookups, or tasks that can finish in a single normal Codex turn.",
-  "When setting codex.goalMode, write a concise objective grounded in task_prompt with only the concrete success criteria the user asked for or that are inherent to the requested coding workflow, such as running relevant tests after a fix. The objective must be non-empty and no more than 4,000 characters.",
-  "Omit codex.goalMode.tokenBudget unless the task clearly needs a custom budget. The runner applies a 200000-token default when it is omitted.",
-]);
-
 export const HARNESS_CREATION_SKILL_POLICY = promptBlock("skill_policy", [
   "Select zero or more skills from available_skills when they materially improve execution.",
   "Skills are reasoning and operating guidance, not operation-level tools. They do not grant external access.",
@@ -240,7 +240,6 @@ export const HARNESS_CREATION_SYSTEM_PROMPT = promptBlock("goat_harness_planner"
   HARNESS_CREATION_MODEL_SELECTION,
   HARNESS_CREATION_PROMPT_CONTRACT,
   HARNESS_CREATION_TOOL_POLICY,
-  HARNESS_CREATION_CODEX_GOAL_POLICY,
   HARNESS_CREATION_SKILL_POLICY,
   HARNESS_CREATION_RESULT_CONTRACT,
 ]);

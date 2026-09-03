@@ -1,8 +1,9 @@
+import { CODEX_AGENT_MODEL_IDS } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { planHarnessForTask } from "./harness";
-import { HARNESS_CREATION_SYSTEM_PROMPT } from "./prompts/harness-creation";
+import { HARNESS_CREATION_SYSTEM_PROMPT, HARNESS_MODEL_OPTIONS } from "./prompts/harness-creation";
 
 const aiMock = vi.hoisted(() => ({
   generateObject: vi.fn(),
@@ -22,7 +23,7 @@ vi.mock("@opencompany/observability/braintrust", () => ({
 
 const model = "moonshotai/kimi-k2.6" as AgentModelId;
 const claudeModel = "anthropic/claude-sonnet-5" as AgentModelId;
-const gptModel = "openai/gpt-5.5" as AgentModelId;
+const gptModel = "openai/gpt-5.6-sol" as AgentModelId;
 const glmModel = "zai/glm-5.2" as AgentModelId;
 
 beforeEach(() => {
@@ -96,9 +97,8 @@ describe("planHarness", () => {
     expect(request.system).toContain("<goat_harness_planner>");
     expect(request.system).toContain("<tool_policy>");
     expect(request.system).toContain("<skill_policy>");
-    expect(request.system).toContain("<codex_goal_policy>");
-    expect(request.system).toContain("set codex.goalMode only");
-    expect(request.system).toContain("grounded in task_prompt");
+    expect(request.system).not.toContain("<codex_goal_policy>");
+    expect(JSON.stringify(request.schema)).not.toContain('"goalMode"');
     expect(request.system).toContain("<result_contract>");
     expect(request.system).toContain("there is no final-result tool");
     expect(request.system).toContain('resultMode "brain_markdown_report"');
@@ -131,7 +131,10 @@ describe("planHarness", () => {
     expect(request.prompt).toContain("long source-set synthesis");
     expect(request.prompt).toContain("<id>\nanthropic/claude-sonnet-5\n</id>");
     expect(request.prompt).toContain("Premium fallback");
-    expect(request.prompt).toContain("<id>\nopenai/gpt-5.5\n</id>");
+    for (const codexModel of CODEX_AGENT_MODEL_IDS) {
+      expect(request.prompt).toContain(`<id>\n${codexModel}\n</id>`);
+    }
+    expect(request.prompt).not.toContain("<id>\nopenai/gpt-5.5\n</id>");
     expect(request.prompt).toContain("<available_operation_tools>");
     expect(request.prompt).toContain("<tool>\nexa_search\n</tool>");
     expect(request.prompt).toContain("<tool>\ngmail_search\n</tool>");
@@ -418,6 +421,37 @@ describe("planHarness", () => {
     });
   });
 
+  it("limits task-planner Codex options to GPT 5.6 and preserves the selected family member", async () => {
+    const codexOptions = HARNESS_MODEL_OPTIONS.filter((option) => option.id.startsWith("openai/"));
+    expect(codexOptions.map((option) => option.id)).toEqual(CODEX_AGENT_MODEL_IDS);
+
+    aiMock.generateObject.mockResolvedValueOnce({
+      object: {
+        schemaVersion: "goat.harness.v1",
+        engine: "codex",
+        model: "openai/gpt-5.6-terra",
+        systemPrompt: "Use Codex to fix and verify the repository.",
+        initialUserMessage: "Fix the repository.",
+        tools: ["exa_search"],
+        skills: [],
+        maxModelSteps: 8,
+        resultMode: "assistant_final",
+      },
+    });
+
+    await expect(
+      planHarness({
+        prompt: "Use Codex to fix the repository.",
+        model,
+        availableTools: ["exa_search"],
+        gatewayApiKey: "gateway",
+      }),
+    ).resolves.toMatchObject({
+      engine: "codex",
+      model: "openai/gpt-5.6-terra",
+    });
+  });
+
   it("enforces a requested Codex engine even if the planner response downgrades it", async () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {
@@ -453,7 +487,7 @@ describe("planHarness", () => {
     expect(prompt).toContain("<requested_engine>\ncodex\n</requested_engine>");
   });
 
-  it("normalizes planner-selected Codex goal mode with a default token budget", async () => {
+  it("drops planner-selected Codex goal mode while automatic task goals are disabled", async () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {
         schemaVersion: "goat.harness.v1",
@@ -476,24 +510,16 @@ describe("planHarness", () => {
       },
     });
 
-    await expect(
-      planHarness({
-        prompt: "Use Codex to fix the flaky test suite in octo/repo and verify it.",
-        model,
-        availableTools: ["exa_search", "github_clone_repository", "github_shell"],
-        githubRepositories: ["octo/repo"],
-        gatewayApiKey: "gateway",
-      }),
-    ).resolves.toMatchObject({
-      engine: "codex",
-      codex: {
-        repository: "octo/repo",
-        goalMode: {
-          objective: "Fix the flaky tests in octo/repo and verify the suite passes.",
-          tokenBudget: 200_000,
-        },
-      },
+    const harness = await planHarness({
+      prompt: "Use Codex to fix the flaky test suite in octo/repo and verify it.",
+      model,
+      availableTools: ["exa_search", "github_clone_repository", "github_shell"],
+      githubRepositories: ["octo/repo"],
+      gatewayApiKey: "gateway",
     });
+
+    expect(harness).toMatchObject({ engine: "codex", codex: { repository: "octo/repo" } });
+    expect(harness.codex).not.toHaveProperty("goalMode");
   });
 
   it("infers a Codex repository and PR intent from connected repository names", async () => {

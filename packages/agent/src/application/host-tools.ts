@@ -132,6 +132,11 @@ export type ChatHostToolServiceDependencies = {
     idempotencyKey: string;
     skill: { name: string; description: string; instructions: string };
   }) => Promise<{ created: true; name: string; command: string; bundleId: string }>;
+  updateWorkspaceSkill: (input: {
+    actor: Actor;
+    name: string;
+    skill: { description: string; instructions: string };
+  }) => Promise<{ updated: true; name: string; command: string; bundleId: string }>;
   createTask: (input: {
     actorId: string;
     workspaceId: string;
@@ -303,6 +308,23 @@ async function executeOperation(
         idempotencyKey: workspaceSkillIdempotencyKey(command.runId, command.toolCallId),
         skill: {
           name: requiredString(toolInput.name, "name"),
+          description: requiredString(toolInput.description, "description"),
+          instructions: requiredString(toolInput.instructions, "instructions"),
+        },
+      });
+    }
+    case "edit_workspace_skill": {
+      assertSkillTools(context);
+      return dependencies.updateWorkspaceSkill({
+        actor: {
+          userId: context.actorId,
+          workspaceId: context.workspaceId,
+          role: "admin",
+          permissions: [SKILL_WRITE_PERMISSION],
+          authenticationMethod: "service",
+        },
+        name: requiredString(toolInput.name, "name"),
+        skill: {
           description: requiredString(toolInput.description, "description"),
           instructions: requiredString(toolInput.instructions, "instructions"),
         },
@@ -578,7 +600,7 @@ function assertTaskTools(context: ChatHostContext) {
 
 function assertSkillTools(context: ChatHostContext) {
   if (!context.skillToolsEnabled) {
-    throw new Error("Only workspace admins can create Skills from Chat.");
+    throw new Error("Only workspace admins can manage Skills from Chat.");
   }
 }
 

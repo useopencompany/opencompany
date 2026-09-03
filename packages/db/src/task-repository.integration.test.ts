@@ -3,6 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
+  CHAT_HOST_TOOL_CONTRACT_VERSION,
+} from "@opencompany/agent-runtime";
+import {
   type Actor,
   TASK_READ_PERMISSION,
   TASK_WRITE_PERMISSION,
@@ -457,6 +461,17 @@ describe("Postgres Task repository", () => {
     });
     expect(replay).toEqual({ ...first, idempotentReplay: true });
 
+    await expect(
+      database.query<{ host_tool_contract_version: string }>(
+        `SELECT host_tool_contract_version
+         FROM goat.codex_chat_sessions
+         WHERE chat_session_id = $1`,
+        [first.task.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ host_tool_contract_version: CHAT_HOST_TOOL_CONTRACT_VERSION }],
+    });
+
     expect(
       (
         await database.query<{
@@ -525,6 +540,42 @@ describe("Postgres Task repository", () => {
     await expect(
       service.createTask(actor(), { ...command, goal: "A conflicting goal" }),
     ).rejects.toMatchObject({ code: "idempotency_conflict" });
+  });
+
+  it("rejects retired models when creating a new Codex Task", async () => {
+    await expect(
+      service.createTask(actor(), {
+        idempotencyKey: "retired-codex-model",
+        goal: "Review the repository",
+        engine: "codex",
+        model: "openai/gpt-5.5",
+        source: "manual",
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_argument",
+      message: "Unsupported codex Task model.",
+    });
+  });
+
+  it("stamps external-engine Tasks with the action host-tool contract", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "codex-task-host-contract",
+      goal: "Review the repository",
+      engine: "codex",
+      model: "openai/gpt-5.6-sol",
+      source: "manual",
+    });
+
+    await expect(
+      database.query<{ host_tool_contract_version: string }>(
+        `SELECT host_tool_contract_version
+         FROM goat.codex_chat_sessions
+         WHERE chat_session_id = $1`,
+        [created.task.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ host_tool_contract_version: ACTION_HOST_TOOL_CONTRACT_VERSION }],
+    });
   });
 
   it("snapshots currently enabled Plugin IDs into the Workflow Harness at Task creation", async () => {

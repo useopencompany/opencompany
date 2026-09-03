@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import type { ChatUiMessage } from "@/lib/chat-ui";
 import { loadHeadlessChatMessagePresentation } from "./headless-chat-presentations";
 
@@ -8,6 +8,8 @@ vi.mock("./headless-chat-api", () => ({
   headlessChatApiBaseUrl: () => "https://api.example.test",
   createHeadlessChatApiFetch: () => mocks.fetch,
 }));
+
+beforeEach(() => mocks.fetch.mockReset());
 
 it("loads and caches a full presentation for a compact historical Message", async () => {
   const summary = {
@@ -60,4 +62,47 @@ it("loads and caches a full presentation for a compact historical Message", asyn
   expect(String(mocks.fetch.mock.calls[0]?.[0])).toBe(
     "https://api.example.test/v1/conversations/conversation_1/messages/message_client_cache/presentation",
   );
+});
+
+it("conditionally revalidates a cached presentation after its summary changes", async () => {
+  const summary = (updatedAt: string) =>
+    ({
+      id: "message_client_revalidation",
+      role: "assistant",
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: { source: "summary", updatedAt },
+      },
+      parts: [{ type: "text", text: "Done" }],
+    }) as ChatUiMessage;
+  const envelope = (updatedAt: string, detail: string, etag: string) =>
+    Response.json(
+      {
+        data: {
+          presentation: {
+            schemaVersion: "opencompany.chat.debug.v1",
+            uiMessageParts: [{ type: "reasoning", text: detail, state: "done" }],
+          },
+          updatedAt,
+        },
+        meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+      },
+      { headers: { ETag: etag } },
+    );
+  mocks.fetch
+    .mockResolvedValueOnce(
+      envelope("2026-08-10T20:00:01.000Z", "Initial detail", 'W/"presentation-1"'),
+    )
+    .mockResolvedValueOnce(
+      envelope("2026-08-10T20:00:02.000Z", "Updated detail", 'W/"presentation-2"'),
+    );
+
+  await loadHeadlessChatMessagePresentation(summary("2026-08-10T20:00:01.000Z"));
+  const updated = await loadHeadlessChatMessagePresentation(summary("2026-08-10T20:00:02.000Z"));
+
+  expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  expect(mocks.fetch.mock.calls[1]?.[1]).toMatchObject({
+    headers: { Accept: "application/json", "If-None-Match": 'W/"presentation-1"' },
+  });
+  expect(updated.parts[0]).toMatchObject({ text: "Updated detail" });
 });

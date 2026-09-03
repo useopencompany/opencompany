@@ -1673,7 +1673,7 @@ describe("Postgres Chat repositories", () => {
         {
           status: "queued",
           session_id: "task_conversation_1",
-          host_tool_contract_version: "goat.action.v1",
+          host_tool_contract_version: CHAT_HOST_TOOL_CONTRACT_VERSION,
           run_owner: "user_1",
         },
       ],
@@ -1891,7 +1891,7 @@ async function seedTerminalTask(database: PGlite) {
       host_tool_contract_version, status
     ) VALUES (
       'task_runtime_1', 'user_1', 'task_conversation_1', 'opencompany', 'provider/model',
-      'workspace_1', 'goat.action.v1', 'idle'
+      'workspace_1', NULL, 'idle'
     );
     INSERT INTO goat.codex_chat_turns (
       id, user_workos_id, codex_chat_session_id, chat_session_id,

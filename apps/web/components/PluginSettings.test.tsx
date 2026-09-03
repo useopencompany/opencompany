@@ -12,14 +12,20 @@ import {
   GITHUB_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
+  OFFICIAL_SKILL_PLUGINS,
+  OfficialSkillPluginDetail,
   PluginDetail,
   PluginsSettings,
+  SIGNOZ_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
+  YC_ADVISE_PLUGIN_SOURCE,
 } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
+const toasts = vi.hoisted(() => ({ success: vi.fn() }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
+vi.mock("@opencompany/ui/components/sonner", () => ({ toast: toasts }));
 vi.mock("@/lib/headless-knowledge-commands", () => ({
   approveHeadlessPluginMcp: vi.fn(),
   archiveHeadlessPlugin: vi.fn(),
@@ -128,20 +134,45 @@ const officialPreview = {
   report: { ignoredManifestFields: [], skills: [], mcp: { status: "absent" } },
 } as const satisfies PluginImportPreviewDto;
 
-const githubPreview = {
+const ycAdvisePreview = {
   ...officialPreview,
-  manifest: { name: "github", description: "GitHub workflows." },
+  manifest: {
+    name: "yc-advise",
+    description: "Independent YC-style startup advice and structured founder office hours.",
+  },
   source: {
     ...officialPreview.source,
-    path: "github",
-    resolvedCommit: "e".repeat(40),
+    ref: "2e092c3bc518622f1dc4ac1a6777d87ae3695ec6",
+    path: "yc-advise",
+    resolvedCommit: "2e092c3bc518622f1dc4ac1a6777d87ae3695ec6",
+  },
+  skills: [
+    {
+      path: "skills/yc-office-hours",
+      name: "yc-office-hours",
+      description: "Run candid, practical YC-style founder office hours.",
+      integrity: `sha256:${"f".repeat(64)}`,
+      fileCount: 2,
+      totalBytes: 8_192,
+    },
+  ],
+  report: {
+    ...officialPreview.report,
+    skills: [
+      {
+        path: "skills/yc-office-hours",
+        name: "yc-office-hours",
+        status: "valid" as const,
+        integrity: `sha256:${"f".repeat(64)}`,
+      },
+    ],
   },
 } as const satisfies PluginImportPreviewDto;
-
 describe("Plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
     router.refresh.mockReset();
+    toasts.success.mockReset();
     vi.mocked(previewHeadlessPluginImport).mockReset();
     vi.mocked(previewHeadlessPluginImport).mockResolvedValue(officialPreview);
     vi.mocked(importHeadlessPlugin).mockReset();
@@ -183,7 +214,7 @@ describe("Plugin settings", () => {
     expect(screen.getByText(/1 skill · updated/i)).toBeInTheDocument();
   });
 
-  it("offers every immutable official MCP package before installation", async () => {
+  it("routes every uninstalled official package through review before installation", () => {
     render(<PluginsSettings plugins={[]} canEdit />);
 
     const linearLink = screen.getByRole("link", { name: /linear/i });
@@ -205,8 +236,19 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/slack",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(5);
-    expect(screen.getAllByText("Official package · ready to install")).toHaveLength(5);
+    expect(screen.getByRole("link", { name: /signoz/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/signoz",
+    );
+    expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/yc-advise",
+    );
+    expect(screen.getAllByText("Not installed")).toHaveLength(7);
+    expect(screen.getAllByText("Official package · review before installing")).toHaveLength(6);
+    expect(
+      screen.getByText("Official skill package · review before installing"),
+    ).toBeInTheDocument();
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
@@ -219,48 +261,53 @@ describe("Plugin settings", () => {
     expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
     );
+    expect(SIGNOZ_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
+    );
     expect(SLACK_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
     );
+    expect(YC_ADVISE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/2e092c3bc518622f1dc4ac1a6777d87ae3695ec6/yc-advise",
+    );
     expect(linearCard).not.toBeNull();
-    await userEvent.click(
-      within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
+    expect(within(linearCard as HTMLElement).getByRole("link", { name: "Review" })).toHaveAttribute(
+      "href",
+      "/settings/plugins/linear",
     );
-    await waitFor(() =>
-      expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: LINEAR_PLUGIN_SOURCE }),
-    );
-    expect(importHeadlessPlugin).toHaveBeenCalledWith({
-      url: LINEAR_PLUGIN_SOURCE,
-      expectedResolvedCommit: officialPreview.source.resolvedCommit,
-      expectedIntegrity: officialPreview.integrity,
-    });
-    expect(router.push).toHaveBeenCalledWith("/settings/plugins/linear");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Review" })).toHaveLength(7);
+    expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
+    expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });
 
-  it("installs the immutable official GitHub package from its pinned source", async () => {
-    vi.mocked(previewHeadlessPluginImport).mockResolvedValue(githubPreview);
+  it("previews and installs an official skills-only package from its detail page", async () => {
+    vi.mocked(previewHeadlessPluginImport).mockResolvedValue(ycAdvisePreview);
     vi.mocked(importHeadlessPlugin).mockResolvedValue({
-      plugin: { ...plugin, name: "github", manifest: githubPreview.manifest },
+      plugin: {
+        ...plugin,
+        name: "yc-advise",
+        manifest: ycAdvisePreview.manifest,
+        stdioServers: [],
+      },
       replayed: false,
     });
-    render(<PluginsSettings plugins={[]} canEdit />);
 
-    const githubCard = screen.getByRole("link", { name: /github/i }).closest("div.border");
-    expect(githubCard).not.toBeNull();
-    await userEvent.click(
-      within(githubCard as HTMLElement).getByRole("button", { name: "Install" }),
-    );
+    render(<OfficialSkillPluginDetail config={OFFICIAL_SKILL_PLUGINS["yc-advise"]} canEdit />);
 
-    await waitFor(() =>
-      expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: GITHUB_PLUGIN_SOURCE }),
-    );
+    expect(screen.getByRole("button", { name: "Loading package…" })).toBeDisabled();
+    expect(await screen.findByText("yc-office-hours")).toBeInTheDocument();
+    expect(screen.getByText(/no account connection is required/i)).toBeInTheDocument();
+    const installButton = screen.getByRole("button", { name: "Install" });
+    expect(installButton).toBeEnabled();
+    await userEvent.click(installButton);
+
+    await waitFor(() => expect(router.refresh).toHaveBeenCalled());
     expect(importHeadlessPlugin).toHaveBeenCalledWith({
-      url: GITHUB_PLUGIN_SOURCE,
-      expectedResolvedCommit: githubPreview.source.resolvedCommit,
-      expectedIntegrity: githubPreview.integrity,
+      url: YC_ADVISE_PLUGIN_SOURCE,
+      expectedResolvedCommit: ycAdvisePreview.source.resolvedCommit,
+      expectedIntegrity: ycAdvisePreview.integrity,
     });
-    expect(router.push).toHaveBeenCalledWith("/settings/plugins/github");
+    expect(toasts.success).toHaveBeenCalledWith("YC Advise installed.");
   });
 
   it("shows the exact MCP approval boundary without exposing environment values", () => {
@@ -285,6 +332,21 @@ describe("Plugin settings", () => {
     expect(screen.getByText(/resolves to the standalone skill/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete data" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /approve exact package/i })).toBeInTheDocument();
+  });
+
+  it("shows a neutral empty MCP state for skills-only packages", () => {
+    render(<PluginDetail plugin={{ ...plugin, stdioServers: [] }} canEdit />);
+
+    expect(
+      screen.getByText(
+        "An immutable Agent Plugin package with passive Skills and no executable MCP servers.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("This plugin does not include executable MCP servers."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/approve exact package/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/installation alone never starts/i)).not.toBeInTheDocument();
   });
 
   it("offers revocation only for the currently approved integrity", () => {

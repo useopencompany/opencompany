@@ -30,6 +30,7 @@ import {
   listSkillCatalog,
   readChatSkillFile,
   resolveSkillMentions,
+  updateWorkspaceSkillForActor,
 } from "../skills";
 import {
   createTaskScheduleForUser,
@@ -37,6 +38,7 @@ import {
   listTaskSchedulesForUser,
   updateTaskScheduleForUser,
 } from "../task-schedules";
+import { refineWorkflowTaskTitle } from "../workflow-task-title";
 import { createTaskFromWorkflow } from "../workflow-tasks";
 import { listWorkflowCatalog } from "../workflows";
 import {
@@ -45,13 +47,14 @@ import {
   type ChatHostToolServiceDependencies,
   executeChatHostToolService,
 } from "./host-tools";
-import { createTaskForActor } from "./task-creation";
+import { createTaskForActor, updateTaskForActor } from "./task-creation";
 
 const logger = createLogger({ service: "opencompany-goat", runtime: "headless-chat-host-tools" });
 
 export type PersistedHostRuntime = {
   wakeTaskWorker: () => Promise<unknown> | unknown;
   defer: (work: Promise<unknown>) => void;
+  gatewayApiKey: string;
   planHarness: (input: { actorId: string; prompt: string }) => Promise<HarnessSpec>;
   /**
    * Executes a `wiki` tool command through the API-owned boundary. The runner
@@ -105,6 +108,7 @@ export function executePersistedChatHostTool(input: {
     readSkillFile: ({ conversationId, ...skillFile }) =>
       readChatSkillFile({ chatSessionId: conversationId, ...skillFile }),
     createWorkspaceSkill: createWorkspaceSkillForActor,
+    updateWorkspaceSkill: updateWorkspaceSkillForActor,
     createTask: (task) =>
       createTaskForActor(
         {
@@ -125,8 +129,8 @@ export function executePersistedChatHostTool(input: {
         planHarness: input.runtime.planHarness,
       }),
     deleteSchedule: deleteTaskScheduleForUser,
-    createWorkflowTask: ({ actorId, ...workflow }) =>
-      createTaskFromWorkflow(
+    createWorkflowTask: async ({ actorId, ...workflow }) => {
+      const task = await createTaskFromWorkflow(
         { ...workflow, userWorkosId: actorId },
         {
           createTask: (task) =>
@@ -139,7 +143,30 @@ export function executePersistedChatHostTool(input: {
               taskDependencies,
             ),
         },
-      ),
+      );
+      if (!task.sessionId) return task;
+
+      const updated = await refineWorkflowTaskTitle(
+        {
+          taskId: task.id,
+          conversationId: task.sessionId,
+          workflowName: task.name,
+          description: workflow.description,
+          apiKey: input.runtime.gatewayApiKey,
+          actorId,
+        },
+        {
+          updateTaskName: (name) =>
+            updateTaskForActor({
+              actorId,
+              workspaceId: workflow.workspaceId,
+              taskId: task.id,
+              name,
+            }),
+        },
+      );
+      return updated ? { ...task, name: updated.task.name } : task;
+    },
     listWorkflowCatalog: listWorkflowCatalog,
     executeBrowserTool: async ({ context, name, args, activeSession, signal }) =>
       createChatBrowserToolSession({

@@ -4,9 +4,9 @@ import {
   UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA,
 } from "@opencompany/agent/chat-agent";
 import {
-  ACTION_HOST_TOOL_CONTRACT_VERSION,
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
+  hostToolContractVersionForEngine,
 } from "@opencompany/agent-runtime";
 import {
   captureProductLlmUsageRecorded,
@@ -83,7 +83,7 @@ type TaskNextTurn = {
   engine: HarnessSpec["engine"];
   chatModel: string;
   runtimeModel: string;
-  hostToolContractVersion: string | null;
+  hostToolContractVersion: string;
   settings: CodexChatTurnSettings;
   assistantDebugTrace: Record<string, unknown>;
 };
@@ -986,8 +986,7 @@ function createNextTaskTurn(input: {
     engine: input.harnessSpec.engine,
     chatModel: input.harnessSpec.model,
     runtimeModel,
-    hostToolContractVersion:
-      input.harnessSpec.engine === "opencompany" ? null : ACTION_HOST_TOOL_CONTRACT_VERSION,
+    hostToolContractVersion: hostToolContractVersionForEngine(input.harnessSpec.engine),
     settings: input.settings ?? {
       ...(input.harnessSpec.codex?.reasoningEffort
         ? { reasoningEffort: input.harnessSpec.codex.reasoningEffort }

@@ -73,6 +73,7 @@ const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
+  isCommandTimeoutError: vi.fn(),
   isRetryableCommandStreamError: vi.fn(),
   isRetryableSandboxAcquisitionError: vi.fn(),
   writeSandboxTextFiles: vi.fn(),
@@ -203,6 +204,7 @@ vi.mock("./sandbox", () => ({
   armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
+  isCommandTimeoutError: sandboxMocks.isCommandTimeoutError,
   isRetryableCommandStreamError: sandboxMocks.isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
   writeSandboxTextFiles: sandboxMocks.writeSandboxTextFiles,
@@ -506,6 +508,7 @@ describe("runCodexChatTurn over ACP", () => {
     sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
+    sandboxMocks.isCommandTimeoutError.mockReturnValue(false);
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
     sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
     sandboxMocks.writeSandboxTextFiles.mockResolvedValue(undefined);
@@ -569,6 +572,26 @@ describe("runCodexChatTurn over ACP", () => {
       codexChatTurnId: "goat_codex_turn_1",
       attemptId: "attempt_1",
       leaseId: "lease_1",
+    });
+  });
+
+  it("retries a Codex ACP setup command timeout as infrastructure failure", async () => {
+    const timeout = new Error("The operation timed out.");
+    timeout.name = "TimeoutError";
+    cliMocks.ensureCodexAcpAdapterInstalled.mockRejectedValueOnce(timeout);
+    sandboxMocks.isCommandTimeoutError.mockReturnValueOnce(true);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: "CodexChatRetryableInfrastructureError",
+      cause: timeout,
+      diagnosticMessage: "[ensure_codex_acp] TimeoutError: The operation timed out.",
     });
   });
 

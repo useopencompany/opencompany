@@ -21,6 +21,11 @@
   --color-danger-bg: #fff5f3;
   --color-danger-border: #f0c0b8;
   --color-success: #216b35;
+  /* Spend categories — validated categorical palette (see settings/usage chart). */
+  --color-spend-chat: #3b6ea5;
+  --color-spend-ingestion: #b07a2e;
+  --color-spend-capabilities: #2e8968;
+  --color-spend-other: #b6b6b0;
 }
 
 :root[data-theme="dark"] {
@@ -43,6 +48,10 @@
   --color-danger-bg: #3a1c18;
   --color-danger-border: #633128;
   --color-success: #9fdaa8;
+  --color-spend-chat: #5b93d6;
+  --color-spend-ingestion: #c1863a;
+  --color-spend-capabilities: #3fa07f;
+  --color-spend-other: #5f635a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -66,6 +75,10 @@
     --color-danger-bg: #3a1c18;
     --color-danger-border: #633128;
     --color-success: #9fdaa8;
+    --color-spend-chat: #5b93d6;
+    --color-spend-ingestion: #c1863a;
+    --color-spend-capabilities: #3fa07f;
+    --color-spend-other: #5f635a;
   }
 }
 

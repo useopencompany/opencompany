@@ -36,6 +36,7 @@ export function integrationConnectionError(provider: string | null, reason: stri
     case "posthog_denied":
     case "neon_denied":
     case "betterstack_denied":
+    case "signoz_denied":
     case "x_account_denied":
       return `${name} authorization was cancelled.`;
     case "missing_code":
@@ -94,6 +95,8 @@ function providerName(provider: string | null) {
       return "Neon";
     case "betterstack":
       return "Better Stack";
+    case "signoz":
+      return "SigNoz";
     case "x_account":
       return "X";
     default:

@@ -746,7 +746,7 @@ function WorkspaceStep({
     <div>
       <StepHeader
         title="Create your workspace"
-        subtitle="This is the home for your company's brain. You can invite teammates later."
+        subtitle="This is the home for your company's brain. Hobby includes one member; upgrade to Pro to invite teammates."
       />
 
       <IdentityRow user={user} />
