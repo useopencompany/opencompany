@@ -17,7 +17,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   ArrowLeft,
-  BookOpen,
   CalendarClock,
   CircleUserRound,
   ExternalLink,
@@ -87,7 +86,6 @@ import {
   updateAutoModelRoutingAction,
   updateImessageEnabledAction,
   updateTaskSpawningAction,
-  updateWikiEnabledAction,
 } from "@/lib/user-preferences";
 
 export function HomeRoute({
@@ -289,13 +287,6 @@ export function PreferencesSettingsRoute() {
           checked={featureFlags.imessage}
           update={updateImessageEnabledAction}
         />
-        <BetaFeatureSwitch
-          icon={BookOpen}
-          label="Wiki (preview)"
-          description="The next version of Brain: one workspace wiki of folders and markdown pages, built for you and your agents."
-          checked={featureFlags.wiki}
-          update={updateWikiEnabledAction}
-        />
       </section>
     </SettingsContent>
   );
@@ -394,10 +385,11 @@ function AppearanceSection() {
 }
 
 export function JamieSettingsRoute() {
-  const { activeBrain, integrations, workspace } = useAppData();
-  const brainSourcesHref = activeBrain
-    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-    : null;
+  const { activeBrain, featureFlags, integrations, workspace } = useAppData();
+  const brainSourcesHref =
+    featureFlags.legacyBrain && activeBrain
+      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+      : null;
 
   return (
     <SettingsContent
@@ -415,10 +407,11 @@ export function JamieSettingsRoute() {
 }
 
 export function GranolaSettingsRoute() {
-  const { activeBrain, integrations } = useAppData();
-  const brainSourcesHref = activeBrain
-    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-    : null;
+  const { activeBrain, featureFlags, integrations } = useAppData();
+  const brainSourcesHref =
+    featureFlags.legacyBrain && activeBrain
+      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+      : null;
 
   return (
     <SettingsContent
@@ -459,10 +452,11 @@ export function IMessageSettingsRoute() {
 }
 
 export function FathomSettingsRoute() {
-  const { activeBrain, integrations } = useAppData();
-  const brainSourcesHref = activeBrain
-    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-    : null;
+  const { activeBrain, featureFlags, integrations } = useAppData();
+  const brainSourcesHref =
+    featureFlags.legacyBrain && activeBrain
+      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+      : null;
 
   return (
     <SettingsContent
@@ -479,10 +473,11 @@ export function FathomSettingsRoute() {
 }
 
 export function AttioSettingsRoute() {
-  const { activeBrain, integrations } = useAppData();
-  const brainSourcesHref = activeBrain
-    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-    : null;
+  const { activeBrain, featureFlags, integrations } = useAppData();
+  const brainSourcesHref =
+    featureFlags.legacyBrain && activeBrain
+      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+      : null;
 
   return (
     <SettingsContent

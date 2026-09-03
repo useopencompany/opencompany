@@ -55,7 +55,6 @@ export type ChatHostBootstrap = {
   workspaceName: string;
   taskToolsEnabled: boolean;
   skillToolsEnabled: boolean;
-  wikiEnabled: boolean;
   browserToolsEnabled: boolean;
   browserProfiles: Array<{
     id: string;

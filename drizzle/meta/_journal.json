@@ -1695,6 +1695,13 @@
       "when": 1788436800000,
       "tag": "0241_goat_signoz_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 242,
+      "version": "7",
+      "when": 1788436801000,
+      "tag": "0242_goat_legacy_brain_flag",
+      "breakpoints": true
     }
   ]
 }

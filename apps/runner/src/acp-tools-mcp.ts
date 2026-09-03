@@ -20,6 +20,7 @@ import {
   type ActionGatewayResponse,
   type ExternalEngineGatewayTicketPayload,
   isActionHostToolContractVersion,
+  isWikiHostToolContractVersion,
   verifyExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import { type ActionTurnRef, resolveActionApproval } from "@opencompany/db/action-governance";
@@ -156,7 +157,7 @@ export function registerAcpToolsMcpRoute(
           signal: request.signal,
         });
       }
-      if (authorizedContext.brainRef) {
+      if (authorizedContext.legacyBrainEnabled && authorizedContext.brainRef) {
         registerBrainTools({
           server,
           capability,
@@ -587,9 +588,7 @@ function rowsFromExecute<Row>(result: unknown): Row[] {
 function wikiToolEnabled(
   context: NonNullable<Awaited<ReturnType<typeof authorizePersistedExternalEngineToolCapability>>>,
 ) {
-  return (
-    context.wikiEnabled && context.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION
-  );
+  return isWikiHostToolContractVersion(context.hostToolContractVersion);
 }
 
 function registerExternalEngineWikiTool(input: {
@@ -627,7 +626,6 @@ function registerExternalEngineWikiTool(input: {
         const current = userWorkosId === initialContext.actorId ? await currentContext() : null;
         return current
           ? {
-              enabled: true,
               workspaces: [
                 {
                   id: current.workspaceId,
@@ -636,7 +634,7 @@ function registerExternalEngineWikiTool(input: {
                 },
               ],
             }
-          : { enabled: false, workspaces: [] };
+          : { workspaces: [] };
       },
       execute: async ({ userWorkosId, workspaceId, command, idempotencyKey }) => {
         const current =
@@ -680,10 +678,11 @@ function registerBrainTools(input: {
   signal: AbortSignal;
 }) {
   const brainRef = input.authorizedContext.brainRef;
-  if (!brainRef) return;
+  if (!input.authorizedContext.legacyBrainEnabled || !brainRef) return;
   const checkAbort = async () => {
     if (input.signal.aborted) throw new Error("The tool call was canceled.");
-    if (!(await input.authorizeOperation())) {
+    const current = await input.authorizeOperation();
+    if (!current?.legacyBrainEnabled || current.brainRef !== brainRef) {
       throw new Error("This engine turn is no longer active.");
     }
   };

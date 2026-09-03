@@ -44,7 +44,7 @@ const localUser = {
   autoModelRoutingEnabled: false,
   chatCapabilitiesBetaEnabled: false,
   imessageEnabled: false,
-  wikiEnabled: true,
+  wikiEnabled: false,
   taskViewMode: "board",
   preferredMcpClient: null,
   mcpSetupCompletedAt: null,
@@ -87,6 +87,7 @@ describe("identity service", () => {
           workosOrganizationId: "org_company",
           name: "Company",
           slug: "company",
+          legacyBrainEnabled: true,
         },
         role: "admin",
       },
@@ -123,7 +124,7 @@ describe("identity service", () => {
     const result = await service.sync(identity);
 
     expect(result).toMatchObject({
-      user: { id: authUser.id, email: authUser.email },
+      user: { id: authUser.id, email: authUser.email, wikiEnabled: true },
       activeWorkspaceId: "goat_ws_company",
       activeBrainId: "brain_general",
     });
@@ -138,6 +139,34 @@ describe("identity service", () => {
       },
       { db },
     );
+  });
+
+  it("withholds legacy Brain identity data when the workspace flag is off", async () => {
+    vi.mocked(listWorkspacesForUser).mockResolvedValue([
+      {
+        workspace: {
+          id: "workspace_company",
+          workosOrganizationId: "org_company",
+          name: "Company",
+          slug: "company",
+          legacyBrainEnabled: false,
+        },
+        role: "admin",
+      },
+    ] as never);
+    const service = createIdentityService({
+      db: dbWith({ selected: [localUser] }),
+      workos: {
+        userManagement: { getUser: vi.fn(), listOrganizationMemberships: vi.fn() },
+      } as never,
+    });
+
+    await expect(service.get(identity)).resolves.toMatchObject({
+      activeWorkspaceId: "workspace_company",
+      activeBrainId: null,
+      brains: [],
+    });
+    expect(listAccessibleBrains).not.toHaveBeenCalled();
   });
 
   it("retries membership adoption on a workspace-free identity read without blocking sign-in", async () => {

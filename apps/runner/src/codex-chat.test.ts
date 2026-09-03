@@ -1,6 +1,7 @@
 import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
   CODEX_COMMAND_TOOL_PART_TYPE,
   type CodexUiMessagePart,
   verifyExternalEngineGatewayTicket,
@@ -61,6 +62,9 @@ const eventMocks = vi.hoisted(() => ({
 }));
 const historyMocks = vi.hoisted(() => ({ loadCodingChatHistory: vi.fn() }));
 const githubAuthMocks = vi.hoisted(() => ({ loadGitHubAuthForUser: vi.fn() }));
+const workspaceMocks = vi.hoisted(() => ({
+  isLegacyBrainEnabledForWorkspace: vi.fn(async () => false),
+}));
 const repoMocks = vi.hoisted(() => ({
   loadRepositoryBootstrap: vi.fn(),
   stageRepositoryBootstrap: vi.fn(),
@@ -127,6 +131,8 @@ vi.mock("./coding-chat-history", async (importOriginal) => {
   const original = await importOriginal<typeof import("./coding-chat-history")>();
   return { ...original, loadCodingChatHistory: historyMocks.loadCodingChatHistory };
 });
+
+vi.mock("@opencompany/db/workspaces", () => workspaceMocks);
 
 vi.mock("./codex-chat-events", () => ({
   createExternalEngineProjector: eventMocks.createExternalEngineProjector,
@@ -524,7 +530,7 @@ describe("runCodexChatTurn over ACP", () => {
         session: codexSession({
           workspaceId: "workspace_1",
           brainRef: "brain_1",
-          hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
+          hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
         }),
         canonicalAttemptId: "attempt_1",
         env: env({ runnerPublicUrl: "https://runner.example.com" }),
@@ -548,7 +554,7 @@ describe("runCodexChatTurn over ACP", () => {
     expect(harnessInput.task).toContain("Actions may modify connected services");
     expect(harnessInput.task).toContain("denial is a normal outcome");
     expect(harnessInput.task).not.toContain("cannot modify connected services");
-    expect(harnessInput.task).toContain("save_to_brain");
+    expect(harnessInput.task).not.toContain("save_to_brain");
     expect(harnessInput.task).toContain("A wiki tool is available");
     const [mcpServer] = harnessInput.mcpServers;
     expect(mcpServer).toMatchObject({

@@ -3,6 +3,7 @@ import {
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
 } from "@opencompany/agent-runtime";
+import { WIKI_TOOL_NAME } from "@opencompany/wiki/tool";
 import { describe, expect, it, vi } from "vitest";
 import {
   CHAT_MAX_STEPS,
@@ -11,6 +12,7 @@ import {
   UPDATE_TASK_STATUS_TOOL_NAME,
 } from "./chat-agent";
 import {
+  BRAIN_TOOL_NAME,
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
   START_TASK_TOOL_NAME,
@@ -18,6 +20,42 @@ import {
 } from "./chat-ui";
 
 const model = "moonshotai/kimi-k2.6" as never;
+
+describe("knowledge tools", () => {
+  it("injects Wiki and legacy Brain tools only when their runners are available", () => {
+    const noKnowledge = createProductChatToolContext({ model }).tools;
+    const wikiOnly = createProductChatToolContext({ model, runWiki: vi.fn() }).tools;
+    const legacyBrainOnly = createProductChatToolContext({ model, runBrainCli: vi.fn() }).tools;
+
+    expect(WIKI_TOOL_NAME in noKnowledge).toBe(false);
+    expect(BRAIN_TOOL_NAME in noKnowledge).toBe(false);
+    expect(WIKI_TOOL_NAME in wikiOnly).toBe(true);
+    expect(BRAIN_TOOL_NAME in wikiOnly).toBe(false);
+    expect(WIKI_TOOL_NAME in legacyBrainOnly).toBe(false);
+    expect(BRAIN_TOOL_NAME in legacyBrainOnly).toBe(true);
+  });
+
+  it("advertises only read commands for a read-only Wiki runner", () => {
+    const wiki = createProductChatToolContext({
+      model,
+      runWiki: vi.fn(),
+      wikiToolReadOnly: true,
+    }).tools[WIKI_TOOL_NAME] as unknown as {
+      description: string;
+      inputSchema: { jsonSchema: { properties: { command: { enum: string[] } } } };
+    };
+
+    expect(wiki.description).toContain("Read-only workspace wiki");
+    expect(wiki.inputSchema.jsonSchema.properties.command.enum).toEqual([
+      "tree",
+      "read",
+      "grep",
+      "search",
+      "recent",
+      "timeline",
+    ]);
+  });
+});
 
 describe("create_workspace_skill tool", () => {
   it("is available only when the authenticated host injects its runner", () => {

@@ -23,6 +23,8 @@ import {
 } from "@opencompany/telemetry";
 import { flushLatitude, latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import {
+  WIKI_READ_TOOL_DESCRIPTION,
+  WIKI_READ_TOOL_INPUT_JSON_SCHEMA,
   WIKI_TOOL_DESCRIPTION,
   WIKI_TOOL_INPUT_JSON_SCHEMA,
   WIKI_TOOL_NAME,
@@ -402,7 +404,7 @@ export async function runProductChatAgent(input: {
   userContext?: ProductChatSystemPromptInput["userContext"];
   recurringSchedules?: ProductChatSystemPromptInput["recurringSchedules"];
   taskToolsEnabled?: boolean;
-  brainCaptureEnabled?: boolean;
+  wikiToolReadOnly?: boolean;
   activeBrain?: ProductChatSystemPromptInput["activeBrain"];
   connectedIntegrations?: ProductChatSystemPromptInput["connectedIntegrations"];
   // Surface-specific prompt blocks appended after the shared system prompt
@@ -440,7 +442,9 @@ export async function runProductChatAgent(input: {
     ...(input.editWorkspaceSkill ? { editWorkspaceSkill: input.editWorkspaceSkill } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
-    ...(input.runWiki ? { runWiki: input.runWiki } : {}),
+    ...(input.runWiki
+      ? { runWiki: input.runWiki, wikiToolReadOnly: Boolean(input.wikiToolReadOnly) }
+      : {}),
     ...(input.sendUserMessage ? { sendUserMessage: input.sendUserMessage } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
@@ -459,9 +463,8 @@ export async function runProductChatAgent(input: {
     ...(input.userContext ? { userContext: input.userContext } : {}),
     ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
     ...(input.taskToolsEnabled !== undefined ? { taskToolsEnabled: input.taskToolsEnabled } : {}),
-    ...(input.brainCaptureEnabled !== undefined
-      ? { brainCaptureEnabled: input.brainCaptureEnabled }
-      : {}),
+    wikiToolEnabled: Boolean(input.runWiki),
+    wikiToolReadOnly: Boolean(input.wikiToolReadOnly),
     ...(input.activeBrain !== undefined ? { activeBrain: input.activeBrain } : {}),
     ...(input.connectedIntegrations !== undefined
       ? { connectedIntegrations: input.connectedIntegrations }
@@ -573,6 +576,7 @@ export function createProductChatToolContext(input: {
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
+  wikiToolReadOnly?: boolean;
   sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
@@ -632,24 +636,22 @@ export function createProductChatToolContext(input: {
       >[0])
     : BRAIN_READ_TOOL_AI_SCHEMA;
 
-  const tools: ToolSet = {
-    [BRAIN_TOOL_NAME]: tool<BrainToolInput, BrainToolOutput, Record<string, unknown>>({
+  const tools: ToolSet = {};
+  if (input.runBrainCli) {
+    tools[BRAIN_TOOL_NAME] = tool<BrainToolInput, BrainToolOutput, Record<string, unknown>>({
       description: BRAIN_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<BrainToolInput>(brainSchema),
       execute: async (args, executionContext?: unknown) => {
-        if (!input.runBrainCli) {
-          throw new Error("brain is not configured for this chat.");
-        }
         visibleToolActivity = true;
         // Multi-brain runners receive the raw args (including `brain`) and own
         // normalization after extracting the target.
         const toolArgs = multiBrain ? args : normalizeBrainToolInput(args);
         return executionContext === undefined
-          ? input.runBrainCli(toolArgs)
-          : input.runBrainCli(toolArgs, executionContext);
+          ? input.runBrainCli!(toolArgs)
+          : input.runBrainCli!(toolArgs, executionContext);
       },
-    }),
-  };
+    });
+  }
 
   const startTrackedTask = async (
     create: () => Promise<StartedTask>,
@@ -807,9 +809,11 @@ export function createProductChatToolContext(input: {
   const runWiki = input.runWiki;
   if (runWiki) {
     tools[WIKI_TOOL_NAME] = tool<WikiToolInput, WikiToolOutput, Record<string, unknown>>({
-      description: WIKI_TOOL_DESCRIPTION,
+      description: input.wikiToolReadOnly ? WIKI_READ_TOOL_DESCRIPTION : WIKI_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<WikiToolInput>(
-        WIKI_TOOL_INPUT_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0],
+        (input.wikiToolReadOnly
+          ? WIKI_READ_TOOL_INPUT_JSON_SCHEMA
+          : WIKI_TOOL_INPUT_JSON_SCHEMA) as unknown as Parameters<typeof jsonSchema>[0],
       ),
       execute: async (args, executionContext) => {
         visibleToolActivity = true;

@@ -109,6 +109,7 @@ function workspace() {
     slug: null,
     createdByWorkosId: "user_1",
     capabilitySessionBudgetUsdMicros: null,
+    legacyBrainEnabled: false,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
   };

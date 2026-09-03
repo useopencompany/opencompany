@@ -2362,7 +2362,7 @@ describe("canonical Hono API", () => {
           workspaceId: actor.workspaceId,
           role: actor.role,
           taskSpawningEnabled: true,
-          wikiEnabled: true,
+          legacyBrainEnabled: true,
         },
       ],
     }));
@@ -2955,7 +2955,7 @@ describe("canonical Hono API", () => {
     const updatePreferences = vi.fn(async () => ({
       timezone: "Europe/Berlin",
       taskSpawningEnabled: true,
-      wikiEnabled: false,
+      wikiEnabled: true as const,
       taskViewMode: "list" as const,
       imessageEnabled: false,
       autoModelRoutingEnabled: true,
@@ -4556,7 +4556,6 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       imessageEnabled: false,
-      wikiEnabled: true,
       taskViewMode: "board" as const,
       preferredMcpClient: null,
       mcpSetupCompletedAt: null,
@@ -4570,6 +4569,7 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
         name: "Workspace",
         slug: "workspace",
         role: "admin" as const,
+        legacyBrainEnabled: true,
       },
     ],
     activeWorkspaceId: actor.workspaceId,

@@ -1,6 +1,7 @@
 import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
   verifyExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import type {
@@ -111,12 +112,17 @@ const wakeupMocks = vi.hoisted(() => ({
   enqueueCodexChatWakeup: vi.fn(),
   persistCodexChatScheduledWakeup: vi.fn(),
 }));
+const workspaceMocks = vi.hoisted(() => ({
+  isLegacyBrainEnabledForWorkspace: vi.fn(async () => false),
+}));
 
 vi.mock("@opencompany/db/claude-code-auth", () => ({
   loadClaudeCodeCredential: authMocks.loadClaudeCodeCredential,
   markClaudeCodeCredentialNeedsReauth: authMocks.markClaudeCodeCredentialNeedsReauth,
   markClaudeCodeCredentialValidated: authMocks.markClaudeCodeCredentialValidated,
 }));
+
+vi.mock("@opencompany/db/workspaces", () => workspaceMocks);
 
 vi.mock("@opencompany/db/plugin-runtime-repository", () => ({
   loadChatSessionPluginRuntime: pluginRuntimeMocks.loadChatSessionPluginRuntime,
@@ -442,7 +448,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       turn: claudeTurn(),
       session: claudeSession({
         workspaceId: "workspace_1",
-        hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
+        hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
       }),
       canonicalAttemptId: "attempt_1",
       env: env({ runnerPublicUrl: "https://runner.example.com" }),

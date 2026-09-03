@@ -1,3 +1,7 @@
+import {
+  getLegacyBrainAccessForUser,
+  markMcpSetupCompletedForUser,
+} from "@opencompany/db/workspaces";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import {
   buildUserMcpResourceMetadataPath,
@@ -36,24 +40,29 @@ export function createMcpService(input: {
           if (!gatewayApiKey) {
             return Response.json({ error: "opencompany MCP is not configured." }, { status: 503 });
           }
+          const legacyBrainEnabled = (await getLegacyBrainAccessForUser(userWorkosId)).length > 0;
 
           const handler = createMcpHandler(
             (server) => {
-              registerBrainTools(server, {
-                userWorkosId,
-                gatewayApiKey,
-                signal: authenticatedRequest.signal,
-              });
+              if (legacyBrainEnabled) {
+                registerBrainTools(server, {
+                  userWorkosId,
+                  gatewayApiKey,
+                  signal: authenticatedRequest.signal,
+                });
+              }
               registerWikiTool(server, {
                 userWorkosId,
                 gatewayApiKey,
                 ...(input.wiki ? { wiki: input.wiki } : {}),
+                onSuccessfulWikiCall: () => markMcpSetupCompletedForUser(userWorkosId),
               });
             },
             {
               serverInfo: { name: MCP_SERVER_NAME, version: "0.1.0" },
-              instructions:
-                'Brains are knowledge stores. Retrieve curated pages with search_brain (semantic + keyword recall), then fetch full documents by id with get_document; raw evidence is opt-in with kind: "evidence". Search results include pagination: when pagination.hasMore is true, repeat the same search with all filters unchanged and offset: pagination.nextOffset. Use list_documents to enumerate a brain and get_timeline for a record\'s dated history. brain is an advanced escape hatch (doctor/help) — prefer the flat tools. Every tool takes an optional brain id; call list_brains first when the user may have more than one brain. When the user explicitly asks to save or remember content, call save_to_brain once with the faithful source content; it creates an inbox draft and queues background curation. Never save inferred preferences or conversational scratchpad content without clear user intent.',
+              instructions: legacyBrainEnabled
+                ? "The workspace wiki is the primary knowledge system; use wiki tree/read/search for recall and wiki write for explicit knowledge updates. Legacy Brain tools are also available for workspaces that opted in: use search_brain/get_document for reads and save_to_brain only when the user explicitly asks to save there."
+                : "The workspace wiki is the knowledge system. Start with wiki tree, read promising pages, use search for recall, and write only when the user explicitly asks to update durable knowledge.",
             },
             { basePath: "", disableSse: true, maxDuration: MCP_MAX_DURATION_SECONDS },
           );

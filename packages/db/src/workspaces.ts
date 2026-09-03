@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import { defaultBrainFolderManifestEntries, normalizeBrainId } from "../../brain/src/index";
 import { calendarMonthWindow, PRO_STRIPE_PRODUCT_KEY } from "./billing-constants";
 import { hashBrainContent, seedDefaultBrainFolders } from "./brain-files";
@@ -191,12 +191,51 @@ export async function listAccessibleBrainsForUser(
         eq(workspaceMembers.userWorkosId, userWorkosId),
       ),
     )
-    .where(brainAccessCondition(userWorkosId))
+    .where(and(eq(workspaces.legacyBrainEnabled, true), brainAccessCondition(userWorkosId)))
     .orderBy(asc(workspaces.createdAt), asc(brains.createdAt));
   return rows.map((row) => ({
     ...row,
     workspaceRole: row.workspaceRole ?? "member",
   }));
+}
+
+export async function getLegacyBrainAccessForUser(
+  userWorkosId: string,
+  options: { db?: DbClient } = {},
+) {
+  const memberships = await listWorkspacesForUser(userWorkosId, options);
+  return memberships
+    .filter(({ workspace }) => workspace.legacyBrainEnabled)
+    .map(({ workspace }) => ({
+      id: workspace.id,
+      name: workspace.name,
+      slug: workspace.slug,
+    }));
+}
+
+export async function isLegacyBrainEnabledForWorkspace(
+  workspaceId: string,
+  options: { db?: DbClient } = {},
+) {
+  const db = options.db ?? getDb();
+  const [workspace] = await db
+    .select({ enabled: workspaces.legacyBrainEnabled })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  return workspace?.enabled === true;
+}
+
+export async function markMcpSetupCompletedForUser(
+  userWorkosId: string,
+  options: { db?: DbClient; completedAt?: Date } = {},
+) {
+  const db = options.db ?? getDb();
+  const completedAt = options.completedAt ?? new Date();
+  await db
+    .update(users)
+    .set({ mcpSetupCompletedAt: completedAt, updatedAt: completedAt })
+    .where(and(eq(users.workosUserId, userWorkosId), isNull(users.mcpSetupCompletedAt)));
 }
 
 export async function getBrainAccess(
