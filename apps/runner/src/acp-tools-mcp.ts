@@ -97,10 +97,29 @@ export function registerAcpToolsMcpRoute(
         reply.status(401).send({ error: "Unauthorized." });
         return;
       }
+      const observedMethod = observedMcpMethod(request.body);
       const authorizedContext = await resolved.authorize({ capability });
       if (!authorizedContext) {
+        if (observedMethod) {
+          logger.warn("ACP tools MCP request lost turn authority", {
+            event: "opencompany.goat_acp_tools_mcp_authority_denied",
+            codex_chat_session_id: capability.codexChatSessionId,
+            codex_chat_turn_id: capability.codexChatTurnId,
+            attempt_id: capability.attemptId,
+            rpc_method: observedMethod,
+          });
+        }
         reply.status(403).send({ error: "This engine turn is no longer active." });
         return;
+      }
+      if (observedMethod) {
+        logger.info("Authorized ACP tools MCP initialization request", {
+          event: "opencompany.goat_acp_tools_mcp_authorized",
+          codex_chat_session_id: capability.codexChatSessionId,
+          codex_chat_turn_id: capability.codexChatTurnId,
+          attempt_id: capability.attemptId,
+          rpc_method: observedMethod,
+        });
       }
 
       const authorizeOperation = () => resolved.authorize({ capability });
@@ -237,6 +256,12 @@ function verifiedCapability(
   if (!ticket || ticket.length > 4_096) return null;
   const payload = verifyExternalEngineGatewayTicket({ ticket, secret: env.internalToken });
   return payload?.v === 2 ? payload : null;
+}
+
+function observedMcpMethod(body: unknown): "initialize" | "tools/list" | null {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
+  const method = (body as Record<string, unknown>).method;
+  return method === "initialize" || method === "tools/list" ? method : null;
 }
 
 function authorityActionError() {
