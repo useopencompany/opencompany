@@ -1,4 +1,10 @@
-export type OfficialMcpPluginName = "betterstack" | "github" | "linear" | "neon" | "slack";
+export type OfficialMcpPluginName =
+  | "betterstack"
+  | "github"
+  | "linear"
+  | "neon"
+  | "signoz"
+  | "slack";
 export type OfficialSkillPluginName = "yc-advise";
 export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
 
@@ -12,7 +18,7 @@ type OfficialPluginMetadataBase = {
 export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
   name: OfficialMcpPluginName;
   kind: "mcp";
-  connectionProvider: "betterstack" | "github_user" | "linear" | "neon" | "slack";
+  connectionProvider: "betterstack" | "github_user" | "linear" | "neon" | "signoz" | "slack";
   connectHref: string;
   accountLabel?: string;
   accountDescription: string;
@@ -77,6 +83,17 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "neon",
     connectHref: "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
     accountDescription: "The account opencompany uses when you run Neon tools.",
+  },
+  signoz: {
+    name: "signoz",
+    kind: "mcp",
+    label: "SigNoz",
+    description: "Investigate logs, metrics, traces, alerts, and dashboards in SigNoz US Cloud.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
+    connectionProvider: "signoz",
+    connectHref: "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz",
+    accountDescription: "The SigNoz US Cloud account opencompany uses when you run SigNoz tools.",
   },
   slack: {
     name: "slack",

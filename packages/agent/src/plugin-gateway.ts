@@ -45,6 +45,11 @@ import {
   POSTHOG_MCP_ENDPOINT_URL,
 } from "./integrations/posthog-mcp";
 import {
+  getSigNozIntegrationState,
+  loadSigNozMcpWorkerConnection,
+  SIGNOZ_MCP_ENDPOINT_URL,
+} from "./integrations/signoz-mcp";
+import {
   getSlackMcpIntegrationState,
   loadSlackMcpWorkerConnection,
   SLACK_MCP_ENDPOINT_URL,
@@ -100,6 +105,12 @@ const providerBindings = {
     endpointUrl: SLACK_MCP_ENDPOINT_URL,
     getState: getSlackMcpIntegrationState,
     loadConnection: loadSlackMcpWorkerConnection,
+  },
+  signoz: {
+    provider: "signoz",
+    endpointUrl: SIGNOZ_MCP_ENDPOINT_URL,
+    getState: getSigNozIntegrationState,
+    loadConnection: loadSigNozMcpWorkerConnection,
   },
 } as const;
 

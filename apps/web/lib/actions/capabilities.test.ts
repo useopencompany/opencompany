@@ -66,6 +66,14 @@ describe("PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
+  it("keeps SigNoz docs visible but gates telemetry reads and mutations", () => {
+    expect(PROVIDER_CAPABILITIES.signoz).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
   it("uses human-readable labels for every registered capability", () => {
     for (const capabilities of Object.values(PROVIDER_CAPABILITIES)) {
       for (const capability of capabilities) {
@@ -128,6 +136,8 @@ describe("mode helpers", () => {
     expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
     expect(providerCapability("neon", "read")?.label).toBe("Inspect Neon structure");
     expect(providerCapability("neon", "query")?.label).toBe("Query database data");
+    expect(providerCapability("signoz", "read")?.label).toBe("Read SigNoz documentation");
+    expect(providerCapability("signoz", "query")?.label).toBe("Inspect observability data");
     expect(providerCapability("slack", "query")?.label).toBe("Read private Slack");
     expect(providerCapability("slack", "write")?.label).toBe("Change Slack");
   });

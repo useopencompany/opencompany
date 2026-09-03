@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   loadBetterStackConnection: vi.fn(),
   getSlackState: vi.fn(),
   loadSlackConnection: vi.fn(),
+  getSigNozState: vi.fn(),
+  loadSigNozConnection: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({ getDb: () => ({ sentinel: "db" }) }));
@@ -67,6 +69,11 @@ vi.mock("./integrations/slack-mcp", () => ({
   SLACK_MCP_ENDPOINT_URL: "https://mcp.slack.com/mcp",
   getSlackMcpIntegrationState: mocks.getSlackState,
   loadSlackMcpWorkerConnection: mocks.loadSlackConnection,
+}));
+vi.mock("./integrations/signoz-mcp", () => ({
+  SIGNOZ_MCP_ENDPOINT_URL: "https://mcp.us.signoz.cloud/mcp",
+  getSigNozIntegrationState: mocks.getSigNozState,
+  loadSigNozMcpWorkerConnection: mocks.loadSigNozConnection,
 }));
 
 import { createPluginGatewayLifecycle, resolvePluginGatewayRegistrations } from "./plugin-gateway";
@@ -253,6 +260,47 @@ describe("plugin gateway registration cache", () => {
         loadConnection: mocks.loadNeonConnection,
       }),
     ]);
+  });
+
+  it("binds SigNoz credentials only to the reviewed US Cloud endpoint", async () => {
+    mocks.listRegistrations.mockResolvedValueOnce([
+      record({
+        pluginName: "signoz",
+        pluginLabel: "signoz",
+        pluginDescription: "SigNoz plugin tools.",
+        connectionProvider: "signoz",
+        server: {
+          name: "signoz",
+          type: "streamable-http",
+          url: "https://mcp.us.signoz.cloud/mcp",
+          headers: {},
+        },
+        refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+      }),
+    ]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:signoz:signoz",
+        connectionProvider: "signoz",
+        getState: mocks.getSigNozState,
+        loadConnection: mocks.loadSigNozConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      record({
+        pluginName: "signoz",
+        connectionProvider: "signoz",
+        server: {
+          name: "signoz",
+          type: "streamable-http",
+          url: "https://mcp.eu.signoz.cloud/mcp",
+          headers: {},
+        },
+      }),
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
   it("binds the official Better Stack package only to the public hosted endpoint", async () => {

@@ -46,3 +46,26 @@ describe("Slack integration state", () => {
     });
   });
 });
+
+describe("SigNoz integration state", () => {
+  it("surfaces the personal MCP account for official plugin settings", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_signoz",
+        provider: "signoz",
+        externalId: "signoz_mcp_us",
+        accountName: "SigNoz",
+        status: "connected",
+        scopes: [],
+      },
+    ]);
+
+    expect(state.personalAccounts.signoz).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_signoz",
+        provider: "signoz",
+        connected: true,
+      }),
+    ]);
+  });
+});

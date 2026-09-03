@@ -29,6 +29,12 @@ import {
   startPostHogMcpOAuth,
   verifyPostHogMcpState,
 } from "@opencompany/agent/integrations/posthog-mcp";
+import {
+  appendSigNozMcpStatus,
+  completeSigNozMcpOAuth,
+  startSigNozMcpOAuth,
+  verifySigNozMcpState,
+} from "@opencompany/agent/integrations/signoz-mcp";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { type IngressSession, resolveIngressSession, sessionRedirect } from "./ingress-session";
@@ -37,7 +43,13 @@ const logger = createLogger({ service: "opencompany-api", runtime: "mcp-oauth-in
 
 type DbLike = any;
 
-export type McpOAuthProvider = "linear" | "posthog" | "neon" | "latitude" | "betterstack";
+export type McpOAuthProvider =
+  | "linear"
+  | "posthog"
+  | "neon"
+  | "latitude"
+  | "betterstack"
+  | "signoz";
 
 // Provider ingress composition for the remote-MCP connectors. Each
 // provider shares the createRemoteMcpIntegration factory; this module
@@ -69,6 +81,15 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     deniedReason: "betterstack_denied",
     invalidStatePath:
       "/settings/plugins/betterstack?integration=betterstack&setup=error&reason=invalid_state",
+  },
+  signoz: {
+    start: startSigNozMcpOAuth,
+    complete: completeSigNozMcpOAuth,
+    verifyState: verifySigNozMcpState,
+    appendStatus: appendSigNozMcpStatus,
+    deniedReason: "signoz_denied",
+    invalidStatePath:
+      "/settings/plugins/signoz?integration=signoz&setup=error&reason=invalid_state",
   },
   linear: {
     start: startLinearMcpOAuth,

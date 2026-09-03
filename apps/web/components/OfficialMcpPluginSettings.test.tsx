@@ -12,6 +12,7 @@ import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  defaultSigNozToolsState,
   GitHubPluginDetail,
   GitHubPluginDetailView,
   githubToolsStateFromPlugin,
@@ -22,6 +23,7 @@ import {
   NeonPluginDetailView,
   neonToolsStateFromPlugin,
   type PluginToolsState,
+  SigNozPluginDetail,
   SlackPluginDetail,
   slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
@@ -91,6 +93,20 @@ const appData = vi.hoisted(() => ({
       ],
       linear: [],
       neon: [],
+      signoz: [
+        {
+          integrationId: "gint_signoz",
+          provider: "signoz",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "SigNoz",
+          connectionLabel: "SigNoz",
+          statusReason: null,
+          scopes: [],
+          capabilityModes: { read: "on", query: "ask", write: "ask" },
+        },
+      ],
       slack: [
         {
           integrationId: "gint_slack",
@@ -673,6 +689,28 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read GitHub");
     expect(html).toContain("Manage GitHub");
     expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps the personal SigNoz connection onto the official plugin surface", () => {
+    const signozPlugin = {
+      ...plugin,
+      id: "plugin_signoz",
+      name: "signoz",
+      manifest: { name: "signoz", description: "Investigate SigNoz telemetry." },
+      source: { ...plugin.source, path: "signoz" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <SigNozPluginDetail
+        pluginState={{ status: "ready", plugin: signozPlugin }}
+        toolsState={defaultSigNozToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("SigNoz");
+    expect(html).toContain("Read SigNoz documentation");
+    expect(html).toContain("Inspect observability data");
+    expect(html).toContain("Manage SigNoz");
   });
 
   it("shows provenance, accounts, discovered tools, and read-only skills", async () => {

@@ -16,6 +16,7 @@ import {
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
+  Activity,
   Archive,
   ChevronDown,
   ExternalLink,
@@ -129,6 +130,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: NeonIcon,
     iconClassName: "bg-[#00E599] text-[#0B0F14]",
   },
+  signoz: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
+    Icon: Activity,
+    iconClassName: "bg-[#FF6B35] text-white",
+  },
   slack: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.slack,
     Icon: SlackIcon,
@@ -157,6 +163,8 @@ export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
 export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
 export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
+export const SIGNOZ_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.signoz.name;
+export const SIGNOZ_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.signoz.source;
 export const SLACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.slack.name;
 export const SLACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.slack.source;
 export const YC_ADVISE_PLUGIN_NAME = OFFICIAL_SKILL_PLUGINS["yc-advise"].name;
@@ -201,6 +209,10 @@ export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialBetterStackPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.betterstack, preview);
+}
+
+export function installOfficialSigNozPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.signoz, preview);
 }
 
 export function installOfficialSlackPlugin(preview?: PluginImportPreviewDto) {
