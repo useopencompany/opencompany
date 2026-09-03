@@ -7,11 +7,7 @@ import {
   SigNozPluginDetail,
   SlackPluginDetail,
 } from "@/components/OfficialMcpPluginSettings";
-import {
-  OFFICIAL_SKILL_PLUGINS,
-  OfficialSkillPluginDetail,
-  PluginDetail,
-} from "@/components/PluginSettings";
+import { OfficialSkillPluginDetail, PluginDetail } from "@/components/PluginSettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { currentUser } from "@/lib/auth";
 import { getHeadlessPlugin } from "@/lib/headless-knowledge-server";
@@ -19,6 +15,7 @@ import {
   isOfficialMcpPluginName,
   isOfficialSkillPluginName,
   OFFICIAL_MCP_PLUGIN_METADATA,
+  OFFICIAL_SKILL_PLUGIN_METADATA,
 } from "@/lib/official-plugins";
 
 export default async function PluginDetailPage({ params }: { params: Promise<{ name: string }> }) {
@@ -41,16 +38,16 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
   }
   if (isOfficialSkillPluginName(normalizedName)) {
     const [context, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(normalizedName)]);
-    const config = OFFICIAL_SKILL_PLUGINS[normalizedName];
+    const metadata = OFFICIAL_SKILL_PLUGIN_METADATA[normalizedName];
     return plugin ? (
       <PluginDetail
         plugin={plugin}
         canEdit={context.role === "admin"}
-        title={config.label}
-        description={config.description}
+        title={metadata.label}
+        description={metadata.description}
       />
     ) : (
-      <OfficialSkillPluginDetail config={config} canEdit={context.role === "admin"} />
+      <OfficialSkillPluginDetail name={normalizedName} canEdit={context.role === "admin"} />
     );
   }
   const [context, plugin] = await Promise.all([currentUser(), getHeadlessPlugin(name)]);
