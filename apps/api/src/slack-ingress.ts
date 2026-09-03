@@ -112,6 +112,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
     const identity = await fetchSlackIdentity({
       accessToken: oauth.accessToken,
       authedUserId: oauth.authedUserId,
+      teamId: oauth.teamId,
     });
 
     failureStage = "connection_persistence";
@@ -120,7 +121,7 @@ async function handleCallback(input: IngressInput, request: Request): Promise<Re
       teamId: oauth.teamId,
       teamName: oauth.teamName,
       teamDomain: identity.teamDomain,
-      authedUserId: oauth.authedUserId,
+      authedUserId: identity.authedUserId,
       accountName: identity.userName,
       accountEmail: identity.userEmail,
       accessToken: oauth.accessToken,

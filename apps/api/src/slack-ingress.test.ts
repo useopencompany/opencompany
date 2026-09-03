@@ -80,11 +80,12 @@ describe("Slack plugin OAuth ingress", () => {
     vi.mocked(exchangeSlackCode).mockResolvedValue({
       teamId: "T123",
       teamName: "Acme",
-      authedUserId: "U123",
+      authedUserId: null,
       accessToken: "xoxp-slack-token",
       scopes: [...SLACK_MCP_USER_SCOPES],
     });
     vi.mocked(fetchSlackIdentity).mockResolvedValue({
+      authedUserId: "U123",
       userName: "Ada",
       userEmail: "ada@acme.example",
       teamDomain: "acme",
@@ -132,7 +133,8 @@ describe("Slack plugin OAuth ingress", () => {
     expect(exchangeSlackCode).toHaveBeenCalledWith("oauth-code");
     expect(fetchSlackIdentity).toHaveBeenCalledWith({
       accessToken: "xoxp-slack-token",
-      authedUserId: "U123",
+      authedUserId: null,
+      teamId: "T123",
     });
     expect(connectSlackIntegration).toHaveBeenCalledWith({
       userWorkosId: "user_1",
@@ -215,7 +217,7 @@ describe("Slack plugin OAuth ingress", () => {
 
   it("logs the OAuth response shape and callback stage without credential values", async () => {
     vi.mocked(exchangeSlackCode).mockRejectedValueOnce(
-      new SlackOAuthResponseError(["team.id", "authed_user.id"], {
+      new SlackOAuthResponseError(["team.id"], {
         credentialLocation: "top_level",
         hasAuthedUserId: false,
         hasTeamId: false,
@@ -241,8 +243,8 @@ describe("Slack plugin OAuth ingress", () => {
         event: "goat.slack_plugin_callback_failed",
         failure_stage: "oauth_exchange",
         request_id: "request-slack-oauth",
-        error_message: "Slack OAuth response missing required fields: team.id, authed_user.id.",
-        missing_response_fields: ["team.id", "authed_user.id"],
+        error_message: "Slack OAuth response missing required fields: team.id.",
+        missing_response_fields: ["team.id"],
         oauth_response_shape: {
           credential_location: "top_level",
           has_authed_user_id: false,
