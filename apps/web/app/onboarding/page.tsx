@@ -42,7 +42,7 @@ export default async function OnboardingPage({
   const savedSlug = context?.workspace.slug ?? "";
   const stepCookie = Number.parseInt(cookieStore.get(ONBOARDING_STEP_COOKIE)?.value ?? "", 10);
   const requestedStep = Number.isNaN(stepCookie) ? 0 : stepCookie;
-  // A stale OAuth/onboarding cookie must never skip past workspace creation.
+  // A stale onboarding cookie must never skip past workspace creation.
   const initialStep = context ? requestedStep : Math.min(requestedStep, 1);
 
   return (
