@@ -1,7 +1,9 @@
 export type OfficialMcpPluginName =
   | "betterstack"
   | "github"
+  | "gmail"
   | "google-calendar"
+  | "google-drive"
   | "linear"
   | "neon"
   | "render"
@@ -23,7 +25,9 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
   connectionProvider:
     | "betterstack"
     | "github_user"
+    | "gmail"
     | "google_calendar"
+    | "google_drive"
     | "linear"
     | "neon"
     | "render"
@@ -69,6 +73,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     accountLabel: "GitHub",
     accountDescription: "The personal GitHub account opencompany uses when it works as you.",
   },
+  gmail: {
+    name: "gmail",
+    kind: "mcp",
+    label: "Gmail",
+    description: "Search and read Gmail, create drafts, and organize messages with approval.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
+    connectionProvider: "gmail",
+    connectHref: "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+    accountDescription: "The most recently connected Gmail account powers Gmail tools.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure Gmail ingestion in Wiki sources",
+  },
   "google-calendar": {
     name: "google-calendar",
     kind: "mcp",
@@ -80,6 +97,20 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref:
       "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
     accountDescription: "The Google account opencompany uses when you run Calendar tools.",
+  },
+  "google-drive": {
+    name: "google-drive",
+    kind: "mcp",
+    label: "Google Drive",
+    description: "Browse, read, create, and copy files through opencompany's Google Drive MCP.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/dc0c91221bcfa9b6088a19277f875c438b37e96e/google-drive",
+    connectionProvider: "google_drive",
+    connectHref: "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
+    accountDescription:
+      "The most recently connected Google Drive account powers plugin tools. Other accounts remain available for Wiki ingestion.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure Google Drive ingestion in Wiki sources",
   },
   linear: {
     name: "linear",

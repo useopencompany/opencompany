@@ -151,21 +151,31 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    // Workspace scope is shown first: GitHub ingestion is a workspace-owned connection and
-    // Gmail (personal) is hidden.
+    // Workspace scope is shown first and personal connections are hidden.
     expect(
       screen.getByText(
         "Ingest pull requests and issues from selected repositories through webhooks.",
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("Let opencompany read and act on your email."),
+      screen.queryByText("Let opencompany view and update your schedule and events."),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    // Personal scope reveals the personal connections and hides the workspace ones.
-    expect(screen.getByText("Let opencompany read and act on your email.")).toBeInTheDocument();
+    // Personal scope reveals non-plugin connections and hides workspace-owned ones.
+    expect(
+      screen.getByText("Observe, understand, and improve your AI agents from opencompany."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Sync files and folders you choose into opencompany."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Let opencompany read and act on your email."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Let opencompany view and update your schedule and events."),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText(
         "Ingest pull requests and issues from selected repositories through webhooks.",
@@ -451,7 +461,7 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
-  it("shows separate Gmail read, draft, and send controls with one scope-upgrade prompt", () => {
+  it("removes the legacy Gmail settings card after the plugin cutover", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_gmail",
@@ -467,100 +477,8 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const gmailCard = screen
-      .getByText("Let opencompany read and act on your email.")
-      .closest("div.rounded-2xl");
-    expect(gmailCard).not.toBeNull();
-    const readPermission = within(gmailCard as HTMLElement).getByRole("group", {
-      name: "Read emails permission",
-    });
-    const sendPermission = within(gmailCard as HTMLElement).getByRole("group", {
-      name: "Send emails permission",
-    });
-    const draftPermission = within(gmailCard as HTMLElement).getByRole("group", {
-      name: "Create drafts permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(draftPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(sendPermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(
-      within(gmailCard as HTMLElement).getByRole("link", { name: "Enable drafts & sending" }),
-    ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
-  });
-
-  it("flags personal accounts with persisted auth errors without showing capability controls", () => {
-    const integrations = integrationStateFromRows([
-      {
-        id: "gint_gmail",
-        provider: "gmail",
-        externalId: "google_account_1",
-        accountEmail: "louis@example.com",
-        status: "needs_reauth",
-        statusReason: "Google authorization expired. Reconnect Gmail.",
-        scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
-        capabilityModes: {},
-      },
-    ]) as IntegrationState;
-
-    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
-    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
-
-    const gmailCard = screen
-      .getByText("Let opencompany read and act on your email.")
-      .closest("div.rounded-2xl");
-    expect(gmailCard).not.toBeNull();
-    expect(within(gmailCard as HTMLElement).getByText("Needs reconnect")).toBeInTheDocument();
-    expect(
-      within(gmailCard as HTMLElement).getByText("Google authorization expired. Reconnect Gmail."),
-    ).toBeInTheDocument();
-    expect(
-      within(gmailCard as HTMLElement).getByRole("link", { name: "Reconnect" }),
-    ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
-    expect(
-      within(gmailCard as HTMLElement).queryByRole("group", {
-        name: "Read emails permission",
-      }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("prompts send-enabled Gmail accounts only for draft access", () => {
-    const integrations = integrationStateFromRows([
-      {
-        id: "gint_gmail",
-        provider: "gmail",
-        externalId: "google_account_1",
-        accountEmail: "louis@example.com",
-        status: "connected",
-        scopes: [
-          "https://www.googleapis.com/auth/gmail.readonly",
-          "https://www.googleapis.com/auth/gmail.send",
-        ],
-        capabilityModes: {},
-      },
-    ]) as IntegrationState;
-
-    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
-    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
-
-    const gmailCard = screen
-      .getByText("Let opencompany read and act on your email.")
-      .closest("div.rounded-2xl");
-    expect(gmailCard).not.toBeNull();
-    expect(
-      within(gmailCard as HTMLElement).getByRole("link", { name: "Enable drafts" }),
-    ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
-    expect(
-      within(gmailCard as HTMLElement).queryByRole("link", { name: "Enable drafts & sending" }),
-    ).toBeNull();
+    expect(screen.queryByText("Let opencompany read and act on your email.")).toBeNull();
+    expect(screen.queryByText("louis@example.com")).toBeNull();
   });
 
   it("shows Attio read and write permission controls on the connected workspace", () => {
@@ -597,7 +515,7 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
-  it("shows Drive read and write controls plus an OAuth upgrade when writes are unavailable", () => {
+  it("keeps Google Drive out of legacy integrations now that its account lives under Plugins", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_drive",
@@ -613,32 +531,10 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const driveCard = screen
-      .getByText("Sync files and folders you choose into opencompany.")
-      .closest("div.rounded-2xl");
-    expect(driveCard).not.toBeNull();
-    const readPermission = within(driveCard as HTMLElement).getByRole("group", {
-      name: "Find & read files permission",
-    });
-    const writePermission = within(driveCard as HTMLElement).getByRole("group", {
-      name: "Edit Docs & Sheets permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
     expect(
-      within(driveCard as HTMLElement).getByRole("link", {
-        name: "Enable Docs & Sheets editing",
-      }),
-    ).toHaveAttribute(
-      "href",
-      "/api/integrations/google-drive/start?returnTo=/settings/integrations",
-    );
+      screen.queryByText("Sync files and folders you choose into opencompany."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("founder@example.com")).not.toBeInTheDocument();
   });
 
   it("connects Latitude as a personal OAuth integration with guarded writes", () => {

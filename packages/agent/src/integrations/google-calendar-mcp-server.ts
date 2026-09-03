@@ -1,6 +1,6 @@
 import { isPluginGatewayRegistrationActive } from "@opencompany/db/plugin-gateway-repository";
 import { createMcpHandler } from "mcp-handler";
-import { z } from "zod";
+import * as z from "zod";
 import {
   type CapabilityId,
   effectiveCapabilityMode,

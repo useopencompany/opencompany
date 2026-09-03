@@ -31,11 +31,7 @@ import type { RunnerEnv } from "./env";
 import { recoveryReasonForDeployVersions, runnerDeployVersion } from "./runner-deploy-version";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
-import {
-  buildTaskTerminalProjection,
-  resolveTaskTurnContext,
-  type TaskTurnContext,
-} from "./task-turn";
+import { orchestrateTaskFailure, resolveTaskTurnContext, type TaskTurnContext } from "./task-turn";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -130,6 +126,15 @@ export async function claimNextCodexChatTurn(input: {
             AND session.user_workos_id = turn.user_workos_id
             AND session.status <> 'closed'
             AND chat.closed_at IS NULL
+            AND (
+              chat.kind <> 'task'
+              OR EXISTS (
+                SELECT 1
+                FROM goat.tasks AS task
+                WHERE task.session_id = chat.id
+                  AND task.status IN ('queued', 'running')
+              )
+            )
             AND (
               turn.status <> 'queued'
               OR session.host_tool_contract_version IS NULL
@@ -434,6 +439,7 @@ export async function runClaimedTurn(
       session,
       canonicalAttemptId,
       taskContext,
+      env,
       message: CODEX_CHAT_UNEXPECTED_FAILURE_MESSAGE,
     });
     return;
@@ -456,6 +462,7 @@ export async function runClaimedTurn(
         session,
         canonicalAttemptId,
         taskContext,
+        env,
         message: CODEX_CHAT_INFRASTRUCTURE_RETRY_EXHAUSTED_MESSAGE,
       });
       return;
@@ -516,6 +523,7 @@ async function failClaimedTurn(input: {
   session: CodexChatSession;
   canonicalAttemptId: string;
   taskContext: TaskTurnContext | null;
+  env: RunnerEnv;
   message: string;
 }) {
   const { turn, session } = input;
@@ -544,11 +552,18 @@ async function failClaimedTurn(input: {
     redact: (value) => value,
     initialParts,
   });
+  const taskCompletion = input.taskContext
+    ? await orchestrateTaskFailure({
+        context: input.taskContext,
+        error: input.message,
+        env: input.env,
+        session,
+        turn,
+      })
+    : null;
   await projector.fail(input.message, {
     sessionStatus: "failed",
-    ...(input.taskContext
-      ? { taskCompletion: buildTaskTerminalProjection(input.taskContext) }
-      : {}),
+    ...(taskCompletion ? { taskCompletion } : {}),
   });
 }
 

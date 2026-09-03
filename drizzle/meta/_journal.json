@@ -1716,6 +1716,27 @@
       "when": 1788436803000,
       "tag": "0244_wiki_native_company_imports",
       "breakpoints": true
+    },
+    {
+      "idx": 245,
+      "version": "7",
+      "when": 1788436804000,
+      "tag": "0245_goat_task_activities",
+      "breakpoints": true
+    },
+    {
+      "idx": 246,
+      "version": "7",
+      "when": 1788436805000,
+      "tag": "0246_goat_task_waiting_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 247,
+      "version": "7",
+      "when": 1788454430567,
+      "tag": "0247_preserve_assistant_message_boundaries",
+      "breakpoints": true
     }
   ]
 }

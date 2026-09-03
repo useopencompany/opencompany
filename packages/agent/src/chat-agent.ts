@@ -233,7 +233,8 @@ export const UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA: JSONSchema7 = {
 };
 export const TASK_SYSTEM_BLOCK = [
   "<background_task_run>",
-  "You are running as an autonomous background task. There is no interactive user to answer questions or approve steps — work to completion with the tools available.",
+  "You are running as a background task, so the user cannot respond during this turn.",
+  "Follow the task and workflow instructions. If they call for a plan, question, decision, or approval before further work, end the turn with that request; the runner will pause the task for review. Otherwise complete the requested work with the tools available.",
   "When you have finished, write your final result as your last message. The task runner will decide the user-facing task status and card comment after your run finishes.",
   "</background_task_run>",
 ].join("\n");

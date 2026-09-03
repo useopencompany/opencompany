@@ -79,7 +79,7 @@ import {
   type PostHogProviderState,
   type StripeProviderState,
 } from "@/lib/integration-state";
-import { hasGmailDraftScope, hasGmailSendScope } from "@/lib/integrations/gmail-scopes";
+import { gmailMcpScopesSatisfied } from "@/lib/integrations/gmail-scopes";
 import { hasGoogleDriveWriteScope } from "@/lib/integrations/google-drive-scopes";
 import {
   integrationConnectionError,
@@ -385,7 +385,7 @@ const INFISICAL_REGIONS = [
 // Group-card providers surfaced under each scope. These are all user-owned in the
 // data model (each member connects their own account), but the CRM / meeting /
 // issue-tracking tools read as shared workspace tooling, so we present them under
-// the Workspace scope; Gmail / Calendar / Drive stay personal.
+// the Workspace scope. Official Gmail, Calendar, and Drive accounts live under Plugins.
 const WORKSPACE_ACCOUNT_PROVIDERS = [
   "hubspot",
   "attio",
@@ -394,8 +394,6 @@ const WORKSPACE_ACCOUNT_PROVIDERS = [
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
 
 const PERSONAL_ACCOUNT_PROVIDERS = [
-  "gmail",
-  "google_drive",
   "latitude",
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
 
@@ -491,14 +489,6 @@ function IntegrationCards({
             Connections that act as you. Only you can manage them or wire them into brains.
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <IntegrationProviderGroupCard
-              provider="gmail"
-              accounts={integrations.personalAccounts.gmail}
-            />
-            <IntegrationProviderGroupCard
-              provider="google_drive"
-              accounts={integrations.personalAccounts.google_drive}
-            />
             <IntegrationProviderGroupCard
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
@@ -1042,17 +1032,14 @@ export function IntegrationAccountRow({
           account.integrationId
         : account.accountEmail || account.accountName || account.integrationId;
   const needsGoogleDriveWriteScope =
+    showCapabilityModes &&
     account.provider === "google_drive" &&
     account.connected &&
     !hasGoogleDriveWriteScope(account.scopes);
   const needsReconnect = account.status === "needs_reauth" || account.status === "sync_failed";
   const accountConnectHref = reconnectHref ?? integrationConnectHref(account.provider);
-  const gmailScopeUpgradeLabel =
-    account.provider === "gmail" && account.connected && !hasGmailDraftScope(account.scopes)
-      ? hasGmailSendScope(account.scopes)
-        ? "Enable drafts"
-        : "Enable drafts & sending"
-      : null;
+  const needsGmailMcpScope =
+    account.provider === "gmail" && account.connected && !gmailMcpScopesSatisfied(account.scopes);
 
   const beginDisconnect = () => {
     setError(null);
@@ -1122,12 +1109,12 @@ export function IntegrationAccountRow({
               Enable Docs & Sheets editing
             </a>
           ) : null}
-          {gmailScopeUpgradeLabel ? (
+          {needsGmailMcpScope ? (
             <a
-              href={integrationConnectHref("gmail")}
+              href={accountConnectHref}
               className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
             >
-              {gmailScopeUpgradeLabel}
+              Enable full Gmail tools
             </a>
           ) : null}
           <button

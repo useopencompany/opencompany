@@ -33,6 +33,12 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "on",
     },
     {
+      id: "query",
+      label: "Read Gmail",
+      description: "Search and read messages, threads, drafts, and labels in your Gmail account.",
+      defaultMode: "ask",
+    },
+    {
       id: "draft",
       label: "Create drafts",
       description: "Save new email drafts in Gmail for you to review and send.",
@@ -49,13 +55,19 @@ export const PROVIDER_CAPABILITIES: Partial<
     {
       id: "read",
       label: "Find & read files",
-      description: "Search Google Drive and read the contents of Google Docs and Sheets.",
+      description: "Search Google Drive and inspect files you can access.",
       defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read files & permissions",
+      description: "Read or download file contents and inspect who can access a file.",
+      defaultMode: "ask",
     },
     {
       id: "write",
       label: "Edit Docs & Sheets",
-      description: "Create and edit Google Docs, and update spreadsheets you can edit.",
+      description: "Create or copy Drive files, or edit supported Google Docs and Sheets.",
       defaultMode: "ask",
     },
   ],

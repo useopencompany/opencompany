@@ -109,13 +109,13 @@ External webhook or OAuth recovery may require restoring a provider dashboard UR
 URLs intentionally remain stable where the web app is a byte-preserving relay to API-owned ingress;
 call out any provider URL change and its recovery plan in the pull request.
 
-The Google Calendar Plugin uses opencompany's API-hosted MCP at
-`/mcp/plugins/google-calendar`. The package pins the public API URL, while both API and runner use
-`OPENCOMPANY_API_ORIGIN` for environment-local routing. `API_INTERNAL_TOKEN` must match on those two
-services: the runner uses it to sign short-lived tickets bound to one plugin registration,
-integration, operation, and tool; the API verifies the ticket and rechecks the installation,
-connection scopes, and current permission before calling Google. Google access and refresh tokens
-are never used as MCP bearer credentials.
+The Google Calendar and Drive Plugins use opencompany's API-hosted MCPs at
+`/mcp/plugins/google-calendar` and `/mcp/plugins/google-drive`. Their packages pin the public API
+URLs, while both API and runner use `OPENCOMPANY_API_ORIGIN` for environment-local routing.
+`API_INTERNAL_TOKEN` must match on those two services: the runner uses it to sign short-lived
+tickets bound to one plugin registration, integration, operation, and tool; the API verifies each
+ticket and rechecks the installation, connection scopes, and current permission before calling a
+stable Google REST API. Google access and refresh tokens are never used as MCP bearer credentials.
 
 ## Stripe production endpoint
 

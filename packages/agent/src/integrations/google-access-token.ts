@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import { markIntegrationStatus } from "@opencompany/db/integrations";
 import type { IntegrationProvider } from "@opencompany/db/product-schema";
@@ -129,6 +130,66 @@ export async function googleApiDownload(
   }
   const bytes = await readBoundedBody(response, options.maxBytes);
   return { bytes, contentType: response.headers.get("content-type") };
+}
+
+// Authenticated multipart upload for the small in-memory files accepted by
+// first-party Google plugin tools. The request body is reusable for the single
+// auth retry, and the provider credential remains inside this server adapter.
+export async function googleApiMultipartUpload(
+  connection: GoogleAccessConnection,
+  url: URL,
+  options: {
+    metadata: Record<string, unknown>;
+    bytes: Buffer;
+    contentType: string;
+    signal?: AbortSignal;
+  },
+): Promise<unknown> {
+  if (!/^[\w.+-]+\/[\w.+-]+$/u.test(options.contentType)) {
+    throw new Error("A valid upload content type is required.");
+  }
+  const boundary = `opencompany-${randomBytes(16).toString("hex")}`;
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(options.metadata)}\r\n--${boundary}\r\nContent-Type: ${options.contentType}\r\n\r\n`,
+      "utf8",
+    ),
+    options.bytes,
+    Buffer.from(`\r\n--${boundary}--\r\n`, "utf8"),
+  ]);
+  const signal = options.signal ?? null;
+  const run = async (accessToken: string) =>
+    fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": `multipart/related; boundary=${boundary}`,
+      },
+      signal,
+      body,
+    });
+
+  const tokenOptions = signal ? { signal } : {};
+  let token = await getGoogleAccessToken(connection, tokenOptions);
+  let response = await run(token);
+  if (response.status === 401) {
+    token = await getGoogleAccessToken(connection, { ...tokenOptions, forceRefresh: true });
+    response = await run(token);
+  }
+  const text = await response.text();
+  if (!response.ok) {
+    if (response.status === 401 || isGooglePermissionError(response.status, text)) {
+      await markGoogleNeedsReauth(connection, "Google rejected API access.");
+      throw new GoogleAccessAuthError("Google rejected access for this account.");
+    }
+    const detail = googleApiErrorDetail(text);
+    throw new Error(
+      detail
+        ? `Google API request failed with ${response.status}: ${detail}.`
+        : `Google API request failed with ${response.status}.`,
+    );
+  }
+  return text ? (JSON.parse(text) as unknown) : {};
 }
 
 async function readBoundedBody(response: Response, maxBytes: number): Promise<Buffer> {

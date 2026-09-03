@@ -1,6 +1,28 @@
 import type { LegacyTaskDto, TaskReadModel } from "@opencompany/protocol";
-import { describe, expect, it } from "vitest";
-import { legacyTaskDtoToRow, taskReadModelToRow } from "./headless-task-collections";
+import { createCollection } from "@tanstack/react-db";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  awaitHeadlessTaskCommentTransaction,
+  getHeadlessTaskActivities,
+  legacyTaskDtoToRow,
+  taskReadModelToRow,
+} from "./headless-task-collections";
+
+vi.mock("@tanstack/electric-db-collection", () => ({
+  electricCollectionOptions: vi.fn((options) => options),
+}));
+
+vi.mock("@tanstack/react-db", () => ({
+  createCollection: vi.fn((options) => ({
+    options,
+    utils: { awaitTxId: vi.fn(async () => undefined) },
+  })),
+}));
+
+vi.mock("./headless-chat-api", () => ({
+  createHeadlessChatApiFetch: vi.fn(() => fetch),
+  headlessChatApiBaseUrl: vi.fn(() => "https://api.example.test"),
+}));
 
 const canonicalTask: TaskReadModel = {
   id: "task_1",
@@ -22,6 +44,42 @@ const canonicalTask: TaskReadModel = {
 };
 
 describe("headless Task presentation adapters", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("uses one versioned activity shape per Task", () => {
+    const first = getHeadlessTaskActivities("task/1");
+    const second = getHeadlessTaskActivities("task/1");
+
+    expect(first).toBe(second);
+    expect(createCollection).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        first as unknown as {
+          options: { id: string; shapeOptions: { url: string } };
+        }
+      ).options,
+    ).toMatchObject({
+      id: "headless-task-activities:v1:task%2F1",
+      shapeOptions: {
+        url: "https://api.example.test/v1/read-models/task-activities-v1?taskId=task%2F1",
+      },
+    });
+  });
+
+  it("waits for both Task and activity projections after a comment transaction", async () => {
+    await awaitHeadlessTaskCommentTransaction("task/comment-transaction", "42", {
+      scopeKey: "workspace_comment_transaction",
+    });
+
+    const collections = vi.mocked(createCollection).mock.results.map((result) => result.value) as {
+      utils: { awaitTxId: ReturnType<typeof vi.fn> };
+    }[];
+    expect(collections).toHaveLength(2);
+    for (const collection of collections) {
+      expect(collection.utils.awaitTxId).toHaveBeenCalledWith(42, undefined);
+    }
+  });
+
   it("projects canonical metadata without exposing execution persistence", () => {
     expect(taskReadModelToRow(canonicalTask)).toMatchObject({
       id: "task_1",
@@ -33,6 +91,13 @@ describe("headless Task presentation adapters", () => {
       workflow_id: "workflow_1",
       engine: "claude_code",
       reported_outcome: "needs_attention",
+    });
+  });
+
+  it("preserves waiting as a settled, resumable presentation status", () => {
+    expect(taskReadModelToRow({ ...canonicalTask, status: "waiting" })).toMatchObject({
+      status: "waiting",
+      stage: "completed",
     });
   });
 

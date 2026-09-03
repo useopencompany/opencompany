@@ -10,9 +10,13 @@ const mocks = vi.hoisted(() => ({
   discoverSnapshot: vi.fn(),
   getState: vi.fn(),
   getGitHubState: vi.fn(),
+  getGmailState: vi.fn(),
+  loadGmailConnection: vi.fn(),
   getGoogleCalendarState: vi.fn(),
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
+  getGoogleDriveState: vi.fn(),
+  loadGoogleDriveConnection: vi.fn(),
   loadGoogleCalendarConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
@@ -53,12 +57,24 @@ vi.mock("./integrations/github-user-mcp", () => ({
   getGitHubUserMcpIntegrationState: mocks.getGitHubState,
   loadGitHubUserMcpWorkerConnection: mocks.loadGitHubConnection,
 }));
+vi.mock("./integrations/gmail-mcp", () => ({
+  GMAIL_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/gmail",
+  gmailMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/gmail",
+  getGmailMcpIntegrationState: mocks.getGmailState,
+  loadGmailMcpWorkerConnection: mocks.loadGmailConnection,
+}));
 vi.mock("./integrations/google-calendar-mcp", () => ({
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-calendar",
   googleCalendarMcpRuntimeEndpointUrl: () =>
     "https://api.opencompany.chat/mcp/plugins/google-calendar",
   getGoogleCalendarMcpIntegrationState: mocks.getGoogleCalendarState,
   loadGoogleCalendarMcpWorkerConnection: mocks.loadGoogleCalendarConnection,
+}));
+vi.mock("./integrations/google-drive-mcp", () => ({
+  GOOGLE_DRIVE_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-drive",
+  googleDriveMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/google-drive",
+  getGoogleDriveMcpIntegrationState: mocks.getGoogleDriveState,
+  loadGoogleDriveMcpWorkerConnection: mocks.loadGoogleDriveConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
   POSTHOG_MCP_ENDPOINT_URL: "https://mcp.posthog.com/mcp",
@@ -246,6 +262,65 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
+  it("binds Gmail access only to opencompany's exact hosted MCP endpoint", async () => {
+    const gmailRecord = record({
+      pluginName: "gmail",
+      pluginLabel: "gmail",
+      pluginDescription: "Gmail plugin tools.",
+      connectionProvider: "gmail",
+      server: {
+        name: "gmail",
+        type: "streamable-http",
+        url: "https://api.opencompany.chat/mcp/plugins/gmail",
+        headers: {},
+      },
+      capabilities: [
+        {
+          id: "draft",
+          label: "Create drafts",
+          defaultMode: "ask",
+          tools: ["create_draft"],
+        },
+      ],
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([gmailRecord]);
+
+    const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registrations).toEqual([
+      expect.objectContaining({
+        source: "plugin:gmail:gmail",
+        connectionProvider: "gmail",
+        getState: mocks.getGmailState,
+      }),
+    ]);
+    await registrations[0]!.loadConnection({
+      ...identity,
+      operation: { type: "tools/list" },
+      onAuthorizationRequired: () => {
+        throw new Error("authorization required");
+      },
+    });
+    expect(mocks.loadGmailConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...identity,
+        registrationId: "plugin_gateway_1",
+        operation: { type: "tools/list" },
+      }),
+    );
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...gmailRecord,
+        server: {
+          ...gmailRecord.server,
+          url: "https://api.opencompany.chat.evil.example/mcp/plugins/gmail",
+        },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
   it("binds Google credentials only to opencompany's exact Calendar MCP endpoint", async () => {
     const calendarRecord = record({
       pluginName: "google-calendar",
@@ -291,6 +366,57 @@ describe("plugin gateway registration cache", () => {
         server: {
           ...calendarRecord.server,
           url: "https://api.opencompany.chat.evil.example/mcp/plugins/google-calendar",
+        },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Google credentials only to opencompany's exact Drive MCP endpoint", async () => {
+    const googleDriveRecord = record({
+      pluginName: "google-drive",
+      pluginLabel: "google-drive",
+      pluginDescription: "Google Drive plugin tools.",
+      connectionProvider: "google-drive",
+      server: {
+        name: "google-drive",
+        type: "streamable-http",
+        url: "https://api.opencompany.chat/mcp/plugins/google-drive",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([googleDriveRecord]);
+
+    const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registrations).toEqual([
+      expect.objectContaining({
+        source: "plugin:google-drive:google-drive",
+        connectionProvider: "google_drive",
+        getState: mocks.getGoogleDriveState,
+      }),
+    ]);
+    await registrations[0]!.loadConnection({
+      ...identity,
+      operation: { type: "tools/list" },
+      onAuthorizationRequired: () => {
+        throw new Error("authorization required");
+      },
+    });
+    expect(mocks.loadGoogleDriveConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...identity,
+        registrationId: "plugin_gateway_1",
+        operation: { type: "tools/list" },
+      }),
+    );
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...googleDriveRecord,
+        server: {
+          ...googleDriveRecord.server,
+          url: "https://api.opencompany.chat.evil.example/mcp/plugins/google-drive",
         },
       },
     ]);

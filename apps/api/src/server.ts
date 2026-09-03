@@ -7,8 +7,10 @@ import {
 } from "@opencompany/agent/brain-imports";
 import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
+import { createGmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
 import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
+import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import {
   createPluginGatewayLifecycle,
@@ -237,7 +239,15 @@ const app = createApiApp({
   }),
   ...(process.env.API_INTERNAL_TOKEN?.trim()
     ? {
+        gmailMcp: createGmailMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
         googleCalendarMcp: createGoogleCalendarMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+        googleDriveMcp: createGoogleDriveMcpService({
           db: database.db,
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
         }),
@@ -288,12 +298,17 @@ const app = createApiApp({
   googleIngress: createGoogleIngress({
     db: database.db,
     identify: identityVerifier,
-    refreshPluginRegistrations: ({ userWorkosId, workspaceIds }) =>
+    refreshPluginRegistrations: ({ provider, userWorkosId, workspaceIds }) =>
       refreshPluginGatewayRegistrationsForWorkspaces({
         db: database.db,
         userWorkosId,
         workspaceIds,
-        connectionProvider: "google-calendar",
+        connectionProvider:
+          provider === "gmail"
+            ? "gmail"
+            : provider === "google_drive"
+              ? "google-drive"
+              : "google-calendar",
       }),
   }),
   slackIngress: createSlackIngress({

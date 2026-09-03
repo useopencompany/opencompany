@@ -15,9 +15,14 @@ import {
   defaultSigNozToolsState,
   GitHubPluginDetail,
   GitHubPluginDetailView,
+  GmailPluginDetail,
+  GmailPluginDetailView,
   GoogleCalendarPluginDetail,
+  GoogleDrivePluginDetail,
   githubToolsStateFromPlugin,
+  gmailToolsStateFromPlugin,
   googleCalendarToolsStateFromPlugin,
+  googleDriveToolsStateFromPlugin,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -33,7 +38,9 @@ import {
 import {
   BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
+  GMAIL_PLUGIN_SOURCE,
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
+  GOOGLE_DRIVE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
@@ -62,6 +69,15 @@ const accountActions = vi.hoisted(() => ({
 }));
 const appData = vi.hoisted(() => ({
   integrations: {
+    gmail: {
+      connected: true,
+      status: "connected",
+      accountEmail: "ada@example.com",
+      accountName: "Ada",
+      integrationId: "gint_gmail",
+      scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+      capabilityModes: { query: "ask", draft: "ask", write: "ask" },
+    },
     linear: {
       connected: true,
       status: "connected",
@@ -85,8 +101,29 @@ const appData = vi.hoisted(() => ({
       accountName: "Ada",
       integrationId: "gint_google_calendar",
     },
+    google_drive: {
+      connected: true,
+      status: "connected",
+      integrationId: "gint_google_drive_latest",
+      accountEmail: "founder@example.com",
+      accountName: "Founder",
+    },
     personalAccounts: {
       betterstack: [],
+      gmail: [
+        {
+          integrationId: "gint_gmail",
+          provider: "gmail",
+          status: "connected",
+          connected: true,
+          accountEmail: "ada@example.com",
+          accountName: "Ada",
+          connectionLabel: "ada@example.com",
+          statusReason: null,
+          scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+          capabilityModes: { query: "ask", draft: "ask", write: "ask" },
+        },
+      ],
       github_user: [
         {
           integrationId: "gint_github_user",
@@ -116,6 +153,32 @@ const appData = vi.hoisted(() => ({
             "https://www.googleapis.com/auth/calendar.events",
           ],
           capabilityModes: {},
+        },
+      ],
+      google_drive: [
+        {
+          integrationId: "gint_google_drive_older",
+          provider: "google_drive",
+          status: "connected",
+          connected: true,
+          accountEmail: "older@example.com",
+          accountName: "Older",
+          connectionLabel: null,
+          statusReason: null,
+          scopes: [],
+          capabilityModes: {},
+        },
+        {
+          integrationId: "gint_google_drive_latest",
+          provider: "google_drive",
+          status: "connected",
+          connected: true,
+          accountEmail: "founder@example.com",
+          accountName: "Founder",
+          connectionLabel: null,
+          statusReason: null,
+          scopes: [],
+          capabilityModes: { read: "ask", query: "ask", write: "ask" },
         },
       ],
       linear: [],
@@ -567,6 +630,82 @@ const githubPlugin = {
   ],
 } as const satisfies PluginInstallationDto;
 
+const googleDrivePlugin = {
+  ...plugin,
+  id: "plugin_google_drive",
+  name: "google-drive",
+  manifest: {
+    name: "google-drive",
+    description: "Search, inspect, read, create, and copy files through Google Drive.",
+  },
+  source: {
+    ...plugin.source,
+    path: "google-drive",
+    resolvedCommit: "dc0c91221bcfa9b6088a19277f875c438b37e96e",
+  },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "google-drive",
+      type: "streamable-http",
+      connectionProvider: "google-drive",
+      capabilities: [
+        {
+          id: "read",
+          label: "Browse Drive files",
+          defaultMode: "ask",
+          tools: ["get_file_metadata", "list_recent_files", "search_files"],
+        },
+        {
+          id: "query",
+          label: "Read files & permissions",
+          defaultMode: "ask",
+          tools: ["download_file_content", "get_file_permissions", "read_file_content"],
+        },
+        {
+          id: "write",
+          label: "Create & copy files",
+          defaultMode: "ask",
+          tools: ["copy_file", "create_file"],
+        },
+      ],
+      tools: [
+        driveTool("get_file_metadata", "read"),
+        driveTool("list_recent_files", "read"),
+        driveTool("search_files", "read"),
+        driveTool("download_file_content", "query"),
+        driveTool("get_file_permissions", "query"),
+        driveTool("read_file_content", "query"),
+        driveTool("copy_file", "write"),
+        driveTool("create_file", "write"),
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-03T06:00:00.000Z",
+      refreshAfter: "2026-09-03T07:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
+function driveTool(name: string, capabilityId: "read" | "query" | "write") {
+  const capabilityLabel = {
+    read: "Browse Drive files",
+    query: "Read files & permissions",
+    write: "Create & copy files",
+  }[capabilityId];
+  return {
+    name,
+    description: `${name} from Google Drive.`,
+    classification: {
+      capabilityId,
+      capabilityLabel,
+      defaultMode: "ask" as const,
+      bucket: capabilityId === "write" ? ("write" as const) : ("read" as const),
+      curated: true,
+    },
+  };
+}
+
 const slackPlugin = {
   ...plugin,
   id: "plugin_slack",
@@ -758,6 +897,73 @@ const slackPreview = {
   ),
 } as const satisfies PluginImportPreviewDto;
 
+const gmailPlugin = {
+  ...plugin,
+  id: "plugin_gmail",
+  name: "gmail",
+  manifest: {
+    name: "gmail",
+    description: "Search and read Gmail, create drafts, and organize messages.",
+  },
+  source: {
+    ...plugin.source,
+    path: "gmail",
+    resolvedCommit: "587fb06ae2a4e4bed7532e216f8712979ca35e7b",
+  },
+  skills: [],
+  remoteMcpServers: [
+    {
+      name: "gmail",
+      type: "streamable-http",
+      connectionProvider: "gmail",
+      capabilities: [
+        { id: "query", label: "Read Gmail", defaultMode: "ask", tools: ["get_message"] },
+        { id: "draft", label: "Create drafts", defaultMode: "ask", tools: ["create_draft"] },
+        { id: "write", label: "Organize Gmail", defaultMode: "ask", tools: ["trash_message"] },
+      ],
+      tools: [
+        {
+          name: "get_message",
+          description: "Get a Gmail message.",
+          classification: {
+            capabilityId: "query",
+            capabilityLabel: "Read Gmail",
+            defaultMode: "ask",
+            bucket: "read",
+            curated: true,
+          },
+        },
+        {
+          name: "create_draft",
+          description: "Create a Gmail draft.",
+          classification: {
+            capabilityId: "draft",
+            capabilityLabel: "Create drafts",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+        {
+          name: "trash_message",
+          description: "Move a Gmail message to trash.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Organize Gmail",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+      ],
+      discoveryStatus: "ready",
+      discoveredAt: "2026-09-03T08:00:00.000Z",
+      refreshAfter: "2026-09-03T09:00:00.000Z",
+      lastDiscoveryError: null,
+    },
+  ],
+} as const satisfies PluginInstallationDto;
+
 describe("Linear plugin settings", () => {
   beforeEach(() => {
     router.push.mockReset();
@@ -809,6 +1015,68 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read GitHub");
     expect(html).toContain("Manage GitHub");
     expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("presents the selected Drive account and all reviewed tools with Ask defaults", () => {
+    const toolsState = googleDriveToolsStateFromPlugin(googleDrivePlugin);
+    render(
+      <GoogleDrivePluginDetail
+        pluginState={{ status: "ready", plugin: googleDrivePlugin }}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByText("founder@example.com")).toBeInTheDocument();
+    expect(screen.queryByText("older@example.com")).not.toBeInTheDocument();
+    expect(screen.getByText("Needs reconnect")).toBeInTheDocument();
+    expect(screen.queryByText("Enable Docs & Sheets editing")).not.toBeInTheDocument();
+    expect(screen.getByText(/most recently connected Google Drive account/i)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Connect Google Drive account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
+    );
+    expect(
+      screen.getByRole("link", { name: "Configure Google Drive ingestion in Wiki sources" }),
+    ).toHaveAttribute("href", "/wiki/sources");
+    for (const label of ["Browse Drive files", "Read files & permissions", "Create & copy files"]) {
+      expect(
+        within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
+          name: "Ask",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    }
+    expect(toolsState).toMatchObject({
+      status: "ready",
+      discovery: { status: "ready", toolCount: 8 },
+    });
+    if (toolsState.status !== "ready") throw new Error("Expected discovered Drive tools.");
+    expect(
+      toolsState.groups.map((group) => ({
+        id: group.id,
+        defaultMode: group.defaultMode,
+        tools: group.tools.map((tool) => tool.name),
+      })),
+    ).toEqual([
+      {
+        id: "read",
+        defaultMode: "ask",
+        tools: ["Get file metadata", "List recent files", "Search files"],
+      },
+      {
+        id: "query",
+        defaultMode: "ask",
+        tools: ["Download file content", "Get file permissions", "Read file content"],
+      },
+      {
+        id: "write",
+        defaultMode: "ask",
+        tools: ["Copy file", "Create file"],
+      },
+    ]);
+    expect(GOOGLE_DRIVE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/dc0c91221bcfa9b6088a19277f875c438b37e96e/google-drive",
+    );
   });
 
   it("maps the personal SigNoz connection onto the official plugin surface", () => {
@@ -1476,6 +1744,83 @@ describe("Linear plugin settings", () => {
     });
     expect(toasts.success).toHaveBeenCalledWith("Slack installed.");
     expect(router.refresh).toHaveBeenCalled();
+  });
+
+  it("presents Gmail with every sensitive capability gated on Ask", () => {
+    const state = gmailToolsStateFromPlugin(gmailPlugin);
+    render(<GmailPluginDetail pluginState={{ status: "ready", plugin: gmailPlugin }} canEdit />);
+
+    expect(screen.getByRole("heading", { level: 1, name: "Gmail" })).toBeInTheDocument();
+    expect(screen.getByText("ada@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Gmail account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+    );
+    for (const label of ["Read Gmail", "Create drafts", "Organize Gmail"]) {
+      expect(
+        within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
+          name: "Ask",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    }
+    expect(state).toMatchObject({
+      groups: [
+        { id: "query", defaultMode: "ask", tools: [{ readOnly: true }] },
+        { id: "draft", defaultMode: "ask", tools: [{ readOnly: false }] },
+        { id: "write", defaultMode: "ask", tools: [{ readOnly: false }] },
+      ],
+    });
+    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail");
+  });
+
+  it("edits the same Gmail account selected by the MCP gateway", async () => {
+    const [primary] = appData.integrations.personalAccounts.gmail;
+    if (!primary) throw new Error("Expected a primary Gmail fixture.");
+    const other = {
+      ...primary,
+      integrationId: "gint_gmail_other",
+      accountEmail: "other@example.com",
+      connectionLabel: "other@example.com",
+      capabilityModes: { query: "off", draft: "off", write: "off" },
+    };
+    appData.integrations.personalAccounts.gmail = [other, primary];
+
+    render(<GmailPluginDetail pluginState={{ status: "ready", plugin: gmailPlugin }} canEdit />);
+    await userEvent.click(
+      within(screen.getByRole("group", { name: "Read Gmail permission" })).getByRole("button", {
+        name: "On",
+      }),
+    );
+    expect(accountActions.setIntegrationCapabilityModeAction).toHaveBeenCalledWith(
+      "gint_gmail",
+      "query",
+      "on",
+    );
+  });
+
+  it("prompts older Gmail connections to grant the full MCP scope", () => {
+    const oldGrant = {
+      ...account("gint_gmail_old", "ada@example.com", {}, "gmail"),
+      accountEmail: "ada@example.com",
+      scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    } satisfies IntegrationAccountView;
+    render(
+      <GmailPluginDetailView
+        pluginState={{ status: "ready", plugin: gmailPlugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: oldGrant }],
+          permissionConnection: oldGrant,
+        }}
+        toolsState={gmailToolsStateFromPlugin(gmailPlugin)}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Enable full Gmail tools" })).toHaveAttribute(
+      "href",
+      "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+    );
   });
 
   it("builds the two-bucket advanced fallback with ask defaults", () => {

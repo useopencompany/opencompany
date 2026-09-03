@@ -63,6 +63,10 @@ import {
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
 import { type IntegrationAccountView, type IntegrationState } from "@/lib/integration-state";
+import {
+  GOOGLE_DRIVE_MCP_RECONNECT_REASON,
+  googleDriveMcpScopesSatisfied,
+} from "@/lib/integrations/google-drive-scopes";
 import type { OfficialMcpPluginName } from "@/lib/official-plugins";
 
 const NO_CONNECTION_DISCOVERY_ERROR =
@@ -167,6 +171,25 @@ export function GitHubPluginDetail({
   );
 }
 
+export function GmailPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.gmail}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function GoogleCalendarPluginDetail({
   pluginState,
   canEdit,
@@ -179,6 +202,25 @@ export function GoogleCalendarPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS["google-calendar"]}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function GoogleDrivePluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS["google-drive"]}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -352,6 +394,50 @@ export function GitHubPluginDetailView({
   return (
     <OfficialMcpPluginDetailView
       config={OFFICIAL_MCP_PLUGINS.github}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+export function GmailPluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS.gmail}
+      pluginState={pluginState}
+      accountsState={accountsState}
+      toolsState={toolsState}
+      canEdit={canEdit}
+    />
+  );
+}
+
+export function GoogleDrivePluginDetailView({
+  pluginState,
+  accountsState,
+  toolsState,
+  canEdit,
+}: {
+  pluginState: PluginLoadState;
+  accountsState: PluginAccountsState;
+  toolsState: PluginToolsState;
+  canEdit: boolean;
+}) {
+  return (
+    <OfficialMcpPluginDetailView
+      config={OFFICIAL_MCP_PLUGINS["google-drive"]}
       pluginState={pluginState}
       accountsState={accountsState}
       toolsState={toolsState}
@@ -1203,21 +1289,37 @@ function pluginAccountsFromState(
   if (
     config.connectionProvider === "betterstack" ||
     config.connectionProvider === "github_user" ||
+    config.connectionProvider === "gmail" ||
     config.connectionProvider === "google_calendar" ||
+    config.connectionProvider === "google_drive" ||
     config.connectionProvider === "neon" ||
     config.connectionProvider === "render" ||
     config.connectionProvider === "signoz" ||
     config.connectionProvider === "slack"
   ) {
     const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
-      account,
+      account:
+        config.connectionProvider === "google_drive" &&
+        account.status === "connected" &&
+        !googleDriveMcpScopesSatisfied(account.scopes)
+          ? {
+              ...account,
+              status: "needs_reauth" as const,
+              connected: false,
+              statusReason: GOOGLE_DRIVE_MCP_RECONNECT_REASON,
+            }
+          : account,
     }));
     const primaryIntegrationId =
-      config.connectionProvider === "slack"
-        ? state.slack.integrationId
-        : config.connectionProvider === "google_calendar"
-          ? state.google_calendar.integrationId
-          : null;
+      config.connectionProvider === "gmail"
+        ? state.gmail.integrationId
+        : config.connectionProvider === "slack"
+          ? state.slack.integrationId
+          : config.connectionProvider === "google_calendar"
+            ? state.google_calendar.integrationId
+            : config.connectionProvider === "google_drive"
+              ? state.google_drive.integrationId
+              : null;
     return {
       accounts,
       permissionConnection:
@@ -1255,8 +1357,16 @@ export function defaultGitHubToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("github");
 }
 
+export function defaultGmailToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("gmail");
+}
+
 export function defaultGoogleCalendarToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("google-calendar");
+}
+
+export function defaultGoogleDriveToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("google-drive");
 }
 
 export function defaultNeonToolsState(): PluginToolsState {
@@ -1307,10 +1417,20 @@ export function githubToolsStateFromPlugin(plugin: PluginInstallationDto | null)
   return officialPluginToolsStateFromPlugin(plugin, "github");
 }
 
+export function gmailToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "gmail");
+}
+
 export function googleCalendarToolsStateFromPlugin(
   plugin: PluginInstallationDto | null,
 ): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "google-calendar");
+}
+
+export function googleDriveToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "google-drive");
 }
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
@@ -1367,6 +1487,7 @@ function officialPluginToolsStateFromPlugin(
     id: definition.id,
     label: definition.label,
     description:
+      officialCapabilityDescription(provider, definition.id) ??
       knownCapabilities.find((capability) => capability.id === definition.id)?.description ??
       `${definition.label} tools supplied by the installed plugin.`,
     modeKey: definition.id,
@@ -1414,10 +1535,20 @@ export function githubToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
   return officialPluginToolsStateFromPreview(preview, "github");
 }
 
+export function gmailToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "gmail");
+}
+
 export function googleCalendarToolsStateFromPreview(
   preview: PluginImportPreviewDto,
 ): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "google-calendar");
+}
+
+export function googleDriveToolsStateFromPreview(
+  preview: PluginImportPreviewDto,
+): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "google-drive");
 }
 
 export function neonToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
@@ -1450,6 +1581,7 @@ function officialPluginToolsStateFromPreview(
         id: capability.id,
         label: capability.label,
         description:
+          officialCapabilityDescription(provider, capability.id) ??
           knownCapabilities.find((known) => known.id === capability.id)?.description ??
           `${capability.label} tools supplied by the official package.`,
         modeKey: capability.id,
@@ -1459,7 +1591,7 @@ function officialPluginToolsStateFromPreview(
           id: `${server.name}:${tool}`,
           name: displayToolName(tool),
           description: null,
-          readOnly: capability.id !== "write",
+          readOnly: capability.id === "read" || capability.id === "query",
         })),
       });
     }
@@ -1475,6 +1607,16 @@ function officialPluginToolsStateFromPreview(
       lastDiscoveryError: null,
     },
   };
+}
+
+function officialCapabilityDescription(
+  provider: OfficialMcpPluginName,
+  capabilityId: CapabilityId,
+): string | null {
+  if (provider === "gmail" && capabilityId === "write") {
+    return "Add or remove labels, create labels, move mail to trash, and mark or unmark spam.";
+  }
+  return null;
 }
 
 export function uncuratedPluginToolGroups(tools: readonly PluginToolView[]): PluginToolGroupView[] {

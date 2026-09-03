@@ -10,7 +10,9 @@ import {
 import {
   BETTERSTACK_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
+  GMAIL_PLUGIN_SOURCE,
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
+  GOOGLE_DRIVE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   OfficialSkillPluginDetail,
@@ -234,6 +236,14 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/github",
     );
+    expect(screen.getByRole("link", { name: /gmail/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/gmail",
+    );
+    expect(screen.getByRole("link", { name: /google drive/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/google-drive",
+    );
     expect(screen.getByRole("link", { name: /slack/i })).toHaveAttribute(
       "href",
       "/settings/plugins/slack",
@@ -254,11 +264,14 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/yc-advise",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(9);
-    expect(screen.getAllByText("Official package")).toHaveLength(8);
+    expect(screen.getAllByText("Not installed")).toHaveLength(11);
+    expect(screen.getAllByText("Official package")).toHaveLength(10);
     expect(screen.getByText("Official skill package")).toBeInTheDocument();
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
+    );
+    expect(GOOGLE_DRIVE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/dc0c91221bcfa9b6088a19277f875c438b37e96e/google-drive",
     );
     expect(LINEAR_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/linear$/u,
@@ -278,6 +291,9 @@ describe("Plugin settings", () => {
     expect(SLACK_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
     );
+    expect(GMAIL_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
+    );
     expect(GOOGLE_CALENDAR_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
     );
@@ -288,7 +304,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(9);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(11);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });
@@ -347,7 +363,9 @@ describe("Plugin settings", () => {
       );
     });
     expect(router.push).not.toHaveBeenCalled();
-    expect(installButton).toBeEnabled();
+    await waitFor(() => {
+      expect(installButton).toBeEnabled();
+    });
   });
 
   it("previews and installs an official skills-only package from its detail page", async () => {

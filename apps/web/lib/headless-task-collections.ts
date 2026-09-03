@@ -1,12 +1,19 @@
 "use client";
 
-import { type LegacyTaskDto, type TaskReadModel, TaskReadModelSchema } from "@opencompany/protocol";
+import {
+  type LegacyTaskDto,
+  type TaskActivityReadModel,
+  TaskActivityReadModelSchema,
+  type TaskReadModel,
+  TaskReadModelSchema,
+} from "@opencompany/protocol";
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import type { TaskRow } from "./task-collections";
 
 const tasksByScope = new Map<string, ReturnType<typeof createTasks>>();
+const activitiesByTask = new Map<string, ReturnType<typeof createTaskActivities>>();
 
 function createTasks(scopeKey: string) {
   return createCollection(
@@ -30,15 +37,54 @@ export function getHeadlessTasks(scopeKey: string) {
   return collection;
 }
 
+function createTaskActivities(taskId: string) {
+  return createCollection(
+    electricCollectionOptions({
+      id: `headless-task-activities:v1:${encodeURIComponent(taskId)}`,
+      schema: TaskActivityReadModelSchema,
+      shapeOptions: {
+        url: `${headlessChatApiBaseUrl()}/v1/read-models/task-activities-v1?taskId=${encodeURIComponent(taskId)}`,
+        fetchClient: createHeadlessChatApiFetch(),
+      },
+      getKey: (row) => row.id,
+    }),
+  );
+}
+
+export function getHeadlessTaskActivities(taskId: string) {
+  const cached = activitiesByTask.get(taskId);
+  if (cached) return cached;
+  const collection = createTaskActivities(taskId);
+  activitiesByTask.set(taskId, collection);
+  return collection;
+}
+
 export async function awaitHeadlessTaskTransaction(
   transactionIdValue: string,
   options: { scopeKey: string; timeoutMs?: number },
 ) {
+  const transactionId = electricTransactionId(transactionIdValue);
+  await getHeadlessTasks(options.scopeKey).utils.awaitTxId(transactionId, options.timeoutMs);
+}
+
+export async function awaitHeadlessTaskCommentTransaction(
+  taskId: string,
+  transactionIdValue: string,
+  options: { scopeKey: string; timeoutMs?: number },
+) {
+  const transactionId = electricTransactionId(transactionIdValue);
+  await Promise.all([
+    getHeadlessTasks(options.scopeKey).utils.awaitTxId(transactionId, options.timeoutMs),
+    getHeadlessTaskActivities(taskId).utils.awaitTxId(transactionId, options.timeoutMs),
+  ]);
+}
+
+function electricTransactionId(transactionIdValue: string) {
   const transactionId = Number(transactionIdValue);
   if (!Number.isSafeInteger(transactionId) || transactionId < 1) {
     throw new Error("The API returned an invalid Electric transaction identifier.");
   }
-  await getHeadlessTasks(options.scopeKey).utils.awaitTxId(transactionId, options.timeoutMs);
+  return transactionId;
 }
 
 // The current Task UI still consumes its established presentation row. This adapter deliberately
@@ -74,7 +120,7 @@ function taskDtoToRow(task: LegacyTaskDto, conversationId: string | null): TaskR
         ? "queued"
         : status === "running"
           ? "running"
-          : status === "succeeded"
+          : status === "succeeded" || status === "waiting"
             ? "completed"
             : status,
     result: task.outcome.result,
@@ -96,7 +142,8 @@ function taskDtoToRow(task: LegacyTaskDto, conversationId: string | null): TaskR
 }
 
 function canonicalUiStatus(status: TaskReadModel["status"]) {
-  return status === "waiting" || status === "blocked" ? "running" : status;
+  return status === "blocked" ? "running" : status;
 }
 
 export type HeadlessTaskReadModel = TaskReadModel;
+export type HeadlessTaskActivityReadModel = TaskActivityReadModel;
