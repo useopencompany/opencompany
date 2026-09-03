@@ -8,6 +8,7 @@ import {
 } from "./chat-agent";
 import {
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
+  EDIT_WORKSPACE_SKILL_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
 } from "./chat-ui";
@@ -57,6 +58,54 @@ describe("create_workspace_skill tool", () => {
         instructions: "Review the account signals.",
       },
       { toolCallId: "call_skill_1" },
+    );
+  });
+});
+
+describe("edit_workspace_skill tool", () => {
+  it("is available only when the authenticated host injects its runner", () => {
+    expect(EDIT_WORKSPACE_SKILL_TOOL_NAME in createProductChatToolContext({ model }).tools).toBe(
+      false,
+    );
+    expect(
+      EDIT_WORKSPACE_SKILL_TOOL_NAME in
+        createProductChatToolContext({ model, editWorkspaceSkill: vi.fn() }).tools,
+    ).toBe(true);
+  });
+
+  it("passes the complete revised Skill and stable SDK tool-call id to the host", async () => {
+    const editWorkspaceSkill = vi.fn(async () => ({
+      updated: true as const,
+      name: "add-mcp-provider-plugin",
+      command: "/add-mcp-provider-plugin",
+      bundleId: "skill_bundle_2",
+    }));
+    const context = createProductChatToolContext({ model, editWorkspaceSkill });
+    const skillTool = context.tools[EDIT_WORKSPACE_SKILL_TOOL_NAME] as {
+      description: string;
+      execute: (args: unknown, context: { toolCallId: string }) => Promise<unknown>;
+    };
+
+    await expect(
+      skillTool.execute(
+        {
+          name: " add-mcp-provider-plugin ",
+          description: " Add an MCP provider plugin. ",
+          instructions: " Preserve existing guidance and add the provider. ",
+        },
+        { toolCallId: "call_skill_edit_1" },
+      ),
+    ).resolves.toMatchObject({ updated: true, command: "/add-mcp-provider-plugin" });
+
+    expect(skillTool.description).toContain("existing workspace-authored Skill");
+    expect(skillTool.description).toContain("use_skill");
+    expect(editWorkspaceSkill).toHaveBeenCalledWith(
+      {
+        name: "add-mcp-provider-plugin",
+        description: "Add an MCP provider plugin.",
+        instructions: "Preserve existing guidance and add the provider.",
+      },
+      { toolCallId: "call_skill_edit_1" },
     );
   });
 });

@@ -77,6 +77,14 @@ describe("loadHostTools", () => {
       },
       { toolCallId: "call_skill_1" },
     );
+    await tools?.editWorkspaceSkill?.(
+      {
+        name: "add-mcp-provider-plugin",
+        description: "Add an MCP provider plugin.",
+        instructions: "Preserve the workflow and add provider steps.",
+      },
+      { toolCallId: "call_skill_edit_1" },
+    );
     await tools?.close();
 
     expect(requests.map((request) => request.operation)).toEqual([
@@ -85,6 +93,7 @@ describe("loadHostTools", () => {
       "browser",
       "start_task",
       "create_workspace_skill",
+      "edit_workspace_skill",
       "browser_end_profile",
     ]);
     expect(requests[3]).toMatchObject({
@@ -100,7 +109,12 @@ describe("loadHostTools", () => {
       toolCallId: "call_skill_1",
       input: { name: "customer-health-review" },
     });
-    expect(execute).toHaveBeenCalledTimes(6);
+    expect(requests[5]).toMatchObject({
+      operation: "edit_workspace_skill",
+      toolCallId: "call_skill_edit_1",
+      input: { name: "add-mcp-provider-plugin" },
+    });
+    expect(execute).toHaveBeenCalledTimes(7);
   });
 
   it("does not call the web origin", async () => {

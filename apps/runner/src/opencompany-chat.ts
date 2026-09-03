@@ -1045,6 +1045,7 @@ async function resolveProductChatRuntime(input: {
     ...(hostTools?.createWorkspaceSkill
       ? { createWorkspaceSkill: hostTools.createWorkspaceSkill }
       : {}),
+    ...(hostTools?.editWorkspaceSkill ? { editWorkspaceSkill: hostTools.editWorkspaceSkill } : {}),
     ...(hostTools?.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
     ...(hostTools?.browserTools ? { browserTools: hostTools.browserTools } : {}),
     ...(hostTools?.browserProfiles ? { browserProfiles: hostTools.browserProfiles } : {}),
