@@ -11,6 +11,7 @@ import {
   BetterStackIcon,
   GitHubIcon,
   GoogleCalendarIcon,
+  GoogleDriveIcon,
   LinearIcon,
   NeonIcon,
   SlackIcon,
@@ -126,6 +127,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: GoogleCalendarIcon,
     iconClassName: "bg-[#1A73E8] text-white",
   },
+  "google-drive": {
+    ...OFFICIAL_MCP_PLUGIN_METADATA["google-drive"],
+    Icon: GoogleDriveIcon,
+    iconClassName: "bg-white text-[#1FA463]",
+  },
   linear: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
     Icon: LinearIcon,
@@ -170,6 +176,8 @@ export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
 export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
 export const GOOGLE_CALENDAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-calendar"].name;
 export const GOOGLE_CALENDAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-calendar"].source;
+export const GOOGLE_DRIVE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-drive"].name;
+export const GOOGLE_DRIVE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-drive"].source;
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
@@ -220,6 +228,10 @@ export function installOfficialGitHubPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialGoogleCalendarPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS["google-calendar"], preview);
+}
+
+export function installOfficialGoogleDrivePlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS["google-drive"], preview);
 }
 
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "google-drive",
+  "version": "1.1.0",
+  "description": "Search, inspect, read, create, and copy files through opencompany's Google Drive MCP.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://github.com/useopencompany/plugins/tree/main/google-drive",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/google-drive",
+  "license": "MIT",
+  "keywords": ["google-drive", "files", "documents", "storage", "workspace"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Browse Drive files",
+        "defaultMode": "ask",
+        "tools": ["get_file_metadata", "list_recent_files", "search_files"]
+      },
+      "query": {
+        "label": "Read files & permissions",
+        "defaultMode": "ask",
+        "tools": ["download_file_content", "get_file_permissions", "read_file_content"]
+      },
+      "write": {
+        "label": "Create & copy files",
+        "defaultMode": "ask",
+        "tools": ["copy_file", "create_file"]
+      }
+    }
+  }
+}

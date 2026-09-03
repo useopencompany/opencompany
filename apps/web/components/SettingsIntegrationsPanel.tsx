@@ -385,7 +385,7 @@ const INFISICAL_REGIONS = [
 // Group-card providers surfaced under each scope. These are all user-owned in the
 // data model (each member connects their own account), but the CRM / meeting /
 // issue-tracking tools read as shared workspace tooling, so we present them under
-// the Workspace scope; Gmail / Calendar / Drive stay personal.
+// the Workspace scope. Official Calendar and Drive accounts live under Plugins.
 const WORKSPACE_ACCOUNT_PROVIDERS = [
   "hubspot",
   "attio",
@@ -395,7 +395,6 @@ const WORKSPACE_ACCOUNT_PROVIDERS = [
 
 const PERSONAL_ACCOUNT_PROVIDERS = [
   "gmail",
-  "google_drive",
   "latitude",
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
 
@@ -494,10 +493,6 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="gmail"
               accounts={integrations.personalAccounts.gmail}
-            />
-            <IntegrationProviderGroupCard
-              provider="google_drive"
-              accounts={integrations.personalAccounts.google_drive}
             />
             <IntegrationProviderGroupCard
               provider="latitude"
@@ -1042,6 +1037,7 @@ export function IntegrationAccountRow({
           account.integrationId
         : account.accountEmail || account.accountName || account.integrationId;
   const needsGoogleDriveWriteScope =
+    showCapabilityModes &&
     account.provider === "google_drive" &&
     account.connected &&
     !hasGoogleDriveWriteScope(account.scopes);

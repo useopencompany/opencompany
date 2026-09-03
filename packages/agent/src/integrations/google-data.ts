@@ -79,6 +79,33 @@ export async function loadGoogleCalendarIntegration(input: { userWorkosId: strin
   return row;
 }
 
+export async function loadGoogleDriveIntegration(input: { userWorkosId: string; db?: DbLike }) {
+  const [row] = await (input.db ?? getDb())
+    .select({
+      id: integrations.id,
+      userWorkosId: integrations.userWorkosId,
+      status: integrations.status,
+      accountEmail: integrations.accountEmail,
+      accountName: integrations.accountName,
+      statusReason: integrations.statusReason,
+      scopes: integrations.scopes,
+      capabilityModes: integrations.capabilityModes,
+      toolModes: integrations.toolModes,
+    })
+    .from(integrations)
+    .where(
+      and(
+        eq(integrations.userWorkosId, input.userWorkosId),
+        isNull(integrations.workspaceId),
+        eq(integrations.provider, "google_drive"),
+        ne(integrations.status, "disconnected"),
+      ),
+    )
+    .orderBy(desc(integrations.updatedAt))
+    .limit(1);
+  return row;
+}
+
 // Gmail-as-a-brain-source state: same integration rows as the Gmail tool
 // connection, but exposed with the integration id the brain-source picker and
 // save action key config rows on.

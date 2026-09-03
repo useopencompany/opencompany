@@ -5,6 +5,10 @@ import {
   GOOGLE_CALENDAR_MCP_RECONNECT_REASON,
   GOOGLE_CALENDAR_READ_SCOPE,
 } from "./integrations/google-calendar-scopes";
+import {
+  GOOGLE_DRIVE_FILE_SCOPE,
+  GOOGLE_DRIVE_READ_SCOPE,
+} from "./integrations/google-drive-scopes";
 import { SLACK_MCP_RECONNECT_REASON, SLACK_MCP_USER_SCOPES } from "./integrations/slack-scopes";
 
 describe("Google Calendar integration state", () => {
@@ -82,6 +86,47 @@ describe("Slack integration state", () => {
 
     expect(state.slack).toMatchObject({ connected: true, status: "connected" });
     expect(state.personalAccounts.slack[0]).toMatchObject({
+      connected: true,
+      status: "connected",
+    });
+  });
+});
+
+describe("Google Drive integration state", () => {
+  it("keeps legacy accounts connected for Brain ingestion without the plugin grant", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_drive",
+        provider: "google_drive",
+        accountEmail: "ada@example.com",
+        status: "connected",
+        scopes: [GOOGLE_DRIVE_READ_SCOPE],
+      },
+    ]);
+
+    expect(state.google_drive).toMatchObject({
+      integrationId: "gint_drive",
+      connected: true,
+      status: "connected",
+    });
+    expect(state.personalAccounts.google_drive[0]).toMatchObject({
+      integrationId: "gint_drive",
+      connected: true,
+      status: "connected",
+    });
+  });
+
+  it("accepts the complete official Google Drive MCP grant", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_drive",
+        provider: "google_drive",
+        status: "connected",
+        scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE],
+      },
+    ]);
+
+    expect(state.personalAccounts.google_drive[0]).toMatchObject({
       connected: true,
       status: "connected",
     });

@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   getGoogleCalendarState: vi.fn(),
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
+  getGoogleDriveState: vi.fn(),
+  loadGoogleDriveConnection: vi.fn(),
   loadGoogleCalendarConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
@@ -59,6 +61,12 @@ vi.mock("./integrations/google-calendar-mcp", () => ({
     "https://api.opencompany.chat/mcp/plugins/google-calendar",
   getGoogleCalendarMcpIntegrationState: mocks.getGoogleCalendarState,
   loadGoogleCalendarMcpWorkerConnection: mocks.loadGoogleCalendarConnection,
+}));
+vi.mock("./integrations/google-drive-mcp", () => ({
+  GOOGLE_DRIVE_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-drive",
+  googleDriveMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/google-drive",
+  getGoogleDriveMcpIntegrationState: mocks.getGoogleDriveState,
+  loadGoogleDriveMcpWorkerConnection: mocks.loadGoogleDriveConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
   POSTHOG_MCP_ENDPOINT_URL: "https://mcp.posthog.com/mcp",
@@ -291,6 +299,57 @@ describe("plugin gateway registration cache", () => {
         server: {
           ...calendarRecord.server,
           url: "https://api.opencompany.chat.evil.example/mcp/plugins/google-calendar",
+        },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Google credentials only to opencompany's exact Drive MCP endpoint", async () => {
+    const googleDriveRecord = record({
+      pluginName: "google-drive",
+      pluginLabel: "google-drive",
+      pluginDescription: "Google Drive plugin tools.",
+      connectionProvider: "google-drive",
+      server: {
+        name: "google-drive",
+        type: "streamable-http",
+        url: "https://api.opencompany.chat/mcp/plugins/google-drive",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([googleDriveRecord]);
+
+    const registrations = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registrations).toEqual([
+      expect.objectContaining({
+        source: "plugin:google-drive:google-drive",
+        connectionProvider: "google_drive",
+        getState: mocks.getGoogleDriveState,
+      }),
+    ]);
+    await registrations[0]!.loadConnection({
+      ...identity,
+      operation: { type: "tools/list" },
+      onAuthorizationRequired: () => {
+        throw new Error("authorization required");
+      },
+    });
+    expect(mocks.loadGoogleDriveConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...identity,
+        registrationId: "plugin_gateway_1",
+        operation: { type: "tools/list" },
+      }),
+    );
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...googleDriveRecord,
+        server: {
+          ...googleDriveRecord.server,
+          url: "https://api.opencompany.chat.evil.example/mcp/plugins/google-drive",
         },
       },
     ]);
