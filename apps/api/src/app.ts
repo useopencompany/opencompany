@@ -2424,7 +2424,11 @@ export function createApiApp(input: CreateApiAppInput) {
               span.setAttributes({ "goat.http_status_code": c.res.status });
               return c.res;
             } catch (error) {
-              if (!(error instanceof ApiError) && !(error instanceof CoreError)) {
+              c.res = apiErrorResponse(c, error);
+              if (
+                c.res.status >= 500 ||
+                (!(error instanceof ApiError) && !(error instanceof CoreError))
+              ) {
                 captureException(error, {
                   ...requestFailureLogFieldsFrom(c),
                   event: "opencompany.api_request_failed",
@@ -2433,7 +2437,6 @@ export function createApiApp(input: CreateApiAppInput) {
                   path: c.req.path,
                 });
               }
-              c.res = apiErrorResponse(c, error);
               span.setAttributes({ "goat.http_status_code": c.res.status });
               if (c.res.status >= 500) {
                 span.fail(error, { "goat.http_status_code": c.res.status });

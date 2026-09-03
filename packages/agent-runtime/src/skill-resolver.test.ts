@@ -1,13 +1,19 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { SKILL_LIMITS } from "./artifact-policy";
 import {
+  createGitHubSkillFetcher,
   discoverSkillDirectories,
+  GitHubArtifactFetchError,
   parseSkillUrl,
   resolveSkill,
   SkillResolverError,
   type SkillResolverFetcher,
   type SkillTreeEntry,
 } from "./skill-resolver";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -74,6 +80,77 @@ describe("parseSkillUrl", () => {
 
   test("normalizes repeated separators in a subpath", () => {
     expect(parseSkillUrl("o/r///skills////safe///").subpath).toBe("skills/safe");
+  });
+});
+
+describe("createGitHubSkillFetcher", () => {
+  test("reports GitHub rate-limit diagnostics without repository details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          status: 403,
+          headers: {
+            "x-github-request-id": "ABCD:1234:5678:90AB",
+            "x-ratelimit-limit": "60",
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": "1788422400",
+            "x-ratelimit-resource": "core",
+          },
+        }),
+      ),
+    );
+
+    const error = await createGitHubSkillFetcher()
+      .resolveCommit("private-owner", "private-repo", "main")
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GitHubArtifactFetchError);
+    expect(error).toMatchObject({
+      name: "GitHubArtifactFetchError",
+      code: "github_artifact_fetch_failed",
+      message: "GitHub artifact request was rate limited.",
+      upstreamService: "github",
+      upstreamOperation: "resolve_commit",
+      upstreamStatus: 403,
+      failureKind: "rate_limit",
+      rateLimitLimit: 60,
+      rateLimitRemaining: 0,
+      rateLimitReset: 1788422400,
+      rateLimitResource: "core",
+      upstreamRequestId: "ABCD:1234:5678:90AB",
+      upstreamDurationMs: expect.any(Number),
+    });
+    expect(JSON.stringify(error)).not.toMatch(/private-owner|private-repo/u);
+  });
+
+  test("reduces network failures to allowlisted diagnostics", async () => {
+    const socketError = Object.assign(new Error("token=do-not-expose"), {
+      code: "ECONNRESET",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(
+        new TypeError("request included token=do-not-expose", {
+          cause: socketError,
+        }),
+      ),
+    );
+
+    const error = await createGitHubSkillFetcher()
+      .fetchTree("private-owner", "private-repo", "a".repeat(40))
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GitHubArtifactFetchError);
+    expect(error).toMatchObject({
+      message: "GitHub artifact request failed before receiving a response.",
+      upstreamOperation: "fetch_tree",
+      failureKind: "network",
+      networkErrorName: "TypeError",
+      networkErrorCode: "ECONNRESET",
+    });
+    expect(error).not.toHaveProperty("cause");
+    expect(JSON.stringify(error)).not.toMatch(/do-not-expose|private-owner|private-repo/u);
   });
 });
 
