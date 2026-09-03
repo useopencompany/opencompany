@@ -27,6 +27,28 @@ export type SlackOAuthResult = {
   scopes: string[];
 };
 
+export type SlackOAuthResponseShape = {
+  credentialLocation: "absent" | "top_level" | "nested" | "both";
+  hasAuthedUserId: boolean;
+  hasTeamId: boolean;
+  hasEnterpriseId: boolean;
+  isEnterpriseInstall: boolean | null;
+};
+
+export type SlackOAuthRequiredResponseField = "access_token" | "authed_user.id" | "team.id";
+
+export class SlackOAuthResponseError extends Error {
+  readonly code = "slack_oauth_response_invalid";
+
+  constructor(
+    readonly missingFields: readonly SlackOAuthRequiredResponseField[],
+    readonly responseShape: SlackOAuthResponseShape,
+  ) {
+    super(`Slack OAuth response missing required fields: ${missingFields.join(", ")}.`);
+    this.name = "SlackOAuthResponseError";
+  }
+}
+
 const SLACK_PROVIDER = "slack" as const;
 const SLACK_INTEGRATION_ENVS = [
   "OPENCOMPANY_SLACK_CLIENT_ID",
@@ -140,9 +162,11 @@ export function buildSlackAuthorizationUrl(state: string) {
 export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult> {
   const result = await slackApiRequest<{
     team?: { id?: string; name?: string };
+    enterprise?: { id?: string; name?: string };
     authed_user?: { id?: string; access_token?: string; scope?: string; token_type?: string };
     access_token?: string;
     scope?: string;
+    is_enterprise_install?: boolean;
   }>({
     method: "oauth.v2.user.access",
     form: {
@@ -156,8 +180,27 @@ export async function exchangeSlackCode(code: string): Promise<SlackOAuthResult>
   const teamId = result.team?.id?.trim();
   const authedUserId = result.authed_user?.id?.trim();
   const accessToken = result.access_token?.trim();
+  const nestedAccessToken = result.authed_user?.access_token?.trim();
+  const missingFields: SlackOAuthRequiredResponseField[] = [];
+  if (!teamId) missingFields.push("team.id");
+  if (!authedUserId) missingFields.push("authed_user.id");
+  if (!accessToken) missingFields.push("access_token");
   if (!teamId || !authedUserId || !accessToken) {
-    throw new Error("Slack did not return a user token.");
+    throw new SlackOAuthResponseError(missingFields, {
+      credentialLocation:
+        accessToken && nestedAccessToken
+          ? "both"
+          : accessToken
+            ? "top_level"
+            : nestedAccessToken
+              ? "nested"
+              : "absent",
+      hasAuthedUserId: Boolean(authedUserId),
+      hasTeamId: Boolean(teamId),
+      hasEnterpriseId: Boolean(result.enterprise?.id?.trim()),
+      isEnterpriseInstall:
+        typeof result.is_enterprise_install === "boolean" ? result.is_enterprise_install : null,
+    });
   }
 
   return {
