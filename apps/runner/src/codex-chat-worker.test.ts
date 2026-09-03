@@ -746,8 +746,15 @@ describe("runClaimedTurn", () => {
   it("caps infrastructure retry backoff at one minute", () => {
     const now = new Date("2026-07-10T09:00:00.000Z");
 
-    expect(codexChatRetryAt(now, 1)).toEqual(new Date("2026-07-10T09:00:05.000Z"));
-    expect(codexChatRetryAt(now, 20)).toEqual(new Date("2026-07-10T09:01:00.000Z"));
+    expect(codexChatRetryAt(now, 1, 0.5)).toEqual(new Date("2026-07-10T09:00:05.000Z"));
+    expect(codexChatRetryAt(now, 20, 0.5)).toEqual(new Date("2026-07-10T09:01:00.000Z"));
+  });
+
+  it("jitters infrastructure retries by up to twenty-five percent", () => {
+    const now = new Date("2026-07-10T09:00:00.000Z");
+
+    expect(codexChatRetryAt(now, 2, 0)).toEqual(new Date("2026-07-10T09:00:07.500Z"));
+    expect(codexChatRetryAt(now, 2, 1)).toEqual(new Date("2026-07-10T09:00:12.500Z"));
   });
 });
 
