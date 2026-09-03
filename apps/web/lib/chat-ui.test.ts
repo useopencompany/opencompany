@@ -71,7 +71,7 @@ describe("toChatUiMessage", () => {
         schemaVersion: "opencompany.chat.debug.v1",
         model: DEFAULT_MODEL,
         uiMessageParts: [
-          { type: "text", text: "Before." },
+          { type: "text", text: "Before.", itemId: "assistant_update_1" },
           {
             type: START_TASK_TOOL_PART_TYPE,
             toolCallId: "tool_1",
@@ -88,7 +88,7 @@ describe("toChatUiMessage", () => {
               prompt: "Research the market",
             },
           },
-          { type: "text", text: "After." },
+          { type: "text", text: "After.", itemId: "assistant_update_2" },
         ],
       },
     });
@@ -97,6 +97,11 @@ describe("toChatUiMessage", () => {
       "text",
       START_TASK_TOOL_PART_TYPE,
       "text",
+    ]);
+    expect(toChatUiMessage(message).parts).toMatchObject([
+      { type: "text", itemId: "assistant_update_1" },
+      { type: START_TASK_TOOL_PART_TYPE },
+      { type: "text", itemId: "assistant_update_2" },
     ]);
   });
 

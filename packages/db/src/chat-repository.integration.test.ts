@@ -41,6 +41,7 @@ const migrationPaths = [
   "0235_goat_chat_message_shape_epochs.sql",
   "0236_goat_chat_message_presentation_summaries.sql",
   "0245_goat_task_activities.sql",
+  "0247_preserve_assistant_message_boundaries.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -238,7 +239,7 @@ describe("Postgres Chat repositories", () => {
           uiMessageParts: [
             { type: "reasoning", text: longReasoning, state: "done" },
             ...toolParts,
-            { type: "text", text: "Trace complete" },
+            { type: "text", text: "Trace complete", itemId: "assistant_final" },
           ],
         }),
       ],
@@ -265,6 +266,11 @@ describe("Postgres Chat repositories", () => {
     expect(String(summaryReasoning.text)).toHaveLength(160);
     expect(String(summaryReasoning.text)).toMatch(/\.\.\.$/u);
     expect(summaryReasoning.presentationSummary).toBe(true);
+    expect(row.presentation_summary.uiMessageParts.at(-1)).toMatchObject({
+      type: "text",
+      text: "Trace complete",
+      itemId: "assistant_final",
+    });
     expect(summaryTool).toMatchObject({
       type: "dynamic-tool",
       toolName: "history_search",
