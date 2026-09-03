@@ -4,6 +4,7 @@ import { resolvePersistedAutoModelRouting } from "@opencompany/agent/application
 import { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
 import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
+import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import {
@@ -229,6 +230,14 @@ const app = createApiApp({
       ? { gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY }
       : {}),
   }),
+  ...(process.env.API_INTERNAL_TOKEN?.trim()
+    ? {
+        googleCalendarMcp: createGoogleCalendarMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+      }
+    : {}),
   billing: createBillingApplicationService({
     db: database.db,
     stripe,
@@ -271,7 +280,17 @@ const app = createApiApp({
         connectionProvider: "github",
       }),
   }),
-  googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
+  googleIngress: createGoogleIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider: "google-calendar",
+      }),
+  }),
   slackIngress: createSlackIngress({
     db: database.db,
     identify: identityVerifier,

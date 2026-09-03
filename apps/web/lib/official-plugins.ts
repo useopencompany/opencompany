@@ -1,6 +1,7 @@
 export type OfficialMcpPluginName =
   | "betterstack"
   | "github"
+  | "google-calendar"
   | "linear"
   | "neon"
   | "render"
@@ -22,6 +23,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
   connectionProvider:
     | "betterstack"
     | "github_user"
+    | "google_calendar"
     | "linear"
     | "neon"
     | "render"
@@ -66,6 +68,18 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref: "/api/integrations/github-user/start?returnTo=/settings/plugins/github",
     accountLabel: "GitHub",
     accountDescription: "The personal GitHub account opencompany uses when it works as you.",
+  },
+  "google-calendar": {
+    name: "google-calendar",
+    kind: "mcp",
+    label: "Google Calendar",
+    description: "List calendars, read your schedule, and create calendar events.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
+    connectionProvider: "google_calendar",
+    connectHref:
+      "/api/integrations/google-calendar/start?returnTo=/settings/plugins/google-calendar",
+    accountDescription: "The Google account opencompany uses when you run Calendar tools.",
   },
   linear: {
     name: "linear",

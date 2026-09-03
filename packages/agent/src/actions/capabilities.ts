@@ -62,14 +62,20 @@ export const PROVIDER_CAPABILITIES: Partial<
   google_calendar: [
     {
       id: "read",
-      label: "Read calendar",
-      description: "Look up events on your calendars.",
-      defaultMode: "on",
+      label: "Check calendars & availability",
+      description: "List calendars and inspect availability without reading event details.",
+      defaultMode: "ask",
+    },
+    {
+      id: "query",
+      label: "Read calendar events",
+      description: "Search and read event details from your calendars.",
+      defaultMode: "ask",
     },
     {
       id: "write",
-      label: "Add events",
-      description: "Create new events on your calendars.",
+      label: "Manage calendar events",
+      description: "Create, update, delete, and respond to events on your calendars.",
       defaultMode: "ask",
     },
   ],

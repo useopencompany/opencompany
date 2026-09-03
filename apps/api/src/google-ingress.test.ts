@@ -34,6 +34,7 @@ vi.mock("@opencompany/agent/integrations/google-oauth", async (importOriginal) =
 }));
 
 const sentinelDb = { sentinel: "db" };
+const refreshPluginRegistrations = vi.fn(async () => undefined);
 
 function ingress(overrides: { noWorkspaces?: boolean; authError?: ApiError } = {}) {
   vi.mocked(listWorkspacesForUser).mockResolvedValue(
@@ -45,6 +46,7 @@ function ingress(overrides: { noWorkspaces?: boolean; authError?: ApiError } = {
   );
   return createGoogleIngress({
     db: sentinelDb,
+    refreshPluginRegistrations,
     identify: async () => {
       if (overrides.authError) throw overrides.authError;
       return {
@@ -185,6 +187,47 @@ describe("Google ingress", () => {
         db: expect.objectContaining({ sentinel: "db" }),
       }),
     );
+    expect(refreshPluginRegistrations).not.toHaveBeenCalled();
+  });
+
+  it("refreshes installed plugin discovery after Google Calendar connects", async () => {
+    vi.mocked(exchangeGoogleCode).mockResolvedValue({
+      tokens: {
+        access_token: "at",
+        refresh_token: "rt",
+        scope: [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly",
+          "https://www.googleapis.com/auth/calendar.events",
+        ].join(" "),
+      },
+      expiresAt: new Date(Date.now() + 3_600_000),
+    } as never);
+    vi.mocked(fetchGoogleUserInfo).mockResolvedValue({
+      sub: "google-sub-1",
+      email: "ada@example.com",
+      name: "Ada",
+    } as never);
+    vi.mocked(connectGoogleIntegration).mockResolvedValue(undefined as never);
+    const state = createGoogleIntegrationState({
+      provider: "google_calendar",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/google-calendar",
+    });
+
+    const response = await ingress().callback(
+      "google_calendar",
+      new Request(
+        `https://api.example.com/integrations/google-calendar/callback?state=${encodeURIComponent(state)}&code=abc`,
+      ),
+    );
+
+    expect(response.status).toBe(302);
+    expect(refreshPluginRegistrations).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceIds: ["workspace_1"],
+    });
   });
 
   describe("drive webhook", () => {

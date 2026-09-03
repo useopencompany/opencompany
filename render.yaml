@@ -17,6 +17,10 @@ services:
         sync: false
       - key: API_BROWSER_ORIGINS
         sync: false
+      # Canonical origin used by the API and runner when the plugin gateway
+      # connects to API-hosted first-party MCP servers.
+      - key: OPENCOMPANY_API_ORIGIN
+        sync: false
       - key: WORKOS_CLIENT_ID
         sync: false
       - key: WORKOS_MOBILE_CLIENT_ID
@@ -176,8 +180,9 @@ services:
         sync: false
       - key: RUNNER_INTERNAL_TOKEN
         sync: false
-      # Runner→API internal wiki command bearer. The API validates it; the runner
-      # sends it. Keep both services' values in sync.
+      # Shared API-boundary signing secret. It validates runner→API wiki calls
+      # and signs short-lived, tool-bound tickets for first-party plugin MCPs.
+      # Keep the API and runner values in sync.
       - key: API_INTERNAL_TOKEN
         sync: false
       # Browser profiles moved behind /v1 in the #1203 3e cutover. The feature is

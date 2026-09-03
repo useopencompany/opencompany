@@ -13,6 +13,7 @@ import type {
   ImessageProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
+import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { McpService } from "@opencompany/agent/mcp-http";
 import type { BillingApplicationService } from "@opencompany/billing/application-service";
@@ -195,6 +196,7 @@ export type CreateApiAppInput = {
   integrationAccounts: IntegrationAccountService;
   slackBotSettings: SlackBotSettingsService;
   mcp?: McpService;
+  googleCalendarMcp?: GoogleCalendarMcpService;
   engineAuth: EngineAuthService;
   engineSessions: EngineSessionService;
   billing: BillingApplicationService;
@@ -2539,6 +2541,9 @@ export function createApiApp(input: CreateApiAppInput) {
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
   if (input.mcp) {
     app.on(["GET", "POST", "DELETE"], "/mcp", (c) => input.mcp!.handle(c.req.raw));
+  }
+  if (input.googleCalendarMcp) {
+    app.post("/mcp/plugins/google-calendar", (c) => input.googleCalendarMcp!.handle(c.req.raw));
   }
   app.post("/internal/onboarding-emails/enroll", async (c) => {
     authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
