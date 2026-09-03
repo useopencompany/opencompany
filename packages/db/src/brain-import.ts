@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { type Actor, CoreError } from "@opencompany/core";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "./client";
+import { stringifyPostgresJson } from "./postgres-json";
 import {
   type BrainImportDiscoverySummary,
   type BrainImportProvider,
@@ -359,7 +360,7 @@ export async function confirmBrainImport(input: {
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
-  const enabledProviders = JSON.stringify(input.enabledProviders);
+  const enabledProviders = stringifyPostgresJson(input.enabledProviders);
   const result = await db.execute(sql`
     WITH confirmed_run AS (
       UPDATE goat.brain_import_runs

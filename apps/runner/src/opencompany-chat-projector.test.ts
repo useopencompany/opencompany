@@ -103,6 +103,43 @@ describe("createProductChatProjector", () => {
     );
   });
 
+  it("normalizes malformed tool output before persisting the assistant projection", async () => {
+    const projector = createProjector();
+    await projector.project({
+      parts: [
+        { type: "text", text: "Answer\ud800\0", state: "streaming" },
+        {
+          type: "tool-web_search",
+          toolCallId: "tool_call_1",
+          state: "output-available",
+          output: {
+            results: [{ title: "Company\udfffBrain", highlights: ["Founder\0Name"] }],
+          },
+        },
+      ],
+    });
+
+    const projectionQuery = dbMock.execute.mock.calls.find(([query]) =>
+      sqlText(query).includes("UPDATE goat.chat_messages AS message"),
+    )?.[0];
+    const values = queryValues(projectionQuery);
+    const persistedTrace = values.find(
+      (value): value is string =>
+        typeof value === "string" && value.includes("opencompany.chat.debug.v1"),
+    );
+
+    expect(values).toContain("Answer��");
+    expect(JSON.parse(persistedTrace ?? "{}")).toMatchObject({
+      uiMessageParts: [
+        { type: "text", text: "Answer��" },
+        {
+          type: "tool-web_search",
+          output: { results: [{ title: "Company�Brain", highlights: ["Founder�Name"] }] },
+        },
+      ],
+    });
+  });
+
   it("emits each semantic tool transition once", async () => {
     const projector = createProjector();
     await projector.started();

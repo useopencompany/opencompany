@@ -26,6 +26,7 @@ import {
   type RunStatus,
 } from "@opencompany/core";
 import { type SQL, sql } from "drizzle-orm";
+import { stringifyPostgresJson } from "./postgres-json";
 import type { ChatMessageAttachment } from "./product-schema";
 import { type ResolvedWorkspaceSkill, resolveSkillCandidates } from "./skill-catalog";
 
@@ -599,9 +600,9 @@ export class PostgresChatRepository implements ChatRepository {
     const now = this.options.now?.() ?? new Date();
     const attachmentIds = input.command.attachmentIds ?? [];
     const resolvedAttachments = await this.resolveAttachments(input.actor, attachmentIds);
-    const attachmentsJson = JSON.stringify(resolvedAttachments.attachments);
+    const attachmentsJson = stringifyPostgresJson(resolvedAttachments.attachments);
     const attachmentTextsJson = serializeAttachmentTexts(resolvedAttachments.attachmentTexts);
-    const settingsJson = JSON.stringify({
+    const settingsJson = stringifyPostgresJson({
       ...(input.command.settings ?? {}),
       ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
     });
@@ -611,7 +612,7 @@ export class PostgresChatRepository implements ChatRepository {
         mention.kind === "skill" ? [mention.id] : [],
       ) ?? [],
     );
-    const resolvedMentionSkillsJson = JSON.stringify(
+    const resolvedMentionSkillsJson = stringifyPostgresJson(
       resolvedMentionSkills.map((skill) => ({
         bundle_id: skill.bundleId,
         source_kind: skill.sourceKind,
@@ -1022,7 +1023,7 @@ export class PostgresChatRepository implements ChatRepository {
         SELECT
           reservation.assistant_message_id, target_chat.id, 'assistant', '',
           target_chat.task_id,
-          ${JSON.stringify(assistantDebugTrace)}::jsonb,
+          ${stringifyPostgresJson(assistantDebugTrace)}::jsonb,
           ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true
@@ -1417,7 +1418,7 @@ export class PostgresChatRepository implements ChatRepository {
         UPDATE goat.run_approvals AS approval
         SET status = ${input.command.resolution === "canceled" ? "canceled" : "resolved"},
             resolution = ${input.command.resolution},
-            response = ${JSON.stringify(response)}::jsonb,
+            response = ${stringifyPostgresJson(response)}::jsonb,
             resolved_at = ${now},
             updated_at = ${now}
         WHERE approval.id IN (SELECT id FROM authorized)
@@ -1492,7 +1493,7 @@ export class PostgresChatRepository implements ChatRepository {
                         AND part.value -> 'approval' ->> 'id' = ${input.command.approvalId}
                       THEN part.value || jsonb_build_object(
                         'state', 'approval-responded',
-                        'approval', ${JSON.stringify(approvalResponse)}::jsonb
+                        'approval', ${stringifyPostgresJson(approvalResponse)}::jsonb
                       )
                       ELSE part.value
                     END
@@ -1570,7 +1571,7 @@ export class PostgresChatRepository implements ChatRepository {
         )
         SELECT
           ${eventId}, advanced_run.id, advanced_run.event_sequence, 1, 'approval.resolved',
-          ${JSON.stringify({
+          ${stringifyPostgresJson({
             approvalId: input.command.approvalId,
             resolution: input.command.resolution,
           })}::jsonb,
@@ -1694,7 +1695,7 @@ export class PostgresChatRepository implements ChatRepository {
       WITH resolved_interaction AS MATERIALIZED (
         UPDATE goat.codex_chat_interactions AS interaction
         SET status = 'resolved',
-            response = ${JSON.stringify(interactionResponse)}::jsonb,
+            response = ${stringifyPostgresJson(interactionResponse)}::jsonb,
             resolved_at = ${now},
             updated_at = ${now}
         WHERE interaction.id = ${input.approvalId}
@@ -1711,7 +1712,7 @@ export class PostgresChatRepository implements ChatRepository {
       UPDATE goat.run_approvals AS approval
       SET status = 'resolved',
           resolution = 'answered',
-          response = ${JSON.stringify(approvalResponse)}::jsonb,
+          response = ${stringifyPostgresJson(approvalResponse)}::jsonb,
           resolved_at = ${now},
           updated_at = ${now}
       WHERE approval.id IN (SELECT id FROM resolved_interaction)
@@ -1899,7 +1900,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
   async appendEvents(input: Parameters<RunExecutionRepository["appendEvents"]>[0]) {
     if (input.events.length === 0) return [];
     const createdAt = this.now();
-    const eventJson = JSON.stringify(input.events);
+    const eventJson = stringifyPostgresJson(input.events);
     const rows = await this.rows<RunEventRow>(sql`
       WITH input_events AS MATERIALIZED (
         SELECT
@@ -2009,7 +2010,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           item.value ->> 'prompt' AS prompt,
           item.value -> 'options' AS options,
           item.ordinality
-        FROM jsonb_array_elements(${JSON.stringify(input.approvals)}::jsonb)
+        FROM jsonb_array_elements(${stringifyPostgresJson(input.approvals)}::jsonb)
           WITH ORDINALITY AS item(value, ordinality)
       ),
       inserted_approvals AS MATERIALIZED (
@@ -2062,7 +2063,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           item.value ->> 'type' AS type,
           item.value -> 'payload' AS payload,
           item.ordinality
-        FROM jsonb_array_elements(${JSON.stringify(eventDrafts)}::jsonb)
+        FROM jsonb_array_elements(${stringifyPostgresJson(eventDrafts)}::jsonb)
           WITH ORDINALITY AS item(value, ordinality)
       ),
       inserted_events AS MATERIALIZED (
@@ -2472,7 +2473,7 @@ function serializeAttachmentTexts(
   attachmentTexts: ResolvedChatAttachments["attachmentTexts"],
 ): string | null {
   return attachmentTexts && Object.keys(attachmentTexts).length > 0
-    ? JSON.stringify(attachmentTexts)
+    ? stringifyPostgresJson(attachmentTexts)
     : null;
 }
 

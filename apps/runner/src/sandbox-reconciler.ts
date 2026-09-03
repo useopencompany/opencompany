@@ -1,3 +1,4 @@
+import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { Sandbox, type SandboxInfo } from "e2b";
@@ -53,7 +54,7 @@ export async function findLiveOwnedSandboxIds(
   now = new Date(),
 ) {
   if (candidates.length === 0) return new Set<string>();
-  const payload = JSON.stringify(
+  const payload = stringifyPostgresJson(
     candidates.map((candidate) => ({
       sandboxId: candidate.sandboxId,
       ownerKind: candidate.ownerKind,

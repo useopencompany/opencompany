@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { reserveWorkspaceIngestion } from "./billing";
 import { getDb } from "./client";
+import { stringifyPostgresJson } from "./postgres-json";
 import {
   type WikiIngestJob,
   type WikiIngestJobStatus,
@@ -430,7 +431,7 @@ export async function completeWikiIngestJob(input: {
 }): Promise<boolean> {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
-  const resultJson = JSON.stringify(input.result);
+  const resultJson = stringifyPostgresJson(input.result);
   const completed = await db.execute(sql`
     WITH completed_job AS (
       UPDATE goat.wiki_ingest_jobs
@@ -485,14 +486,14 @@ export async function failWikiIngestJobWithBackoff(input: {
   const now = input.now ?? new Date();
   const terminal = input.attempts >= (input.maxAttempts ?? WIKI_INGEST_MAX_ATTEMPTS);
   const nextRetryAt = terminal ? now : wikiIngestRetryAt(now, input.attempts);
-  const attemptErrorJson = JSON.stringify([
+  const attemptErrorJson = stringifyPostgresJson([
     {
       attempt: input.attempts,
       at: now.toISOString(),
       error: input.error.slice(0, ATTEMPT_ERROR_MAX_CHARS),
     },
   ]);
-  const failureResultJson = JSON.stringify(input.result ?? {});
+  const failureResultJson = stringifyPostgresJson(input.result ?? {});
   const failed = await db.execute(sql`
     WITH failed_job AS (
       UPDATE goat.wiki_ingest_jobs
@@ -547,7 +548,7 @@ export async function skipWikiIngestJob(input: {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   const reason = input.reason?.trim() || null;
-  const resultJson = JSON.stringify(input.result);
+  const resultJson = stringifyPostgresJson(input.result);
   const skipped = await db.execute(sql`
     WITH skipped_job AS (
       UPDATE goat.wiki_ingest_jobs

@@ -74,6 +74,31 @@ describe("createExternalEngineProjector", () => {
     expect(mocks.captureException.mock.calls[0]?.[0]).not.toBe(databaseError);
   });
 
+  it("normalizes malformed engine output before persisting the assistant projection", async () => {
+    mocks.execute.mockResolvedValueOnce({ rows: [{ id: "updated_row" }] });
+    const projector = createExternalEngineProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+    });
+
+    await projector.push([agentMessageChunk("Answer\ud800\0")]);
+
+    const messageUpdate = mocks.execute.mock.calls
+      .map(([query]) => query)
+      .find((query) => sqlText(query).includes("UPDATE goat.chat_messages AS message"));
+    const values = queryValues(messageUpdate);
+    const persistedTrace = values.find(
+      (value): value is string =>
+        typeof value === "string" && value.includes("goat.codex_chat.debug.v1"),
+    );
+
+    expect(values).toContain("Answer��");
+    expect(JSON.parse(persistedTrace ?? "{}")).toMatchObject({
+      uiMessageParts: [{ type: "text", text: "Answer��" }],
+    });
+  });
+
   it("still aborts projection when the event insert proves the turn lease was lost", async () => {
     mocks.execute.mockResolvedValueOnce({ rows: [] });
     const projector = createExternalEngineProjector({

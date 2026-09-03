@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { includedUsageAllowanceCents } from "./billing-constants";
 import { getDb } from "./client";
+import { stringifyPostgresJson } from "./postgres-json";
 import type { CreditLedgerSource, WorkspacePlan } from "./product-schema";
 import { creditLedger, stripeCheckoutSessions } from "./product-schema";
 
@@ -131,8 +132,8 @@ export async function recordCreditDebit(input: CreditDebitInput) {
         ${input.reservationId ?? null},
         ${input.providerCostUsdMicros},
         ${input.platformFeeUsdMicros},
-        ${JSON.stringify(input.costBasis)}::jsonb,
-        ${JSON.stringify(input.metadata ?? {})}::jsonb
+        ${stringifyPostgresJson(input.costBasis)}::jsonb,
+        ${stringifyPostgresJson(input.metadata ?? {})}::jsonb
       )
       ON CONFLICT DO NOTHING
       RETURNING workspace_id, id, amount_usd_micros
@@ -249,12 +250,12 @@ export async function grantMonthlyIncludedUsage(input: {
   const db = input.db ?? getDb();
   const grantKey = `included_usage_grant:${input.workspaceId}:${input.periodStart.toISOString()}:${targetAllowanceCents}`;
   const expireKey = `included_usage_expiration:${input.workspaceId}:${input.periodStart.toISOString()}`;
-  const expirationMetadata = JSON.stringify({
+  const expirationMetadata = stringifyPostgresJson({
     reason: "included_usage_no_rollover",
     newPeriodStart: input.periodStart.toISOString(),
     stripeEventId: input.eventId ?? null,
   });
-  const grantMetadata = JSON.stringify({
+  const grantMetadata = stringifyPostgresJson({
     reason: "monthly_included_usage",
     plan: input.plan,
     seatQuantity: input.seatQuantity,

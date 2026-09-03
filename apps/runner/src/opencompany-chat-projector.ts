@@ -7,6 +7,7 @@ import { calculateModelUsageCost } from "@opencompany/billing";
 import type { RunApprovalDraft, RunEventDraft, RunExecutionRepository } from "@opencompany/core";
 import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
 import { recordCreditDebit, recordSubscriptionCoveredUsage } from "@opencompany/db/credits";
+import { normalizePostgresText, stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import type { ChatMessageDebugTrace } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { recordModelCost, recordModelUsageTokens } from "@opencompany/telemetry";
@@ -97,10 +98,14 @@ export function createProductChatProjector(input: {
     const effectiveProjection = options.preservePersistedOnEmpty
       ? await hydrateEmptyProjectionFromPersistedMessage(projection)
       : projection;
-    const content = effectiveProjection.parts
-      .flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : []))
-      .join("")
-      .trim();
+    const content = normalizePostgresText(
+      effectiveProjection.parts
+        .flatMap((part) =>
+          part.type === "text" && typeof part.text === "string" ? [part.text] : [],
+        )
+        .join("")
+        .trim(),
+    );
     const debugTrace: ChatMessageDebugTrace = {
       schemaVersion: CHAT_DEBUG_SCHEMA_VERSION,
       model: target.model,
@@ -117,7 +122,7 @@ export function createProductChatProjector(input: {
       await getDb().execute(sql`
         UPDATE goat.chat_messages AS message
         SET content = ${content},
-            debug_trace = ${JSON.stringify(debugTrace)}::jsonb,
+            debug_trace = ${stringifyPostgresJson(debugTrace)}::jsonb,
             updated_at = ${new Date()}
         WHERE message.id = ${target.assistantMessageId}
           AND message.session_id = ${target.chatSessionId}

@@ -42,7 +42,7 @@ const CODEX_CHAT_RETRY_BASE_DELAY_MS = 5_000;
 const CODEX_CHAT_RETRY_MAX_DELAY_MS = 60_000;
 export const CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS = 5;
 const CODEX_CHAT_UNEXPECTED_FAILURE_MESSAGE =
-  "This chat run failed before the coding engine could finish. Send your message again to retry.";
+  "This chat run failed unexpectedly. Send your message again to retry.";
 const CODEX_CHAT_INFRASTRUCTURE_RETRY_EXHAUSTED_MESSAGE =
   "This chat run could not start after several infrastructure retries. Send your message again to retry.";
 

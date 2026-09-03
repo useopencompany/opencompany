@@ -1105,11 +1105,16 @@ describe("Postgres Chat repositories", () => {
         {
           id: "event_content",
           type: "message.content_updated",
-          payload: { messageId: "assistant_1", content: "Done", complete: true },
+          payload: {
+            messageId: "assistant_1",
+            content: "Done\ud800\0",
+            complete: true,
+          },
         },
       ],
     });
     expect(events.map((event) => event.sequence)).toEqual([2, 3]);
+    expect(events[1]?.payload).toMatchObject({ content: "Done��" });
     await expect(
       execution.appendEvents({
         worker: { workerId: "other_worker" },
