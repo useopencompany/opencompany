@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reloading a Claude or Codex chat keeps the model you were using — Fable no longer quietly switches to another model on your next message (#1486) — @opencompany-bot.
 - The built-in opencompany connector no longer occasionally shows as disconnected at the start of a Claude session (#1544) — @louis.
 - Workflow tasks get a proper generated title instead of keeping the raw workflow name (#1524, #1538) — @louis.
+- Follow-up questions on report-producing tasks now answer in the conversation instead of creating another report when you ask for a summary or clarification (#1540) — @louis.
+- Scheduled follow-ups from Claude tasks now run at the requested time instead of appearing scheduled and then never starting (#1546) — @louis.
 - Messages with emoji or other unusual characters save reliably instead of sometimes failing a reply midway (#1511) — @louis.
 
 ## [1.21.0] - 2026-09-01
