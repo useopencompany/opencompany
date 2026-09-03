@@ -5335,8 +5335,8 @@ export const chatAttachmentUploads = productSchema.table(
   }),
 );
 
-// Keyed attachment uploads reserve their identity before Blob I/O. Cleanup marks these rows but
-// retains them as tombstones, preventing a previously used key from acquiring a new meaning.
+// Keyed attachment uploads reserve their identity before Blob I/O. Claimed and cleaned commands
+// become short-lived tombstones, then the cleanup worker removes them after the replay window.
 // There is intentionally no attachment FK because the reservation precedes the upload row.
 export const chatAttachmentUploadCommands = productSchema.table(
   "chat_attachment_upload_commands",
@@ -5354,6 +5354,7 @@ export const chatAttachmentUploadCommands = productSchema.table(
     blobPathname: text("blob_pathname").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
     cleanedAt: timestamp("cleaned_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     touchedAt: timestamp("touched_at", { withTimezone: true }).notNull().defaultNow(),
@@ -5372,7 +5373,10 @@ export const chatAttachmentUploadCommands = productSchema.table(
     ),
     expiryIdx: index("goat_chat_attachment_upload_commands_expiry_idx")
       .on(table.expiresAt, table.commandId)
-      .where(sql`${table.cleanedAt} IS NULL`),
+      .where(sql`${table.cleanedAt} IS NULL AND ${table.claimedAt} IS NULL`),
+    terminalIdx: index("goat_chat_attachment_upload_commands_terminal_idx")
+      .on(table.cleanedAt, table.commandId)
+      .where(sql`${table.cleanedAt} IS NOT NULL`),
     requestHashCheck: check(
       "goat_chat_attachment_upload_commands_request_hash_check",
       sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
@@ -5391,7 +5395,8 @@ export const chatAttachmentUploadCommands = productSchema.table(
     ),
     lifecycleCheck: check(
       "goat_chat_attachment_upload_commands_lifecycle_check",
-      sql`${table.cleanedAt} IS NULL OR ${table.completedAt} IS NULL OR ${table.cleanedAt} >= ${table.completedAt}`,
+      sql`(${table.cleanedAt} IS NULL OR ${table.completedAt} IS NULL OR ${table.cleanedAt} >= ${table.completedAt})
+        AND (${table.claimedAt} IS NULL OR (${table.completedAt} IS NOT NULL AND ${table.cleanedAt} IS NOT NULL AND ${table.claimedAt} >= ${table.completedAt}))`,
     ),
   }),
 );

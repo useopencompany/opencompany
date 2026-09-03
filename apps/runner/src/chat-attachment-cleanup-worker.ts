@@ -15,6 +15,7 @@ const CLEANUP_LOCK_NAME = "opencompany.chat-attachment-cleanup.v1";
 const CLEANUP_INTERVAL_MS = 60 * 60_000;
 export const CHAT_ATTACHMENT_CLEANUP_GRACE_MS = 15 * 60_000;
 export const CHAT_ATTACHMENT_CLEANUP_BATCH_SIZE = 100;
+export const CHAT_ATTACHMENT_COMMAND_RETENTION_MS = 24 * 60 * 60_000;
 
 type CleanupCandidate = {
   kind: "command" | "legacy";
@@ -25,6 +26,7 @@ export type ChatAttachmentCleanupResult = {
   acquired: boolean;
   found: number;
   cleaned: number;
+  purged: number;
   failed: number;
   skipped: number;
 };
@@ -57,6 +59,7 @@ export async function cleanExpiredChatAttachments(input: {
     acquired = lock.rows[0]?.acquired === true;
     if (!acquired) return emptyResult(false);
 
+    const purged = await purgeTerminalCommands(client, now, batchSize);
     const candidates = await listCandidates(client, now, batchSize);
     let cleaned = 0;
     let failed = 0;
@@ -79,7 +82,7 @@ export async function cleanExpiredChatAttachments(input: {
         input.onCandidateFailure?.(candidate, error);
       }
     }
-    return { acquired: true, found: candidates.length, cleaned, failed, skipped };
+    return { acquired: true, found: candidates.length, cleaned, purged, failed, skipped };
   } catch (error) {
     fatalError = error;
     throw error;
@@ -132,13 +135,15 @@ export function startChatAttachmentCleanupWorker(
           event: "opencompany.chat_attachment_cleanup_completed",
           found_count: result.found,
           cleaned_count: result.cleaned,
+          purged_command_count: result.purged,
           failed_count: result.failed,
           skipped_count: result.skipped,
         });
       }
       return (
         result.acquired &&
-        result.found === (options.batchSize ?? CHAT_ATTACHMENT_CLEANUP_BATCH_SIZE)
+        (result.found === (options.batchSize ?? CHAT_ATTACHMENT_CLEANUP_BATCH_SIZE) ||
+          result.purged === (options.batchSize ?? CHAT_ATTACHMENT_CLEANUP_BATCH_SIZE))
       );
     },
     onError: (error) => {
@@ -164,10 +169,9 @@ async function listCandidates(client: PooledDbClient, now: Date, batchSize: numb
       WITH candidates AS (
         SELECT 'command'::text AS kind, command.command_id AS id, command.expires_at
         FROM goat.chat_attachment_upload_commands AS command
-        LEFT JOIN goat.chat_attachment_uploads AS upload ON upload.id = command.attachment_id
         WHERE command.cleaned_at IS NULL
+          AND command.claimed_at IS NULL
           AND command.expires_at + interval '15 minutes' <= $1
-          AND upload.claimed_at IS NULL
         UNION ALL
         SELECT 'legacy'::text AS kind, upload.id, upload.expires_at
         FROM goat.chat_attachment_uploads AS upload
@@ -187,6 +191,29 @@ async function listCandidates(client: PooledDbClient, now: Date, batchSize: numb
     [now, batchSize],
   );
   return result.rows;
+}
+
+async function purgeTerminalCommands(client: PooledDbClient, now: Date, batchSize: number) {
+  const retentionCutoff = new Date(now.getTime() - CHAT_ATTACHMENT_COMMAND_RETENTION_MS);
+  const result = await client.query<{ commandId: string }>(
+    `
+      WITH expired_command_tombstones AS (
+        SELECT command_id
+        FROM goat.chat_attachment_upload_commands
+        WHERE cleaned_at IS NOT NULL
+          AND cleaned_at <= $1
+        ORDER BY cleaned_at, command_id
+        LIMIT $2
+        FOR UPDATE SKIP LOCKED
+      )
+      DELETE FROM goat.chat_attachment_upload_commands AS command
+      USING expired_command_tombstones AS expired
+      WHERE command.command_id = expired.command_id
+      RETURNING command.command_id AS "commandId"
+    `,
+    [retentionCutoff, batchSize],
+  );
+  return result.rows.length;
 }
 
 async function cleanCandidate(input: {
@@ -223,11 +250,12 @@ async function cleanCommandCandidate(input: {
     attachmentId: string;
     blobPathname: string;
     expiresAt: Date;
+    claimedAt: Date | null;
     cleanedAt: Date | null;
   }>(
     `
       SELECT attachment_id AS "attachmentId", blob_pathname AS "blobPathname",
-             expires_at AS "expiresAt", cleaned_at AS "cleanedAt"
+             expires_at AS "expiresAt", claimed_at AS "claimedAt", cleaned_at AS "cleanedAt"
       FROM goat.chat_attachment_upload_commands
       WHERE command_id = $1
       FOR UPDATE
@@ -237,6 +265,7 @@ async function cleanCommandCandidate(input: {
   const row = command.rows[0];
   if (
     !row ||
+    row.claimedAt ||
     row.cleanedAt ||
     row.expiresAt.getTime() + CHAT_ATTACHMENT_CLEANUP_GRACE_MS > input.now.getTime()
   ) {
@@ -341,5 +370,5 @@ function positiveInteger(value: number, name: string) {
 }
 
 function emptyResult(acquired: boolean): ChatAttachmentCleanupResult {
-  return { acquired, found: 0, cleaned: 0, failed: 0, skipped: 0 };
+  return { acquired, found: 0, cleaned: 0, purged: 0, failed: 0, skipped: 0 };
 }

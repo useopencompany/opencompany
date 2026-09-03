@@ -848,6 +848,13 @@ export class PostgresChatRepository implements ChatRepository {
         WHERE existing.kind = 'chat'
            OR existing.task_id IN (SELECT id FROM continued_task)
       ),
+      locked_attachment_commands AS MATERIALIZED (
+        -- Completion and cleanup also lock keyed commands before their upload row.
+        SELECT command.command_id
+        FROM goat.chat_attachment_upload_commands AS command
+        WHERE command.attachment_id IN (${attachmentIdList})
+        FOR UPDATE
+      ),
       eligible_attachments AS MATERIALIZED (
         SELECT upload.id
         FROM goat.chat_attachment_uploads AS upload
@@ -857,6 +864,7 @@ export class PostgresChatRepository implements ChatRepository {
           AND upload.expires_at > ${now}
           AND upload.id IN (${attachmentIdList})
           AND EXISTS (SELECT 1 FROM membership)
+          AND (SELECT count(*) FROM locked_attachment_commands) >= 0
         FOR UPDATE
       ),
       reservation AS MATERIALIZED (
@@ -1069,6 +1077,17 @@ export class PostgresChatRepository implements ChatRepository {
           AND upload.claimed_at IS NULL
         RETURNING upload.id
       ),
+      terminal_attachment_commands AS MATERIALIZED (
+        UPDATE goat.chat_attachment_upload_commands AS command
+        SET claimed_at = ${now},
+            cleaned_at = ${now},
+            touched_at = ${now}
+        FROM claimed_attachments AS upload
+        WHERE command.attachment_id = upload.id
+          AND command.claimed_at IS NULL
+          AND command.cleaned_at IS NULL
+        RETURNING command.command_id
+      ),
       inserted_user_message AS (
         INSERT INTO goat.chat_messages (
           id, session_id, role, content, task_id, attachments, attachment_texts,
@@ -1229,7 +1248,8 @@ export class PostgresChatRepository implements ChatRepository {
           ELSE jsonb_array_length(jsonb_build_object('reason', 'unmaterialized')) = 0
         END AS materialized,
         (SELECT count(*) FROM notified) AS "notifyCount",
-        (SELECT count(*) FROM dismissed_capabilities) AS "capabilityCancelCount"
+        (SELECT count(*) FROM dismissed_capabilities) AS "capabilityCancelCount",
+        (SELECT count(*) FROM terminal_attachment_commands) AS "terminalAttachmentCommandCount"
       FROM reservation
       `);
     } catch (error) {

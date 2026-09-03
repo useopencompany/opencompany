@@ -83,6 +83,7 @@ export function createAttachmentUploadService(input: {
         repository: input.repository,
         storage,
         now,
+        id,
       });
     },
   };
@@ -169,9 +170,10 @@ async function uploadKeyed(input: {
   repository: AttachmentRepository;
   storage: AttachmentStorage;
   now: () => Date;
+  id: () => string;
 }): Promise<AttachmentUploadResult> {
-  const commandId = deterministicId("attachment_upload_command", input.actor, input.idempotencyKey);
-  const attachmentId = deterministicId("attachment", input.actor, input.idempotencyKey);
+  const commandId = `attachment_upload_command_${randomUUID()}`;
+  const attachmentId = input.id();
   const blobPathname = `goat-chat-v1/${input.actor.userId}/${attachmentId}/content`;
   const requestedAt = input.now();
   const requestHash = attachmentRequestHash(input.file);
@@ -297,14 +299,6 @@ function attachmentRequestHash(file: ValidatedAttachmentFile) {
       }),
     )
     .digest("hex");
-}
-
-function deterministicId(prefix: string, actor: Actor, key: string) {
-  const digest = createHash("sha256")
-    .update([prefix, actor.userId, actor.workspaceId, key].join("\n"))
-    .digest("hex")
-    .slice(0, 32);
-  return `${prefix}_${digest}`;
 }
 
 function assertIdempotencyKey(value: string) {

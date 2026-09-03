@@ -40,7 +40,7 @@ const migrationPaths = [
   "0229_goat_chat_skill_bundle_names.sql",
   "0235_goat_chat_message_shape_epochs.sql",
   "0236_goat_chat_message_presentation_summaries.sql",
-  "0239_goat_chat_attachment_upload_idempotency.sql",
+  "0240_goat_chat_attachment_upload_idempotency.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -80,7 +80,7 @@ describe("Postgres Chat repositories", () => {
       );
     `);
     for (const migrationPath of migrationPaths) {
-      if (migrationPath.endsWith("0239_goat_chat_attachment_upload_idempotency.sql")) {
+      if (migrationPath.endsWith("0240_goat_chat_attachment_upload_idempotency.sql")) {
         await database.exec(`
           INSERT INTO goat.chat_attachment_uploads (
             id, user_workos_id, workspace_id, format, media_type, filename, size_bytes,
@@ -241,6 +241,75 @@ describe("Postgres Chat repositories", () => {
       attachmentId: "attachment_keyed_1",
       cleanedAt: expect.any(Date),
       expiresAt,
+    });
+  });
+
+  it("terminalizes a keyed upload command when its attachment is claimed", async () => {
+    const timestamp = new Date("2026-08-10T20:00:00.000Z");
+    const uploads = new PostgresChatAttachmentRepository(execute, () => timestamp);
+    const reservation = await uploads.reserve({
+      actor: actor(),
+      commandId: "attachment_command_claimed",
+      idempotencyKey: "claimed-upload-key",
+      requestHash: "b".repeat(64),
+      attachmentId: "attachment_claimed",
+      blobPathname: "goat-chat-v1/user_1/attachment_claimed/content",
+      expiresAt: new Date("2026-08-11T20:00:00.000Z"),
+    });
+    expect(reservation).not.toBeNull();
+    await expect(
+      uploads.complete({
+        commandId: "attachment_command_claimed",
+        format: "text",
+        mediaType: "text/plain",
+        filename: "claimed.txt",
+        sizeBytes: 7,
+        blobUrl: "https://blob.invalid/claimed",
+        extractedText: "claimed",
+      }),
+    ).resolves.toMatchObject({ id: "attachment_claimed", created: true });
+    const messages = new ChatApplicationService(
+      new PostgresChatRepository(execute, {
+        ids: deterministicIds(),
+        now: () => timestamp,
+        resolveAttachments: (input) => uploads.resolve(input),
+      }),
+    );
+
+    const created = await messages.createMessage(actor(), {
+      idempotencyKey: "claim-keyed-attachment",
+      content: "Use the keyed upload",
+      engine: "opencompany",
+      model: "provider/model",
+      attachmentIds: ["attachment_claimed"],
+    });
+
+    await expect(
+      database.query<{
+        claimed_message_id: string;
+        upload_claimed_at: Date;
+        command_claimed_at: Date;
+        cleaned_at: Date;
+      }>(`
+        SELECT
+          upload.claimed_message_id,
+          upload.claimed_at AS upload_claimed_at,
+          command.claimed_at AS command_claimed_at,
+          command.cleaned_at
+        FROM goat.chat_attachment_uploads AS upload
+        JOIN goat.chat_attachment_upload_commands AS command
+          ON command.attachment_id = upload.id
+        WHERE upload.id = 'attachment_claimed'
+      `),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          claimed_message_id: created.messageId,
+          upload_claimed_at: timestamp,
+          command_claimed_at: timestamp,
+          cleaned_at: timestamp,
+        },
+      ],
     });
   });
 

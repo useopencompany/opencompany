@@ -1,8 +1,10 @@
+import { PGlite } from "@electric-sql/pglite";
 import type { PooledDbClient, PooledDbHandle } from "@opencompany/db/pool";
 import { BlobNotFoundError } from "@vercel/blob";
 import { describe, expect, it, vi } from "vitest";
 import {
   CHAT_ATTACHMENT_CLEANUP_GRACE_MS,
+  CHAT_ATTACHMENT_COMMAND_RETENTION_MS,
   cleanExpiredChatAttachments,
   isBlobNotFound,
   startChatAttachmentCleanupWorker,
@@ -66,7 +68,14 @@ describe("chat attachment cleanup", () => {
         now,
         deleteBlob,
       }),
-    ).resolves.toEqual({ acquired: true, found: 3, cleaned: 3, failed: 0, skipped: 0 });
+    ).resolves.toEqual({
+      acquired: true,
+      found: 3,
+      cleaned: 3,
+      purged: 0,
+      failed: 0,
+      skipped: 0,
+    });
     expect(deleteBlob.mock.calls.map(([target]) => target)).toEqual([
       "https://blob.invalid/ready",
       "private/command_incomplete",
@@ -130,7 +139,14 @@ describe("chat attachment cleanup", () => {
         now,
         deleteBlob,
       }),
-    ).resolves.toEqual({ acquired: true, found: 2, cleaned: 1, failed: 1, skipped: 0 });
+    ).resolves.toEqual({
+      acquired: true,
+      found: 2,
+      cleaned: 1,
+      purged: 0,
+      failed: 1,
+      skipped: 0,
+    });
     expect(client.query.mock.calls.filter(([query]) => query === "ROLLBACK")).toHaveLength(1);
     const failedDeletes = client.query.mock.calls.filter(
       ([query, params]) => query.startsWith("DELETE") && params?.[0] === "attachment_failed",
@@ -188,9 +204,132 @@ describe("chat attachment cleanup", () => {
         now,
         deleteBlob,
       }),
-    ).resolves.toEqual({ acquired: true, found: 2, cleaned: 0, failed: 0, skipped: 2 });
+    ).resolves.toEqual({
+      acquired: true,
+      found: 2,
+      cleaned: 0,
+      purged: 0,
+      failed: 0,
+      skipped: 2,
+    });
     expect(deleteBlob).not.toHaveBeenCalled();
   });
+
+  it("reaches an eligible upload past a large prefix of expired claimed commands", async () => {
+    const database = await PGlite.create();
+    try {
+      await database.exec(`
+        CREATE SCHEMA goat;
+        CREATE TABLE goat.chat_attachment_upload_commands (
+          command_id text PRIMARY KEY,
+          attachment_id text NOT NULL UNIQUE,
+          blob_pathname text NOT NULL UNIQUE,
+          expires_at timestamptz NOT NULL,
+          claimed_at timestamptz,
+          cleaned_at timestamptz,
+          touched_at timestamptz NOT NULL
+        );
+        CREATE INDEX command_cleanup_idx
+          ON goat.chat_attachment_upload_commands (expires_at, command_id)
+          WHERE cleaned_at IS NULL AND claimed_at IS NULL;
+        CREATE INDEX command_terminal_idx
+          ON goat.chat_attachment_upload_commands (cleaned_at, command_id)
+          WHERE cleaned_at IS NOT NULL;
+        CREATE TABLE goat.chat_attachment_uploads (
+          id text PRIMARY KEY,
+          blob_url text NOT NULL,
+          expires_at timestamptz NOT NULL,
+          claimed_at timestamptz
+        );
+      `);
+      const terminalAt = new Date(now.getTime() - CHAT_ATTACHMENT_COMMAND_RETENTION_MS - 1);
+      await database.query(
+        `
+          INSERT INTO goat.chat_attachment_upload_commands (
+            command_id, attachment_id, blob_pathname, expires_at,
+            claimed_at, cleaned_at, touched_at
+          )
+          SELECT
+            'claimed_command_' || value,
+            'claimed_attachment_' || value,
+            'private/claimed/' || value,
+            $1,
+            $2,
+            $2,
+            $2
+          FROM generate_series(1, 250) AS value
+        `,
+        [expiredAt, terminalAt],
+      );
+      await database.query(
+        `
+          INSERT INTO goat.chat_attachment_uploads (id, blob_url, expires_at, claimed_at)
+          SELECT
+            'claimed_attachment_' || value,
+            'https://blob.invalid/claimed/' || value,
+            $1,
+            $2
+          FROM generate_series(1, 250) AS value
+        `,
+        [expiredAt, terminalAt],
+      );
+      await database.query(
+        `
+          INSERT INTO goat.chat_attachment_upload_commands (
+            command_id, attachment_id, blob_pathname, expires_at, touched_at
+          ) VALUES ('eligible_command', 'eligible_attachment', 'private/eligible', $1, $1)
+        `,
+        [expiredAt],
+      );
+      await database.query(
+        `
+          INSERT INTO goat.chat_attachment_uploads (id, blob_url, expires_at)
+          VALUES ('eligible_attachment', 'https://blob.invalid/eligible', $1)
+        `,
+        [expiredAt],
+      );
+      const client = {
+        query: vi.fn(async (query: string, params?: unknown[]) => {
+          if (query.includes("pg_try_advisory_lock")) return { rows: [{ acquired: true }] };
+          if (query.includes("pg_advisory_unlock")) return { rows: [{ unlocked: true }] };
+          return database.query(query, params as never[] | undefined);
+        }),
+        release: vi.fn(),
+      } as unknown as PooledDbClient;
+      const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+      const deleteBlob = vi.fn(async () => undefined);
+
+      await expect(
+        cleanExpiredChatAttachments({
+          pool,
+          token: "test-token",
+          signal: new AbortController().signal,
+          now,
+          batchSize: 100,
+          deleteBlob,
+        }),
+      ).resolves.toEqual({
+        acquired: true,
+        found: 1,
+        cleaned: 1,
+        purged: 100,
+        failed: 0,
+        skipped: 0,
+      });
+      expect(deleteBlob).toHaveBeenCalledOnce();
+      expect(deleteBlob).toHaveBeenCalledWith(
+        "https://blob.invalid/eligible",
+        expect.objectContaining({ token: "test-token" }),
+      );
+      await expect(
+        database.query<{ count: number }>(
+          "SELECT count(*)::int AS count FROM goat.chat_attachment_upload_commands",
+        ),
+      ).resolves.toMatchObject({ rows: [{ count: 151 }] });
+    } finally {
+      await database.close();
+    }
+  }, 15_000);
 
   it("does no work when another runner owns the advisory lock", async () => {
     const client = fakeClient(async (query) => {
@@ -205,7 +344,14 @@ describe("chat attachment cleanup", () => {
         token: "test-token",
         signal: new AbortController().signal,
       }),
-    ).resolves.toEqual({ acquired: false, found: 0, cleaned: 0, failed: 0, skipped: 0 });
+    ).resolves.toEqual({
+      acquired: false,
+      found: 0,
+      cleaned: 0,
+      purged: 0,
+      failed: 0,
+      skipped: 0,
+    });
     expect(client.query).toHaveBeenCalledOnce();
   });
 
