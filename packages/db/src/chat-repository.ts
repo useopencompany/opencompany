@@ -1030,7 +1030,12 @@ export class PostgresChatRepository implements ChatRepository {
             reservation.run_id, target_chat.owner_user_workos_id,
             upserted_runtime.id, target_chat.id,
           reservation.message_id, reservation.assistant_message_id, 'queued',
-          ${input.command.content}, ${settingsJson}::jsonb, 1, ${now}, ${now}
+          ${input.command.content},
+          CASE WHEN target_chat.task_id IS NULL
+            THEN ${settingsJson}::jsonb
+            ELSE ${settingsJson}::jsonb || '{"taskResultMode":"assistant_final"}'::jsonb
+          END,
+          1, ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true
         JOIN upserted_runtime ON upserted_runtime.chat_session_id = target_chat.id

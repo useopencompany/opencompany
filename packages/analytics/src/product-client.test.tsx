@@ -125,7 +125,7 @@ describe("ProductAnalyticsProvider", () => {
       flow: "owner",
       step: "profile",
       step_index: 0,
-      total_steps: 4,
+      total_steps: 3,
     });
 
     expect(posthog.identify).toHaveBeenCalledWith("user_123", { email: "ada@example.com" });
@@ -133,7 +133,7 @@ describe("ProductAnalyticsProvider", () => {
       flow: "owner",
       step: "profile",
       step_index: 0,
-      total_steps: 4,
+      total_steps: 3,
     });
 
     vi.unstubAllEnvs();
