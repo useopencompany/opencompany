@@ -13,6 +13,7 @@ import type {
   WebSearchToolOutput,
 } from "@opencompany/agent/chat-ui";
 import {
+  listedActionSourceIdsFromMessages,
   replaceChatUiMessageText,
   textFromChatUiMessage,
   toChatUiMessage,
@@ -219,20 +220,24 @@ export async function runProductChatTurn(input: {
     if (input.taskContext) {
       await markTaskTurnRunning({ context: input.taskContext, turn });
     }
-    const runtime = await resolveProductChatRuntime({
-      turn,
-      session,
-      env,
-      signal: generationController.signal,
-      taskContext: input.taskContext,
-    });
-    runtimeCleanup = runtime.cleanup;
-    throwIfAborted(generationController.signal);
     const storedMessages = await loadProductChatStoredMessages({
       chatSessionId: session.chatSessionId,
       currentUserMessageId: turn.userMessageId,
       includeCurrentAssistantMessage: turn.settings.approvalContinuation === true,
     });
+    throwIfAborted(generationController.signal);
+    const prelistedActionSourceIds = listedActionSourceIdsFromMessages(
+      storedMessages.map((message) => toChatUiMessage(message)),
+    );
+    const runtime = await resolveProductChatRuntime({
+      turn,
+      session,
+      env,
+      signal: generationController.signal,
+      prelistedActionSourceIds,
+      taskContext: input.taskContext,
+    });
+    runtimeCleanup = runtime.cleanup;
     throwIfAborted(generationController.signal);
     if (!modelResolution) {
       throw new Error("Durable opencompany chat session is missing its workspace.");
@@ -1125,9 +1130,10 @@ async function resolveProductChatRuntime(input: {
   session: CodexChatSession;
   env: RunnerEnv;
   signal: AbortSignal;
+  prelistedActionSourceIds: readonly string[];
   taskContext?: TaskTurnContext | undefined;
 }) {
-  const { turn, session, env, signal, taskContext } = input;
+  const { turn, session, env, signal, prelistedActionSourceIds, taskContext } = input;
   const model = session.model as AgentModelId;
   if (!AGENT_MODEL_CATALOG.some((candidate) => candidate.id === model)) {
     throw new Error(`Unsupported opencompany chat model: ${session.model}.`);
@@ -1168,6 +1174,7 @@ async function resolveProductChatRuntime(input: {
     turnId: turn.id,
     signal,
     approvalContinuation: Boolean(turn.settings.approvalContinuation),
+    prelistedSourceIds: prelistedActionSourceIds,
   });
   const hostTools = await loadHostTools({
     sessionId: session.id,
