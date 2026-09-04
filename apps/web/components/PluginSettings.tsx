@@ -17,6 +17,7 @@ import {
   NeonIcon,
   PostHogIcon,
   SlackIcon,
+  StripeIcon,
   XIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
@@ -170,6 +171,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: SlackIcon,
     iconClassName: "bg-white text-[#4A154B]",
   },
+  stripe: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.stripe,
+    Icon: StripeIcon,
+    iconClassName: "bg-[#635BFF] text-white",
+  },
   x: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.x,
     Icon: XIcon,
@@ -212,6 +218,8 @@ export const SIGNOZ_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.signoz.name;
 export const SIGNOZ_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.signoz.source;
 export const SLACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.slack.name;
 export const SLACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.slack.source;
+export const STRIPE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.stripe.name;
+export const STRIPE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.stripe.source;
 export const X_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.x.name;
 export const X_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.x.source;
 export const YC_ADVISE_PLUGIN_NAME = OFFICIAL_SKILL_PLUGINS["yc-advise"].name;
@@ -280,6 +288,10 @@ export function installOfficialSigNozPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialSlackPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.slack, preview);
+}
+
+export function installOfficialStripePlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.stripe, preview);
 }
 
 export function PluginsSettings({

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   noop: vi.fn(),
   remote: vi.fn(),
   registrations: vi.fn(),
+  stripe: vi.fn(),
   x: vi.fn(),
 }));
 
@@ -26,7 +27,7 @@ vi.mock("./neon", () => ({ resolveNeonActions: mocks.noop }));
 vi.mock("./posthog", () => ({ resolvePostHogActions: mocks.posthog }));
 vi.mock("./remote-mcp", () => ({ resolveRemoteMcpActions: mocks.remote }));
 vi.mock("./revolut", () => ({ resolveRevolutActions: mocks.noop }));
-vi.mock("./stripe", () => ({ resolveStripeActions: mocks.noop }));
+vi.mock("./stripe", () => ({ resolveStripeActions: mocks.stripe }));
 vi.mock("./x-account", () => ({ resolveXAccountActions: mocks.x }));
 
 import { resolveActionCatalog } from "./catalog";
@@ -68,6 +69,12 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       label: "PostHog",
       description: "Legacy PostHog actions.",
       actions: [{ id: "posthog.query-trends" }],
+    });
+    mocks.stripe.mockResolvedValue({
+      id: "stripe",
+      label: "Stripe",
+      description: "Legacy Stripe founder metrics.",
+      actions: [{ id: "stripe.get_balance" }],
     });
   });
 
@@ -146,6 +153,40 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
     expect(withPlugin.actions).toContainEqual(
       expect.objectContaining({ id: "plugin:posthog:posthog.query-trends" }),
+    );
+  });
+
+  it("keeps legacy Stripe metrics as fallback and suppresses them after plugin install", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.stripe).toHaveBeenCalledWith("workspace_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "stripe.get_balance" }),
+    );
+
+    mocks.stripe.mockClear();
+    const stripePluginRegistration = {
+      source: "plugin:stripe:stripe",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:stripe:stripe",
+      label: "Stripe",
+      description: "Official Stripe plugin tools.",
+      actions: [{ id: "plugin:stripe:stripe.stripe_api_read" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [stripePluginRegistration] },
+    );
+
+    expect(mocks.stripe).not.toHaveBeenCalled();
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "stripe.get_balance" }),
+    );
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:stripe:stripe.stripe_api_read" }),
     );
   });
 
