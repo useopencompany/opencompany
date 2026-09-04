@@ -484,7 +484,7 @@ describe("MessageBubble assistant errors", () => {
       ],
     };
 
-    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} turnActive />);
 
     const toolCall = screen.getByTestId("chat-tool-call-use_action");
     const disclosure = within(toolCall).getByRole("button", { name: /Linear List Issues/i });
@@ -1000,7 +1000,7 @@ describe("MessageBubble assistant errors", () => {
       ],
     };
 
-    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} turnActive />);
 
     expect(screen.getByText("Use Capability")).toBeInTheDocument();
     expect(screen.getByText("ENG-123 tracks the launch.")).toBeInTheDocument();
@@ -1033,7 +1033,7 @@ describe("MessageBubble Codex interactions", () => {
       ],
     };
 
-    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} compactTrace />);
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
     const disclosure = screen.getByRole("button", { name: "2 tool calls, 2 messages" });
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
@@ -1080,7 +1080,7 @@ describe("MessageBubble Codex interactions", () => {
       ],
     };
 
-    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} compactTrace />);
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
     const disclosure = screen.getByRole("button", { name: "1 tool call, 2 messages" });
     expect(screen.getByText("Shipped the compact turn UI.")).toBeVisible();
@@ -1108,7 +1108,7 @@ describe("MessageBubble Codex interactions", () => {
       ],
     };
 
-    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} compactTrace />);
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
     expect(screen.queryByText(/tool call/)).not.toBeInTheDocument();
     expect(screen.getByText("I’m checking the viewer now.")).toBeVisible();
@@ -1133,14 +1133,14 @@ describe("MessageBubble Codex interactions", () => {
     };
 
     const { rerender } = render(
-      <MessageBubble message={message} taskLookup={emptyTaskLookup} compactTrace turnActive />,
+      <MessageBubble message={message} taskLookup={emptyTaskLookup} turnActive />,
     );
 
     expect(screen.queryByText("1 tool call, 1 message")).not.toBeInTheDocument();
     expect(screen.getByText("I’m checking the viewer now.")).toBeVisible();
     expect(screen.getByText("Inspect viewer")).toBeVisible();
 
-    rerender(<MessageBubble message={message} taskLookup={emptyTaskLookup} compactTrace />);
+    rerender(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
     expect(screen.getByRole("button", { name: "1 tool call, 1 message" })).toHaveAttribute(
       "aria-expanded",
@@ -1150,6 +1150,89 @@ describe("MessageBubble Codex interactions", () => {
     expect(
       screen.getByText("The first check passed. I’ll verify the lifecycle next."),
     ).toBeVisible();
+  });
+
+  it("keeps artifact cards visible while the surrounding trace compacts", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_artifact_trace",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Generating the launch plan now." },
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_artifact",
+          state: "output-available",
+          input: { description: "Write launch plan", command: "write launch-plan.md" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+        {
+          type: "data-artifact-file",
+          data: {
+            artifactId: "artifact_trace_1",
+            artifactVersionId: "version_1",
+            version: 1,
+            title: "Launch plan",
+            filename: "launch-plan.md",
+            mediaType: "text/markdown",
+            sizeBytes: 2_048,
+            state: "ready",
+          },
+        } as ChatUiMessage["parts"][number],
+        { type: "text", text: "The plan is attached above." },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByRole("button", { name: "1 tool call, 1 message" })).toBeVisible();
+    expect(screen.getByText("Launch plan")).toBeVisible();
+    expect(screen.getByText("The plan is attached above.")).toBeVisible();
+    expect(screen.queryByText("Generating the launch plan now.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Write launch plan")).not.toBeInTheDocument();
+  });
+
+  it("compacts trailing tool calls that follow the final assistant message", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_trailing_tools",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Done — everything is verified." },
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_trailing",
+          state: "output-available",
+          input: { description: "Clean up worktree", command: "git status" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByRole("button", { name: "1 tool call" })).toBeVisible();
+    expect(screen.getByText("Done — everything is verified.")).toBeVisible();
+    expect(screen.queryByText("Clean up worktree")).not.toBeInTheDocument();
+  });
+
+  it("keeps a tool-only turn expanded because no final message anchors the collapse", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_tool_only",
+      role: "assistant",
+      parts: [
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_only",
+          state: "output-available",
+          input: { description: "Inspect repository", command: "git log" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.queryByText(/tool call/)).not.toBeInTheDocument();
+    expect(screen.getByText("Inspect repository")).toBeVisible();
   });
 
   it("renders described commands without shell wrappers or internal tool constants", () => {

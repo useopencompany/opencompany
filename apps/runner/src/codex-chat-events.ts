@@ -41,6 +41,10 @@ import { settleDurableTurn, type TaskTurnCompletion } from "./task-turn";
 
 const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1" as const;
 
+// Item id for the settled-task-result text part appended at finalize. Distinct from every
+// harness-emitted itemId so the client renders it as its own final assistant message.
+const TASK_RESULT_ITEM_ID = "opencompany-task-settled-result" as const;
+
 // Live deltas already stream to the client over SSE run_events; the durable chat_messages row only
 // needs periodic checkpoints plus a guaranteed terminal write. Debouncing the row write (instead of
 // writing on every token) keeps the Electric read-model shape log from growing with streaming
@@ -710,7 +714,7 @@ export function createExternalEngineProjector(input: {
       summary: ExternalEngineTurnSummary,
       options: {
         taskCompletion?: TaskTurnCompletion | null;
-        replacementContent?: string | null;
+        settledResultContent?: string | null;
       } = {},
     ) {
       return serializeProjection(async () => {
@@ -730,11 +734,16 @@ export function createExternalEngineProjector(input: {
         });
         await reconcilePublishedArtifacts();
         if (summary.status === "success") {
-          if (options.replacementContent?.trim()) {
-            parts = [
-              ...parts.filter((part) => part.type !== "text"),
-              { type: "text", text: options.replacementContent.trim() },
-            ];
+          const settledResult = options.settledResultContent?.trim();
+          // A rewritten task result (e.g. the Brain report pointer) becomes the turn's final
+          // message. Append it instead of replacing the streamed text parts so the trace keeps
+          // its chronological text/tool interleaving; the stable itemId keeps it a distinct
+          // message boundary and dedupes a finalize replay after crash recovery.
+          if (
+            settledResult &&
+            !parts.some((part) => part.type === "text" && part.itemId === TASK_RESULT_ITEM_ID)
+          ) {
+            parts = [...parts, { type: "text", text: settledResult, itemId: TASK_RESULT_ITEM_ID }];
           }
           // Safety net: if no assistant.completed event produced a text part, fall back to the
           // accumulator's result so the turn never ends visually empty.

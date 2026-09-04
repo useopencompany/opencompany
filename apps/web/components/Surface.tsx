@@ -10,6 +10,7 @@ import type {
 import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
+  getAgentModelDefinition,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
@@ -1117,10 +1118,20 @@ export function Surface({
   );
   const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
+  // Unlike isTaskConversationWorking this ignores viewer permissions: a read-only viewer of a
+  // running task still watches a live trace, which must not compact mid-run.
+  const isTaskRunInFlight = Boolean(
+    activeTaskConversation &&
+      (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
+  );
+  // The message whose trace stays fully expanded. Prefer the turn identified by run metadata;
+  // while work is in flight without one (task runs, transports without a run id yet), protect the
+  // newest assistant message so a streaming trace never compacts mid-turn. A submitting turn has
+  // no assistant row yet, so it must not re-expand the previous turn's collapsed trace.
   const activeAssistantMessageId =
     foregroundAssistantMessageId && !isChatTurnTerminal(chatTurnPhase)
       ? foregroundAssistantMessageId
-      : isTaskConversationWorking && chatMessages.at(-1)?.role === "assistant"
+      : (isAgentWorking || isTaskRunInFlight) && chatTurnPhase !== "submitting"
         ? latestAssistantMessageId
         : null;
   const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
@@ -3007,7 +3018,6 @@ export function Surface({
                       onActionApproval={handleActionApproval}
                       allowActionApproval={message.id === latestAssistantMessageId}
                       isTaskSession={Boolean(activeTaskConversation)}
-                      compactTrace={isCloudCodingEngine(activeChatEngine)}
                       turnActive={message.id === activeAssistantMessageId}
                     />
                   ))}
@@ -5791,18 +5801,23 @@ function ChatTitleHeader({
   isTask?: boolean;
 }) {
   const EngineIcon = isCloudCodingEngine(engine) ? ENGINE_REGISTRY[engine].Icon : null;
+  const modelLabel = getAgentModelDefinition(model)?.label ?? model;
   return (
     <div className="flex min-w-0 items-center gap-2 text-ink">
-      {EngineIcon ? (
-        <EngineIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
-      ) : (
-        <ModelProviderIcon
-          modelId={model}
-          size={14}
-          strokeWidth={1.9}
-          className="shrink-0 text-ink-muted"
-        />
-      )}
+      <Tooltip>
+        <TooltipTrigger
+          type="button"
+          aria-label={`Model: ${modelLabel}`}
+          className="inline-flex shrink-0 rounded-sm text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          {EngineIcon ? (
+            <EngineIcon size={14} strokeWidth={1.9} />
+          ) : (
+            <ModelProviderIcon modelId={model} size={14} strokeWidth={1.9} />
+          )}
+        </TooltipTrigger>
+        <TooltipContent>{`Model: ${modelLabel}`}</TooltipContent>
+      </Tooltip>
       <span className="max-w-[min(420px,calc(100vw-7rem))] truncate text-[12.5px] font-medium leading-4">
         {title}
       </span>

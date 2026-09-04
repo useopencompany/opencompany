@@ -171,6 +171,45 @@ describe("createExternalEngineProjector", () => {
     expect(statements).toContainEqual(expect.stringContaining("event_key"));
   });
 
+  it("preserves the interleaved trace and appends a rewritten settled result exactly once", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const projector = createExternalEngineProjector({
+      target: projectorTarget({ engine: "claude_code" }),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+    });
+    const settledResult = "Research report saved to Brain: [Launch](https://example.com/launch).";
+    const summary = {
+      sessionId: "codex_thread_1",
+      status: "success" as const,
+      result: "Inspecting the repo.\n\nAll checks passed.",
+      error: null,
+      usage: null,
+      goal: null,
+    };
+
+    await projector.push([agentMessageChunk("Inspecting the repo.", "assistant_message_1")]);
+    await projector.push([fileChangeStartedEvent()]);
+    await projector.push([agentMessageChunk("All checks passed.", "assistant_message_2")]);
+    await projector.finalize(summary, { settledResultContent: settledResult });
+    // A crash-recovery replay of finalize must not duplicate the settled result part.
+    await projector.finalize(summary, { settledResultContent: settledResult });
+
+    const persistedTrace = queryValues(messageUpdates().at(-1)).find(
+      (value): value is string =>
+        typeof value === "string" && value.includes("goat.codex_chat.debug.v1"),
+    );
+    const parts = (JSON.parse(persistedTrace ?? "{}") as { uiMessageParts: CodexUiMessagePart[] })
+      .uiMessageParts;
+    expect(parts.map((part) => (part.type === "text" ? `text:${part.text}` : part.type))).toEqual([
+      "text:Inspecting the repo.",
+      "dynamic-tool",
+      "text:All checks passed.",
+      `text:${settledResult}`,
+    ]);
+    expect(parts.at(-1)).toMatchObject({ itemId: "opencompany-task-settled-result" });
+  });
+
   it("keeps the session queued until a queued follow-up turn is claimed", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const projector = createExternalEngineProjector({

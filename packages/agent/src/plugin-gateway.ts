@@ -78,6 +78,11 @@ import {
   SLACK_MCP_ENDPOINT_URL,
 } from "./integrations/slack-mcp";
 import {
+  getStripeMcpIntegrationState,
+  loadStripeMcpWorkerConnection,
+  STRIPE_MCP_ENDPOINT_URL,
+} from "./integrations/stripe";
+import {
   getXMcpIntegrationState,
   loadXMcpWorkerConnection,
   X_MCP_ENDPOINT_URL,
@@ -163,6 +168,12 @@ const providerBindings = {
     endpointUrl: SIGNOZ_MCP_ENDPOINT_URL,
     getState: getSigNozIntegrationState,
     loadConnection: loadSigNozMcpWorkerConnection,
+  },
+  stripe: {
+    provider: "stripe",
+    endpointUrl: STRIPE_MCP_ENDPOINT_URL,
+    getState: getStripeMcpIntegrationState,
+    loadConnection: loadStripeMcpWorkerConnection,
   },
   x: {
     provider: "x_account",

@@ -486,7 +486,10 @@ export async function consumeProductChatStream(input: {
   let lastPresentationAt = now() - presentationFlushIntervalMs;
   let presentedContent = projectionText(input.initialProjection ?? { parts: [] });
   let dirty = false;
-  let latestUsage: LanguageModelUsage | undefined;
+  // The persisted usage drives the context-window meter, so it must remain the
+  // latest individual model step. AI SDK's finish event reports cumulative usage
+  // across every step in the turn, which can exceed the model's context window.
+  let latestStepUsage: LanguageModelUsage | undefined;
   let finishReason: string | undefined;
   let stepIndex = 0;
 
@@ -496,7 +499,7 @@ export async function consumeProductChatStream(input: {
 
   const projection = (): ProductChatProjection => ({
     parts: cloneParts(parts),
-    ...(latestUsage ? { usage: latestUsage } : {}),
+    ...(latestStepUsage ? { contextUsage: latestStepUsage } : {}),
     ...(finishReason ? { finishReason } : {}),
   });
   const flush = async (force = false) => {
@@ -759,16 +762,13 @@ export async function consumeProductChatStream(input: {
         appendPart({ type: "step-start" });
       } else if (part.type === "finish-step") {
         if (isLanguageModelUsage(part.usage)) {
-          latestUsage = part.usage;
+          latestStepUsage = part.usage;
           await input.sink.recordStepUsage({ stepIndex, usage: part.usage });
         }
         stepIndex += 1;
         await flush(true);
       } else if (part.type === "finish") {
         finishReason = readString(part.finishReason) ?? undefined;
-        if (isLanguageModelUsage(part.totalUsage)) {
-          latestUsage = part.totalUsage;
-        }
       } else if (part.type === "abort") {
         throw abortReason(input.signal, readString(part.reason) ?? "Model stream was aborted.");
       } else if (part.type === "error") {

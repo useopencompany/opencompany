@@ -1,5 +1,5 @@
-import { StripeSettingsRoute } from "@/components/Routes";
+import { redirect } from "next/navigation";
 
 export default function StripeSettingsPage() {
-  return <StripeSettingsRoute />;
+  redirect("/settings/plugins/stripe");
 }
