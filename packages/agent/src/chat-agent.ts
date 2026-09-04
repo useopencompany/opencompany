@@ -1391,11 +1391,23 @@ export function createProductChatToolContext(input: {
         visibleToolActivity = true;
         const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
         const queryTerms = query.split(/\s+/).filter(Boolean);
-        const matches = skills.catalog.filter((skill) => {
-          if (queryTerms.length === 0) return true;
-          const searchable = `${skill.id} ${skill.name} ${skill.description}`.toLowerCase();
-          return queryTerms.every((term) => searchable.includes(term));
-        });
+        const matches = queryTerms.length
+          ? skills.catalog
+              .map((skill, catalogIndex) => {
+                const searchable = `${skill.id} ${skill.name} ${skill.description}`.toLowerCase();
+                return {
+                  skill,
+                  catalogIndex,
+                  matchedTerms: queryTerms.filter((term) => searchable.includes(term)).length,
+                };
+              })
+              .filter((candidate) => candidate.matchedTerms > 0)
+              .sort(
+                (left, right) =>
+                  right.matchedTerms - left.matchedTerms || left.catalogIndex - right.catalogIndex,
+              )
+              .map((candidate) => candidate.skill)
+          : [...skills.catalog];
         const listed = matches.slice(0, MAX_LIST_SKILL_RESULTS);
         for (const skill of listed) listedSkillIds.add(skill.id);
         return {
