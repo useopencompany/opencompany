@@ -77,6 +77,14 @@ describe("PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
+  it("keeps public Stripe guidance on and guards account data and mutations", () => {
+    expect(PROVIDER_CAPABILITIES.stripe).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
   it("uses human-readable labels for every registered capability", () => {
     for (const capabilities of Object.values(PROVIDER_CAPABILITIES)) {
       for (const capability of capabilities) {
@@ -143,5 +151,8 @@ describe("mode helpers", () => {
     expect(providerCapability("signoz", "query")?.label).toBe("Inspect observability data");
     expect(providerCapability("slack", "query")?.label).toBe("Read private Slack");
     expect(providerCapability("slack", "write")?.label).toBe("Change Slack");
+    expect(providerCapability("stripe", "read")?.label).toBe("Learn about Stripe");
+    expect(providerCapability("stripe", "query")?.label).toBe("Read Stripe data");
+    expect(providerCapability("stripe", "write")?.label).toBe("Manage Stripe");
   });
 });

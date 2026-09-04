@@ -56,7 +56,6 @@ import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
-import { StripeIntegrationSetup } from "@/components/StripeIntegrationSetup";
 import { Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
@@ -489,23 +488,6 @@ export function AttioSettingsRoute() {
       <AttioIntegrationSetup
         initialState={integrations.attio}
         brainSourcesHref={brainSourcesHref}
-      />
-    </SettingsContent>
-  );
-}
-
-export function StripeSettingsRoute() {
-  const { integrations, workspace } = useAppData();
-
-  return (
-    <SettingsContent
-      title="Stripe"
-      description="Read-only founder metrics from your Stripe account"
-      backLink={{ href: "/settings/integrations", label: "Integrations" }}
-    >
-      <StripeIntegrationSetup
-        initialState={integrations.stripe}
-        canManage={workspace.role === "admin"}
       />
     </SettingsContent>
   );

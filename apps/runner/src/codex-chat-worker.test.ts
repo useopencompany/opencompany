@@ -7,6 +7,7 @@ import {
 } from "./codex-chat-errors";
 import {
   CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS,
+  CODEX_CHAT_MAX_TOTAL_ATTEMPTS,
   claimNextCodexChatTurn,
   codexChatLeaseTtlMs,
   codexChatRetryAt,
@@ -773,6 +774,43 @@ describe("runClaimedTurn", () => {
     expect(
       dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH deferred AS")),
     ).toBe(false);
+  });
+
+  it("settles turns past the total attempt budget without executing them", async () => {
+    await expect(
+      runClaimedTurn(turn({ attempts: CODEX_CHAT_MAX_TOTAL_ATTEMPTS + 1 }), env()),
+    ).resolves.toBeUndefined();
+
+    expect(chatMocks.runCodexChatTurn).not.toHaveBeenCalled();
+    expect(chatMocks.runProductChatTurn).not.toHaveBeenCalled();
+    expect(eventMocks.fail).toHaveBeenCalledWith(
+      "This chat run was retried too many times and has been stopped. Send your message again to retry.",
+      { sessionStatus: "failed" },
+    );
+  });
+
+  it("still executes a turn at exactly the total attempt budget", async () => {
+    await expect(
+      runClaimedTurn(turn({ attempts: CODEX_CHAT_MAX_TOTAL_ATTEMPTS }), env()),
+    ).resolves.toBeUndefined();
+
+    expect(chatMocks.runCodexChatTurn).toHaveBeenCalledOnce();
+    expect(eventMocks.fail).not.toHaveBeenCalled();
+  });
+
+  it("forces a minimal settlement when the attempt-cap failure write itself throws", async () => {
+    eventMocks.fail.mockRejectedValueOnce(
+      new Error("could not determine data type of parameter $51"),
+    );
+
+    await expect(
+      runClaimedTurn(turn({ attempts: CODEX_CHAT_MAX_TOTAL_ATTEMPTS + 1 }), env()),
+    ).resolves.toBeUndefined();
+
+    expect(chatMocks.runCodexChatTurn).not.toHaveBeenCalled();
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH failed_turn AS")),
+    ).toBe(true);
   });
 
   it("caps infrastructure retry backoff at one minute", () => {

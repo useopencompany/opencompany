@@ -145,6 +145,10 @@ export function createIntegrationAccountService(input: {
     userWorkosId: string;
     workspaceId: string;
   }) => Promise<void>;
+  refreshStripePluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceId: string;
+  }) => Promise<void>;
 }): IntegrationAccountService {
   const db = input.db;
   const now = input.now ?? (() => new Date());
@@ -209,13 +213,8 @@ export function createIntegrationAccountService(input: {
       if (!isCapabilityMode(mode) || !isCapabilityId(capabilityId)) {
         throw new ApiError(400, "invalid_request", "Unknown permission mode.");
       }
-      await requireOwnPersonalIntegration(db, actor, integrationId);
-      const [row] = await db
-        .select({ provider: integrations.provider })
-        .from(integrations)
-        .where(eq(integrations.id, integrationId))
-        .limit(1);
-      const capability = row ? providerCapability(row.provider, capabilityId) : undefined;
+      const integration = await requireManageableCapabilityIntegration(db, actor, integrationId);
+      const capability = providerCapability(integration.provider, capabilityId);
       if (!capability) {
         throw new ApiError(400, "invalid_request", "This integration has no such permission.");
       }
@@ -554,6 +553,17 @@ export function createIntegrationAccountService(input: {
           identity: validation.identity,
           db,
         });
+        await input
+          .refreshStripePluginRegistrations?.({
+            userWorkosId: actor.userId,
+            workspaceId: actor.workspaceId,
+          })
+          .catch((error) => {
+            logger.warn("Stripe connected but plugin discovery refresh failed", {
+              event: "opencompany.stripe_plugin_refresh_failed",
+              error_message: error instanceof Error ? error.message : String(error),
+            });
+          });
         return await getStripeIntegrationState(actor.workspaceId, db);
       } catch (error) {
         throw commandFailure(
@@ -657,6 +667,37 @@ async function requireOwnPersonalIntegration(db: DbLike, actor: Actor, integrati
     )
     .limit(1);
   if (!row) throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
+  return row;
+}
+
+async function requireManageableCapabilityIntegration(
+  db: DbLike,
+  actor: Actor,
+  integrationId: string,
+) {
+  const [row] = await db
+    .select({
+      id: integrations.id,
+      provider: integrations.provider,
+      userWorkosId: integrations.userWorkosId,
+      workspaceId: integrations.workspaceId,
+    })
+    .from(integrations)
+    .where(eq(integrations.id, integrationId))
+    .limit(1);
+  if (!row) throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
+
+  if (row.workspaceId !== null) {
+    if (row.workspaceId !== actor.workspaceId) {
+      throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
+    }
+    requireAdmin(actor, "Only workspace admins can manage this integration's permissions.");
+    return row;
+  }
+
+  if (row.userWorkosId !== actor.userId) {
+    throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
+  }
   return row;
 }
 

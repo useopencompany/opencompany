@@ -14,6 +14,7 @@ import {
   betterStackToolsStateFromPlugin,
   defaultPostHogToolsState,
   defaultSigNozToolsState,
+  defaultStripeToolsState,
   GitHubPluginDetail,
   GitHubPluginDetailView,
   GmailPluginDetail,
@@ -34,6 +35,7 @@ import {
   PostHogPluginDetail,
   SigNozPluginDetail,
   SlackPluginDetail,
+  StripePluginDetail,
   slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
   XPluginDetail,
@@ -48,6 +50,7 @@ import {
   NEON_PLUGIN_SOURCE,
   POSTHOG_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
+  STRIPE_PLUGIN_SOURCE,
   X_PLUGIN_SOURCE,
 } from "./PluginSettings";
 
@@ -98,6 +101,16 @@ const appData = vi.hoisted(() => ({
       accountName: "Acme Analytics",
       integrationId: "gint_posthog_tools",
       capabilityModes: { read: "on", write: "ask" },
+    },
+    stripe: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Acme Payments",
+      integrationId: "gint_stripe_tools",
+      livemode: false,
+      capabilityModes: { read: "on", query: "ask", write: "ask" },
+      toolModes: {},
     },
     slack: {
       connected: true,
@@ -1171,6 +1184,32 @@ describe("Linear plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps the workspace Stripe key onto the official plugin surface", () => {
+    const stripePlugin = {
+      ...plugin,
+      id: "plugin_stripe",
+      name: "stripe",
+      manifest: { name: "stripe", description: "Work with Stripe." },
+      source: { ...plugin.source, path: "stripe" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <StripePluginDetail
+        pluginState={{ status: "ready", plugin: stripePlugin }}
+        toolsState={defaultStripeToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Acme Payments · Test mode");
+    expect(html).toContain("Learn about Stripe");
+    expect(html).toContain("Read Stripe data");
+    expect(html).toContain("Manage Stripe");
+    expect(html).toContain("mcp.stripe.com");
+    expect(STRIPE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/68c22e8a1ffe5eb8a83fb91c68f76f3f45705d3a/stripe",
+    );
   });
 
   it("shows provenance, accounts, discovered tools, and read-only skills", async () => {

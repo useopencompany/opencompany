@@ -212,9 +212,9 @@ describe("consumeProductChatStream", () => {
           type: "finish",
           finishReason: "stop",
           totalUsage: {
-            inputTokens: 130,
-            outputTokens: 35,
-            totalTokens: 165,
+            inputTokens: 1_300,
+            outputTokens: 350,
+            totalTokens: 1_650,
             inputTokenDetails: {
               noCacheTokens: 110,
               cacheReadTokens: 20,
@@ -236,7 +236,9 @@ describe("consumeProductChatStream", () => {
 
     expect(result).toMatchObject({
       finishReason: "stop",
-      usage: { totalTokens: 165 },
+      // The projection powers the context meter, so it keeps the final step's
+      // occupancy rather than the finish event's cumulative turn usage.
+      contextUsage: { totalTokens: 150 },
       parts: [
         {
           type: "text",
