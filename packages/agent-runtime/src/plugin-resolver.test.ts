@@ -510,6 +510,59 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official HubSpot package with sensitive CRM reads behind Ask", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/hubspot", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "hubspot");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "hubspot",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "hubspot", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "hubspot",
+        type: "streamable-http",
+        url: "https://mcp.hubspot.com",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Inspect HubSpot structure",
+        defaultMode: "on",
+        tools: expect.arrayContaining(["get_user_details", "discover_hubspot_schema"]),
+      }),
+      expect.objectContaining({
+        id: "query",
+        label: "Read CRM & marketing data",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["search_crm_objects", "search_conversations"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Change HubSpot",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["manage_crm_objects", "manage_blog_post"]),
+      }),
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(25);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "hubspot", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official Slack package with least-privilege capability defaults", async () => {
     const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/slack", import.meta.url));
     const files = await fixtureFiles(fixtureRoot, "slack");

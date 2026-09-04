@@ -233,6 +233,25 @@ export function GoogleDrivePluginDetail({
   );
 }
 
+export function HubSpotPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.hubspot}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function LinearPluginDetail({
   pluginState,
   canEdit,
@@ -1339,6 +1358,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "gmail" ||
     config.connectionProvider === "google_calendar" ||
     config.connectionProvider === "google_drive" ||
+    config.connectionProvider === "hubspot" ||
     config.connectionProvider === "neon" ||
     config.connectionProvider === "posthog" ||
     config.connectionProvider === "render" ||
@@ -1346,18 +1366,21 @@ function pluginAccountsFromState(
     config.connectionProvider === "slack" ||
     config.connectionProvider === "x_account"
   ) {
-    if (config.connectionProvider === "posthog") {
-      const connection = state.posthog;
-      const permissionConnection: IntegrationAccountView<"posthog"> | null =
+    if (config.connectionProvider === "posthog" || config.connectionProvider === "hubspot") {
+      const provider = config.connectionProvider;
+      const connection = state[provider];
+      const permissionConnection: IntegrationAccountView<typeof provider> | null =
         connection.integrationId
           ? {
               integrationId: connection.integrationId,
-              provider: "posthog",
+              provider,
               status: connection.status === "not_connected" ? "disconnected" : connection.status,
               connected: connection.connected,
               accountEmail: null,
               accountName: connection.accountName,
-              connectionLabel: connection.accountName || "PostHog tool access",
+              connectionLabel:
+                connection.accountName ||
+                `${provider === "hubspot" ? "HubSpot" : "PostHog"} tool access`,
               statusReason: connection.statusReason,
               scopes: [],
               capabilityModes: connection.capabilityModes,
@@ -1442,6 +1465,10 @@ export function defaultGoogleDriveToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("google-drive");
 }
 
+export function defaultHubSpotToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("hubspot");
+}
+
 export function defaultNeonToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("neon");
 }
@@ -1508,6 +1535,12 @@ export function googleDriveToolsStateFromPlugin(
   plugin: PluginInstallationDto | null,
 ): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "google-drive");
+}
+
+export function hubspotToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "hubspot");
 }
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
@@ -1654,6 +1687,10 @@ export function signozToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
 
 export function posthogToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "posthog");
+}
+
+export function hubspotToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "hubspot");
 }
 
 function officialPluginToolsStateFromPreview(

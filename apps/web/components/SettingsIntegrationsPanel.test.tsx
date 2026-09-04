@@ -444,6 +444,24 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
   });
 
+  it("keeps HubSpot ingestion accounts off the legacy integrations surface", () => {
+    const integrations = integrationStateFromRows([
+      {
+        id: "gint_hubspot_ingest",
+        provider: "hubspot",
+        externalId: "portal_123",
+        connectionLabel: "Acme CRM",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as IntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    expect(screen.queryByText("Acme CRM")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
+  });
+
   it("removes the legacy Gmail settings card after the plugin cutover", () => {
     const integrations = integrationStateFromRows([
       {

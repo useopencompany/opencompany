@@ -1,6 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   auth,
+  type OAuthAuthorizationServerInformation,
   type OAuthClientInformation,
   type OAuthClientMetadata,
   type OAuthClientProvider,
@@ -38,6 +39,7 @@ export type RemoteMcpProviderState<TProvider extends IntegrationProvider> = {
 };
 
 type RemoteMcpOAuthPayload = {
+  authorizationServerInformation?: OAuthAuthorizationServerInformation;
   clientInformation?: OAuthClientInformation;
   tokens?: OAuthTokens;
   codeVerifier?: string;
@@ -60,14 +62,16 @@ type RemoteMcpIntegrationConfig<TProvider extends IntegrationProvider> = {
   externalId: string;
   storedScopes: readonly string[];
   authScope?: string;
+  routeSegment?: string;
+  staticClientInformation?: () => OAuthClientInformation;
   acceptLegacyStateWithoutProvider?: boolean;
 };
 
 export function createRemoteMcpIntegration<const TProvider extends IntegrationProvider>(
   config: RemoteMcpIntegrationConfig<TProvider>,
 ) {
-  const callbackUrl = () =>
-    `${getAppUrl()}/api/integrations/${config.provider.replaceAll("_", "-")}/callback`;
+  const routeSegment = config.routeSegment ?? config.provider.replaceAll("_", "-");
+  const callbackUrl = () => `${getAppUrl()}/api/integrations/${routeSegment}/callback`;
 
   async function getState(
     identity: string | { userWorkosId: string; workspaceId?: string },
@@ -117,7 +121,8 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
       userWorkosId: row.userWorkosId,
       integrationId: row.id,
     });
-    if (!payload.clientInformation || !payload.tokens) {
+    const staticClientInformation = config.staticClientInformation?.();
+    if ((!staticClientInformation && !payload.clientInformation) || !payload.tokens) {
       await markNeedsReauth({
         userWorkosId: row.userWorkosId,
         integrationId: row.id,
@@ -133,6 +138,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
         userWorkosId: row.userWorkosId,
         integrationId: row.id,
         payload,
+        staticClientInformation,
         onAuthorizationUrl: () => input.onAuthorizationRequired(),
       }),
     };
@@ -206,6 +212,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
         integrationId: integration.id,
         db: input.db,
       }),
+      staticClientInformation: config.staticClientInformation?.(),
       state,
       onAuthorizationUrl: (url) => {
         authorizationUrl = url.toString();
@@ -235,6 +242,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
       userWorkosId: input.userWorkosId,
       integrationId: input.integrationId,
       payload: await loadPayload(input),
+      staticClientInformation: config.staticClientInformation?.(),
       db: input.db,
     });
 
@@ -378,6 +386,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
     userWorkosId: string;
     integrationId: string;
     payload: RemoteMcpOAuthPayload;
+    staticClientInformation?: OAuthClientInformation | undefined;
     state?: string;
     onAuthorizationUrl?: (url: URL) => void;
     db?: DbLike;
@@ -409,7 +418,11 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
           ...(config.authScope ? { scope: config.authScope } : {}),
         };
       },
-      clientInformation: () => payload.clientInformation,
+      clientInformation: () => input.staticClientInformation ?? payload.clientInformation,
+      authorizationServerInformation: () => payload.authorizationServerInformation,
+      saveAuthorizationServerInformation: async (authorizationServerInformation) => {
+        await persist({ ...payload, authorizationServerInformation });
+      },
       saveClientInformation: async (clientInformation) => {
         await persist({ ...payload, clientInformation });
       },
@@ -484,6 +497,9 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
 
 function parsePayload(value: Record<string, unknown>): RemoteMcpOAuthPayload {
   const payload: RemoteMcpOAuthPayload = {};
+  if (isOAuthAuthorizationServerInformation(value.authorizationServerInformation)) {
+    payload.authorizationServerInformation = value.authorizationServerInformation;
+  }
   if (isOAuthClientInformation(value.clientInformation)) {
     payload.clientInformation = value.clientInformation;
   }
@@ -545,6 +561,17 @@ function isRemoteMcpState(value: unknown): value is RemoteMcpState {
 function isOAuthClientInformation(value: unknown): value is OAuthClientInformation {
   if (!isRecord(value) || typeof value.client_id !== "string") return false;
   return value.client_secret === undefined || typeof value.client_secret === "string";
+}
+
+function isOAuthAuthorizationServerInformation(
+  value: unknown,
+): value is OAuthAuthorizationServerInformation {
+  return (
+    isRecord(value) &&
+    (value.issuer === undefined || typeof value.issuer === "string") &&
+    typeof value.authorizationServerUrl === "string" &&
+    typeof value.tokenEndpoint === "string"
+  );
 }
 
 function isOAuthTokens(value: unknown): value is OAuthTokens {

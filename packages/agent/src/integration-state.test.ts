@@ -185,3 +185,38 @@ describe("SigNoz integration state", () => {
     ]);
   });
 });
+
+describe("HubSpot integration state", () => {
+  it("keeps MCP tool authorization separate from Wiki ingestion accounts", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_hubspot_ingest",
+        provider: "hubspot",
+        externalId: "portal_123",
+        connectionLabel: "Acme portal",
+        status: "connected",
+        scopes: ["crm.objects.contacts.read"],
+      },
+      {
+        id: "gint_hubspot_mcp",
+        provider: "hubspot",
+        externalId: "hubspot_mcp",
+        accountName: "HubSpot",
+        status: "connected",
+        capabilityModes: { read: "on", query: "ask", write: "ask" },
+      },
+    ]);
+
+    expect(state.hubspot).toMatchObject({
+      integrationId: "gint_hubspot_mcp",
+      connected: true,
+      capabilityModes: { read: "on", query: "ask", write: "ask" },
+    });
+    expect(state.personalAccounts.hubspot).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_hubspot_ingest",
+        connectionLabel: "Acme portal",
+      }),
+    ]);
+  });
+});

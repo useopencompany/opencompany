@@ -21,6 +21,7 @@ import { getFathomIntegrationState } from "@/lib/integrations/fathom";
 import { getGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGranolaIntegrationState } from "@/lib/integrations/granola";
+import { getHubSpotMcpIntegrationState } from "@/lib/integrations/hubspot-mcp";
 import { getImessageIntegrationState } from "@/lib/integrations/imessage";
 import { getJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
@@ -43,6 +44,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
     recentChats,
     googleIntegrations,
     linear,
+    hubspot,
     posthog,
     github,
     jamie,
@@ -72,6 +74,11 @@ export async function AppShell({ children }: { children: ReactNode }) {
       "linear_integration",
       () => getLinearIntegrationState(user.workosUserId),
       emptyIntegrations.linear,
+    ),
+    loadOptionalAppShellData(
+      "hubspot_mcp_integration",
+      () => getHubSpotMcpIntegrationState(user.workosUserId),
+      emptyIntegrations.hubspot,
     ),
     loadOptionalAppShellData(
       "posthog_integration",
@@ -187,6 +194,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
     integrations: buildIntegrationState({
       googleIntegrations,
       linear,
+      hubspot,
       posthog,
       github,
       jamie,
@@ -266,6 +274,7 @@ function brainSummaryView(brain: {
 function buildIntegrationState(input: {
   googleIntegrations: Pick<IntegrationState, "gmail" | "google_calendar" | "google_drive">;
   linear: IntegrationState["linear"];
+  hubspot: IntegrationState["hubspot"];
   posthog: IntegrationState["posthog"];
   github: IntegrationState["github"];
   jamie: IntegrationState["jamie"];
@@ -286,6 +295,7 @@ function buildIntegrationState(input: {
     google_calendar: input.googleIntegrations.google_calendar,
     google_drive: input.googleIntegrations.google_drive,
     linear: input.linear,
+    hubspot: input.hubspot,
     posthog: input.posthog,
     github: input.github,
     jamie: input.jamie,

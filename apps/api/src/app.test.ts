@@ -1785,6 +1785,8 @@ describe("canonical Hono API", () => {
       ["POST", "/webhooks/jamie/gint_1", "jamie.webhookForIntegration"],
       ["GET", "/integrations/linear/start", "mcp.start.linear"],
       ["GET", "/integrations/linear/callback", "mcp.callback.linear"],
+      ["GET", "/integrations/hubspot-mcp/start", "mcp.start.hubspot"],
+      ["GET", "/integrations/hubspot-mcp/callback", "mcp.callback.hubspot"],
       ["GET", "/integrations/posthog/start", "mcp.start.posthog"],
       ["GET", "/integrations/posthog/callback", "mcp.callback.posthog"],
       ["GET", "/integrations/neon/start", "mcp.start.neon"],

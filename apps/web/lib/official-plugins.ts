@@ -4,6 +4,7 @@ export type OfficialMcpPluginName =
   | "gmail"
   | "google-calendar"
   | "google-drive"
+  | "hubspot"
   | "linear"
   | "neon"
   | "posthog"
@@ -30,6 +31,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "gmail"
     | "google_calendar"
     | "google_drive"
+    | "hubspot"
     | "linear"
     | "neon"
     | "posthog"
@@ -115,6 +117,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
       "The most recently connected Google Drive account powers plugin tools. Other accounts remain available for Wiki ingestion.",
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure Google Drive ingestion in Wiki sources",
+  },
+  hubspot: {
+    name: "hubspot",
+    kind: "mcp",
+    label: "HubSpot",
+    description: "Inspect CRM structure, query customer data, and make approved changes.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
+    connectionProvider: "hubspot",
+    connectHref: "/api/integrations/hubspot-mcp/start?returnTo=/settings/plugins/hubspot",
+    accountDescription: "The HubSpot account opencompany uses when you run CRM tools.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure HubSpot ingestion in Wiki sources",
   },
   linear: {
     name: "linear",

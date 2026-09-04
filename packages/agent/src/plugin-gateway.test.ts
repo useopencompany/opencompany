@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   getGoogleDriveState: vi.fn(),
   loadGoogleDriveConnection: vi.fn(),
   loadGoogleCalendarConnection: vi.fn(),
+  getHubSpotState: vi.fn(),
+  loadHubSpotConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
   getBetterStackState: vi.fn(),
@@ -79,6 +81,11 @@ vi.mock("./integrations/google-drive-mcp", () => ({
   googleDriveMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/google-drive",
   getGoogleDriveMcpIntegrationState: mocks.getGoogleDriveState,
   loadGoogleDriveMcpWorkerConnection: mocks.loadGoogleDriveConnection,
+}));
+vi.mock("./integrations/hubspot-mcp", () => ({
+  HUBSPOT_MCP_ENDPOINT_URL: "https://mcp.hubspot.com",
+  getHubSpotMcpIntegrationState: mocks.getHubSpotState,
+  loadHubSpotMcpWorkerConnection: mocks.loadHubSpotConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
   POSTHOG_MCP_ENDPOINT_URL:
@@ -570,6 +577,40 @@ describe("plugin gateway registration cache", () => {
       {
         ...posthogRecord,
         server: { ...posthogRecord.server, url: "https://mcp.posthog.com/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds HubSpot credentials only to HubSpot's exact hosted MCP endpoint", async () => {
+    const hubspotRecord = record({
+      pluginName: "hubspot",
+      pluginLabel: "hubspot",
+      pluginDescription: "HubSpot CRM tools.",
+      connectionProvider: "hubspot",
+      server: {
+        name: "hubspot",
+        type: "streamable-http",
+        url: "https://mcp.hubspot.com",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([hubspotRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:hubspot:hubspot",
+        connectionProvider: "hubspot",
+        getState: mocks.getHubSpotState,
+        loadConnection: mocks.loadHubSpotConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...hubspotRecord,
+        server: { ...hubspotRecord.server, url: "https://evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

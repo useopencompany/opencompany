@@ -13,6 +13,7 @@ import {
   GMAIL_PLUGIN_SOURCE,
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
+  HUBSPOT_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   OfficialSkillPluginDetail,
@@ -266,6 +267,10 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/posthog",
     );
+    expect(screen.getByRole("link", { name: /hubspot/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/hubspot",
+    );
     expect(screen.getByRole("link", { name: /^x/i })).toHaveAttribute(
       "href",
       "/settings/plugins/x",
@@ -274,8 +279,8 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/yc-advise",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(13);
-    expect(screen.getAllByText("Official package")).toHaveLength(12);
+    expect(screen.getAllByText("Not installed")).toHaveLength(14);
+    expect(screen.getAllByText("Official package")).toHaveLength(13);
     expect(screen.getByText("Official skill package")).toBeInTheDocument();
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
@@ -297,6 +302,9 @@ describe("Plugin settings", () => {
     );
     expect(POSTHOG_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+    );
+    expect(HUBSPOT_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
     );
     expect(SIGNOZ_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
@@ -320,7 +328,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(13);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(14);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });

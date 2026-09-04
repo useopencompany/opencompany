@@ -8,6 +8,7 @@ export type ActionProviderId =
   | "google_calendar"
   | "google_drive"
   | "linear"
+  | "hubspot"
   | "posthog"
   | "attio"
   | "github"
