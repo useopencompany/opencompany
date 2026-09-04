@@ -449,6 +449,63 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official Latitude package with every reviewed tool classified", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/latitude", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "latitude");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "latitude",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "latitude", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "latitude",
+        type: "streamable-http",
+        url: "https://api.latitude.so/v1/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toHaveLength(3);
+    expect(plugin.capabilities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "read",
+          label: "Inspect Latitude workspace",
+          defaultMode: "on",
+          tools: expect.arrayContaining(["listProjects", "listMonitors", "getExperiment"]),
+        }),
+        expect.objectContaining({
+          id: "query",
+          label: "Read traces and user data",
+          defaultMode: "ask",
+          tools: expect.arrayContaining(["getTrace", "querySpans", "getMemoryRecord"]),
+        }),
+        expect.objectContaining({
+          id: "write",
+          label: "Manage Latitude",
+          defaultMode: "ask",
+          tools: expect.arrayContaining(["deleteProject", "createApiKey", "removeMember"]),
+        }),
+      ]),
+    );
+    expect(plugin.capabilities.map((capability) => capability.tools.length)).toEqual([26, 47, 54]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(127);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "latitude", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official PostHog package with every reviewed analytics tool classified", async () => {
     const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/posthog", import.meta.url));
     const files = await fixtureFiles(fixtureRoot, "posthog");

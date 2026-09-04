@@ -158,6 +158,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: HubSpotIcon,
     iconClassName: "bg-[#FF7A59] text-white",
   },
+  latitude: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.latitude,
+    Icon: Activity,
+    iconClassName: "bg-[#171717] text-white",
+  },
   linear: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
     Icon: LinearIcon,
@@ -225,6 +230,8 @@ export const HUBSPOT_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.hubspot.name;
 export const HUBSPOT_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.hubspot.source;
 export const ATTIO_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.attio.name;
 export const ATTIO_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.attio.source;
+export const LATITUDE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.latitude.name;
+export const LATITUDE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.latitude.source;
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
@@ -297,6 +304,10 @@ export function installOfficialHubSpotPlugin(preview?: PluginImportPreviewDto) {
 
 export function installOfficialAttioPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.attio, preview);
+}
+
+export function installOfficialLatitudePlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.latitude, preview);
 }
 
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {

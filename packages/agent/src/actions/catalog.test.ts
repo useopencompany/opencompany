@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   github: vi.fn(),
   gmail: vi.fn(),
   googleDrive: vi.fn(),
+  latitude: vi.fn(),
   posthog: vi.fn(),
   noop: vi.fn(),
   remote: vi.fn(),
@@ -22,7 +23,7 @@ vi.mock("./github", () => ({ resolveGitHubActions: mocks.github }));
 vi.mock("./gmail", () => ({ resolveGmailActions: mocks.gmail }));
 vi.mock("./google-calendar", () => ({ resolveGoogleCalendarActions: mocks.calendar }));
 vi.mock("./google-drive", () => ({ resolveGoogleDriveActions: mocks.googleDrive }));
-vi.mock("./latitude", () => ({ resolveLatitudeActions: mocks.noop }));
+vi.mock("./latitude", () => ({ resolveLatitudeActions: mocks.latitude }));
 vi.mock("./linear", () => ({ resolveLinearActions: mocks.noop }));
 vi.mock("./neon", () => ({ resolveNeonActions: mocks.noop }));
 vi.mock("./posthog", () => ({ resolvePostHogActions: mocks.posthog }));
@@ -70,6 +71,12 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       label: "Google Drive",
       description: "Legacy Google Drive actions.",
       actions: [{ id: "google_drive.search_files" }],
+    });
+    mocks.latitude.mockResolvedValue({
+      id: "latitude",
+      label: "Latitude",
+      description: "Legacy Latitude actions.",
+      actions: [{ id: "latitude.listTraces" }],
     });
     mocks.posthog.mockResolvedValue({
       id: "posthog",
@@ -160,6 +167,40 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
     expect(withPlugin.actions).toContainEqual(
       expect.objectContaining({ id: "plugin:posthog:posthog.query-trends" }),
+    );
+  });
+
+  it("keeps legacy Latitude actions as fallback and suppresses them after plugin install", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.latitude).toHaveBeenCalledWith("user_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "latitude.listTraces" }),
+    );
+
+    mocks.latitude.mockClear();
+    const latitudePluginRegistration = {
+      source: "plugin:latitude:latitude",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:latitude:latitude",
+      label: "Latitude",
+      description: "Official Latitude plugin tools.",
+      actions: [{ id: "plugin:latitude:latitude.listTraces" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [latitudePluginRegistration] },
+    );
+
+    expect(mocks.latitude).not.toHaveBeenCalled();
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "latitude.listTraces" }),
+    );
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:latitude:latitude.listTraces" }),
     );
   });
 

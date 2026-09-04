@@ -16,6 +16,7 @@ import {
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
+  LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   OfficialSkillPluginDetail,
@@ -277,10 +278,6 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/google-calendar",
     );
-    expect(screen.getByRole("link", { name: /signoz/i })).toHaveAttribute(
-      "href",
-      "/settings/plugins/signoz",
-    );
     expect(screen.getByRole("link", { name: /render/i })).toHaveAttribute(
       "href",
       "/settings/plugins/render",
@@ -296,6 +293,10 @@ describe("Plugin settings", () => {
     expect(screen.getByRole("link", { name: /^x/i })).toHaveAttribute(
       "href",
       "/settings/plugins/x",
+    );
+    expect(screen.getByRole("link", { name: /latitude/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/latitude",
     );
     expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(15);
     await user.click(screen.getByRole("button", { name: "View all business plugins" }));
@@ -337,6 +338,9 @@ describe("Plugin settings", () => {
     );
     expect(ATTIO_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",
+    );
+    expect(LATITUDE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
     );
     expect(SIGNOZ_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
@@ -395,7 +399,7 @@ describe("Plugin settings", () => {
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
 
     const engineering = screen.getByRole("region", { name: "Engineering" });
-    expect(within(engineering).getAllByRole("link")).toHaveLength(5);
+    expect(within(engineering).getAllByRole("link")).toHaveLength(6);
     expect(within(engineering).getByRole("link", { name: /github/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Engineering" })).toHaveAttribute(
       "aria-pressed",
