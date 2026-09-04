@@ -22,7 +22,6 @@ import {
   type NormalizedHubspotObjectContent,
   type NormalizedHubspotObjectSourceItem,
   type NormalizedImportSourceItem,
-  type NormalizedJamieMeetingSourceItem,
   type NormalizedLinearIssueContent,
   type NormalizedLinearIssueSourceItem,
   type NormalizedUploadAssetSourceItem,
@@ -93,15 +92,7 @@ import {
   buildGmailIngestTriagePrompt,
   runBrainIngestTriage,
 } from "./brain-ingest-triage";
-import {
-  buildJamieMeetingEvidenceWrite,
-  formatActionItems,
-  formatParticipants,
-  formatTranscript,
-  formatTranscriptExcerpt,
-  JAMIE_MEETING_FOLDER,
-  truncateByBytes,
-} from "./brain-jamie-writes";
+import { truncateByBytes } from "./brain-write-utils";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 
@@ -147,7 +138,7 @@ const ENRICHMENT_RESULT_SUMMARY_LIMIT = 800;
 // Agent-driven captures snapshot into a provenance subfolder of the evidence
 // zone, so the raw pile is organized by source instead of dumped into the
 // "evidence/" root. Mirrors the deterministic connector evidence folders
-// (evidence/document for Jamie, evidence/email for Gmail).
+// (evidence/document for meeting notes, evidence/email for Gmail).
 export const CHAT_CAPTURE_EVIDENCE_FOLDER = "evidence/chat";
 const AGENT_CLI_TIMEOUT_MS = 60_000;
 const AGENT_CLI_STDOUT_LIMIT = 24_000;
@@ -307,11 +298,6 @@ export const BRAIN_ENRICHMENT_SYSTEM_ADDENDUM = [
   "- No fabrication still governs: never fold an unattributed web claim into a page, and never let a search invent an entity the source did not establish.",
   `- Budget: at most ${BRAIN_ENRICHMENT_SEARCH_LIMIT} web searches for this whole ingest. When the budget is exhausted the tool refuses further calls; finish with what you have.`,
 ].join("\n");
-
-export const JAMIE_MEETING_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
-  mission: "folds one source item into a single brain of Markdown knowledge documents.",
-  skipRule: `If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${BRAIN_AGENT_SKIP_SENTINEL}.`,
-});
 
 export const GRANOLA_MEETING_INGEST_SYSTEM_PROMPT = buildBrainIngestSystemPrompt({
   mission: "folds one source item into a single brain of Markdown knowledge documents.",
@@ -853,54 +839,6 @@ function formatLinearIssueComments(issue: NormalizedLinearIssueContent["issue"])
       return `[${time}] ${author} (comment id ${comment.id}): ${body}`;
     })
     .join("\n");
-}
-
-export function buildJamieMeetingAgentIngestPrompt(
-  item: NormalizedJamieMeetingSourceItem,
-  context: {
-    meetingBrainId: string;
-    evidenceBrainId: string;
-    truncatedTranscript: boolean;
-  },
-) {
-  const meeting = item.content.meeting;
-  const transcript = boundedTranscriptMarkdown(item);
-  return [
-    "Ingest this completed meeting from Jamie (an AI meeting notetaker) into the brain.",
-    "",
-    "A raw evidence snapshot of these notes already exists in this brain:",
-    `- Evidence record: [[evidence:${context.evidenceBrainId}|Jamie meeting notes]] (id: ${context.evidenceBrainId})`,
-    context.truncatedTranscript
-      ? "- The evidence transcript was truncated to fit the file size limit."
-      : null,
-    "",
-    "Required outcome, all scoped to this brain:",
-    `1. A meeting page with id "${context.meetingBrainId}" in the "${JAMIE_MEETING_FOLDER}" folder (type: meeting) whose compiled truth synthesizes the meeting: what it was, decisions, action items, and [[page:...]] links to every attendee and company page. If the folder is missing, run folder create first. Link the evidence record. Do not paste the transcript.`,
-    "2. A person page per human attendee (skip notetaker bots), created or updated, with the meeting on their timeline (use --evidence-id and --source-ref). Update their compiled truth only when the meeting changes their state of play (role, company, plans).",
-    "3. Company pages for organizations that are clearly central to the meeting, with the meeting on their timelines. Do not create company pages from a bare email domain alone.",
-    "4. Backlinks between all of these pages per the iron law.",
-    "",
-    `Source ref: ${item.sourceRef}`,
-    `Occurred at: ${item.occurredAt}`,
-    `Captured at: ${item.capturedAt}`,
-    "",
-    `## Meeting title\n${meeting.title}`,
-    `## Meeting metadata\n- Started: ${meeting.startTime}${meeting.endTime ? `\n- Ended: ${meeting.endTime}` : ""}`,
-    `## Participants\n${formatParticipants(item)}`,
-    `## Action items\n${formatActionItems(item)}`,
-    `## Summary (from Jamie)\n${truncateByBytes(meeting.summaryMarkdown, PROMPT_SUMMARY_BYTES)}`,
-    `## Transcript\n${transcript}`,
-  ]
-    .filter((line): line is string => line !== null)
-    .join("\n");
-}
-
-function boundedTranscriptMarkdown(item: NormalizedJamieMeetingSourceItem) {
-  const segments = item.content.meeting.transcript;
-  if (segments.length === 0) return "No transcript provided by Jamie.";
-  const full = formatTranscript(segments);
-  if (Buffer.byteLength(full, "utf8") <= PROMPT_TRANSCRIPT_BYTES) return full;
-  return formatTranscriptExcerpt(segments, PROMPT_TRANSCRIPT_BYTES);
 }
 
 export function buildGranolaMeetingAgentIngestPrompt(
@@ -1693,7 +1631,7 @@ export function runImportAgentIngest(
   return runBrainIngestProfile(IMPORT_INGEST_PROFILE, input, deps);
 }
 
-// Jamie, Granola, and Fathom share one shape: snapshot the transcript to
+// Granola and Fathom share one shape: snapshot the transcript to
 // evidence/ deterministically before the agent runs (a 400KB transcript should
 // not round-trip through model tool calls), then curate from that pointer.
 function meetingEvidenceProfile<
@@ -1728,19 +1666,6 @@ function meetingEvidenceProfile<
       };
     },
   };
-}
-
-const JAMIE_MEETING_INGEST_PROFILE = meetingEvidenceProfile({
-  system: JAMIE_MEETING_INGEST_SYSTEM_PROMPT,
-  buildEvidence: buildJamieMeetingEvidenceWrite,
-  buildPrompt: buildJamieMeetingAgentIngestPrompt,
-});
-
-export function runJamieMeetingAgentIngest(
-  input: BrainIngestProfileInput<NormalizedJamieMeetingSourceItem>,
-  deps: BrainAgentIngestDeps = {},
-): Promise<Record<string, unknown>> {
-  return runBrainIngestProfile(JAMIE_MEETING_INGEST_PROFILE, input, deps);
 }
 
 const GRANOLA_MEETING_INGEST_PROFILE = meetingEvidenceProfile({
@@ -2330,7 +2255,7 @@ export async function runIngestAgentLoop(input: {
       description: [
         "Run one opencompany-brain CLI command against this brain.",
         `Commands: ${commands.join(", ")}.`,
-        'Pass everything after the command name as args tokens, e.g. {"command":"query","args":["hiring plan","--limit","5"]} or {"command":"timeline-add","args":["ada","--body","Met at roadmap review.","--source-ref","jamie:meeting:123"]}.',
+        'Pass everything after the command name as args tokens, e.g. {"command":"query","args":["hiring plan","--limit","5"]} or {"command":"timeline-add","args":["ada","--body","Met at roadmap review.","--source-ref","granola:meeting:123"]}.',
         'For long bodies use stdin with the matching flag, e.g. {"command":"create","args":["--type","person","--id","ada","--title","Ada","--truth-stdin"],"stdin":"..."}.',
         'For syntax not covered by the system prompt, call {"command":"help","args":["<command>"]}.',
         "A successful write returns an authoritative structured receipt with the resulting page status and timeline entry count. Continue from it; do not call get or timeline on an affected page to verify the write.",

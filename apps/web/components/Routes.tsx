@@ -49,7 +49,6 @@ import { BrainView } from "@/components/BrainView";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
-import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsContent } from "@/components/SettingsChrome";
@@ -368,28 +367,6 @@ function AppearanceSection() {
         );
       })}
     </div>
-  );
-}
-
-export function JamieSettingsRoute() {
-  const { activeBrain, featureFlags, integrations, workspace } = useAppData();
-  const brainSourcesHref =
-    featureFlags.legacyBrain && activeBrain
-      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-      : null;
-
-  return (
-    <SettingsContent
-      title="Jamie"
-      description="Meeting notes for opencompany Brain"
-      backLink={{ href: "/settings/integrations", label: "Integrations" }}
-    >
-      <JamieIntegrationSetup
-        initialState={integrations.jamie}
-        brainSourcesHref={brainSourcesHref}
-        canManage={workspace.role === "admin"}
-      />
-    </SettingsContent>
   );
 }
 

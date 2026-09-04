@@ -15,6 +15,7 @@ import {
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
+  JAMIE_PLUGIN_SOURCE,
   LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
@@ -300,6 +301,10 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/hubspot",
     );
+    expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/jamie",
+    );
     expect(screen.getByRole("link", { name: /latitude/i })).toHaveAttribute(
       "href",
       "/settings/plugins/latitude",
@@ -327,6 +332,9 @@ describe("Plugin settings", () => {
     );
     expect(HUBSPOT_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
+    );
+    expect(JAMIE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
     );
     expect(LATITUDE_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
@@ -356,7 +364,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(15);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(16);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });

@@ -13,6 +13,7 @@ export type ActionProviderId =
   | "attio"
   | "github"
   | "github_user"
+  | "jamie"
   | "stripe"
   | "revolut"
   | "latitude"

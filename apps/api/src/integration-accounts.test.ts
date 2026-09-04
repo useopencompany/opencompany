@@ -3,7 +3,6 @@ import {
   getGranolaIntegrationState,
   validateGranolaApiKey,
 } from "@opencompany/agent/integrations/granola";
-import { saveJamieWebhookApiKey } from "@opencompany/agent/integrations/jamie";
 import {
   connectRenderMcpIntegration,
   getRenderIntegrationState,
@@ -50,12 +49,6 @@ vi.mock("@opencompany/agent/integrations/granola", async (importOriginal) => ({
     accountName: "Sam",
     statusReason: null,
   })),
-}));
-
-vi.mock("@opencompany/agent/integrations/jamie", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  createOrResetJamieWebhookEndpoint: vi.fn(),
-  saveJamieWebhookApiKey: vi.fn(),
 }));
 
 vi.mock("@opencompany/agent/integrations/render-mcp", async (importOriginal) => ({
@@ -432,7 +425,7 @@ describe("integration account service", () => {
     expect(getRenderIntegrationState).toHaveBeenCalled();
   });
 
-  it("admin-gates the workspace-scoped Stripe and Jamie commands", async () => {
+  it("admin-gates the workspace-scoped Stripe commands", async () => {
     const service = createIntegrationAccountService({ db: fakeDb() });
     await expect(service.connectStripe(member, "rk_test_x".padEnd(40, "a"))).rejects.toMatchObject({
       status: 403,
@@ -441,14 +434,6 @@ describe("integration account service", () => {
     await expect(service.disconnectStripe(member)).rejects.toMatchObject({
       status: 403,
       message: "Only workspace admins can manage the Stripe integration.",
-    });
-    await expect(service.createOrResetJamieWebhookEndpoint(member)).rejects.toMatchObject({
-      status: 403,
-      message: "Only workspace admins can manage the Jamie integration.",
-    });
-    await expect(service.saveJamieWebhookApiKey(member, "sk_x")).rejects.toMatchObject({
-      status: 403,
-      message: "Only workspace admins can manage the Jamie integration.",
     });
   });
 
@@ -509,41 +494,6 @@ describe("integration account service", () => {
     await expect(service.disconnectStripe(admin)).rejects.toMatchObject({
       status: 404,
       message: "Stripe is not connected.",
-    });
-  });
-
-  it("surfaces Jamie lib validation errors verbatim like the retired action", async () => {
-    vi.mocked(saveJamieWebhookApiKey).mockRejectedValueOnce(
-      new Error("Create a Jamie webhook endpoint before saving the API key."),
-    );
-    const service = createIntegrationAccountService({ db: fakeDb() });
-    await expect(service.saveJamieWebhookApiKey(admin, "sk_x")).rejects.toMatchObject({
-      status: 400,
-      message: "Create a Jamie webhook endpoint before saving the API key.",
-    });
-  });
-
-  it("auto-enables Jamie for the Wiki when its API key is saved", async () => {
-    vi.mocked(saveJamieWebhookApiKey).mockResolvedValueOnce({
-      integrationId: "gint_jamie",
-      webhookUrl: "https://example.test/webhooks/jamie",
-      headerName: "x-jamie-api-key",
-      apiKeyConfigured: true,
-    });
-    const db = fakeDb([[{ userWorkosId: "user_connector" }]]);
-    const service = createIntegrationAccountService({ db });
-
-    await expect(service.saveJamieWebhookApiKey(admin, "sk_x")).resolves.toMatchObject({
-      integrationId: "gint_jamie",
-      apiKeyConfigured: true,
-    });
-    expect(ensureWikiSourceEnabledOnConnect).toHaveBeenCalledWith({
-      workspaceId: "workspace_1",
-      provider: "jamie",
-      integrationId: "gint_jamie",
-      userWorkosId: "user_connector",
-      createdByWorkosId: "user_1",
-      db,
     });
   });
 });

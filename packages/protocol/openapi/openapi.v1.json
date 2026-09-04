@@ -2396,84 +2396,6 @@
             ],
             "additionalProperties": false
           },
-          "jamie": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "jamie"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  },
-                  "webhookUrl": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 4096,
-                    "format": "uri"
-                  },
-                  "apiKeyConfigured": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountName",
-                  "webhookUrl",
-                  "apiKeyConfigured"
-                ],
-                "additionalProperties": false
-              },
-              "legacyDefaultDelivery": {
-                "type": "boolean"
-              },
-              "isDefaultBrain": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "integration",
-              "legacyDefaultDelivery",
-              "isDefaultBrain"
-            ],
-            "additionalProperties": false
-          },
           "linear": {
             "type": "object",
             "properties": {
@@ -2975,7 +2897,6 @@
           "viewer",
           "sources",
           "ownAccounts",
-          "jamie",
           "linear",
           "github",
           "gmail",
@@ -2999,7 +2920,6 @@
           "provider": {
             "type": "string",
             "enum": [
-              "jamie",
               "gmail",
               "google_drive",
               "github",
@@ -3169,7 +3089,6 @@
               "provider": {
                 "type": "string",
                 "enum": [
-                  "jamie",
                   "gmail",
                   "google_drive",
                   "github",
@@ -3217,7 +3136,6 @@
               "provider": {
                 "type": "string",
                 "enum": [
-                  "jamie",
                   "gmail",
                   "google_drive",
                   "github",
@@ -5590,7 +5508,6 @@
               "enum": [
                 "public_web",
                 "github",
-                "jamie",
                 "granola",
                 "fathom",
                 "gmail",
@@ -6247,7 +6164,6 @@
             "type": "string",
             "enum": [
               "gmail",
-              "jamie",
               "granola",
               "linear",
               "github"
@@ -6399,7 +6315,6 @@
             "type": "string",
             "enum": [
               "gmail",
-              "jamie",
               "granola",
               "linear",
               "github"
@@ -6539,7 +6454,6 @@
             "type": "string",
             "enum": [
               "gmail",
-              "jamie",
               "granola",
               "linear",
               "github"
@@ -10885,61 +10799,6 @@
         "required": [
           "data",
           "meta"
-        ],
-        "additionalProperties": false
-      },
-      "JamieWebhookSetupEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "setup": {
-                "$ref": "#/components/schemas/JamieWebhookSetup"
-              }
-            },
-            "required": [
-              "setup"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "JamieWebhookSetup": {
-        "type": "object",
-        "properties": {
-          "integrationId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128,
-            "example": "gint_0f8e7d6c5b4a",
-            "description": "Integration connection id."
-          },
-          "webhookUrl": {
-            "type": "string",
-            "minLength": 1
-          },
-          "headerName": {
-            "type": "string",
-            "minLength": 1
-          },
-          "apiKeyConfigured": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "integrationId",
-          "webhookUrl",
-          "headerName",
-          "apiKeyConfigured"
         ],
         "additionalProperties": false
       },
@@ -21637,90 +21496,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/StripeAccountDeleteEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/integration-accounts/jamie/webhook-endpoint": {
-      "post": {
-        "tags": [
-          "Integrations"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Jamie webhook endpoint created or reset for the workspace. Admin only. Any previously saved API key binding is cleared.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JamieWebhookSetupEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/integration-accounts/jamie/api-key": {
-      "put": {
-        "tags": [
-          "Integrations"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IntegrationApiKeyBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Jamie webhook API key bound to the workspace endpoint. Admin only; only a hash is stored and the key never appears in the response.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JamieWebhookSetupEnvelope"
                 }
               }
             }

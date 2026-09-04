@@ -39,10 +39,10 @@ import {
 
 const occurredAt = new Date("2026-08-24T10:00:00.000Z");
 const normalizedPayload = {
-  sourceProvider: "jamie",
+  sourceProvider: "granola",
   sourceType: "meeting",
   externalId: "meeting_123",
-  sourceRef: "jamie:meeting:meeting_123",
+  sourceRef: "granola:meeting:meeting_123",
   title: "Roadmap review",
   occurredAt: occurredAt.toISOString(),
   capturedAt: "2026-08-24T11:00:00.000Z",
@@ -58,9 +58,9 @@ function input(
     attempt: 1,
     workspaceId: "workspace_123",
     actorUserWorkosId: "user_123",
-    sourceProvider: "jamie" as const,
+    sourceProvider: "granola" as const,
     sourceType: "meeting" as const,
-    sourceRef: "jamie:meeting:meeting_123",
+    sourceRef: "granola:meeting:meeting_123",
     title: "Roadmap review",
     occurredAt,
     contentHash: "hash_123",
@@ -379,14 +379,14 @@ describe("opencompany wiki librarian agent", () => {
     expect(WIKI_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS).toBe(900_000);
   });
 
-  it("builds the registered Jamie meeting header and five-section prompt", () => {
+  it("builds the registered Granola meeting header and five-section prompt", () => {
     const message = buildWikiIngestUserMessage(input(vi.fn()));
-    expect(message).toContain("# Source context: jamie/meeting");
+    expect(message).toContain("# Source context: granola/meeting");
     expect(message).toContain("title, date and time, attendees, provider summary, and transcript");
     expect(message).toContain("decisions, project state, commitments, and people or company facts");
     expect(message).toContain("at most a timeline-add");
     expect(message).toContain("do NOT copy the full transcript");
-    expect(message).toContain("[[source:jamie:meeting:meeting_123]]");
+    expect(message).toContain("[[source:granola:meeting:meeting_123]]");
     expect(message).toContain("<normalized-source-payload>");
     expect(message).toContain('"contentHash": "hash_123"');
     for (const section of [
@@ -402,7 +402,7 @@ describe("opencompany wiki librarian agent", () => {
     expect(WIKI_AGENT_INGEST_SYSTEM_PROMPT).toContain("[[source:provider:id]]");
   });
 
-  it("routes both meeting providers through the meeting header registry", () => {
+  it("routes Granola through the meeting header registry", () => {
     const granolaHeader = buildWikiSourceContextHeader({
       sourceProvider: "granola",
       sourceType: "meeting",

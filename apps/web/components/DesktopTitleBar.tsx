@@ -31,7 +31,6 @@ const SETTINGS_TITLES: Record<string, string> = {
   "/settings/attio": "Attio",
   "/settings/fathom": "Fathom",
   "/settings/granola": "Granola",
-  "/settings/jamie": "Jamie",
 };
 
 function pathSegmentLabel(value: string | undefined, fallback: string) {

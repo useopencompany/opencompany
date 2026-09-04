@@ -204,7 +204,6 @@ export const WIKI_SOURCE_CONTEXT_HEADER_BUILDERS: Partial<
   Record<ActiveWikiIngestSourceProvider, WikiSourceContextHeaderBuilder>
 > = {
   gmail: buildGmailSourceContextHeader,
-  jamie: buildMeetingSourceContextHeader,
   granola: buildMeetingSourceContextHeader,
   linear: buildLinearSourceContextHeader,
   github: buildGitHubSourceContextHeader,

@@ -1768,10 +1768,6 @@ describe("canonical Hono API", () => {
       attioIngress: {
         webhook: record("attio.webhook", calls),
       },
-      jamieIngress: {
-        webhook: record("jamie.webhook", calls),
-        webhookForIntegration: record("jamie.webhookForIntegration", calls),
-      },
       mcpOAuthIngress: {
         start: recordMcp("mcp.start", calls),
         callback: recordMcp("mcp.callback", calls),
@@ -1811,8 +1807,6 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/hubspot/callback", "hubspot.callback"],
       ["POST", "/webhooks/hubspot/events", "hubspot.webhook"],
       ["POST", "/webhooks/attio/events", "attio.webhook"],
-      ["POST", "/webhooks/jamie", "jamie.webhook"],
-      ["POST", "/webhooks/jamie/gint_1", "jamie.webhookForIntegration"],
       ["GET", "/integrations/linear/start", "mcp.start.linear"],
       ["GET", "/integrations/linear/callback", "mcp.callback.linear"],
       ["GET", "/integrations/hubspot-mcp/start", "mcp.start.hubspot"],
@@ -1825,6 +1819,8 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/latitude/callback", "mcp.callback.latitude"],
       ["GET", "/integrations/signoz/start", "mcp.start.signoz"],
       ["GET", "/integrations/signoz/callback", "mcp.callback.signoz"],
+      ["GET", "/integrations/jamie-mcp/start", "mcp.start.jamie"],
+      ["GET", "/integrations/jamie-mcp/callback", "mcp.callback.jamie"],
       ["GET", "/integrations/x-account/start", "x-account.start"],
       ["GET", "/integrations/x-account/callback", "x-account.callback"],
       ["GET", "/integrations/slack-bot/start", "slack-bot.start"],
@@ -5052,12 +5048,6 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     },
     disconnectStripe: async () => {
       throw new Error("Unexpected Stripe disconnect.");
-    },
-    createOrResetJamieWebhookEndpoint: async () => {
-      throw new Error("Unexpected Jamie webhook endpoint mutation.");
-    },
-    saveJamieWebhookApiKey: async () => {
-      throw new Error("Unexpected Jamie API key mutation.");
     },
   };
 }

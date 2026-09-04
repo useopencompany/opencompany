@@ -10,7 +10,7 @@ import {
   createBrainMarkdownContent,
   MAX_BRAIN_FILE_BYTES,
 } from "@opencompany/db/brain-files";
-import { truncateByBytes } from "./brain-jamie-writes";
+import { truncateByBytes } from "./brain-write-utils";
 
 export const FATHOM_TRANSCRIPT_EXCERPT_BYTES = 400_000;
 export const FATHOM_EVIDENCE_FOLDER = "evidence/document";

@@ -54,36 +54,25 @@ export function resolveBrainSourceState(
   const providerSources = details?.sources.filter((entry) => entry.provider === providerId) ?? [];
   const source = providerSources.find((entry) => entry.isOwn) ?? providerSources[0] ?? null;
   const integration =
-    providerId === "jamie"
-      ? details?.jamie.integration
-      : providerId === "linear"
-        ? details?.linear.integration
-        : providerId === "github"
-          ? details?.github.integration
-          : providerId === "gmail"
-            ? details?.gmail.integration
-            : providerId === "google_drive"
-              ? details?.googleDrive.integration
-              : providerId === "hubspot"
-                ? details?.hubspot.integration
-                : providerId === "attio"
-                  ? details?.attio.integration
-                  : providerId === "granola"
-                    ? details?.granola.integration
-                    : providerId === "fathom"
-                      ? details?.fathom.integration
-                      : undefined;
-  const jamieReady =
-    providerId === "jamie" ? Boolean(details?.jamie.integration.apiKeyConfigured) : false;
-  const connected = providerId === "jamie" ? jamieReady : Boolean(integration?.connected);
-  // Before any per-brain rows exist, Jamie deliveries follow legacy routing to
-  // the user's default brain — surface that as an implicit "on" there.
-  const legacyEnabled = Boolean(
-    providerId === "jamie" &&
-      !source &&
-      details?.jamie.legacyDefaultDelivery &&
-      details?.jamie.isDefaultBrain,
-  );
+    providerId === "linear"
+      ? details?.linear.integration
+      : providerId === "github"
+        ? details?.github.integration
+        : providerId === "gmail"
+          ? details?.gmail.integration
+          : providerId === "google_drive"
+            ? details?.googleDrive.integration
+            : providerId === "hubspot"
+              ? details?.hubspot.integration
+              : providerId === "attio"
+                ? details?.attio.integration
+                : providerId === "granola"
+                  ? details?.granola.integration
+                  : providerId === "fathom"
+                    ? details?.fathom.integration
+                    : undefined;
+  const connected = Boolean(integration?.connected);
+  const legacyEnabled = false;
   return {
     source,
     connected,
@@ -119,7 +108,7 @@ export function brainSourceHasScope(
       // source is always feeding once the user confirms.
       return gmailEventsFromConfig(config).length > 0;
     default:
-      // Jamie / Granola / Fathom have no scope to pick — connecting is enough.
+      // Granola / Fathom have no scope to pick — connecting is enough.
       return true;
   }
 }
@@ -255,9 +244,7 @@ export function SourceProviderCard({
     (source ? source.canToggle : connected) &&
     (provider.id !== "google_drive" || Boolean(source)) &&
     !isPending;
-  const sourceNeedsSetup = Boolean(
-    source && source.integrationStatus !== "connected" && !(provider.id === "jamie" && connected),
-  );
+  const sourceNeedsSetup = Boolean(source && source.integrationStatus !== "connected");
   const sourceStatusBadge =
     sourceNeedsSetup && source
       ? source.integrationStatus === "disconnected"

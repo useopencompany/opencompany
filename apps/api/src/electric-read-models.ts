@@ -845,7 +845,6 @@ function publicAttachment(value: unknown) {
 const BRAIN_IMPORT_PROVIDERS = new Set([
   "public_web",
   "github",
-  "jamie",
   "granola",
   "fathom",
   "gmail",

@@ -175,13 +175,12 @@ export type IntegrationProvider =
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, Render, SigNoz, X) are always personal. Installation-bound
-// connections (GitHub App org installs, Jamie webhook secrets, the Slack
+// connections (GitHub App org installs, the Slack
 // answer-bot install) are workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
 // workspace admin.
 export const WORKSPACE_OWNED_INTEGRATION_PROVIDERS = [
   "github",
-  "jamie",
   "slack_bot",
   "stripe",
 ] as const satisfies readonly IntegrationProvider[];

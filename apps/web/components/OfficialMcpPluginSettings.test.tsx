@@ -28,6 +28,7 @@ import {
   googleCalendarToolsStateFromPlugin,
   googleDriveToolsStateFromPlugin,
   HubSpotPluginDetail,
+  JamiePluginDetail,
   LatitudePluginDetail,
   type LinearAccountsState,
   LinearPluginDetail,
@@ -51,6 +52,7 @@ import {
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
+  JAMIE_PLUGIN_SOURCE,
   LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
@@ -107,6 +109,14 @@ const appData = vi.hoisted(() => ({
       accountName: "Acme CRM",
       integrationId: "gint_hubspot_mcp",
       capabilityModes: { read: "on", query: "ask", write: "ask" },
+    },
+    jamie: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Jamie",
+      integrationId: "gint_jamie_mcp",
+      capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
     },
     posthog: {
       connected: true,
@@ -244,6 +254,20 @@ const appData = vi.hoisted(() => ({
         },
       ],
       linear: [],
+      jamie: [
+        {
+          integrationId: "gint_jamie_mcp",
+          provider: "jamie",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "Jamie",
+          connectionLabel: "Jamie",
+          statusReason: null,
+          scopes: [],
+          capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
+        },
+      ],
       neon: [],
       signoz: [
         {
@@ -1267,6 +1291,62 @@ describe("Linear plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps Jamie OAuth onto the official plugin without offering legacy ingestion", () => {
+    const jamiePlugin = {
+      ...plugin,
+      id: "plugin_jamie",
+      name: "jamie",
+      manifest: { name: "jamie", description: "Search and manage Jamie meeting content." },
+      source: { ...plugin.source, path: "jamie" },
+      remoteMcpServers: [
+        {
+          name: "jamie",
+          type: "streamable-http" as const,
+          connectionProvider: "jamie",
+          capabilities: [
+            {
+              id: "read",
+              label: "Browse Jamie organization",
+              defaultMode: "on" as const,
+              tools: ["list_templates", "list_tags"],
+            },
+            {
+              id: "query",
+              label: "Read meetings & tasks",
+              defaultMode: "ask" as const,
+              tools: ["list_meetings", "get_meeting", "list_tasks"],
+            },
+            {
+              id: "write",
+              label: "Manage Jamie content",
+              defaultMode: "ask" as const,
+              tools: ["create_tasks", "create_tag"],
+            },
+            {
+              id: "draft",
+              label: "Permanently delete tags",
+              defaultMode: "off" as const,
+              tools: ["delete_tag"],
+            },
+          ],
+          tools: [],
+        },
+      ],
+    } satisfies PluginInstallationDto;
+
+    render(<JamiePluginDetail pluginState={{ status: "ready", plugin: jamiePlugin }} canEdit />);
+
+    expect(screen.getByRole("heading", { level: 1, name: "Jamie" })).toBeInTheDocument();
+    expect(screen.getByText("Browse Jamie organization")).toBeInTheDocument();
+    expect(screen.getByText("Read meetings & tasks")).toBeInTheDocument();
+    expect(screen.getByText("Manage Jamie content")).toBeInTheDocument();
+    expect(screen.getByText("Permanently delete tags")).toBeInTheDocument();
+    expect(screen.queryByText(/ingestion in Wiki sources/i)).not.toBeInTheDocument();
+    expect(JAMIE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
+    );
   });
 
   it("maps the workspace Stripe key onto the official plugin surface", () => {

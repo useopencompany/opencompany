@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SourceProviderCard } from "@/components/BrainSourceCards";
 import type { BrainSourcesDetails, BrainSourceView } from "@/lib/brain-source-actions";
 import { BRAIN_SOURCE_PROVIDERS } from "@/lib/brain-sources/registry";
-import type { JamieProviderState } from "@/lib/integration-state";
 
 const brainSourceActionsMock = vi.hoisted(() => ({
   getBrainSourcesAction: vi.fn(),
@@ -62,57 +61,6 @@ describe("BrainSourceCards", () => {
     });
     brainSourceActionsMock.setBrainGoogleDriveSourceAction.mockResolvedValue({ ok: true });
     toastMock.error.mockClear();
-  });
-
-  it("allows a saved Jamie API key to be enabled as a brain source before the first webhook", async () => {
-    const user = userEvent.setup();
-    renderJamieSource(brainSourceDetails());
-
-    const toggle = await screen.findByRole("switch", { name: "Jamie source" });
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-
-    await user.click(toggle);
-
-    await waitFor(() =>
-      expect(brainSourceActionsMock.setBrainSourceEnabledAction).toHaveBeenCalledWith({
-        brainRef: "goat_brain_1",
-        provider: "jamie",
-        integrationId: "gint_jamie_1",
-        enabled: true,
-      }),
-    );
-  });
-
-  it("does not show a setup warning for an enabled Jamie source with saved credentials", async () => {
-    renderJamieSource(
-      brainSourceDetails({
-        sources: [
-          {
-            sourceId: "gbscfg_jamie_1",
-            provider: "jamie",
-            integrationId: "gint_jamie_1",
-            enabled: true,
-            connectedByName: "Ada Lovelace",
-            ownerEmail: "ada@example.com",
-            ownerAvatarUrl: null,
-            accountEmail: null,
-            accountName: "Jamie",
-            connectionLabel: null,
-            ownerKind: "workspace" as const,
-            isOwn: false,
-            canConfigure: true,
-            canToggle: true,
-            canRemove: true,
-            integrationStatus: "needs_reauth",
-            config: {},
-          },
-        ],
-      }),
-    );
-
-    const toggle = await screen.findByRole("switch", { name: "Jamie source" });
-    expect(toggle).toHaveAttribute("aria-checked", "true");
-    expect(screen.queryByText("Needs setup")).not.toBeInTheDocument();
   });
 
   it("browses and saves personal Drive selections with the workspace visibility warning", async () => {
@@ -391,54 +339,7 @@ describe("BrainSourceCards", () => {
       }),
     );
   });
-
-  it("supports onboarding-owned setup actions and links to the manual guide", async () => {
-    const user = userEvent.setup();
-    const onConnect = vi.fn();
-    if (!jamieProvider) throw new Error("Jamie source provider is not registered.");
-
-    render(
-      <SourceProviderCard
-        brainRef="goat_brain_1"
-        provider={jamieProvider}
-        details={brainSourceDetails({
-          jamie: {
-            integration: jamieState({
-              integrationId: null,
-              webhookUrl: null,
-              apiKeyConfigured: false,
-            }),
-            legacyDefaultDelivery: false,
-            isDefaultBrain: false,
-          },
-        })}
-        onChanged={async () => {}}
-        onConnect={onConnect}
-      />,
-    );
-
-    expect(screen.getByRole("link", { name: /setup guide/i })).toHaveAttribute(
-      "href",
-      "https://docs.opencompany.cloud/docs/integrations/jamie",
-    );
-    await user.click(screen.getByRole("button", { name: "Set up" }));
-    expect(onConnect).toHaveBeenCalledOnce();
-  });
 });
-
-const jamieProvider = BRAIN_SOURCE_PROVIDERS.find((provider) => provider.id === "jamie");
-
-function renderJamieSource(details: BrainSourcesDetails) {
-  if (!jamieProvider) throw new Error("Jamie source provider is not registered.");
-  return render(
-    <SourceProviderCard
-      brainRef="goat_brain_1"
-      provider={jamieProvider}
-      details={details}
-      onChanged={async () => {}}
-    />,
-  );
-}
 
 function brainSourceDetails(
   overrides: Partial<BrainSourcesDetails> & { sources?: BrainSourceView[] } = {},
@@ -454,15 +355,6 @@ function brainSourceDetails(
       granola: [],
       fathom: [],
       attio: [],
-    },
-    jamie: {
-      integration: jamieState({
-        connected: false,
-        status: "needs_reauth",
-        apiKeyConfigured: true,
-      }),
-      legacyDefaultDelivery: false,
-      isDefaultBrain: false,
     },
     linear: {
       integration: {
@@ -594,20 +486,6 @@ function attioSource(overrides: Partial<BrainSourceView> = {}): BrainSourceView 
     canRemove: true,
     integrationStatus: "connected",
     config: {},
-    ...overrides,
-  };
-}
-
-function jamieState(overrides: Partial<JamieProviderState> = {}): JamieProviderState {
-  return {
-    provider: "jamie",
-    connected: false,
-    status: "not_connected",
-    accountName: "Jamie",
-    statusReason: null,
-    integrationId: "gint_jamie_1",
-    webhookUrl: "https://opencompany.test/api/webhooks/jamie",
-    apiKeyConfigured: false,
     ...overrides,
   };
 }

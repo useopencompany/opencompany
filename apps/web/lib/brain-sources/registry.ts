@@ -3,7 +3,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   Contact,
   Files,
-  FileText,
   GitBranch,
   Handshake,
   ListTodo,
@@ -13,8 +12,6 @@ import {
 } from "lucide-react";
 
 const DOCS_ORIGIN = "https://docs.opencompany.cloud";
-
-export const JAMIE_DOCS_HREF = `${DOCS_ORIGIN}/docs/integrations/jamie`;
 
 export type BrainSourceProviderDef = {
   id: BrainSourceConfigProvider;
@@ -33,16 +30,6 @@ export type BrainSourceProviderDef = {
 // destinations (rendered by the Destinations section in brain settings via
 // SlackBotDestinationCard), not ingestion sources.
 export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
-  {
-    id: "jamie",
-    name: "Jamie",
-    description: "Meeting notes flow into this brain after every completed meeting.",
-    icon: FileText,
-    connectionKind: "webhook",
-    available: true,
-    connectHref: "/settings/jamie",
-    docsHref: JAMIE_DOCS_HREF,
-  },
   {
     id: "granola",
     name: "Granola",
@@ -126,7 +113,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
 // the brain until the user picks what to ingest, so onboarding opens a focused
 // config surface right after connect.
 //
-// The meeting-note providers (Jamie, Granola, Fathom) have nothing to scope —
+// The meeting-note providers (Granola and Fathom) have nothing to scope —
 // once connected, every meeting flows in — so onboarding auto-enables them on
 // connect instead of prompting for config.
 export function brainSourceNeedsConfig(id: BrainSourceConfigProvider): boolean {
