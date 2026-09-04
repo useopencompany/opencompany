@@ -5144,7 +5144,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText(/Task running/i)).not.toBeInTheDocument();
   });
 
-  it("renders assistant text and task cards in message part order", () => {
+  it("renders assistant text and task cards in message part order", async () => {
     render(
       <Surface
         tasks={[]}
@@ -5183,6 +5183,10 @@ describe("Surface chat streaming UI", () => {
         }}
       />,
     );
+
+    // The resting turn folds the intermediate update behind the disclosure; expanding it must
+    // restore the original part order around the always-visible task card and final message.
+    await userEvent.click(screen.getByRole("button", { name: "1 message" }));
 
     const firstText = screen.getByText("I'll start now.");
     const taskCard = screen.getByRole("link", { name: /Research market/ });
