@@ -44,6 +44,7 @@ describe("calculateModelUsageCost", () => {
   });
 
   it.each([
+    ["openai/gpt-6-astra", 73_500],
     ["openai/gpt-5.6-sol", 41_750],
     ["openai/gpt-5.6-terra", 20_875],
     ["openai/gpt-5.6-luna", 8_350],
@@ -86,7 +87,7 @@ describe("calculateModelUsageCost", () => {
     ["zai/glm-5.2", 7_460],
     ["zai/glm-5-turbo", 6_640],
     ["zai/glm-5v-turbo", 6_640],
-  ])("prices %s from Vercel AI Gateway published rates", (modelName, expectedProviderCost) => {
+  ])("prices %s from published provider rates", (modelName, expectedProviderCost) => {
     const cost = calculateModelUsageCost({
       modelName,
       inputTokens: 4_000,
@@ -125,6 +126,28 @@ describe("calculateModelUsageCost", () => {
 
     expect(cost.providerCostUsdMicros).toBe(27_500);
     expect(cost.costBasis.longContextApplied).toBe(true);
+  });
+
+  it("applies GPT-6 Astra long-context pricing above 272K input tokens", () => {
+    const cost = calculateModelUsageCost({
+      modelName: "openai/gpt-6-astra",
+      inputTokens: 272_001,
+      inputNoCacheTokens: 1_000,
+      inputCacheReadTokens: 1_000,
+      inputCacheWriteTokens: 1_000,
+      outputTokens: 1_000,
+    });
+
+    expect(cost.providerCostUsdMicros).toBe(122_000);
+    expect(cost.costBasis).toMatchObject({
+      longContextApplied: true,
+      ratesUsdMicrosPerMillion: {
+        inputNoCache: 20_000_000,
+        inputCacheRead: 2_000_000,
+        inputCacheWrite: 25_000_000,
+        output: 75_000_000,
+      },
+    });
   });
 
   it("applies xAI long-context tiers when input reaches the threshold", () => {
@@ -242,7 +265,7 @@ describe("fees and hosted tools", () => {
       providerCostUsdMicros: 11_565,
       costBasis: {
         costSource: "platform_model_pricing",
-        pricingVersion: "2026-08-24.standard.1",
+        pricingVersion: "2026-09-04.standard.1",
       },
     });
   });
@@ -263,7 +286,7 @@ describe("fees and hosted tools", () => {
       totalCostUsdMicros: 1_000_000,
       costBasis: {
         costSource: "broker_metered",
-        pricingVersion: "2026-08-24.standard.1",
+        pricingVersion: "2026-09-04.standard.1",
       },
     });
   });

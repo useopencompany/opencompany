@@ -15,6 +15,7 @@ import {
   BRAIN_TOOL_NAME,
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
+  LIST_SKILLS_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
 } from "./chat-ui";
@@ -189,7 +190,7 @@ describe("start_task tool", () => {
     },
   );
 
-  it("advertises only GPT 5.6 models when the user requests a Codex task", () => {
+  it("advertises only current Codex models when the user requests a Codex task", () => {
     const context = createProductChatToolContext({
       model,
       latestUserMessage: "Use Codex to fix the repository.",
@@ -204,7 +205,7 @@ describe("start_task tool", () => {
     );
   });
 
-  it("preserves an already Codex-compatible GPT 5.6 task model", async () => {
+  it("preserves an already Codex-compatible task model", async () => {
     const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
       id: "task_1",
       displayId: "TASK-1",
@@ -400,6 +401,49 @@ describe("update_task_status tool gating", () => {
       comment: "Blocked on auth.",
     });
     expect(calls).toEqual([{ status: "needs_attention", comment: "Blocked on auth." }]);
+  });
+});
+
+describe("list_skills tool", () => {
+  const catalog = [
+    {
+      id: "linear-issue-drafting",
+      name: "linear-issue-drafting",
+      description:
+        "Turn a bug report, feature request, or work note into a reviewable Linear issue.",
+    },
+    {
+      id: "linear-status-reporting",
+      name: "linear-status-reporting",
+      description: "Build a concise status report from Linear issues and projects.",
+    },
+    {
+      id: "product-work",
+      name: "product-work",
+      description: "Use this for work on the opencompany product.",
+    },
+  ];
+
+  it("ranks partial matches instead of hiding a skill when one query term is absent", async () => {
+    const context = createProductChatToolContext({
+      model,
+      skills: {
+        catalog,
+        execute: vi.fn(),
+      },
+    });
+    const listSkills = context.tools[LIST_SKILLS_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await expect(
+      listSkills.execute({ query: "Linear issue drafting product feature" }),
+    ).resolves.toEqual({
+      ok: true,
+      skills: [catalog[0], catalog[1], catalog[2]],
+      total: 3,
+      truncated: false,
+    });
   });
 });
 

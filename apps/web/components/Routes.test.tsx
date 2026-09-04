@@ -148,10 +148,6 @@ vi.mock("@/components/AttioIntegrationSetup", () => ({
   AttioIntegrationSetup: () => null,
 }));
 
-vi.mock("@/components/StripeIntegrationSetup", () => ({
-  StripeIntegrationSetup: () => null,
-}));
-
 vi.mock("@/components/McpSetupGuide", () => ({
   McpSetupGuide: () => <div data-testid="mcp-setup-guide" />,
 }));
@@ -333,7 +329,7 @@ describe("SettingsRoute", () => {
 
     expect(screen.getByRole("heading", { name: "Inference" })).toBeInTheDocument();
     expect(
-      screen.getByText("Configure how this workspace runs AI model inference."),
+      screen.getByText("Connect model subscriptions and choose how your workspace runs AI."),
     ).toBeInTheDocument();
     expect(screen.getByTestId("inference-settings-panel")).toBeInTheDocument();
   });

@@ -26,19 +26,14 @@ const allowedStandaloneFiles = new Set([
   "packages/db/src/product-schema.ts",
   "scripts/lib/release-smoke.test.mjs",
 ]);
+// These reviewed absolute baselines must pass for the same tree before and after
+// merge. Comparing with origin/main plus a PR-specific delta makes the check
+// self-invalidating once origin/main advances to that merged tree.
 const protectedCompatibilityTokens = [
-  [
-    "physical and stored quoted goat_* identifiers",
-    /["'`]goat_[a-z0-9_]*["'`]/gu,
-    "[\"'`]goat_[a-z0-9_]*[\"'`]",
-  ],
-  [
-    "quoted sandbox runtime roots",
-    /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu,
-    "[\"'`]opencompany-goat[a-z0-9_./${}:*-]*[\"'`]",
-  ],
-  ["chat source-provider values", /["']goat-chat["']/gu, '["\x27]goat-chat["\x27]'],
-  ["import source-provider values", /["']goat-import["']/gu, '["\x27]goat-import["\x27]'],
+  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1116],
+  ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
+  ["chat source-provider values", /["']goat-chat["']/gu, 30],
+  ["import source-provider values", /["']goat-import["']/gu, 13],
 ];
 const requiredCompatibilityFragments = new Map([
   ["packages/db/src/product-schema.ts", ['pgSchema("goat")', "'goat-chat', 'goat-import'"]],
@@ -137,9 +132,8 @@ for (const [relativePath, fragments] of requiredCompatibilityFragments) {
   }
 }
 
-for (const [label, currentPattern, gitPattern] of protectedCompatibilityTokens) {
+for (const [label, currentPattern, expectedCount] of protectedCompatibilityTokens) {
   const currentCount = currentCompatibilityCorpus.match(currentPattern)?.length ?? 0;
-  const expectedCount = gitMatchCount(gitPattern);
   if (currentCount !== expectedCount) {
     failures.push(
       `${label}: expected ${expectedCount} retained occurrences, found ${currentCount}`,
@@ -240,35 +234,6 @@ function gitLines(args) {
   return execFileSync("git", args, { cwd: repositoryRoot, encoding: "utf8" })
     .split("\n")
     .filter(Boolean);
-}
-
-function gitMatchCount(pattern) {
-  try {
-    return execFileSync(
-      "git",
-      [
-        "grep",
-        "-I",
-        "-h",
-        "-o",
-        "-E",
-        pattern,
-        "origin/main",
-        "--",
-        ".",
-        ":(exclude)drizzle/**",
-        ":(exclude)docs/adr/**",
-        ":(exclude)docs/future-concepts/oss-readiness.md",
-        ":(exclude)scripts/check-naming-boundary.mjs",
-      ],
-      { cwd: repositoryRoot, encoding: "utf8" },
-    )
-      .split("\n")
-      .filter(Boolean).length;
-  } catch (error) {
-    if (error?.status === 1) return 0;
-    throw error;
-  }
 }
 
 function isHistorical(relativePath) {

@@ -3554,6 +3554,8 @@ describe("canonical Hono API", () => {
       accountName: "Acme",
       livemode: false,
       statusReason: null,
+      capabilityModes: {},
+      toolModes: {},
     }));
     const disconnectStripe = vi.fn(async () => undefined);
     const connectAttio = vi.fn(async () => ({

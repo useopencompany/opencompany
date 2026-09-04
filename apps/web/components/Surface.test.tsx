@@ -1935,6 +1935,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("Capability / Speed / Cost")).not.toBeInTheDocument();
     expect(screen.getAllByText("Claude Sonnet 5").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Claude Opus 4.8")).toBeInTheDocument();
+    expect(screen.getByText("GPT 6 Astra")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.6 Sol")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.6 Terra")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.5")).toBeInTheDocument();
@@ -2142,7 +2143,11 @@ describe("Surface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
-    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" })).toBeInTheDocument();
+    const codexModelPicker = screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" });
+    expect(codexModelPicker).toBeInTheDocument();
+    await user.click(codexModelPicker);
+    await user.click(screen.getByText("GPT 6 Astra"));
+    expect(screen.getByRole("button", { name: "Codex model: GPT 6 Astra" })).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Clone my repo");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -2155,7 +2160,7 @@ describe("Surface chat streaming UI", () => {
         schemaVersion: 1,
         settings: { reasoningEffort: "xhigh" },
       },
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6-astra",
     });
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
@@ -2187,7 +2192,7 @@ describe("Surface chat streaming UI", () => {
         message_id: "assistant_accepted_1",
         engine: "codex",
         model: CODEX_CHAT_DEFAULT_MODEL_ID,
-        selected_model: CODEX_CHAT_DEFAULT_MODEL_ID,
+        selected_model: "openai/gpt-6-astra",
         is_new_session: true,
         sandbox_status_at_send: "not_created",
         send_source: "composer",
@@ -2742,6 +2747,29 @@ describe("Surface chat streaming UI", () => {
     await user.hover(contextMeter);
 
     expect(await screen.findByText("14k / 1.0M context · 1%")).toBeVisible();
+  });
+
+  it("shows the session model in a tooltip from the header icon", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_model_tooltip_1",
+          title: "Model details",
+          model: "openai/gpt-5.6-terra",
+          engine: "codex",
+          messages: [],
+        }}
+      />,
+    );
+
+    const modelIcon = screen.getByRole("button", { name: "Model: GPT 5.6 Terra" });
+    await user.hover(modelIcon);
+
+    expect(await screen.findByText("Model: GPT 5.6 Terra")).toBeVisible();
   });
 
   it("shows when a Codex chat is waiting for runner capacity", () => {
@@ -5203,7 +5231,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText(/Task running/i)).not.toBeInTheDocument();
   });
 
-  it("renders assistant text and task cards in message part order", () => {
+  it("renders assistant text and task cards in message part order", async () => {
     render(
       <Surface
         tasks={[]}
@@ -5242,6 +5270,10 @@ describe("Surface chat streaming UI", () => {
         }}
       />,
     );
+
+    // The resting turn folds the intermediate update behind the disclosure; expanding it must
+    // restore the original part order around the always-visible task card and final message.
+    await userEvent.click(screen.getByRole("button", { name: "1 message" }));
 
     const firstText = screen.getByText("I'll start now.");
     const taskCard = screen.getByRole("link", { name: /Research market/ });

@@ -158,6 +158,27 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  stripe: [
+    {
+      id: "read",
+      label: "Learn about Stripe",
+      description: "Search Stripe documentation and inspect API reference details.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read Stripe data",
+      description: "Read account, customer, payment, billing, balance, and analytics data.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage Stripe",
+      description:
+        "Create, update, or delete Stripe resources, including refunds and billing changes.",
+      defaultMode: "ask",
+    },
+  ],
   slack: [
     {
       id: "read",

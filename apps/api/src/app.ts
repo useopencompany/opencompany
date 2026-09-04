@@ -3552,6 +3552,8 @@ function stripeStateDto(state: StripeProviderState) {
     accountName: state.accountName,
     livemode: state.livemode,
     statusReason: state.statusReason,
+    capabilityModes: state.capabilityModes,
+    toolModes: state.toolModes,
   };
 }
 

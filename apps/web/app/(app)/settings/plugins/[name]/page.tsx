@@ -12,6 +12,7 @@ import {
   RenderPluginDetail,
   SigNozPluginDetail,
   SlackPluginDetail,
+  StripePluginDetail,
   XPluginDetail,
 } from "@/components/OfficialMcpPluginSettings";
 import { OfficialSkillPluginDetail, PluginDetail } from "@/components/PluginSettings";
@@ -46,6 +47,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
       render: RenderPluginDetail,
       signoz: SigNozPluginDetail,
       slack: SlackPluginDetail,
+      stripe: StripePluginDetail,
       x: XPluginDetail,
     }[normalizedName];
     return <Detail pluginState={pluginState} canEdit={context.role === "admin"} />;

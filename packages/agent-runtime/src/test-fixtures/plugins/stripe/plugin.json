@@ -1,0 +1,47 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "stripe",
+  "version": "1.0.0",
+  "description": "Learn about Stripe, inspect account and financial data, and manage Stripe resources with approval.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://docs.stripe.com/mcp",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/stripe",
+  "license": "MIT",
+  "keywords": ["stripe", "payments", "billing", "subscriptions", "finance"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Learn about Stripe",
+        "defaultMode": "on",
+        "tools": [
+          "stripe_api_search",
+          "stripe_api_details",
+          "search_stripe_documentation",
+          "stripe_implementation_planner"
+        ]
+      },
+      "query": {
+        "label": "Read Stripe data",
+        "defaultMode": "ask",
+        "tools": [
+          "stripe_api_read",
+          "get_stripe_account_info",
+          "stripe_analytics",
+          "show_metric_app",
+          "list_metrics",
+          "explain_metric",
+          "metric_drilldown",
+          "get_balance_summary"
+        ]
+      },
+      "write": {
+        "label": "Manage Stripe",
+        "defaultMode": "ask",
+        "tools": ["stripe_api_write", "send_stripe_mcp_feedback", "stripe_report"]
+      }
+    }
+  }
+}

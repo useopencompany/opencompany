@@ -220,6 +220,13 @@ const app = createApiApp({
         workspaceIds: [workspaceId],
         connectionProvider: "render",
       }),
+    refreshStripePluginRegistrations: ({ userWorkosId, workspaceId }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds: [workspaceId],
+        connectionProvider: "stripe",
+      }),
   }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
   mcp: createMcpService({

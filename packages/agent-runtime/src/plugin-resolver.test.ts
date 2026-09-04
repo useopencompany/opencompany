@@ -563,6 +563,73 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official Stripe package with every documented tool classified", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/stripe", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "stripe");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "stripe",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "stripe", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "stripe",
+        type: "streamable-http",
+        url: "https://mcp.stripe.com",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      {
+        id: "read",
+        label: "Learn about Stripe",
+        defaultMode: "on",
+        tools: [
+          "stripe_api_search",
+          "stripe_api_details",
+          "search_stripe_documentation",
+          "stripe_implementation_planner",
+        ],
+      },
+      {
+        id: "query",
+        label: "Read Stripe data",
+        defaultMode: "ask",
+        tools: [
+          "stripe_api_read",
+          "get_stripe_account_info",
+          "stripe_analytics",
+          "show_metric_app",
+          "list_metrics",
+          "explain_metric",
+          "metric_drilldown",
+          "get_balance_summary",
+        ],
+      },
+      {
+        id: "write",
+        label: "Manage Stripe",
+        defaultMode: "ask",
+        tools: ["stripe_api_write", "send_stripe_mcp_feedback", "stripe_report"],
+      },
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(15);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "stripe", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official Slack package with least-privilege capability defaults", async () => {
     const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/slack", import.meta.url));
     const files = await fixtureFiles(fixtureRoot, "slack");

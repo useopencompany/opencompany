@@ -1,9 +1,10 @@
 # Codex subscription-backed model routing
 
-Workspace admins can route the opencompany engine's `openai/gpt-5.6-sol` and
-`openai/gpt-5.6-terra` models through a connected ChatGPT/Codex subscription.
-The setting is available under **Settings → Inference → Subscription-backed
-models**. The admin enabling the setting becomes the
+Workspace admins can route the opencompany engine's `openai/gpt-6-astra`,
+`openai/gpt-5.6-sol`, and `openai/gpt-5.6-terra` models through a connected
+ChatGPT/Codex subscription.
+The setting is available under **Settings → Inference → Workspace model
+access**. The admin enabling the setting becomes the
 workspace's credential provider. Removing that admin from the workspace or
 disconnecting their Codex account clears the designation.
 
@@ -27,9 +28,9 @@ remain encrypted in `goat.codex_credentials`.
 
 After applying migration `0238_codex_subscription_routing`:
 
-1. Connect Codex from a workspace admin's personal Integrations settings.
-2. Enable **Subscription-backed models** under **Settings → Inference**.
-3. Run one Sol or Terra turn in chat, a task, and the Slack bot.
+1. Connect Codex under **Settings → Inference → Coding subscriptions**.
+2. Enable **Shared model access** under **Settings → Inference**.
+3. Run one Astra, Sol, or Terra turn in chat, a task, and the Slack bot.
 4. Confirm the request provider is `codex-backend`, token usage is present,
    Billing shows **Covered**, and no credit debit was created.
 5. Confirm a non-eligible model still reports `vercel-ai-gateway` and debits
