@@ -10,6 +10,7 @@ export type OfficialMcpPluginName =
   | "render"
   | "signoz"
   | "slack"
+  | "stripe"
   | "x";
 export type OfficialSkillPluginName = "yc-advise";
 export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
@@ -36,6 +37,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "render"
     | "signoz"
     | "slack"
+    | "stripe"
     | "x_account";
   connectHref: string;
   accountLabel?: string;
@@ -186,6 +188,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "slack",
     connectHref: "/api/integrations/slack/start?returnTo=/settings/plugins/slack",
     accountDescription: "The most recently connected Slack account powers Slack tools.",
+  },
+  stripe: {
+    name: "stripe",
+    kind: "mcp",
+    label: "Stripe",
+    description:
+      "Learn about Stripe, inspect account and financial data, and manage Stripe resources with approval.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/68c22e8a1ffe5eb8a83fb91c68f76f3f45705d3a/stripe",
+    connectionProvider: "stripe",
+    connectHref: "/settings/plugins/stripe#stripe-restricted-key",
+    accountDescription:
+      "A workspace-owned restricted API key controls which Stripe resources plugin tools can access.",
   },
   x: {
     name: "x",

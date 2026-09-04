@@ -22,6 +22,7 @@ import {
   RENDER_PLUGIN_SOURCE,
   SIGNOZ_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
+  STRIPE_PLUGIN_SOURCE,
   X_PLUGIN_SOURCE,
   YC_ADVISE_PLUGIN_SOURCE,
 } from "./PluginSettings";
@@ -266,6 +267,10 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/posthog",
     );
+    expect(screen.getByRole("link", { name: /stripe/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/stripe",
+    );
     expect(screen.getByRole("link", { name: /^x/i })).toHaveAttribute(
       "href",
       "/settings/plugins/x",
@@ -274,8 +279,8 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/yc-advise",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(13);
-    expect(screen.getAllByText("Official package")).toHaveLength(12);
+    expect(screen.getAllByText("Not installed")).toHaveLength(14);
+    expect(screen.getAllByText("Official package")).toHaveLength(13);
     expect(screen.getByText("Official skill package")).toBeInTheDocument();
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
@@ -304,6 +309,9 @@ describe("Plugin settings", () => {
     expect(SLACK_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
     );
+    expect(STRIPE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/68c22e8a1ffe5eb8a83fb91c68f76f3f45705d3a/stripe",
+    );
     expect(X_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
     );
@@ -320,7 +328,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(13);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(14);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });

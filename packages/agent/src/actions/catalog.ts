@@ -90,6 +90,9 @@ export async function resolveActionCatalog(
   const posthogPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:posthog:"),
   );
+  const stripePluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:stripe:"),
+  );
   const xPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:x:"),
   );
@@ -107,7 +110,7 @@ export async function resolveActionCatalog(
     neonPluginInstalled ? null : resolveNeonActions(input.userWorkosId).catch(() => null),
     resolveAttioActions(input.userWorkosId).catch(() => null),
     githubPluginConnected ? null : resolveGitHubActions(input.workspaceId).catch(() => null),
-    resolveStripeActions(input.workspaceId).catch(() => null),
+    stripePluginInstalled ? null : resolveStripeActions(input.workspaceId).catch(() => null),
     resolveRevolutActions(input.workspaceId).catch(() => null),
     xPluginInstalled ? null : resolveXAccountActions(input.userWorkosId).catch(() => null),
     ...remoteMcpRegistrations.map((registration) =>

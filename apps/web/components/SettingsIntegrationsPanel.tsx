@@ -16,7 +16,6 @@ import {
   LinearIcon,
   NeonIcon,
   OpenAIIcon,
-  StripeIcon,
   XIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
@@ -75,7 +74,6 @@ import {
   type JamieProviderState,
   type LinearProviderState,
   type PersonalAccountProvider,
-  type StripeProviderState,
 } from "@/lib/integration-state";
 import { gmailMcpScopesSatisfied } from "@/lib/integrations/gmail-scopes";
 import { hasGoogleDriveWriteScope } from "@/lib/integrations/google-drive-scopes";
@@ -94,7 +92,6 @@ type IntegrationMetaKey =
   | SettingsPersonalAccountProvider
   | "github"
   | "jamie"
-  | "stripe"
   | "infisical"
   | "codex"
   | "claude_code"
@@ -194,13 +191,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Investigate observability data and manage alerts and dashboards.",
     monogram: "S",
     tileClass: "bg-[#FF6B35] text-white",
-  },
-  stripe: {
-    label: "Stripe",
-    description:
-      "Give opencompany read-only access to payment activity, subscriptions, and receivables.",
-    Icon: StripeIcon,
-    tileClass: "bg-[#635BFF] text-white",
   },
   infisical: {
     label: "Infisical",
@@ -403,7 +393,6 @@ function countWorkspaceConnected(integrations: IntegrationState) {
   return (
     (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
-    (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
     (integrations.infisical.connected ? 1 : 0) +
     countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
   );
@@ -453,7 +442,6 @@ function IntegrationCards({
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
-            <IntegrationCardRow integration={integrations.stripe} canConnect={isWorkspaceAdmin} />
             <IntegrationProviderGroupCard
               provider="hubspot"
               accounts={integrations.personalAccounts.hubspot}
@@ -839,12 +827,7 @@ function IntegrationCardRow({
   integration,
   canConnect = true,
 }: {
-  integration:
-    | GoogleProviderState
-    | LinearProviderState
-    | GitHubProviderState
-    | JamieProviderState
-    | StripeProviderState;
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState;
   canConnect?: boolean;
 }) {
   const meta = INTEGRATION_META[integration.provider];
@@ -860,11 +843,7 @@ function IntegrationCardRow({
         ? integration.accountName
         : integration.provider === "jamie"
           ? integration.accountName
-          : integration.provider === "stripe"
-            ? [integration.accountName, integration.livemode === false ? "Test mode" : null]
-                .filter(Boolean)
-                .join(" · ") || null
-            : (integration.accountEmail ?? integration.accountName);
+          : (integration.accountEmail ?? integration.accountName);
   const capabilityBody =
     connected && integration.provider === "linear" && integration.integrationId ? (
       <CapabilityModeRows
@@ -891,8 +870,6 @@ function IntegrationCardRow({
             </div>
             {integration.provider === "github" && canConnect ? (
               <ConnectLink href="/settings/repositories" label="Configure repositories" />
-            ) : integration.provider === "stripe" && canConnect ? (
-              <ConnectLink href={connectHref} label="Manage" />
             ) : null}
           </div>
         ) : needsReconnect && canConnect ? (
@@ -1755,12 +1732,7 @@ function IMessageIntegrationCard({ integration }: { integration: ImessageProvide
 }
 
 function integrationStatus(
-  integration:
-    | GoogleProviderState
-    | LinearProviderState
-    | GitHubProviderState
-    | JamieProviderState
-    | StripeProviderState,
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
   if (integration.provider === "jamie" && integration.apiKeyConfigured) return "Connected";
@@ -1773,23 +1745,13 @@ function integrationStatus(
 }
 
 function integrationNeedsReconnect(
-  integration:
-    | GoogleProviderState
-    | LinearProviderState
-    | GitHubProviderState
-    | JamieProviderState
-    | StripeProviderState,
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState,
 ) {
   return integration.status === "needs_reauth" || integration.status === "sync_failed";
 }
 
 function integrationStatusReason(
-  integration:
-    | GoogleProviderState
-    | LinearProviderState
-    | GitHubProviderState
-    | JamieProviderState
-    | StripeProviderState,
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState,
 ) {
   return "statusReason" in integration ? integration.statusReason : null;
 }
@@ -1813,7 +1775,6 @@ function integrationConnectHref(
   if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
   if (provider === "attio") return "/settings/attio";
-  if (provider === "stripe") return "/settings/stripe";
   if (provider === "slack") return "/settings/plugins/slack";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
