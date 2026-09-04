@@ -140,6 +140,9 @@ describe("InferenceSettingsPanel", () => {
     setCodexWorkspaceEngineEnabled.mockResolvedValue({ ok: true });
     renderPanel(integrations, true);
 
+    expect(
+      screen.getByText(/Let everyone use GPT 6 Astra, GPT 5\.6 Sol, and Terra/),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Share my subscription" }));
 
     await waitFor(() => expect(setCodexWorkspaceEngineEnabled).toHaveBeenCalledWith(true));

@@ -386,7 +386,8 @@ function WorkspaceModelAccessCard({
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <h3 className="text-[15px] font-semibold leading-tight text-ink">Shared model access</h3>
           <p className="text-[13px] leading-5 text-ink-subtle">
-            Let everyone use GPT 5.6 Sol and Terra through one admin&apos;s ChatGPT subscription.
+            Let everyone use GPT 6 Astra, GPT 5.6 Sol, and Terra through one admin&apos;s ChatGPT
+            subscription.
           </p>
         </div>
       </div>

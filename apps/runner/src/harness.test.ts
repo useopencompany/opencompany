@@ -421,7 +421,7 @@ describe("planHarness", () => {
     });
   });
 
-  it("limits task-planner Codex options to GPT 5.6 and preserves the selected family member", async () => {
+  it("limits task-planner Codex options to current models and preserves the selection", async () => {
     const codexOptions = HARNESS_MODEL_OPTIONS.filter((option) => option.id.startsWith("openai/"));
     expect(codexOptions.map((option) => option.id)).toEqual(CODEX_AGENT_MODEL_IDS);
 

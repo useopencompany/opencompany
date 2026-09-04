@@ -12,8 +12,9 @@ import {
 } from "./models";
 
 describe("Codex model catalog", () => {
-  it("offers only the latest GPT 5.6 family for new Codex work", () => {
+  it("offers GPT 6 Astra and the latest GPT 5.6 family for new Codex work", () => {
     expect(CODEX_AGENT_MODEL_IDS).toEqual([
+      "openai/gpt-6-astra",
       "openai/gpt-5.6-sol",
       "openai/gpt-5.6-terra",
       "openai/gpt-5.6-luna",
@@ -29,6 +30,7 @@ describe("Codex model catalog", () => {
   });
 
   it.each([
+    ["openai/gpt-6-astra", "gpt-6-astra"],
     ["openai/gpt-5.6-sol", "gpt-5.6-sol"],
     ["openai/gpt-5.6-terra", "gpt-5.6-terra"],
     ["openai/gpt-5.6-luna", "gpt-5.6-luna"],
