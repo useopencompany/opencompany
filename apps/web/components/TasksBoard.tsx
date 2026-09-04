@@ -70,9 +70,11 @@ export const TASK_BOARD_COLUMN_CAP = 50;
 const ALL_TASKS_FILTER_VALUE = "all";
 const WORKFLOW_FILTER_PREFIX = "workflow:";
 
-type TaskTimeRange = "7d" | "30d" | "90d" | "all";
+type TaskTimeRange = "24h" | "2d" | "7d" | "30d" | "90d" | "all";
 
 const TASK_TIME_RANGE_OPTIONS = [
+  "24h",
+  "2d",
   "7d",
   "30d",
   "90d",
@@ -80,6 +82,8 @@ const TASK_TIME_RANGE_OPTIONS = [
 ] as const satisfies readonly TaskTimeRange[];
 
 const TASK_TIME_RANGE_LABELS: Record<TaskTimeRange, string> = {
+  "24h": "Last 24 hours",
+  "2d": "Last 2 days",
   "7d": "Last 7 days",
   "30d": "Last 30 days",
   "90d": "Last 90 days",
@@ -87,6 +91,8 @@ const TASK_TIME_RANGE_LABELS: Record<TaskTimeRange, string> = {
 };
 
 const TASK_TIME_RANGE_MS: Record<Exclude<TaskTimeRange, "all">, number> = {
+  "24h": 24 * 60 * 60 * 1000,
+  "2d": 2 * 24 * 60 * 60 * 1000,
   "7d": 7 * 24 * 60 * 60 * 1000,
   "30d": 30 * 24 * 60 * 60 * 1000,
   "90d": 90 * 24 * 60 * 60 * 1000,
@@ -151,9 +157,7 @@ export function TasksBoardRoute({
     for (const task of activeTasks) {
       if (selectedWorkflowId !== null && task.workflowId !== selectedWorkflowId) continue;
       const column = taskBoardColumn(task);
-      // Only the terminal columns are date-filtered so a stalled in-progress
-      // or in-review task never disappears just because it's old.
-      if (cutoffMs !== null && CAPPED_TASK_BOARD_COLUMNS.has(column)) {
+      if (cutoffMs !== null) {
         const updatedMs = new Date(task.updatedAt).getTime();
         if (Number.isFinite(updatedMs) && updatedMs < cutoffMs) continue;
       }

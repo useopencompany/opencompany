@@ -495,39 +495,63 @@ describe("TasksBoardRoute", () => {
     expect(within(doneColumn).getAllByRole("link")).toHaveLength(TASK_BOARD_COLUMN_CAP + 2);
   });
 
-  it("defaults to the last 7 days and hides older terminal tasks until widened", async () => {
+  it("offers short time ranges and applies them across every task state", async () => {
     const user = userEvent.setup();
     appDataMock.taskRows = [
       taskRow({
-        id: "recent-done",
-        name: "Recently completed task",
-        status: "succeeded",
-        updated_at: "2026-07-28T09:00:00.000Z",
-      }),
-      taskRow({
-        id: "old-done",
-        name: "Old completed task",
-        status: "succeeded",
-        updated_at: "2026-06-01T09:00:00.000Z",
-      }),
-      taskRow({
-        id: "old-running",
-        name: "Stalled in-progress task",
+        id: "recent-running",
+        name: "Recent in-progress task",
         status: "running",
-        updated_at: "2026-06-01T09:00:00.000Z",
+        updated_at: "2026-07-28T00:00:00.000Z",
+      }),
+      taskRow({
+        id: "recent-review",
+        name: "Recent in-review task",
+        status: "succeeded",
+        reported_outcome: "needs_attention",
+        updated_at: "2026-07-28T00:00:00.000Z",
+      }),
+      taskRow({
+        id: "recent-done",
+        name: "Recent done task",
+        status: "succeeded",
+        updated_at: "2026-07-28T00:00:00.000Z",
+      }),
+      taskRow({
+        id: "recent-canceled",
+        name: "Recent canceled task",
+        status: "canceled",
+        updated_at: "2026-07-28T00:00:00.000Z",
       }),
     ];
 
     render(<TasksBoardRoute workflowNames={{}} />);
 
-    expect(screen.getByText("Recently completed task")).toBeInTheDocument();
-    expect(screen.queryByText("Old completed task")).not.toBeInTheDocument();
-    expect(screen.getByText("Stalled in-progress task")).toBeInTheDocument();
+    const timeRangeFilter = screen.getByRole("combobox", {
+      name: "Filter tasks by time range",
+    });
+    expect(screen.getByText("Recent in-progress task")).toBeInTheDocument();
+    expect(screen.getByText("Recent in-review task")).toBeInTheDocument();
+    expect(screen.getByText("Recent done task")).toBeInTheDocument();
+    expect(screen.getByText("Recent canceled task")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("combobox", { name: "Filter tasks by time range" }));
-    await user.click(await screen.findByRole("option", { name: "All time" }));
+    await user.click(timeRangeFilter);
+    expect(await screen.findByRole("option", { name: "Last 24 hours" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Last 2 days" })).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Last 24 hours" }));
 
-    expect(await screen.findByText("Old completed task")).toBeInTheDocument();
+    expect(screen.queryByText("Recent in-progress task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recent in-review task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recent done task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recent canceled task")).not.toBeInTheDocument();
+
+    await user.click(timeRangeFilter);
+    await user.click(await screen.findByRole("option", { name: "Last 2 days" }));
+
+    expect(await screen.findByText("Recent in-progress task")).toBeInTheDocument();
+    expect(screen.getByText("Recent in-review task")).toBeInTheDocument();
+    expect(screen.getByText("Recent done task")).toBeInTheDocument();
+    expect(screen.getByText("Recent canceled task")).toBeInTheDocument();
   });
 
   it("filters tasks by their workflow and keeps non-workflow tasks out of the result", async () => {
