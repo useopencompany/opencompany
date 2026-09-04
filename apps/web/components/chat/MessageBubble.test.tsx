@@ -20,7 +20,7 @@ const presentationMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/components/AppDataProvider", () => ({
-  useAppDataOptional: () => ({ user: { email: "louis@acta.so" } }),
+  useAppDataOptional: () => ({ user: { email: "louis@example.com" } }),
 }));
 vi.mock("@/lib/headless-chat-presentations", () => ({
   loadHeadlessChatMessagePresentation: presentationMocks.load,
@@ -620,7 +620,7 @@ describe("MessageBubble assistant errors", () => {
     );
 
     expect(screen.getByText("Run Linear · Save Comment?")).toBeVisible();
-    expect(screen.getByText("as louis@acta.so")).toBeVisible();
+    expect(screen.getByText("as louis@example.com")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Decline" }));
     await waitFor(() =>
       expect(onActionApproval).toHaveBeenCalledWith({
