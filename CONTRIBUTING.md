@@ -17,6 +17,28 @@ Keep pull requests focused. Explain the problem, the chosen boundary, user-visib
 and anything reviewers cannot verify locally. UI changes need a browser check of the real route,
 including the primary flow and an obvious error or empty state.
 
+## Commit Identity and Email Privacy
+
+Git records the author and committer email address in every commit. That metadata is visible when a
+repository is public. If you do not want a personal address published, use the GitHub-provided
+`noreply` address shown in your GitHub email settings:
+
+```bash
+git config user.email "YOUR_NOREPLY_EMAIL"
+```
+
+Run that command in this repository to override your global Git identity, or add `--global` to use it
+for future commits in every repository. Confirm the configured value with `git config user.email`
+before committing. Changing the setting does not alter existing commits.
+
+GitHub can also keep the address private for web-based operations and block command-line pushes that
+expose an address marked private. See [GitHub's commit email
+guide](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/setting-your-commit-email-address)
+and [push protection
+guide](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/blocking-command-line-pushes-that-expose-your-personal-email-address).
+The project's handling of existing commit metadata is documented in [Git contributor email
+privacy](./docs/contributor-email-privacy.md).
+
 ## Local Checks
 
 Use Bun `1.3.2` and Node `20.20.0` or newer. Install exactly the committed dependency graph:

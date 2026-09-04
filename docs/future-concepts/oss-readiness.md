@@ -1,7 +1,7 @@
 # Open-source release readiness
 
 - Status: Proposed
-- Last reviewed: 2026-08-26
+- Last reviewed: 2026-09-04
 
 ## Current state
 
@@ -28,8 +28,11 @@ documented local path, and execute the same core checks as maintainers.
 
 - Complete a provenance and redistribution audit for source, fonts, images, screenshots, generated
   artifacts, and third-party examples.
-- Run independent secret and personal-data scans over every Git ref. Rotate findings before deciding
-  whether history rewriting is necessary.
+- Follow the accepted [Git contributor email privacy](../contributor-email-privacy.md) decision:
+  rerun independent secret and personal-data scans over every Git ref intended for publication,
+  privately notify contributors whose history contains personal or otherwise non-public addresses,
+  and resolve objections before deciding whether the coordinated history-rewrite exception is
+  necessary.
 - Decide and document the final license, notices, trademark policy, contribution terms, security
   reporting path, code of conduct, and maintainer ownership.
 - Exercise setup from clean macOS and Linux clones without company Infisical, Neon, Vercel, or
