@@ -272,17 +272,20 @@ function sourceNotFound() {
 }
 
 function isActiveWikiSource(source: WikiSourceWithIntegration): source is ActiveWikiSource {
-  return source.provider !== "slack";
+  return source.provider !== "slack" && source.provider !== "jamie" && source.provider !== "github";
 }
 
 function isActiveWikiIngestActivityRow(
   row: WikiIngestActivityRow,
 ): row is ActiveWikiIngestActivityRow {
-  return row.sourceProvider !== "slack";
+  return (
+    row.sourceProvider !== "slack" &&
+    row.sourceProvider !== "jamie" &&
+    row.sourceProvider !== "github"
+  );
 }
 
 function providerDisplayName(provider: ActiveWikiSourceProvider) {
-  if (provider === "github") return "GitHub";
   if (provider === "gmail") return "Gmail";
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }

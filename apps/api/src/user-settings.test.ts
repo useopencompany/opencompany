@@ -16,7 +16,7 @@ const storedPreferences = {
   taskSpawningEnabled: false,
   wikiEnabled: true as const,
   taskViewMode: "board" as const,
-  imessageEnabled: false,
+  taskTimeRange: "7d" as const,
   autoModelRoutingEnabled: false,
 };
 
@@ -73,6 +73,18 @@ describe("user settings service", () => {
       updated,
     );
     expect(set).toHaveBeenCalledWith({ taskViewMode: "list", updatedAt: now });
+  });
+
+  it("persists the selected task time range", async () => {
+    const now = new Date("2026-08-13T08:00:00.000Z");
+    const updated = { ...storedPreferences, taskTimeRange: "24h" as const };
+    const { db, set } = fakeDb({ selectRows: [storedPreferences], updateRows: [updated] });
+    const service = createUserSettingsService({ db, now: () => now });
+
+    await expect(service.updatePreferences(actor, { taskTimeRange: "24h" })).resolves.toEqual(
+      updated,
+    );
+    expect(set).toHaveBeenCalledWith({ taskTimeRange: "24h", updatedAt: now });
   });
 
   it("reports a missing profile as a structured not_found error", async () => {

@@ -14,12 +14,10 @@ export async function getPersonalAccounts(): Promise<
   const response = await (await serverApiClient()).v1["integration-accounts"].$get();
   if (!response.ok) throw await serverApiError(response, "Could not load integration accounts.");
   const accounts = (await response.json()).data as IntegrationAccountDto[];
-  return personalAccountsFromRows(
-    accounts.map((account: IntegrationAccountDto) => ({
-      ...account,
-      id: account.integrationId,
-      workspaceId: null,
-      externalId: null,
-    })),
-  );
+  const grouped = personalAccountsFromRows([]);
+  for (const account of accounts) {
+    const provider = account.provider as PersonalAccountProvider;
+    grouped[provider].push(account as IntegrationAccountView);
+  }
+  return grouped;
 }

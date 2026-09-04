@@ -2,6 +2,8 @@ import type { PluginGatewayRegistrationRecord } from "@opencompany/db/plugin-gat
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  getAttioState: vi.fn(),
+  loadAttioConnection: vi.fn(),
   claimRefresh: vi.fn(async () => true),
   isActive: vi.fn(async () => true),
   listRegistrations: vi.fn(),
@@ -10,16 +12,24 @@ const mocks = vi.hoisted(() => ({
   discoverSnapshot: vi.fn(),
   getState: vi.fn(),
   getGitHubState: vi.fn(),
+  getFathomState: vi.fn(),
   getGmailState: vi.fn(),
   loadGmailConnection: vi.fn(),
+  getGranolaState: vi.fn(),
+  loadGranolaConnection: vi.fn(),
   getGoogleCalendarState: vi.fn(),
   loadConnection: vi.fn(),
   loadGitHubConnection: vi.fn(),
+  loadFathomConnection: vi.fn(),
   getGoogleDriveState: vi.fn(),
   loadGoogleDriveConnection: vi.fn(),
   loadGoogleCalendarConnection: vi.fn(),
   getHubSpotState: vi.fn(),
   loadHubSpotConnection: vi.fn(),
+  getJamieState: vi.fn(),
+  loadJamieConnection: vi.fn(),
+  getLatitudeState: vi.fn(),
+  loadLatitudeConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
   getBetterStackState: vi.fn(),
@@ -55,6 +65,11 @@ vi.mock("./integrations/linear-mcp", () => ({
   getLinearIntegrationState: mocks.getState,
   loadLinearMcpWorkerConnection: mocks.loadConnection,
 }));
+vi.mock("./integrations/attio-mcp", () => ({
+  ATTIO_MCP_ENDPOINT_URL: "https://mcp.attio.com/mcp",
+  getAttioMcpIntegrationState: mocks.getAttioState,
+  loadAttioMcpWorkerConnection: mocks.loadAttioConnection,
+}));
 vi.mock("./integrations/betterstack-mcp", () => ({
   BETTERSTACK_MCP_ENDPOINT_URL: "https://mcp.betterstack.com",
   getBetterStackIntegrationState: mocks.getBetterStackState,
@@ -65,11 +80,21 @@ vi.mock("./integrations/github-user-mcp", () => ({
   getGitHubUserMcpIntegrationState: mocks.getGitHubState,
   loadGitHubUserMcpWorkerConnection: mocks.loadGitHubConnection,
 }));
+vi.mock("./integrations/fathom-mcp", () => ({
+  FATHOM_MCP_ENDPOINT_URL: "https://api.fathom.ai/mcp",
+  getFathomMcpIntegrationState: mocks.getFathomState,
+  loadFathomMcpWorkerConnection: mocks.loadFathomConnection,
+}));
 vi.mock("./integrations/gmail-mcp", () => ({
   GMAIL_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/gmail",
   gmailMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/gmail",
   getGmailMcpIntegrationState: mocks.getGmailState,
   loadGmailMcpWorkerConnection: mocks.loadGmailConnection,
+}));
+vi.mock("./integrations/granola-mcp", () => ({
+  GRANOLA_MCP_ENDPOINT_URL: "https://mcp.granola.ai/mcp",
+  getGranolaMcpIntegrationState: mocks.getGranolaState,
+  loadGranolaMcpWorkerConnection: mocks.loadGranolaConnection,
 }));
 vi.mock("./integrations/google-calendar-mcp", () => ({
   GOOGLE_CALENDAR_MCP_ENDPOINT_URL: "https://api.opencompany.chat/mcp/plugins/google-calendar",
@@ -88,6 +113,11 @@ vi.mock("./integrations/hubspot-mcp", () => ({
   HUBSPOT_MCP_ENDPOINT_URL: "https://mcp.hubspot.com",
   getHubSpotMcpIntegrationState: mocks.getHubSpotState,
   loadHubSpotMcpWorkerConnection: mocks.loadHubSpotConnection,
+}));
+vi.mock("./integrations/jamie-mcp", () => ({
+  JAMIE_MCP_ENDPOINT_URL: "https://mcp.meetjamie.ai/mcp",
+  getJamieMcpIntegrationState: mocks.getJamieState,
+  loadJamieMcpWorkerConnection: mocks.loadJamieConnection,
 }));
 vi.mock("./integrations/posthog-mcp", () => ({
   POSTHOG_MCP_ENDPOINT_URL:
@@ -108,8 +138,8 @@ vi.mock("./integrations/neon-mcp", () => ({
 }));
 vi.mock("./integrations/latitude-mcp", () => ({
   LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
-  getLatitudeIntegrationState: vi.fn(),
-  loadLatitudeMcpWorkerConnection: vi.fn(),
+  getLatitudeIntegrationState: mocks.getLatitudeState,
+  loadLatitudeMcpWorkerConnection: mocks.loadLatitudeConnection,
 }));
 vi.mock("./integrations/slack-mcp", () => ({
   SLACK_MCP_ENDPOINT_URL: "https://mcp.slack.com/mcp",
@@ -319,6 +349,48 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
+  it("binds Fathom credentials only to Fathom's exact hosted MCP endpoint", async () => {
+    const fathomRecord = record({
+      pluginName: "fathom",
+      pluginLabel: "fathom",
+      pluginDescription: "Fathom meeting tools.",
+      connectionProvider: "fathom",
+      server: {
+        name: "fathom",
+        type: "streamable-http",
+        url: "https://api.fathom.ai/mcp",
+        headers: {},
+      },
+      capabilities: [
+        {
+          id: "query",
+          label: "Read Fathom meetings",
+          defaultMode: "ask",
+          tools: ["search_meetings", "get_meeting_transcript"],
+        },
+      ],
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([fathomRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:fathom:fathom",
+        connectionProvider: "fathom",
+        getState: mocks.getFathomState,
+        loadConnection: mocks.loadFathomConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...fathomRecord,
+        server: { ...fathomRecord.server, url: "https://api.fathom.ai.evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
   it("binds Gmail access only to opencompany's exact hosted MCP endpoint", async () => {
     const gmailRecord = record({
       pluginName: "gmail",
@@ -424,6 +496,40 @@ describe("plugin gateway registration cache", () => {
           ...calendarRecord.server,
           url: "https://api.opencompany.chat.evil.example/mcp/plugins/google-calendar",
         },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Granola OAuth only to Granola's exact hosted MCP endpoint", async () => {
+    const granolaRecord = record({
+      pluginName: "granola",
+      pluginLabel: "granola",
+      pluginDescription: "Granola meeting tools.",
+      connectionProvider: "granola",
+      server: {
+        name: "granola",
+        type: "streamable-http",
+        url: "https://mcp.granola.ai/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([granolaRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:granola:granola",
+        connectionProvider: "granola",
+        getState: mocks.getGranolaState,
+        loadConnection: mocks.loadGranolaConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...granolaRecord,
+        server: { ...granolaRecord.server, url: "https://mcp.granola.ai.evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
@@ -589,6 +695,40 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
+  it("binds Latitude credentials only to Latitude's exact hosted MCP endpoint", async () => {
+    const latitudeRecord = record({
+      pluginName: "latitude",
+      pluginLabel: "latitude",
+      pluginDescription: "Latitude observability tools.",
+      connectionProvider: "latitude",
+      server: {
+        name: "latitude",
+        type: "streamable-http",
+        url: "https://api.latitude.so/v1/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([latitudeRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:latitude:latitude",
+        connectionProvider: "latitude",
+        getState: mocks.getLatitudeState,
+        loadConnection: mocks.loadLatitudeConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...latitudeRecord,
+        server: { ...latitudeRecord.server, url: "https://api.latitude.so/v1/mcp/other" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
   it("binds HubSpot credentials only to HubSpot's exact hosted MCP endpoint", async () => {
     const hubspotRecord = record({
       pluginName: "hubspot",
@@ -618,6 +758,89 @@ describe("plugin gateway registration cache", () => {
       {
         ...hubspotRecord,
         server: { ...hubspotRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Jamie OAuth credentials only to Jamie's exact hosted MCP endpoint", async () => {
+    const jamieRecord = record({
+      pluginName: "jamie",
+      pluginLabel: "jamie",
+      pluginDescription: "Jamie meeting tools.",
+      connectionProvider: "jamie",
+      server: {
+        name: "jamie",
+        type: "streamable-http",
+        url: "https://mcp.meetjamie.ai/mcp",
+        headers: {},
+      },
+      capabilities: [
+        {
+          id: "query",
+          label: "Read meetings & tasks",
+          defaultMode: "ask",
+          tools: ["list_meetings", "get_meeting", "list_tasks"],
+        },
+      ],
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([jamieRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:jamie:jamie",
+        connectionProvider: "jamie",
+        getState: mocks.getJamieState,
+        loadConnection: mocks.loadJamieConnection,
+        capabilities: [
+          expect.objectContaining({
+            id: "query",
+            defaultMode: "ask",
+            tools: ["list_meetings", "get_meeting", "list_tasks"],
+          }),
+        ],
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...jamieRecord,
+        server: { ...jamieRecord.server, url: "https://mcp.meetjamie.ai.evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Attio credentials only to Attio's exact hosted MCP endpoint", async () => {
+    const attioRecord = record({
+      pluginName: "attio",
+      pluginLabel: "Attio",
+      pluginDescription: "Attio CRM tools.",
+      connectionProvider: "attio",
+      server: {
+        name: "attio",
+        type: "streamable-http",
+        url: "https://mcp.attio.com/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([attioRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:attio:attio",
+        connectionProvider: "attio",
+        getState: mocks.getAttioState,
+        loadConnection: mocks.loadAttioConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...attioRecord,
+        server: { ...attioRecord.server, url: "https://evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

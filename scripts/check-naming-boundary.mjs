@@ -30,7 +30,7 @@ const allowedStandaloneFiles = new Set([
 // merge. Comparing with origin/main plus a PR-specific delta makes the check
 // self-invalidating once origin/main advances to that merged tree.
 const protectedCompatibilityTokens = [
-  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1116],
+  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1103],
   ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
   ["chat source-provider values", /["']goat-chat["']/gu, 30],
   ["import source-provider values", /["']goat-import["']/gu, 13],
@@ -200,6 +200,19 @@ const addedEnvKeys = [
   "WORKOS_MOBILE_CLIENT_ID",
 ];
 const retiredEnvKeys = new Set([
+  "GITHUB_INTEGRATION_APP_CLIENT_ID",
+  "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
+  "GITHUB_INTEGRATION_APP_ID",
+  "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
+  "GITHUB_INTEGRATION_APP_SLUG",
+  "GITHUB_INTEGRATION_APP_WEBHOOK_SECRET",
+  "GITHUB_INTEGRATION_STATE_SECRET",
+  "LINQ_API_BASE_URL",
+  "LINQ_API_TOKEN",
+  "LINQ_FROM_NUMBER",
+  "OPENCOMPANY_IMESSAGE_DAILY_CAP",
+  "OPENCOMPANY_IMESSAGE_KILL_SWITCH",
+  "OPENCOMPANY_IMESSAGE_PROVIDER",
   ["OPENCOMPANY", "SLACK", "SIGNING", "SECRET"].join("_"),
   ["RUNNER", "CLAUDE", "CODE", "ACP", "ENABLED"].join("_"),
 ]);

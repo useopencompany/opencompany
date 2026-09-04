@@ -64,13 +64,11 @@ import { ElectricReadModelProxy } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
 import { createEngineSessionService } from "./engine-sessions";
 import { createFeedbackService } from "./feedback";
-import { createGitHubIngress } from "./github-ingress";
 import { createGitHubUserIngress } from "./github-user-ingress";
 import { createGoogleIngress } from "./google-ingress";
 import { createHubspotIngress } from "./hubspot-ingress";
 import { createIdentityService } from "./identity";
 import { createIntegrationAccountService } from "./integration-accounts";
-import { createJamieIngress } from "./jamie-ingress";
 import { createLinearIngress } from "./linear-ingress";
 import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
 import { PostgresMessagePresentationService } from "./message-presentations";
@@ -279,16 +277,6 @@ const app = createApiApp({
   identify: identityVerifier,
   ...(process.env.CRON_SECRET ? { emailLifecycleInternalSecret: process.env.CRON_SECRET } : {}),
   browserOrigins: parseBrowserOrigins(process.env.API_BROWSER_ORIGINS),
-  githubIngress: createGitHubIngress({
-    db: database.db,
-    identify: identityVerifier,
-    wakeWikiIngest: () =>
-      runnerClient.postJson(
-        "/internal/goat/wiki-ingest/wake",
-        {},
-        { errorFormat: "error-message" },
-      ),
-  }),
   githubUserIngress: createGitHubUserIngress({
     db: database.db,
     identify: identityVerifier,
@@ -332,15 +320,6 @@ const app = createApiApp({
   linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
   hubspotIngress: createHubspotIngress({ db: database.db, identify: identityVerifier }),
   attioIngress: createAttioIngress({ db: database.db }),
-  jamieIngress: createJamieIngress({
-    db: database.db,
-    wakeWikiIngest: () =>
-      runnerClient.postJson(
-        "/internal/goat/wiki-ingest/wake",
-        {},
-        { errorFormat: "error-message" },
-      ),
-  }),
   mcpOAuthIngress: createMcpOAuthIngress({
     db: database.db,
     identify: identityVerifier,

@@ -139,6 +139,25 @@ export type PluginAccountsState =
 
 export type LinearAccountsState = PluginAccountsState;
 
+export function AttioPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.attio}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function BetterStackPluginDetail({
   pluginState,
   canEdit,
@@ -151,6 +170,25 @@ export function BetterStackPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.betterstack}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function FathomPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.fathom}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -189,6 +227,25 @@ export function GmailPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.gmail}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function GranolaPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.granola}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -253,6 +310,25 @@ export function HubSpotPluginDetail({
   );
 }
 
+export function LatitudePluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.latitude}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function LinearPluginDetail({
   pluginState,
   canEdit,
@@ -265,6 +341,25 @@ export function LinearPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.linear}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function JamiePluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.jamie}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -1392,13 +1487,37 @@ function pluginAccountsFromState(
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
 } {
+  if (config.connectionProvider === "granola") {
+    const connection = state.granola_mcp;
+    const permissionConnection: IntegrationAccountView<"granola"> | null = connection.integrationId
+      ? {
+          integrationId: connection.integrationId,
+          provider: "granola",
+          status: connection.status === "not_connected" ? "disconnected" : connection.status,
+          connected: connection.connected,
+          accountEmail: null,
+          accountName: connection.accountName,
+          connectionLabel: connection.accountName || "Granola tool access",
+          statusReason: connection.statusReason,
+          scopes: [],
+          capabilityModes: connection.capabilityModes,
+        }
+      : null;
+    return {
+      permissionConnection,
+      accounts: permissionConnection ? [{ account: permissionConnection }] : [],
+    };
+  }
   if (
+    config.connectionProvider === "attio" ||
     config.connectionProvider === "betterstack" ||
+    config.connectionProvider === "fathom" ||
     config.connectionProvider === "github_user" ||
     config.connectionProvider === "gmail" ||
     config.connectionProvider === "google_calendar" ||
     config.connectionProvider === "google_drive" ||
     config.connectionProvider === "hubspot" ||
+    config.connectionProvider === "jamie" ||
     config.connectionProvider === "neon" ||
     config.connectionProvider === "posthog" ||
     config.connectionProvider === "render" ||
@@ -1434,7 +1553,11 @@ function pluginAccountsFromState(
         accounts: permissionConnection ? [{ account: permissionConnection }] : [],
       };
     }
-    if (config.connectionProvider === "posthog" || config.connectionProvider === "hubspot") {
+    if (
+      config.connectionProvider === "attio" ||
+      config.connectionProvider === "posthog" ||
+      config.connectionProvider === "hubspot"
+    ) {
       const provider = config.connectionProvider;
       const connection = state[provider];
       const permissionConnection: IntegrationAccountView<typeof provider> | null =
@@ -1448,7 +1571,7 @@ function pluginAccountsFromState(
               accountName: connection.accountName,
               connectionLabel:
                 connection.accountName ||
-                `${provider === "hubspot" ? "HubSpot" : "PostHog"} tool access`,
+                `${provider === "attio" ? "Attio" : provider === "hubspot" ? "HubSpot" : "PostHog"} tool access`,
               statusReason: connection.statusReason,
               scopes: [],
               capabilityModes: connection.capabilityModes,
@@ -1483,7 +1606,9 @@ function pluginAccountsFromState(
               ? state.google_drive.integrationId
               : config.connectionProvider === "x_account"
                 ? state.x_account.integrationId
-                : null;
+                : config.connectionProvider === "jamie"
+                  ? state.jamie.integrationId
+                  : null;
     return {
       accounts,
       permissionConnection:
@@ -1517,12 +1642,20 @@ export function defaultLinearToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("linear");
 }
 
+export function defaultAttioToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("attio");
+}
+
 export function defaultGitHubToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("github");
 }
 
 export function defaultGmailToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("gmail");
+}
+
+export function defaultGranolaToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("granola");
 }
 
 export function defaultGoogleCalendarToolsState(): PluginToolsState {
@@ -1537,12 +1670,20 @@ export function defaultHubSpotToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("hubspot");
 }
 
+export function defaultLatitudeToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("latitude");
+}
+
 export function defaultNeonToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("neon");
 }
 
 export function defaultBetterStackToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("betterstack");
+}
+
+export function defaultFathomToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("fathom");
 }
 
 export function defaultPostHogToolsState(): PluginToolsState {
@@ -1589,12 +1730,22 @@ export function linearToolsStateFromPlugin(plugin: PluginInstallationDto | null)
   return officialPluginToolsStateFromPlugin(plugin, "linear");
 }
 
+export function attioToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "attio");
+}
+
 export function githubToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "github");
 }
 
 export function gmailToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "gmail");
+}
+
+export function granolaToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "granola");
 }
 
 export function googleCalendarToolsStateFromPlugin(
@@ -1613,6 +1764,12 @@ export function hubspotToolsStateFromPlugin(
   plugin: PluginInstallationDto | null,
 ): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "hubspot");
+}
+
+export function latitudeToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "latitude");
 }
 
 export function neonToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
@@ -1723,12 +1880,20 @@ export function linearToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
   return officialPluginToolsStateFromPreview(preview, "linear");
 }
 
+export function attioToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "attio");
+}
+
 export function githubToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "github");
 }
 
 export function gmailToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "gmail");
+}
+
+export function granolaToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "granola");
 }
 
 export function googleCalendarToolsStateFromPreview(
@@ -1767,6 +1932,10 @@ export function posthogToolsStateFromPreview(preview: PluginImportPreviewDto): P
 
 export function hubspotToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "hubspot");
+}
+
+export function latitudeToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "latitude");
 }
 
 export function stripeToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {

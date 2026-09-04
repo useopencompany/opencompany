@@ -1,0 +1,77 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "attio",
+  "version": "1.0.0",
+  "description": "Inspect Attio CRM structure, query workspace data, and make permission-gated changes.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://docs.attio.com/mcp/overview",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/attio",
+  "license": "MIT",
+  "keywords": ["attio", "crm", "sales", "customer-data", "tasks"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Inspect Attio structure",
+        "defaultMode": "on",
+        "tools": [
+          "list-objects",
+          "list-attribute-definitions",
+          "list-lists",
+          "list-list-attribute-definitions",
+          "list-workspace-teams",
+          "whoami"
+        ]
+      },
+      "query": {
+        "label": "Read CRM data",
+        "defaultMode": "ask",
+        "tools": [
+          "search-records",
+          "list-records",
+          "get-records-by-ids",
+          "list-records-in-list",
+          "list-comments",
+          "list-comment-replies",
+          "search-notes-by-metadata",
+          "semantic-search-notes",
+          "get-note-body",
+          "list-tasks",
+          "search-meetings",
+          "search-call-recordings-by-metadata",
+          "semantic-search-call-recordings",
+          "get-call-recording",
+          "search-emails-by-metadata",
+          "semantic-search-emails",
+          "get-email-content",
+          "list-workspace-members",
+          "run-basic-report",
+          "query-particle-sql"
+        ]
+      },
+      "write": {
+        "label": "Change Attio",
+        "defaultMode": "ask",
+        "tools": [
+          "create-record",
+          "upsert-record",
+          "update-record",
+          "merge-records",
+          "create-list",
+          "add-record-to-list",
+          "update-list",
+          "update-list-entry-by-id",
+          "update-list-entry-by-record-id",
+          "create-comment",
+          "delete-comment",
+          "create-note",
+          "update-note",
+          "create-task",
+          "update-task"
+        ]
+      }
+    }
+  }
+}

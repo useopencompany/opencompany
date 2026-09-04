@@ -4,9 +4,13 @@ import { createRepoConfigService } from "./repo-configs";
 
 const mocks = vi.hoisted(() => ({
   deleteConfig: vi.fn(),
+  listAccess: vi.fn(),
   listConfigs: vi.fn(),
-  listRepositories: vi.fn(),
   upsertConfig: vi.fn(),
+}));
+
+vi.mock("@opencompany/agent/integrations/github-user", () => ({
+  listGitHubUserRepositoryAccess: mocks.listAccess,
 }));
 
 vi.mock("@opencompany/db/repo-configs", async (importOriginal) => {
@@ -15,7 +19,6 @@ vi.mock("@opencompany/db/repo-configs", async (importOriginal) => {
     ...original,
     deleteRepoConfig: mocks.deleteConfig,
     listRepoConfigs: mocks.listConfigs,
-    listWorkspaceRepositories: mocks.listRepositories,
     upsertRepoConfig: mocks.upsertConfig,
   };
 });
@@ -48,13 +51,35 @@ describe("repository config service", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.listRepositories.mockResolvedValue([
-      {
-        repositoryExternalId: "123",
-        repositoryFullName: "opencompany/Renamed-App",
-        private: true,
-      },
-    ]);
+    mocks.listAccess.mockResolvedValue({
+      checkedAt: "2026-08-12T10:00:00.000Z",
+      installations: [
+        {
+          id: "installation_1",
+          account: {
+            id: "account_1",
+            login: "opencompany",
+            type: "Organization",
+            avatarUrl: null,
+            htmlUrl: "https://github.com/opencompany",
+          },
+          repositorySelection: "selected",
+          permissions: {},
+          pendingPermissions: [],
+          suspendedAt: null,
+          repositories: [
+            {
+              id: "123",
+              name: "Renamed-App",
+              fullName: "opencompany/Renamed-App",
+              private: true,
+              htmlUrl: "https://github.com/opencompany/Renamed-App",
+            },
+          ],
+        },
+      ],
+      target: null,
+    });
     mocks.listConfigs.mockResolvedValue([configView()]);
     mocks.upsertConfig.mockResolvedValue(configView());
     mocks.deleteConfig.mockResolvedValue(true);
@@ -71,7 +96,7 @@ describe("repository config service", () => {
       ],
       configs: [configView()],
     });
-    expect(mocks.listRepositories).toHaveBeenCalledWith({ db, workspaceId: "gws_1" });
+    expect(mocks.listAccess).toHaveBeenCalledWith({ userWorkosId: "user_1", db });
     expect(mocks.listConfigs).toHaveBeenCalledWith({ db, workspaceId: "gws_1" });
   });
 
@@ -114,7 +139,7 @@ describe("repository config service", () => {
       message: "Invalid repository.",
     });
 
-    mocks.listRepositories.mockResolvedValue([]);
+    mocks.listAccess.mockResolvedValue({ installations: [] });
     await expect(service.setEnv(admin, "123", "KEY=value")).rejects.toMatchObject({
       status: 404,
       message: "This repository is not available to the workspace.",
@@ -132,7 +157,7 @@ describe("repository config service", () => {
       code: "invalid_request",
       message: "No environment variables were found.",
     });
-    expect(mocks.listRepositories).not.toHaveBeenCalled();
+    expect(mocks.listAccess).not.toHaveBeenCalled();
     expect(mocks.upsertConfig).not.toHaveBeenCalled();
   });
 

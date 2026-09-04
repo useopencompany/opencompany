@@ -1,11 +1,5 @@
 import type { WikiSourceProvider } from "@opencompany/protocol";
-import {
-  GitHubIcon,
-  GmailIcon,
-  GranolaIcon,
-  LinearIcon,
-  type LucideIcon,
-} from "@opencompany/ui/icons";
+import { GmailIcon, GranolaIcon, LinearIcon, type LucideIcon } from "@opencompany/ui/icons";
 
 export type WikiSourceProviderDef = {
   id: WikiSourceProvider;
@@ -31,23 +25,13 @@ export const WIKI_SOURCE_PROVIDERS: WikiSourceProviderDef[] = [
     scopeRequired: true,
   },
   {
-    id: "jamie",
-    name: "Jamie",
-    description: "Add completed meeting notes to your workspace Wiki automatically.",
-    monogram: "J",
-    tileClass: "bg-[#5B5BD6] text-white",
-    connectionKind: "webhook",
-    connectHref: "/settings/jamie",
-    scopeRequired: false,
-  },
-  {
     id: "granola",
     name: "Granola",
     description: "Feed finished Granola meeting summaries into your workspace Wiki.",
     Icon: GranolaIcon,
     tileClass: "bg-[#F0EBE1] text-[#1A1714]",
     connectionKind: "api_key",
-    connectHref: "/settings/granola",
+    connectHref: "/wiki/sources",
     scopeRequired: false,
   },
   {
@@ -58,16 +42,6 @@ export const WIKI_SOURCE_PROVIDERS: WikiSourceProviderDef[] = [
     tileClass: "bg-[#5E6AD2] text-white",
     connectionKind: "oauth",
     connectHref: "/api/integrations/linear-ingest/start?returnTo=/wiki/sources",
-    scopeRequired: true,
-  },
-  {
-    id: "github",
-    name: "GitHub",
-    description: "Bring repository, pull request, and issue context into the Wiki.",
-    Icon: GitHubIcon,
-    tileClass: "bg-[#181717] text-white",
-    connectionKind: "oauth",
-    connectHref: "/api/integrations/github/start?returnTo=/wiki/sources",
     scopeRequired: true,
   },
 ];

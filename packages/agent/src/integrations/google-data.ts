@@ -8,7 +8,7 @@ import {
   type GoogleProviderState,
   googleIntegrationStateFromRows,
 } from "../integration-state";
-import { getGitHubIntegrationState } from "./github";
+import { getGitHubUserIntegrationState } from "./github-user";
 import { getLatitudeIntegrationState } from "./latitude-mcp";
 import { getLinearIntegrationState } from "./linear-mcp";
 
@@ -218,7 +218,7 @@ export async function getAvailableHarnessTools(userWorkosId: string): Promise<Ta
     getGoogleIntegrationState(userWorkosId),
     getLinearIntegrationState(userWorkosId),
     getLatitudeIntegrationState(userWorkosId),
-    getGitHubIntegrationState(userWorkosId),
+    getGitHubUserIntegrationState(userWorkosId),
   ]);
   const tools: TaskToolName[] = ["exa_search"];
   if (process.env.RUNNER_OPENCOMPANY_BROWSER_ENABLED?.trim().toLowerCase() === "true") {

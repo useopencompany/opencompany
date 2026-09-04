@@ -171,15 +171,15 @@ export type IntegrationProvider =
   | "latitude"
   | "posthog"
   | "neon"
-  | "imessage"
   | "x_account";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Better Stack, Render, SigNoz, X) are always personal. Installation-bound
-// connections (GitHub App org installs, Jamie webhook secrets, the Slack
-// answer-bot install) are workspace plumbing: they carry no human identity,
+// connections (Jamie webhook secrets and the Slack answer-bot install) are
+// workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
-// workspace admin.
+// workspace admin. `github` remains here only for historical rows from the
+// retired workspace-ingestion integration.
 export const WORKSPACE_OWNED_INTEGRATION_PROVIDERS = [
   "github",
   "jamie",
@@ -192,8 +192,6 @@ export function isWorkspaceOwnedIntegrationProvider(provider: IntegrationProvide
   );
 }
 export type IntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
-export type ImessageSendSource = "chat" | "task" | "pairing";
-export type ImessageSendStatus = "sent" | "failed";
 export type IntegrationCredentialKind = "oauth_token" | "webhook_secret" | "api_key";
 export type IntegrationCredentialEncryptedPayload = EncryptedPayload;
 export type BrowserProfileStatus = "pending_login" | "connected" | "needs_reauth" | "disconnected";
@@ -225,8 +223,9 @@ export type BrainSourceProvider =
   | "granola"
   | "fathom"
   | "attio";
-// The persisted source unions still include Slack so historical rows remain
-// readable during the cutover. Active API schemas and workers exclude it.
+// The persisted source unions still include retired Slack and GitHub ingestion
+// providers so historical rows remain readable. Active API schemas and workers
+// exclude them.
 // "slack_bot" rows are answer *destinations* (which channels a brain answers
 // in via the Slack bot), not ingestion sources; no ingestion path reads them.
 export type BrainSourceConfigProvider =
@@ -427,6 +426,7 @@ export type TaskResultMode = HarnessSpec extends { resultMode: infer Mode } ? Mo
 export type WorkspaceRole = "admin" | "member";
 export type McpClient = "claude" | "chatgpt" | "cursor";
 export type TaskViewMode = "board" | "list";
+export type TaskTimeRange = "24h" | "2d" | "7d" | "30d" | "90d" | "all";
 export type WorkspacePlan = "hobby" | "pro";
 export type StripeSubscriptionStatus =
   | "incomplete"
@@ -738,12 +738,13 @@ export const users = productSchema.table(
     taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
-    imessageEnabled: boolean("imessage_enabled").notNull().default(false),
     // Retained for rollback compatibility after the wiki became the default.
     // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
     // Board vs list layout for the Tasks page; persisted per user across devices.
     taskViewMode: text("task_view_mode").notNull().default("board").$type<TaskViewMode>(),
+    // Time window for the Tasks page; persisted per user across devices.
+    taskTimeRange: text("task_time_range").notNull().default("7d").$type<TaskTimeRange>(),
     preferredMcpClient: text("preferred_mcp_client").$type<McpClient>(),
     // Set exactly once, when this user first completes a successful knowledge query over MCP.
     mcpSetupCompletedAt: timestamp("mcp_setup_completed_at", { withTimezone: true }),
@@ -760,6 +761,10 @@ export const users = productSchema.table(
     taskViewModeCheck: check(
       "goat_users_task_view_mode_check",
       sql`${table.taskViewMode} IN ('board', 'list')`,
+    ),
+    taskTimeRangeCheck: check(
+      "opencompany_users_task_time_range_check",
+      sql`${table.taskTimeRange} IN ('24h', '2d', '7d', '30d', '90d', 'all')`,
     ),
   }),
 );
@@ -1641,7 +1646,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1691,7 +1696,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1741,69 +1746,11 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'render', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
       sql`${table.status} IN ('available', 'permission_lost', 'archived', 'sync_failed')`,
-    ),
-  }),
-);
-
-// Pending iMessage pairing verification. One active challenge per user,
-// upserted on resend. Lives outside the Electric-synced integrations table so
-// the code hash never reaches clients.
-export const imessagePairingChallenges = productSchema.table(
-  "imessage_pairing_challenges",
-  {
-    id: text("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    phoneE164: text("phone_e164").notNull(),
-    // sha256 hex of the 6-digit code; the plaintext is only ever in the sent message.
-    codeHash: text("code_hash").notNull(),
-    attemptCount: integer("attempt_count").notNull().default(0),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    consumedAt: timestamp("consumed_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    userIdx: uniqueIndex("goat_imessage_pairing_challenges_user_idx").on(table.userWorkosId),
-  }),
-);
-
-// Audit log of outbound iMessages; doubles as the per-user daily rate-limit
-// counter for the send_user_message tool.
-export const imessageSends = productSchema.table(
-  "imessage_sends",
-  {
-    id: text("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    source: text("source").$type<ImessageSendSource>().notNull(),
-    chatSessionId: text("chat_session_id"),
-    turnId: text("turn_id"),
-    status: text("status").$type<ImessageSendStatus>().notNull(),
-    errorReason: text("error_reason"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    userCreatedIdx: index("goat_imessage_sends_user_created_idx").on(
-      table.userWorkosId,
-      table.createdAt,
-    ),
-    turnSentIdx: uniqueIndex("goat_imessage_sends_turn_sent_idx")
-      .on(table.turnId)
-      .where(sql`${table.turnId} IS NOT NULL AND ${table.status} = 'sent'`),
-    sourceCheck: check(
-      "goat_imessage_sends_source_check",
-      sql`${table.source} IN ('chat', 'task', 'pairing')`,
-    ),
-    statusCheck: check(
-      "goat_imessage_sends_status_check",
-      sql`${table.status} IN ('sent', 'failed')`,
     ),
   }),
 );
@@ -2701,12 +2648,8 @@ export const linearIssueEvents = productSchema.table(
   }),
 );
 
-// Raw GitHub pull-request activity buffer: the webhook inserts one row per
-// opened, commented, or merged event; the runner's flush sweeper batches
-// unflushed rows per pull request into one activity-window source item after a
-// quiet period (source_item_id NULL = unflushed). Issue activity remains
-// direct-enqueue because it does not have the open-to-merge lifecycle that
-// causes repeated PR ingestion.
+// Retired GitHub-ingestion storage. Kept so this cutover does not delete
+// customer data; no webhook or runner path writes or flushes these rows.
 export const gitHubPullRequestEvents = productSchema.table(
   "github_pull_request_events",
   {

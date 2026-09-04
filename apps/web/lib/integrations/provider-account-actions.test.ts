@@ -2,11 +2,6 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveAttioApiKeyAction } from "./attio-actions";
-import { confirmImessagePairingAction, startImessagePairingAction } from "./imessage-actions";
-import {
-  createOrResetJamieWebhookEndpointAction,
-  saveJamieWebhookApiKeyAction,
-} from "./jamie-actions";
 import { saveRenderApiKeyAction } from "./render-actions";
 import {
   disconnectStripeIntegrationAction,
@@ -113,30 +108,6 @@ describe("provider account command adapters", () => {
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("starts iMessage pairing without revalidating and confirms with state", async () => {
-    const requests = stubApi(() => Response.json({ data: { started: true }, meta }));
-    await expect(startImessagePairingAction("+14155551234")).resolves.toEqual({ ok: true });
-    expect(new URL((requests[0] as Request).url).pathname).toBe(
-      "/v1/integration-accounts/imessage/pairing",
-    );
-    expect(revalidatePath).not.toHaveBeenCalled();
-
-    const state = {
-      provider: "imessage",
-      connected: true,
-      status: "connected",
-      integrationId: "gint_imsg",
-      phoneE164: "+14155551234",
-      statusReason: null,
-    };
-    const confirmRequests = stubApi(() => Response.json({ data: { state }, meta }));
-    await expect(confirmImessagePairingAction("123456")).resolves.toEqual({ ok: true, state });
-    expect(new URL((confirmRequests[0] as Request).url).pathname).toBe(
-      "/v1/integration-accounts/imessage/pairing/confirm",
-    );
-    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
-  });
-
   it("keeps the retired admin-only Stripe copy from the API envelope", async () => {
     stubApi(() =>
       Response.json(
@@ -166,25 +137,5 @@ describe("provider account command adapters", () => {
     expect(request.method).toBe("DELETE");
     expect(new URL(request.url).pathname).toBe("/v1/integration-accounts/stripe");
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
-  });
-
-  it("returns the Jamie webhook setup exactly as the API delivers it", async () => {
-    const setup = {
-      integrationId: "gint_jamie",
-      webhookUrl: "https://app.example.test/api/webhooks/jamie",
-      headerName: "x-api-key",
-      apiKeyConfigured: false,
-    };
-    const requests = stubApi(() => Response.json({ data: { setup }, meta }));
-    await expect(createOrResetJamieWebhookEndpointAction()).resolves.toEqual({ ok: true, setup });
-    expect(new URL((requests[0] as Request).url).pathname).toBe(
-      "/v1/integration-accounts/jamie/webhook-endpoint",
-    );
-
-    stubApi(() => errorEnvelope("Create a Jamie webhook endpoint before saving the API key.", 400));
-    await expect(saveJamieWebhookApiKeyAction("sk_x")).resolves.toEqual({
-      ok: false,
-      error: "Create a Jamie webhook endpoint before saving the API key.",
-    });
   });
 });

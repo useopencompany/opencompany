@@ -51,7 +51,6 @@ import {
   CodexDeviceAuthFlowEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
   ConfirmBrainImportBodySchema,
-  ConfirmImessagePairingBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
@@ -86,8 +85,6 @@ import {
   GenerateConversationTitleEnvelopeSchema,
   GranolaAccountStateEnvelopeSchema,
   IdentityEnvelopeSchema,
-  ImessageAccountStateEnvelopeSchema,
-  ImessagePairingStartedEnvelopeSchema,
   ImportSkillBodySchema,
   InfisicalAuthFlowEnvelopeSchema,
   InfisicalAuthStatusEnvelopeSchema,
@@ -100,7 +97,6 @@ import {
   IntegrationCapabilityModeEnvelopeSchema,
   InviteWorkspaceMemberBodySchema,
   InvokeWorkflowBodySchema,
-  JamieWebhookSetupEnvelopeSchema,
   LegacyTaskHistoryEnvelopeSchema,
   LegacyTaskPageSchema,
   ManagedCapabilitySourceSchema,
@@ -161,7 +157,6 @@ import {
   SlackBotMutationEnvelopeSchema,
   SlackBotWorkspaceSettingsEnvelopeSchema,
   StartBrainImportBodySchema,
-  StartImessagePairingBodySchema,
   StartInfisicalAuthBodySchema,
   StripeAccountDeleteEnvelopeSchema,
   StripeAccountStateEnvelopeSchema,
@@ -2944,46 +2939,6 @@ export const connectRenderAccountRoute = createRoute({
   },
 });
 
-export const startImessagePairingRoute = createRoute({
-  method: "post",
-  path: "/v1/integration-accounts/imessage/pairing",
-  tags: ["Integrations"],
-  security: actorSecurity,
-  request: {
-    body: {
-      required: true,
-      content: { "application/json": { schema: StartImessagePairingBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "A verification code was sent to the provided phone number.",
-      content: { "application/json": { schema: ImessagePairingStartedEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const confirmImessagePairingRoute = createRoute({
-  method: "post",
-  path: "/v1/integration-accounts/imessage/pairing/confirm",
-  tags: ["Integrations"],
-  security: actorSecurity,
-  request: {
-    body: {
-      required: true,
-      content: { "application/json": { schema: ConfirmImessagePairingBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Pairing confirmed; the iMessage connection is active.",
-      content: { "application/json": { schema: ImessageAccountStateEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
 export const connectStripeAccountRoute = createRoute({
   method: "put",
   path: "/v1/integration-accounts/stripe",
@@ -3014,42 +2969,6 @@ export const disconnectStripeAccountRoute = createRoute({
     200: {
       description: "Workspace Stripe connection removed. Admin only.",
       content: { "application/json": { schema: StripeAccountDeleteEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const createJamieWebhookEndpointRoute = createRoute({
-  method: "post",
-  path: "/v1/integration-accounts/jamie/webhook-endpoint",
-  tags: ["Integrations"],
-  security: actorSecurity,
-  responses: {
-    200: {
-      description:
-        "Jamie webhook endpoint created or reset for the workspace. Admin only. Any previously saved API key binding is cleared.",
-      content: { "application/json": { schema: JamieWebhookSetupEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const saveJamieApiKeyRoute = createRoute({
-  method: "put",
-  path: "/v1/integration-accounts/jamie/api-key",
-  tags: ["Integrations"],
-  security: actorSecurity,
-  request: {
-    body: {
-      required: true,
-      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description:
-        "Jamie webhook API key bound to the workspace endpoint. Admin only; only a hash is stored and the key never appears in the response.",
-      content: { "application/json": { schema: JamieWebhookSetupEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3689,12 +3608,8 @@ export type V1RouteHandlers = {
   connectFathomAccount: RouteHandler<typeof connectFathomAccountRoute>;
   connectGranolaAccount: RouteHandler<typeof connectGranolaAccountRoute>;
   connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
-  startImessagePairing: RouteHandler<typeof startImessagePairingRoute>;
-  confirmImessagePairing: RouteHandler<typeof confirmImessagePairingRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
   disconnectStripeAccount: RouteHandler<typeof disconnectStripeAccountRoute>;
-  createJamieWebhookEndpoint: RouteHandler<typeof createJamieWebhookEndpointRoute>;
-  saveJamieApiKey: RouteHandler<typeof saveJamieApiKeyRoute>;
   listIntegrationAccounts: RouteHandler<typeof listIntegrationAccountsRoute>;
   getSlackBotWorkspaceSettings: RouteHandler<typeof getSlackBotWorkspaceSettingsRoute>;
   disconnectSlackBot: RouteHandler<typeof disconnectSlackBotRoute>;
@@ -3882,12 +3797,8 @@ export function createV1Router(
       .openapi(connectFathomAccountRoute, handlers.connectFathomAccount)
       .openapi(connectGranolaAccountRoute, handlers.connectGranolaAccount)
       .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
-      .openapi(startImessagePairingRoute, handlers.startImessagePairing)
-      .openapi(confirmImessagePairingRoute, handlers.confirmImessagePairing)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
       .openapi(disconnectStripeAccountRoute, handlers.disconnectStripeAccount)
-      .openapi(createJamieWebhookEndpointRoute, handlers.createJamieWebhookEndpoint)
-      .openapi(saveJamieApiKeyRoute, handlers.saveJamieApiKey)
       .openapi(listIntegrationAccountsRoute, handlers.listIntegrationAccounts)
       .openapi(getSlackBotWorkspaceSettingsRoute, handlers.getSlackBotWorkspaceSettings)
       .openapi(disconnectSlackBotRoute, handlers.disconnectSlackBot)
@@ -4355,20 +4266,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
             fathom: [],
             attio: [],
           },
-          jamie: {
-            integration: {
-              provider: "jamie",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountName: null,
-              statusReason: null,
-              webhookUrl: null,
-              apiKeyConfigured: false,
-            },
-            legacyDefaultDelivery: false,
-            isDefaultBrain: false,
-          },
           linear: {
             integration: {
               provider: "linear",
@@ -4377,16 +4274,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
               integrationId: null,
               accountName: null,
               organizationName: null,
-              statusReason: null,
-            },
-          },
-          github: {
-            integration: {
-              provider: "github",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountName: null,
               statusReason: null,
             },
           },
@@ -4483,7 +4370,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
-  listBrainSourceOptions: (c) => c.json({ data: { provider: "github", repos: [] }, meta }, 200),
+  listBrainSourceOptions: (c) =>
+    c.json({ data: { provider: "linear", teams: [], partial: false }, meta }, 200),
   listBrowserProfiles: (c) => c.json({ data: [], meta }, 200),
   createBrowserProfile: (c) => c.json({ data: placeholderBrowserProfile, meta }, 201),
   deleteBrowserProfile: (c) =>
@@ -5096,7 +4984,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           taskSpawningEnabled: false,
           wikiEnabled: true as const,
           taskViewMode: "board" as const,
-          imessageEnabled: false,
+          taskTimeRange: "7d" as const,
           autoModelRoutingEnabled: false,
         },
         meta,
@@ -5219,24 +5107,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
-  startImessagePairing: (c) => c.json({ data: { started: true as const }, meta }, 200),
-  confirmImessagePairing: (c) =>
-    c.json(
-      {
-        data: {
-          state: {
-            provider: "imessage" as const,
-            connected: true,
-            status: "connected" as const,
-            integrationId: "gint_contract",
-            phoneE164: "+14155551234",
-            statusReason: null,
-          },
-        },
-        meta,
-      },
-      200,
-    ),
   connectStripeAccount: (c) =>
     c.json(
       {
@@ -5256,36 +5126,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   disconnectStripeAccount: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
-  createJamieWebhookEndpoint: (c) =>
-    c.json(
-      {
-        data: {
-          setup: {
-            integrationId: "gint_contract",
-            webhookUrl: "https://app.example.com/api/webhooks/jamie",
-            headerName: "x-api-key",
-            apiKeyConfigured: false,
-          },
-        },
-        meta,
-      },
-      200,
-    ),
-  saveJamieApiKey: (c) =>
-    c.json(
-      {
-        data: {
-          setup: {
-            integrationId: "gint_contract",
-            webhookUrl: "https://app.example.com/api/webhooks/jamie",
-            headerName: "x-api-key",
-            apiKeyConfigured: true,
-          },
-        },
-        meta,
-      },
-      200,
-    ),
   listIntegrationAccounts: (c) => c.json({ data: [], meta }, 200),
   getSlackBotWorkspaceSettings: (c) =>
     c.json(
@@ -5579,9 +5419,9 @@ function contractIdentity() {
       taskSpawningEnabled: true,
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
-      imessageEnabled: false,
       wikiEnabled: true as const,
       taskViewMode: "board" as const,
+      taskTimeRange: "7d" as const,
       preferredMcpClient: null,
       mcpSetupCompletedAt: null,
       onboardedAt: placeholderTime,

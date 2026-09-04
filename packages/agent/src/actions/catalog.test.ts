@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  attio: vi.fn(),
   calendar: vi.fn(),
-  github: vi.fn(),
   gmail: vi.fn(),
   googleDrive: vi.fn(),
+  latitude: vi.fn(),
   posthog: vi.fn(),
   noop: vi.fn(),
   remote: vi.fn(),
@@ -16,12 +17,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../plugin-gateway", () => ({
   resolvePluginGatewayRegistrations: mocks.registrations,
 }));
-vi.mock("./attio", () => ({ resolveAttioActions: mocks.noop }));
-vi.mock("./github", () => ({ resolveGitHubActions: mocks.github }));
+vi.mock("./attio", () => ({ resolveAttioActions: mocks.attio }));
 vi.mock("./gmail", () => ({ resolveGmailActions: mocks.gmail }));
 vi.mock("./google-calendar", () => ({ resolveGoogleCalendarActions: mocks.calendar }));
 vi.mock("./google-drive", () => ({ resolveGoogleDriveActions: mocks.googleDrive }));
-vi.mock("./latitude", () => ({ resolveLatitudeActions: mocks.noop }));
+vi.mock("./latitude", () => ({ resolveLatitudeActions: mocks.latitude }));
 vi.mock("./linear", () => ({ resolveLinearActions: mocks.noop }));
 vi.mock("./neon", () => ({ resolveNeonActions: mocks.noop }));
 vi.mock("./posthog", () => ({ resolvePostHogActions: mocks.posthog }));
@@ -44,14 +44,14 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       description: "Legacy Calendar actions.",
       actions: [{ id: "google_calendar.list_events" }],
     });
+    mocks.attio.mockResolvedValue({
+      id: "attio",
+      label: "Attio",
+      description: "Legacy Attio actions.",
+      actions: [{ id: "attio.search-records" }],
+    });
     mocks.remote.mockResolvedValue(null);
     mocks.registrations.mockResolvedValue([]);
-    mocks.github.mockResolvedValue({
-      id: "github",
-      label: "GitHub",
-      description: "Legacy workspace GitHub actions.",
-      actions: [{ id: "github.search_issues" }],
-    });
     mocks.gmail.mockResolvedValue({
       id: "gmail",
       label: "Gmail",
@@ -63,6 +63,12 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       label: "Google Drive",
       description: "Legacy Google Drive actions.",
       actions: [{ id: "google_drive.search_files" }],
+    });
+    mocks.latitude.mockResolvedValue({
+      id: "latitude",
+      label: "Latitude",
+      description: "Legacy Latitude actions.",
+      actions: [{ id: "latitude.listTraces" }],
     });
     mocks.posthog.mockResolvedValue({
       id: "posthog",
@@ -78,14 +84,15 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     });
   });
 
-  it("keeps the legacy GitHub issue search when the official plugin is absent", async () => {
+  it("does not expose GitHub actions when the official plugin is absent", async () => {
     const catalog = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [] },
     );
 
-    expect(mocks.github).toHaveBeenCalledWith("workspace_1");
-    expect(catalog.actions).toContainEqual(expect.objectContaining({ id: "github.search_issues" }));
+    expect(catalog.actions).not.toContainEqual(
+      expect.objectContaining({ id: expect.stringContaining("github") }),
+    );
   });
 
   it("keeps Calendar fallback actions only while the official plugin is absent", async () => {
@@ -156,6 +163,40 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
   });
 
+  it("keeps legacy Latitude actions as fallback and suppresses them after plugin install", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.latitude).toHaveBeenCalledWith("user_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "latitude.listTraces" }),
+    );
+
+    mocks.latitude.mockClear();
+    const latitudePluginRegistration = {
+      source: "plugin:latitude:latitude",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:latitude:latitude",
+      label: "Latitude",
+      description: "Official Latitude plugin tools.",
+      actions: [{ id: "plugin:latitude:latitude.listTraces" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [latitudePluginRegistration] },
+    );
+
+    expect(mocks.latitude).not.toHaveBeenCalled();
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "latitude.listTraces" }),
+    );
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:latitude:latitude.listTraces" }),
+    );
+  });
+
   it("keeps legacy Stripe metrics as fallback and suppresses them after plugin install", async () => {
     const withoutPlugin = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
@@ -190,7 +231,7 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
   });
 
-  it("suppresses the legacy GitHub issue search when the official plugin is installed", async () => {
+  it("exposes GitHub actions through the official plugin", async () => {
     const githubPluginRegistration = {
       source: "plugin:github:github",
       getState: vi.fn().mockResolvedValue({
@@ -200,44 +241,25 @@ describe("resolveActionCatalog plugin reconciliation", () => {
         toolModes: {},
       }),
     } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:github:github",
+      label: "GitHub",
+      description: "Official GitHub plugin tools.",
+      actions: [{ id: "plugin:github:github.search_issues" }],
+    });
 
     const catalog = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [githubPluginRegistration] },
     );
 
-    expect(mocks.github).not.toHaveBeenCalled();
     expect(mocks.remote).toHaveBeenCalledWith(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       githubPluginRegistration,
     );
-    expect(catalog.actions).not.toContainEqual(
-      expect.objectContaining({ id: "github.search_issues" }),
+    expect(catalog.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:github:github.search_issues" }),
     );
-  });
-
-  it("keeps the legacy GitHub issue search for members without a personal connection", async () => {
-    const githubPluginRegistration = {
-      source: "plugin:github:github",
-      getState: vi.fn().mockResolvedValue({
-        connected: false,
-        integrationId: null,
-        capabilityModes: {},
-        toolModes: {},
-      }),
-    } as unknown as RemoteMcpGatewayRegistration;
-
-    const catalog = await resolveActionCatalog(
-      { userWorkosId: "user_without_github", workspaceId: "workspace_1" },
-      { remoteMcpRegistrations: [githubPluginRegistration] },
-    );
-
-    expect(githubPluginRegistration.getState).toHaveBeenCalledWith({
-      userWorkosId: "user_without_github",
-      workspaceId: "workspace_1",
-    });
-    expect(mocks.github).toHaveBeenCalledWith("workspace_1");
-    expect(catalog.actions).toContainEqual(expect.objectContaining({ id: "github.search_issues" }));
   });
 
   it("exposes Slack tools only through the official plugin", async () => {
@@ -384,6 +406,40 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     expect(mocks.remote).toHaveBeenCalledWith(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       googleDrivePluginRegistration,
+    );
+  });
+
+  it("keeps legacy Attio actions as fallback and suppresses them after plugin install", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.attio).toHaveBeenCalledWith("user_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "attio.search-records" }),
+    );
+
+    mocks.attio.mockClear();
+    const attioPluginRegistration = {
+      source: "plugin:attio:attio",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:attio:attio",
+      label: "Attio",
+      description: "Official Attio plugin tools.",
+      actions: [{ id: "plugin:attio:attio.search-records" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [attioPluginRegistration] },
+    );
+
+    expect(mocks.attio).not.toHaveBeenCalled();
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "attio.search-records" }),
+    );
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:attio:attio.search-records" }),
     );
   });
 });

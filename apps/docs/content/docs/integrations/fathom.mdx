@@ -1,38 +1,46 @@
 ---
 title: Fathom
-description: Connect Fathom meeting recordings to opencompany Brain ingestion with a personal API key.
+description: Search meeting summaries and transcripts through Fathom's official MCP plugin.
 ---
 
-## What the connection does
+## What the Plugin does
 
-opencompany polls Fathom every few minutes for new meetings and deliberately lags real time so Fathom
-can finish its summary and transcript. If generated content is unavailable, the recording stays in
-a durable pending queue and is retried. Once ready, opencompany writes a meeting page plus a raw
-evidence snapshot of the summary, action items, and transcript.
+Fathom is an official Agent Plugin backed by [Fathom's hosted MCP server](https://developers.fathom.ai/mcp-docs).
+It lets opencompany search meetings, find people, list teams, resolve recording IDs, and read meeting
+summaries, action items, and transcripts.
 
-The connection is personal and can read meetings you recorded or that were shared with your team.
-Live polling does not automatically import meetings from before you connected. To seed recent
-history, run **Import company context** with Fathom selected and confirm the planned workload.
+The Plugin is installed once for a workspace. Each person connects their own Fathom account, and
+Fathom limits results to meetings that account can access.
 
-## Setup steps
+## Connect Fathom
 
-1. In Fathom, open **Settings** and find **API Access**.
-2. Generate a new API key and copy the value Fathom shows once.
-3. In opencompany, open **Settings → Fathom** or choose **Set up** on the source card.
-4. Paste the key and save it. opencompany validates the key before storing it.
+1. Ask a workspace admin to install Fathom under **Settings → Plugins → Fathom**.
+2. On the Fathom Plugin page, choose **Connect Fathom account**.
+3. Sign in to Fathom and approve access.
+4. Return to the Plugin page and confirm tool discovery is ready.
 
-## Brain routing
+OAuth credentials remain encrypted and server-side. The Plugin gateway sends them only to the
+reviewed `https://api.fathom.ai/mcp` endpoint.
 
-Enable Fathom under **Sources** in a Brain's settings. Each new meeting fans out to every Brain where
-your Fathom source is enabled. If two members of the same Brain can access a team-shared meeting, it
-is ingested once for that Brain.
+## Permissions and limitations
 
-## Troubleshooting
+All reviewed tools are grouped under **Read Fathom meetings** and default to **Ask** because meeting
+content, participant details, team names, and account identity can be sensitive. Turn the group
+**On** only when automatic access is appropriate for that account. Newly discovered tools remain
+**Ask** until opencompany reviews and classifies them.
 
-- Confirm the Fathom source is enabled on the target Brain.
-- Confirm **Settings → Fathom** shows **Connected**. Replace a revoked key.
-- Wait at least twenty minutes after the meeting; recordings without generated content stay pending
-  and retry automatically.
-- Use **Import company context** for meetings that happened before live polling began.
+Fathom search covers meeting titles and summaries rather than the full transcript. Retrieve a
+meeting transcript after resolving its recording ID when you need details that did not reach the
+summary. Availability and result scope still follow the connected account's Fathom plan and sharing
+permissions.
 
-The Fathom API is documented at [developers.fathom.ai](https://developers.fathom.ai).
+## Legacy Brain ingestion
+
+Existing API-key connections continue to poll completed meetings into Wiki/Brain as a fallback.
+Installing the Plugin does not reuse or replace that API key: MCP OAuth tokens are audience-bound
+and cannot power ingestion. Configure the legacy source from **Wiki → Sources** only if you need
+automatic meeting ingestion; the old Fathom card is no longer shown in general Integration settings.
+
+Live polling does not automatically import meetings from before the API-key connection. Use
+**Import company context** to seed recent history. If a completed meeting is missing, confirm the
+legacy source is enabled and allow time for Fathom to finish its summary and transcript.

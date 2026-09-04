@@ -1,6 +1,5 @@
 import { resolvePluginGatewayRegistrations } from "../plugin-gateway";
 import { resolveAttioActions } from "./attio";
-import { resolveGitHubActions } from "./github";
 import { resolveGmailActions } from "./gmail";
 import { resolveGoogleCalendarActions } from "./google-calendar";
 import { resolveGoogleDriveActions } from "./google-drive";
@@ -63,8 +62,8 @@ export async function resolveActionCatalog(
   const linearPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:linear:"),
   );
-  const githubPluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:github:"),
+  const attioPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:attio:"),
   );
   const gmailPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:gmail:"),
@@ -75,20 +74,14 @@ export async function resolveActionCatalog(
   const googleCalendarPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:google-calendar:"),
   );
-  const githubPluginConnected =
-    githubPluginInstalled &&
-    (
-      await Promise.all(
-        remoteMcpRegistrations
-          .filter((registration) => registration.source.startsWith("plugin:github:"))
-          .map((registration) => registration.getState(input).catch(() => null)),
-      )
-    ).some((state) => state?.connected && state.integrationId);
   const neonPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:neon:"),
   );
   const posthogPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:posthog:"),
+  );
+  const latitudePluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:latitude:"),
   );
   const stripePluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:stripe:"),
@@ -106,10 +99,9 @@ export async function resolveActionCatalog(
       : resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
     linearPluginInstalled ? null : resolveLinearActions(input.userWorkosId).catch(() => null),
     posthogPluginInstalled ? null : resolvePostHogActions(input.userWorkosId).catch(() => null),
-    resolveLatitudeActions(input.userWorkosId).catch(() => null),
+    latitudePluginInstalled ? null : resolveLatitudeActions(input.userWorkosId).catch(() => null),
     neonPluginInstalled ? null : resolveNeonActions(input.userWorkosId).catch(() => null),
-    resolveAttioActions(input.userWorkosId).catch(() => null),
-    githubPluginConnected ? null : resolveGitHubActions(input.workspaceId).catch(() => null),
+    attioPluginInstalled ? null : resolveAttioActions(input.userWorkosId).catch(() => null),
     stripePluginInstalled ? null : resolveStripeActions(input.workspaceId).catch(() => null),
     resolveRevolutActions(input.workspaceId).catch(() => null),
     xPluginInstalled ? null : resolveXAccountActions(input.userWorkosId).catch(() => null),
