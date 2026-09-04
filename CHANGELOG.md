@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-09-04
+
+### Added
+- A wave of new official plugins: connect Gmail, Google Drive, HubSpot, Stripe, PostHog, Attio, Fathom, and Latitude, then pick exactly which actions opencompany is allowed to take and approve anything sensitive before it runs (#1515, #1517, #1564, #1562, #1557, #1583, #1584, #1585) — @louis.
+- Edit your Google Docs from chat: the Google Drive plugin can now make changes to an existing doc, not just read it, with each edit gated behind your approval (#1573) — @louis.
+- GPT-6 Astra is available across chat and Codex, and runs against your own connected ChatGPT/Codex subscription at no extra cost when you have one (#1566) — @louis.
+- Tasks now have an activity feed: watch each run's steps as they happen, retry or reopen a task, and pick it back up just by leaving a comment (#1542) — @louis.
+- Filter tasks by recent time ranges — including the last 24 hours and last 2 days — and your choice now follows you across navigation and devices (#1571, #1581) — @louis.
+- Jump to any task from the command palette: active and archived tasks and chats show newest-first and are searchable by name, prompt, or ID (#1554) — @louis.
+- Hover the model icon in a session header to see which model that session is running (#1559) — @louis.
+
+### Changed
+- Plugins now have their own spot in the left sidebar, and the catalog is redesigned around search, featured picks, and categories so you can find the right plugin faster (#1569, #1565) — @louis.
+- Granola, Jamie, and X now connect through official plugins instead of built-in integrations. Reconnect each one once through its plugin to keep it working (#1582, #1588, #1556) — @louis.
+- Your personal Codex and Claude Code subscriptions have moved from Integrations to the new Inference settings, kept separate from workspace-wide model access (#1567) — @louis.
+- Long chats and coding sessions stay fast: busy conversations now compact their oldest turns behind the scenes while keeping the current turn and recent context intact (#1563) — @louis.
+- Chat attachment uploads are more reliable — an interrupted upload resumes or replays cleanly instead of failing (#1502) — @andrei.
+
+### Fixed
+- Attachments work in task conversations again: drop a screenshot or file into a task follow-up just like in chat (#1539) — @louis.
+- Long, tool-heavy chats read cleanly again — messages, thinking, and tool calls stay in order while a task runs, then collapse behind a single disclosure once it's done (#1561, #1549) — @louis.
+- The context indicator now shows how full a chat's context actually is, instead of inflating after multi-step tool runs (#1558) — @louis.
+- Skill search is more forgiving: a relevant skill no longer disappears just because your query included an extra word (#1560) — @louis.
+- Tasks no longer get stuck retrying forever — a run that can't finish cleanly is now stopped instead of restarting indefinitely (#1551, #1552) — @louis.
+- Claude coding sessions start reliably again, fixing authorization and readiness checks that could fail a session before your prompt even ran (#1553, #1550) — @louis.
+- Connected actions like PostHog stay available across turns instead of needing to be rediscovered mid-conversation (#1568) — @louis.
+
+### Removed
+- The legacy workspace GitHub integration is retired — repository access and coding sessions now run through the personal GitHub plugin (#1589) — @louis.
+- The iMessage integration has been removed (#1580) — @louis.
+
+### Security
+- Upgraded dependencies to clear reported high-priority vulnerabilities (#1578) — @louis.
+
 ## [1.22.0] - 2026-09-03
 
 ### Added
