@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppDataProvider, type AppInitialData, useAppData } from "@/components/AppDataProvider";
+import { integrationStateFromRows } from "@/lib/integration-state";
 import {
   addOptimisticChatSummary,
   clearAllOptimisticChatSummaries,
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => {
     preloadHeadlessChatMessages: vi.fn(async (conversationId: string) => {
       void conversationId;
     }),
+    syncHeadlessChatMessageShapeEpochs: vi.fn(async () => {}),
     getHeadlessIntegrationAccounts: vi.fn(() => ({})),
     getHeadlessTaskSchedules: vi.fn(() => ({})),
     getHeadlessTasks: vi.fn(() => ({})),
@@ -33,6 +35,7 @@ vi.mock("@tanstack/react-db", () => ({
 vi.mock("@/lib/headless-chat-collections", () => ({
   getHeadlessChatConversations: mocks.getHeadlessChatConversations,
   preloadHeadlessChatMessages: mocks.preloadHeadlessChatMessages,
+  syncHeadlessChatMessageShapeEpochs: mocks.syncHeadlessChatMessageShapeEpochs,
 }));
 
 vi.mock("@/lib/headless-integration-collections", () => ({
@@ -59,6 +62,7 @@ describe("AppDataProvider", () => {
     mocks.getHeadlessTaskSchedules.mockClear();
     mocks.getHeadlessIntegrationAccounts.mockClear();
     mocks.preloadHeadlessChatMessages.mockClear();
+    mocks.syncHeadlessChatMessageShapeEpochs.mockClear();
     mocks.listLegacyTaskCompatibility.mockClear();
     mocks.useLiveQuery.mockReset();
     mocks.useLiveQuery.mockImplementation(() => mocks.liveQueryResult);
@@ -90,6 +94,50 @@ describe("AppDataProvider", () => {
     expect(mocks.getHeadlessTaskSchedules).not.toHaveBeenCalled();
   });
 
+  it("preserves the server-selected Gmail account while live accounts hydrate", async () => {
+    const data = initialData();
+    data.integrations = integrationStateFromRows([
+      {
+        id: "gint_gmail_primary",
+        provider: "gmail",
+        status: "connected",
+        scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+        capabilityModes: { query: "ask" },
+      },
+    ]);
+    const perCollection = [
+      { data: [], isLoading: false },
+      { data: [], isLoading: false },
+      { data: [], isLoading: false },
+      {
+        data: [
+          {
+            id: "gint_gmail_other",
+            provider: "gmail",
+            status: "connected",
+            scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+            capabilityModes: { query: "off" },
+          },
+        ],
+        isLoading: false,
+      },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(
+      () => perCollection[call++ % perCollection.length] ?? { data: [], isLoading: false },
+    );
+
+    render(
+      <AppDataProvider initialData={data}>
+        <GmailPrimaryProbe />
+      </AppDataProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("gmail-primary").textContent).toBe("gint_gmail_primary"),
+    );
+  });
+
   it("preloads only active-runtime transcripts after live conversations are ready", async () => {
     const now = Date.now();
     const chatRows = Array.from({ length: 6 }, (_, index) => ({
@@ -104,6 +152,7 @@ describe("AppDataProvider", () => {
       // sidebar hover/focus, so boot must not fan out a shape for them.
       activityState: (index === 1 || index === 3 ? "working" : "idle") as "working" | "idle",
       hasUnseen: false,
+      messageShapeEpoch: index,
       createdAt: new Date(now - index * 1_000).toISOString(),
       updatedAt: new Date(now - index * 1_000).toISOString(),
     }));
@@ -136,6 +185,13 @@ describe("AppDataProvider", () => {
     expect(
       mocks.preloadHeadlessChatMessages.mock.calls.map(([chatId]) => chatId).toSorted(),
     ).toEqual(["chat_preload_1", "chat_preload_3"]);
+    expect(mocks.syncHeadlessChatMessageShapeEpochs).toHaveBeenCalledWith(
+      chatRows.map(({ id, activityState, messageShapeEpoch }) => ({
+        id,
+        activityState,
+        messageShapeEpoch,
+      })),
+    );
   });
 
   it("does not fan out transcript preloads from the server fallback", () => {
@@ -264,6 +320,51 @@ describe("AppDataProvider", () => {
     expect(screen.getByTestId("recent").textContent).toBe("claude_code:idle:false");
     expect(screen.getByTestId("recent").getAttribute("data-chat-id")).toBe("goat_chat_claude_1");
     expect(screen.getByTestId("recent").getAttribute("data-runtime-status")).toBe("idle");
+  });
+
+  it("keeps archived and older tasks available to global navigation", async () => {
+    const taskRows = [
+      taskRow({
+        id: "task_archived",
+        display_id: "TASK-2",
+        name: "Archived task",
+        archived_at: "2026-07-02T10:00:00.000Z",
+        created_at: "2026-07-02T10:00:00.000Z",
+        updated_at: "2026-07-02T10:00:00.000Z",
+      }),
+      taskRow({
+        id: "task_old",
+        display_id: "TASK-1",
+        name: "Old active task",
+        created_at: "2025-01-01T10:00:00.000Z",
+        updated_at: "2025-01-01T10:00:00.000Z",
+      }),
+    ];
+    const perCollection = [
+      { data: taskRows, isLoading: false },
+      { data: [], isLoading: false },
+      { data: [], isLoading: false },
+      { data: [], isLoading: true },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(() => {
+      const result = perCollection[call % perCollection.length] ?? { data: [], isLoading: false };
+      call += 1;
+      return result;
+    });
+
+    render(
+      <AppDataProvider initialData={initialData()}>
+        <TaskHistoryProbe />
+      </AppDataProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("task-history").getAttribute("data-all-task-ids")).toBe(
+        "task_archived,task_old",
+      ),
+    );
+    expect(screen.getByTestId("task-history").getAttribute("data-home-task-ids")).toBe("");
   });
 
   it("keeps multiple API-projected working chats without a second live query", () => {
@@ -498,6 +599,55 @@ function DataProbe() {
   return <div>{`${data.user.email}:${data.archivedChats.length}`}</div>;
 }
 
+function GmailPrimaryProbe() {
+  return <div data-testid="gmail-primary">{useAppData().integrations.gmail.integrationId}</div>;
+}
+
+function TaskHistoryProbe() {
+  const data = useAppData();
+  return (
+    <div
+      data-testid="task-history"
+      data-all-task-ids={data.allTasks.map((task) => task.id).join(",")}
+      data-home-task-ids={data.tasks.map((task) => task.id).join(",")}
+    />
+  );
+}
+
+function taskRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "task_1",
+    display_id: "TASK-1",
+    name: "Task",
+    prompt: "Do the work",
+    model: "anthropic/claude-sonnet-5",
+    engine: "opencompany" as const,
+    session_id: "conversation_task_1",
+    schedule_id: null,
+    scheduled_for: null,
+    workflow_id: null,
+    workflow_brain_ref: null,
+    status: "succeeded" as const,
+    stage: "completed" as const,
+    result: "Done",
+    error: null,
+    reported_outcome: "done" as const,
+    outcome_comment: null,
+    harness_spec: {},
+    debug_trace: {},
+    sandbox_id: null,
+    attempts: 0,
+    next_run_at: null,
+    lease_id: null,
+    lease_owner: null,
+    lease_expires_at: null,
+    archived_at: null,
+    created_at: "2026-07-01T10:00:00.000Z",
+    updated_at: "2026-07-01T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
 function initialData(): AppInitialData {
   return {
     user: {
@@ -516,8 +666,13 @@ function initialData(): AppInitialData {
     tasks: [],
     schedules: [],
     recentChats: [],
-    integrations: {} as AppInitialData["integrations"],
-    featureFlags: { taskSpawning: false, autoModelRouting: false, imessage: false, wiki: false },
+    integrations: integrationStateFromRows([]),
+    featureFlags: {
+      taskSpawning: false,
+      autoModelRouting: false,
+      imessage: false,
+      legacyBrain: false,
+    },
     codexConnected: false,
     claudeCodeConnected: false,
     mcpSetup: { preferredClient: null, completedAt: null },

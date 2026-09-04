@@ -13,10 +13,19 @@ const mocks = vi.hoisted(() => ({
   confirmRun: vi.fn(async () => ({ importRunId: "gbimp_1", enqueued: 0 })),
   cancelRun: vi.fn(async () => ({ importRunId: "gbimp_1", skippedJobs: 0 })),
   retryRun: vi.fn(async () => ({ importRunId: "gbimp_1", deletedCandidates: 0 })),
+  legacyBrainEnabled: vi.fn(async () => false),
+  startWikiRun: vi.fn(async (_input: unknown) => ({
+    run: { id: "gbimp_wiki", status: "discovering" },
+    idempotentReplay: false,
+  })),
+  confirmWikiRun: vi.fn(async () => ({ importRunId: "gbimp_wiki", enqueued: 0 })),
+  cancelWikiRun: vi.fn(async () => ({ importRunId: "gbimp_wiki", skippedJobs: 0 })),
+  retryWikiRun: vi.fn(async () => ({ importRunId: "gbimp_wiki", deletedCandidates: 0 })),
 }));
 
 vi.mock("@opencompany/db/workspaces", () => ({
   getBrainAccess: mocks.getBrainAccess,
+  isLegacyBrainEnabledForWorkspace: mocks.legacyBrainEnabled,
 }));
 vi.mock("@opencompany/db/brain-import", async (importActual) => ({
   ...(await importActual<typeof import("@opencompany/db/brain-import")>()),
@@ -24,9 +33,15 @@ vi.mock("@opencompany/db/brain-import", async (importActual) => ({
   confirmBrainImport: mocks.confirmRun,
   cancelBrainImport: mocks.cancelRun,
   retryBrainImportDiscovery: mocks.retryRun,
+  startWikiImportRunIdempotent: mocks.startWikiRun,
+  confirmWikiImport: mocks.confirmWikiRun,
+  cancelWikiImport: mocks.cancelWikiRun,
+  retryWikiImportDiscovery: mocks.retryWikiRun,
 }));
 
-const { BrainImportApplicationService } = await import("./brain-imports");
+const { BrainImportApplicationService, WikiImportApplicationService } = await import(
+  "./brain-imports"
+);
 
 const member: Actor = {
   userId: "user_1",
@@ -36,6 +51,10 @@ const member: Actor = {
   authenticationMethod: "session",
 };
 const admin: Actor = { ...member, role: "admin" };
+const wikiAdmin: Actor = {
+  ...admin,
+  permissions: ["wiki:read", "wiki:write"],
+};
 
 const connectedGitHub = {
   integration: { integrationId: "integration_gh" },
@@ -52,7 +71,6 @@ function sourcesDetails(overrides: Record<string, unknown> = {}) {
     granola: disconnected,
     fathom: disconnected,
     gmail: disconnected,
-    slack: disconnected,
     linear: disconnected,
     googleDrive: disconnected,
     hubspot: disconnected,
@@ -136,7 +154,7 @@ describe("BrainImportApplicationService", () => {
             repos: [{ fullName: "acme/api" }, { fullName: "not-listed/repo" }],
           },
         },
-        slack: { enabled: false },
+        slack: { enabled: true, integrationId: "integration_slack" },
       },
     });
 
@@ -150,7 +168,7 @@ describe("BrainImportApplicationService", () => {
       { id: "repo_1", fullName: "acme/api" },
     ]);
     expect(Array.isArray(persisted.sourceSelection.github?.config?.events)).toBe(true);
-    expect(persisted.sourceSelection.slack).toEqual({ enabled: false });
+    expect(persisted.sourceSelection.slack).toBeUndefined();
     expect(persisted.sourceSelection.jamie).toEqual({ enabled: false });
   });
 
@@ -162,17 +180,17 @@ describe("BrainImportApplicationService", () => {
         idempotencyKey: "key-1",
         companyUrl: "acme.com",
         sourceSelection: {
-          slack: { enabled: true, integrationId: "integration_slack" },
+          gmail: { enabled: true, integrationId: "integration_gmail" },
         },
       }),
     ).rejects.toMatchObject({
       code: "invalid_argument",
-      message: "Connect Slack in your settings first.",
+      message: "Connect Gmail in your settings first.",
     } satisfies Partial<CoreError>);
     expect(mocks.startRun).not.toHaveBeenCalled();
   });
 
-  it("requires configured scope for GitHub, Slack, and Linear sources", async () => {
+  it("requires configured scope for GitHub sources", async () => {
     const { service: imports } = service();
 
     await expect(
@@ -190,33 +208,6 @@ describe("BrainImportApplicationService", () => {
     ).rejects.toMatchObject({
       code: "invalid_argument",
       message: "Select at least one GitHub repository.",
-    } satisfies Partial<CoreError>);
-
-    const configuredSlack = service({
-      list: async () =>
-        sourcesDetails({
-          slack: { integration: { integrationId: "integration_slack" } },
-          sources: [
-            {
-              provider: "slack",
-              integrationId: "integration_slack",
-              canConfigure: true,
-              config: { channels: [], dms: [] },
-            },
-          ],
-        }),
-    });
-    await expect(
-      configuredSlack.service.start(admin, "brain_1", {
-        idempotencyKey: "key-2",
-        companyUrl: "acme.com",
-        sourceSelection: {
-          slack: { enabled: true, integrationId: "integration_slack" },
-        },
-      }),
-    ).rejects.toMatchObject({
-      code: "invalid_argument",
-      message: "Select at least one Slack channel or DM in Brain Settings first.",
     } satisfies Partial<CoreError>);
   });
 
@@ -275,5 +266,87 @@ describe("BrainImportApplicationService", () => {
     await expect(imports.retry(admin, "brain_1", "gbimp_1")).resolves.toMatchObject({
       status: "discovering",
     });
+  });
+});
+
+describe("WikiImportApplicationService", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.legacyBrainEnabled.mockResolvedValue(false);
+  });
+
+  it("binds a Wiki import to configured source rows and the acting workspace", async () => {
+    const list = vi.fn(
+      async () =>
+        [
+          {
+            provider: "github",
+            integrationId: "integration_gh",
+            integrationStatus: "connected",
+            canConfigure: true,
+            enabled: true,
+            config: { repos: [{ id: "repo_1", fullName: "acme/api" }] },
+          },
+        ] as never,
+    );
+    const service = new WikiImportApplicationService({}, { list });
+
+    await expect(
+      service.start(wikiAdmin, {
+        idempotencyKey: "wiki-1",
+        companyUrl: "acme.com",
+        sourceSelection: {
+          public_web: { enabled: true },
+          github: { enabled: true, integrationId: "integration_gh" },
+          fathom: { enabled: true, integrationId: "integration_fathom" },
+        },
+      }),
+    ).resolves.toMatchObject({ importRunId: "gbimp_wiki", status: "discovering" });
+    expect(mocks.startWikiRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: wikiAdmin,
+        companyUrl: "https://acme.com",
+        sourceSelection: expect.objectContaining({
+          public_web: { enabled: true },
+          github: expect.objectContaining({ integrationId: "integration_gh" }),
+        }),
+      }),
+    );
+    const call = mocks.startWikiRun.mock.calls[0]?.[0] as {
+      sourceSelection: Record<string, unknown>;
+    };
+    expect(call.sourceSelection.fathom).toBeUndefined();
+  });
+
+  it("rejects members and legacy Brain workspaces", async () => {
+    const service = new WikiImportApplicationService({}, { list: vi.fn(async () => []) });
+    await expect(
+      service.start(
+        { ...wikiAdmin, role: "member" },
+        {
+          idempotencyKey: "wiki-1",
+          companyUrl: "acme.com",
+          sourceSelection: {},
+        },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+
+    mocks.legacyBrainEnabled.mockResolvedValue(true);
+    await expect(service.cancel(wikiAdmin, "gbimp_wiki")).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+
+  it("preserves created-by attribution through confirmation", async () => {
+    const service = new WikiImportApplicationService({}, { list: vi.fn(async () => []) });
+    await service.confirm(wikiAdmin, "gbimp_wiki", ["public_web", "public_web", "fathom"]);
+    expect(mocks.confirmWikiRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importRunId: "gbimp_wiki",
+        workspaceId: "workspace_1",
+        actingUserWorkosId: "user_1",
+        enabledProviders: ["public_web"],
+      }),
+    );
   });
 });

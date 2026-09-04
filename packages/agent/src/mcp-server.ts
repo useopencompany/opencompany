@@ -66,7 +66,6 @@ import type { BrainToolInput } from "./chat-ui";
 // application service the browser and runner use.
 export type McpWikiGateway = {
   getAccess(userWorkosId: string): Promise<{
-    enabled: boolean;
     workspaces: Array<{ id: string; name: string; slug: string | null }>;
   }>;
   execute(input: {
@@ -81,6 +80,7 @@ export type McpToolContext = {
   userWorkosId: string;
   gatewayApiKey: string;
   wiki?: McpWikiGateway;
+  onSuccessfulWikiCall?: () => Promise<void>;
   signal?: AbortSignal;
 };
 
@@ -441,7 +441,7 @@ export function registerBrainTools(server: McpServer, ctx: McpToolContext) {
   );
 }
 
-// --- wiki (preview) ---------------------------------------------------------------------------
+// --- wiki -------------------------------------------------------------------------------------
 
 const wikiNonEmptyString = z.string().check(z.minLength(1));
 
@@ -450,6 +450,7 @@ const wikiNonEmptyString = z.string().check(z.minLength(1));
 // workspaces — chat resolves the workspace from the session instead.
 const wikiToolMcpInputSchema = {
   command: z.enum([...WIKI_TOOL_COMMANDS]),
+  depth: z.optional(z.number().check(z.int(), z.minimum(0), z.maximum(10))),
   pages: z.optional(
     z.union([
       wikiNonEmptyString,
@@ -459,6 +460,7 @@ const wikiToolMcpInputSchema = {
   path: z.optional(wikiNonEmptyString),
   body: z.optional(z.string()),
   kind: z.optional(z.enum(["project", "person", "company", "research", "meeting", "other"])),
+  title: z.optional(wikiNonEmptyString),
   query: z.optional(wikiNonEmptyString),
   since: z.optional(wikiNonEmptyString),
   to: z.optional(wikiNonEmptyString),
@@ -482,8 +484,8 @@ export function registerWikiTool(server: McpServer, ctx: McpToolContext) {
   server.registerTool(
     WIKI_TOOL_NAME,
     {
-      title: "Workspace wiki (preview)",
-      description: `${WIKI_TOOL_DESCRIPTION} Available only to users who enabled the wiki preview in Preferences; pass "workspace" (id or slug) when you belong to more than one workspace.`,
+      title: "Workspace wiki",
+      description: `${WIKI_TOOL_DESCRIPTION} Pass "workspace" (id or slug) when you belong to more than one workspace.`,
       inputSchema: wikiToolMcpInputSchema,
       annotations: WIKI_TOOL_ANNOTATIONS,
     },
@@ -502,15 +504,6 @@ export function registerWikiTool(server: McpServer, ctx: McpToolContext) {
           });
         }
         const access = await wiki.getAccess(ctx.userWorkosId);
-        if (!access.enabled) {
-          return mcpTextToolResult({
-            ok: false,
-            stdout: "",
-            stderr: "",
-            error:
-              "The wiki preview is not enabled for this user. Enable it under Preferences in the app.",
-          });
-        }
         const wanted = args.workspace?.trim();
         const matches = wanted
           ? access.workspaces.filter(
@@ -542,6 +535,15 @@ export function registerWikiTool(server: McpServer, ctx: McpToolContext) {
           command,
           idempotencyKey,
         });
+        if (output.ok && ctx.onSuccessfulWikiCall) {
+          try {
+            await ctx.onSuccessfulWikiCall();
+          } catch (error) {
+            console.error("[opencompany] Failed to record MCP setup completion", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
         return mcpTextToolResult(
           output.ok
             ? { ok: true, stdout: "", stderr: "", parsed: output.result }

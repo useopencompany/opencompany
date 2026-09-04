@@ -10,6 +10,7 @@ import type {
 import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
+  getAgentModelDefinition,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
@@ -204,6 +205,8 @@ import {
   archiveHeadlessTask,
   cancelHeadlessTaskRun,
   createHeadlessTask,
+  createHeadlessTaskComment,
+  newHeadlessTaskCommentId,
 } from "@/lib/headless-task-commands";
 import { isRecentChatActivity, isRecentHomeActivity } from "@/lib/home-activity";
 import { alwaysAllowChatActionAction } from "@/lib/integration-account-actions";
@@ -372,6 +375,7 @@ export type SurfaceChatSelection = {
 
 export function Surface({
   tasks,
+  allTasks = tasks,
   schedules = [],
   defaultModel,
   initialChat,
@@ -393,6 +397,7 @@ export function Surface({
   onConversationResolved,
 }: {
   tasks: readonly TaskView[];
+  allTasks?: readonly TaskView[];
   schedules?: readonly TaskScheduleView[];
   defaultModel: string;
   initialChat: ChatSessionView | null;
@@ -451,6 +456,11 @@ export function Surface({
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const pendingProgrammaticPromptRef = useRef<string | null>(null);
+  const pendingTaskCommentRef = useRef<{
+    id: string;
+    body: string;
+    attachmentIds?: string[];
+  } | null>(null);
   const backgroundTaskFocusOriginRef = useRef<Element | null>(null);
   const onboardingKickoffReadRef = useRef(false);
   const onboardingKickoffPromptRef = useRef<string | null>(null);
@@ -556,6 +566,7 @@ export function Surface({
   const conversationRunning = isChatRuntimeActive(conversationRuntime);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
+  const [taskCommentSubmitting, setTaskCommentSubmitting] = useState(false);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [commandPaletteView, setCommandPaletteView] = useState<"search" | "compose">("search");
@@ -600,11 +611,11 @@ export function Surface({
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
   const backgroundInputDirective = parseBackgroundChatDirective(input);
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
-  const workflowMentionsEnabled =
-    taskSpawningEnabled && (!activeTaskConversation || backgroundDirectiveActive);
+  const workflowMentionsEnabled = taskSpawningEnabled && !activeTaskConversation;
   const readOnly = readOnlyNotice !== null;
-  const skillMentionsEnabled = !readOnly;
+  const skillMentionsEnabled = !readOnly && !activeTaskConversation;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
+    if (activeTaskConversation) return false;
     if (!chatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
       return mention.id === "claude" ? claudeCodeConnected : codexConnected;
@@ -904,7 +915,7 @@ export function Surface({
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
     : null;
-  const attachmentsEnabled = Boolean(userWorkosId) && !activeTaskConversation;
+  const attachmentsEnabled = Boolean(userWorkosId) && !readOnly;
   const composerAttachments = useChatAttachments({
     modelName: String(composerChatModel),
     // The Cmd+K compose view mounts a second composer with its own window-level drop
@@ -915,6 +926,7 @@ export function Surface({
       isActivePane &&
       attachmentsEnabled &&
       !engineSubmitting &&
+      !taskCommentSubmitting &&
       !(newChatCommandOpen && commandPaletteView === "compose"),
     ...(composerEngine === "codex" || composerEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
@@ -1106,6 +1118,22 @@ export function Surface({
   );
   const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
+  // Unlike isTaskConversationWorking this ignores viewer permissions: a read-only viewer of a
+  // running task still watches a live trace, which must not compact mid-run.
+  const isTaskRunInFlight = Boolean(
+    activeTaskConversation &&
+      (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
+  );
+  // The message whose trace stays fully expanded. Prefer the turn identified by run metadata;
+  // while work is in flight without one (task runs, transports without a run id yet), protect the
+  // newest assistant message so a streaming trace never compacts mid-turn. A submitting turn has
+  // no assistant row yet, so it must not re-expand the previous turn's collapsed trace.
+  const activeAssistantMessageId =
+    foregroundAssistantMessageId && !isChatTurnTerminal(chatTurnPhase)
+      ? foregroundAssistantMessageId
+      : (isAgentWorking || isTaskRunInFlight) && chatTurnPhase !== "submitting"
+        ? latestAssistantMessageId
+        : null;
   const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
   const activeTurnTimerStartedAtMs =
     foregroundTurn?.startedAtMs ??
@@ -1116,15 +1144,32 @@ export function Surface({
     () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
     [optimisticallyArchivedChatIds, recentChats],
   );
-  const paletteChats = useMemo(
+  const commandPaletteItems = useMemo(
     () =>
       [
-        ...paletteRecentChats.map((chat) => ({ chat, archived: false })),
-        ...archivedChats.map((chat) => ({ chat, archived: true })),
+        ...(taskSpawningEnabled
+          ? allTasks.map((task) => ({
+              kind: "task" as const,
+              task,
+              archived: Boolean(task.archivedAt),
+            }))
+          : []),
+        ...paletteRecentChats.map((chat) => ({
+          kind: "chat" as const,
+          chat,
+          archived: false,
+        })),
+        ...archivedChats.map((chat) => ({
+          kind: "chat" as const,
+          chat,
+          archived: true,
+        })),
       ].toSorted(
-        (a, b) => new Date(b.chat.updatedAt).getTime() - new Date(a.chat.updatedAt).getTime(),
+        (a, b) =>
+          new Date(b.kind === "task" ? b.task.updatedAt : b.chat.updatedAt).getTime() -
+          new Date(a.kind === "task" ? a.task.updatedAt : a.chat.updatedAt).getTime(),
       ),
-    [archivedChats, paletteRecentChats],
+    [allTasks, archivedChats, paletteRecentChats, taskSpawningEnabled],
   );
   const showEngineComposerControls = composerEngine !== null;
 
@@ -1656,6 +1701,14 @@ export function Surface({
     [closeCommandPalette, router],
   );
 
+  const jumpToTask = useCallback(
+    (task: TaskView) => {
+      closeCommandPalette();
+      router.push(`/tasks/${encodeURIComponent(task.displayId)}`);
+    },
+    [closeCommandPalette, router],
+  );
+
   const restoreAndOpenChat = useCallback(
     (chat: ChatSummaryView) => {
       if (restoringChatId) return;
@@ -1683,8 +1736,63 @@ export function Surface({
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (readOnly) return;
-    const prompt = (pendingProgrammaticPromptRef.current ?? input).trim();
+    const rawPrompt = pendingProgrammaticPromptRef.current ?? input;
+    const prompt = rawPrompt.trim();
     pendingProgrammaticPromptRef.current = null;
+    const pendingAttachments = composerAttachments.attachments;
+    const readyAttachments = pendingAttachments.filter(
+      (attachment) => attachment.status === "ready",
+    );
+    if (composerAttachments.isUploading) {
+      toast.error("Wait for attachments to finish uploading.");
+      return;
+    }
+    if (composerAttachments.hasFailed) {
+      toast.error("Remove failed attachments before sending.");
+      return;
+    }
+    if (activeTaskConversation) {
+      if (isTaskConversationWorking || taskCommentSubmitting) return;
+      if (!prompt && readyAttachments.length === 0) return;
+      const attachmentIds = readyAttachments.map((attachment) => attachment.id);
+      const pendingCommand = pendingTaskCommentRef.current;
+      const command =
+        pendingCommand?.body === rawPrompt &&
+        JSON.stringify(pendingCommand.attachmentIds ?? []) === JSON.stringify(attachmentIds)
+          ? pendingCommand
+          : {
+              id: newHeadlessTaskCommentId(),
+              body: rawPrompt,
+              ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+            };
+      pendingTaskCommentRef.current = command;
+      clearError();
+      setInput("");
+      setMentionToken(null);
+      setSelectedMentions([]);
+      composerAttachments.setAttachments([]);
+      setTaskCommentSubmitting(true);
+      void createHeadlessTaskComment(activeTaskConversation.taskId, command, {
+        scopeKey: workspaceId,
+      })
+        .then(() => {
+          revokeAttachmentPreviews(pendingAttachments);
+          if (!mountedRef.current) return;
+          pendingTaskCommentRef.current = null;
+          router.refresh();
+          toast.success("Comment posted. The task is running again.");
+        })
+        .catch((error) => {
+          if (!mountedRef.current) return;
+          if (!inputRef.current?.value) setInput(rawPrompt);
+          composerAttachments.setAttachments(pendingAttachments);
+          toast.error(error instanceof Error ? error.message : "Could not post the comment.");
+        })
+        .finally(() => {
+          if (mountedRef.current) setTaskCommentSubmitting(false);
+        });
+      return;
+    }
     const backgroundChat = parseBackgroundChatDirective(prompt);
     const backgroundLaunch = backgroundChat
       ? resolveBackgroundChatLaunchSelection({
@@ -1706,19 +1814,7 @@ export function Surface({
       return;
     }
 
-    const pendingAttachments = composerAttachments.attachments;
-    const readyAttachments = pendingAttachments.filter(
-      (attachment) => attachment.status === "ready",
-    );
     if (!prompt && readyAttachments.length === 0) return;
-    if (composerAttachments.isUploading) {
-      toast.error("Wait for attachments to finish uploading.");
-      return;
-    }
-    if (composerAttachments.hasFailed) {
-      toast.error("Remove failed attachments before sending.");
-      return;
-    }
 
     const messagePrompt = backgroundChat?.prompt ?? prompt;
     if (!messagePrompt && readyAttachments.length === 0) return;
@@ -2454,6 +2550,7 @@ export function Surface({
   const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextInput = event.target.value;
     pendingProgrammaticPromptRef.current = null;
+    if (pendingTaskCommentRef.current?.body !== nextInput) pendingTaskCommentRef.current = null;
     setInput(nextInput);
     setSelectedMentions((current) =>
       current.filter((mention) => chatMentionIsVisible(nextInput, mention)),
@@ -2622,12 +2719,12 @@ export function Surface({
       >
         <DialogHeader className="sr-only">
           <DialogTitle>
-            {commandPaletteView === "compose" ? "New chat" : "Jump to a chat"}
+            {commandPaletteView === "compose" ? "New chat" : "Jump to recent work"}
           </DialogTitle>
           <DialogDescription>
             {commandPaletteView === "compose"
               ? "Start a new chat that runs in the background."
-              : "Search chats to reopen, or start a new one."}
+              : "Search tasks and chats, or start a new chat."}
           </DialogDescription>
         </DialogHeader>
         <DialogContent
@@ -2667,7 +2764,7 @@ export function Surface({
                 autoFocus
                 value={chatSearchQuery}
                 onValueChange={setChatSearchQuery}
-                placeholder="Search chats or start something new..."
+                placeholder="Search tasks and chats or start something new..."
               />
               <CommandList>
                 <CommandGroup heading="Actions" forceMount>
@@ -2688,54 +2785,88 @@ export function Surface({
                     </CommandShortcut>
                   </CommandItem>
                 </CommandGroup>
-                <CommandEmpty>No matching chats.</CommandEmpty>
-                {paletteChats.length > 0 ? (
-                  <CommandGroup heading="Chats">
-                    {paletteChats.map(({ chat, archived }) => (
-                      <CommandItem
-                        key={chat.id}
-                        value={`chat ${archived ? "archived " : ""}${chat.title} ${chat.id}`}
-                        onSelect={() => (archived ? restoreAndOpenChat(chat) : jumpToChat(chat))}
-                        className="gap-3"
-                      >
-                        {archived && restoringChatId === chat.id ? (
-                          <LoaderCircle
-                            size={16}
-                            strokeWidth={2}
-                            className="shrink-0 animate-spin text-ink-subtle"
-                          />
-                        ) : archived ? (
-                          <Archive size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-                        ) : (
-                          <MessageSquare
-                            size={16}
-                            strokeWidth={2}
-                            className="shrink-0 text-ink-subtle"
-                          />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <p className="truncate text-[13px] font-medium text-ink">
-                              {chat.title}
+                <CommandEmpty>No matching tasks or chats.</CommandEmpty>
+                {commandPaletteItems.length > 0 ? (
+                  <CommandGroup heading="Recent">
+                    {commandPaletteItems.map((item) =>
+                      item.kind === "task" ? (
+                        <CommandItem
+                          key={`task:${item.task.id}`}
+                          value={`task ${item.archived ? "archived " : ""}${item.task.name} ${item.task.prompt} ${item.task.displayId} ${item.task.id}`}
+                          onSelect={() => jumpToTask(item.task)}
+                          className="gap-3"
+                        >
+                          <Target size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="truncate text-[13px] font-medium text-ink">
+                                {item.task.name}
+                              </p>
+                              {item.archived ? (
+                                <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
+                                  Archived
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="truncate text-[12px] text-ink-subtle">
+                              {item.task.displayId} · {item.task.prompt}
                             </p>
-                            {archived ? (
-                              <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
-                                Archived
-                              </span>
-                            ) : null}
                           </div>
-                          {archived ? null : (
-                            <p className="truncate text-[12px] text-ink-subtle">{chat.preview}</p>
+                        </CommandItem>
+                      ) : (
+                        <CommandItem
+                          key={`chat:${item.chat.id}`}
+                          value={`chat ${item.archived ? "archived " : ""}${item.chat.title} ${item.chat.id}`}
+                          onSelect={() =>
+                            item.archived ? restoreAndOpenChat(item.chat) : jumpToChat(item.chat)
+                          }
+                          className="gap-3"
+                        >
+                          {item.archived && restoringChatId === item.chat.id ? (
+                            <LoaderCircle
+                              size={16}
+                              strokeWidth={2}
+                              className="shrink-0 animate-spin text-ink-subtle"
+                            />
+                          ) : item.archived ? (
+                            <Archive
+                              size={16}
+                              strokeWidth={2}
+                              className="shrink-0 text-ink-subtle"
+                            />
+                          ) : (
+                            <MessageSquare
+                              size={16}
+                              strokeWidth={2}
+                              className="shrink-0 text-ink-subtle"
+                            />
                           )}
-                        </div>
-                        {archived ? (
-                          <CommandShortcut className="flex items-center gap-1">
-                            <RotateCcw size={12} strokeWidth={2} />
-                            Restore
-                          </CommandShortcut>
-                        ) : null}
-                      </CommandItem>
-                    ))}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="truncate text-[13px] font-medium text-ink">
+                                {item.chat.title}
+                              </p>
+                              {item.archived ? (
+                                <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
+                                  Archived
+                                </span>
+                              ) : null}
+                            </div>
+                            {item.archived ? null : (
+                              <p className="truncate text-[12px] text-ink-subtle">
+                                {item.chat.preview}
+                              </p>
+                            )}
+                          </div>
+                          {item.archived ? (
+                            <CommandShortcut className="flex items-center gap-1">
+                              <RotateCcw size={12} strokeWidth={2} />
+                              Restore
+                            </CommandShortcut>
+                          ) : null}
+                        </CommandItem>
+                      ),
+                    )}
                   </CommandGroup>
                 ) : null}
               </CommandList>
@@ -2748,7 +2879,7 @@ export function Surface({
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-hidden">
           {mode === "home" ? (
             <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-              <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
+              <div className="flex w-full max-w-[720px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
                 {hasHomeActivity ? (
                   <>
                     {homeTasks.length > 0 ? (
@@ -2887,6 +3018,7 @@ export function Surface({
                       onActionApproval={handleActionApproval}
                       allowActionApproval={message.id === latestAssistantMessageId}
                       isTaskSession={Boolean(activeTaskConversation)}
+                      turnActive={message.id === activeAssistantMessageId}
                     />
                   ))}
                   {isTaskConversationStopping ? (
@@ -2941,7 +3073,7 @@ export function Surface({
                 >
                   {readOnlyNotice}
                 </p>
-              ) : chatSendBlocked ? (
+              ) : !activeTaskConversation && chatSendBlocked ? (
                 <p
                   className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-4 text-ink shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
                   role="alert"
@@ -2955,7 +3087,7 @@ export function Surface({
                     Top up to continue
                   </button>
                 </p>
-              ) : lowCreditBalance && creditBalance ? (
+              ) : !activeTaskConversation && lowCreditBalance && creditBalance ? (
                 <p
                   className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
                   role="status"
@@ -3050,7 +3182,21 @@ export function Surface({
                   ))}
                 </div>
               ) : null}
-              {selectedAdHocTask ? (
+              {activeTaskConversation ? (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                >
+                  <MessageSquare size={13} strokeWidth={2} className="shrink-0" />
+                  <span>
+                    {isTaskConversationWorking
+                      ? "You can comment when the current run finishes."
+                      : taskCommentSubmitting
+                        ? "Posting your comment…"
+                        : "Posting a comment resumes this task."}
+                  </span>
+                </div>
+              ) : selectedAdHocTask ? (
                 <div
                   role="status"
                   data-testid="ad-hoc-task-hint"
@@ -3104,11 +3250,13 @@ export function Surface({
                       name="prompt"
                       value={input}
                       placeholder={
-                        mode === "chat"
-                          ? "Reply..."
-                          : taskSpawningEnabled
-                            ? "Ask a question or describe a task..."
-                            : "Ask opencompany anything..."
+                        activeTaskConversation
+                          ? "Add a comment…"
+                          : mode === "chat"
+                            ? "Reply..."
+                            : taskSpawningEnabled
+                              ? "Ask a question or describe a task..."
+                              : "Ask opencompany anything..."
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
@@ -3131,7 +3279,12 @@ export function Surface({
                           event.currentTarget.selectionStart,
                         )
                       }
-                      disabled={backgroundTaskSubmitting || readOnly}
+                      disabled={
+                        backgroundTaskSubmitting ||
+                        taskCommentSubmitting ||
+                        isTaskConversationWorking ||
+                        readOnly
+                      }
                       readOnly={voiceDictation.isActive}
                       className={cn(
                         "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
@@ -3167,10 +3320,12 @@ export function Surface({
                         )) ||
                       composerAttachments.isUploading ||
                       (!isBackgroundSubmit && isForegroundTurnWorking) ||
+                      isTaskConversationWorking ||
+                      taskCommentSubmitting ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
                       readOnly ||
-                      chatSendBlocked
+                      (!activeTaskConversation && chatSendBlocked)
                     }
                     isGenerating={
                       isBackgroundSubmit
@@ -3179,6 +3334,7 @@ export function Surface({
                     }
                     isStopping={!isBackgroundSubmit && isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
+                    submitsComment={Boolean(activeTaskConversation)}
                     onStop={stopGeneration}
                   />
                 </div>
@@ -3200,7 +3356,12 @@ export function Surface({
                       <button
                         type="button"
                         aria-label="Attach files"
-                        disabled={isForegroundTurnWorking || readOnly || voiceDictation.isActive}
+                        disabled={
+                          isForegroundTurnWorking ||
+                          taskCommentSubmitting ||
+                          readOnly ||
+                          voiceDictation.isActive
+                        }
                         onClick={() => attachmentFileInputRef.current?.click()}
                         className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
                       >
@@ -3208,93 +3369,104 @@ export function Surface({
                       </button>
                     </>
                   ) : null}
-                  <button
-                    type="button"
-                    aria-label="Start voice dictation"
-                    disabled={
-                      isForegroundTurnWorking ||
-                      backgroundTaskSubmitting ||
-                      readOnly ||
-                      voiceDictation.isActive ||
-                      newChatCommandOpen
-                    }
-                    onClick={voiceDictation.start}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
-                  >
-                    <Mic size={15} strokeWidth={1.9} />
-                  </button>
-                  <ModelPicker
-                    value={composerChatModel}
-                    onChange={(model) => {
-                      setSelectedMentions((current) =>
-                        current.filter((mention) => mention.kind !== "engine"),
-                      );
-                      setChatModelOverride(model);
-                      persistLastChatSelection(userWorkosId, model);
-                      if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
-                        setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
-                      } else if (model === CLAUDE_PICKER_VALUE && model !== composerChatModel) {
-                        setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
-                        setCodexPlanModeEnabled(false);
-                        setCodexGoalModeEnabled(false);
-                        setCodexGoalObjective("");
-                        setCodexGoalTokenBudget("");
-                      } else if (model !== CODEX_PICKER_VALUE && model !== CLAUDE_PICKER_VALUE) {
-                        setCodexPlanModeEnabled(false);
-                        setCodexGoalModeEnabled(false);
-                        setCodexGoalObjective("");
-                        setCodexGoalTokenBudget("");
-                      }
-                    }}
-                    disabled={
-                      isForegroundTurnWorking ||
-                      Boolean(chatSessionId) ||
-                      voiceDictation.isActive ||
-                      readOnly
-                    }
-                    codexConnected={codexConnected}
-                    claudeCodeConnected={claudeCodeConnected}
-                    autoModelRoutingEnabled={autoModelRoutingEnabled}
-                  />
-                  {showEngineComposerControls ? (
-                    <EngineComposerControls
-                      model={
-                        composerEngine === "codex"
-                          ? { engine: "codex", value: codexModel, onChange: setCodexModel }
-                          : composerEngine === "claude_code"
-                            ? {
-                                engine: "claude_code",
-                                value: claudeModel,
-                                onChange: setClaudeModel,
-                              }
-                            : null
-                      }
-                      engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
-                      reasoningEffortAvailable={
-                        composerEngine !== "claude_code" ||
-                        claudeCodeModelSupportsReasoningEffort(claudeModel)
-                      }
-                      reasoningEffort={codexReasoningEffort}
-                      planModeEnabled={codexPlanModeEnabled}
-                      planModeAvailable={composerEngine === "codex"}
-                      goalModeAvailable={composerEngine !== "claude_code"}
-                      goalModeEnabled={codexGoalModeEnabled}
-                      goalObjective={codexGoalObjective}
-                      goalTokenBudget={codexGoalTokenBudget}
-                      disabled={isForegroundTurnWorking || readOnly || voiceDictation.isActive}
-                      modelDisabled={
-                        isForegroundTurnWorking ||
-                        Boolean(activeEngineChat) ||
-                        readOnly ||
-                        voiceDictation.isActive
-                      }
-                      onReasoningEffortChange={setCodexReasoningEffort}
-                      onPlanModeEnabledChange={setCodexPlanModeEnabled}
-                      onGoalModeEnabledChange={setCodexGoalModeEnabled}
-                      onGoalObjectiveChange={setCodexGoalObjective}
-                      onGoalTokenBudgetChange={setCodexGoalTokenBudget}
-                    />
-                  ) : null}
+                  {activeTaskConversation ? (
+                    <span className="min-h-7 px-1 text-[11.5px] leading-7 text-ink-subtle">
+                      Comments are sent verbatim to this task.
+                    </span>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        aria-label="Start voice dictation"
+                        disabled={
+                          isForegroundTurnWorking ||
+                          backgroundTaskSubmitting ||
+                          readOnly ||
+                          voiceDictation.isActive ||
+                          newChatCommandOpen
+                        }
+                        onClick={voiceDictation.start}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                      >
+                        <Mic size={15} strokeWidth={1.9} />
+                      </button>
+                      <ModelPicker
+                        value={composerChatModel}
+                        onChange={(model) => {
+                          setSelectedMentions((current) =>
+                            current.filter((mention) => mention.kind !== "engine"),
+                          );
+                          setChatModelOverride(model);
+                          persistLastChatSelection(userWorkosId, model);
+                          if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
+                            setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+                          } else if (model === CLAUDE_PICKER_VALUE && model !== composerChatModel) {
+                            setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+                            setCodexPlanModeEnabled(false);
+                            setCodexGoalModeEnabled(false);
+                            setCodexGoalObjective("");
+                            setCodexGoalTokenBudget("");
+                          } else if (
+                            model !== CODEX_PICKER_VALUE &&
+                            model !== CLAUDE_PICKER_VALUE
+                          ) {
+                            setCodexPlanModeEnabled(false);
+                            setCodexGoalModeEnabled(false);
+                            setCodexGoalObjective("");
+                            setCodexGoalTokenBudget("");
+                          }
+                        }}
+                        disabled={
+                          isForegroundTurnWorking ||
+                          Boolean(chatSessionId) ||
+                          voiceDictation.isActive ||
+                          readOnly
+                        }
+                        codexConnected={codexConnected}
+                        claudeCodeConnected={claudeCodeConnected}
+                        autoModelRoutingEnabled={autoModelRoutingEnabled}
+                      />
+                      {showEngineComposerControls ? (
+                        <EngineComposerControls
+                          model={
+                            composerEngine === "codex"
+                              ? { engine: "codex", value: codexModel, onChange: setCodexModel }
+                              : composerEngine === "claude_code"
+                                ? {
+                                    engine: "claude_code",
+                                    value: claudeModel,
+                                    onChange: setClaudeModel,
+                                  }
+                                : null
+                          }
+                          engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
+                          reasoningEffortAvailable={
+                            composerEngine !== "claude_code" ||
+                            claudeCodeModelSupportsReasoningEffort(claudeModel)
+                          }
+                          reasoningEffort={codexReasoningEffort}
+                          planModeEnabled={codexPlanModeEnabled}
+                          planModeAvailable={composerEngine === "codex"}
+                          goalModeAvailable={composerEngine !== "claude_code"}
+                          goalModeEnabled={codexGoalModeEnabled}
+                          goalObjective={codexGoalObjective}
+                          goalTokenBudget={codexGoalTokenBudget}
+                          disabled={isForegroundTurnWorking || readOnly || voiceDictation.isActive}
+                          modelDisabled={
+                            isForegroundTurnWorking ||
+                            Boolean(activeEngineChat) ||
+                            readOnly ||
+                            voiceDictation.isActive
+                          }
+                          onReasoningEffortChange={setCodexReasoningEffort}
+                          onPlanModeEnabledChange={setCodexPlanModeEnabled}
+                          onGoalModeEnabledChange={setCodexGoalModeEnabled}
+                          onGoalObjectiveChange={setCodexGoalObjective}
+                          onGoalTokenBudgetChange={setCodexGoalTokenBudget}
+                        />
+                      ) : null}
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -5277,8 +5449,8 @@ function automationCommandError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-async function uploadCanonicalAttachment({ file }: { file: File }) {
-  return { ...(await uploadHeadlessChatAttachment({ file })), canonical: true };
+async function uploadCanonicalAttachment({ file, pendingId }: { file: File; pendingId: string }) {
+  return { ...(await uploadHeadlessChatAttachment({ file, pendingId })), canonical: true };
 }
 
 function escapeRegExp(value: string) {
@@ -5629,18 +5801,23 @@ function ChatTitleHeader({
   isTask?: boolean;
 }) {
   const EngineIcon = isCloudCodingEngine(engine) ? ENGINE_REGISTRY[engine].Icon : null;
+  const modelLabel = getAgentModelDefinition(model)?.label ?? model;
   return (
     <div className="flex min-w-0 items-center gap-2 text-ink">
-      {EngineIcon ? (
-        <EngineIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
-      ) : (
-        <ModelProviderIcon
-          modelId={model}
-          size={14}
-          strokeWidth={1.9}
-          className="shrink-0 text-ink-muted"
-        />
-      )}
+      <Tooltip>
+        <TooltipTrigger
+          type="button"
+          aria-label={`Model: ${modelLabel}`}
+          className="inline-flex shrink-0 rounded-sm text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          {EngineIcon ? (
+            <EngineIcon size={14} strokeWidth={1.9} />
+          ) : (
+            <ModelProviderIcon modelId={model} size={14} strokeWidth={1.9} />
+          )}
+        </TooltipTrigger>
+        <TooltipContent>{`Model: ${modelLabel}`}</TooltipContent>
+      </Tooltip>
       <span className="max-w-[min(420px,calc(100vw-7rem))] truncate text-[12.5px] font-medium leading-4">
         {title}
       </span>
@@ -6452,12 +6629,14 @@ function SubmitButton({
   isGenerating,
   isStopping = false,
   startsTask = false,
+  submitsComment = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
   isStopping?: boolean;
   startsTask?: boolean;
+  submitsComment?: boolean;
   onStop: () => void;
 }) {
   if (isStopping) {
@@ -6491,8 +6670,8 @@ function SubmitButton({
   return (
     <button
       type="submit"
-      aria-label={startsTask ? "Start task" : "Send message"}
-      title={startsTask ? "Start task" : undefined}
+      aria-label={startsTask ? "Start task" : submitsComment ? "Post comment" : "Send message"}
+      title={startsTask ? "Start task" : submitsComment ? "Post comment" : undefined}
       disabled={disabled}
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-30"
     >
@@ -6580,6 +6759,14 @@ function getTaskMeta(task: TaskView): {
       icon: X,
       className: "text-ink-subtle",
       detail: `${recurringPrefix}${task.error ?? STATUS_COPY.canceled}`,
+      spin: false,
+    };
+  }
+  if (task.status === "waiting") {
+    return {
+      icon: AlertCircle,
+      className: "text-warning",
+      detail: `${recurringPrefix}${task.outcomeComment ?? STATUS_COPY.waiting}`,
       spin: false,
     };
   }

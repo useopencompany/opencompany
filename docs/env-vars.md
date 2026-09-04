@@ -52,7 +52,8 @@ contracts include:
 - Runner: database, internal/stream tokens, `OPENCOMPANY_API_ORIGIN` and `API_INTERNAL_TOKEN` for
   the internal wiki command endpoint (agent wiki writes cross the canonical API, never the wiki
   database directly), opencompany origin, allowed origins, integration encryption, an explicitly
-  enabled task-worker gate, E2B, Blob (including Plugin data archives), model providers,
+  enabled task-worker gate, the stable `RUNNER_SANDBOX_NAMESPACE` that scopes managed E2B cleanup,
+  E2B, Blob (including Plugin data archives), model providers,
   GitHub/Google/X integration credentials, opencompany PostHog, and Redis values; capability
   controls and provider-specific tuning remain optional.
 - Release: production DB URL, Vercel/Render credentials and project/service IDs, opencompany/API/runner
@@ -76,6 +77,19 @@ query parameters, or a fragment.
 
 `CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
+
+The official GitHub Plugin uses a dedicated personal GitHub App, separate from the workspace
+ingestion App. Put `GITHUB_USER_APP_SLUG`, `GITHUB_USER_APP_CLIENT_ID`,
+`GITHUB_USER_APP_CLIENT_SECRET`, and `GITHUB_USER_APP_STATE_SECRET` in prod `/api`; put the client
+ID and secret in prod `/runner` as well so sandbox sessions can refresh the same expiring user
+credential. The public callback remains
+`${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/integrations/github-user/callback`, relayed by web to the
+API. The App must request Contents, Issues, and Pull requests read/write plus Actions, Checks, and
+Metadata read, with expiring user tokens and user authorization during installation enabled. Set
+its Setup URL to
+`${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/settings/plugins/github` and enable redirect-on-update so App
+updates return to opencompany. Do not reuse or rename the workspace-owned
+`GITHUB_INTEGRATION_*` values.
 
 `BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
 The runner uses it for bounded, durable `PLUGIN_DATA` archives and never injects it into Plugin
@@ -127,7 +141,8 @@ flow and is intentionally omitted from the customer integration index.
 ## Local generated values
 
 `bun run setup` writes branch-specific `DATABASE_URL`, the local API listener/origin and browser
-allowlist, web ports/origins, runner tokens, and Electric configuration to `.env.local`. It mirrors
+allowlist, web ports/origins, runner tokens, a workspace-specific `RUNNER_SANDBOX_NAMESPACE`, and
+Electric configuration to `.env.local`. It mirrors
 only the web auth/proxy/compatibility and observability subset into `apps/web/.env.local`;
 API/runner provider credentials are not copied into that app-local file.
 Do not put branch database URLs or generated local tokens in Infisical. `.env.override.local` may

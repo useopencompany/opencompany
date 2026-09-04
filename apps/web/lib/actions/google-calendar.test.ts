@@ -100,7 +100,7 @@ describe("resolveGoogleCalendarActions", () => {
       id: "google_calendar.list_events",
       provider: "google_calendar",
       capability: "read",
-      permissionMode: "on",
+      permissionMode: "ask",
       params: {
         type: "object",
         additionalProperties: false,
@@ -125,7 +125,7 @@ describe("resolveGoogleCalendarActions", () => {
       permission: {
         provider: "google_calendar",
         capabilityId: "write",
-        label: "Add events",
+        label: "Manage calendar events",
         integrationIds: ["gint_calendar_1"],
       },
       params: {

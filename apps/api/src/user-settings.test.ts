@@ -14,7 +14,7 @@ const actor: Actor = {
 const storedPreferences = {
   timezone: "UTC",
   taskSpawningEnabled: false,
-  wikiEnabled: true,
+  wikiEnabled: true as const,
   taskViewMode: "board" as const,
   imessageEnabled: false,
   autoModelRoutingEnabled: false,
@@ -37,9 +37,9 @@ describe("user settings service", () => {
     const { db, update } = fakeDb({ selectRows: [storedPreferences] });
     const service = createUserSettingsService({ db });
 
-    await expect(
-      service.updatePreferences(actor, { timezone: "UTC", wikiEnabled: true }),
-    ).resolves.toEqual(storedPreferences);
+    await expect(service.updatePreferences(actor, { timezone: "UTC" })).resolves.toEqual(
+      storedPreferences,
+    );
     expect(update).not.toHaveBeenCalled();
   });
 
@@ -53,15 +53,25 @@ describe("user settings service", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it("keeps the compatibility Wiki preference always on without writing", async () => {
+    const { db, update } = fakeDb({ selectRows: [storedPreferences] });
+    const service = createUserSettingsService({ db });
+
+    await expect(service.updatePreferences(actor, { wikiEnabled: false })).resolves.toEqual(
+      storedPreferences,
+    );
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("writes only the changed fields and stamps updatedAt", async () => {
     const now = new Date("2026-08-13T08:00:00.000Z");
     const updated = { ...storedPreferences, taskViewMode: "list" as const };
     const { db, set } = fakeDb({ selectRows: [storedPreferences], updateRows: [updated] });
     const service = createUserSettingsService({ db, now: () => now });
 
-    await expect(
-      service.updatePreferences(actor, { taskViewMode: "list", wikiEnabled: true }),
-    ).resolves.toEqual(updated);
+    await expect(service.updatePreferences(actor, { taskViewMode: "list" })).resolves.toEqual(
+      updated,
+    );
     expect(set).toHaveBeenCalledWith({ taskViewMode: "list", updatedAt: now });
   });
 
@@ -69,7 +79,9 @@ describe("user settings service", () => {
     const { db } = fakeDb({ selectRows: [] });
     const service = createUserSettingsService({ db });
 
-    await expect(service.updatePreferences(actor, { wikiEnabled: false })).rejects.toMatchObject({
+    await expect(
+      service.updatePreferences(actor, { taskSpawningEnabled: true }),
+    ).rejects.toMatchObject({
       status: 404,
       code: "not_found",
     });

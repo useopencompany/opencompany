@@ -30,6 +30,9 @@ function state(
     activeTurnId: "run_1",
     hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
     workspaceId: "workspace_1",
+    workspaceName: "Acme",
+    workspaceSlug: "acme",
+    legacyBrainEnabled: false,
     actorId: "user_1",
     conversationId: "conversation_1",
     sandboxId: "sandbox_1",
@@ -53,6 +56,9 @@ describe("External engine tool capability authority", () => {
     expect(authorizeExternalEngineToolCapability({ capability, state: state(), now })).toEqual({
       actorId: "user_1",
       workspaceId: "workspace_1",
+      workspaceName: "Acme",
+      workspaceSlug: "acme",
+      legacyBrainEnabled: false,
       conversationId: "conversation_1",
       sandboxId: "sandbox_1",
       engine: "claude_code",
@@ -63,6 +69,19 @@ describe("External engine tool capability authority", () => {
     });
   });
 
+  it("authorizes MCP initialization while the claimed engine session is starting", () => {
+    expect(
+      authorizeExternalEngineToolCapability({
+        capability,
+        state: state({ sessionStatus: "starting" }),
+        now,
+      }),
+    ).toMatchObject({
+      conversationId: "conversation_1",
+      engine: "claude_code",
+    });
+  });
+
   it.each([
     ["Codex", { engine: "codex" }],
     [
@@ -70,6 +89,7 @@ describe("External engine tool capability authority", () => {
       {
         engine: "codex",
         brainRef: "brain_1",
+        legacyBrainEnabled: true,
         hostToolContractVersion: CODEX_BRAIN_TOOL_CONTRACT_VERSION,
       },
     ],
@@ -87,6 +107,8 @@ describe("External engine tool capability authority", () => {
     ["revoked membership", { membershipId: "" }],
     ["interrupted turn", { interruptRequestedAt: now }],
     ["settled attempt", { attemptStatus: "succeeded" }],
+    ["failed session", { sessionStatus: "failed" }],
+    ["idle session", { sessionStatus: "idle" }],
   ])("rejects %s authority", (_name, overrides) => {
     expect(
       authorizeExternalEngineToolCapability({ capability, state: state(overrides), now }),

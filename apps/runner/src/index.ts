@@ -16,6 +16,10 @@ import { startAttioFlushWorker } from "./attio-flush-worker";
 import { setBrainImportWakeup, startBrainImportWorker } from "./brain-import-worker";
 import { setBrainIngestWakeup, startBrainIngestWorker } from "./brain-ingest-worker";
 import { startBrainWorkerAdmissionListener } from "./brain-worker-admission";
+import {
+  requireChatAttachmentCleanupToken,
+  startChatAttachmentCleanupWorker,
+} from "./chat-attachment-cleanup-worker";
 import { startCodexChatSelfHealSweeper } from "./codex-chat-self-heal";
 import {
   setCodexChatWakeup,
@@ -38,7 +42,6 @@ import { startSandboxReconciler } from "./sandbox-reconciler";
 import { startTaskScheduleWorker } from "./scheduler";
 import { createServer } from "./server";
 import { activeSlackBotEventCount, drainSlackBotEvents } from "./slack-bot-events";
-import { startSlackFlushWorker } from "./slack-flush-worker";
 import { startStuckWorkMonitor } from "./stuck-work-monitor";
 import { setWikiIngestWakeup, startWikiIngestWorker } from "./wiki-ingest-worker";
 import { startWorkflowEventWorker } from "./workflow-event-worker";
@@ -63,6 +66,7 @@ installProcessErrorBackstop();
 const env = loadEnv();
 const chatPresentation = createChatPresentationStream();
 assertRunnerDbConfig();
+if (env.taskWorkerEnabled) requireChatAttachmentCleanupToken(env);
 // The LLM broker can be left holding unsettled tokens if a runner dies mid-delegation.
 // Sweep them every 60s; the partial-index scan is cheap and the settlement CAS makes it safe
 // across instances.
@@ -96,7 +100,6 @@ const codexChatWorker = env.taskWorkerEnabled
 const brainIngestWorker = env.taskWorkerEnabled ? startBrainIngestWorker(env) : null;
 const wikiIngestWorker = env.taskWorkerEnabled ? startWikiIngestWorker(env) : null;
 const brainImportWorker = env.taskWorkerEnabled ? startBrainImportWorker(env) : null;
-const slackFlushWorker = env.taskWorkerEnabled ? startSlackFlushWorker() : null;
 const linearFlushWorker = env.taskWorkerEnabled ? startLinearFlushWorker() : null;
 const gitHubFlushWorker = env.taskWorkerEnabled ? startGitHubFlushWorker() : null;
 const hubspotFlushWorker = env.taskWorkerEnabled ? startHubspotFlushWorker(env) : null;
@@ -106,6 +109,9 @@ const gmailFlushWorker = env.taskWorkerEnabled ? startGmailFlushWorker(env) : nu
 const granolaPollWorker = env.taskWorkerEnabled ? startGranolaPollWorker() : null;
 const fathomPollWorker = env.taskWorkerEnabled ? startFathomPollWorker() : null;
 const googleDriveSyncWorker = env.taskWorkerEnabled ? startGoogleDriveSyncWorker(env) : null;
+const chatAttachmentCleanupWorker = env.taskWorkerEnabled
+  ? startChatAttachmentCleanupWorker(env, { pool: getDbPool() })
+  : null;
 const stuckWorkMonitor = env.taskWorkerEnabled
   ? startStuckWorkMonitor({
       turnThresholdMs: Math.max(env.codexTimeoutMs + 15 * 60_000, 20 * 60_000),
@@ -113,7 +119,9 @@ const stuckWorkMonitor = env.taskWorkerEnabled
   : null;
 const codexChatSelfHealSweeper =
   env.taskWorkerEnabled && env.codexChatSelfHealEnabled ? startCodexChatSelfHealSweeper() : null;
-const sandboxReconciler = env.taskWorkerEnabled ? startSandboxReconciler() : null;
+const sandboxReconciler = env.taskWorkerEnabled
+  ? startSandboxReconciler({ namespace: env.sandboxNamespace })
+  : null;
 const taskScheduleWorker = codexChatWorker
   ? startTaskScheduleWorker({
       onTaskCreated: () => {
@@ -210,7 +218,6 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
     runnerDrainTask("brain_ingest", brainIngestWorker),
     runnerDrainTask("wiki_ingest", wikiIngestWorker),
     runnerDrainTask("brain_import", brainImportWorker),
-    runnerDrainTask("slack_flush", slackFlushWorker),
     {
       name: "slack_bot_events",
       activeCount: activeSlackBotEventCount,
@@ -225,6 +232,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
     runnerDrainTask("granola_poll", granolaPollWorker),
     runnerDrainTask("fathom_poll", fathomPollWorker),
     runnerDrainTask("google_drive_sync", googleDriveSyncWorker),
+    runnerDrainTask("chat_attachment_cleanup", chatAttachmentCleanupWorker),
     runnerDrainTask("stuck_work_monitor", stuckWorkMonitor),
     runnerDrainTask("codex_chat_self_heal", codexChatSelfHealSweeper),
     runnerDrainTask("sandbox_reconciler", sandboxReconciler),

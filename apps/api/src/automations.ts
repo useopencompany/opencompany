@@ -1,6 +1,6 @@
-import { generateChatTitle } from "@opencompany/agent/chat-title";
 import { normalizeScheduleDefinition } from "@opencompany/agent/schedule-rules";
 import { SkillMentionError } from "@opencompany/agent/skills";
+import { refineWorkflowTaskTitle } from "@opencompany/agent/workflow-task-title";
 import {
   prepareWorkflowRunForUser,
   WorkflowPreparationError,
@@ -14,6 +14,7 @@ import {
   CoreError,
   TaskApplicationService,
   TaskScheduleApplicationService,
+  taskNameFromGoal,
   WorkflowApplicationService,
 } from "@opencompany/core";
 import type { ResolvedChatAttachments } from "@opencompany/db/chat-repository";
@@ -35,7 +36,6 @@ type AutomationServicesInput = {
   runnerUrl?: string;
   runnerToken?: string;
   gatewayApiKey?: string;
-  defer?: (promise: Promise<void>) => void;
   now?: () => Date;
 };
 
@@ -75,7 +75,6 @@ export function createAutomationServices(input: AutomationServicesInput) {
     execute: input.execute,
     resolveAttachments: input.resolveAttachments,
     ...(input.gatewayApiKey ? { gatewayApiKey: input.gatewayApiKey } : {}),
-    ...(input.defer ? { defer: input.defer } : {}),
     ...(input.now ? { now: input.now } : {}),
   });
   const options = {
@@ -108,7 +107,6 @@ type AutomationTaskCreatorInput = {
     attachmentIds: readonly string[];
   }): Promise<ResolvedChatAttachments>;
   gatewayApiKey?: string;
-  defer?: (promise: Promise<void>) => void;
   now?: () => Date;
 };
 
@@ -146,52 +144,46 @@ export function createAutomationTaskCreator(
         ...(command.scheduleId ? { scheduleId: command.scheduleId } : {}),
         ...(command.attachmentIds ? { attachmentIds: command.attachmentIds } : {}),
       });
-      if (command.source === "workflow" && !created.idempotentReplay) {
-        const titleUpdate = refineWorkflowTaskTitle({
-          service,
-          actor: command.actor,
-          taskId: created.task.id,
-          conversationId: created.task.conversationId,
+      if (
+        shouldRefineWorkflowTaskTitle({
+          source: command.source,
           workflowName: command.name,
-          description: command.goal,
-          ...(input.gatewayApiKey ? { apiKey: input.gatewayApiKey } : {}),
-        });
-        if (input.defer) input.defer(titleUpdate);
-        else void titleUpdate;
+          taskName: created.task.name,
+          idempotentReplay: created.idempotentReplay,
+        })
+      ) {
+        const updated = await refineWorkflowTaskTitle(
+          {
+            taskId: created.task.id,
+            conversationId: created.task.conversationId,
+            workflowName: command.name,
+            description: command.goal,
+            actorId: command.actor.userId,
+            ...(input.gatewayApiKey ? { apiKey: input.gatewayApiKey } : {}),
+          },
+          {
+            updateTaskName: (name) => service.updateTask(command.actor, created.task.id, { name }),
+          },
+        );
+        if (updated) return { ...created, task: updated.task };
       }
       return created;
     },
   };
 }
 
-export async function refineWorkflowTaskTitle(input: {
-  service: Pick<TaskApplicationService, "updateTask">;
-  actor: Actor;
-  taskId: string;
-  conversationId: string;
+export function shouldRefineWorkflowTaskTitle(input: {
+  source: "workflow" | "schedule";
   workflowName: string;
-  description: string;
-  apiKey?: string;
-  generateTitle?: typeof generateChatTitle;
+  taskName: string;
+  idempotentReplay: boolean;
 }) {
-  if (!input.apiKey?.trim()) return;
-  try {
-    const title = await (input.generateTitle ?? generateChatTitle)({
-      content: input.description,
-      fallbackTitle: input.workflowName,
-      apiKey: input.apiKey,
-      userWorkosId: input.actor.userId,
-      chatSessionId: input.conversationId,
-    });
-    if (!title || title === input.workflowName) return;
-    await input.service.updateTask(input.actor, input.taskId, { name: title });
-  } catch (error) {
-    console.warn("Workflow Task title refinement failed.", {
-      event: "opencompany.workflow_task_title_failed",
-      task_id: input.taskId,
-      error,
-    });
-  }
+  if (input.source !== "workflow") return false;
+  // New Tasks always get one refinement attempt. On replay, compare against the same canonical
+  // normalization used by Task creation so names such as "ship-feature" and "Ship-feature" do
+  // not incorrectly look like a previously refined title.
+  if (!input.idempotentReplay) return true;
+  return input.taskName === taskNameFromGoal(input.workflowName);
 }
 
 async function prepareWorkflow(

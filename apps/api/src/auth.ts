@@ -259,7 +259,7 @@ async function resolveLocalActor(
       member.workspace_id AS "workspaceId",
       member.role,
       actor_user.task_spawning_enabled AS "taskSpawningEnabled",
-      actor_user.wiki_enabled AS "wikiEnabled"
+      workspace.legacy_brain_enabled AS "legacyBrainEnabled"
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
       ON member.user_workos_id = actor_user.workos_user_id
@@ -287,7 +287,7 @@ async function resolveLocalActor(
     workspaceId: string;
     role: string;
     taskSpawningEnabled: boolean;
-    wikiEnabled: boolean;
+    legacyBrainEnabled: boolean;
   }>(result)[0];
   if (!row) {
     throw new ApiError(
@@ -310,7 +310,7 @@ async function resolveLocalActor(
 // the request authenticator and the internal service-actor resolver.
 function actorPermissions(row: {
   role: string;
-  wikiEnabled: boolean;
+  legacyBrainEnabled: boolean;
   taskSpawningEnabled: boolean;
 }): string[] {
   return [
@@ -318,10 +318,12 @@ function actorPermissions(row: {
     CHAT_WRITE_PERMISSION,
     TASK_READ_PERMISSION,
     TASK_WRITE_PERMISSION,
-    BRAIN_READ_PERMISSION,
     SKILL_READ_PERMISSION,
-    ...(row.role === "admin" ? [BRAIN_WRITE_PERMISSION, SKILL_WRITE_PERMISSION] : []),
-    ...(row.wikiEnabled ? [WIKI_READ_PERMISSION, WIKI_WRITE_PERMISSION] : []),
+    WIKI_READ_PERMISSION,
+    WIKI_WRITE_PERMISSION,
+    ...(row.legacyBrainEnabled ? [BRAIN_READ_PERMISSION] : []),
+    ...(row.role === "admin" ? [SKILL_WRITE_PERMISSION] : []),
+    ...(row.role === "admin" && row.legacyBrainEnabled ? [BRAIN_WRITE_PERMISSION] : []),
     ...(row.taskSpawningEnabled
       ? [
           WORKFLOW_READ_PERMISSION,
@@ -336,8 +338,9 @@ function actorPermissions(row: {
 // Reconstructs an Actor for an explicit (userWorkosId, workspaceId) pair from
 // Postgres, for internal service calls (e.g. the runner→API wiki command
 // endpoint) that name their tenancy but must never be trusted for permissions.
-// Requires the user to exist, have finished onboarding, have the wiki preview
-// enabled, and hold an accessible membership of the named workspace.
+// Requires the user to exist and hold a membership of the named workspace.
+// Invite acceptance can create that membership before onboarding finishes, so
+// membership remains the Wiki authorization boundary in that valid state.
 export async function resolveWikiServiceActor(
   execute: ChatSqlExecute,
   input: { userWorkosId: string; workspaceId: string },
@@ -347,15 +350,13 @@ export async function resolveWikiServiceActor(
       member.workspace_id AS "workspaceId",
       member.role,
       actor_user.task_spawning_enabled AS "taskSpawningEnabled",
-      actor_user.wiki_enabled AS "wikiEnabled"
+      workspace.legacy_brain_enabled AS "legacyBrainEnabled"
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
       ON member.user_workos_id = actor_user.workos_user_id
     JOIN goat.workspaces AS workspace
       ON workspace.id = member.workspace_id
     WHERE actor_user.workos_user_id = ${input.userWorkosId}
-      AND actor_user.onboarded_at IS NOT NULL
-      AND actor_user.wiki_enabled = true
       AND workspace.id = ${input.workspaceId}
     LIMIT 1
   `);
@@ -363,7 +364,7 @@ export async function resolveWikiServiceActor(
     workspaceId: string;
     role: string;
     taskSpawningEnabled: boolean;
-    wikiEnabled: boolean;
+    legacyBrainEnabled: boolean;
   }>(result)[0];
   if (!row) {
     throw new ApiError(403, "forbidden", "The user cannot access the wiki in this workspace.");

@@ -73,6 +73,7 @@ export async function startInfisicalAuthFlow(input: {
     const createdSandbox = await Sandbox.create(input.env.codexE2bTemplate ?? "codex", {
       envs: {},
       metadata: managedSandboxMetadata({
+        namespace: input.env.sandboxNamespace,
         ownerKind: "infisical_auth_flow",
         ownerId: id,
         metadata: {

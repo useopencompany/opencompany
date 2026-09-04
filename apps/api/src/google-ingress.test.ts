@@ -34,8 +34,19 @@ vi.mock("@opencompany/agent/integrations/google-oauth", async (importOriginal) =
 }));
 
 const sentinelDb = { sentinel: "db" };
+const refreshPluginRegistrations = vi.fn(async () => undefined);
 
-function ingress(overrides: { noWorkspaces?: boolean; authError?: ApiError } = {}) {
+function ingress(
+  overrides: {
+    noWorkspaces?: boolean;
+    authError?: ApiError;
+    refreshPluginRegistrations?: (input: {
+      provider: "gmail" | "google_calendar" | "google_drive";
+      userWorkosId: string;
+      workspaceIds: string[];
+    }) => Promise<void>;
+  } = {},
+) {
   vi.mocked(listWorkspacesForUser).mockResolvedValue(
     overrides.noWorkspaces
       ? []
@@ -45,6 +56,7 @@ function ingress(overrides: { noWorkspaces?: boolean; authError?: ApiError } = {
   );
   return createGoogleIngress({
     db: sentinelDb,
+    refreshPluginRegistrations,
     identify: async () => {
       if (overrides.authError) throw overrides.authError;
       return {
@@ -56,6 +68,9 @@ function ingress(overrides: { noWorkspaces?: boolean; authError?: ApiError } = {
         activeBrainId: null,
       };
     },
+    ...(overrides.refreshPluginRegistrations
+      ? { refreshPluginRegistrations: overrides.refreshPluginRegistrations }
+      : {}),
   });
 }
 
@@ -87,6 +102,39 @@ describe("Google ingress", () => {
       "https://opencompany.example.com/api/integrations/gmail/callback",
     );
     expect(location.searchParams.get("state")).toBeTruthy();
+    expect(location.searchParams.get("scope")).not.toContain("gmail.modify");
+  });
+
+  it("requests the full Gmail scope only for the official MCP plugin", async () => {
+    const response = await ingress().start(
+      "gmail",
+      new Request(
+        "https://api.example.com/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+      ),
+    );
+    const location = new URL(response.headers.get("location") ?? "");
+
+    expect(location.searchParams.get("scope")?.split(" ")).toContain(
+      "https://www.googleapis.com/auth/gmail.modify",
+    );
+  });
+
+  it("requests only the official MCP scopes from the Google Drive plugin page", async () => {
+    const response = await ingress().start(
+      "google_drive",
+      new Request(
+        "https://api.example.com/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
+      ),
+    );
+
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.searchParams.get("scope")?.split(" ")).toEqual([
+      "https://www.googleapis.com/auth/drive.readonly",
+      "https://www.googleapis.com/auth/drive.file",
+      "openid",
+      "email",
+      "profile",
+    ]);
   });
 
   it("redirects anonymous browsers to the web sign-in", async () => {
@@ -151,7 +199,7 @@ describe("Google ingress", () => {
       tokens: {
         access_token: "at",
         refresh_token: "rt",
-        scope: "openid email https://www.googleapis.com/auth/gmail.readonly",
+        scope: "openid email https://www.googleapis.com/auth/gmail.modify",
       },
       expiresAt: new Date(Date.now() + 3_600_000),
     } as never);
@@ -164,8 +212,9 @@ describe("Google ingress", () => {
 
     const state = createGoogleIntegrationState({
       provider: "gmail",
+      access: "gmail_mcp",
       userWorkosId: "user_1",
-      returnTo: "/settings",
+      returnTo: "/settings/plugins/gmail",
     });
     const response = await ingress().callback(
       "gmail",
@@ -176,7 +225,16 @@ describe("Google ingress", () => {
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location") ?? "");
     expect(location.origin).toBe("https://opencompany.example.com");
+    expect(location.pathname).toBe("/settings/plugins/gmail");
     expect(location.searchParams.get("setup")).toBe("connected");
+    expect(exchangeGoogleCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "gmail",
+        scopes: expect.arrayContaining(["https://www.googleapis.com/auth/gmail.modify"]),
+      }),
+      "abc",
+      "https://opencompany.example.com/api/integrations/gmail/callback",
+    );
     expect(connectGoogleIntegration).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: "gmail",
@@ -185,6 +243,90 @@ describe("Google ingress", () => {
         db: expect.objectContaining({ sentinel: "db" }),
       }),
     );
+    expect(refreshPluginRegistrations).toHaveBeenCalledWith({
+      provider: "gmail",
+      userWorkosId: "user_1",
+      workspaceIds: ["workspace_1"],
+    });
+  });
+
+  it("refreshes installed plugin discovery after Google Calendar connects", async () => {
+    vi.mocked(exchangeGoogleCode).mockResolvedValue({
+      tokens: {
+        access_token: "at",
+        refresh_token: "rt",
+        scope: [
+          "openid",
+          "email",
+          "https://www.googleapis.com/auth/calendar.readonly",
+          "https://www.googleapis.com/auth/calendar.events",
+        ].join(" "),
+      },
+      expiresAt: new Date(Date.now() + 3_600_000),
+    } as never);
+    vi.mocked(fetchGoogleUserInfo).mockResolvedValue({
+      sub: "google-sub-1",
+      email: "ada@example.com",
+      name: "Ada",
+    } as never);
+    vi.mocked(connectGoogleIntegration).mockResolvedValue(undefined as never);
+    const state = createGoogleIntegrationState({
+      provider: "google_calendar",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/google-calendar",
+    });
+
+    const response = await ingress().callback(
+      "google_calendar",
+      new Request(
+        `https://api.example.com/integrations/google-calendar/callback?state=${encodeURIComponent(state)}&code=abc`,
+      ),
+    );
+
+    expect(response.status).toBe(302);
+    expect(refreshPluginRegistrations).toHaveBeenCalledWith({
+      provider: "google_calendar",
+      userWorkosId: "user_1",
+      workspaceIds: ["workspace_1"],
+    });
+  });
+
+  it("refreshes installed Drive plugin discovery after a Drive account connects", async () => {
+    const refreshPluginRegistrations = vi.fn(async () => undefined);
+    vi.mocked(exchangeGoogleCode).mockResolvedValue({
+      tokens: {
+        access_token: "at",
+        refresh_token: "rt",
+        scope:
+          "openid email https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file",
+      },
+      expiresAt: new Date(Date.now() + 3_600_000),
+    } as never);
+    vi.mocked(fetchGoogleUserInfo).mockResolvedValue({
+      sub: "google-drive-sub-1",
+      email: "ada@example.com",
+      name: "Ada",
+    } as never);
+    vi.mocked(connectGoogleIntegration).mockResolvedValue(undefined as never);
+
+    const state = createGoogleIntegrationState({
+      provider: "google_drive",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/google-drive",
+    });
+    const response = await ingress({ refreshPluginRegistrations }).callback(
+      "google_drive",
+      new Request(
+        `https://api.example.com/integrations/google-drive/callback?state=${encodeURIComponent(state)}&code=abc`,
+      ),
+    );
+
+    expect(response.status).toBe(302);
+    expect(refreshPluginRegistrations).toHaveBeenCalledWith({
+      provider: "google_drive",
+      userWorkosId: "user_1",
+      workspaceIds: ["workspace_1"],
+    });
   });
 
   describe("drive webhook", () => {

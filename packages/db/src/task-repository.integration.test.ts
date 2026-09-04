@@ -3,6 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import {
+  ACTION_HOST_TOOL_CONTRACT_VERSION,
+  CHAT_HOST_TOOL_CONTRACT_VERSION,
+} from "@opencompany/agent-runtime";
+import {
   type Actor,
   TASK_READ_PERMISSION,
   TASK_WRITE_PERMISSION,
@@ -28,6 +32,9 @@ const migrationPaths = [
   "0223_goat_task_projection_preservation.sql",
   "0226_goat_immutable_skill_bundles.sql",
   "0228_goat_plugins.sql",
+  "0245_goat_task_activities.sql",
+  "0246_goat_task_waiting_status.sql",
+  "0248_goat_chat_attachment_upload_idempotency.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -457,6 +464,17 @@ describe("Postgres Task repository", () => {
     });
     expect(replay).toEqual({ ...first, idempotentReplay: true });
 
+    await expect(
+      database.query<{ host_tool_contract_version: string }>(
+        `SELECT host_tool_contract_version
+         FROM goat.codex_chat_sessions
+         WHERE chat_session_id = $1`,
+        [first.task.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ host_tool_contract_version: CHAT_HOST_TOOL_CONTRACT_VERSION }],
+    });
+
     expect(
       (
         await database.query<{
@@ -464,15 +482,39 @@ describe("Postgres Task repository", () => {
           conversations: number;
           messages: number;
           runs: number;
+          activities: number;
         }>(`
           SELECT
             (SELECT COUNT(*)::int FROM goat.tasks) AS tasks,
             (SELECT COUNT(*)::int FROM goat.chat_sessions WHERE kind = 'task') AS conversations,
             (SELECT COUNT(*)::int FROM goat.chat_messages) AS messages,
-            (SELECT COUNT(*)::int FROM goat.codex_chat_turns) AS runs
+            (SELECT COUNT(*)::int FROM goat.codex_chat_turns) AS runs,
+            (SELECT COUNT(*)::int FROM goat.task_activities) AS activities
         `)
       ).rows,
-    ).toEqual([{ tasks: 1, conversations: 1, messages: 2, runs: 1 }]);
+    ).toEqual([{ tasks: 1, conversations: 1, messages: 2, runs: 1, activities: 1 }]);
+    await expect(
+      database.query<{
+        task_id: string;
+        author: string;
+        author_workos_id: string;
+        kind: string;
+        metadata: Record<string, unknown>;
+      }>(`
+        SELECT task_id, author, author_workos_id, kind, metadata
+        FROM goat.task_activities
+      `),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          task_id: first.task.id,
+          author: "user",
+          author_workos_id: "user_1",
+          kind: "created",
+          metadata: { source: "manual" },
+        },
+      ],
+    });
     expect(
       (
         await database.query<{
@@ -525,6 +567,42 @@ describe("Postgres Task repository", () => {
     await expect(
       service.createTask(actor(), { ...command, goal: "A conflicting goal" }),
     ).rejects.toMatchObject({ code: "idempotency_conflict" });
+  });
+
+  it("rejects retired models when creating a new Codex Task", async () => {
+    await expect(
+      service.createTask(actor(), {
+        idempotencyKey: "retired-codex-model",
+        goal: "Review the repository",
+        engine: "codex",
+        model: "openai/gpt-5.5",
+        source: "manual",
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_argument",
+      message: "Unsupported codex Task model.",
+    });
+  });
+
+  it("stamps external-engine Tasks with the action host-tool contract", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "codex-task-host-contract",
+      goal: "Review the repository",
+      engine: "codex",
+      model: "openai/gpt-5.6-sol",
+      source: "manual",
+    });
+
+    await expect(
+      database.query<{ host_tool_contract_version: string }>(
+        `SELECT host_tool_contract_version
+         FROM goat.codex_chat_sessions
+         WHERE chat_session_id = $1`,
+        [created.task.conversationId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ host_tool_contract_version: ACTION_HOST_TOOL_CONTRACT_VERSION }],
+    });
   });
 
   it("snapshots currently enabled Plugin IDs into the Workflow Harness at Task creation", async () => {
@@ -648,6 +726,342 @@ describe("Postgres Task repository", () => {
     ).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("records a user comment verbatim and reopens its canonical Task run atomically", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "task-comment-resume",
+      goal: "Start with a plan and wait for approval.",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "manual",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'completed', completed_at = now()
+       WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_sessions
+       SET status = 'idle', active_turn_id = NULL
+       WHERE chat_session_id = $1`,
+      [created.task.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.tasks
+       SET status = 'waiting', stage = 'completed', result = 'Here is the plan.',
+           reported_outcome = 'needs_attention', outcome_comment = 'Approve the plan.', attempts = 1
+       WHERE id = $1`,
+      [created.task.id],
+    );
+
+    const body = "  Approved — also rename the config flag.\n";
+    const resumed = await service.createComment(actor(), created.task.displayId.toLowerCase(), {
+      id: "task_comment_1",
+      body,
+    });
+
+    expect(resumed).toMatchObject({
+      task: {
+        id: created.task.id,
+        status: "running",
+        outcome: { result: null, error: null, reportedStatus: null, comment: null },
+      },
+      comment: {
+        id: "task_comment_1",
+        taskId: created.task.id,
+        authorWorkosId: "user_1",
+        body,
+      },
+      idempotentReplay: false,
+    });
+    await expect(
+      database.query<{
+        status: string;
+        stage: string;
+        attempts: number;
+        runtime_status: string;
+        active_turn_id: string;
+        user_content: string;
+        user_task_id: string;
+        assistant_content: string;
+        run_prompt: string;
+        run_result_mode: string;
+        run_status: string;
+        run_owner: string;
+        event_type: string;
+        comment_body: string;
+        comment_author: string;
+        status_activity: string;
+      }>(
+        `SELECT
+           task.status,
+           task.stage,
+           task.attempts,
+           runtime.status AS runtime_status,
+           runtime.active_turn_id,
+           user_message.content AS user_content,
+           user_message.task_id AS user_task_id,
+           assistant_message.content AS assistant_content,
+           run.prompt AS run_prompt,
+           run.settings->>'taskResultMode' AS run_result_mode,
+           run.status AS run_status,
+           run.user_workos_id AS run_owner,
+           event.type AS event_type,
+           comment.body AS comment_body,
+           comment.author_workos_id AS comment_author,
+           resumed.body AS status_activity
+         FROM goat.tasks AS task
+         JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = task.session_id
+         JOIN goat.codex_chat_turns AS run ON run.id = $2
+         JOIN goat.chat_messages AS user_message ON user_message.id = run.user_message_id
+         JOIN goat.chat_messages AS assistant_message ON assistant_message.id = run.assistant_message_id
+         JOIN goat.run_events AS event ON event.run_id = run.id AND event.type = 'run.queued'
+         JOIN goat.task_activities AS comment ON comment.id = 'task_comment_1'
+         JOIN goat.task_activities AS resumed
+           ON resumed.task_id = task.id AND resumed.kind = 'status_changed'
+         WHERE task.id = $1`,
+        [created.task.id, resumed.runId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          status: "running",
+          stage: "queued",
+          attempts: 2,
+          runtime_status: "queued",
+          active_turn_id: resumed.runId,
+          user_content: body,
+          user_task_id: created.task.id,
+          assistant_content: "",
+          run_prompt: body,
+          run_result_mode: "assistant_final",
+          run_status: "queued",
+          run_owner: "user_1",
+          event_type: "run.queued",
+          comment_body: body,
+          comment_author: "user_1",
+          status_activity: "Resumed by user.",
+        },
+      ],
+    });
+
+    await expect(
+      service.createComment(actor(), created.task.id, { id: "task_comment_1", body }),
+    ).resolves.toMatchObject({
+      messageId: resumed.messageId,
+      assistantMessageId: resumed.assistantMessageId,
+      runId: resumed.runId,
+      idempotentReplay: true,
+    });
+    await expect(
+      service.createComment(actor(), created.task.id, {
+        id: "task_comment_1",
+        body: "Changed after the first request.",
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await expect(
+      service.createComment(actor(), created.task.id, {
+        id: "task_comment_2",
+        body: "A second comment while active.",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.createComment(
+        actor({ userId: "user_2", workspaceId: "workspace_2" }),
+        created.task.id,
+        { id: "task_comment_other_workspace", body: "Not authorized." },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    expect(
+      (
+        await database.query<{ messages: number; runs: number; comments: number }>(
+          `SELECT
+             (SELECT COUNT(*)::int FROM goat.chat_messages WHERE session_id = $1) AS messages,
+             (SELECT COUNT(*)::int FROM goat.codex_chat_turns WHERE chat_session_id = $1) AS runs,
+             (SELECT COUNT(*)::int FROM goat.task_activities
+               WHERE task_id = $2 AND kind = 'comment') AS comments`,
+          [created.task.conversationId, created.task.id],
+        )
+      ).rows,
+    ).toEqual([{ messages: 4, runs: 2, comments: 1 }]);
+  });
+
+  it("allows a workspace member to comment but keeps the resumed Run owned by the Task owner", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "task-member-comment",
+      goal: "Ask the workspace for review.",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "manual",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns SET status = 'completed', completed_at = now() WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_sessions SET status = 'idle', active_turn_id = NULL
+       WHERE chat_session_id = $1`,
+      [created.task.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.tasks SET status = 'succeeded', stage = 'completed' WHERE id = $1`,
+      [created.task.id],
+    );
+
+    const result = await service.createComment(
+      actor({ userId: "user_3", role: "member" }),
+      created.task.id,
+      {
+        id: "task_comment_member",
+        body: "Please add the customer quote.",
+      },
+    );
+
+    expect(result.comment.authorWorkosId).toBe("user_3");
+    await expect(
+      database.query<{ run_owner: string; comment_author: string }>(
+        `SELECT run.user_workos_id AS run_owner, activity.author_workos_id AS comment_author
+         FROM goat.codex_chat_turns AS run
+         JOIN goat.task_activities AS activity ON activity.id = 'task_comment_member'
+         WHERE run.id = $1`,
+        [result.runId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ run_owner: "user_1", comment_author: "user_3" }],
+    });
+  });
+
+  it("claims attachments when an attachment-only comment resumes a Task", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "task-attachment-comment",
+      goal: "Review the updated screenshot.",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "manual",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns SET status = 'completed', completed_at = now() WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_sessions SET status = 'idle', active_turn_id = NULL
+       WHERE chat_session_id = $1`,
+      [created.task.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.tasks SET status = 'succeeded', stage = 'completed' WHERE id = $1`,
+      [created.task.id],
+    );
+
+    const uploads = new PostgresChatAttachmentRepository(
+      execute,
+      () => new Date("2026-08-11T10:00:00.000Z"),
+    );
+    await uploads.reserve({
+      actor: actor(),
+      commandId: "attachment_comment_command_1",
+      idempotencyKey: "task-comment-attachment-upload",
+      requestHash: "b".repeat(64),
+      attachmentId: "attachment_comment_1",
+      blobPathname: "private/user_1/attachment_comment_1/content",
+      expiresAt: new Date("2026-08-12T10:00:00.000Z"),
+    });
+    await uploads.complete({
+      commandId: "attachment_comment_command_1",
+      format: "image",
+      mediaType: "image/png",
+      filename: "updated.png",
+      sizeBytes: 1024,
+      blobUrl: "https://blob.invalid/updated.png",
+      extractedText: null,
+    });
+    const attachmentService = new TaskApplicationService(
+      new PostgresTaskRepository(execute, {
+        now: () => new Date("2026-08-11T10:00:00.000Z"),
+        resolveAttachments: (input) => uploads.resolve(input),
+      }),
+    );
+    const command = {
+      id: "task_comment_attachment_1",
+      body: "",
+      attachmentIds: ["attachment_comment_1"],
+    };
+
+    const resumed = await attachmentService.createComment(actor(), created.task.id, command);
+    await expect(
+      attachmentService.createComment(actor(), created.task.id, command),
+    ).resolves.toMatchObject({
+      messageId: resumed.messageId,
+      assistantMessageId: resumed.assistantMessageId,
+      runId: resumed.runId,
+      idempotentReplay: true,
+    });
+    await expect(
+      database.query<{
+        claimed_message_id: string;
+        attachment_id: string;
+        message_content: string;
+        command_claimed_at: Date;
+        command_cleaned_at: Date;
+      }>(
+        `SELECT
+           upload.claimed_message_id,
+           message.attachments->0->>'id' AS attachment_id,
+           message.content AS message_content,
+           command.claimed_at AS command_claimed_at,
+           command.cleaned_at AS command_cleaned_at
+         FROM goat.chat_attachment_uploads AS upload
+         JOIN goat.chat_messages AS message ON message.id = upload.claimed_message_id
+         JOIN goat.chat_attachment_upload_commands AS command
+           ON command.attachment_id = upload.id
+         WHERE upload.id = 'attachment_comment_1'`,
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          claimed_message_id: resumed.messageId,
+          attachment_id: "attachment_comment_1",
+          message_content: "",
+          command_claimed_at: new Date("2026-08-11T10:00:00.000Z"),
+          command_cleaned_at: new Date("2026-08-11T10:00:00.000Z"),
+        },
+      ],
+    });
+  });
+
+  it("rejects comments on archived Tasks", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "task-archived-comment",
+      goal: "Finish and archive.",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "manual",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns SET status = 'completed', completed_at = now() WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_sessions SET status = 'idle', active_turn_id = NULL
+       WHERE chat_session_id = $1`,
+      [created.task.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.tasks
+       SET status = 'succeeded', stage = 'completed', archived_at = now()
+       WHERE id = $1`,
+      [created.task.id],
+    );
+
+    await expect(
+      service.createComment(actor(), created.task.id, {
+        id: "task_comment_archived",
+        body: "Reopen this.",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
   it("uses a stable cursor and accepts either opaque or display Task identity", async () => {
     const first = await service.createTask(actor(), {
       idempotencyKey: "task-page-1",
@@ -684,19 +1098,27 @@ describe("Postgres Task repository", () => {
       () => new Date("2026-08-11T10:00:00.000Z"),
     );
     await expect(
-      uploads.create({
+      uploads.reserve({
         actor: actor(),
-        id: "attachment_1",
+        commandId: "attachment_command_1",
+        idempotencyKey: "task-attachment-upload",
+        requestHash: "a".repeat(64),
+        attachmentId: "attachment_1",
+        blobPathname: "private/user_1/attachment_1/content",
+        expiresAt: new Date("2026-08-12T10:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ attachmentId: "attachment_1" });
+    await expect(
+      uploads.complete({
+        commandId: "attachment_command_1",
         format: "pdf",
         mediaType: "application/pdf",
         filename: "launch.pdf",
         sizeBytes: 2048,
-        blobPathname: "private/user_1/launch.pdf",
         blobUrl: "https://blob.invalid/launch.pdf",
         extractedText: "Private launch context",
-        expiresAt: new Date("2026-08-12T10:00:00.000Z"),
       }),
-    ).resolves.toMatchObject({ id: "attachment_1" });
+    ).resolves.toMatchObject({ id: "attachment_1", created: true });
     let resolutions = 0;
     const attachmentService = new TaskApplicationService(
       new PostgresTaskRepository(execute, {
@@ -725,16 +1147,27 @@ describe("Postgres Task repository", () => {
     expect(resolutions).toBe(1);
     expect(
       (
-        await database.query<{ claimed_message_id: string; claimed_at: Date }>(`
-          SELECT claimed_message_id, claimed_at
-          FROM goat.chat_attachment_uploads
-          WHERE id = 'attachment_1'
+        await database.query<{
+          claimed_message_id: string;
+          claimed_at: Date;
+          command_claimed_at: Date;
+          command_cleaned_at: Date;
+        }>(`
+          SELECT upload.claimed_message_id, upload.claimed_at,
+                 command.claimed_at AS command_claimed_at,
+                 command.cleaned_at AS command_cleaned_at
+          FROM goat.chat_attachment_uploads AS upload
+          JOIN goat.chat_attachment_upload_commands AS command
+            ON command.attachment_id = upload.id
+          WHERE upload.id = 'attachment_1'
         `)
       ).rows,
     ).toEqual([
       {
         claimed_message_id: first.messageId,
         claimed_at: new Date("2026-08-11T10:00:00.000Z"),
+        command_claimed_at: new Date("2026-08-11T10:00:00.000Z"),
+        command_cleaned_at: new Date("2026-08-11T10:00:00.000Z"),
       },
     ]);
   });
@@ -970,6 +1403,8 @@ const BASE_SCHEMA = `
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   );
+  ALTER TABLE goat.tasks ADD CONSTRAINT goat_tasks_status_check
+    CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'canceled'));
   CREATE UNIQUE INDEX goat_tasks_session_idx ON goat.tasks(session_id) WHERE session_id IS NOT NULL;
   CREATE TABLE goat.task_messages (
     id text PRIMARY KEY,

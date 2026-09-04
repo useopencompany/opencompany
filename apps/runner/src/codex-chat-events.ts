@@ -23,6 +23,7 @@ import {
 } from "@opencompany/analytics/product/server";
 import type { RunEventDraft, RunExecutionRepository } from "@opencompany/core";
 import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
+import { normalizePostgresText, stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import {
   type ChatMessageDebugTrace,
   CODEX_CHAT_EVENT_TYPES,
@@ -39,6 +40,10 @@ import { rowsFromExecute } from "./sql-exec";
 import { settleDurableTurn, type TaskTurnCompletion } from "./task-turn";
 
 const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1" as const;
+
+// Item id for the settled-task-result text part appended at finalize. Distinct from every
+// harness-emitted itemId so the client renders it as its own final assistant message.
+const TASK_RESULT_ITEM_ID = "opencompany-task-settled-result" as const;
 
 // Live deltas already stream to the client over SSE run_events; the durable chat_messages row only
 // needs periodic checkpoints plus a guaranteed terminal write. Debouncing the row write (instead of
@@ -141,14 +146,16 @@ export function createExternalEngineProjector(input: {
   };
 
   const computeContent = () =>
-    redact(
-      parts
-        .filter(
-          (part): part is Extract<CodexUiMessagePart, { type: "text" }> => part.type === "text",
-        )
-        .map((part) => part.text)
-        .filter((text) => text.trim())
-        .join("\n\n"),
+    normalizePostgresText(
+      redact(
+        parts
+          .filter(
+            (part): part is Extract<CodexUiMessagePart, { type: "text" }> => part.type === "text",
+          )
+          .map((part) => part.text)
+          .filter((text) => text.trim())
+          .join("\n\n"),
+      ),
     );
 
   const persistAssistantMessage = async (content: string, options: AssistantWriteOptions) => {
@@ -166,7 +173,7 @@ export function createExternalEngineProjector(input: {
       await getDb().execute(sql`
         UPDATE goat.chat_messages AS message
         SET content = ${content},
-            debug_trace = ${JSON.stringify(debugTrace)}::jsonb,
+            debug_trace = ${stringifyPostgresJson(debugTrace)}::jsonb,
             updated_at = ${new Date()}
         WHERE message.id = ${target.assistantMessageId}
           AND message.role = 'assistant'
@@ -212,8 +219,8 @@ export function createExternalEngineProjector(input: {
                  ${target.turnId},
                  ${eventKey},
                  ${event.type},
-                 ${JSON.stringify(redactJson(event.payload, redact))}::jsonb,
-                 ${JSON.stringify(redactJson(event.rawEvent, redact))}::jsonb,
+                 ${stringifyPostgresJson(redactJson(event.payload, redact))}::jsonb,
+                 ${stringifyPostgresJson(redactJson(event.rawEvent, redact))}::jsonb,
                  ${new Date()}
           WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
           ON CONFLICT (codex_chat_turn_id, event_key)
@@ -502,6 +509,18 @@ export function createExternalEngineProjector(input: {
   };
 
   return {
+    appendNotice(text: string) {
+      return serializeProjection(async () => {
+        const notice = text.trim();
+        if (!notice || parts.some((part) => part.type === "text" && part.text === notice)) return;
+        parts = [
+          ...parts,
+          { type: "text", text: notice, itemId: "opencompany-github-auth-notice" },
+        ];
+        await syncAssistantMessage({ error: turnError, force: true });
+      });
+    },
+
     push(rawEvents: Record<string, unknown>[]) {
       return serializeProjection(async () => {
         for (const raw of rawEvents) {
@@ -565,7 +584,7 @@ export function createExternalEngineProjector(input: {
                  ${typeof request.params.itemId === "string" ? request.params.itemId : null},
                  ${request.method},
                  'pending',
-                 ${JSON.stringify(redactJson(request.params, redact))}::jsonb,
+                 ${stringifyPostgresJson(redactJson(request.params, redact))}::jsonb,
                  ${now},
                  ${now}
           WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
@@ -632,7 +651,7 @@ export function createExternalEngineProjector(input: {
             )
             SELECT ${approvalId}, ${target.turnId}, ${target.canonicalAttemptId ?? null},
                    ${toolCallId}, 'acp_permission', ${redact(title)},
-                   ${JSON.stringify(optionIds)}::jsonb, 'pending', ${now}, ${now}
+                   ${stringifyPostgresJson(optionIds)}::jsonb, 'pending', ${now}, ${now}
             WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
             RETURNING id
           `),
@@ -695,7 +714,7 @@ export function createExternalEngineProjector(input: {
       summary: ExternalEngineTurnSummary,
       options: {
         taskCompletion?: TaskTurnCompletion | null;
-        replacementContent?: string | null;
+        settledResultContent?: string | null;
       } = {},
     ) {
       return serializeProjection(async () => {
@@ -715,11 +734,16 @@ export function createExternalEngineProjector(input: {
         });
         await reconcilePublishedArtifacts();
         if (summary.status === "success") {
-          if (options.replacementContent?.trim()) {
-            parts = [
-              ...parts.filter((part) => part.type !== "text"),
-              { type: "text", text: options.replacementContent.trim() },
-            ];
+          const settledResult = options.settledResultContent?.trim();
+          // A rewritten task result (e.g. the Brain report pointer) becomes the turn's final
+          // message. Append it instead of replacing the streamed text parts so the trace keeps
+          // its chronological text/tool interleaving; the stable itemId keeps it a distinct
+          // message boundary and dedupes a finalize replay after crash recovery.
+          if (
+            settledResult &&
+            !parts.some((part) => part.type === "text" && part.itemId === TASK_RESULT_ITEM_ID)
+          ) {
+            parts = [...parts, { type: "text", text: settledResult, itemId: TASK_RESULT_ITEM_ID }];
           }
           // Safety net: if no assistant.completed event produced a text part, fall back to the
           // accumulator's result so the turn never ends visually empty.

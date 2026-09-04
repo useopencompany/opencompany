@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-09-03
+
+### Added
+- Official plugins let you connect your own tools and pick exactly which actions opencompany can take: Slack, GitHub, Google Calendar, Render, SigNoz, and Better Stack are all available now (#1505, #1494, #1513, #1541, #1533, #1496) — @louis and @opencompany-bot.
+- Add a plugin in one click, straight from the plugin overview, instead of stepping through a separate review first (#1536) — @louis.
+- Skills-only plugins are here: install a playbook like `yc-advise` that adds its own `/` commands, no connected tool required (#1525) — @louis.
+- Connect your personal GitHub account, kept separate from workspace ingestion, so coding sessions and tools act as you — and opencompany now walks you through granting repository access when it's missing (#1475, #1506) — @louis.
+- Route chat and task turns through your own ChatGPT/Codex subscription: pick a connected account in the new Inference settings and GPT 5.6 Sol and Terra run against it at no extra cost (#1488, #1493) — @opencompany-bot.
+- Ask opencompany to update one of your workspace skills right from chat (#1519) — @louis.
+
+### Changed
+- Wiki is now your workspace's knowledge system by default. Owner onboarding is shorter, and connecting sources or importing company context stays available from Wiki after setup. Brain stays available behind a legacy setting (#1527, #1543, #1548) — @louis.
+- The old built-in Slack integration is retired in favor of the Slack plugin; reconnect Slack once through the plugin to keep it working (#1508) — @louis.
+- The workspace Usage page is rebuilt around one daily-spend chart, broken down by where your spend goes, so you can see how much you're spending and which way it's trending at a glance (#1512) — @louis.
+- Long coding chats stay readable: earlier Codex and Claude tool calls collapse behind a single disclosure while the latest reply and anything still running stay in view (#1529) — @louis.
+- Long chats load faster — older reasoning and tool details now load only when you expand them (#1487) — @opencompany-bot.
+- Reaching your Hobby plan's member limit now explains what's going on and links straight to the upgrade, instead of a silently disabled invite form (#1530) — @louis.
+
+### Fixed
+- Pending action approvals show up right away in older chats, with their full details and controls, instead of waiting on a separate fetch (#1522) — @louis.
+- Reloading a Claude or Codex chat keeps the model you were using — Fable no longer quietly switches to another model on your next message (#1486) — @opencompany-bot.
+- The built-in opencompany connector no longer occasionally shows as disconnected at the start of a Claude session (#1544) — @louis.
+- Workflow tasks get a proper generated title instead of keeping the raw workflow name (#1524, #1538) — @louis.
+- Follow-up questions on report-producing tasks now answer in the conversation instead of creating another report when you ask for a summary or clarification (#1540) — @louis.
+- Scheduled follow-ups from Claude tasks now run at the requested time instead of appearing scheduled and then never starting (#1546) — @louis.
+- Wiki commands no longer fail when GPT 5.6 leaves an optional input blank, so tasks can keep browsing and updating pages (#1547) — @louis.
+- Messages with emoji or other unusual characters save reliably instead of sometimes failing a reply midway (#1511) — @louis.
+
+## [1.21.0] - 2026-09-01
+
+### Added
+- The official Linear plugin now installs in one click: pin it to your workspace, choose exactly which Linear actions opencompany is allowed to take, and approve anything sensitive before it runs — replacing the old Linear integration card (#1468) — @louis.
+- Coding sessions can now use your wiki: Codex and Claude sandboxes reach the same wiki tools as chat, so a coding task can pull context from your pages or write results back (#1480) — @opencompany-bot.
+
+### Changed
+- Long, busy chats stay fast: heavy conversations now refresh their snapshot behind the scenes instead of slowing down as they grow (#1485) — @opencompany-bot.
+
+## [1.20.0] - 2026-08-28
+
+### Fixed
+- Coding sessions hold on through more dropped connections: when a long-running command loses its stream mid-run, the session now reconnects and keeps going instead of failing (#1459) — @louis.
+- Scheduled workflows you set up before Skills launched now run again on schedule, instead of failing to start (#1457) — @opencompany-bot.
+
 ## [1.19.0] - 2026-08-27
 
 ### Added

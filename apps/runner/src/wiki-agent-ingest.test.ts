@@ -1,4 +1,4 @@
-import { normalizeSlackConversationWindow } from "@opencompany/brain";
+import { normalizeGmailThreadWindow } from "@opencompany/brain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const aiMock = vi.hoisted(() => ({
@@ -22,16 +22,16 @@ vi.mock("@opencompany/observability/braintrust", () => ({
 }));
 
 import {
+  buildCompanyImportSourceContextHeader,
   buildGitHubSourceContextHeader,
   buildGmailSourceContextHeader,
   buildLinearSourceContextHeader,
   buildMeetingSourceContextHeader,
-  buildSlackSourceContextHeader,
   buildWikiIngestUserMessage,
   buildWikiSourceContextHeader,
-  placeMovingAnthropicCacheBreakpoint,
   runWikiAgentIngest,
   WIKI_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
+  WIKI_AGENT_INGEST_MODEL,
   WIKI_AGENT_INGEST_SYSTEM_PROMPT,
   WikiAgentOutcomeError,
   WikiIngestBudgetError,
@@ -92,15 +92,19 @@ function generate(input: {
   text: string;
   toolInput?: Record<string, unknown>;
   stepUsage?: ReturnType<typeof usage>;
+  stepCount?: number;
 }) {
   aiMock.generateText.mockImplementationOnce(async (options: any) => {
     if (input.toolInput) await options.tools.wiki.execute(input.toolInput);
     const stepUsage = input.stepUsage ?? usage();
-    await options.onStepFinish({ usage: stepUsage });
+    const stepCount = input.stepCount ?? 1;
+    for (let step = 0; step < stepCount; step += 1) {
+      await options.onStepFinish({ usage: stepUsage });
+    }
     return {
       text: input.text,
-      steps: [{}],
-      totalUsage: stepUsage,
+      steps: Array.from({ length: stepCount }, () => ({})),
+      totalUsage: usage(stepUsage.inputTokens * stepCount, stepUsage.outputTokens * stepCount),
     };
   });
 }
@@ -113,7 +117,7 @@ function triageResult(
   }> = {},
 ) {
   return {
-    model: "openai/gpt-5.4-nano",
+    model: WIKI_AGENT_INGEST_MODEL,
     decision,
     reason: overrides.reason ?? (decision === "skip" ? "obvious chatter" : "durable decision"),
     entityHints: overrides.entityHints ?? (decision === "skip" ? [] : ["Acme API", "Billing"]),
@@ -161,9 +165,111 @@ function githubInput() {
   };
 }
 
+function companyImportInput(
+  executeCommand: NonNullable<Parameters<typeof runWikiAgentIngest>[0]["executeCommand"]>,
+) {
+  return {
+    ...input(executeCommand),
+    sourceProvider: "opencompany-import" as const,
+    sourceType: "run" as const,
+    sourceRef: "opencompany-import:run:gbimp_1:research",
+    title: "Acme context import",
+    contentHash: "hash_import",
+    normalizedPayload: {
+      sourceProvider: "opencompany-import",
+      sourceType: "run",
+      externalId: "gbimp_1:research",
+      sourceRef: "opencompany-import:run:gbimp_1:research",
+      title: "Acme context import",
+      occurredAt: occurredAt.toISOString(),
+      capturedAt: occurredAt.toISOString(),
+      contentHash: "hash_import",
+      content: {
+        phase: "research",
+        importRunId: "gbimp_1",
+        companyUrl: "https://acme.example",
+        companyDomain: "acme.example",
+        searches: [],
+        results: [],
+      },
+    },
+  };
+}
+
 describe("opencompany wiki librarian agent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("writes company-import pages through the API command boundary as the acting user", async () => {
+    const executeCommand = vi.fn(async () => ({
+      ok: true as const,
+      result: { action: "created", path: "companies/acme" },
+    }));
+    generate({
+      text: "Created the company profile.",
+      toolInput: {
+        command: "write",
+        path: "companies/acme",
+        title: "Acme",
+        kind: "company",
+        body: "# Acme",
+      },
+    });
+
+    await expect(runWikiAgentIngest(companyImportInput(executeCommand))).resolves.toMatchObject({
+      mutations: 1,
+      skipped: false,
+    });
+    expect(executeCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace_123",
+        actorId: "user_123",
+        toolInput: expect.objectContaining({ command: "write", kind: "company" }),
+      }),
+    );
+  });
+
+  it("rejects company-import writes with a non-company/person kind before the API call", async () => {
+    const executeCommand = vi.fn();
+    generate({
+      text: "Could not create the page.",
+      toolInput: {
+        command: "write",
+        path: "research/acme",
+        title: "Acme",
+        kind: "research",
+        body: "# Acme",
+      },
+    });
+
+    await expect(runWikiAgentIngest(companyImportInput(executeCommand))).rejects.toBeInstanceOf(
+      WikiAgentOutcomeError,
+    );
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("gives company imports explicit company/person kind guidance", () => {
+    expect(
+      buildCompanyImportSourceContextHeader({
+        sourceProvider: "opencompany-import",
+        sourceType: "run",
+        sourceRef: "opencompany-import:run:gbimp_1:research",
+        title: "Acme context import",
+        occurredAt,
+        sourceConfig: {},
+      }),
+    ).toContain("kind `company`");
+    expect(
+      buildCompanyImportSourceContextHeader({
+        sourceProvider: "opencompany-import",
+        sourceType: "run",
+        sourceRef: "opencompany-import:run:gbimp_1:candidate:gmail:gbimpc_1",
+        title: "Acme customer context",
+        occurredAt,
+        sourceConfig: {},
+      }),
+    ).toContain("supplied company context");
   });
 
   it("uses one wiki tool and classifies a successful mutation", async () => {
@@ -184,15 +290,23 @@ describe("opencompany wiki librarian agent", () => {
     const result = await runWikiAgentIngest(input(executeCommand));
 
     expect(result).toMatchObject({
+      model: WIKI_AGENT_INGEST_MODEL,
       skipped: false,
       mutations: 1,
       toolCalls: 1,
       pages: [{ path: "meetings/roadmap-review", title: "Roadmap Review", action: "created" }],
     });
     const generation = aiMock.generateText.mock.calls[0]?.[0] as any;
+    expect(generation.model).toEqual({ model: WIKI_AGENT_INGEST_MODEL });
     expect(Object.keys(generation.tools)).toEqual(["wiki"]);
-    expect(generation.messages[0].providerOptions.anthropic.cacheControl.type).toBe("ephemeral");
-    expect(generation.messages[1].providerOptions.anthropic.cacheControl.type).toBe("ephemeral");
+    expect(generation.providerOptions.gateway.caching).toBe("auto");
+    expect(generation.system).toBe(WIKI_AGENT_INGEST_SYSTEM_PROMPT);
+    expect(generation.messages).toEqual([
+      expect.objectContaining({ role: "user", content: expect.any(String) }),
+    ]);
+    expect(generation.messages).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ providerOptions: expect.anything() })]),
+    );
     expect(executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: "workspace_123",
@@ -251,7 +365,7 @@ describe("opencompany wiki librarian agent", () => {
   });
 
   it("raises a budget error after the soft stop without a mutation", async () => {
-    generate({ text: "No write completed.", stepUsage: usage(1_000_000, 0) });
+    generate({ text: "No write completed.", stepUsage: usage(1_000_000, 0), stepCount: 7 });
 
     await expect(runWikiAgentIngest(input(vi.fn()))).rejects.toMatchObject({
       name: "WikiIngestBudgetError",
@@ -312,15 +426,7 @@ describe("opencompany wiki librarian agent", () => {
     expect(granolaHeader).toContain("not a standalone transcript archive");
   });
 
-  it("builds Slack and Gmail guidance with job-scoped source references", () => {
-    const slackHeader = buildSlackSourceContextHeader({
-      sourceProvider: "slack",
-      sourceType: "conversation",
-      sourceRef: "slack:T123:C123:100.000:200.000",
-      title: "#product",
-      occurredAt,
-      sourceConfig: {},
-    });
+  it("builds Gmail guidance with job-scoped source references", () => {
     const gmailHeader = buildGmailSourceContextHeader({
       sourceProvider: "gmail",
       sourceType: "thread",
@@ -332,9 +438,6 @@ describe("opencompany wiki librarian agent", () => {
       },
     });
 
-    expect(slackHeader).toContain("decisions, commitments, durable facts");
-    expect(slackHeader).toContain("transient chatter");
-    expect(slackHeader).toContain("[[source:slack:T123:C123:100.000:200.000]]");
     expect(gmailHeader).toContain("sender and thread context");
     expect(gmailHeader).toContain("facts about external contacts");
     expect(gmailHeader).toContain("Trusted source guidance: Only capture customer commitments.");
@@ -371,11 +474,11 @@ describe("opencompany wiki librarian agent", () => {
     expect(githubHeader).toContain("finish with SKIP");
   });
 
-  it("short-circuits a Slack job when cheap triage returns skip", async () => {
+  it("short-circuits a Gmail job when cheap triage returns skip", async () => {
     const runTriage = vi.fn(async () => triageResult("skip"));
 
-    await expect(runWikiAgentIngest(slackInput(vi.fn()), { runTriage })).resolves.toMatchObject({
-      model: "openai/gpt-5.4-nano",
+    await expect(runWikiAgentIngest(gmailInput(vi.fn()), { runTriage })).resolves.toMatchObject({
+      model: WIKI_AGENT_INGEST_MODEL,
       skipped: true,
       skipMode: "triage",
       reason: "obvious chatter",
@@ -393,7 +496,7 @@ describe("opencompany wiki librarian agent", () => {
     const runTriage = vi.fn(async () => triageResult("skip"));
 
     await expect(runWikiAgentIngest(githubInput(), { runTriage })).resolves.toMatchObject({
-      model: "openai/gpt-5.4-nano",
+      model: WIKI_AGENT_INGEST_MODEL,
       skipped: true,
       skipMode: "triage",
       toolCalls: 0,
@@ -405,23 +508,23 @@ describe("opencompany wiki librarian agent", () => {
     expect(aiMock.generateText).not.toHaveBeenCalled();
   });
 
-  it("passes triage entity hints into the full Slack librarian message", async () => {
+  it("passes triage entity hints into the full Gmail librarian message", async () => {
     generate({ text: "SKIP: already captured" });
 
-    await runWikiAgentIngest(slackInput(vi.fn()), {
+    await runWikiAgentIngest(gmailInput(vi.fn()), {
       runTriage: vi.fn(async () => triageResult("ingest", { entityHints: ["Acme", "Onboarding"] })),
     });
 
     const generation = aiMock.generateText.mock.calls[0]?.[0] as any;
-    expect(generation.messages[1].content).toContain("## Cheap triage handoff");
-    expect(generation.messages[1].content).toContain("- Acme\n- Onboarding");
+    expect(generation.messages[0].content).toContain("## Cheap triage handoff");
+    expect(generation.messages[0].content).toContain("- Acme\n- Onboarding");
   });
 
   it("falls through to full wiki ingest when cheap triage fails", async () => {
     generate({ text: "SKIP: nothing durable" });
 
     await expect(
-      runWikiAgentIngest(slackInput(vi.fn()), {
+      runWikiAgentIngest(gmailInput(vi.fn()), {
         runTriage: vi.fn(async () => {
           throw new Error("triage provider unavailable");
         }),
@@ -442,9 +545,9 @@ describe("opencompany wiki librarian agent", () => {
     });
     expect(result.budget.modelCostUsdMicros).toBeGreaterThan(25);
     const generation = aiMock.generateText.mock.calls[0]?.[0] as any;
-    expect(generation.messages[1].content).toContain("## Cheap triage handoff");
-    expect(generation.messages[1].content).toContain("- Acme API");
-    expect(generation.messages[1].content).toContain("- Billing");
+    expect(generation.messages[0].content).toContain("## Cheap triage handoff");
+    expect(generation.messages[0].content).toContain("- Acme API");
+    expect(generation.messages[0].content).toContain("- Billing");
   });
 
   it("falls through to the GitHub wiki agent when triage fails", async () => {
@@ -459,49 +562,30 @@ describe("opencompany wiki librarian agent", () => {
     });
     expect(aiMock.generateText).toHaveBeenCalledOnce();
   });
-
-  it("moves the Anthropic cache breakpoint to the newest non-static message", () => {
-    const marked = placeMovingAnthropicCacheBreakpoint([
-      { role: "system", content: "system" },
-      { role: "user", content: "source" },
-      {
-        role: "assistant",
-        content: "old",
-        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-      },
-      { role: "tool", content: [] },
-    ] as any);
-
-    expect(marked[2]?.providerOptions).not.toHaveProperty("anthropic");
-    expect(marked[3]?.providerOptions).toMatchObject({
-      anthropic: { cacheControl: { type: "ephemeral" } },
-    });
-  });
 });
 
-function slackInput(
+function gmailInput(
   executeCommand: NonNullable<Parameters<typeof runWikiAgentIngest>[0]["executeCommand"]>,
 ) {
-  const item = normalizeSlackConversationWindow({
-    windowId: "gslkwin_123",
-    teamId: "T123",
-    channelId: "C123",
-    channelName: "product",
-    channelType: "channel",
+  const item = normalizeGmailThreadWindow({
+    windowId: "ggmwin_123",
+    threadId: "thread_123",
+    subject: "Acme onboarding",
     messages: [
       {
-        ts: "1724493600.000100",
-        userId: "U123",
-        userName: "Ada",
-        text: "Acme approved the onboarding plan.",
+        messageId: "message_123",
+        direction: "received",
+        from: "ada@acme.example",
+        sentAt: occurredAt.toISOString(),
+        bodyText: "Acme approved the onboarding plan.",
       },
     ],
     flushedAt: occurredAt.toISOString(),
   });
   return {
     ...input(executeCommand),
-    sourceProvider: "slack" as const,
-    sourceType: "conversation" as const,
+    sourceProvider: "gmail" as const,
+    sourceType: "thread" as const,
     sourceRef: item.sourceRef,
     title: item.title,
     contentHash: item.contentHash,

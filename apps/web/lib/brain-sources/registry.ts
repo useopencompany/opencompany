@@ -8,7 +8,6 @@ import {
   Handshake,
   ListTodo,
   Mail,
-  MessageSquare,
   NotebookPen,
   Video,
 } from "lucide-react";
@@ -92,15 +91,6 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     connectHref: "/api/integrations/github/start?returnTo=/settings/integrations",
   },
   {
-    id: "slack",
-    name: "Slack",
-    description: "Ingest channel conversations into this brain.",
-    icon: MessageSquare,
-    connectionKind: "oauth",
-    available: true,
-    connectHref: "/api/integrations/slack/start?returnTo=/settings/integrations",
-  },
-  {
     id: "linear",
     name: "Linear",
     description: "Ingest selected issue and comment events from selected teams into this brain.",
@@ -131,7 +121,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
 ];
 
 // Providers whose ingestion scope must be chosen after the account connects —
-// channels, teams, repos, CRM objects, Drive files, or (for Gmail) confirmed
+// teams, repos, CRM objects, Drive files, or (for Gmail) confirmed
 // email events. Authorizing the account is not enough for these: nothing feeds
 // the brain until the user picks what to ingest, so onboarding opens a focused
 // config surface right after connect.
@@ -141,7 +131,6 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
 // connect instead of prompting for config.
 export function brainSourceNeedsConfig(id: BrainSourceConfigProvider): boolean {
   return (
-    id === "slack" ||
     id === "linear" ||
     id === "github" ||
     id === "gmail" ||

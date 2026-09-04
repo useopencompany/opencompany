@@ -55,6 +55,13 @@ import {
   saveJamieWebhookApiKey,
 } from "@opencompany/agent/integrations/jamie";
 import {
+  connectRenderMcpIntegration,
+  getRenderIntegrationState,
+  isValidRenderApiKey,
+  type RenderProviderState,
+  validateRenderApiKey,
+} from "@opencompany/agent/integrations/render-mcp";
+import {
   connectStripeIntegration,
   disconnectStripeIntegration,
   getStripeIntegrationState,
@@ -118,6 +125,7 @@ export type IntegrationAccountService = {
   disconnectAttio(actor: Actor, integrationId: string): Promise<void>;
   connectFathom(actor: Actor, apiKey: string): Promise<FathomProviderState>;
   connectGranola(actor: Actor, apiKey: string): Promise<GranolaProviderState>;
+  connectRender(actor: Actor, apiKey: string): Promise<RenderProviderState>;
   startImessagePairing(actor: Actor, phone: string): Promise<void>;
   confirmImessagePairing(actor: Actor, code: string): Promise<ImessageProviderState>;
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
@@ -133,6 +141,14 @@ export function createIntegrationAccountService(input: {
   resolveImessageProvider?: () => ImessageProvider | null;
   generatePairingCode?: () => string;
   runner?: RunnerClient;
+  refreshRenderPluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceId: string;
+  }) => Promise<void>;
+  refreshStripePluginRegistrations?: (input: {
+    userWorkosId: string;
+    workspaceId: string;
+  }) => Promise<void>;
 }): IntegrationAccountService {
   const db = input.db;
   const now = input.now ?? (() => new Date());
@@ -174,7 +190,10 @@ export function createIntegrationAccountService(input: {
     },
 
     async getUsage(actor, integrationId) {
-      await requireOwnPersonalIntegration(db, actor, integrationId);
+      const integration = await requireOwnPersonalIntegration(db, actor, integrationId);
+      if (integration.provider === "slack") {
+        return { affectedBrainSourceCount: 0 };
+      }
       try {
         const [row] = await db
           .select({ count: sql<number>`count(*)::integer` })
@@ -194,13 +213,8 @@ export function createIntegrationAccountService(input: {
       if (!isCapabilityMode(mode) || !isCapabilityId(capabilityId)) {
         throw new ApiError(400, "invalid_request", "Unknown permission mode.");
       }
-      await requireOwnPersonalIntegration(db, actor, integrationId);
-      const [row] = await db
-        .select({ provider: integrations.provider })
-        .from(integrations)
-        .where(eq(integrations.id, integrationId))
-        .limit(1);
-      const capability = row ? providerCapability(row.provider, capabilityId) : undefined;
+      const integration = await requireManageableCapabilityIntegration(db, actor, integrationId);
+      const capability = providerCapability(integration.provider, capabilityId);
       if (!capability) {
         throw new ApiError(400, "invalid_request", "This integration has no such permission.");
       }
@@ -348,6 +362,41 @@ export function createIntegrationAccountService(input: {
         return await getGranolaIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(error, "Could not save the Granola API key.", "granola_connect");
+      }
+    },
+
+    async connectRender(actor, apiKey) {
+      const trimmed = apiKey.trim();
+      if (!isValidRenderApiKey(trimmed)) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "Render API keys start with rnd_. Check the key and try again.",
+        );
+      }
+      try {
+        const validation = await validateRenderApiKey(trimmed);
+        if (!validation.ok) throw new ApiError(400, "invalid_request", validation.error);
+        await connectRenderMcpIntegration({
+          userWorkosId: actor.userId,
+          apiKey: trimmed,
+          owner: validation.owner,
+          db,
+        });
+        await input
+          .refreshRenderPluginRegistrations?.({
+            userWorkosId: actor.userId,
+            workspaceId: actor.workspaceId,
+          })
+          .catch((error) => {
+            logger.warn("Render connected but plugin discovery refresh failed", {
+              event: "opencompany.render_plugin_refresh_failed",
+              error_message: error instanceof Error ? error.message : String(error),
+            });
+          });
+        return await getRenderIntegrationState(actor.userId, db);
+      } catch (error) {
+        throw commandFailure(error, "Could not save the Render API key.", "render_connect");
       }
     },
 
@@ -504,6 +553,17 @@ export function createIntegrationAccountService(input: {
           identity: validation.identity,
           db,
         });
+        await input
+          .refreshStripePluginRegistrations?.({
+            userWorkosId: actor.userId,
+            workspaceId: actor.workspaceId,
+          })
+          .catch((error) => {
+            logger.warn("Stripe connected but plugin discovery refresh failed", {
+              event: "opencompany.stripe_plugin_refresh_failed",
+              error_message: error instanceof Error ? error.message : String(error),
+            });
+          });
         return await getStripeIntegrationState(actor.workspaceId, db);
       } catch (error) {
         throw commandFailure(
@@ -596,7 +656,7 @@ export function createIntegrationAccountService(input: {
 
 async function requireOwnPersonalIntegration(db: DbLike, actor: Actor, integrationId: string) {
   const [row] = await db
-    .select({ id: integrations.id })
+    .select({ id: integrations.id, provider: integrations.provider })
     .from(integrations)
     .where(
       and(
@@ -607,6 +667,38 @@ async function requireOwnPersonalIntegration(db: DbLike, actor: Actor, integrati
     )
     .limit(1);
   if (!row) throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
+  return row;
+}
+
+async function requireManageableCapabilityIntegration(
+  db: DbLike,
+  actor: Actor,
+  integrationId: string,
+) {
+  const [row] = await db
+    .select({
+      id: integrations.id,
+      provider: integrations.provider,
+      userWorkosId: integrations.userWorkosId,
+      workspaceId: integrations.workspaceId,
+    })
+    .from(integrations)
+    .where(eq(integrations.id, integrationId))
+    .limit(1);
+  if (!row) throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
+
+  if (row.workspaceId !== null) {
+    if (row.workspaceId !== actor.workspaceId) {
+      throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
+    }
+    requireAdmin(actor, "Only workspace admins can manage this integration's permissions.");
+    return row;
+  }
+
+  if (row.userWorkosId !== actor.userId) {
+    throw new ApiError(404, "not_found", OWNER_ONLY_MESSAGE);
+  }
+  return row;
 }
 
 async function disconnectOwnedPersonalIntegration(db: DbLike, actor: Actor, integrationId: string) {

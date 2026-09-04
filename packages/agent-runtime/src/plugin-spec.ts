@@ -2,11 +2,11 @@
 //
 // This module contains no I/O. It validates the manifest against the published 1.0.0 contract,
 // discovers the immediate child components of `skills/`, and parses MCP server declarations. It
-// validates every official transport (stdio, streamable-http, sse) but selects only stdio for
-// execution, because that is the only transport this release runs. Failures are surfaced at the
-// boundary the spec assigns them: a manifest violation rejects the whole package, an invalid
-// `mcp.json` disables MCP without discarding valid skills, and an invalid individual server entry
-// is skipped and reported while other servers keep loading.
+// validates every official transport (stdio, streamable-http, sse), selects stdio for the frozen
+// contained runtime, and registers remote entries for the server-side action gateway. Failures are
+// surfaced at the boundary the spec assigns them: a manifest violation rejects the whole package,
+// an invalid `mcp.json` disables MCP without discarding valid skills, and an invalid individual
+// server entry is skipped and reported while other servers keep loading.
 
 export class PluginSpecError extends Error {
   constructor(message: string) {
@@ -42,6 +42,31 @@ export type PluginManifestResult = {
   manifest: PluginManifest;
   // Unknown top-level fields, reported and ignored per the schema-closure rule.
   ignoredFields: string[];
+};
+
+export const OPENCOMPANY_CAPABILITIES_EXTENSION = "so.opencompany.capabilities";
+
+export type PluginCapabilityId = "read" | "query" | "draft" | "write";
+export type PluginCapabilityMode = "on" | "ask" | "off";
+
+export type PluginCapabilityDefinition = {
+  id: PluginCapabilityId;
+  label: string;
+  defaultMode: PluginCapabilityMode;
+  tools: string[];
+};
+
+export type PluginCapabilitiesReport =
+  | { status: "absent" }
+  | { present: true; status: "ignored"; reason: string }
+  | { present: true; status: "parsed"; issues: string[] };
+
+export type PluginCapabilitiesResult = {
+  // Only populated for an explicitly trusted, reviewed package source. The raw extension remains in
+  // the manifest for standards-compliant round-tripping, but untrusted definitions never reach the
+  // gateway registration record.
+  definitions: PluginCapabilityDefinition[];
+  report: PluginCapabilitiesReport;
 };
 
 // Manifest name rule: 1-64 chars, lowercase alphanumerics, hyphens, and periods, alphanumeric
@@ -160,6 +185,103 @@ export function parsePluginManifest(jsonText: string): PluginManifestResult {
   return { manifest, ignoredFields };
 }
 
+// Parse opencompany's permission extension without making it part of package validity. Unknown
+// extension namespaces remain ignored by the client. Problems in our namespace are reported and
+// the valid groups are retained; an invalid or ambiguously mapped tool therefore falls back to the
+// gateway's uncurated Ask policy instead of rejecting otherwise useful skills.
+export function parsePluginCapabilities(
+  extensions: Record<string, unknown> | undefined,
+  options: { trusted: boolean },
+): PluginCapabilitiesResult {
+  const value = extensions?.[OPENCOMPANY_CAPABILITIES_EXTENSION];
+  if (value === undefined) return { definitions: [], report: { status: "absent" } };
+  if (!options.trusted) {
+    return {
+      definitions: [],
+      report: {
+        present: true,
+        status: "ignored",
+        reason: "Capability definitions are honored only from a reviewed official package source.",
+      },
+    };
+  }
+
+  const issues: string[] = [];
+  if (!isRecord(value)) {
+    return {
+      definitions: [],
+      report: {
+        present: true,
+        status: "parsed",
+        issues: [`Extension \`${OPENCOMPANY_CAPABILITIES_EXTENSION}\` must be an object.`],
+      },
+    };
+  }
+
+  const definitions: PluginCapabilityDefinition[] = [];
+  for (const [id, group] of Object.entries(value)) {
+    if (id !== "read" && id !== "query" && id !== "draft" && id !== "write") {
+      issues.push(`Unknown capability group \`${id}\` was ignored.`);
+      continue;
+    }
+    if (!isRecord(group)) {
+      issues.push(`Capability group \`${id}\` must be an object.`);
+      continue;
+    }
+    const unknownFields = Object.keys(group).filter(
+      (field) => field !== "label" && field !== "defaultMode" && field !== "tools",
+    );
+    for (const field of unknownFields) {
+      issues.push(`Unknown field \`${id}.${field}\` was ignored.`);
+    }
+    const label = group.label;
+    const defaultMode = group.defaultMode;
+    const tools = group.tools;
+    if (typeof label !== "string" || label.trim().length === 0 || label.length > 120) {
+      issues.push(
+        `Capability group \`${id}.label\` must be a non-empty string up to 120 characters.`,
+      );
+      continue;
+    }
+    if (defaultMode !== "on" && defaultMode !== "ask" && defaultMode !== "off") {
+      issues.push(`Capability group \`${id}.defaultMode\` must be \`on\`, \`ask\`, or \`off\`.`);
+      continue;
+    }
+    if (
+      !Array.isArray(tools) ||
+      tools.some((tool) => typeof tool !== "string" || tool.trim().length === 0)
+    ) {
+      issues.push(`Capability group \`${id}.tools\` must be an array of non-empty tool names.`);
+      continue;
+    }
+    const uniqueTools = [...new Set((tools as string[]).map((tool) => tool.trim()))];
+    definitions.push({ id, label: label.trim(), defaultMode, tools: uniqueTools });
+  }
+
+  const memberships = new Map<string, PluginCapabilityId[]>();
+  for (const definition of definitions) {
+    for (const tool of definition.tools) {
+      const ids = memberships.get(tool) ?? [];
+      ids.push(definition.id);
+      memberships.set(tool, ids);
+    }
+  }
+  const ambiguousTools = new Set(
+    [...memberships.entries()].filter(([, ids]) => new Set(ids).size > 1).map(([tool]) => tool),
+  );
+  for (const tool of [...ambiguousTools].sort()) {
+    issues.push(`Tool \`${tool}\` appears in multiple capability groups and will remain unmapped.`);
+  }
+
+  return {
+    definitions: definitions.map((definition) => ({
+      ...definition,
+      tools: definition.tools.filter((tool) => !ambiguousTools.has(tool)),
+    })),
+    report: { present: true, status: "parsed", issues },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // skills/ discovery
 // ---------------------------------------------------------------------------
@@ -202,12 +324,21 @@ export type StdioMcpServer = {
   cwd?: string;
 };
 
+// Remote entries are server-side gateway registration records. They are deliberately distinct
+// from StdioMcpServer so no sandbox/runtime materializer can accidentally launch or receive them.
+export type RemoteMcpServer = {
+  name: string;
+  type: "streamable-http" | "sse";
+  url: string;
+  headers: Record<string, string>;
+};
+
 export type McpServerReport = {
   name: string;
   // `selected`: a valid stdio server this release will run.
-  // `unsupported`: a valid streamable-http or sse server that is recognized but not launched.
+  // `gateway-registered`: a valid remote server registered for server-side discovery/dispatch.
   // `invalid`: a server entry that failed validation and was skipped.
-  status: "selected" | "unsupported" | "invalid";
+  status: "selected" | "gateway-registered" | "invalid";
   transport?: McpTransport;
   reason?: string;
 };
@@ -215,9 +346,14 @@ export type McpServerReport = {
 export type McpConfigResult =
   // The whole document is invalid; MCP is disabled for the plugin. Valid skills are unaffected.
   | { status: "disabled"; reason: string }
-  // The document parsed; `servers` are the executable stdio servers and `reports` explains every
-  // declared server (selected, unsupported, or skipped-invalid).
-  | { status: "parsed"; servers: StdioMcpServer[]; reports: McpServerReport[] };
+  // The document parsed; `servers` are the executable stdio servers, `remoteServers` are gateway
+  // registrations, and `reports` explains every declared entry.
+  | {
+      status: "parsed";
+      servers: StdioMcpServer[];
+      remoteServers: RemoteMcpServer[];
+      reports: McpServerReport[];
+    };
 
 const RESERVED_ENV_KEYS = new Set(["PATH", "HOME", "LANG", "PLUGIN_ROOT", "PLUGIN_DATA"]);
 
@@ -237,8 +373,8 @@ function parseStringArray(value: unknown): string[] | null {
   return value as string[];
 }
 
-// Validate one server entry. Returns either the selected stdio server or a report explaining why it
-// was not selected (unsupported transport, or invalid entry). Never throws.
+// Validate one server entry. Returns either the selected stdio server, a remote gateway
+// registration, or a report explaining why the entry was invalid. Never throws.
 function validateServer(name: string, value: unknown): McpServerReport {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return { name, status: "invalid", reason: "Server entry must be an object." };
@@ -326,12 +462,7 @@ function validateServer(name: string, value: unknown): McpServerReport {
         reason: "`headers` must be a map of string values.",
       };
     }
-    return {
-      name,
-      status: "unsupported",
-      transport: type,
-      reason: `The ${type} transport is validated but not launched in this release.`,
-    };
+    return { name, status: "gateway-registered", transport: type };
   }
 
   return {
@@ -368,6 +499,15 @@ function buildStdioServer(name: string, record: Record<string, unknown>): StdioM
   return server;
 }
 
+function buildRemoteServer(name: string, record: Record<string, unknown>): RemoteMcpServer {
+  return {
+    name,
+    type: record.type as RemoteMcpServer["type"],
+    url: record.url as string,
+    headers: parseStringMap(record.headers) ?? {},
+  };
+}
+
 // Parse and validate an `mcp.json` document. A structurally invalid document disables MCP for the
 // plugin (callers keep the plugin and its valid skills). A valid document yields the selected stdio
 // servers plus a per-server report covering every declared entry.
@@ -400,14 +540,21 @@ export function parseMcpConfig(jsonText: string): McpConfigResult {
   }
 
   const servers: StdioMcpServer[] = [];
+  const remoteServers: RemoteMcpServer[] = [];
   const reports: McpServerReport[] = [];
   for (const [name, value] of Object.entries(record.mcpServers as Record<string, unknown>)) {
     const report = validateServer(name, value);
     reports.push(report);
     if (report.status === "selected") {
       servers.push(buildStdioServer(name, value as Record<string, unknown>));
+    } else if (report.status === "gateway-registered") {
+      remoteServers.push(buildRemoteServer(name, value as Record<string, unknown>));
     }
   }
 
-  return { status: "parsed", servers, reports };
+  return { status: "parsed", servers, remoteServers, reports };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

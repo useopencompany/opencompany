@@ -377,6 +377,141 @@
         ],
         "additionalProperties": false
       },
+      "CreateTaskCommentEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "$ref": "#/components/schemas/Task"
+              },
+              "comment": {
+                "$ref": "#/components/schemas/TaskComment"
+              },
+              "messageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "assistantMessageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "transactionId": {
+                "type": "string",
+                "pattern": "^[0-9]+$/u"
+              },
+              "replayed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "task",
+              "comment",
+              "messageId",
+              "assistantMessageId",
+              "runId",
+              "transactionId",
+              "replayed"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "TaskComment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "author": {
+            "type": "string",
+            "enum": [
+              "user"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "comment"
+            ]
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 10000
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "author",
+          "kind",
+          "body",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "CreateTaskCommentBody": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 10000
+          },
+          "attachmentIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "id",
+          "body"
+        ],
+        "additionalProperties": false
+      },
       "TaskEnvelope": {
         "type": "object",
         "properties": {
@@ -2207,12 +2342,6 @@
           "ownAccounts": {
             "type": "object",
             "properties": {
-              "slack": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/BrainSourceAccount"
-                }
-              },
               "linear": {
                 "type": "array",
                 "items": {
@@ -2257,7 +2386,6 @@
               }
             },
             "required": [
-              "slack",
               "linear",
               "gmail",
               "google_drive",
@@ -2343,71 +2471,6 @@
               "integration",
               "legacyDefaultDelivery",
               "isDefaultBrain"
-            ],
-            "additionalProperties": false
-          },
-          "slack": {
-            "type": "object",
-            "properties": {
-              "integration": {
-                "type": "object",
-                "properties": {
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "slack"
-                    ]
-                  },
-                  "connected": {
-                    "type": "boolean"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "connected",
-                      "needs_reauth",
-                      "sync_failed",
-                      "disconnected",
-                      "not_connected"
-                    ]
-                  },
-                  "integrationId": {
-                    "type": "string",
-                    "nullable": true,
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "example": "run_019fed53"
-                  },
-                  "statusReason": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 2000
-                  },
-                  "accountName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  },
-                  "teamName": {
-                    "type": "string",
-                    "nullable": true,
-                    "maxLength": 512
-                  }
-                },
-                "required": [
-                  "provider",
-                  "connected",
-                  "status",
-                  "integrationId",
-                  "statusReason",
-                  "accountName",
-                  "teamName"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "integration"
             ],
             "additionalProperties": false
           },
@@ -2913,7 +2976,6 @@
           "sources",
           "ownAccounts",
           "jamie",
-          "slack",
           "linear",
           "github",
           "gmail",
@@ -2941,7 +3003,6 @@
               "gmail",
               "google_drive",
               "github",
-              "slack",
               "linear",
               "slack_bot",
               "hubspot",
@@ -3112,7 +3173,6 @@
                   "gmail",
                   "google_drive",
                   "github",
-                  "slack",
                   "linear",
                   "slack_bot",
                   "hubspot",
@@ -3161,7 +3221,6 @@
                   "gmail",
                   "google_drive",
                   "github",
-                  "slack",
                   "linear",
                   "slack_bot",
                   "hubspot",
@@ -3178,82 +3237,6 @@
               "operation",
               "provider",
               "enabled"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "operation": {
-                "type": "string",
-                "enum": [
-                  "configure"
-                ]
-              },
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "slack"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "channels": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 500
-              },
-              "dms": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name"
-                  ],
-                  "additionalProperties": false
-                },
-                "maxItems": 500
-              }
-            },
-            "required": [
-              "operation",
-              "provider",
-              "enabled",
-              "channels",
-              "dms"
             ],
             "additionalProperties": false
           },
@@ -4569,7 +4552,10 @@
             "type": "boolean"
           },
           "wikiEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "taskViewMode": {
             "type": "string",
@@ -4653,13 +4639,17 @@
               "admin",
               "member"
             ]
+          },
+          "legacyBrainEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
           "id",
           "name",
           "slug",
-          "role"
+          "role",
+          "legacyBrainEnabled"
         ],
         "additionalProperties": false
       },
@@ -5214,6 +5204,7 @@
               },
               "brainId": {
                 "type": "string",
+                "nullable": true,
                 "minLength": 1,
                 "maxLength": 256,
                 "example": "run_019fed53"
@@ -5300,85 +5291,6 @@
       },
       "BrainSourceOptions": {
         "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "provider": {
-                "type": "string",
-                "enum": [
-                  "slack"
-                ]
-              },
-              "channels": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "isPrivate": {
-                      "type": "boolean"
-                    },
-                    "isSlackConnect": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name",
-                    "isPrivate",
-                    "isSlackConnect"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "dms": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 512
-                    },
-                    "isSlackConnect": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name",
-                    "isSlackConnect"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "partial": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "provider",
-              "channels",
-              "dms",
-              "partial"
-            ],
-            "additionalProperties": false
-          },
           {
             "type": "object",
             "properties": {
@@ -5674,7 +5586,6 @@
                 "granola",
                 "fathom",
                 "gmail",
-                "slack",
                 "linear"
               ]
             },
@@ -6328,7 +6239,6 @@
             "type": "string",
             "enum": [
               "gmail",
-              "slack",
               "jamie",
               "granola",
               "linear",
@@ -6481,7 +6391,6 @@
             "type": "string",
             "enum": [
               "gmail",
-              "slack",
               "jamie",
               "granola",
               "linear",
@@ -6622,7 +6531,6 @@
             "type": "string",
             "enum": [
               "gmail",
-              "slack",
               "jamie",
               "granola",
               "linear",
@@ -7016,7 +6924,7 @@
             "items": {
               "$ref": "#/components/schemas/SkillBundleFileMetadata"
             },
-            "maxItems": 64
+            "maxItems": 512
           }
         },
         "required": [
@@ -7152,17 +7060,24 @@
                   "$ref": "#/components/schemas/SkillImportFileMetadata"
                 },
                 "minItems": 1,
-                "maxItems": 64
+                "maxItems": 512
               },
               "fileCount": {
                 "type": "integer",
                 "minimum": 1,
-                "maximum": 64
+                "maximum": 512
               },
               "totalBytes": {
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 1048576
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SkillImportWarning"
+                },
+                "maxItems": 10
               }
             },
             "required": [
@@ -7173,7 +7088,8 @@
               "integrity",
               "files",
               "fileCount",
-              "totalBytes"
+              "totalBytes",
+              "warnings"
             ],
             "additionalProperties": false
           },
@@ -7253,6 +7169,27 @@
         "required": [
           "path",
           "sizeBytes"
+        ],
+        "additionalProperties": false
+      },
+      "SkillImportWarning": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "source_directory_normalized"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "code",
+          "message"
         ],
         "additionalProperties": false
       },
@@ -8189,11 +8126,15 @@
               "expiresAt": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "replayed": {
+                "type": "boolean"
               }
             },
             "required": [
               "attachment",
-              "expiresAt"
+              "expiresAt",
+              "replayed"
             ],
             "additionalProperties": false
           },
@@ -8252,6 +8193,43 @@
         "required": [
           "data",
           "meta"
+        ],
+        "additionalProperties": false
+      },
+      "MessagePresentationEnvelopeV1": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MessagePresentation"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "MessagePresentation": {
+        "type": "object",
+        "properties": {
+          "presentation": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "nullable": true
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "presentation",
+          "updatedAt"
         ],
         "additionalProperties": false
       },
@@ -9289,6 +9267,12 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "nullable": true
+                    }
+                  },
                   "options": {
                     "type": "array",
                     "items": {
@@ -9364,6 +9348,12 @@
                 "type": "object",
                 "properties": {
                   "approvalId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "example": "run_019fed53"
+                  },
+                  "toolCallId": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256,
@@ -10051,7 +10041,10 @@
             "type": "boolean"
           },
           "wikiEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "taskViewMode": {
             "type": "string",
@@ -10678,6 +10671,93 @@
         ],
         "additionalProperties": false
       },
+      "RenderAccountStateEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "$ref": "#/components/schemas/RenderAccountState"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "RenderAccountState": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "render"
+            ]
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_connected",
+              "connected",
+              "needs_reauth",
+              "sync_failed"
+            ]
+          },
+          "integrationId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "gint_0f8e7d6c5b4a",
+            "description": "Integration connection id."
+          },
+          "accountName": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "capabilityModes": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          },
+          "toolModes": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          }
+        },
+        "required": [
+          "provider",
+          "connected",
+          "status",
+          "integrationId",
+          "accountName",
+          "statusReason",
+          "capabilityModes",
+          "toolModes"
+        ],
+        "additionalProperties": false
+      },
       "ImessagePairingStartedEnvelope": {
         "type": "object",
         "properties": {
@@ -11005,11 +11085,15 @@
               "google_calendar",
               "google_drive",
               "linear",
+              "github_user",
               "slack",
               "hubspot",
               "granola",
               "fathom",
               "attio",
+              "betterstack",
+              "render",
+              "signoz",
               "latitude",
               "neon",
               "x_account"
@@ -11589,13 +11673,72 @@
             "type": "string",
             "nullable": true,
             "format": "date-time"
+          },
+          "workspaceEngine": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "providerDisplayName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "providerEmail": {
+                "type": "string",
+                "format": "email"
+              },
+              "credentialStatus": {
+                "type": "string",
+                "enum": [
+                  "connected",
+                  "needs_reauth"
+                ]
+              },
+              "credentialStatusReason": {
+                "type": "string",
+                "nullable": true
+              },
+              "lastValidatedAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "isCurrentUser": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "enabled",
+              "providerDisplayName",
+              "providerEmail",
+              "credentialStatus",
+              "credentialStatusReason",
+              "lastValidatedAt",
+              "isCurrentUser"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
           "status",
           "statusReason",
           "lastValidatedAt",
-          "lastRotatedAt"
+          "lastRotatedAt",
+          "workspaceEngine"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateCodexWorkspaceEngineBody": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "additionalProperties": false
       },
@@ -12555,6 +12698,80 @@
           "mcp": {
             "$ref": "#/components/schemas/PluginMcpReport"
           },
+          "capabilities": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
           "collisions": {
             "type": "array",
             "items": {
@@ -12722,6 +12939,7 @@
             "type": "string",
             "enum": [
               "selected",
+              "gateway-registered",
               "unsupported",
               "invalid"
             ]
@@ -12883,7 +13101,7 @@
                 "fileCount": {
                   "type": "integer",
                   "minimum": 1,
-                  "maximum": 64
+                  "maximum": 512
                 },
                 "totalBytes": {
                   "type": "integer",
@@ -12908,6 +13126,12 @@
               "$ref": "#/components/schemas/PluginStdioServer"
             }
           },
+          "remoteMcpServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginRemoteMcpPreviewServer"
+            }
+          },
           "report": {
             "$ref": "#/components/schemas/PluginValidationReport"
           }
@@ -12921,6 +13145,7 @@
           "totalBytes",
           "skills",
           "stdioServers",
+          "remoteMcpServers",
           "report"
         ],
         "additionalProperties": false
@@ -12987,6 +13212,85 @@
         ],
         "additionalProperties": false
       },
+      "PluginRemoteMcpPreviewServer": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "streamable-http",
+              "sse"
+            ]
+          },
+          "connectionProvider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginCapabilityDefinition"
+            },
+            "maxItems": 64
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "connectionProvider",
+          "capabilities"
+        ],
+        "additionalProperties": false
+      },
+      "PluginCapabilityDefinition": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "read",
+              "query",
+              "draft",
+              "write"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "defaultMode": {
+            "type": "string",
+            "enum": [
+              "on",
+              "ask",
+              "off"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "maxItems": 512
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "defaultMode",
+          "tools"
+        ],
+        "additionalProperties": false
+      },
       "PluginValidationReport": {
         "type": "object",
         "properties": {
@@ -13004,6 +13308,80 @@
           },
           "mcp": {
             "$ref": "#/components/schemas/PluginMcpReport"
+          },
+          "capabilities": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
           }
         },
         "required": [
@@ -13132,6 +13510,12 @@
             "items": {
               "$ref": "#/components/schemas/PluginStdioServer"
             }
+          },
+          "remoteMcpServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginRemoteMcpServer"
+            }
           }
         },
         "required": [
@@ -13148,7 +13532,8 @@
           "archivedAt",
           "files",
           "skills",
-          "stdioServers"
+          "stdioServers",
+          "remoteMcpServers"
         ],
         "additionalProperties": false
       },
@@ -13211,6 +13596,141 @@
           "bundleId",
           "integrity",
           "description"
+        ],
+        "additionalProperties": false
+      },
+      "PluginRemoteMcpServer": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "streamable-http",
+              "sse"
+            ]
+          },
+          "connectionProvider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginCapabilityDefinition"
+            },
+            "maxItems": 64
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginDiscoveredTool"
+            },
+            "maxItems": 512
+          },
+          "discoveryStatus": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ready",
+              "stale",
+              "error"
+            ]
+          },
+          "discoveredAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "refreshAfter": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastDiscoveryError": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "connectionProvider",
+          "capabilities",
+          "tools",
+          "discoveryStatus",
+          "discoveredAt",
+          "refreshAfter",
+          "lastDiscoveryError"
+        ],
+        "additionalProperties": false
+      },
+      "PluginDiscoveredTool": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "classification": {
+            "type": "object",
+            "properties": {
+              "capabilityId": {
+                "type": "string",
+                "enum": [
+                  "read",
+                  "query",
+                  "draft",
+                  "write"
+                ]
+              },
+              "capabilityLabel": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "defaultMode": {
+                "type": "string",
+                "enum": [
+                  "on",
+                  "ask",
+                  "off"
+                ]
+              },
+              "bucket": {
+                "type": "string",
+                "enum": [
+                  "read",
+                  "write"
+                ]
+              },
+              "curated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "capabilityId",
+              "capabilityLabel",
+              "defaultMode",
+              "bucket",
+              "curated"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "classification"
         ],
         "additionalProperties": false
       },
@@ -13442,6 +13962,66 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CreateTaskEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tasks/{taskId}/comments": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTaskCommentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Comment recorded verbatim and Task resumed with a queued Run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTaskCommentEnvelope"
                 }
               }
             }
@@ -16435,21 +17015,6 @@
                       "provider": {
                         "type": "string",
                         "enum": [
-                          "slack"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "provider"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "type": "string",
-                        "enum": [
                           "linear"
                         ]
                       }
@@ -16775,6 +17340,225 @@
         "responses": {
           "200": {
             "description": "Failed pre-confirmation discovery reset and started again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartBrainImportBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Workspace Wiki company-context discovery started or replayed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports/{importRunId}/confirm": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "importRunId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmBrainImportBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Discovered Wiki import confirmed; ingestion begins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports/{importRunId}/cancel": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "importRunId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active Wiki import canceled; queued ingestion jobs are skipped.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrainImportRunCommandEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/wiki/imports/{importRunId}/retry": {
+      "post": {
+        "tags": [
+          "Wiki"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "importRunId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Failed Wiki discovery reset and started again.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19142,6 +19926,19 @@
             "sessionCookie": []
           }
         ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[\\x21-\\x7e]+$/u"
+            },
+            "required": false,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -19348,6 +20145,80 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/messages/{messageId}/presentation": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "conversationId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "messageId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "required": false,
+            "name": "if-none-match",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The full authorized Message presentation used for lazy trace expansion.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePresentationEnvelopeV1"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The Message presentation has not changed."
           },
           "default": {
             "description": "A structured protocol error.",
@@ -20031,9 +20902,11 @@
                 "chat-conversations-v1",
                 "chat-conversations-v2",
                 "chat-messages-v1",
+                "chat-messages-v2",
                 "chat-runs-v1",
                 "engine-sessions-v1",
                 "tasks-v1",
+                "task-activities-v1",
                 "workflows-v1",
                 "workflow-schedules-v1",
                 "task-schedules-v1",
@@ -20043,6 +20916,7 @@
                 "brain-edges-v1",
                 "brain-ingest-jobs-v1",
                 "brain-import-runs-v1",
+                "wiki-import-runs-v1",
                 "wiki-pages-v2",
                 "wiki-timeline-v1",
                 "integration-accounts-v1"
@@ -20072,6 +20946,28 @@
             },
             "required": false,
             "name": "brainId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": false,
+            "name": "taskId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true,
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "required": false,
+            "name": "messageShapeEpoch",
             "in": "query"
           },
           {
@@ -20717,6 +21613,53 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GranolaAccountStateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integration-accounts/render": {
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationApiKeyBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Render connected (or reconnected) for the acting user. The API key never appears in the response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenderAccountStateEnvelope"
                 }
               }
             }
@@ -21658,6 +22601,52 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EngineAuthDisconnectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/codex/workspace": {
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCodexWorkspaceEngineBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace subscription-backed Codex routing updated by an admin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodexAuthStatusEnvelope"
                 }
               }
             }
@@ -22704,6 +23693,56 @@
         "responses": {
           "200": {
             "description": "Plugin MCP approval revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/mcp/refresh": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin remote MCP discovery snapshot refreshed from the connected provider.",
             "content": {
               "application/json": {
                 "schema": {

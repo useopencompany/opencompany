@@ -27,19 +27,28 @@ export function integrationConnectionError(provider: string | null, reason: stri
     case "session_mismatch":
       return `Sign in with the same account that started the ${name} connection, then try again.`;
     case "github_denied":
+    case "github_user_denied":
     case "gmail_denied":
     case "slack_denied":
     case "linear_denied":
     case "hubspot_denied":
+    case "hubspot_mcp_denied":
     case "latitude_denied":
     case "posthog_denied":
     case "neon_denied":
+    case "betterstack_denied":
+    case "signoz_denied":
     case "x_account_denied":
       return `${name} authorization was cancelled.`;
     case "missing_code":
     case "missing_installation_id":
+    case "invalid_installation_action":
     case "invalid_state":
       return `${name} did not return a valid authorization. Please try again.`;
+    case "installation_not_authorized":
+      return `The selected GitHub App installation is not available to this GitHub account.`;
+    case "connection_sync_failed":
+      return `${name} authorized successfully, but setup could not be completed. Please try again.`;
     default:
       return `${name} could not be connected. Please try again.`;
   }
@@ -55,6 +64,7 @@ export function integrationConnectionSuccess(provider: string | null) {
 function providerName(provider: string | null) {
   switch (provider) {
     case "github":
+    case "github_user":
       return "GitHub";
     case "gmail":
       return "Gmail";
@@ -84,6 +94,12 @@ function providerName(provider: string | null) {
       return "PostHog";
     case "neon":
       return "Neon";
+    case "betterstack":
+      return "Better Stack";
+    case "render":
+      return "Render";
+    case "signoz":
+      return "SigNoz";
     case "x_account":
       return "X";
     default:

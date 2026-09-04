@@ -48,7 +48,7 @@ const WORKFLOW_MODEL_CONFIG = [
   {
     token: "codex",
     engine: "codex",
-    modelId: "openai/gpt-5.5",
+    modelId: "openai/gpt-5.6-sol",
     label: "Codex",
     hint: "Cloud coding agent (needs Codex connected)",
   },

@@ -45,6 +45,8 @@ const plugin: ResolvedPluginPackage = {
       env: { PRIVATE_TOKEN: "secret-value" },
     },
   ],
+  remoteServers: [],
+  capabilities: [],
   report: {
     ignoredManifestFields: [],
     skills: [],
@@ -119,6 +121,45 @@ describe("PluginImportApplicationService", () => {
       ),
     );
     expect(install).not.toHaveBeenCalled();
+  });
+
+  it("refreshes gateway discovery after install, enable, and an explicit refresh", async () => {
+    const storedPlugin = { name: "quality-tools", status: "enabled" } as never;
+    const install = vi.fn(async () => ({ plugin: storedPlugin, idempotentReplay: false }));
+    const setStatus = vi.fn(async () => storedPlugin);
+    const get = vi.fn(async () => storedPlugin);
+    const refresh = vi.fn(async () => undefined);
+    const service = new PluginImportApplicationService(
+      repository({ install, setStatus, get }),
+      resolver(plugin),
+      { refresh },
+    );
+
+    await service.install(actor, {
+      idempotencyKey: "plugin-install-1",
+      url: "example/plugins",
+      expectedResolvedCommit: resolvedCommit,
+      expectedIntegrity: integrity,
+    });
+    await service.setEnabled(actor, "quality-tools", false);
+    await service.setEnabled(actor, "quality-tools", true);
+    await service.refreshMcp(actor, "quality-tools");
+
+    expect(refresh).toHaveBeenNthCalledWith(1, {
+      actor,
+      pluginName: "quality-tools",
+      reason: "install",
+    });
+    expect(refresh).toHaveBeenNthCalledWith(2, {
+      actor,
+      pluginName: "quality-tools",
+      reason: "enable",
+    });
+    expect(refresh).toHaveBeenNthCalledWith(3, {
+      actor,
+      pluginName: "quality-tools",
+      reason: "explicit",
+    });
   });
 });
 

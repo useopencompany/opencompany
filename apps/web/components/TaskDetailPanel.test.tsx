@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { buildHarnessRun } from "@/lib/task-harness-run";
@@ -8,6 +9,22 @@ import { TaskDetailPanel } from "./TaskDetailPanel";
 const mocks = vi.hoisted(() => ({
   surfaceProps: null as Record<string, unknown> | null,
   tasks: [] as Record<string, unknown>[],
+  hydrated: true,
+  runRows: [] as Record<string, unknown>[],
+  getHeadlessChatRuns: vi.fn(() => ({})),
+  useLiveQuery: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-db", () => ({
+  useLiveQuery: mocks.useLiveQuery,
+}));
+
+vi.mock("@/components/useHydrated", () => ({
+  useHydrated: () => mocks.hydrated,
+}));
+
+vi.mock("@/lib/headless-chat-collections", () => ({
+  getHeadlessChatRuns: mocks.getHeadlessChatRuns,
 }));
 
 vi.mock("@/components/AppDataProvider", () => ({
@@ -18,6 +35,7 @@ vi.mock("@/components/AppDataProvider", () => ({
       firstName: "Ada",
     },
     activeBrain: null,
+    workspace: { id: "workspace_1" },
     tasks: mocks.tasks,
     schedules: [],
     recentChats: [],
@@ -27,6 +45,8 @@ vi.mock("@/components/AppDataProvider", () => ({
     featureFlags: {
       taskSpawning: true,
       autoModelRouting: false,
+      imessage: false,
+      legacyBrain: false,
     },
   }),
 }));
@@ -42,9 +62,26 @@ vi.mock("@/components/Surface", () => ({
 beforeEach(() => {
   mocks.surfaceProps = null;
   mocks.tasks = [];
+  mocks.hydrated = true;
+  mocks.runRows = [];
+  mocks.getHeadlessChatRuns.mockClear();
+  mocks.useLiveQuery.mockReset();
+  mocks.useLiveQuery.mockImplementation(() => ({ data: mocks.runRows }));
 });
 
 describe("TaskDetailPanel", () => {
+  it("server-renders canonical task data without starting the Run collection", () => {
+    mocks.hydrated = false;
+
+    const html = renderToString(
+      <TaskDetailPanel initialRun={buildHarnessRun({ task: task(), messages: [], events: [] })} />,
+    );
+
+    expect(html).toContain("Morning workflow");
+    expect(mocks.getHeadlessChatRuns).not.toHaveBeenCalled();
+    expect(mocks.useLiveQuery).not.toHaveBeenCalled();
+  });
+
   it("projects a workflow run into the standard chat surface", () => {
     const run = buildHarnessRun({
       task: task(),
@@ -71,6 +108,7 @@ describe("TaskDetailPanel", () => {
     });
     expect(mocks.surfaceProps).toMatchObject({
       taskSpawningEnabled: true,
+      workspaceId: "workspace_1",
       userName: "Ada",
       userWorkosId: "user_1",
     });
@@ -101,6 +139,24 @@ describe("TaskDetailPanel", () => {
       id: "goat_chat_task_1",
       title: "Acme interview follow-up",
     });
+  });
+
+  it("shows a generated Task title that arrives after the page loads", () => {
+    const initialRun = buildHarnessRun({ task: task(), messages: [], events: [] });
+    const view = render(<TaskDetailPanel initialRun={initialRun} />);
+
+    expect(screen.getByTestId("opencompany-surface")).toHaveTextContent("Morning workflow");
+
+    mocks.tasks = [
+      {
+        id: "goat_task_1",
+        name: "Acme interview follow-up",
+        status: "succeeded",
+      },
+    ];
+    view.rerender(<TaskDetailPanel initialRun={initialRun} />);
+
+    expect(screen.getByTestId("opencompany-surface")).toHaveTextContent("Acme interview follow-up");
   });
 
   it("isolates sessionless history behind the read-only compatibility boundary", () => {

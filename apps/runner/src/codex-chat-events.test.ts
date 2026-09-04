@@ -74,6 +74,31 @@ describe("createExternalEngineProjector", () => {
     expect(mocks.captureException.mock.calls[0]?.[0]).not.toBe(databaseError);
   });
 
+  it("normalizes malformed engine output before persisting the assistant projection", async () => {
+    mocks.execute.mockResolvedValueOnce({ rows: [{ id: "updated_row" }] });
+    const projector = createExternalEngineProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+    });
+
+    await projector.push([agentMessageChunk("Answer\ud800\0")]);
+
+    const messageUpdate = mocks.execute.mock.calls
+      .map(([query]) => query)
+      .find((query) => sqlText(query).includes("UPDATE goat.chat_messages AS message"));
+    const values = queryValues(messageUpdate);
+    const persistedTrace = values.find(
+      (value): value is string =>
+        typeof value === "string" && value.includes("goat.codex_chat.debug.v1"),
+    );
+
+    expect(values).toContain("Answer��");
+    expect(JSON.parse(persistedTrace ?? "{}")).toMatchObject({
+      uiMessageParts: [{ type: "text", text: "Answer��" }],
+    });
+  });
+
   it("still aborts projection when the event insert proves the turn lease was lost", async () => {
     mocks.execute.mockResolvedValueOnce({ rows: [] });
     const projector = createExternalEngineProjector({
@@ -144,6 +169,45 @@ describe("createExternalEngineProjector", () => {
       1,
     );
     expect(statements).toContainEqual(expect.stringContaining("event_key"));
+  });
+
+  it("preserves the interleaved trace and appends a rewritten settled result exactly once", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const projector = createExternalEngineProjector({
+      target: projectorTarget({ engine: "claude_code" }),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+    });
+    const settledResult = "Research report saved to Brain: [Launch](https://example.com/launch).";
+    const summary = {
+      sessionId: "codex_thread_1",
+      status: "success" as const,
+      result: "Inspecting the repo.\n\nAll checks passed.",
+      error: null,
+      usage: null,
+      goal: null,
+    };
+
+    await projector.push([agentMessageChunk("Inspecting the repo.", "assistant_message_1")]);
+    await projector.push([fileChangeStartedEvent()]);
+    await projector.push([agentMessageChunk("All checks passed.", "assistant_message_2")]);
+    await projector.finalize(summary, { settledResultContent: settledResult });
+    // A crash-recovery replay of finalize must not duplicate the settled result part.
+    await projector.finalize(summary, { settledResultContent: settledResult });
+
+    const persistedTrace = queryValues(messageUpdates().at(-1)).find(
+      (value): value is string =>
+        typeof value === "string" && value.includes("goat.codex_chat.debug.v1"),
+    );
+    const parts = (JSON.parse(persistedTrace ?? "{}") as { uiMessageParts: CodexUiMessagePart[] })
+      .uiMessageParts;
+    expect(parts.map((part) => (part.type === "text" ? `text:${part.text}` : part.type))).toEqual([
+      "text:Inspecting the repo.",
+      "dynamic-tool",
+      "text:All checks passed.",
+      `text:${settledResult}`,
+    ]);
+    expect(parts.at(-1)).toMatchObject({ itemId: "opencompany-task-settled-result" });
   });
 
   it("keeps the session queued until a queued follow-up turn is claimed", async () => {
@@ -419,6 +483,25 @@ describe("createExternalEngineProjector", () => {
     expect(sqlText(query)).toContain("UPDATE goat.chat_messages AS message");
     expect(queryValues(query)).toContainEqual(
       expect.stringContaining("Persist this before interrupt."),
+    );
+  });
+
+  it("persists a user-visible turn notice once", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const projector = createExternalEngineProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+      normalizeEvent: acpNormalizer(),
+    });
+
+    await projector.appendNotice("GitHub needs reconnecting.");
+    await projector.appendNotice("GitHub needs reconnecting.");
+
+    expect(mocks.execute).toHaveBeenCalledOnce();
+    const [query] = mocks.execute.mock.calls[0] ?? [];
+    expect(sqlText(query)).toContain("UPDATE goat.chat_messages AS message");
+    expect(queryValues(query)).toContainEqual(
+      expect.stringContaining("GitHub needs reconnecting."),
     );
   });
 

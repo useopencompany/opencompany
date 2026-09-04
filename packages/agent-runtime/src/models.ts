@@ -45,12 +45,18 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
 
 export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.6-sol";
 export const CODEX_AGENT_MODEL_IDS = [
+  "openai/gpt-6-astra",
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",
   "openai/gpt-5.6-luna",
+] as const satisfies readonly AgentModelId[];
+// Retired selections remain runnable so persisted chats and in-flight tasks do not fail after a
+// catalog update. New Codex work must pass isCodexModelId and is limited to the current family.
+const LEGACY_CODEX_RUNTIME_MODEL_IDS = [
   "openai/gpt-5.5",
   "openai/gpt-5.4",
   "openai/gpt-5.4-mini",
+  "openai/gpt-5.2-codex",
 ] as const satisfies readonly AgentModelId[];
 export const CODEX_REASONING_EFFORTS = [
   "low",
@@ -60,6 +66,10 @@ export const CODEX_REASONING_EFFORTS = [
 ] as const satisfies readonly CodexReasoningEffort[];
 
 const CODEX_MODEL_ID_SET = new Set<string>(CODEX_AGENT_MODEL_IDS);
+const CODEX_RUNTIME_MODEL_ID_SET = new Set<string>([
+  ...CODEX_AGENT_MODEL_IDS,
+  ...LEGACY_CODEX_RUNTIME_MODEL_IDS,
+]);
 const CODEX_REASONING_EFFORT_SET = new Set<string>(CODEX_REASONING_EFFORTS);
 
 export function isCodexModelId(value: string): value is AgentModelId {
@@ -71,9 +81,7 @@ export function isCodexReasoningEffort(value: string): value is CodexReasoningEf
 }
 
 export function codexCliModelNameForModelId(modelId: string): string | null {
-  return isCodexModelId(modelId) || modelId === "openai/gpt-5.2-codex"
-    ? modelId.replace(/^openai\//, "")
-    : null;
+  return CODEX_RUNTIME_MODEL_ID_SET.has(modelId) ? modelId.replace(/^openai\//, "") : null;
 }
 
 // Sonnet is the default because it is fully covered by Claude subscription limits on
@@ -119,6 +127,27 @@ export function claudeCodeModelSupportsReasoningEffort(model: string): boolean {
 // judge router and is rated qualitatively from OpenRouter's Fusion defaults
 // rather than a single model benchmark.
 export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
+  {
+    id: "openai/gpt-6-astra",
+    type: "model",
+    contextWindowTokens: 1_050_000,
+    label: "GPT 6 Astra",
+    description: "OpenAI's most capable model for complex end-to-end work.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 3, speed: 1, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposure: "summary",
+    },
+  },
   {
     id: "openai/gpt-5.6-sol",
     type: "model",

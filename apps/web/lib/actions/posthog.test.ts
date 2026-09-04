@@ -72,6 +72,7 @@ describe("PostHog actions", () => {
       accountName: "PostHog",
       statusReason: null,
       capabilityModes: {},
+      toolModes: {},
     });
     vi.mocked(loadPostHogMcpWorkerConnection).mockResolvedValue({
       ok: true,
@@ -208,6 +209,7 @@ describe("PostHog actions", () => {
       accountName: "PostHog",
       statusReason: null,
       capabilityModes: { write: "off" },
+      toolModes: {},
     });
 
     await expect(

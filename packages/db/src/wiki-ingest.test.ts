@@ -64,7 +64,7 @@ describe("wiki ingestion schema", () => {
     ).toEqual(["workspace_id"]);
   });
 
-  it("limits every wiki ingestion provider check to the six launch providers", () => {
+  it("keeps public source configuration to launch providers and permits internal imports", () => {
     const tables = [
       [wikiSources, "opencompany_wiki_sources_provider_check"],
       [wikiSourceItems, "opencompany_wiki_source_items_source_provider_check"],
@@ -77,8 +77,15 @@ describe("wiki ingestion schema", () => {
       );
       expect(constraint, `Missing ${constraintName}`).toBeDefined();
       const query = dialect.sqlToQuery(constraint!.value).sql;
-      expect(query).toContain("IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')");
       expect(query).not.toContain("google_drive");
+      if (table === wikiSourceItems || table === wikiIngestJobs) {
+        expect(query).toContain(
+          "IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github', 'opencompany-import')",
+        );
+      } else {
+        expect(query).toContain("IN ('gmail', 'slack', 'jamie', 'granola', 'linear', 'github')");
+        expect(query).not.toContain("'opencompany-import'");
+      }
     }
   });
 });
@@ -158,7 +165,7 @@ describe("upsertWikiSourceItemAndEnqueue", () => {
         workspaceId: "workspace_1",
         sourceItemId: "gwsrc_1",
         sourceKind: "wiki",
-        sourceProvider: "slack",
+        sourceProvider: "gmail",
         rawEventCount: 2,
       }),
     );
@@ -254,6 +261,7 @@ describe("claimNextWikiIngestJob", () => {
 
     const query = normalizedSql(execute.mock.calls[0]![0] as SQL);
     expect(query).toContain("reservation.status = 'consumed'");
+    expect(query).toContain("job.source_provider <> 'slack'");
     expect(query).toContain("source.enabled = true");
     expect(query).toContain("source.provider = job.source_provider");
     expect(query).toContain("running.workspace_id = job.workspace_id");
@@ -322,9 +330,9 @@ describe("listWikiIngestActivityRows", () => {
       rows: [
         {
           id: "gwjob_1",
-          sourceProvider: "slack",
-          sourceType: "conversation",
-          title: "#product",
+          sourceProvider: "gmail",
+          sourceType: "thread",
+          title: "Launch update",
           occurredAt: "2026-08-24T08:00:00.000Z",
           status: "succeeded",
           attempts: 1,
@@ -351,12 +359,15 @@ describe("listWikiIngestActivityRows", () => {
     ).resolves.toEqual([
       expect.objectContaining({
         id: "gwjob_1",
-        title: "#product",
+        title: "Launch update",
         createdAt: new Date("2026-08-24T09:00:00.000Z"),
       }),
     ]);
 
     const compiled = dialect.sqlToQuery(execute.mock.calls[0]![0] as SQL);
+    expect(normalizeSql(compiled.sql)).toContain(
+      "job.source_provider not in ('slack', 'opencompany-import')",
+    );
     expect(normalizeSql(compiled.sql)).toContain("inner join goat.wiki_source_items as source");
     expect(normalizeSql(compiled.sql)).toContain("where job.workspace_id =");
     expect(normalizeSql(compiled.sql)).toContain("order by job.created_at desc, job.id desc");
@@ -473,11 +484,11 @@ describe("wiki ingest job lifecycle", () => {
 
 function wikiItem() {
   return {
-    sourceProvider: "slack" as const,
-    sourceType: "conversation" as const,
+    sourceProvider: "gmail" as const,
+    sourceType: "thread" as const,
     externalId: "window_1",
-    sourceRef: "slack:channel:C123:window:1",
-    title: "Slack window",
+    sourceRef: "gmail:thread:thread_1",
+    title: "Gmail thread",
     occurredAt: "2026-08-24T08:55:00.000Z",
     capturedAt: "2026-08-24T09:00:00.000Z",
     contentHash: "hash_1",

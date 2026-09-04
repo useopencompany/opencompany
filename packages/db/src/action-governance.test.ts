@@ -1,7 +1,12 @@
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import {
+  actionApprovalInputHash,
   claimActionAsyncRun,
   claimActionInvocation,
+  registerActionApproval,
+  resolveActionApproval,
   storeActionCapabilityQuote,
 } from "./action-governance";
 
@@ -10,7 +15,7 @@ const turn = {
   turnId: "turn_1",
   userWorkosId: "user_1",
   workspaceId: "workspace_1",
-  policy: "cloudReadOnly" as const,
+  policy: "foregroundInteractive" as const,
 };
 
 describe("opencompany action turn governance", () => {
@@ -105,9 +110,84 @@ describe("opencompany action turn governance", () => {
       }),
     ).resolves.toBe(false);
   });
+
+  it("binds approval input deterministically and resolves it exactly once", async () => {
+    expect(actionApprovalInputHash({ b: 2, a: { y: true, x: 1 } })).toBe(
+      actionApprovalInputHash({ a: { x: 1, y: true }, b: 2 }),
+    );
+    const approved = {
+      actionId: "gmail.send",
+      sourceId: "gmail",
+      capabilityId: "write",
+      inputHash: "a".repeat(64),
+      status: "approved" as const,
+      requestedAt: "2026-08-26T00:00:00.000Z",
+      resolvedAt: "2026-08-26T00:01:00.000Z",
+    };
+
+    await expect(
+      resolveActionApproval({
+        turn,
+        invocationId: "invocation_1",
+        decision: "approved",
+        db: governanceDb({ updates: [[{ approvalRecords: { invocation_1: approved } }]] }),
+      }),
+    ).resolves.toEqual({ ok: true, record: approved, duplicate: false });
+    await expect(
+      resolveActionApproval({
+        turn,
+        invocationId: "invocation_1",
+        decision: "approved",
+        db: governanceDb({
+          updates: [[]],
+          selects: [[{ approvalRecords: { invocation_1: approved } }]],
+        }),
+      }),
+    ).resolves.toEqual({ ok: true, record: approved, duplicate: true });
+  });
+
+  it("casts the invocation id used as a jsonb object key", async () => {
+    let approvalRecordsSql: SQL | undefined;
+    const params = { issueId: "PRO-185", body: "Approval gateway test" };
+    const pending = {
+      actionId: "plugin:linear:linear.save_comment",
+      sourceId: "plugin:linear:linear",
+      capabilityId: "write",
+      inputHash: actionApprovalInputHash(params),
+      status: "pending" as const,
+      requestedAt: "2026-09-01T08:30:00.000Z",
+    };
+    const db = governanceDb({
+      updates: [[{ approvalRecords: { invocation_1: pending } }]],
+      onUpdateSet: (values) => {
+        approvalRecordsSql = values.approvalRecords as SQL;
+      },
+    });
+
+    await expect(
+      registerActionApproval({
+        turn,
+        invocationId: "invocation_1",
+        actionId: pending.actionId,
+        sourceId: pending.sourceId,
+        capabilityId: pending.capabilityId,
+        params,
+        now: new Date(pending.requestedAt),
+        db,
+      }),
+    ).resolves.toEqual(pending);
+
+    expect(approvalRecordsSql).toBeDefined();
+    const query = new PgDialect().sqlToQuery(approvalRecordsSql!);
+    expect(query.sql).toMatch(/jsonb_build_object\(\$\d+::text, \$\d+::jsonb\)/u);
+  });
 });
 
-function governanceDb(input: { updates?: unknown[][]; selects?: unknown[][] }) {
+function governanceDb(input: {
+  updates?: unknown[][];
+  selects?: unknown[][];
+  onUpdateSet?: (values: Record<string, unknown>) => void;
+}) {
   const updates = [...(input.updates ?? [])];
   const selects = [...(input.selects ?? [])];
   return {
@@ -117,9 +197,12 @@ function governanceDb(input: { updates?: unknown[][]; selects?: unknown[][] }) {
       })),
     })),
     update: vi.fn(() => ({
-      set: vi.fn(() => ({
-        where: vi.fn(() => rowsChain(updates.shift() ?? [])),
-      })),
+      set: vi.fn((values: Record<string, unknown>) => {
+        input.onUpdateSet?.(values);
+        return {
+          where: vi.fn(() => rowsChain(updates.shift() ?? [])),
+        };
+      }),
     })),
     select: vi.fn(() => ({
       from: vi.fn(() => ({

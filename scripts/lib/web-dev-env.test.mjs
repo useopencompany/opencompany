@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { localSandboxNamespace } from "./sandbox-namespace.mjs";
 import { resolveWebDevEnv } from "./web-dev-env.mjs";
 
 test("web local HTTPS WorkOS redirect wins over the ngrok tunnel", () => {
@@ -7,6 +8,7 @@ test("web local HTTPS WorkOS redirect wins over the ngrok tunnel", () => {
     port: "3002",
     processEnv: {
       RUNNER_ALLOWED_ORIGINS: "https://existing.example",
+      RUNNER_SANDBOX_NAMESPACE: "production",
     },
     tunnelEnv: {
       NEXT_PUBLIC_APP_URL: "https://public.ngrok-free.app",
@@ -17,6 +19,7 @@ test("web local HTTPS WorkOS redirect wins over the ngrok tunnel", () => {
       OPENCOMPANY_NEXT_PUBLIC_APP_URL: "https://localhost:3443",
       OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://localhost:3443/auth/callback",
     },
+    workspacePath: "/workspaces/local-one",
   });
 
   assert.equal(env.OPENCOMPANY_NEXT_PUBLIC_APP_URL, "https://localhost:3443");
@@ -30,6 +33,8 @@ test("web local HTTPS WorkOS redirect wins over the ngrok tunnel", () => {
   );
   assert.equal(env.RUNNER_PREVIEW_BASE_DOMAIN, "preview.localhost:3443");
   assert.equal(env.RUNNER_PREVIEW_PROTOCOL, "https");
+  assert.equal(env.RUNNER_SANDBOX_NAMESPACE, localSandboxNamespace("/workspaces/local-one"));
+  assert.notEqual(env.RUNNER_SANDBOX_NAMESPACE, "production");
 });
 
 test("web redirect falls back to localhost when Caddy is unavailable", () => {

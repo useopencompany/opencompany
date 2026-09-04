@@ -7,6 +7,7 @@ import {
 import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import {
+  actionTurns,
   CODEX_CHAT_EVENT_TYPES,
   CODING_HARNESS_EVENT_TYPES,
   codexChatEvents,
@@ -58,8 +59,21 @@ describe("canonical Run constraints", () => {
   });
 });
 
+describe("action gateway constraints", () => {
+  it("uses the shared interactive and headless policies", () => {
+    const policyCheck = getTableConfig(actionTurns).checks.find((constraint) =>
+      pgDialect.sqlToQuery(constraint.value).sql.includes(`"policy" IN`),
+    );
+    expect(policyCheck).toBeDefined();
+    expect(pgDialect.sqlToQuery(policyCheck!.value).sql).toContain(
+      `"policy" IN ('foregroundInteractive', 'headless')`,
+    );
+  });
+});
+
 function checkParams(
   table:
+    | typeof actionTurns
     | typeof codexChatEvents
     | typeof codexChatInteractions
     | typeof runAttempts
@@ -72,6 +86,7 @@ function checkParams(
 
 function checkQuery(
   table:
+    | typeof actionTurns
     | typeof codexChatEvents
     | typeof codexChatInteractions
     | typeof runAttempts

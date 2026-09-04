@@ -1,4 +1,5 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import { type SQLWrapper, sql } from "drizzle-orm";
 
 export const USD_MICROS_PER_CENT = 10_000;
@@ -10,7 +11,7 @@ export const PLATFORM_FEE_BPS = 0;
 
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;
-const MODEL_PRICING_VERSION = "2026-08-24.standard.1";
+const MODEL_PRICING_VERSION = "2026-09-04.standard.1";
 
 type PricingProvider =
   | "openai"
@@ -79,6 +80,20 @@ export type WorkspaceUsageDebitInput = {
 // `// verified YYYY-MM-DD` on the entry and bump the pricingVersion below —
 // a stale entry silently misprices real debits.
 const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
+  // verified 2026-09-04 against OpenAI's published API pricing
+  "openai/gpt-6-astra": {
+    model: "openai/gpt-6-astra",
+    provider: "openai",
+    inputUsdMicrosPerMillion: 10_000_000,
+    cachedInputUsdMicrosPerMillion: 1_000_000,
+    cacheWriteUsdMicrosPerMillion: 12_500_000,
+    outputUsdMicrosPerMillion: 50_000_000,
+    longContext: {
+      inputTokenThreshold: 272_001,
+      inputMultiplier: 2,
+      outputMultiplier: 1.5,
+    },
+  },
   "openai/gpt-5.6-sol": {
     model: "openai/gpt-5.6-sol",
     provider: "openai",
@@ -756,8 +771,8 @@ export async function recordWorkspaceUsageDebit(input: WorkspaceUsageDebitInput)
         ${input.sandboxUsageId ?? null},
         ${input.providerCostUsdMicros},
         ${input.platformFeeUsdMicros},
-        ${JSON.stringify(input.costBasis)}::jsonb,
-        ${JSON.stringify(metadata)}::jsonb
+        ${stringifyPostgresJson(input.costBasis)}::jsonb,
+        ${stringifyPostgresJson(metadata)}::jsonb
       FROM session_row
       ON CONFLICT DO NOTHING
       RETURNING workspace_id, id, amount_usd_micros

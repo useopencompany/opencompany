@@ -25,6 +25,7 @@ import {
   getHeadlessChatConversations,
   type HeadlessChatConversationReadModel,
   preloadHeadlessChatMessages,
+  syncHeadlessChatMessageShapeEpochs,
 } from "@/lib/headless-chat-collections";
 import {
   getHeadlessIntegrationAccounts,
@@ -107,6 +108,9 @@ export type AppInitialData = {
 type AppData = AppInitialData & {
   taskRows: TaskRow[];
   tasksReady: boolean;
+  // Full task history for global navigation. Home continues to use the
+  // intentionally smaller recent/active subset exposed as `tasks`.
+  allTasks: TaskView[];
   // Closed (archived) chats, surfaced in the command palette so the user can
   // search and restore them. Derived from the same live query as recentChats —
   // closed rows already stream to the client, they're just hidden elsewhere.
@@ -256,10 +260,15 @@ function AppLiveDataSubscriptions({
     [integrationAccountsCollection],
   );
 
-  const tasks = useMemo(() => {
+  const allTasks = useMemo(() => {
     if (tasksLoading && !taskRows?.length) return initialData.tasks;
     return currentTaskRows
       .map(taskRowToView)
+      .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }, [currentTaskRows, initialData.tasks, taskRows?.length, tasksLoading]);
+
+  const tasks = useMemo(() => {
+    return allTasks
       .filter(
         (task) =>
           !task.archivedAt &&
@@ -268,7 +277,7 @@ function AppLiveDataSubscriptions({
             isRecentHomeActivity(task.createdAt)),
       )
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [currentTaskRows, initialData.tasks, taskRows?.length, tasksLoading]);
+  }, [allTasks]);
 
   const schedules = useMemo(() => {
     if (!initialData.featureFlags.taskSpawning) return [];
@@ -307,11 +316,21 @@ function AppLiveDataSubscriptions({
       toSummary,
     );
   }, [chatRows, chatsLoading, initialData.recentChats]);
+  const chatMessageShapeRows = useMemo(
+    () =>
+      ((chatRows ?? []) as HeadlessChatConversationReadModel[]).map((row) => ({
+        id: row.id,
+        activityState: row.activityState,
+        messageShapeEpoch: row.messageShapeEpoch,
+      })),
+    [chatRows],
+  );
 
   useEffect(() => {
     // Wait for the authoritative conversation shape so the larger server
     // fallback cannot accidentally fan out into one Electric shape per chat.
-    if (chatsLoading && !chatRows?.length) return;
+    if (chatsLoading && chatMessageShapeRows.length === 0) return;
+    void syncHeadlessChatMessageShapeEpochs(chatMessageShapeRows);
     // Only warm chats with a live runtime turn: they have an active SSE stream the user is likely
     // watching, and there are rarely more than a couple. Idle transcripts preload on demand via
     // sidebar hover/focus (Sidebar.tsx), so boot no longer fans out one shape per recent chat —
@@ -325,7 +344,7 @@ function AppLiveDataSubscriptions({
         });
       });
     }
-  }, [chatRows?.length, chatsLoading, recentChats]);
+  }, [chatMessageShapeRows, chatsLoading, recentChats]);
 
   const archivedChats = useMemo<ChatSummaryView[]>(() => {
     return ((chatRows ?? []) as HeadlessChatConversationReadModel[])
@@ -356,6 +375,16 @@ function AppLiveDataSubscriptions({
     );
     return {
       ...liveIntegrations,
+      // Official MCP gateways deliberately select the most recently updated
+      // account. Preserve the server-selected primaries while personalAccounts
+      // continues to update live, so plugin pages edit those same accounts.
+      gmail: {
+        ...liveIntegrations.gmail,
+        integrationId: initialData.integrations.gmail.integrationId,
+      },
+      slack: initialData.integrations.slack,
+      google_calendar: initialData.integrations.google_calendar,
+      google_drive: initialData.integrations.google_drive,
       codex: initialData.integrations.codex,
       claude_code: initialData.integrations.claude_code,
       infisical: initialData.integrations.infisical,
@@ -372,6 +401,7 @@ function AppLiveDataSubscriptions({
     () => ({
       ...initialData,
       tasks,
+      allTasks,
       schedules,
       recentChats,
       archivedChats,
@@ -381,6 +411,7 @@ function AppLiveDataSubscriptions({
     }),
     [
       archivedChats,
+      allTasks,
       initialData,
       integrations,
       recentChats,
@@ -420,6 +451,7 @@ function initialAppData(initialData: AppInitialData): AppData {
     recentChats: selectSidebarChats(initialData.recentChats),
     taskRows: [],
     tasksReady: false,
+    allTasks: initialData.tasks,
     archivedChats: [],
   };
 }

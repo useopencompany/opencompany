@@ -1,5 +1,6 @@
 import {
   createGitHubPluginFetcher,
+  GitHubArtifactFetchError,
   PluginResolverError,
   resolvePlugin,
 } from "@opencompany/agent-runtime";
@@ -8,6 +9,8 @@ import {
   type PluginImportResolver,
   type ResolvedPluginPackage,
 } from "@opencompany/core";
+
+const TRUSTED_CAPABILITY_SOURCES = ["useopencompany/plugins"] as const;
 
 export function createPluginImportResolver(): PluginImportResolver {
   return { resolve: resolvePluginImport };
@@ -21,6 +24,7 @@ export async function resolvePluginImport(input: {
     const plugin = await resolvePlugin({
       url: input.url,
       fetcher: createGitHubPluginFetcher(),
+      trustedCapabilitySources: TRUSTED_CAPABILITY_SOURCES,
       ...(input.selectedPath !== undefined ? { selectedPath: input.selectedPath } : {}),
     });
     return {
@@ -52,11 +56,20 @@ export async function resolvePluginImport(input: {
         },
       })),
       stdioServers: plugin.stdioServers,
+      remoteServers: plugin.remoteServers,
+      capabilities: plugin.capabilities,
       report: plugin.report,
     };
   } catch (error) {
     if (error instanceof PluginResolverError) {
       throw new CoreError("invalid_argument", error.message);
+    }
+    if (error instanceof GitHubArtifactFetchError) {
+      throw new CoreError(
+        "unavailable",
+        "Couldn't read that plugin right now. Check the URL and try again.",
+        { cause: error },
+      );
     }
     throw new CoreError(
       "unavailable",

@@ -6,7 +6,8 @@ import {
 import { calculateModelUsageCost } from "@opencompany/billing";
 import type { RunApprovalDraft, RunEventDraft, RunExecutionRepository } from "@opencompany/core";
 import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
-import { recordCreditDebit } from "@opencompany/db/credits";
+import { recordCreditDebit, recordSubscriptionCoveredUsage } from "@opencompany/db/credits";
+import { normalizePostgresText, stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import type { ChatMessageDebugTrace } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { recordModelCost, recordModelUsageTokens } from "@opencompany/telemetry";
@@ -29,13 +30,13 @@ export type ProductChatUiPart = {
   [key: string]: unknown;
 };
 
-type ProductChatUsage = Partial<
+type ProductChatContextUsage = Partial<
   Pick<LanguageModelUsage, "inputTokens" | "outputTokens" | "totalTokens">
 >;
 
 export type ProductChatProjection = {
   parts: ProductChatUiPart[];
-  usage?: ProductChatUsage;
+  contextUsage?: ProductChatContextUsage;
   finishReason?: string;
 };
 
@@ -59,6 +60,8 @@ export function createProductChatProjector(input: {
     assistantMessageId: string;
     workspaceId: string | null;
     model: string;
+    billing?: "metered_gateway" | "subscription_covered";
+    provider?: "gateway" | "codex-backend";
     leaseId: string;
     leaseOwner: string;
     canonicalAttemptId?: string;
@@ -95,10 +98,14 @@ export function createProductChatProjector(input: {
     const effectiveProjection = options.preservePersistedOnEmpty
       ? await hydrateEmptyProjectionFromPersistedMessage(projection)
       : projection;
-    const content = effectiveProjection.parts
-      .flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : []))
-      .join("")
-      .trim();
+    const content = normalizePostgresText(
+      effectiveProjection.parts
+        .flatMap((part) =>
+          part.type === "text" && typeof part.text === "string" ? [part.text] : [],
+        )
+        .join("")
+        .trim(),
+    );
     const debugTrace: ChatMessageDebugTrace = {
       schemaVersion: CHAT_DEBUG_SCHEMA_VERSION,
       model: target.model,
@@ -106,7 +113,9 @@ export function createProductChatProjector(input: {
       ...(effectiveProjection.finishReason
         ? { finishReason: effectiveProjection.finishReason }
         : {}),
-      ...(effectiveProjection.usage ? { usage: compactUsage(effectiveProjection.usage) } : {}),
+      ...(effectiveProjection.contextUsage
+        ? { usage: compactUsage(effectiveProjection.contextUsage) }
+        : {}),
       ...(options.error ? { error: options.error } : {}),
       ...(options.aborted ? { aborted: true } : {}),
       ...(typeof options.durationMs === "number" ? { durationMs: options.durationMs } : {}),
@@ -115,7 +124,7 @@ export function createProductChatProjector(input: {
       await getDb().execute(sql`
         UPDATE goat.chat_messages AS message
         SET content = ${content},
-            debug_trace = ${JSON.stringify(debugTrace)}::jsonb,
+            debug_trace = ${stringifyPostgresJson(debugTrace)}::jsonb,
             updated_at = ${new Date()}
         WHERE message.id = ${target.assistantMessageId}
           AND message.session_id = ${target.chatSessionId}
@@ -194,7 +203,7 @@ export function createProductChatProjector(input: {
     return {
       parts,
       ...(row.debug_trace?.finishReason ? { finishReason: row.debug_trace.finishReason } : {}),
-      ...(row.debug_trace?.usage ? { usage: row.debug_trace.usage } : {}),
+      ...(row.debug_trace?.usage ? { contextUsage: row.debug_trace.usage } : {}),
     };
   };
 
@@ -232,6 +241,8 @@ export function createProductChatProjector(input: {
         userMessageId: target.userMessageId,
         turnId: target.turnId,
         stepIndex: input.stepIndex,
+        billing: target.billing ?? "metered_gateway",
+        provider: target.provider ?? "gateway",
       });
     },
 
@@ -417,10 +428,12 @@ async function recordProductChatModelCost(input: {
   userMessageId: string;
   turnId: string;
   stepIndex: number;
+  billing: "metered_gateway" | "subscription_covered";
+  provider: "gateway" | "codex-backend";
 }) {
   const inputTokens = readUsageNumber(input.usage.inputTokens);
   const outputTokens = readUsageNumber(input.usage.outputTokens);
-  const cost = calculateModelUsageCost({
+  const calculatedCost = calculateModelUsageCost({
     modelName: input.model,
     inputTokens,
     inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
@@ -428,6 +441,16 @@ async function recordProductChatModelCost(input: {
     inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
     outputTokens,
   });
+  const cost =
+    input.billing === "subscription_covered"
+      ? {
+          ...calculatedCost,
+          providerCostUsdMicros: 0,
+          platformFeeUsdMicros: 0,
+          totalCostUsdMicros: 0,
+          billable: false,
+        }
+      : calculatedCost;
   recordModelCost({
     costUsdMicros: cost.totalCostUsdMicros,
     attributes: {
@@ -435,6 +458,8 @@ async function recordProductChatModelCost(input: {
       "goat.surface": "chat",
       "goat.stage": "generation",
       "goat.engine": "opencompany",
+      "goat.billing": input.billing,
+      "goat.provider": input.provider,
     },
   });
   recordUsageMetrics(input.usage, {
@@ -451,9 +476,12 @@ async function recordProductChatModelCost(input: {
     taskId: input.taskId,
     turnId: input.turnId,
     stepIndex: input.stepIndex,
-    modelProvider: "vercel-ai-gateway",
+    modelProvider: input.provider === "codex-backend" ? "codex-backend" : "vercel-ai-gateway",
     model: input.model,
     engine: "opencompany",
+    ...(input.billing === "subscription_covered"
+      ? { usageSource: "subscription_covered" as const }
+      : {}),
     inputTokens,
     inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
     inputCacheReadTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheReadTokens),
@@ -470,6 +498,34 @@ async function recordProductChatModelCost(input: {
     billable: cost.billable,
   });
 
+  if (input.billing === "subscription_covered" && input.workspaceId) {
+    try {
+      await recordSubscriptionCoveredUsage({
+        workspaceId: input.workspaceId,
+        userWorkosId: input.userWorkosId,
+        idempotencyKey: `chat:${input.userMessageId}:durable:${input.turnId}:step:${input.stepIndex}:covered`,
+        chatSessionId: input.chatSessionId,
+        metadata: {
+          engine: "opencompany",
+          model: input.model,
+          provider: input.provider,
+          turnId: input.turnId,
+          stepIndex: input.stepIndex,
+          ...(input.taskId ? { taskId: input.taskId } : {}),
+        },
+        db: getDb(),
+      });
+    } catch (error) {
+      logger.warn("Subscription-covered chat usage recording failed", {
+        event: "opencompany.goat_subscription_covered_usage_recording_failed",
+        workspace_id: input.workspaceId,
+        turn_id: input.turnId,
+        step_index: input.stepIndex,
+        error,
+      });
+    }
+    return;
+  }
   if (!cost.billable || !input.workspaceId) return;
   try {
     const debit = await recordCreditDebit({
@@ -519,7 +575,7 @@ async function recordProductChatModelCost(input: {
   }
 }
 
-function compactUsage(usage: ProductChatUsage) {
+function compactUsage(usage: ProductChatContextUsage) {
   return {
     inputTokens: readUsageNumber(usage.inputTokens),
     outputTokens: readUsageNumber(usage.outputTokens),

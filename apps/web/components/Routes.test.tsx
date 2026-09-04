@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import type { SkillImportPreviewDto } from "@opencompany/protocol";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +7,7 @@ import { BrainView } from "@/components/BrainView";
 import {
   BrainRoute,
   HomeRoute,
+  InferenceSettingsRoute,
   McpSettingsRoute,
   PreferencesSettingsRoute,
   SkillBundleRoute,
@@ -29,7 +31,12 @@ const appDataMock = vi.hoisted(() => ({
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
     workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
-    featureFlags: { taskSpawning: false, autoModelRouting: false },
+    featureFlags: {
+      taskSpawning: false,
+      autoModelRouting: false,
+      imessage: false,
+      legacyBrain: true,
+    },
     integrations: {},
     mcpSetup: { preferredClient: null, completedAt: null },
   },
@@ -38,7 +45,6 @@ const appDataMock = vi.hoisted(() => ({
 const userPreferencesMock = vi.hoisted(() => ({
   updateTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
-  updateWikiEnabledAction: vi.fn(async () => ({ ok: true, enabled: true })),
   updateImessageEnabledAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
@@ -58,22 +64,25 @@ const skillActionsMock = vi.hoisted(() => ({
   enableHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
   disableHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
   replaceHeadlessSkill: vi.fn(async () => ({ name: "test-skill" })),
-  previewHeadlessSkillImport: vi.fn(async () => ({
-    status: "resolved" as const,
-    name: "imported-skill",
-    description: "Does an imported thing",
-    source: {
-      type: "github" as const,
-      url: "https://github.com/o/r",
-      ref: "main",
-      path: "",
-      resolvedCommit: "a".repeat(40),
-    },
-    integrity: `sha256:${"b".repeat(64)}`,
-    files: [{ path: "SKILL.md", sizeBytes: 128 }],
-    fileCount: 1,
-    totalBytes: 128,
-  })),
+  previewHeadlessSkillImport: vi.fn(
+    async (): Promise<SkillImportPreviewDto> => ({
+      status: "resolved" as const,
+      name: "imported-skill",
+      description: "Does an imported thing",
+      source: {
+        type: "github" as const,
+        url: "https://github.com/o/r",
+        ref: "main",
+        path: "",
+        resolvedCommit: "a".repeat(40),
+      },
+      integrity: `sha256:${"b".repeat(64)}`,
+      files: [{ path: "SKILL.md", sizeBytes: 128 }],
+      fileCount: 1,
+      totalBytes: 128,
+      warnings: [],
+    }),
+  ),
   importHeadlessSkill: vi.fn(async () => ({
     installation: { name: "imported-skill" },
     replayed: false,
@@ -139,10 +148,6 @@ vi.mock("@/components/AttioIntegrationSetup", () => ({
   AttioIntegrationSetup: () => null,
 }));
 
-vi.mock("@/components/StripeIntegrationSetup", () => ({
-  StripeIntegrationSetup: () => null,
-}));
-
 vi.mock("@/components/McpSetupGuide", () => ({
   McpSetupGuide: () => <div data-testid="mcp-setup-guide" />,
 }));
@@ -159,11 +164,14 @@ vi.mock("@/components/SettingsIntegrationsPanel", () => ({
   SettingsIntegrationsPanel: () => <div>Integrations</div>,
 }));
 
+vi.mock("@/components/InferenceSettingsPanel", () => ({
+  InferenceSettingsPanel: () => <div data-testid="inference-settings-panel" />,
+}));
+
 vi.mock("@/lib/user-preferences", () => ({
   updateTaskSpawningAction: userPreferencesMock.updateTaskSpawningAction,
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
   updateImessageEnabledAction: userPreferencesMock.updateImessageEnabledAction,
-  updateWikiEnabledAction: userPreferencesMock.updateWikiEnabledAction,
 }));
 
 vi.mock("@/lib/headless-automation-commands", () => ({
@@ -314,6 +322,16 @@ describe("SettingsRoute", () => {
         "Connect Claude, ChatGPT, or Cursor to everything you can access in opencompany.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("renders the workspace inference settings", () => {
+    render(<InferenceSettingsRoute />);
+
+    expect(screen.getByRole("heading", { name: "Inference" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Connect model subscriptions and choose how your workspace runs AI."),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("inference-settings-panel")).toBeInTheDocument();
   });
 
   it("shows the Tasks & Workflows switch off by default and persists opt-in", async () => {
@@ -588,6 +606,43 @@ describe("SkillsSettingsRoute", () => {
     await waitFor(() =>
       expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/imported-skill"),
     );
+  });
+
+  it("shows when a source directory is normalized to the declared Skill name", async () => {
+    skillActionsMock.previewHeadlessSkillImport.mockResolvedValueOnce({
+      status: "resolved",
+      name: "vercel-react-best-practices",
+      description: "React and Next.js performance guidance.",
+      source: {
+        type: "skills.sh",
+        url: "https://github.com/vercel-labs/agent-skills",
+        ref: "main",
+        path: "skills/react-best-practices",
+        resolvedCommit: "a".repeat(40),
+      },
+      integrity: `sha256:${"b".repeat(64)}`,
+      files: [{ path: "SKILL.md", sizeBytes: 128 }],
+      fileCount: 1,
+      totalBytes: 128,
+      warnings: [
+        {
+          code: "source_directory_normalized",
+          message:
+            'Source directory "react-best-practices" will be installed as "vercel-react-best-practices" to match the Skill name.',
+        },
+      ],
+    });
+    render(<SkillsSettingsRoute skills={[]} canEdit />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Import skill" }));
+    await userEvent.type(
+      screen.getByPlaceholderText("github.com/owner/repo"),
+      "https://skills.sh/vercel-labs/agent-skills/vercel-react-best-practices",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(await screen.findByText(/will be installed as/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install skill" })).toBeEnabled();
   });
 
   it("creates a standard workspace-authored Skill with a derived slash command", async () => {

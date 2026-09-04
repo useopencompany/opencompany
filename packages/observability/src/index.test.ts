@@ -215,6 +215,54 @@ describe("sanitizeLogFields", () => {
     );
   });
 
+  it("serializes safe upstream diagnostics from nested error causes", () => {
+    const upstreamError = Object.assign(new Error("GitHub artifact request was rate limited."), {
+      code: "github_artifact_fetch_failed",
+      failureKind: "rate_limit",
+      upstreamService: "github",
+      upstreamOperation: "resolve_commit",
+      upstreamStatus: 403,
+      upstreamDurationMs: 9,
+      rateLimitLimit: 60,
+      rateLimitRemaining: 0,
+      rateLimitReset: 1788422400,
+      rateLimitResource: "core",
+      retryAfterSeconds: 42,
+      upstreamRequestId: "ABCD:1234:5678:90AB",
+      networkErrorName: "TypeError",
+      networkErrorCode: "ECONNRESET",
+      repositoryUrl: "https://github.com/private-owner/private-repo",
+      responseBody: "token=do-not-expose",
+    });
+    const error = new Error("Couldn't read that plugin right now.", { cause: upstreamError });
+
+    const fields = errorToLogFields(error);
+
+    expect(fields).toMatchObject({
+      error: {
+        cause: {
+          code: "github_artifact_fetch_failed",
+          failure_kind: "rate_limit",
+          upstream_service: "github",
+          upstream_operation: "resolve_commit",
+          upstream_status: 403,
+          upstream_duration_ms: 9,
+          rate_limit_limit: 60,
+          rate_limit_remaining: 0,
+          rate_limit_reset: 1788422400,
+          rate_limit_resource: "core",
+          retry_after_seconds: 42,
+          upstream_request_id: "ABCD:1234:5678:90AB",
+          network_error_name: "TypeError",
+          network_error_code: "ECONNRESET",
+        },
+      },
+    });
+    expect(JSON.stringify(fields)).not.toMatch(
+      /private-owner|private-repo|do-not-expose|repositoryUrl|responseBody/u,
+    );
+  });
+
   it("bounds cyclic error cause chains", () => {
     const error = new Error("cyclic failure") as Error & { cause?: unknown };
     error.cause = error;

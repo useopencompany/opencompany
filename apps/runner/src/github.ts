@@ -1,5 +1,8 @@
 import { createSign } from "node:crypto";
 import { hasGhApiRequestBody, readGhApiMethod } from "@opencompany/agent-runtime";
+import { createLogger } from "@opencompany/observability";
+
+const logger = createLogger({ service: "opencompany-runner", runtime: "github" });
 
 type InstallationToken = {
   token: string;
@@ -231,6 +234,56 @@ export async function getGitHubWorkInstallationToken(input: {
     envNames: ["GITHUB_INTEGRATION_APP_ID", "GITHUB_INTEGRATION_APP_PRIVATE_KEY"],
     repositoryFullNames,
   });
+}
+
+export async function listGitHubUserRepositoryNames(input: {
+  accessToken: string;
+  signal?: AbortSignal;
+}): Promise<string[]> {
+  const pageCap = 10;
+  const names = new Set<string>();
+
+  for (let page = 1; page <= pageCap; page += 1) {
+    const url = new URL("https://api.github.com/user/repos");
+    url.searchParams.set("per_page", "100");
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("sort", "full_name");
+    url.searchParams.set("direction", "asc");
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${input.accessToken}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      signal: input.signal ?? null,
+    });
+    if (!response.ok) {
+      throw new Error(`GitHub personal repository listing failed with ${response.status}.`);
+    }
+
+    const payload = (await response.json()) as unknown;
+    if (!Array.isArray(payload)) {
+      throw new Error("GitHub personal repository listing returned an invalid response.");
+    }
+    for (const row of payload) {
+      if (!row || typeof row !== "object") continue;
+      const fullName = "full_name" in row ? row.full_name : null;
+      if (typeof fullName === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) {
+        names.add(fullName);
+      }
+    }
+    if (payload.length < 100) break;
+    if (page === pageCap) {
+      logger.warn("GitHub personal repository listing reached its pagination cap", {
+        event: "opencompany.github_user_repository_listing_truncated",
+        page_cap: pageCap,
+        repository_count: names.size,
+      });
+    }
+  }
+
+  return [...names].sort((left, right) => left.localeCompare(right));
 }
 
 function normalizeRepositoryFullNames(names: string[]) {

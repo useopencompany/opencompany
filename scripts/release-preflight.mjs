@@ -72,6 +72,7 @@ const groups = {
       "OPENCOMPANY_STRIPE_API_KEY",
       "CRON_SECRET",
       "API_BROWSER_ORIGINS",
+      "OPENCOMPANY_API_ORIGIN",
       "OPENCOMPANY_AUTHKIT_DOMAIN",
       "OPENCOMPANY_API_OAUTH_AUDIENCE",
       "VERCEL_AI_GATEWAY_API_KEY",
@@ -89,14 +90,17 @@ const groups = {
       "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
       "GITHUB_INTEGRATION_STATE_SECRET",
       "GITHUB_INTEGRATION_APP_WEBHOOK_SECRET",
+      "GITHUB_USER_APP_SLUG",
+      "GITHUB_USER_APP_CLIENT_ID",
+      "GITHUB_USER_APP_CLIENT_SECRET",
+      "GITHUB_USER_APP_STATE_SECRET",
       // Google-family OAuth ingress (#1203 4a2).
       "GOOGLE_OAUTH_CLIENT_ID",
       "GOOGLE_OAUTH_CLIENT_SECRET",
       "GOOGLE_INTEGRATION_STATE_SECRET",
-      // Slack ingestion + Linear ingest OAuth/webhook ingress (#1203 4b1).
+      // Official Slack MCP plugin OAuth + Linear ingest OAuth/webhook ingress.
       "OPENCOMPANY_SLACK_CLIENT_ID",
       "OPENCOMPANY_SLACK_CLIENT_SECRET",
-      "OPENCOMPANY_SLACK_SIGNING_SECRET",
       "OPENCOMPANY_SLACK_STATE_SECRET",
       "OPENCOMPANY_LINEAR_CLIENT_ID",
       "OPENCOMPANY_LINEAR_CLIENT_SECRET",
@@ -104,6 +108,8 @@ const groups = {
       "OPENCOMPANY_LINEAR_STATE_SECRET",
       // Remote-MCP, X account, and Slack bot OAuth/webhook ingress.
       "MCP_OAUTH_STATE_SECRET",
+      "OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID",
+      "OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET",
       "OPENCOMPANY_X_CLIENT_ID",
       "OPENCOMPANY_X_CLIENT_SECRET",
       "OPENCOMPANY_X_STATE_SECRET",
@@ -115,8 +121,8 @@ const groups = {
       // public URL is the guaranteed fallback; the internal URL is optional.
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
-      // Validates the runner→API internal wiki command bearer. Must match the
-      // runner's API_INTERNAL_TOKEN or agent wiki writes 401.
+      // Validates runner→API wiki calls and first-party plugin MCP tickets.
+      // Must match the runner's API_INTERNAL_TOKEN.
       "API_INTERNAL_TOKEN",
       // Billing/usage and Stripe ingress.
       "OPENCOMPANY_STRIPE_WEBHOOK_SECRET",
@@ -214,8 +220,12 @@ const groups = {
       "BLOB_READ_WRITE_TOKEN",
       "GITHUB_INTEGRATION_APP_ID",
       "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
+      "GITHUB_USER_APP_CLIENT_ID",
+      "GITHUB_USER_APP_CLIENT_SECRET",
       "GOOGLE_OAUTH_CLIENT_ID",
       "GOOGLE_OAUTH_CLIENT_SECRET",
+      "OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID",
+      "OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET",
       "OPENCOMPANY_X_CLIENT_ID",
       "OPENCOMPANY_X_CLIENT_SECRET",
       "MONID_API_KEY",
@@ -223,6 +233,7 @@ const groups = {
       "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
       "REDIS_URL",
       "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
+      "RUNNER_SANDBOX_NAMESPACE",
     ],
     optional: [
       "EXA_API_KEY",
@@ -458,6 +469,12 @@ const githubIntegrationStateSecret = process.env.GITHUB_INTEGRATION_STATE_SECRET
 if (!isUnset(githubIntegrationStateSecret) && githubIntegrationStateSecret.length < 32) {
   failed = true;
   console.log("\nGITHUB_INTEGRATION_STATE_SECRET must be at least 32 characters.");
+}
+
+const githubUserAppStateSecret = process.env.GITHUB_USER_APP_STATE_SECRET;
+if (!isUnset(githubUserAppStateSecret) && githubUserAppStateSecret.length < 32) {
+  failed = true;
+  console.log("\nGITHUB_USER_APP_STATE_SECRET must be at least 32 characters.");
 }
 
 const webRedirectUri = process.env.OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI;

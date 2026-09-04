@@ -34,7 +34,7 @@ describe("Brain source API actions", () => {
           data: {
             brainId: "brain_1",
             integrationId: "integration_1",
-            provider: "slack",
+            provider: "gmail",
             enabled: true,
           },
           meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
@@ -46,7 +46,7 @@ describe("Brain source API actions", () => {
       setBrainSourceEnabledAction({
         brainRef: "brain_1",
         integrationId: "integration_1",
-        provider: "slack",
+        provider: "gmail",
         enabled: true,
       }),
     ).resolves.toEqual({ ok: true });

@@ -6,15 +6,21 @@ import { CheckCircle2, Globe2, Loader2, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   cancelBrainImportAction,
+  cancelWikiImportAction,
   confirmBrainImportAction,
+  confirmWikiImportAction,
   retryBrainImportDiscoveryAction,
+  retryWikiImportDiscoveryAction,
   startBrainImportDiscoveryAction,
+  startWikiImportDiscoveryAction,
 } from "@/lib/brain-import-actions";
 import { getBrainSourcesAction, listGitHubRepositoriesAction } from "@/lib/brain-source-actions";
 import {
   getHeadlessBrainCollections,
+  getHeadlessWikiCollections,
   type HeadlessBrainImportRunReadModel,
 } from "@/lib/headless-knowledge-collections";
+import { listWikiSources } from "@/lib/wiki-source-api";
 
 const PROVIDERS = [
   ["public_web", "Public web"],
@@ -23,7 +29,6 @@ const PROVIDERS = [
   ["granola", "Granola"],
   ["fathom", "Fathom"],
   ["gmail", "Gmail"],
-  ["slack", "Slack"],
   ["linear", "Linear"],
 ] as const;
 
@@ -34,16 +39,48 @@ export function BrainImport({
   brainRef: string;
   compact?: boolean;
 }) {
-  const brainCollections = useMemo(() => getHeadlessBrainCollections(brainRef), [brainRef]);
-  const { data } = useLiveQuery(
-    (q) => q.from({ run: brainCollections.importRuns }),
-    [brainCollections],
+  return <CompanyImport brainRef={brainRef} compact={compact} />;
+}
+
+export function WikiImport({
+  workspaceId,
+  compact = false,
+  initialWebsite = "",
+}: {
+  workspaceId: string;
+  compact?: boolean;
+  initialWebsite?: string;
+}) {
+  return (
+    <CompanyImport workspaceId={workspaceId} compact={compact} initialWebsite={initialWebsite} />
   );
+}
+
+function CompanyImport({
+  brainRef,
+  workspaceId,
+  compact = false,
+  initialWebsite = "",
+}: {
+  brainRef?: string;
+  workspaceId?: string;
+  compact?: boolean;
+  initialWebsite?: string;
+}) {
+  const wiki = Boolean(workspaceId);
+  const collections = useMemo(
+    () =>
+      workspaceId
+        ? getHeadlessWikiCollections(workspaceId)
+        : getHeadlessBrainCollections(brainRef!),
+    [brainRef, workspaceId],
+  );
+  const { data } = useLiveQuery((q) => q.from({ run: collections.importRuns }), [collections]);
   const run =
     ((data ?? []) as HeadlessBrainImportRunReadModel[]).toSorted((a, b) =>
       b.createdAt.localeCompare(a.createdAt),
     )[0] ?? null;
-  const [website, setWebsite] = useState("");
+  const [website, setWebsite] = useState(initialWebsite);
   const [focus, setFocus] = useState("");
   const [disclosed, setDisclosed] = useState(false);
   const [selection, setSelection] = useState<
@@ -59,9 +96,37 @@ export function BrainImport({
   const [confirmationOverrides, setConfirmationOverrides] = useState<Record<string, boolean>>({});
   const [startAnother, setStartAnother] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const visibleProviders = useMemo(
+    () => (wiki ? PROVIDERS.filter(([id]) => id !== "fathom") : PROVIDERS),
+    [wiki],
+  );
 
   useEffect(() => {
     let canceled = false;
+    if (wiki) {
+      void listWikiSources().then(
+        (sources) => {
+          if (canceled) return;
+          const next: typeof selection = { public_web: { enabled: true } };
+          for (const source of sources) {
+            if (!source.canConfigure || source.integrationStatus !== "connected") continue;
+            next[source.provider] = {
+              enabled: source.enabled,
+              integrationId: source.integrationId,
+              config: source.config,
+            };
+          }
+          setSelection(next);
+        },
+        () => {
+          if (!canceled) toast.error("Wiki sources could not be loaded for this import.");
+        },
+      );
+      return () => {
+        canceled = true;
+      };
+    }
+    if (!brainRef) return;
     void getBrainSourcesAction(brainRef).then(async (details) => {
       if (canceled || !details) return;
       const next: typeof selection = { public_web: { enabled: true } };
@@ -115,7 +180,7 @@ export function BrainImport({
     return () => {
       canceled = true;
     };
-  }, [brainRef]);
+  }, [brainRef, wiki]);
 
   const enabledAtConfirm = useMemo(
     () =>
@@ -130,34 +195,42 @@ export function BrainImport({
   const start = () =>
     startTransition(async () => {
       setConfirmationOverrides({});
-      const result = await startBrainImportDiscoveryAction({
-        brainRef,
-        companyUrl: website.trim(),
-        focus,
-        sourceSelection: selection,
-      });
+      const result = wiki
+        ? await startWikiImportDiscoveryAction({
+            companyUrl: website.trim(),
+            focus,
+            sourceSelection: selection,
+          })
+        : await startBrainImportDiscoveryAction({
+            brainRef: brainRef!,
+            companyUrl: website.trim(),
+            focus,
+            sourceSelection: selection,
+          });
       if (!result.ok) toast.error(result.message);
       else setStartAnother(false);
     });
   const cancel = () =>
     run &&
     startTransition(async () => {
-      const result = await cancelBrainImportAction({
-        brainRef,
-        importRunId: run.id,
-      });
+      const result = wiki
+        ? await cancelWikiImportAction({ importRunId: run.id })
+        : await cancelBrainImportAction({ brainRef: brainRef!, importRunId: run.id });
       if (!result.ok) toast.error(result.message);
     });
   const confirm = () =>
     run &&
     startTransition(async () => {
-      const result = await confirmBrainImportAction({
-        brainRef,
-        importRunId: run.id,
-        enabledProviders: Array.from(enabledAtConfirm) as Array<
-          "public_web" | "github" | "jamie" | "granola" | "fathom" | "gmail" | "slack" | "linear"
-        >,
-      });
+      const enabledProviders = Array.from(enabledAtConfirm) as Array<
+        "public_web" | "github" | "jamie" | "granola" | "fathom" | "gmail" | "linear"
+      >;
+      const result = wiki
+        ? await confirmWikiImportAction({ importRunId: run.id, enabledProviders })
+        : await confirmBrainImportAction({
+            brainRef: brainRef!,
+            importRunId: run.id,
+            enabledProviders,
+          });
       if (!result.ok) toast.error(result.message);
     });
 
@@ -201,7 +274,7 @@ export function BrainImport({
             />
           </label>
           <div className="grid grid-cols-2 gap-2">
-            {PROVIDERS.map(([id, label]) => {
+            {visibleProviders.map(([id, label]) => {
               const available = id === "public_web" || Boolean(selection[id]?.integrationId);
               return (
                 <label
@@ -234,7 +307,8 @@ export function BrainImport({
               className="mt-0.5 accent-ink"
             />
             <span>
-              Imported private content becomes readable by everyone who has access to this brain.
+              Imported context becomes readable by everyone who has access to this{" "}
+              {wiki ? "workspace Wiki" : "brain"}.
             </span>
           </label>
           <div className="flex justify-end">
@@ -273,12 +347,14 @@ export function BrainImport({
       ) + 1;
     return (
       <section className="w-full max-w-[680px] rounded-xl border border-border bg-surface p-5">
-        <h2 className="text-[16px] font-semibold text-ink">Ready to build your brain</h2>
+        <h2 className="text-[16px] font-semibold text-ink">
+          Ready to build your {wiki ? "Wiki" : "brain"}
+        </h2>
         <p className="mt-1 text-[12px] text-ink-subtle">
           Review the bounded workload before any LLM ingestion starts.
         </p>
         <div className="mt-4 divide-y divide-border-subtle rounded-lg border border-border">
-          {PROVIDERS.map(([id, label]) => {
+          {visibleProviders.map(([id, label]) => {
             const value = run.discoverySummary[id];
             if (!value) return null;
             return (
@@ -324,7 +400,7 @@ export function BrainImport({
             disabled={isPending}
             className="rounded-md bg-ink px-4 py-2 text-[12.5px] font-medium text-canvas"
           >
-            Build brain · {planned} ingestion runs
+            Build {wiki ? "Wiki" : "brain"} · {planned} ingestion runs
           </button>
         </div>
       </section>
@@ -337,7 +413,7 @@ export function BrainImport({
         title="Import failed"
         detail={
           run.lastError ??
-          "The import could not finish. Any successfully created documents remain in the brain."
+          `The import could not finish. Any successfully created ${wiki ? "pages remain in the Wiki" : "documents remain in the brain"}.`
         }
         icon={<XCircle size={18} className="text-danger" />}
       />
@@ -352,10 +428,12 @@ export function BrainImport({
         action="Retry scan"
         onAction={() =>
           startTransition(async () => {
-            const result = await retryBrainImportDiscoveryAction({
-              brainRef,
-              importRunId: run.id,
-            });
+            const result = wiki
+              ? await retryWikiImportDiscoveryAction({ importRunId: run.id })
+              : await retryBrainImportDiscoveryAction({
+                  brainRef: brainRef!,
+                  importRunId: run.id,
+                });
             if (!result.ok) toast.error(result.message);
           })
         }
@@ -366,11 +444,15 @@ export function BrainImport({
   if (run.status === "succeeded" || run.status === "partial")
     return (
       <StatusCard
-        title={run.status === "succeeded" ? "Brain built" : "Brain built with some gaps"}
+        title={
+          run.status === "succeeded"
+            ? `${wiki ? "Wiki" : "Brain"} built`
+            : `${wiki ? "Wiki" : "Brain"} built with some gaps`
+        }
         detail={
           run.status === "succeeded"
-            ? "The selected context is imported and organized. Connected sources will keep feeding this brain."
-            : "Useful context was imported, but at least one source failed. Successful documents remain available."
+            ? `The selected context is imported and organized. Connected sources will keep feeding this ${wiki ? "Wiki" : "brain"}.`
+            : `Useful context was imported, but at least one source failed. Successful ${wiki ? "pages" : "documents"} remain available.`
         }
         icon={<CheckCircle2 size={18} className="text-emerald-600" />}
         action="Import more context"
@@ -380,7 +462,11 @@ export function BrainImport({
 
   return (
     <StatusCard
-      title={run.status === "finalizing" ? "Organizing your brain" : "Building your brain"}
+      title={
+        run.status === "finalizing"
+          ? `Organizing your ${wiki ? "Wiki" : "brain"}`
+          : `Building your ${wiki ? "Wiki" : "brain"}`
+      }
       detail={
         run.status === "finalizing"
           ? "Source jobs are complete. opencompany is deduplicating and repairing links without adding new facts."
@@ -410,8 +496,6 @@ function integrationFor(
       return details.fathom.integration;
     case "gmail":
       return details.gmail.integration;
-    case "slack":
-      return details.slack.integration;
     case "linear":
       return details.linear.integration;
     default:

@@ -1,11 +1,21 @@
 import { serve } from "@hono/node-server";
 import { getAppUrl } from "@opencompany/agent/app-url";
 import { resolvePersistedAutoModelRouting } from "@opencompany/agent/application/persisted-auto-model-routing";
-import { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
+import {
+  BrainImportApplicationService,
+  WikiImportApplicationService,
+} from "@opencompany/agent/brain-imports";
 import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
+import { createGmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
+import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
+import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import { createMcpService } from "@opencompany/agent/mcp-http";
+import {
+  createPluginGatewayLifecycle,
+  refreshPluginGatewayRegistrationsForWorkspaces,
+} from "@opencompany/agent/plugin-gateway";
 import { createPluginImportResolver } from "@opencompany/agent/plugin-import";
 import { createSkillImportResolver } from "@opencompany/agent/skill-import";
 import { createWorkspaceSkillArtifact } from "@opencompany/agent-runtime";
@@ -55,6 +65,7 @@ import { createEngineAuthService } from "./engine-auth";
 import { createEngineSessionService } from "./engine-sessions";
 import { createFeedbackService } from "./feedback";
 import { createGitHubIngress } from "./github-ingress";
+import { createGitHubUserIngress } from "./github-user-ingress";
 import { createGoogleIngress } from "./google-ingress";
 import { createHubspotIngress } from "./hubspot-ingress";
 import { createIdentityService } from "./identity";
@@ -62,6 +73,7 @@ import { createIntegrationAccountService } from "./integration-accounts";
 import { createJamieIngress } from "./jamie-ingress";
 import { createLinearIngress } from "./linear-ingress";
 import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
+import { PostgresMessagePresentationService } from "./message-presentations";
 import { createOnboardingService } from "./onboarding";
 import { createOnboardingEmailService } from "./onboarding-emails";
 import { createRepoConfigService } from "./repo-configs";
@@ -122,6 +134,7 @@ const wikiCommands = new WikiCommandApplicationService(
 const wikiSources = createWikiSourceService({ db: database.db });
 const brainSources = new BrainSourceApplicationService(database.db);
 const brainImports = new BrainImportApplicationService(database.db, brainSources);
+const wikiImports = new WikiImportApplicationService(database.db, wikiSources);
 const browserProfiles = new BrowserProfileApplicationService(database.db);
 const skillImports = new SkillImportApplicationService(
   new PostgresSkillBundleRepository(database.db),
@@ -131,6 +144,7 @@ const skillImports = new SkillImportApplicationService(
 const pluginImports = new PluginImportApplicationService(
   new PostgresPluginRepository(database.db),
   createPluginImportResolver(),
+  createPluginGatewayLifecycle({ db: database.db }),
 );
 const notifier = new PostgresRunEventNotifier(database.pool);
 const presentation = createPresentationStream();
@@ -154,11 +168,13 @@ const app = createApiApp({
   wikiSources,
   brainSources,
   brainImports,
+  wikiImports,
   browserProfiles,
   skillImports,
   pluginImports,
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   chatResources: createChatResourceService({ db: database.db }),
+  messagePresentations: new PostgresMessagePresentationService(execute),
   chatTitles: createChatTitleService({
     db: database.db,
     ...(process.env.VERCEL_AI_GATEWAY_API_KEY
@@ -194,7 +210,24 @@ const app = createApiApp({
   userSettings: createUserSettingsService({ db: database.db }),
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),
-  integrationAccounts: createIntegrationAccountService({ db: database.db, runner: runnerClient }),
+  integrationAccounts: createIntegrationAccountService({
+    db: database.db,
+    runner: runnerClient,
+    refreshRenderPluginRegistrations: ({ userWorkosId, workspaceId }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds: [workspaceId],
+        connectionProvider: "render",
+      }),
+    refreshStripePluginRegistrations: ({ userWorkosId, workspaceId }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds: [workspaceId],
+        connectionProvider: "stripe",
+      }),
+  }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
   mcp: createMcpService({
     // The API-hosted MCP tool runs the same command service in-process — no
@@ -211,6 +244,22 @@ const app = createApiApp({
       ? { gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY }
       : {}),
   }),
+  ...(process.env.API_INTERNAL_TOKEN?.trim()
+    ? {
+        gmailMcp: createGmailMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+        googleCalendarMcp: createGoogleCalendarMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+        googleDriveMcp: createGoogleDriveMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+      }
+    : {}),
   billing: createBillingApplicationService({
     db: database.db,
     stripe,
@@ -240,8 +289,46 @@ const app = createApiApp({
         { errorFormat: "error-message" },
       ),
   }),
-  googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
-  slackIngress: createSlackIngress({ db: database.db, identify: identityVerifier }),
+  githubUserIngress: createGitHubUserIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        // Registrations persist the Plugin package name; the gateway binding
+        // maps package "github" to the personal github_user integration.
+        connectionProvider: "github",
+      }),
+  }),
+  googleIngress: createGoogleIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ provider, userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider:
+          provider === "gmail"
+            ? "gmail"
+            : provider === "google_drive"
+              ? "google-drive"
+              : "google-calendar",
+      }),
+  }),
+  slackIngress: createSlackIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider: "slack",
+      }),
+  }),
   linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
   hubspotIngress: createHubspotIngress({ db: database.db, identify: identityVerifier }),
   attioIngress: createAttioIngress({ db: database.db }),
@@ -254,8 +341,28 @@ const app = createApiApp({
         { errorFormat: "error-message" },
       ),
   }),
-  mcpOAuthIngress: createMcpOAuthIngress({ db: database.db, identify: identityVerifier }),
-  xAccountIngress: createXAccountIngress({ db: database.db, identify: identityVerifier }),
+  mcpOAuthIngress: createMcpOAuthIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ provider, userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider: provider,
+      }),
+  }),
+  xAccountIngress: createXAccountIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider: "x",
+      }),
+  }),
   slackBotIngress: createSlackBotIngress({
     db: database.db,
     identify: identityVerifier,

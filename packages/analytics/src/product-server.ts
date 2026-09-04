@@ -27,7 +27,7 @@ export type CaptureProductTaskSpawnedInput = {
   trigger?: ProductTaskSpawnTrigger | undefined;
 };
 
-export type ProductLlmUsageAnalyticsSurface = "chat" | "task";
+export type ProductLlmUsageAnalyticsSurface = "chat" | "task" | "slack_bot";
 
 export type ProductLlmUsageAnalyticsStage =
   | "generation"

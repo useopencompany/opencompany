@@ -12,18 +12,38 @@ import {
 } from "./models";
 
 describe("Codex model catalog", () => {
+  it("offers GPT 6 Astra and the latest GPT 5.6 family for new Codex work", () => {
+    expect(CODEX_AGENT_MODEL_IDS).toEqual([
+      "openai/gpt-6-astra",
+      "openai/gpt-5.6-sol",
+      "openai/gpt-5.6-terra",
+      "openai/gpt-5.6-luna",
+    ]);
+    expect(isCodexModelId("openai/gpt-5.5")).toBe(false);
+    expect(isCodexModelId("openai/gpt-5.4")).toBe(false);
+    expect(isCodexModelId("openai/gpt-5.4-mini")).toBe(false);
+  });
+
   it("defaults Codex sandboxes to GPT 5.6 Sol", () => {
     expect(CODEX_DEFAULT_MODEL_ID).toBe("openai/gpt-5.6-sol");
     expect(codexCliModelNameForModelId(CODEX_DEFAULT_MODEL_ID)).toBe("gpt-5.6-sol");
   });
 
   it.each([
+    ["openai/gpt-6-astra", "gpt-6-astra"],
     ["openai/gpt-5.6-sol", "gpt-5.6-sol"],
     ["openai/gpt-5.6-terra", "gpt-5.6-terra"],
     ["openai/gpt-5.6-luna", "gpt-5.6-luna"],
   ])("maps %s to its Codex CLI model name", (modelId, cliModel) => {
     expect(isCodexModelId(modelId)).toBe(true);
     expect(codexCliModelNameForModelId(modelId)).toBe(cliModel);
+  });
+
+  it("keeps retired Codex selections runnable for persisted work", () => {
+    expect(codexCliModelNameForModelId("openai/gpt-5.5")).toBe("gpt-5.5");
+    expect(codexCliModelNameForModelId("openai/gpt-5.4")).toBe("gpt-5.4");
+    expect(codexCliModelNameForModelId("openai/gpt-5.4-mini")).toBe("gpt-5.4-mini");
+    expect(codexCliModelNameForModelId("openai/gpt-5.2-codex")).toBe("gpt-5.2-codex");
   });
 
   it("has display metadata for every supported Codex model", () => {

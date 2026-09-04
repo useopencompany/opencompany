@@ -2,8 +2,8 @@
 
 import { toast } from "@opencompany/ui/components/sonner";
 import {
-  AnthropicIcon,
   AttioIcon,
+  BetterStackIcon,
   FathomIcon,
   GitHubIcon,
   GmailIcon,
@@ -14,10 +14,6 @@ import {
   type LucideIcon as IconComponent,
   LinearIcon,
   NeonIcon,
-  OpenAIIcon,
-  PostHogIcon,
-  SlackIcon,
-  StripeIcon,
   XIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
@@ -25,20 +21,15 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { ExternalLink, Globe2, Loader2, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { useHydrated } from "@/components/useHydrated";
 import {
+  type CapabilityId,
   type CapabilityMode,
   effectiveCapabilityMode,
   type ProviderCapability,
   providerCapabilities,
 } from "@/lib/actions/capabilities";
-import { disconnectClaudeCodeAuth, saveClaudeCodeToken } from "@/lib/claude-code-auth";
-import {
-  type CodexDeviceAuthFlow,
-  disconnectCodexAuth,
-  pollCodexDeviceAuth,
-  startCodexDeviceAuth,
-} from "@/lib/codex-auth";
 import {
   completeHeadlessBrowserProfileLogin,
   createHeadlessBrowserProfile,
@@ -62,8 +53,6 @@ import {
   setIntegrationCapabilityModeAction,
 } from "@/lib/integration-account-actions";
 import {
-  type ClaudeCodeProviderState,
-  type CodexProviderState,
   type GitHubProviderState,
   type GoogleProviderState,
   type ImessageProviderState,
@@ -74,11 +63,8 @@ import {
   type JamieProviderState,
   type LinearProviderState,
   type PersonalAccountProvider,
-  type PostHogProviderState,
-  type SlackProviderState,
-  type StripeProviderState,
 } from "@/lib/integration-state";
-import { hasGmailDraftScope, hasGmailSendScope } from "@/lib/integrations/gmail-scopes";
+import { gmailMcpScopesSatisfied } from "@/lib/integrations/gmail-scopes";
 import { hasGoogleDriveWriteScope } from "@/lib/integrations/google-drive-scopes";
 import {
   integrationConnectionError,
@@ -89,15 +75,13 @@ import {
 // monogram fallback where no square vector mark exists), the colored logo tile,
 // and a short connection-focused description. Keyed by provider so the card
 // components derive everything from the provider string.
+type SettingsPersonalAccountProvider = Exclude<PersonalAccountProvider, "slack">;
+
 type IntegrationMetaKey =
-  | PersonalAccountProvider
+  | SettingsPersonalAccountProvider
   | "github"
   | "jamie"
-  | "posthog"
-  | "stripe"
   | "infisical"
-  | "codex"
-  | "claude_code"
   | "imessage";
 
 type IntegrationMeta = {
@@ -112,8 +96,14 @@ type IntegrationMeta = {
 
 const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   github: {
-    label: "GitHub",
-    description: "Bring pull requests and issues from your repositories into opencompany.",
+    label: "GitHub workspace ingestion",
+    description: "Ingest pull requests and issues from selected repositories through webhooks.",
+    Icon: GitHubIcon,
+    tileClass: "bg-[#181717] text-white",
+  },
+  github_user: {
+    label: "GitHub as you",
+    description: "Let opencompany work with repositories, issues, and pull requests as you.",
     Icon: GitHubIcon,
     tileClass: "bg-[#181717] text-white",
   },
@@ -147,12 +137,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: LinearIcon,
     tileClass: "bg-[#5E6AD2] text-white",
   },
-  posthog: {
-    label: "PostHog",
-    description: "Explore product analytics and create focused insights from opencompany.",
-    Icon: PostHogIcon,
-    tileClass: "bg-[#F54E00] text-white",
-  },
   latitude: {
     label: "Latitude",
     description: "Observe, understand, and improve your AI agents from opencompany.",
@@ -164,12 +148,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Inspect Neon projects and schemas, and run permission-gated read-only SQL.",
     Icon: NeonIcon,
     tileClass: "bg-[#00E599] text-[#0B0F14]",
-  },
-  slack: {
-    label: "Slack",
-    description: "Let opencompany search and read your Slack conversations.",
-    Icon: SlackIcon,
-    tileClass: "bg-[#4A154B] text-white",
   },
   hubspot: {
     label: "HubSpot",
@@ -183,12 +161,23 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: AttioIcon,
     tileClass: "bg-[#111111] text-white",
   },
-  stripe: {
-    label: "Stripe",
-    description:
-      "Give opencompany read-only access to payment activity, subscriptions, and receivables.",
-    Icon: StripeIcon,
-    tileClass: "bg-[#635BFF] text-white",
+  betterstack: {
+    label: "Better Stack",
+    description: "Investigate observability data and manage monitoring and incident response.",
+    Icon: BetterStackIcon,
+    tileClass: "bg-[#1B1F23] text-white",
+  },
+  render: {
+    label: "Render",
+    description: "Deploy and operate services and datastores through Render's official MCP server.",
+    monogram: "R",
+    tileClass: "bg-[#0B0D0E] text-white",
+  },
+  signoz: {
+    label: "SigNoz",
+    description: "Investigate observability data and manage alerts and dashboards.",
+    monogram: "S",
+    tileClass: "bg-[#FF6B35] text-white",
   },
   infisical: {
     label: "Infisical",
@@ -207,18 +196,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Meeting recordings flow in after Fathom finishes each summary.",
     Icon: FathomIcon,
     tileClass: "bg-[#1355FF] text-white",
-  },
-  codex: {
-    label: "Codex",
-    description: "Connect your Codex subscription so opencompany can run coding tasks.",
-    Icon: OpenAIIcon,
-    tileClass: "bg-black text-white",
-  },
-  claude_code: {
-    label: "Claude Code",
-    description: "Connect your Claude subscription so opencompany can run coding tasks.",
-    Icon: AnthropicIcon,
-    tileClass: "bg-[#CC785C] text-white",
   },
   imessage: {
     label: "iMessage",
@@ -273,7 +250,7 @@ export function SettingsIntegrationsPanel({
   );
 }
 
-function IntegrationSetupFeedback() {
+export function IntegrationSetupFeedback() {
   const handled = useRef(false);
 
   useEffect(() => {
@@ -364,26 +341,21 @@ const INFISICAL_REGIONS = [
 // Group-card providers surfaced under each scope. These are all user-owned in the
 // data model (each member connects their own account), but the CRM / meeting /
 // issue-tracking tools read as shared workspace tooling, so we present them under
-// the Workspace scope; Gmail / Calendar / Drive / Slack stay personal.
+// the Workspace scope. Official Gmail, Calendar, Drive, and HubSpot tool accounts live under
+// Plugins.
 const WORKSPACE_ACCOUNT_PROVIDERS = [
-  "hubspot",
   "attio",
   "granola",
   "fathom",
-] as const satisfies readonly PersonalAccountProvider[];
+] as const satisfies readonly SettingsPersonalAccountProvider[];
 
 const PERSONAL_ACCOUNT_PROVIDERS = [
-  "gmail",
-  "google_calendar",
-  "google_drive",
-  "slack",
   "latitude",
-  "neon",
-] as const satisfies readonly PersonalAccountProvider[];
+] as const satisfies readonly SettingsPersonalAccountProvider[];
 
 function countConnectedAccounts(
   integrations: IntegrationState,
-  providers: readonly PersonalAccountProvider[],
+  providers: readonly SettingsPersonalAccountProvider[],
 ) {
   let count = 0;
   for (const provider of providers) {
@@ -396,9 +368,6 @@ function countWorkspaceConnected(integrations: IntegrationState) {
   return (
     (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
-    (integrationStatus(integrations.linear) === "Connected" ? 1 : 0) +
-    (integrationStatus(integrations.posthog) === "Connected" ? 1 : 0) +
-    (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
     (integrations.infisical.connected ? 1 : 0) +
     countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
   );
@@ -407,8 +376,6 @@ function countWorkspaceConnected(integrations: IntegrationState) {
 function countPersonalConnected(integrations: IntegrationState, includeImessage: boolean) {
   return (
     countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS) +
-    (integrations.codex.connected ? 1 : 0) +
-    (integrations.claude_code.connected ? 1 : 0) +
     (includeImessage && integrations.imessage.connected ? 1 : 0)
   );
 }
@@ -448,13 +415,6 @@ function IntegrationCards({
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
-            <IntegrationCardRow integration={integrations.linear} />
-            <IntegrationCardRow integration={integrations.posthog} />
-            <IntegrationCardRow integration={integrations.stripe} canConnect={isWorkspaceAdmin} />
-            <IntegrationProviderGroupCard
-              provider="hubspot"
-              accounts={integrations.personalAccounts.hubspot}
-            />
             <IntegrationProviderGroupCard
               provider="attio"
               accounts={integrations.personalAccounts.attio}
@@ -476,35 +436,9 @@ function IntegrationCards({
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <IntegrationProviderGroupCard
-              provider="gmail"
-              accounts={integrations.personalAccounts.gmail}
-            />
-            <IntegrationProviderGroupCard
-              provider="google_calendar"
-              accounts={integrations.personalAccounts.google_calendar}
-            />
-            <IntegrationProviderGroupCard
-              provider="google_drive"
-              accounts={integrations.personalAccounts.google_drive}
-            />
-            <IntegrationProviderGroupCard
-              provider="slack"
-              accounts={integrations.personalAccounts.slack}
-            />
-            <IntegrationProviderGroupCard
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
             />
-            <IntegrationProviderGroupCard
-              provider="neon"
-              accounts={integrations.personalAccounts.neon}
-            />
-            <IntegrationProviderGroupCard
-              provider="x_account"
-              accounts={integrations.personalAccounts.x_account}
-            />
-            <CodexIntegrationCard integration={integrations.codex} />
-            <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
             {imessageEnabled ? (
               <IMessageIntegrationCard integration={integrations.imessage} />
             ) : null}
@@ -860,14 +794,7 @@ function IntegrationCardRow({
   integration,
   canConnect = true,
 }: {
-  integration:
-    | GoogleProviderState
-    | LinearProviderState
-    | PostHogProviderState
-    | GitHubProviderState
-    | JamieProviderState
-    | SlackProviderState
-    | StripeProviderState;
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState;
   canConnect?: boolean;
 }) {
   const meta = INTEGRATION_META[integration.provider];
@@ -877,23 +804,15 @@ function IntegrationCardRow({
   const needsReconnect = integrationNeedsReconnect(integration);
   const statusReason = integrationStatusReason(integration);
   const accountLabel =
-    integration.provider === "linear" || integration.provider === "posthog"
+    integration.provider === "linear"
       ? integration.accountName
       : integration.provider === "github"
         ? integration.accountName
         : integration.provider === "jamie"
           ? integration.accountName
-          : integration.provider === "stripe"
-            ? [integration.accountName, integration.livemode === false ? "Test mode" : null]
-                .filter(Boolean)
-                .join(" · ") || null
-            : integration.provider === "slack"
-              ? [integration.teamName, integration.accountName].filter(Boolean).join(" · ") || null
-              : (integration.accountEmail ?? integration.accountName);
+          : (integration.accountEmail ?? integration.accountName);
   const capabilityBody =
-    connected &&
-    (integration.provider === "linear" || integration.provider === "posthog") &&
-    integration.integrationId ? (
+    connected && integration.provider === "linear" && integration.integrationId ? (
       <CapabilityModeRows
         integrationId={integration.integrationId}
         provider={integration.provider}
@@ -918,8 +837,6 @@ function IntegrationCardRow({
             </div>
             {integration.provider === "github" && canConnect ? (
               <ConnectLink href="/settings/repositories" label="Configure repositories" />
-            ) : integration.provider === "stripe" && canConnect ? (
-              <ConnectLink href={connectHref} label="Manage" />
             ) : null}
           </div>
         ) : needsReconnect && canConnect ? (
@@ -956,9 +873,15 @@ function IntegrationCardRow({
 function IntegrationProviderGroupCard({
   provider,
   accounts,
+  capabilityIds,
+  capabilityOverrides,
 }: {
-  provider: PersonalAccountProvider;
+  provider: SettingsPersonalAccountProvider;
   accounts: IntegrationAccountView[];
+  capabilityIds?: readonly CapabilityId[];
+  capabilityOverrides?: Partial<
+    Record<CapabilityId, Partial<Pick<ProviderCapability, "label" | "description">>>
+  >;
 }) {
   const meta = INTEGRATION_META[provider];
   const connectHref = integrationConnectHref(provider);
@@ -973,7 +896,12 @@ function IntegrationProviderGroupCard({
       body={
         <div className="flex flex-col gap-1.5">
           {accounts.map((account) => (
-            <IntegrationAccountRow key={account.integrationId} account={account} />
+            <IntegrationAccountRow
+              key={account.integrationId}
+              account={account}
+              {...(capabilityIds ? { capabilityIds } : {})}
+              {...(capabilityOverrides ? { capabilityOverrides } : {})}
+            />
           ))}
         </div>
       }
@@ -993,7 +921,23 @@ function IntegrationProviderGroupCard({
   );
 }
 
-function IntegrationAccountRow({ account }: { account: IntegrationAccountView }) {
+export function IntegrationAccountRow({
+  account,
+  purposeLabel,
+  reconnectHref,
+  showCapabilityModes = true,
+  capabilityIds,
+  capabilityOverrides,
+}: {
+  account: IntegrationAccountView<PersonalAccountProvider | "posthog">;
+  purposeLabel?: string;
+  reconnectHref?: string;
+  showCapabilityModes?: boolean;
+  capabilityIds?: readonly CapabilityId[];
+  capabilityOverrides?: Partial<
+    Record<CapabilityId, Partial<Pick<ProviderCapability, "label" | "description">>>
+  >;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState<{
@@ -1014,16 +958,18 @@ function IntegrationAccountRow({ account }: { account: IntegrationAccountView })
           account.integrationId
         : account.accountEmail || account.accountName || account.integrationId;
   const needsGoogleDriveWriteScope =
+    showCapabilityModes &&
     account.provider === "google_drive" &&
     account.connected &&
     !hasGoogleDriveWriteScope(account.scopes);
   const needsReconnect = account.status === "needs_reauth" || account.status === "sync_failed";
-  const gmailScopeUpgradeLabel =
-    account.provider === "gmail" && account.connected && !hasGmailDraftScope(account.scopes)
-      ? hasGmailSendScope(account.scopes)
-        ? "Enable drafts"
-        : "Enable drafts & sending"
-      : null;
+  const accountConnectHref =
+    reconnectHref ??
+    (account.provider === "posthog"
+      ? "/api/integrations/posthog/start?returnTo=/settings/plugins/posthog"
+      : integrationConnectHref(account.provider));
+  const needsGmailMcpScope =
+    account.provider === "gmail" && account.connected && !gmailMcpScopesSatisfied(account.scopes);
 
   const beginDisconnect = () => {
     setError(null);
@@ -1064,6 +1010,11 @@ function IntegrationAccountRow({ account }: { account: IntegrationAccountView })
           {identity}
         </span>
         <div className="flex shrink-0 items-center gap-1.5">
+          {purposeLabel ? (
+            <span className="rounded-full border border-border px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+              {purposeLabel}
+            </span>
+          ) : null}
           {account.connected ? (
             <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
               Connected
@@ -1074,7 +1025,7 @@ function IntegrationAccountRow({ account }: { account: IntegrationAccountView })
             </span>
           ) : (
             <a
-              href={integrationConnectHref(account.provider)}
+              href={accountConnectHref}
               className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
             >
               Reconnect
@@ -1088,12 +1039,12 @@ function IntegrationAccountRow({ account }: { account: IntegrationAccountView })
               Enable Docs & Sheets editing
             </a>
           ) : null}
-          {gmailScopeUpgradeLabel ? (
+          {needsGmailMcpScope ? (
             <a
-              href={integrationConnectHref("gmail")}
+              href={accountConnectHref}
               className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
             >
-              {gmailScopeUpgradeLabel}
+              Enable full Gmail tools
             </a>
           ) : null}
           <button
@@ -1112,18 +1063,20 @@ function IntegrationAccountRow({ account }: { account: IntegrationAccountView })
             <p className="text-[12px] leading-4 text-warning">{account.statusReason}</p>
           ) : null}
           <a
-            href={integrationConnectHref(account.provider)}
+            href={accountConnectHref}
             className="w-fit rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
           >
             Reconnect
           </a>
         </div>
       ) : null}
-      {account.connected ? (
+      {account.connected && showCapabilityModes ? (
         <CapabilityModeRows
           integrationId={account.integrationId}
           provider={account.provider}
           capabilityModes={account.capabilityModes}
+          {...(capabilityIds ? { capabilityIds } : {})}
+          {...(capabilityOverrides ? { capabilityOverrides } : {})}
         />
       ) : null}
       {confirming ? (
@@ -1164,12 +1117,20 @@ function CapabilityModeRows({
   integrationId,
   provider,
   capabilityModes,
+  capabilityIds,
+  capabilityOverrides,
 }: {
   integrationId: string;
   provider: PersonalAccountProvider | "posthog";
   capabilityModes: Record<string, unknown>;
+  capabilityIds?: readonly CapabilityId[];
+  capabilityOverrides?: Partial<
+    Record<CapabilityId, Partial<Pick<ProviderCapability, "label" | "description">>>
+  >;
 }) {
-  const capabilities = providerCapabilities(provider);
+  const capabilities = providerCapabilities(provider)
+    .filter((capability) => !capabilityIds || capabilityIds.includes(capability.id))
+    .map((capability) => ({ ...capability, ...capabilityOverrides?.[capability.id] }));
   if (capabilities.length === 0) return null;
   return (
     <div className="flex flex-col gap-1 border-t border-border/60 pt-1.5">
@@ -1184,15 +1145,6 @@ function CapabilityModeRows({
     </div>
   );
 }
-
-const CAPABILITY_MODE_OPTIONS: Array<{
-  mode: CapabilityMode;
-  label: string;
-}> = [
-  { mode: "on", label: "On" },
-  { mode: "ask", label: "Ask" },
-  { mode: "off", label: "Off" },
-];
 
 function CapabilityModeRow({
   integrationId,
@@ -1238,32 +1190,12 @@ function CapabilityModeRow({
           {capability.label}
         </div>
       </div>
-      <div
-        role="group"
-        aria-label={`${capability.label} permission`}
-        className="flex shrink-0 items-center rounded-full bg-surface-muted p-0.5"
-      >
-        {CAPABILITY_MODE_OPTIONS.map((option) => {
-          const active = option.mode === currentMode;
-          return (
-            <button
-              key={option.mode}
-              type="button"
-              aria-pressed={active}
-              disabled={isPending}
-              onClick={() => select(option.mode)}
-              className={cn(
-                "rounded-full px-2 py-0.5 text-[11px] font-medium leading-4 transition-colors duration-150",
-                active
-                  ? "bg-surface text-ink shadow-sm"
-                  : "text-ink-subtle hover:text-ink disabled:opacity-60",
-              )}
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
+      <CapabilityModeToggle
+        label={capability.label}
+        mode={currentMode}
+        disabled={isPending}
+        onChange={select}
+      />
     </div>
   );
 }
@@ -1480,267 +1412,6 @@ function InfisicalIntegrationCard({
   );
 }
 
-function CodexIntegrationCard({ integration }: { integration: CodexProviderState }) {
-  const router = useRouter();
-  const [flow, setFlow] = useState<CodexDeviceAuthFlow | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isPolling, setIsPolling] = useState(false);
-  const [isPending, startTransition] = useTransition();
-  const status = flow?.status ?? integration.status;
-
-  useEffect(() => {
-    if (
-      !flow ||
-      flow.status === "completed" ||
-      flow.status === "failed" ||
-      flow.status === "expired"
-    ) {
-      return;
-    }
-
-    let active = true;
-    let pollInFlight = false;
-    const timer = window.setInterval(() => {
-      if (pollInFlight) return;
-      pollInFlight = true;
-      setIsPolling(true);
-      void (async () => {
-        try {
-          const result = await pollCodexDeviceAuth(flow.id);
-          if (!active) return;
-          if (result.ok) {
-            if (result.flow.status === "completed") {
-              setFlow(null);
-              setError(null);
-              router.refresh();
-            } else {
-              setFlow(result.flow);
-            }
-          } else {
-            setError(result.error);
-          }
-        } finally {
-          pollInFlight = false;
-          if (active) setIsPolling(false);
-        }
-      })();
-    }, 2500);
-
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-      setIsPolling(false);
-    };
-  }, [flow, router]);
-
-  const startAuth = () => {
-    setError(null);
-    startTransition(async () => {
-      const result = await startCodexDeviceAuth();
-      if (result.ok) {
-        if (result.flow.status === "completed") {
-          setFlow(null);
-          router.refresh();
-        } else {
-          setFlow(result.flow);
-        }
-      } else {
-        setError(result.error);
-      }
-    });
-  };
-
-  const disconnect = () => {
-    setError(null);
-    setIsPolling(false);
-    startTransition(async () => {
-      await disconnectCodexAuth();
-      setFlow(null);
-      router.refresh();
-    });
-  };
-
-  const accountLabel =
-    integration.status === "connected"
-      ? integration.lastValidatedAt
-        ? `Validated ${formatDateTime(integration.lastValidatedAt)}`
-        : "Subscription connected"
-      : integration.statusReason;
-
-  return (
-    <IntegrationCard
-      meta={INTEGRATION_META.codex}
-      body={
-        <div className="flex flex-col gap-2">
-          {accountLabel ? (
-            <p className="truncate text-[12px] leading-4 text-ink-subtle">{accountLabel}</p>
-          ) : null}
-          {flow?.status === "code_ready" && flow.verificationUri && flow.userCode ? (
-            <div className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
-              <a
-                href={flow.verificationUri}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-ink underline underline-offset-2"
-              >
-                Open Codex sign-in
-              </a>
-              <span> and enter </span>
-              <span className="font-mono font-semibold text-ink">{flow.userCode}</span>
-            </div>
-          ) : null}
-          {flow?.statusReason || error ? (
-            <div className="text-[12px] leading-4 text-warning">{error ?? flow?.statusReason}</div>
-          ) : null}
-        </div>
-      }
-      footer={
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={startAuth}
-            disabled={isPending}
-            aria-busy={isPending || isPolling}
-            className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
-          >
-            {buttonLabel(status, isPending)}
-          </button>
-          {integration.connected ? (
-            <button
-              type="button"
-              onClick={disconnect}
-              disabled={isPending}
-              className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-            >
-              Disconnect
-            </button>
-          ) : null}
-        </div>
-      }
-    />
-  );
-}
-
-function ClaudeCodeIntegrationCard({ integration }: { integration: ClaudeCodeProviderState }) {
-  const router = useRouter();
-  const [token, setToken] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-
-  const submitToken = () => {
-    setError(null);
-    startTransition(async () => {
-      const result = await saveClaudeCodeToken(token);
-      if (result.ok) {
-        setToken("");
-        setShowForm(false);
-        router.refresh();
-      } else {
-        setError(result.error);
-      }
-    });
-  };
-
-  const disconnect = () => {
-    setError(null);
-    startTransition(async () => {
-      await disconnectClaudeCodeAuth();
-      setShowForm(false);
-      router.refresh();
-    });
-  };
-
-  const accountLabel =
-    integration.status === "connected"
-      ? integration.lastValidatedAt
-        ? `Connected ${formatDateTime(integration.lastValidatedAt)}`
-        : "Token saved; validation pending"
-      : integration.statusReason;
-
-  return (
-    <IntegrationCard
-      meta={INTEGRATION_META.claude_code}
-      body={
-        <div className="flex flex-col gap-2">
-          {accountLabel ? (
-            <p className="truncate text-[12px] leading-4 text-ink-subtle">{accountLabel}</p>
-          ) : null}
-          {showForm ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-[12px] leading-5 text-ink-muted">
-                Run <span className="font-mono font-semibold text-ink">claude setup-token</span> on
-                your machine, approve in the browser, and paste the token here. Tokens last about a
-                year.
-              </p>
-              <input
-                type="password"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-                placeholder="sk-ant-oat…"
-                autoComplete="off"
-                spellCheck={false}
-                className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-              />
-            </div>
-          ) : null}
-          {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
-        </div>
-      }
-      footer={
-        <div className="flex items-center gap-2">
-          {showForm ? (
-            <>
-              <button
-                type="button"
-                onClick={submitToken}
-                disabled={isPending || !token.trim()}
-                aria-busy={isPending}
-                className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
-              >
-                {isPending ? "Working" : "Save token"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setToken("");
-                  setError(null);
-                }}
-                disabled={isPending}
-                className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => setShowForm(true)}
-                disabled={isPending}
-                className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
-              >
-                {buttonLabel(integration.status, isPending)}
-              </button>
-              {integration.connected ? (
-                <button
-                  type="button"
-                  onClick={disconnect}
-                  disabled={isPending}
-                  className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-                >
-                  Disconnect
-                </button>
-              ) : null}
-            </>
-          )}
-        </div>
-      }
-    />
-  );
-}
-
 function IMessageIntegrationCard({ integration }: { integration: ImessageProviderState }) {
   return (
     <IntegrationCard
@@ -1767,14 +1438,7 @@ function IMessageIntegrationCard({ integration }: { integration: ImessageProvide
 }
 
 function integrationStatus(
-  integration:
-    | GoogleProviderState
-    | LinearProviderState
-    | PostHogProviderState
-    | GitHubProviderState
-    | JamieProviderState
-    | SlackProviderState
-    | StripeProviderState,
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
   if (integration.provider === "jamie" && integration.apiKeyConfigured) return "Connected";
@@ -1787,33 +1451,19 @@ function integrationStatus(
 }
 
 function integrationNeedsReconnect(
-  integration:
-    | GoogleProviderState
-    | LinearProviderState
-    | PostHogProviderState
-    | GitHubProviderState
-    | JamieProviderState
-    | SlackProviderState
-    | StripeProviderState,
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState,
 ) {
   return integration.status === "needs_reauth" || integration.status === "sync_failed";
 }
 
 function integrationStatusReason(
-  integration:
-    | GoogleProviderState
-    | LinearProviderState
-    | PostHogProviderState
-    | GitHubProviderState
-    | JamieProviderState
-    | SlackProviderState
-    | StripeProviderState,
+  integration: GoogleProviderState | LinearProviderState | GitHubProviderState | JamieProviderState,
 ) {
   return "statusReason" in integration ? integration.statusReason : null;
 }
 
 function integrationConnectHref(
-  provider: Exclude<IntegrationMetaKey, "codex" | "claude_code" | "infisical">,
+  provider: Exclude<IntegrationMetaKey, "codex" | "claude_code" | "infisical"> | "slack",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -1824,20 +1474,26 @@ function integrationConnectHref(
   }
   if (provider === "github")
     return "/api/integrations/github/start?returnTo=/settings/integrations";
+  if (provider === "github_user")
+    return "/api/integrations/github-user/start?returnTo=/settings/plugins/github";
   if (provider === "jamie") return "/settings/jamie";
   if (provider === "imessage") return "/settings/imessage";
   if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
   if (provider === "attio") return "/settings/attio";
-  if (provider === "stripe") return "/settings/stripe";
-  if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
+  if (provider === "slack") return "/settings/plugins/slack";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
   if (provider === "latitude")
     return "/api/integrations/latitude/start?returnTo=/settings/integrations";
   if (provider === "neon") return "/api/integrations/neon/start?returnTo=/settings/integrations";
-  if (provider === "posthog")
-    return "/api/integrations/posthog/start?returnTo=/settings/integrations";
+  if (provider === "betterstack") {
+    return "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack";
+  }
+  if (provider === "render") return "/settings/plugins/render#render-api-key";
+  if (provider === "signoz") {
+    return "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz";
+  }
   if (provider === "x_account")
     return "/api/integrations/x-account/start?returnTo=/settings/integrations";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";
@@ -1849,11 +1505,4 @@ function buttonLabel(status: string, isPending: boolean) {
   if (status === "needs_reauth") return "Reconnect";
   if (status === "failed" || status === "expired") return "Retry";
   return "Connect";
-}
-
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
 }

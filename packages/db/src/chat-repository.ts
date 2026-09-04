@@ -1,8 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  ACTION_HOST_TOOL_CONTRACT_VERSION,
-  CHAT_HOST_TOOL_CONTRACT_VERSION,
-} from "@opencompany/agent-runtime";
+import { hostToolContractVersionForEngine } from "@opencompany/agent-runtime";
 import {
   type Actor,
   type ChatAttachmentFormat,
@@ -26,6 +23,7 @@ import {
   type RunStatus,
 } from "@opencompany/core";
 import { type SQL, sql } from "drizzle-orm";
+import { stringifyPostgresJson } from "./postgres-json";
 import type { ChatMessageAttachment } from "./product-schema";
 import { type ResolvedWorkspaceSkill, resolveSkillCandidates } from "./skill-catalog";
 
@@ -64,6 +62,25 @@ export type ChatAttachmentUpload = {
   sizeBytes: number;
   expiresAt: Date;
 };
+
+export type ChatAttachmentUploadReservation = {
+  commandId: string;
+  requestHash: string;
+  attachmentId: string;
+  blobPathname: string;
+  expiresAt: Date;
+  completedAt: Date | null;
+  cleanedAt: Date | null;
+};
+
+export type CompleteChatAttachmentUploadInput = Omit<
+  CreateChatAttachmentUploadInput,
+  "actor" | "id" | "blobPathname" | "expiresAt"
+> & {
+  commandId: string;
+};
+
+export type CompletedChatAttachmentUpload = ChatAttachmentUpload & { created: boolean };
 
 export type ChatRepositoryIdFactory = {
   command(): string;
@@ -111,6 +128,119 @@ export class PostgresChatAttachmentRepository {
         expires_at AS "expiresAt"
     `);
     return row ? mapAttachmentUpload(row) : null;
+  }
+
+  async reserve(input: {
+    actor: Actor;
+    commandId: string;
+    idempotencyKey: string;
+    requestHash: string;
+    attachmentId: string;
+    blobPathname: string;
+    expiresAt: Date;
+  }): Promise<ChatAttachmentUploadReservation | null> {
+    const touchedAt = this.now();
+    const [row] = await this.rows<ChatAttachmentUploadReservationRow>(sql`
+      INSERT INTO goat.chat_attachment_upload_commands (
+        command_id, user_workos_id, workspace_id, idempotency_key, request_hash,
+        attachment_id, blob_pathname, expires_at, created_at, touched_at
+      )
+      SELECT
+        ${input.commandId}, ${input.actor.userId}, ${input.actor.workspaceId},
+        ${input.idempotencyKey}, ${input.requestHash}, ${input.attachmentId},
+        ${input.blobPathname}, ${input.expiresAt}, ${touchedAt}, ${touchedAt}
+      WHERE EXISTS (
+        SELECT 1
+        FROM goat.workspace_members AS member
+        WHERE member.workspace_id = ${input.actor.workspaceId}
+          AND member.user_workos_id = ${input.actor.userId}
+      )
+      ON CONFLICT (user_workos_id, workspace_id, idempotency_key)
+      DO UPDATE SET touched_at = EXCLUDED.touched_at
+      RETURNING
+        command_id AS "commandId", request_hash AS "requestHash",
+        attachment_id AS "attachmentId", blob_pathname AS "blobPathname",
+        expires_at AS "expiresAt", completed_at AS "completedAt", cleaned_at AS "cleanedAt"
+    `);
+    return row ? mapAttachmentUploadReservation(row) : null;
+  }
+
+  async findCompleted(commandId: string): Promise<ChatAttachmentUpload | null> {
+    const [row] = await this.rows<ChatAttachmentUploadRow>(sql`
+      SELECT
+        upload.id, upload.format, upload.media_type AS "mediaType", upload.filename,
+        upload.size_bytes AS "sizeBytes", command.expires_at AS "expiresAt"
+      FROM goat.chat_attachment_upload_commands AS command
+      INNER JOIN goat.chat_attachment_uploads AS upload ON upload.id = command.attachment_id
+      WHERE command.command_id = ${commandId}
+        AND command.completed_at IS NOT NULL
+        AND command.cleaned_at IS NULL
+      LIMIT 1
+    `);
+    return row ? mapAttachmentUpload(row) : null;
+  }
+
+  async complete(
+    input: CompleteChatAttachmentUploadInput,
+  ): Promise<CompletedChatAttachmentUpload | null> {
+    const completedAt = this.now();
+    const [row] = await this.rows<CompletedChatAttachmentUploadRow>(sql`
+      WITH locked_command AS MATERIALIZED (
+        SELECT command.*
+        FROM goat.chat_attachment_upload_commands AS command
+        WHERE command.command_id = ${input.commandId}
+          AND command.cleaned_at IS NULL
+        FOR UPDATE
+      ), inserted AS (
+        INSERT INTO goat.chat_attachment_uploads (
+          id, user_workos_id, workspace_id, format, media_type, filename, size_bytes,
+          blob_pathname, blob_url, extracted_text, expires_at, created_at
+        )
+        SELECT
+          command.attachment_id, command.user_workos_id, command.workspace_id, ${input.format},
+          ${input.mediaType}, ${input.filename}, ${input.sizeBytes}, command.blob_pathname,
+          ${input.blobUrl}, ${input.extractedText}, command.expires_at, ${completedAt}
+        FROM locked_command AS command
+        WHERE EXISTS (
+            SELECT 1
+            FROM goat.workspace_members AS member
+            WHERE member.workspace_id = command.workspace_id
+              AND member.user_workos_id = command.user_workos_id
+          )
+        ON CONFLICT (id) DO NOTHING
+        RETURNING id
+      ), completed AS (
+        UPDATE goat.chat_attachment_upload_commands AS command
+        SET completed_at = COALESCE(command.completed_at, ${completedAt}),
+            touched_at = ${completedAt}
+        WHERE command.command_id = ${input.commandId}
+          AND command.cleaned_at IS NULL
+          AND (
+            EXISTS (SELECT 1 FROM inserted)
+            OR EXISTS (
+              SELECT 1
+              FROM goat.chat_attachment_uploads AS upload
+              WHERE upload.id = command.attachment_id
+                AND upload.user_workos_id = command.user_workos_id
+                AND upload.workspace_id = command.workspace_id
+                AND upload.blob_pathname = command.blob_pathname
+                AND upload.format = ${input.format}
+                AND upload.media_type = ${input.mediaType}
+                AND upload.filename = ${input.filename}
+                AND upload.size_bytes = ${input.sizeBytes}
+                AND upload.extracted_text IS NOT DISTINCT FROM ${input.extractedText}
+            )
+          )
+        RETURNING command.attachment_id, command.expires_at
+      )
+      SELECT
+        completed.attachment_id AS id, ${input.format} AS format,
+        ${input.mediaType} AS "mediaType", ${input.filename} AS filename,
+        ${input.sizeBytes} AS "sizeBytes", completed.expires_at AS "expiresAt",
+        EXISTS (SELECT 1 FROM inserted) AS created
+      FROM completed
+    `);
+    return row ? { ...mapAttachmentUpload(row), created: row.created } : null;
   }
 
   async resolve(input: {
@@ -198,6 +328,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.active_run_id AS "activeRunId",
         conversation.runtime_has_error AS "runtimeHasError",
         conversation.runtime_updated_at AS "runtimeUpdatedAt",
+        conversation.message_shape_epoch AS "messageShapeEpoch",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
         conversation.pinned_at AS "pinnedAt",
@@ -248,6 +379,7 @@ export class PostgresChatRepository implements ChatRepository {
         conversation.active_run_id AS "activeRunId",
         conversation.runtime_has_error AS "runtimeHasError",
         conversation.runtime_updated_at AS "runtimeUpdatedAt",
+        conversation.message_shape_epoch AS "messageShapeEpoch",
         conversation.activity_state AS "activityState",
         conversation.has_unseen AS "hasUnseen",
         conversation.pinned_at AS "pinnedAt",
@@ -594,12 +726,13 @@ export class PostgresChatRepository implements ChatRepository {
     const runtimeId = ids.runtime();
     const runId = ids.run();
     const eventId = ids.event();
+    const activityId = `task_activity_${randomUUID()}`;
     const now = this.options.now?.() ?? new Date();
     const attachmentIds = input.command.attachmentIds ?? [];
     const resolvedAttachments = await this.resolveAttachments(input.actor, attachmentIds);
-    const attachmentsJson = JSON.stringify(resolvedAttachments.attachments);
+    const attachmentsJson = stringifyPostgresJson(resolvedAttachments.attachments);
     const attachmentTextsJson = serializeAttachmentTexts(resolvedAttachments.attachmentTexts);
-    const settingsJson = JSON.stringify({
+    const settingsJson = stringifyPostgresJson({
       ...(input.command.settings ?? {}),
       ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
     });
@@ -609,7 +742,7 @@ export class PostgresChatRepository implements ChatRepository {
         mention.kind === "skill" ? [mention.id] : [],
       ) ?? [],
     );
-    const resolvedMentionSkillsJson = JSON.stringify(
+    const resolvedMentionSkillsJson = stringifyPostgresJson(
       resolvedMentionSkills.map((skill) => ({
         bundle_id: skill.bundleId,
         source_kind: skill.sourceKind,
@@ -653,7 +786,7 @@ export class PostgresChatRepository implements ChatRepository {
       authorized_existing AS MATERIALIZED (
         SELECT
           chat.id, chat.model, chat.kind, chat.user_workos_id AS owner_user_workos_id,
-          task.id AS task_id
+          task.id AS task_id, task.status AS task_status
         FROM goat.chat_sessions AS chat
         LEFT JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = chat.id
         LEFT JOIN goat.tasks AS task
@@ -672,7 +805,7 @@ export class PostgresChatRepository implements ChatRepository {
                 )
               )
               AND task.archived_at IS NULL
-              AND task.status IN ('succeeded', 'failed', 'canceled')
+              AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
             )
           )
           AND chat.engine = ${input.command.engine}
@@ -689,7 +822,7 @@ export class PostgresChatRepository implements ChatRepository {
       ),
       continued_task AS MATERIALIZED (
         UPDATE goat.tasks AS task
-        SET status = 'queued',
+        SET status = 'running',
             stage = 'queued',
             result = NULL,
             error = NULL,
@@ -699,19 +832,43 @@ export class PostgresChatRepository implements ChatRepository {
             lease_id = NULL,
             lease_owner = NULL,
             lease_expires_at = NULL,
+            attempts = task.attempts + 1,
             updated_at = ${now}
         FROM authorized_existing AS existing
         WHERE existing.kind = 'task'
           AND task.id = existing.task_id
-          AND task.status IN ('succeeded', 'failed', 'canceled')
-        RETURNING task.id
+          AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
+        RETURNING task.id, existing.task_status AS previous_status
+      ),
+      resumed_task_activity AS MATERIALIZED (
+        INSERT INTO goat.task_activities (
+          id, task_id, author, author_workos_id, kind, body, metadata, created_at
+        )
+        SELECT
+          ${activityId}, task.id, 'user', ${input.actor.userId}, 'status_changed',
+          'Resumed by user.',
+          jsonb_build_object(
+            'fromStatus', task.previous_status,
+            'toStatus', 'running',
+            'runId', ${runId}::text
+          ),
+          ${now}
+        FROM continued_task AS task
+        RETURNING task_id
       ),
       admitted_existing AS MATERIALIZED (
         SELECT
           existing.id, existing.model, existing.owner_user_workos_id, existing.task_id
         FROM authorized_existing AS existing
         WHERE existing.kind = 'chat'
-           OR existing.task_id IN (SELECT id FROM continued_task)
+           OR existing.task_id IN (SELECT task_id FROM resumed_task_activity)
+      ),
+      locked_attachment_commands AS MATERIALIZED (
+        -- Completion and cleanup also lock keyed commands before their upload row.
+        SELECT command.command_id
+        FROM goat.chat_attachment_upload_commands AS command
+        WHERE command.attachment_id IN (${attachmentIdList})
+        FOR UPDATE
       ),
       eligible_attachments AS MATERIALIZED (
         SELECT upload.id
@@ -722,6 +879,7 @@ export class PostgresChatRepository implements ChatRepository {
           AND upload.expires_at > ${now}
           AND upload.id IN (${attachmentIdList})
           AND EXISTS (SELECT 1 FROM membership)
+          AND (SELECT count(*) FROM locked_attachment_commands) >= 0
         FOR UPDATE
       ),
       reservation AS MATERIALIZED (
@@ -889,14 +1047,7 @@ export class PostgresChatRepository implements ChatRepository {
         SELECT
           ${runtimeId}, target_chat.owner_user_workos_id, target_chat.id, ${input.command.engine},
           ${runtimeModel}, ${input.actor.workspaceId},
-          CASE WHEN target_chat.task_id IS NULL
-            THEN ${
-              input.command.engine === "opencompany"
-                ? CHAT_HOST_TOOL_CONTRACT_VERSION
-                : ACTION_HOST_TOOL_CONTRACT_VERSION
-            }
-            ELSE NULL
-          END,
+          ${hostToolContractVersionForEngine(input.command.engine)},
           ${runId}, 'queued', ${now}, ${now}
         FROM target_chat
         ON CONFLICT (chat_session_id) DO UPDATE
@@ -933,6 +1084,17 @@ export class PostgresChatRepository implements ChatRepository {
         WHERE upload.id IN (SELECT id FROM eligible_attachments)
           AND upload.claimed_at IS NULL
         RETURNING upload.id
+      ),
+      terminal_attachment_commands AS MATERIALIZED (
+        UPDATE goat.chat_attachment_upload_commands AS command
+        SET claimed_at = ${now},
+            cleaned_at = ${now},
+            touched_at = ${now}
+        FROM claimed_attachments AS upload
+        WHERE command.attachment_id = upload.id
+          AND command.claimed_at IS NULL
+          AND command.cleaned_at IS NULL
+        RETURNING command.command_id
       ),
       inserted_user_message AS (
         INSERT INTO goat.chat_messages (
@@ -1020,7 +1182,7 @@ export class PostgresChatRepository implements ChatRepository {
         SELECT
           reservation.assistant_message_id, target_chat.id, 'assistant', '',
           target_chat.task_id,
-          ${JSON.stringify(assistantDebugTrace)}::jsonb,
+          ${stringifyPostgresJson(assistantDebugTrace)}::jsonb,
           ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true
@@ -1037,7 +1199,12 @@ export class PostgresChatRepository implements ChatRepository {
             reservation.run_id, target_chat.owner_user_workos_id,
             upserted_runtime.id, target_chat.id,
           reservation.message_id, reservation.assistant_message_id, 'queued',
-          ${input.command.content}, ${settingsJson}::jsonb, 1, ${now}, ${now}
+          ${input.command.content},
+          CASE WHEN target_chat.task_id IS NULL
+            THEN ${settingsJson}::jsonb
+            ELSE ${settingsJson}::jsonb || '{"taskResultMode":"assistant_final"}'::jsonb
+          END,
+          1, ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true
         JOIN upserted_runtime ON upserted_runtime.chat_session_id = target_chat.id
@@ -1094,7 +1261,8 @@ export class PostgresChatRepository implements ChatRepository {
           ELSE jsonb_array_length(jsonb_build_object('reason', 'unmaterialized')) = 0
         END AS materialized,
         (SELECT count(*) FROM notified) AS "notifyCount",
-        (SELECT count(*) FROM dismissed_capabilities) AS "capabilityCancelCount"
+        (SELECT count(*) FROM dismissed_capabilities) AS "capabilityCancelCount",
+        (SELECT count(*) FROM terminal_attachment_commands) AS "terminalAttachmentCommandCount"
       FROM reservation
       `);
     } catch (error) {
@@ -1184,9 +1352,10 @@ export class PostgresChatRepository implements ChatRepository {
   async cancelRun(input: { actor: Actor; runId: string }) {
     const now = this.options.now?.() ?? new Date();
     const eventId = (this.options.ids ?? defaultIds).event();
+    const activityId = `task_activity_${randomUUID()}`;
     const [row] = await this.rows<{ status: LegacyRunStatus; replayed: boolean }>(sql`
       WITH authorized AS MATERIALIZED (
-        SELECT run.id, task.id AS task_id
+        SELECT run.id, task.id AS task_id, task.status AS task_status
         FROM goat.codex_chat_turns AS run
         JOIN goat.codex_chat_sessions AS runtime ON runtime.id = run.codex_chat_session_id
         JOIN goat.chat_sessions AS chat ON chat.id = run.chat_session_id
@@ -1290,6 +1459,23 @@ export class PostgresChatRepository implements ChatRepository {
           AND task.status IN ('queued', 'running')
         RETURNING task.id
       ),
+      status_changed_activity AS MATERIALIZED (
+        INSERT INTO goat.task_activities (
+          id, task_id, author, author_workos_id, kind, body, metadata, created_at
+        )
+        SELECT
+          ${activityId}, task.id, 'user', ${input.actor.userId}, 'status_changed',
+          'Stopped by user.',
+          jsonb_build_object(
+            'fromStatus', authorized.task_status,
+            'toStatus', 'canceled',
+            'runId', authorized.id
+          ),
+          ${now}
+        FROM canceled_task AS task
+        JOIN authorized ON authorized.task_id = task.id
+        RETURNING id
+      ),
       aborted_message AS (
         UPDATE goat.chat_messages AS message
         SET debug_trace = COALESCE(
@@ -1332,7 +1518,8 @@ export class PostgresChatRepository implements ChatRepository {
         COALESCE((SELECT changed.status FROM changed), run.status) AS status,
         NOT EXISTS (SELECT 1 FROM changed) AS replayed,
         (SELECT count(*) FROM notified) AS "notifyCount",
-        (SELECT count(*) FROM canceled_capabilities) AS "capabilityCancelCount"
+        (SELECT count(*) FROM canceled_capabilities) AS "capabilityCancelCount",
+        (SELECT count(*) FROM status_changed_activity) AS "taskActivityCount"
       FROM goat.codex_chat_turns AS run
       JOIN authorized ON authorized.id = run.id
     `);
@@ -1360,6 +1547,7 @@ export class PostgresChatRepository implements ChatRepository {
     }
     const now = this.options.now?.() ?? new Date();
     const eventId = (this.options.ids ?? defaultIds).event();
+    const liveEventId = (this.options.ids ?? defaultIds).event();
     const response = { resolution: input.command.resolution, answer: input.command.answer };
     const approvalResponse = {
       id: input.command.approvalId,
@@ -1414,12 +1602,34 @@ export class PostgresChatRepository implements ChatRepository {
         UPDATE goat.run_approvals AS approval
         SET status = ${input.command.resolution === "canceled" ? "canceled" : "resolved"},
             resolution = ${input.command.resolution},
-            response = ${JSON.stringify(response)}::jsonb,
+            response = ${stringifyPostgresJson(response)}::jsonb,
             resolved_at = ${now},
             updated_at = ${now}
         WHERE approval.id IN (SELECT id FROM authorized)
           AND approval.status = 'pending'
-        RETURNING approval.id, approval.run_id, approval.tool_call_id
+        RETURNING approval.id, approval.run_id, approval.tool_call_id, approval.kind
+      ),
+      resolved_action_approval AS MATERIALIZED (
+        UPDATE goat.action_turns AS action_turn
+        SET approval_records = jsonb_set(
+              action_turn.approval_records,
+              ARRAY[changed.tool_call_id]::text[],
+              (action_turn.approval_records -> changed.tool_call_id) || jsonb_build_object(
+                'status', CASE
+                  WHEN ${input.command.resolution === "approved"}::boolean
+                    THEN 'approved'::text
+                  ELSE 'denied'::text
+                END,
+                'resolvedAt', ${now.toISOString()}::text
+              )
+            ),
+            updated_at = ${now}
+        FROM changed
+        WHERE changed.tool_call_id IS NOT NULL
+          AND action_turn.turn_id = changed.run_id
+          AND action_turn.approval_records ? changed.tool_call_id
+          AND action_turn.approval_records -> changed.tool_call_id ->> 'status' = 'pending'
+        RETURNING action_turn.id
       ),
       transitioned_capability AS MATERIALIZED (
         UPDATE goat.capability_runs AS capability
@@ -1467,7 +1677,7 @@ export class PostgresChatRepository implements ChatRepository {
                         AND part.value -> 'approval' ->> 'id' = ${input.command.approvalId}
                       THEN part.value || jsonb_build_object(
                         'state', 'approval-responded',
-                        'approval', ${JSON.stringify(approvalResponse)}::jsonb
+                        'approval', ${stringifyPostgresJson(approvalResponse)}::jsonb
                       )
                       ELSE part.value
                     END
@@ -1518,6 +1728,16 @@ export class PostgresChatRepository implements ChatRepository {
           AND EXISTS (SELECT 1 FROM rewritten_assistant)
         RETURNING run.id, run.event_sequence, run.status, run.codex_chat_session_id
       ),
+      advanced_live_run AS MATERIALIZED (
+        UPDATE goat.codex_chat_turns AS run
+        SET event_sequence = run.event_sequence + 1,
+            updated_at = ${now}
+        FROM changed
+        WHERE run.id = changed.run_id
+          AND run.status = 'running'
+          AND changed.kind = 'use_action'
+        RETURNING run.id, run.event_sequence, changed.tool_call_id
+      ),
       queued_runtime AS MATERIALIZED (
         UPDATE goat.codex_chat_sessions AS runtime
         SET status = 'queued',
@@ -1535,7 +1755,7 @@ export class PostgresChatRepository implements ChatRepository {
         )
         SELECT
           ${eventId}, advanced_run.id, advanced_run.event_sequence, 1, 'approval.resolved',
-          ${JSON.stringify({
+          ${stringifyPostgresJson({
             approvalId: input.command.approvalId,
             resolution: input.command.resolution,
           })}::jsonb,
@@ -1543,19 +1763,39 @@ export class PostgresChatRepository implements ChatRepository {
         FROM advanced_run
         RETURNING id, run_id, sequence
       ),
+      inserted_live_event AS (
+        INSERT INTO goat.run_events (
+          id, run_id, sequence, schema_version, type, payload, created_at
+        )
+        SELECT
+          ${liveEventId}, advanced.id, advanced.event_sequence, 1, 'approval.resolved',
+          jsonb_build_object(
+            'approvalId', ${input.command.approvalId}::text,
+            'toolCallId', advanced.tool_call_id,
+            'resolution', ${input.command.resolution}::text
+          ),
+          ${now}
+        FROM advanced_live_run AS advanced
+        RETURNING id, run_id, sequence
+      ),
       notified AS MATERIALIZED (
         SELECT pg_notify(
           ${RUN_EVENT_NOTIFY_CHANNEL},
           jsonb_build_object('runId', run_id, 'sequence', sequence)::text
         )
-        FROM inserted_event
+        FROM (
+          SELECT run_id, sequence FROM inserted_event
+          UNION ALL
+          SELECT run_id, sequence FROM inserted_live_event
+        ) AS event
       )
       SELECT
         approval.run_id AS "runId",
         approval.response,
         NOT EXISTS (SELECT 1 FROM changed) AS replayed,
         (SELECT count(*) FROM notified) AS "notifyCount",
-        (SELECT count(*) FROM transitioned_capability) AS "capabilityTransitionCount"
+        (SELECT count(*) FROM transitioned_capability) AS "capabilityTransitionCount",
+        (SELECT count(*) FROM resolved_action_approval) AS "actionApprovalTransitionCount"
       FROM goat.run_approvals AS approval
       JOIN authorized ON authorized.id = approval.id
     `);
@@ -1639,7 +1879,7 @@ export class PostgresChatRepository implements ChatRepository {
       WITH resolved_interaction AS MATERIALIZED (
         UPDATE goat.codex_chat_interactions AS interaction
         SET status = 'resolved',
-            response = ${JSON.stringify(interactionResponse)}::jsonb,
+            response = ${stringifyPostgresJson(interactionResponse)}::jsonb,
             resolved_at = ${now},
             updated_at = ${now}
         WHERE interaction.id = ${input.approvalId}
@@ -1656,7 +1896,7 @@ export class PostgresChatRepository implements ChatRepository {
       UPDATE goat.run_approvals AS approval
       SET status = 'resolved',
           resolution = 'answered',
-          response = ${JSON.stringify(approvalResponse)}::jsonb,
+          response = ${stringifyPostgresJson(approvalResponse)}::jsonb,
           resolved_at = ${now},
           updated_at = ${now}
       WHERE approval.id IN (SELECT id FROM resolved_interaction)
@@ -1844,7 +2084,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
   async appendEvents(input: Parameters<RunExecutionRepository["appendEvents"]>[0]) {
     if (input.events.length === 0) return [];
     const createdAt = this.now();
-    const eventJson = JSON.stringify(input.events);
+    const eventJson = stringifyPostgresJson(input.events);
     const rows = await this.rows<RunEventRow>(sql`
       WITH input_events AS MATERIALIZED (
         SELECT
@@ -1954,7 +2194,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           item.value ->> 'prompt' AS prompt,
           item.value -> 'options' AS options,
           item.ordinality
-        FROM jsonb_array_elements(${JSON.stringify(input.approvals)}::jsonb)
+        FROM jsonb_array_elements(${stringifyPostgresJson(input.approvals)}::jsonb)
           WITH ORDINALITY AS item(value, ordinality)
       ),
       inserted_approvals AS MATERIALIZED (
@@ -2007,7 +2247,7 @@ export class PostgresRunExecutionRepository implements RunExecutionRepository {
           item.value ->> 'type' AS type,
           item.value -> 'payload' AS payload,
           item.ordinality
-        FROM jsonb_array_elements(${JSON.stringify(eventDrafts)}::jsonb)
+        FROM jsonb_array_elements(${stringifyPostgresJson(eventDrafts)}::jsonb)
           WITH ORDINALITY AS item(value, ordinality)
       ),
       inserted_events AS MATERIALIZED (
@@ -2089,6 +2329,7 @@ type ConversationRow = {
   activeRunId: string | null;
   runtimeHasError: boolean | null;
   runtimeUpdatedAt: Date | string | null;
+  messageShapeEpoch: number | string;
   activityState: Conversation["activityState"];
   hasUnseen: boolean;
   pinnedAt: Date | string | null;
@@ -2192,6 +2433,18 @@ type ChatAttachmentUploadRow = {
   sizeBytes: number;
   expiresAt: Date | string;
 };
+
+type ChatAttachmentUploadReservationRow = {
+  commandId: string;
+  requestHash: string;
+  attachmentId: string;
+  blobPathname: string;
+  expiresAt: Date | string;
+  completedAt: Date | string | null;
+  cleanedAt: Date | string | null;
+};
+
+type CompletedChatAttachmentUploadRow = ChatAttachmentUploadRow & { created: boolean };
 
 type ResolvedAttachmentRow = {
   id: string;
@@ -2335,6 +2588,7 @@ function mapConversation(row: ConversationRow): Conversation {
     title: row.title,
     engine: row.engine,
     model: row.model,
+    messageShapeEpoch: Number(row.messageShapeEpoch),
     runtime:
       row.runtimeStatus !== null && row.runtimeHasError !== null && row.runtimeUpdatedAt !== null
         ? {
@@ -2415,7 +2669,7 @@ function serializeAttachmentTexts(
   attachmentTexts: ResolvedChatAttachments["attachmentTexts"],
 ): string | null {
   return attachmentTexts && Object.keys(attachmentTexts).length > 0
-    ? JSON.stringify(attachmentTexts)
+    ? stringifyPostgresJson(attachmentTexts)
     : null;
 }
 
@@ -2467,6 +2721,20 @@ function mapAttachmentUpload(row: ChatAttachmentUploadRow): ChatAttachmentUpload
     filename: row.filename,
     sizeBytes: row.sizeBytes,
     expiresAt: asDate(row.expiresAt),
+  };
+}
+
+function mapAttachmentUploadReservation(
+  row: ChatAttachmentUploadReservationRow,
+): ChatAttachmentUploadReservation {
+  return {
+    commandId: row.commandId,
+    requestHash: row.requestHash,
+    attachmentId: row.attachmentId,
+    blobPathname: row.blobPathname,
+    expiresAt: asDate(row.expiresAt),
+    completedAt: row.completedAt ? asDate(row.completedAt) : null,
+    cleanedAt: row.cleanedAt ? asDate(row.cleanedAt) : null,
   };
 }
 

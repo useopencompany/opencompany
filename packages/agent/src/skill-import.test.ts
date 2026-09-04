@@ -37,6 +37,12 @@ describe("resolveSkillImport", () => {
         ],
         fileCount: 3,
         totalBytes: 0,
+        warnings: [
+          {
+            code: "source_directory_normalized",
+            message: "Source directory normalized.",
+          },
+        ],
       },
     });
 
@@ -44,6 +50,12 @@ describe("resolveSkillImport", () => {
 
     expect(preview).toMatchObject({
       status: "resolved",
+      warnings: [
+        {
+          code: "source_directory_normalized",
+          message: "Source directory normalized.",
+        },
+      ],
       bundle: {
         name: "my-skill",
         body: "Do the thing.",
@@ -111,9 +123,38 @@ describe("resolveSkillImport", () => {
   it("maps upstream failures to a retryable unavailable domain error", async () => {
     resolveSkillMock.mockRejectedValueOnce(new Error("upstream token=do-not-expose"));
 
-    await expect(resolveSkillImport({ url: "https://github.com/o/r" })).rejects.toMatchObject({
+    const error = await resolveSkillImport({ url: "https://github.com/o/r" }).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toMatchObject({
       code: "unavailable",
       message: "Couldn't read that skill right now. Check the URL and try again.",
+    });
+    expect(error).not.toHaveProperty("cause");
+  });
+
+  it("retains sanitized GitHub diagnostics as the unavailable error cause", async () => {
+    const { GitHubArtifactFetchError } = await vi.importActual<
+      typeof import("@opencompany/agent-runtime")
+    >("@opencompany/agent-runtime");
+    const upstreamError = new GitHubArtifactFetchError({
+      operation: "resolve_commit",
+      failureKind: "rate_limit",
+      durationMs: 12,
+      status: 403,
+      rateLimitRemaining: 0,
+    });
+    resolveSkillMock.mockRejectedValueOnce(upstreamError);
+
+    const error = await resolveSkillImport({ url: "https://github.com/o/r" }).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toMatchObject({
+      code: "unavailable",
+      message: "Couldn't read that skill right now. Check the URL and try again.",
+      cause: upstreamError,
     });
   });
 });

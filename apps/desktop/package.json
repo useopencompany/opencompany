@@ -19,7 +19,7 @@
     "@todesktop/runtime": "2.1.4"
   },
   "devDependencies": {
-    "@todesktop/cli": "1.28.0",
+    "@todesktop/cli": "1.28.1",
     "@types/node": "^25.9.1",
     "electron": "43.4.1",
     "esbuild": "0.28.2",

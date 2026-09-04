@@ -9,7 +9,17 @@ import {
   validateGranolaApiKey,
 } from "@opencompany/agent/integrations/granola";
 import { saveJamieWebhookApiKey } from "@opencompany/agent/integrations/jamie";
-import { disconnectStripeIntegration } from "@opencompany/agent/integrations/stripe";
+import {
+  connectRenderMcpIntegration,
+  getRenderIntegrationState,
+  validateRenderApiKey,
+} from "@opencompany/agent/integrations/render-mcp";
+import {
+  connectStripeIntegration,
+  disconnectStripeIntegration,
+  getStripeIntegrationState,
+  validateStripeRestrictedApiKey,
+} from "@opencompany/agent/integrations/stripe";
 import type { Actor } from "@opencompany/core";
 import {
   consumeImessageChallenge,
@@ -79,6 +89,22 @@ vi.mock("@opencompany/agent/integrations/jamie", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createOrResetJamieWebhookEndpoint: vi.fn(),
   saveJamieWebhookApiKey: vi.fn(),
+}));
+
+vi.mock("@opencompany/agent/integrations/render-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  validateRenderApiKey: vi.fn(),
+  connectRenderMcpIntegration: vi.fn(async () => ({ integrationId: "gint_render" })),
+  getRenderIntegrationState: vi.fn(async () => ({
+    provider: "render" as const,
+    connected: true,
+    status: "connected" as const,
+    integrationId: "gint_render",
+    accountName: "Acme",
+    statusReason: null,
+    capabilityModes: {},
+    toolModes: {},
+  })),
 }));
 
 vi.mock("@opencompany/agent/integrations/stripe", async (importOriginal) => ({
@@ -161,6 +187,19 @@ describe("integration account service", () => {
             scopes: [],
             capabilityModes: {},
           },
+          {
+            id: "gint_betterstack_mcp",
+            provider: "betterstack",
+            workspaceId: null,
+            externalId: "betterstack_mcp",
+            accountEmail: "ada@example.com",
+            accountName: "Ada's team",
+            connectionLabel: "Better Stack tool access",
+            statusReason: null,
+            status: "connected",
+            scopes: ["read", "write"],
+            capabilityModes: { read: "on", query: "ask", write: "ask" },
+          },
         ],
       ]),
     });
@@ -177,6 +216,18 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["gmail.readonly"],
         capabilityModes: { read: "on" },
+      },
+      {
+        integrationId: "gint_betterstack_mcp",
+        provider: "betterstack",
+        status: "connected",
+        connected: true,
+        accountEmail: "ada@example.com",
+        accountName: "Ada's team",
+        connectionLabel: "Better Stack tool access",
+        statusReason: null,
+        scopes: ["read", "write"],
+        capabilityModes: { read: "on", query: "ask", write: "ask" },
       },
     ]);
   });
@@ -195,6 +246,16 @@ describe("integration account service", () => {
     const service = createIntegrationAccountService({ db });
     await expect(service.getUsage(member, "gint_x")).resolves.toEqual({
       affectedBrainSourceCount: 4,
+    });
+  });
+
+  it("does not report retired Slack source rows as active account usage", async () => {
+    const service = createIntegrationAccountService({
+      db: fakeDb([[{ id: "gint_slack", provider: "slack" }]]),
+    });
+
+    await expect(service.getUsage(member, "gint_slack")).resolves.toEqual({
+      affectedBrainSourceCount: 0,
     });
   });
 
@@ -227,7 +288,16 @@ describe("integration account service", () => {
   });
 
   it("rejects capability updates for providers without that capability", async () => {
-    const db = fakeDb([[{ id: "gint_x" }], [{ provider: "granola" }]]);
+    const db = fakeDb([
+      [
+        {
+          id: "gint_x",
+          provider: "granola",
+          userWorkosId: "user_1",
+          workspaceId: null,
+        },
+      ],
+    ]);
     const service = createIntegrationAccountService({ db });
     await expect(service.setCapabilityMode(member, "gint_x", "write", "on")).rejects.toMatchObject({
       status: 400,
@@ -236,13 +306,50 @@ describe("integration account service", () => {
   });
 
   it("applies a valid capability mode override", async () => {
-    const db = fakeDb([[{ id: "gint_x" }], [{ provider: "gmail" }]]);
+    const db = fakeDb([
+      [
+        {
+          id: "gint_x",
+          provider: "gmail",
+          userWorkosId: "user_1",
+          workspaceId: null,
+        },
+      ],
+    ]);
     const service = createIntegrationAccountService({ db });
     await expect(
       service.setCapabilityMode(member, "gint_x", "write", "ask"),
     ).resolves.toBeUndefined();
     expect(applyIntegrationCapabilityMode).toHaveBeenCalledWith(
       expect.objectContaining({ integrationIds: ["gint_x"], capabilityId: "write", mode: "ask" }),
+    );
+  });
+
+  it("admin-gates permission changes for the workspace Stripe connection", async () => {
+    const row = {
+      id: "gint_stripe",
+      provider: "stripe",
+      userWorkosId: "user_admin",
+      workspaceId: "workspace_1",
+    };
+    const memberService = createIntegrationAccountService({ db: fakeDb([[row]]) });
+    await expect(
+      memberService.setCapabilityMode(member, "gint_stripe", "query", "on"),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: "Only workspace admins can manage this integration's permissions.",
+    });
+
+    const adminService = createIntegrationAccountService({ db: fakeDb([[row]]) });
+    await expect(
+      adminService.setCapabilityMode(admin, "gint_stripe", "query", "on"),
+    ).resolves.toBeUndefined();
+    expect(applyIntegrationCapabilityMode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        integrationIds: ["gint_stripe"],
+        capabilityId: "query",
+        mode: "on",
+      }),
     );
   });
 
@@ -285,6 +392,9 @@ describe("integration account service", () => {
     await expect(service.connectGranola(member, "not-a-granola-key")).rejects.toMatchObject({
       message: "Granola API keys start with grn_. Check the key and try again.",
     });
+    await expect(service.connectRender(member, "not-a-render-key")).rejects.toMatchObject({
+      message: "Render API keys start with rnd_. Check the key and try again.",
+    });
   });
 
   it("connects Granola with the trimmed key and returns the refreshed state", async () => {
@@ -323,6 +433,36 @@ describe("integration account service", () => {
       status: 400,
       message: "Granola rejected this API key. Check it and try again.",
     });
+  });
+
+  it("connects Render with a validated key and refreshes plugin discovery", async () => {
+    vi.mocked(validateRenderApiKey).mockResolvedValueOnce({
+      ok: true,
+      owner: { id: "tea_123", name: "Acme", email: "founder@example.com" },
+    });
+    const refreshRenderPluginRegistrations = vi.fn(async () => undefined);
+    const service = createIntegrationAccountService({
+      db: fakeDb(),
+      refreshRenderPluginRegistrations,
+    });
+
+    await expect(service.connectRender(member, "  rnd_abcdefgh12345678  ")).resolves.toMatchObject({
+      provider: "render",
+      connected: true,
+      integrationId: "gint_render",
+    });
+    expect(connectRenderMcpIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        apiKey: "rnd_abcdefgh12345678",
+        owner: { id: "tea_123", name: "Acme", email: "founder@example.com" },
+      }),
+    );
+    expect(refreshRenderPluginRegistrations).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(getRenderIntegrationState).toHaveBeenCalled();
   });
 
   it("requires the preference toggle and a configured provider before pairing", async () => {
@@ -455,6 +595,53 @@ describe("integration account service", () => {
     await expect(service.saveJamieWebhookApiKey(member, "sk_x")).rejects.toMatchObject({
       status: 403,
       message: "Only workspace admins can manage the Jamie integration.",
+    });
+  });
+
+  it("connects Stripe and refreshes installed plugin discovery", async () => {
+    const apiKey = `rk_test_${"a".repeat(24)}`;
+    vi.mocked(validateStripeRestrictedApiKey).mockResolvedValueOnce({
+      ok: true,
+      identity: {
+        accountId: "acct_123",
+        accountName: "Acme Payments",
+        accountEmail: "finance@example.com",
+        country: "US",
+        livemode: false,
+      },
+    });
+    vi.mocked(getStripeIntegrationState).mockResolvedValueOnce({
+      provider: "stripe",
+      connected: true,
+      status: "connected",
+      integrationId: "gint_stripe",
+      accountName: "Acme Payments",
+      livemode: false,
+      statusReason: null,
+      capabilityModes: {},
+      toolModes: {},
+    });
+    const refreshStripePluginRegistrations = vi.fn(async () => undefined);
+    const service = createIntegrationAccountService({
+      db: fakeDb(),
+      refreshStripePluginRegistrations,
+    });
+
+    await expect(service.connectStripe(admin, apiKey)).resolves.toMatchObject({
+      provider: "stripe",
+      connected: true,
+      integrationId: "gint_stripe",
+    });
+    expect(connectStripeIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        apiKey,
+      }),
+    );
+    expect(refreshStripePluginRegistrations).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
     });
   });
 

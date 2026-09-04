@@ -30,12 +30,14 @@ vi.mock("./db", () => ({
 vi.mock("./sandbox", () => ({
   killSandbox: mocks.killSandbox,
   managedSandboxMetadata: (input: {
+    namespace: string;
     ownerKind: string;
     ownerId: string;
     metadata?: Record<string, string>;
   }) => ({
     ...input.metadata,
     opencompany_managed: "true",
+    opencompany_sandbox_namespace: input.namespace,
     opencompany_owner_kind: input.ownerKind,
     opencompany_owner_id: input.ownerId,
   }),
@@ -140,6 +142,7 @@ describe("startCodexDeviceAuthFlow", () => {
       metadata: {
         user_id: "user_1",
         opencompany_managed: "true",
+        opencompany_sandbox_namespace: "test",
         opencompany_owner_kind: "codex_device_auth_flow",
         opencompany_owner_id: expect.any(String),
       },
@@ -226,6 +229,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     exaApiKey: "exa",
     browserEnabled: false,
     codexE2bTemplate: undefined,
+    sandboxNamespace: "test",
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
     codexChatIdleTimeoutMs: 1_800_000,

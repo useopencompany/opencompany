@@ -78,6 +78,9 @@ export const READ_SKILL_FILE_TOOL_PART_TYPE = `tool-${READ_SKILL_FILE_TOOL_NAME}
 export const CREATE_WORKSPACE_SKILL_TOOL_NAME = "create_workspace_skill";
 export const CREATE_WORKSPACE_SKILL_TOOL_PART_TYPE =
   `tool-${CREATE_WORKSPACE_SKILL_TOOL_NAME}` as const;
+export const EDIT_WORKSPACE_SKILL_TOOL_NAME = "edit_workspace_skill";
+export const EDIT_WORKSPACE_SKILL_TOOL_PART_TYPE =
+  `tool-${EDIT_WORKSPACE_SKILL_TOOL_NAME}` as const;
 export const BROWSER_USE_PROFILE_TOOL_NAME = "browser_use_profile";
 export const BROWSER_USE_PROFILE_TOOL_PART_TYPE = `tool-${BROWSER_USE_PROFILE_TOOL_NAME}` as const;
 export const BROWSER_OPEN_TOOL_PART_TYPE = "tool-browser_open";
@@ -169,6 +172,10 @@ export type ChatMessageMetadata = {
   sessionId?: string;
   runId?: string;
   model?: string;
+  presentation?: {
+    source: "summary";
+    updatedAt: string;
+  };
   scheduledWakeup?: {
     reason: string;
     dueAt: string;
@@ -524,6 +531,19 @@ export type CreateWorkspaceSkillToolOutput = {
   bundleId: string;
 };
 
+export type EditWorkspaceSkillToolInput = {
+  name: string;
+  description: string;
+  instructions: string;
+};
+
+export type EditWorkspaceSkillToolOutput = {
+  updated: true;
+  name: string;
+  command: string;
+  bundleId: string;
+};
+
 type BrowserChatTools = {
   [Name in BrowserToolName]: {
     input: BrowserToolInput;
@@ -595,6 +615,10 @@ export type ChatTools = {
   create_workspace_skill: {
     input: CreateWorkspaceSkillToolInput;
     output: CreateWorkspaceSkillToolOutput;
+  };
+  edit_workspace_skill: {
+    input: EditWorkspaceSkillToolInput;
+    output: EditWorkspaceSkillToolOutput;
   };
   codex_command: {
     input: CodexCommandToolInput;
@@ -794,13 +818,16 @@ export function replaceChatUiMessageText(message: ChatUiMessage, text: string): 
   };
 }
 
-export function toChatUiMessage(message: StoredChatMessage): ChatUiMessage {
+export function toChatUiMessage(
+  message: StoredChatMessage,
+  options?: { preserveProviderMetadata?: boolean },
+): ChatUiMessage {
   const metadata = toChatMessageMetadata(message);
   return {
     id: message.id,
     role: message.role === "user" ? "user" : "assistant",
     ...(metadata ? { metadata } : {}),
-    parts: toChatUiMessageParts(message, metadata),
+    parts: toChatUiMessageParts(message, metadata, options),
   };
 }
 
@@ -917,10 +944,11 @@ function serializeChatMessageTimestamp(value: Date | string) {
 function toChatUiMessageParts(
   message: StoredChatMessage,
   metadata: ChatMessageMetadata | undefined,
+  options?: { preserveProviderMetadata?: boolean },
 ): ChatUiMessage["parts"] {
   if (message.role !== "assistant") return textParts(message.content);
 
-  const persistedParts = parseDebugTraceUiMessageParts(message.debugTrace?.uiMessageParts);
+  const persistedParts = parseDebugTraceUiMessageParts(message.debugTrace?.uiMessageParts, options);
   if (persistedParts) return withStoredContentFallback(persistedParts, message.content);
 
   const legacyTaskParts = legacyTaskOrderedParts(message, metadata?.task ?? null);
@@ -941,18 +969,31 @@ function withStoredContentFallback(
   return [...parts, { type: "text", text: content }];
 }
 
-function parseDebugTraceUiMessageParts(value: unknown): ChatUiMessage["parts"] | null {
+function parseDebugTraceUiMessageParts(
+  value: unknown,
+  options?: { preserveProviderMetadata?: boolean },
+): ChatUiMessage["parts"] | null {
   if (!Array.isArray(value)) return null;
 
   const parts: ChatUiMessage["parts"] = [];
   for (const part of value) {
     if (!isRecord(part)) continue;
     if (part.type === "text" && typeof part.text === "string") {
-      parts.push({ type: "text", text: part.text });
+      parts.push({
+        type: "text",
+        text: part.text,
+        ...(typeof part.itemId === "string" ? { itemId: part.itemId } : {}),
+        ...persistedProviderMetadata(part, options),
+      } as ChatUiMessage["parts"][number]);
       continue;
     }
     if (part.type === "reasoning" && typeof part.text === "string") {
-      parts.push({ type: "reasoning", text: part.text, state: "done" });
+      parts.push({
+        type: "reasoning",
+        text: part.text,
+        state: "done",
+        ...persistedProviderMetadata(part, options),
+      } as ChatUiMessage["parts"][number]);
       continue;
     }
     if (part.type === CHAT_ARTIFACT_DATA_PART_TYPE) {
@@ -961,11 +1002,23 @@ function parseDebugTraceUiMessageParts(value: unknown): ChatUiMessage["parts"] |
       continue;
     }
     if (isPersistedToolPart(part)) {
-      parts.push(normalizePersistedToolPart(part));
+      const normalized = normalizePersistedToolPart(part);
+      parts.push({
+        ...normalized,
+        ...persistedProviderMetadata(part, options),
+      } as ChatUiMessage["parts"][number]);
     }
   }
 
   return parts.length > 0 ? parts : null;
+}
+
+function persistedProviderMetadata(
+  part: Record<string, unknown>,
+  options?: { preserveProviderMetadata?: boolean },
+) {
+  if (!options?.preserveProviderMetadata || !isRecord(part.providerMetadata)) return {};
+  return { providerMetadata: structuredClone(part.providerMetadata) };
 }
 
 function isPersistedToolPart(value: Record<string, unknown>) {

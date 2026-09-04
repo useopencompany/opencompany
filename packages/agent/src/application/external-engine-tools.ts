@@ -20,6 +20,7 @@ export type ExternalEngineToolDependencies = {
   executeAction: (input: {
     request: ActionGatewayRequest;
     signal: AbortSignal;
+    reportProgress?: (progress: { progress: number; message: string }) => Promise<void>;
   }) => Promise<ActionGatewayResponse>;
   publishArtifact: (input: {
     sessionId: string;
@@ -96,14 +97,39 @@ export function registerExternalEngineServiceTools(
     async (args, extra) => {
       const action = typeof args.action === "string" ? args.action : "";
       const params = isRecord(args.params) ? args.params : {};
-      return runGateway(dependencies.executeAction, ctx, {
-        operation: "execute",
-        sessionId: ctx.sessionId,
-        turnId: ctx.runId,
-        action,
-        params,
-        invocationId: mcpInvocationId(ctx.runId, extra.sessionId, extra.requestId),
-      });
+      // RequestHandlerExtra always supplies this on the real SDK path. Keep the structural read
+      // tolerant so embedders that invoke a registered callback directly are still supported.
+      const requestSignal = (extra as { signal?: AbortSignal }).signal;
+      const progressToken = extra._meta?.progressToken;
+      return runGateway(
+        dependencies.executeAction,
+        ctx,
+        {
+          operation: "execute",
+          sessionId: ctx.sessionId,
+          turnId: ctx.runId,
+          action,
+          params,
+          invocationId: mcpInvocationId(ctx.runId, extra.sessionId, extra.requestId),
+        },
+        {
+          ...(ctx.signal && requestSignal
+            ? { signal: AbortSignal.any([ctx.signal, requestSignal]) }
+            : ctx.signal || requestSignal
+              ? { signal: ctx.signal ?? requestSignal }
+              : {}),
+          ...(progressToken !== undefined
+            ? {
+                reportProgress: async (progress: { progress: number; message: string }) => {
+                  await extra.sendNotification({
+                    method: "notifications/progress",
+                    params: { progressToken, ...progress },
+                  });
+                },
+              }
+            : {}),
+        },
+      );
     },
   );
 }
@@ -149,10 +175,15 @@ async function runGateway(
   executeAction: ExternalEngineToolDependencies["executeAction"],
   ctx: ExternalEngineToolContext,
   request: ActionGatewayRequest,
+  options: {
+    signal?: AbortSignal;
+    reportProgress?: (progress: { progress: number; message: string }) => Promise<void>;
+  } = {},
 ) {
   const response = await executeAction({
     request,
-    signal: ctx.signal ?? new AbortController().signal,
+    signal: options.signal ?? ctx.signal ?? new AbortController().signal,
+    ...(options.reportProgress ? { reportProgress: options.reportProgress } : {}),
   });
   return mcpResult(response);
 }

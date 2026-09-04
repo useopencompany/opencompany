@@ -69,6 +69,67 @@ describe("TaskApplicationService", () => {
     });
   });
 
+  it("preserves a Task comment verbatim while normalizing its resource identities", async () => {
+    const repository = fakeRepository();
+    const service = new TaskApplicationService(repository);
+
+    await service.createComment(actor(), " task_1 ", {
+      id: " comment_1 ",
+      body: "  Approved — keep the original spacing.\n",
+      attachmentIds: [" attachment_1 "],
+    });
+
+    expect(repository.createTaskCommentAndRun).toHaveBeenCalledWith({
+      actor: actor(),
+      taskId: "task_1",
+      command: {
+        id: "comment_1",
+        body: "  Approved — keep the original spacing.\n",
+        attachmentIds: ["attachment_1"],
+      },
+    });
+
+    await service.createComment(actor(), "task_1", {
+      id: "comment_2",
+      body: "",
+      attachmentIds: ["attachment_2"],
+    });
+    expect(repository.createTaskCommentAndRun).toHaveBeenLastCalledWith({
+      actor: actor(),
+      taskId: "task_1",
+      command: { id: "comment_2", body: "", attachmentIds: ["attachment_2"] },
+    });
+  });
+
+  it("validates Task comments before persistence", async () => {
+    const repository = fakeRepository();
+    const service = new TaskApplicationService(repository);
+
+    await expect(
+      service.createComment(actor({ permissions: [TASK_READ_PERMISSION] }), "task_1", {
+        id: "comment_1",
+        body: "Approved",
+      }),
+    ).rejects.toThrow(/not allowed/i);
+    await expect(
+      service.createComment(actor(), "task_1", { id: "comment_1", body: " \n " }),
+    ).rejects.toThrow(/comment or attachment is required/i);
+    await expect(
+      service.createComment(actor(), "task_1", {
+        id: "comment_1",
+        body: "Approved",
+        attachmentIds: ["attachment_1", "attachment_1"],
+      }),
+    ).rejects.toThrow(/unique/i);
+    await expect(
+      service.createComment(actor(), "task_1", {
+        id: "comment_1",
+        body: "x".repeat(10_001),
+      }),
+    ).rejects.toThrow(/cannot exceed/i);
+    expect(repository.createTaskCommentAndRun).not.toHaveBeenCalled();
+  });
+
   it("keeps archive mutation actor-scoped", async () => {
     const repository = fakeRepository();
     const service = new TaskApplicationService(repository);
@@ -128,6 +189,7 @@ function command(overrides: Partial<CreateTaskCommand> = {}): CreateTaskCommand 
 
 function fakeRepository(): TaskRepository & {
   createTaskAndRun: ReturnType<typeof vi.fn>;
+  createTaskCommentAndRun: ReturnType<typeof vi.fn>;
   getTaskByConversation: ReturnType<typeof vi.fn>;
   getTaskSummary: ReturnType<typeof vi.fn>;
   listTasks: ReturnType<typeof vi.fn>;
@@ -167,6 +229,21 @@ function fakeRepository(): TaskRepository & {
       assistantMessageId: "message_2",
       runId: "run_1",
       transactionId: "42",
+      idempotentReplay: false,
+    })),
+    createTaskCommentAndRun: vi.fn(async ({ actor, command }) => ({
+      task: { ...task, status: "running" as const },
+      comment: {
+        id: command.id,
+        taskId: task.id,
+        authorWorkosId: actor.userId,
+        body: command.body,
+        createdAt: task.updatedAt,
+      },
+      messageId: "message_3",
+      assistantMessageId: "message_4",
+      runId: "run_2",
+      transactionId: "44",
       idempotentReplay: false,
     })),
     updateTask: vi.fn(async () => ({

@@ -15,8 +15,10 @@ import {
   EngineSessionReadModelSchema,
   IntegrationAccountReadModelSchema,
   MessageReadModelSchema,
+  MessageSummaryReadModelSchema,
   type ReadModel,
   RunReadModelSchema,
+  TaskActivityReadModelSchema,
   TaskOutcomeSchema,
   TaskReadModelSchema,
   TaskScheduleReadModelSchema,
@@ -57,6 +59,7 @@ const ELECTRIC_RESPONSE_HEADERS = [
 // prevents @electric-sql/client from parsing the already-decoded values a second time.
 const PREDECODED_READ_MODEL_FIELDS = new Set([
   "presentation",
+  "presentationSummary",
   "attachments",
   "steps",
   "trigger",
@@ -69,6 +72,7 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "capabilityModes",
   "hasUnseen",
   "enabled",
+  "metadata",
   "planPaused",
 ]);
 
@@ -78,6 +82,8 @@ export interface ReadModelService {
     readModel: ReadModel;
     conversationId?: string;
     brainId?: string;
+    taskId?: string;
+    messageShapeEpoch?: number;
     requestUrl: URL;
   }): Promise<Response>;
 }
@@ -106,6 +112,8 @@ export class ElectricReadModelProxy implements ReadModelService {
     readModel: ReadModel;
     conversationId?: string;
     brainId?: string;
+    taskId?: string;
+    messageShapeEpoch?: number;
     requestUrl: URL;
   }) {
     const shape = readModelShape(input);
@@ -175,6 +183,8 @@ function readModelShape(input: {
   readModel: ReadModel;
   conversationId?: string;
   brainId?: string;
+  taskId?: string;
+  messageShapeEpoch?: number;
 }) {
   switch (input.readModel) {
     case "chat-conversations-v1":
@@ -209,21 +219,44 @@ function readModelShape(input: {
         "active_run_id",
         "runtime_has_error",
         "runtime_updated_at",
+        "message_shape_epoch",
         "created_at",
         "updated_at",
       ]);
     case "chat-messages-v1":
-      return conversationShape(input, "goat.message_read_model_v1", [
-        "id",
-        "conversation_id",
-        "role",
-        "content",
-        "task_id",
-        "presentation",
-        "attachments",
-        "created_at",
-        "updated_at",
-      ]);
+      return conversationShape(
+        input,
+        "goat.message_read_model_v1",
+        [
+          "id",
+          "conversation_id",
+          "role",
+          "content",
+          "task_id",
+          "presentation",
+          "attachments",
+          "created_at",
+          "updated_at",
+        ],
+        input.messageShapeEpoch ?? 0,
+      );
+    case "chat-messages-v2":
+      return conversationShape(
+        input,
+        "goat.message_read_model_v1",
+        [
+          "id",
+          "conversation_id",
+          "role",
+          "content",
+          "task_id",
+          "presentation_summary",
+          "attachments",
+          "created_at",
+          "updated_at",
+        ],
+        input.messageShapeEpoch ?? 0,
+      );
     case "chat-runs-v1":
       return conversationShape(input, "goat.run_read_model_v1", [
         "id",
@@ -293,6 +326,25 @@ function readModelShape(input: {
         ],
         where: `("workspace_id" = $2 OR (` + `"workspace_id" IS NULL AND "actor_id" = $1))`,
         params: [input.actor.userId, input.actor.workspaceId],
+      };
+    case "task-activities-v1":
+      if (!input.taskId) {
+        throw new ApiError(400, "invalid_request", "taskId is required for this read model.");
+      }
+      return {
+        table: "goat.task_activities",
+        columns: [
+          "id",
+          "task_id",
+          "author",
+          "author_workos_id",
+          "kind",
+          "body",
+          "metadata",
+          "created_at",
+        ],
+        where: `"task_id" = $1`,
+        params: [input.taskId],
       };
     case "workflows-v1":
       return {
@@ -461,6 +513,26 @@ function readModelShape(input: {
         "created_at",
         "updated_at",
       ]);
+    case "wiki-import-runs-v1":
+      return {
+        table: "goat.brain_import_runs",
+        columns: [
+          "id",
+          "status",
+          "company_url",
+          "company_name",
+          "focus",
+          "source_selection",
+          "discovery_summary",
+          "last_error",
+          "confirmed_at",
+          "completed_at",
+          "created_at",
+          "updated_at",
+        ],
+        where: `"workspace_id" = $1`,
+        params: [input.actor.workspaceId],
+      };
     case "wiki-pages-v2":
       return {
         table: "goat.wiki_pages",
@@ -507,6 +579,7 @@ function conversationShape(
   input: { actor: Actor; conversationId?: string },
   table: string,
   columns: string[],
+  shapeEpoch?: number,
 ) {
   if (!input.conversationId) {
     throw new ApiError(400, "invalid_request", "conversationId is required for this read model.");
@@ -516,8 +589,14 @@ function conversationShape(
     columns,
     where:
       `"conversation_id" = $1 ` +
-      `AND ("workspace_id" = $3 OR ("workspace_id" IS NULL AND "actor_id" = $2))`,
-    params: [input.conversationId, input.actor.userId, input.actor.workspaceId],
+      `AND ("workspace_id" = $3 OR ("workspace_id" IS NULL AND "actor_id" = $2))` +
+      (shapeEpoch === undefined ? "" : ` AND CAST($4 AS text) = CAST($4 AS text)`),
+    params: [
+      input.conversationId,
+      input.actor.userId,
+      input.actor.workspaceId,
+      ...(shapeEpoch === undefined ? [] : [String(shapeEpoch)]),
+    ],
   };
 }
 
@@ -607,7 +686,7 @@ function projectReadModelValue(
   if (readModel === "brain-ingest-jobs-v1" && Object.hasOwn(projected, "lastError")) {
     projected.lastError = boundedNullableString(projected.lastError, 2_000);
   }
-  if (readModel === "brain-import-runs-v1") {
+  if (readModel === "brain-import-runs-v1" || readModel === "wiki-import-runs-v1") {
     if (Object.hasOwn(projected, "sourceSelection")) {
       projected.sourceSelection = publicBrainImportSourceSelection(projected.sourceSelection);
     }
@@ -647,6 +726,10 @@ function projectReadModelValue(
       ).parse(projected);
     case "chat-messages-v1":
       return (partial ? MessageReadModelSchema.partial() : MessageReadModelSchema).parse(projected);
+    case "chat-messages-v2":
+      return (
+        partial ? MessageSummaryReadModelSchema.partial() : MessageSummaryReadModelSchema
+      ).parse(projected);
     case "chat-runs-v1":
       return (partial ? RunReadModelSchema.partial() : RunReadModelSchema).parse(projected);
     case "engine-sessions-v1":
@@ -659,6 +742,10 @@ function projectReadModelValue(
       ).parse(projected);
     case "task-schedules-v1":
       return (partial ? TaskScheduleReadModelSchema.partial() : TaskScheduleReadModelSchema).parse(
+        projected,
+      );
+    case "task-activities-v1":
+      return (partial ? TaskActivityReadModelSchema.partial() : TaskActivityReadModelSchema).parse(
         projected,
       );
     case "integration-accounts-v1":
@@ -686,6 +773,7 @@ function projectReadModelValue(
         partial ? BrainIngestJobReadModelSchema.partial() : BrainIngestJobReadModelSchema
       ).parse(projected);
     case "brain-import-runs-v1":
+    case "wiki-import-runs-v1":
       return (
         partial ? BrainImportRunReadModelSchema.partial() : BrainImportRunReadModelSchema
       ).parse(projected);
@@ -709,6 +797,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
   }
   if (
     name === "attemptCount" ||
+    name === "messageShapeEpoch" ||
     name === "version" ||
     name === "attempts" ||
     name === "sizeBytes" ||
@@ -719,6 +808,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
   }
   if (
     name === "presentation" ||
+    name === "presentationSummary" ||
     name === "steps" ||
     name === "trigger" ||
     name === "timeline" ||
@@ -729,7 +819,8 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "sourceSelection" ||
     name === "discoverySummary" ||
     name === "scopes" ||
-    name === "capabilityModes"
+    name === "capabilityModes" ||
+    name === "metadata"
   ) {
     return jsonValue(value);
   }
@@ -758,7 +849,6 @@ const BRAIN_IMPORT_PROVIDERS = new Set([
   "granola",
   "fathom",
   "gmail",
-  "slack",
   "linear",
 ]);
 const BRAIN_IMPORT_SUMMARY_STATUSES = new Set(["pending", "ready", "failed", "unavailable"]);
@@ -982,6 +1072,7 @@ const READ_MODEL_COLUMN_NAMES = {
     active_run_id: "",
     runtime_has_error: "",
     runtime_updated_at: "",
+    message_shape_epoch: "messageShapeEpoch",
     created_at: "createdAt",
     updated_at: "updatedAt",
   },
@@ -992,6 +1083,17 @@ const READ_MODEL_COLUMN_NAMES = {
     content: "content",
     task_id: "taskId",
     presentation: "presentation",
+    attachments: "attachments",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "chat-messages-v2": {
+    id: "id",
+    conversation_id: "conversationId",
+    role: "role",
+    content: "content",
+    task_id: "taskId",
+    presentation_summary: "presentationSummary",
     attachments: "attachments",
     created_at: "createdAt",
     updated_at: "updatedAt",
@@ -1038,6 +1140,16 @@ const READ_MODEL_COLUMN_NAMES = {
     archived_at: "archivedAt",
     created_at: "createdAt",
     updated_at: "updatedAt",
+  },
+  "task-activities-v1": {
+    id: "id",
+    task_id: "taskId",
+    author: "author",
+    author_workos_id: "authorWorkosId",
+    kind: "kind",
+    body: "body",
+    metadata: "metadata",
+    created_at: "createdAt",
   },
   "workflows-v1": {
     id: "id",
@@ -1163,6 +1275,20 @@ const READ_MODEL_COLUMN_NAMES = {
     updated_at: "updatedAt",
   },
   "brain-import-runs-v1": {
+    id: "id",
+    status: "status",
+    company_url: "companyUrl",
+    company_name: "companyName",
+    focus: "focus",
+    source_selection: "sourceSelection",
+    discovery_summary: "discoverySummary",
+    last_error: "lastError",
+    confirmed_at: "confirmedAt",
+    completed_at: "completedAt",
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+  },
+  "wiki-import-runs-v1": {
     id: "id",
     status: "status",
     company_url: "companyUrl",

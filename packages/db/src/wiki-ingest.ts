@@ -3,14 +3,19 @@ import { and, eq, sql } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { reserveWorkspaceIngestion } from "./billing";
 import { getDb } from "./client";
+import { stringifyPostgresJson } from "./postgres-json";
 import {
   type WikiIngestJob,
   type WikiIngestJobStatus,
+  type WikiIngestSourceType,
   type WikiSourceProvider,
   type WikiSourceType,
   wikiIngestJobs,
   wikiSourceItems,
 } from "./product-schema";
+
+export type ActiveWikiSourceProvider = Exclude<WikiSourceProvider, "slack">;
+export type ActiveWikiIngestSourceProvider = ActiveWikiSourceProvider | "opencompany-import";
 
 type DbLike = any;
 
@@ -19,8 +24,8 @@ export const WIKI_INGEST_MAX_ATTEMPTS = 5;
 const ATTEMPT_ERROR_MAX_CHARS = 500;
 
 export type NormalizedWikiSourceItem<TContent = unknown> = {
-  sourceProvider: WikiSourceProvider;
-  sourceType: WikiSourceType;
+  sourceProvider: ActiveWikiIngestSourceProvider;
+  sourceType: WikiIngestSourceType;
   externalId: string;
   sourceRef: string;
   title: string | null;
@@ -48,8 +53,9 @@ type PersistedWikiIngestJob = {
   skipReason: string | null;
 };
 
-export type ClaimedWikiIngestJob = WikiIngestJob & {
-  sourceType: WikiSourceType;
+export type ClaimedWikiIngestJob = Omit<WikiIngestJob, "sourceProvider"> & {
+  sourceProvider: ActiveWikiIngestSourceProvider;
+  sourceType: WikiIngestSourceType;
   sourceRef: string;
   title: string | null;
   occurredAt: Date;
@@ -106,6 +112,7 @@ export async function listWikiIngestActivityRows(input: {
       ON source.id = job.source_item_id
      AND source.workspace_id = job.workspace_id
     WHERE job.workspace_id = ${input.workspaceId}
+      AND job.source_provider NOT IN ('slack', 'opencompany-import')
       AND (
         ${beforeCreatedAt}::timestamptz IS NULL
         OR (job.created_at, job.id) < (${beforeCreatedAt}::timestamptz, ${beforeId})
@@ -119,11 +126,12 @@ export async function listWikiIngestActivityRows(input: {
 export async function upsertWikiSourceItemAndEnqueue(input: {
   workspaceId: string;
   sourceConnectionId: string;
-  integrationId: string;
+  integrationId: string | null;
   item: NormalizedWikiSourceItem;
   rawPayload: unknown;
   skipReason?: string | null;
   rawEventCount?: number;
+  importRunId?: string | null;
   now?: Date;
   db?: DbLike;
 }): Promise<UpsertWikiSourceItemResult> {
@@ -201,6 +209,7 @@ export async function upsertWikiSourceItemAndEnqueue(input: {
       integrationId: input.integrationId,
       contentHash: input.item.contentHash,
       status: skipReason ? "skipped" : "queued",
+      importRunId: input.importRunId ?? null,
       nextRetryAt: now,
       skipReason,
       ...(skipReason
@@ -254,6 +263,13 @@ export async function upsertWikiSourceItemAndEnqueue(input: {
         db,
       })));
 
+  if (job && input.importRunId) {
+    await db
+      .update(wikiIngestJobs)
+      .set({ importRunId: input.importRunId, updatedAt: now })
+      .where(eq(wikiIngestJobs.id, job.id));
+  }
+
   if (job) {
     await db
       .update(wikiSourceItems)
@@ -301,13 +317,27 @@ export async function claimNextWikiIngestJob(input: {
           (job.status = 'queued' AND job.next_retry_at <= ${now})
           OR (job.status = 'running' AND job.lease_expires_at < ${now})
         )
-        AND EXISTS (
-          SELECT 1
-          FROM goat.wiki_sources AS source
-          WHERE source.workspace_id = job.workspace_id
-            AND source.integration_id = job.integration_id
-            AND source.provider = job.source_provider
-            AND source.enabled = true
+        AND job.source_provider <> 'slack'
+        AND (
+          (
+            job.source_provider = 'opencompany-import'
+            AND job.import_run_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM goat.brain_import_runs AS import_run
+              WHERE import_run.id = job.import_run_id
+                AND import_run.workspace_id = job.workspace_id
+                AND import_run.status IN ('ingesting', 'finalizing')
+            )
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM goat.wiki_sources AS source
+            WHERE source.workspace_id = job.workspace_id
+              AND source.integration_id = job.integration_id
+              AND source.provider = job.source_provider
+              AND source.enabled = true
+          )
         )
         AND NOT EXISTS (
           SELECT 1
@@ -425,7 +455,7 @@ export async function completeWikiIngestJob(input: {
 }): Promise<boolean> {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
-  const resultJson = JSON.stringify(input.result);
+  const resultJson = stringifyPostgresJson(input.result);
   const completed = await db.execute(sql`
     WITH completed_job AS (
       UPDATE goat.wiki_ingest_jobs
@@ -480,14 +510,14 @@ export async function failWikiIngestJobWithBackoff(input: {
   const now = input.now ?? new Date();
   const terminal = input.attempts >= (input.maxAttempts ?? WIKI_INGEST_MAX_ATTEMPTS);
   const nextRetryAt = terminal ? now : wikiIngestRetryAt(now, input.attempts);
-  const attemptErrorJson = JSON.stringify([
+  const attemptErrorJson = stringifyPostgresJson([
     {
       attempt: input.attempts,
       at: now.toISOString(),
       error: input.error.slice(0, ATTEMPT_ERROR_MAX_CHARS),
     },
   ]);
-  const failureResultJson = JSON.stringify(input.result ?? {});
+  const failureResultJson = stringifyPostgresJson(input.result ?? {});
   const failed = await db.execute(sql`
     WITH failed_job AS (
       UPDATE goat.wiki_ingest_jobs
@@ -542,7 +572,7 @@ export async function skipWikiIngestJob(input: {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   const reason = input.reason?.trim() || null;
-  const resultJson = JSON.stringify(input.result);
+  const resultJson = stringifyPostgresJson(input.result);
   const skipped = await db.execute(sql`
     WITH skipped_job AS (
       UPDATE goat.wiki_ingest_jobs
@@ -708,6 +738,7 @@ const wikiIngestJobColumnsSql = sql`
   job.source_provider AS "sourceProvider",
   job.source_connection_id AS "sourceConnectionId",
   job.integration_id AS "integrationId",
+  job.import_run_id AS "importRunId",
   job.content_hash AS "contentHash",
   job.status,
   job.attempts,

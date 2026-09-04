@@ -85,11 +85,11 @@ describe("createActionDispatcher", () => {
         ({
           ok: true,
           catalog: {
-            sources: [{ id: "slack", label: "Slack", description: "Messages" }],
+            sources: [{ id: "plugin:slack:slack", label: "Slack", description: "Messages" }],
             actions: [
               {
-                id: "slack.post",
-                source: "slack",
+                id: "plugin:slack:slack.post",
+                source: "plugin:slack:slack",
                 description: "Post a message.",
                 params: { type: "object" },
                 permissionMode: "ask",
@@ -104,7 +104,7 @@ describe("createActionDispatcher", () => {
       { execute },
     );
 
-    expect(dispatcher?.prelistedSourceIds).toEqual(["slack"]);
+    expect(dispatcher?.prelistedSourceIds).toEqual(["plugin:slack:slack"]);
   });
 
   it("treats an empty authorized catalog as a valid Chat runtime", async () => {
@@ -124,7 +124,7 @@ describe("createActionDispatcher", () => {
     expect(dispatcher?.catalog).toEqual({ sources: [], actions: [] });
   });
 
-  it("fails closed when action approval cannot be evaluated", async () => {
+  it("returns a model-visible tool error when action approval cannot be evaluated", async () => {
     const execute = vi.fn(
       async ({ request }: { request: ActionHostGatewayRequest }): Promise<ActionGatewayResponse> =>
         request.operation === "catalog"
@@ -155,7 +155,23 @@ describe("createActionDispatcher", () => {
         params: { to: "ada@example.com" },
         toolCallId: "call_1",
       }),
-    ).rejects.toThrow("Action approval could not be evaluated.");
+    ).resolves.toBe(false);
+    await expect(
+      dispatcher?.execute({
+        action: "gmail.send",
+        params: { to: "ada@example.com" },
+        toolCallId: "call_1",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      action: "gmail.send",
+      error: {
+        code: "internal",
+        source: "gmail",
+        message: 'Approval for "gmail.send" could not be evaluated, so the action was not run.',
+      },
+    });
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 
   it("does not require a reachable web origin", async () => {

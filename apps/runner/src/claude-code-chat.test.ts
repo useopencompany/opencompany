@@ -1,5 +1,7 @@
+import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
   verifyExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import type {
@@ -10,7 +12,9 @@ import type {
 } from "@opencompany/db/product-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE,
   extractAcpScheduleWakeup,
+  inspectClaudeCoreMcpInitialization,
   isClaudeCodeAuthenticationFailure,
   runClaudeCodeChatTurn,
 } from "./claude-code-chat";
@@ -46,6 +50,7 @@ const acpMocks = vi.hoisted(() => ({
 }));
 
 const eventMocks = vi.hoisted(() => ({
+  appendNotice: vi.fn(async () => undefined),
   createExternalEngineProjector: vi.fn(),
   loadCodexChatAssistantMessageParts: vi.fn(),
 }));
@@ -109,12 +114,17 @@ const wakeupMocks = vi.hoisted(() => ({
   enqueueCodexChatWakeup: vi.fn(),
   persistCodexChatScheduledWakeup: vi.fn(),
 }));
+const workspaceMocks = vi.hoisted(() => ({
+  isLegacyBrainEnabledForWorkspace: vi.fn(async () => false),
+}));
 
 vi.mock("@opencompany/db/claude-code-auth", () => ({
   loadClaudeCodeCredential: authMocks.loadClaudeCodeCredential,
   markClaudeCodeCredentialNeedsReauth: authMocks.markClaudeCodeCredentialNeedsReauth,
   markClaudeCodeCredentialValidated: authMocks.markClaudeCodeCredentialValidated,
 }));
+
+vi.mock("@opencompany/db/workspaces", () => workspaceMocks);
 
 vi.mock("@opencompany/db/plugin-runtime-repository", () => ({
   loadChatSessionPluginRuntime: pluginRuntimeMocks.loadChatSessionPluginRuntime,
@@ -137,8 +147,21 @@ vi.mock("./acp-harness", () => ({
 }));
 
 vi.mock("./coding-agent-shared", () => ({
+  GITHUB_RECONNECT_NOTICE:
+    "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+  GITHUB_UNAVAILABLE_NOTICE:
+    "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
   buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
+  loadGitHubAuthForUser: chatMocks.loadGitHubAuthForUser,
+  shouldAppendGitHubAuthNotice: (
+    history: { messages: Array<{ role: string; content: string }> },
+    notice: string,
+  ) =>
+    !notice.startsWith("GitHub needs reconnecting") ||
+    !history.messages.some(
+      (message) => message.role === "assistant" && message.content.includes(notice),
+    ),
 }));
 
 vi.mock("./coding-chat-history", async (importOriginal) => {
@@ -164,7 +187,6 @@ vi.mock("./codex-chat", () => ({
   CodexChatInterruptedError: class CodexChatInterruptedError extends Error {},
   loadCodexChatAttachments: chatMocks.loadCodexChatAttachments,
   loadCodexChatSessionSkills: chatMocks.loadCodexChatSessionSkills,
-  loadGitHubAuthForUser: chatMocks.loadGitHubAuthForUser,
   markCodexChatSandboxTimeoutArmed: chatMocks.markCodexChatSandboxTimeoutArmed,
   materializeCodexChatAttachments: chatMocks.materializeCodexChatAttachments,
   materializeCodingChatHistory: chatMocks.materializeCodingChatHistory,
@@ -212,12 +234,14 @@ vi.mock("./repo-bootstrap", () => ({
 
 vi.mock("./sandbox", () => ({
   managedSandboxMetadata: (input: {
+    namespace: string;
     ownerKind: string;
     ownerId: string;
     metadata?: Record<string, string>;
   }) => ({
     ...input.metadata,
     opencompany_managed: "true",
+    opencompany_sandbox_namespace: input.namespace,
     opencompany_owner_kind: input.ownerKind,
     opencompany_owner_id: input.ownerId,
   }),
@@ -269,6 +293,38 @@ describe("isClaudeCodeAuthenticationFailure", () => {
   });
 });
 
+describe("inspectClaudeCoreMcpInitialization", () => {
+  it("requires both action tools from a connected opencompany server", () => {
+    expect(inspectClaudeCoreMcpInitialization(claudeCoreMcpInitNotification())).toEqual({
+      sessionId: "claude_thread_1",
+      status: "connected",
+      advertisedToolCount: 3,
+      hasListActions: true,
+      hasUseAction: true,
+      ready: true,
+      failureReason: null,
+    });
+  });
+
+  it("reports a connected server with an incomplete toolset", () => {
+    expect(
+      inspectClaudeCoreMcpInitialization(
+        claudeCoreMcpInitNotification({ tools: ["mcp__opencompany__list_actions"] }),
+      ),
+    ).toMatchObject({
+      status: "connected",
+      hasListActions: true,
+      hasUseAction: false,
+      ready: false,
+      failureReason: "required_tools_missing",
+    });
+  });
+
+  it("ignores unrelated ACP notifications", () => {
+    expect(inspectClaudeCoreMcpInitialization({ method: "session/update", params: {} })).toBeNull();
+  });
+});
+
 describe("extractAcpScheduleWakeup", () => {
   it("recognizes ACP ScheduleWakeup calls and clamps their delay", () => {
     expect(
@@ -283,6 +339,27 @@ describe("extractAcpScheduleWakeup", () => {
       delaySeconds: 3_600,
       reason: "Final check",
       prompt: "Check the deploy.",
+    });
+  });
+
+  it("recognizes ScheduleWakeup calls wrapped in the Claude ACP MCP envelope", () => {
+    expect(
+      extractAcpScheduleWakeup(
+        acpToolCallEvent("codex_mcp_tool", {
+          kind: "other",
+          tool: "ScheduleWakeup",
+          toolName: "ScheduleWakeup",
+          arguments: {
+            delaySeconds: 600,
+            reason: "Wait for CI",
+            prompt: "Inspect PR #42.",
+          },
+        }),
+      ),
+    ).toEqual({
+      delaySeconds: 600,
+      reason: "Wait for CI",
+      prompt: "Inspect PR #42.",
     });
   });
 
@@ -380,6 +457,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
     eventMocks.createExternalEngineProjector.mockImplementation(
       (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
+        appendNotice: eventMocks.appendNotice,
         push: vi.fn(async (events: Record<string, unknown>[]) => {
           for (const event of events) input.normalizeEvent?.(event);
         }),
@@ -406,9 +484,13 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     acpMocks.runTurn.mockImplementation(
       async (input: {
         onEngineSessionId: (sessionId: string) => Promise<void>;
+        onNotification?: (
+          notification: ReturnType<typeof claudeCoreMcpInitNotification>,
+        ) => Promise<void>;
         onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
       }) => {
         await input.onEngineSessionId("claude_thread_1");
+        await input.onNotification?.(claudeCoreMcpInitNotification());
         await input.onRuntimeEvents(successfulAcpEvents("Done over ACP."));
         return {
           sessionId: "claude_thread_1",
@@ -425,19 +507,24 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       turn: claudeTurn(),
       session: claudeSession({
         workspaceId: "workspace_1",
-        hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
+        hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
       }),
       canonicalAttemptId: "attempt_1",
       env: env({ runnerPublicUrl: "https://runner.example.com" }),
     });
 
     const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as {
+      task: string;
       mcpServers: Array<{
         name: string;
         url: string;
         headers: Array<{ name: string; value: string }>;
       }>;
     };
+    expect(harnessInput.task).toContain("Actions may modify connected services");
+    expect(harnessInput.task).toContain("denial is a normal outcome");
+    expect(harnessInput.task).not.toContain("cannot modify connected services");
+    expect(harnessInput.task).toContain("A wiki tool is available");
     expect(harnessInput.mcpServers).toHaveLength(1);
     const [server] = harnessInput.mcpServers;
     expect(server).toMatchObject({
@@ -459,6 +546,138 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       attemptId: "attempt_1",
       leaseId: "lease_1",
     });
+  });
+
+  it("fails the turn when Claude reports that opencompany MCP is disconnected", async () => {
+    acpMocks.runTurn.mockImplementationOnce(
+      async (input: {
+        onEngineSessionId: (sessionId: string) => Promise<void>;
+        onNotification: (
+          notification: ReturnType<typeof claudeCoreMcpInitNotification>,
+        ) => Promise<void>;
+      }) => {
+        await input.onEngineSessionId("claude_thread_1");
+        await input.onNotification(claudeCoreMcpInitNotification({ status: "failed", tools: [] }));
+        throw new Error("unreachable");
+      },
+    );
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession({
+          workspaceId: "workspace_1",
+          hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+        }),
+        canonicalAttemptId: "attempt_1",
+        env: env({ runnerPublicUrl: "https://runner.example.com" }),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.fail).toHaveBeenCalledWith(CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE, {
+      failureDiagnostic: `[run_turn] ClaudeCoreMcpUnavailableError: ${CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE}`,
+    });
+    expect(authMocks.markClaudeCodeCredentialNeedsReauth).not.toHaveBeenCalled();
+  });
+
+  it("fails the turn when Claude omits its requested MCP initialization event", async () => {
+    acpMocks.runTurn.mockResolvedValueOnce({
+      sessionId: "claude_thread_1",
+      loadedSession: true,
+      promptResponse: { stopReason: "end_turn" },
+      stderrTail: "",
+    });
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession({
+          workspaceId: "workspace_1",
+          hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+        }),
+        canonicalAttemptId: "attempt_1",
+        env: env({ runnerPublicUrl: "https://runner.example.com" }),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.fail).toHaveBeenCalledWith(CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE, {
+      failureDiagnostic: `[run_turn] ClaudeCoreMcpUnavailableError: ${CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE}`,
+    });
+  });
+
+  it.each([
+    [
+      "a personal credential that needs reconnecting",
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+      "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+    ],
+    [
+      "a transient refresh failure",
+      new Error("GitHub token refresh failed with 503."),
+      "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
+    ],
+  ])("continues without GitHub auth after %s", async (_case, error, notice) => {
+    chatMocks.loadGitHubAuthForUser.mockRejectedValueOnce(error);
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(eventMocks.appendNotice).toHaveBeenCalledWith(notice);
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
+  it("continues when the GitHub auth notice cannot be persisted", async () => {
+    chatMocks.loadGitHubAuthForUser.mockRejectedValueOnce(
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+    );
+    eventMocks.appendNotice.mockRejectedValueOnce(new Error("database unavailable"));
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
+  it("does not repeat a reconnect notice already present in durable history", async () => {
+    chatMocks.loadGitHubAuthForUser.mockRejectedValueOnce(
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+    );
+    historyMocks.loadCodingChatHistory.mockResolvedValueOnce({
+      messages: [
+        {
+          role: "assistant",
+          content:
+            "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+          attachments: [],
+        },
+      ],
+      materializableAttachments: [],
+      omittedTurnCount: 0,
+      omittedAttachmentCount: 0,
+    });
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(eventMocks.appendNotice).not.toHaveBeenCalled();
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
   });
 
   it("never prepares or starts MCP for an installed but unapproved Plugin", async () => {
@@ -991,8 +1210,8 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     const turn = claudeTurn({ settings: { reasoningEffort: "high" } });
     const completion = { taskId: "goat_task_1", nextTurn: { id: "next_turn" } };
     taskMocks.closeTaskTurn.mockResolvedValueOnce({
-      reportedOutcome: "needs_attention",
-      outcomeComment: "Waiting for CI.",
+      disposition: "needs_attention",
+      comment: "Waiting for CI.",
     });
     taskMocks.finalizeTaskResult.mockResolvedValueOnce("PR opened; CI is running.");
     taskMocks.buildTaskTurnCompletion.mockReturnValueOnce(completion);
@@ -1014,10 +1233,15 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       }) => {
         await input.onEngineSessionId("claude_thread_1");
         await input.onRuntimeEvents([
-          acpToolCallEvent("ScheduleWakeup", {
-            delay_seconds: 600,
-            reason: "Wait for CI",
-            prompt: "Inspect PR #42.",
+          acpToolCallEvent("codex_mcp_tool", {
+            kind: "other",
+            tool: "ScheduleWakeup",
+            toolName: "ScheduleWakeup",
+            arguments: {
+              delay_seconds: 600,
+              reason: "Wait for CI",
+              prompt: "Inspect PR #42.",
+            },
           }),
           ...successfulAcpEvents("PR opened; CI is running."),
         ]);
@@ -1058,6 +1282,25 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     expect(wakeupMocks.enqueueCodexChatWakeup).not.toHaveBeenCalled();
   });
 });
+
+function claudeCoreMcpInitNotification(overrides: { status?: string; tools?: string[] } = {}) {
+  return {
+    method: "_claude/sdkMessage",
+    params: {
+      sessionId: "claude_thread_1",
+      message: {
+        type: "system",
+        subtype: "init",
+        tools: overrides.tools ?? [
+          "mcp__opencompany__publish_artifact",
+          "mcp__opencompany__list_actions",
+          "mcp__opencompany__use_action",
+        ],
+        mcp_servers: [{ name: "opencompany", status: overrides.status ?? "connected" }],
+      },
+    },
+  };
+}
 
 function acpToolCallEvent(name: string, rawInput: Record<string, unknown>) {
   return {
@@ -1249,6 +1492,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     exaApiKey: "exa",
     browserEnabled: false,
     codexE2bTemplate: undefined,
+    sandboxNamespace: "test",
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
     codexChatIdleTimeoutMs: 300_000,

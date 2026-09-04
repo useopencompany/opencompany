@@ -3,7 +3,10 @@ import {
   AutoModelRoutingError,
   type AutoModelRoutingResolution,
 } from "@opencompany/agent/application/auto-model-routing";
-import type { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
+import type {
+  BrainImportApplicationService,
+  WikiImportApplicationService,
+} from "@opencompany/agent/brain-imports";
 import type { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import type { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import type {
@@ -13,6 +16,10 @@ import type {
   ImessageProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
+import type { GmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
+import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
+import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
+import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { McpService } from "@opencompany/agent/mcp-http";
 import type { BillingApplicationService } from "@opencompany/billing/application-service";
 import {
@@ -61,6 +68,7 @@ import {
   PROTOCOL_VERSION_HEADER,
   PresentationDeltaEventSchema,
   RunEventSchema,
+  V1_BROWSER_REQUEST_HEADERS,
   type V1RouteHandlers,
 } from "@opencompany/protocol";
 import { SPANS, withSpan } from "@opencompany/telemetry";
@@ -86,6 +94,7 @@ import type { EngineSessionService } from "./engine-sessions";
 import { ApiError, errorResponse } from "./errors";
 import type { FeedbackService } from "./feedback";
 import type { GitHubIngressService } from "./github-ingress";
+import type { GitHubUserIngressService } from "./github-user-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
 import type { IdentityService } from "./identity";
@@ -93,6 +102,7 @@ import type { IntegrationAccountService } from "./integration-accounts";
 import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
+import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
 import type { OnboardingService } from "./onboarding";
 import type { OnboardingEmailService } from "./onboarding-emails";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
@@ -119,15 +129,9 @@ const HEARTBEAT_MS = 15_000;
 const TERMINAL_RUN_STATUSES = new Set(["paused", "completed", "failed", "canceled"]);
 const MULTIPART_ENVELOPE_BYTES = 64 * 1024;
 const SAFE_BROWSER_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const CORS_ALLOW_HEADERS = [
-  "Accept",
-  "Content-Type",
-  "Idempotency-Key",
-  "Last-Event-ID",
-  "X-OpenCompany-Protocol-Version",
-];
 const CORS_EXPOSE_HEADERS = [
   "Content-Disposition",
+  "ETag",
   "Electric-Cursor",
   "Electric-Handle",
   "Electric-Offset",
@@ -159,6 +163,7 @@ export type CreateApiAppInput = {
   wikiSources: WikiSourceService;
   brainSources: Pick<BrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
   brainImports: Pick<BrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
+  wikiImports: Pick<WikiImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
   browserProfiles: Pick<
     BrowserProfileApplicationService,
     | "list"
@@ -172,6 +177,7 @@ export type CreateApiAppInput = {
   pluginImports: PluginImportApplicationService;
   brainAssets: BrainAssetService;
   chatResources?: ChatResourceService;
+  messagePresentations?: MessagePresentationService;
   chatTitles?: ChatTitleService;
   captureChatMessage?: (input: {
     actor: Actor;
@@ -196,6 +202,9 @@ export type CreateApiAppInput = {
   integrationAccounts: IntegrationAccountService;
   slackBotSettings: SlackBotSettingsService;
   mcp?: McpService;
+  gmailMcp?: GmailMcpService;
+  googleCalendarMcp?: GoogleCalendarMcpService;
+  googleDriveMcp?: GoogleDriveMcpService;
   engineAuth: EngineAuthService;
   engineSessions: EngineSessionService;
   billing: BillingApplicationService;
@@ -209,6 +218,7 @@ export type CreateApiAppInput = {
   emailLifecycleInternalSecret?: string;
   browserOrigins?: readonly string[];
   githubIngress?: GitHubIngressService;
+  githubUserIngress?: GitHubUserIngressService;
   googleIngress?: GoogleIngressService;
   slackIngress?: SlackIngressService;
   linearIngress?: LinearIngressService;
@@ -307,6 +317,54 @@ export function createApiApp(input: CreateApiAppInput) {
         {
           data: {
             task: taskDto(result.task),
+            messageId: result.messageId,
+            assistantMessageId: result.assistantMessageId,
+            runId: result.runId,
+            transactionId: result.transactionId,
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        202,
+      );
+    },
+    createTaskComment: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const { taskId } = c.req.valid("param");
+      const body = c.req.valid("json");
+      const result = await input.tasks.createComment(actor, taskId, body);
+      if (!result.idempotentReplay && input.captureChatMessage) {
+        void Promise.resolve(
+          input.captureChatMessage({
+            actor,
+            conversationId: result.task.conversationId,
+            firstMessage: false,
+            engine: result.task.engine,
+            model: result.task.model,
+            messageLength: body.body.length,
+            selectionMode: "manual",
+          }),
+        ).catch((error) =>
+          logger.warn("Canonical Task comment analytics capture failed", {
+            event: "opencompany.canonical_task_comment_analytics_failed",
+            task_id: result.task.id,
+            error_name: error instanceof Error ? error.name : typeof error,
+          }),
+        );
+      }
+      return c.json(
+        {
+          data: {
+            task: taskDto(result.task),
+            comment: {
+              id: result.comment.id,
+              taskId: result.comment.taskId,
+              author: "user" as const,
+              kind: "comment" as const,
+              body: result.comment.body,
+              createdAt: result.comment.createdAt.toISOString(),
+            },
             messageId: result.messageId,
             assistantMessageId: result.assistantMessageId,
             runId: result.runId,
@@ -915,6 +973,38 @@ export function createApiApp(input: CreateApiAppInput) {
         200,
       );
     },
+    startWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.wikiImports.start(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    confirmWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const result = await input.wikiImports.confirm(
+        actor,
+        params.importRunId,
+        c.req.valid("json").enabledProviders,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    cancelWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.wikiImports.cancel(actor, c.req.valid("param").importRunId);
+      return c.json({ data: result, meta }, 200);
+    },
+    retryWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.wikiImports.retry(actor, c.req.valid("param").importRunId);
+      return c.json({ data: result, meta }, 200);
+    },
     createBrainDocument: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -1344,6 +1434,13 @@ export function createApiApp(input: CreateApiAppInput) {
       const plugin = await input.pluginImports.revokeMcp(actor, c.req.valid("param").name);
       return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
     },
+    refreshPluginMcp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const plugin = await input.pluginImports.refreshMcp(actor, c.req.valid("param").name);
+      if (!plugin) throw new CoreError("not_found", "Plugin not found.");
+      return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
+    },
     deletePluginData: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 10);
@@ -1582,7 +1679,25 @@ export function createApiApp(input: CreateApiAppInput) {
       if (!(file instanceof File)) {
         throw new ApiError(400, "invalid_request", "A file upload is required.");
       }
-      const upload = await input.attachments.upload({ actor, file });
+      const idempotencyKey = c.req.valid("header")["idempotency-key"];
+      if (!idempotencyKey) {
+        logger.info("Attachment upload omitted an idempotency key", {
+          event: "opencompany.chat_attachment_upload_idempotency_key_missing",
+          missing_key_count: 1,
+        });
+      }
+      const upload = await input.attachments.upload({
+        actor,
+        file,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+      });
+      if (upload.replayed) {
+        logger.info("Attachment upload replayed", {
+          event: "opencompany.chat_attachment_upload_replayed",
+          replayed_count: 1,
+          attachment_id: upload.id,
+        });
+      }
       return c.json(
         {
           data: {
@@ -1594,6 +1709,7 @@ export function createApiApp(input: CreateApiAppInput) {
               kind: upload.format === "image" ? ("image" as const) : ("document" as const),
             },
             expiresAt: upload.expiresAt.toISOString(),
+            replayed: upload.replayed,
           },
           meta,
         },
@@ -1623,6 +1739,25 @@ export function createApiApp(input: CreateApiAppInput) {
         ...c.req.valid("param"),
       });
       return chatResourceResponse(asset) as never;
+    },
+    getMessagePresentation: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const params = c.req.valid("param");
+      await authorizeConversationRead(input, actor, params.conversationId);
+      if (!input.messagePresentations) {
+        throw new ApiError(503, "unavailable", "Message presentations are not configured.", true);
+      }
+      const result = await input.messagePresentations.get({ actor, ...params });
+      if (!result) throw new ApiError(404, "not_found", "Message presentation not found.");
+      const etag = messagePresentationEtag(params.messageId, result.updatedAt);
+      c.header("ETag", etag);
+      c.header("Cache-Control", "private, max-age=0, must-revalidate");
+      c.header("Vary", "Authorization, Cookie");
+      if (etagMatches(c.req.valid("header")["if-none-match"], etag)) {
+        return c.body(null, 304);
+      }
+      return c.json({ data: result, meta }, 200);
     },
     downloadChatScreenshot: async (c) => {
       const actor = actorFrom(c);
@@ -1840,7 +1975,31 @@ export function createApiApp(input: CreateApiAppInput) {
       }
       const params = c.req.valid("param");
       const query = c.req.valid("query");
-      if (params.readModel.startsWith("brain-")) {
+      if (params.readModel !== "task-activities-v1" && query.taskId) {
+        throw new ApiError(400, "invalid_request", "taskId is not valid for this read model.");
+      }
+      if (
+        query.messageShapeEpoch !== undefined &&
+        params.readModel !== "chat-messages-v1" &&
+        params.readModel !== "chat-messages-v2"
+      ) {
+        throw new ApiError(
+          400,
+          "invalid_request",
+          "messageShapeEpoch is only valid for the Chat Message read model.",
+        );
+      }
+      let messageShapeEpoch: number | undefined;
+      if (params.readModel === "task-activities-v1") {
+        if (!query.taskId || query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "taskId is required and other resource identifiers are not valid for this read model.",
+          );
+        }
+        await input.tasks.getTask(actor, query.taskId);
+      } else if (params.readModel.startsWith("brain-")) {
         if (query.conversationId || !query.brainId) {
           throw new ApiError(
             400,
@@ -1926,7 +2085,13 @@ export function createApiApp(input: CreateApiAppInput) {
             "conversationId is required for this read model.",
           );
         }
-        await authorizeConversationRead(input, actor, query.conversationId);
+        const resource = await authorizeConversationRead(input, actor, query.conversationId);
+        if (
+          (params.readModel === "chat-messages-v1" || params.readModel === "chat-messages-v2") &&
+          "messageShapeEpoch" in resource
+        ) {
+          messageShapeEpoch = resource.messageShapeEpoch;
+        }
       } else if (query.conversationId || query.brainId) {
         throw new ApiError(
           400,
@@ -1939,6 +2104,8 @@ export function createApiApp(input: CreateApiAppInput) {
         readModel: params.readModel,
         ...(query.conversationId ? { conversationId: query.conversationId } : {}),
         ...(query.brainId ? { brainId: query.brainId } : {}),
+        ...(query.taskId ? { taskId: query.taskId } : {}),
+        ...(messageShapeEpoch !== undefined ? { messageShapeEpoch } : {}),
         requestUrl: new URL(c.req.url),
       }) as never;
     },
@@ -2043,6 +2210,15 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("json").apiKey,
       );
       return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
+    },
+    connectRenderAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectRender(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: renderStateDto(state) }, meta }, 200);
     },
     startImessagePairing: async (c) => {
       const actor = actorFrom(c);
@@ -2203,6 +2379,15 @@ export function createApiApp(input: CreateApiAppInput) {
       const status = await input.engineAuth.getCodexStatus(actor);
       return c.json({ data: status, meta }, 200);
     },
+    updateCodexWorkspaceEngine: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const status = await input.engineAuth.setCodexWorkspaceEngine(
+        actor,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: status, meta }, 200);
+    },
     startCodexDeviceAuth: async (c) => {
       const actor = actorFrom(c);
       // Flow starts open device/browser authorizations against external auth
@@ -2324,7 +2509,7 @@ export function createApiApp(input: CreateApiAppInput) {
         cors({
           origin: browserOrigins,
           allowMethods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-          allowHeaders: CORS_ALLOW_HEADERS,
+          allowHeaders: [...V1_BROWSER_REQUEST_HEADERS],
           exposeHeaders: CORS_EXPOSE_HEADERS,
           credentials: true,
           maxAge: 600,
@@ -2365,7 +2550,11 @@ export function createApiApp(input: CreateApiAppInput) {
               span.setAttributes({ "goat.http_status_code": c.res.status });
               return c.res;
             } catch (error) {
-              if (!(error instanceof ApiError) && !(error instanceof CoreError)) {
+              c.res = apiErrorResponse(c, error);
+              if (
+                c.res.status >= 500 ||
+                (!(error instanceof ApiError) && !(error instanceof CoreError))
+              ) {
                 captureException(error, {
                   ...requestFailureLogFieldsFrom(c),
                   event: "opencompany.api_request_failed",
@@ -2374,7 +2563,6 @@ export function createApiApp(input: CreateApiAppInput) {
                   path: c.req.path,
                 });
               }
-              c.res = apiErrorResponse(c, error);
               span.setAttributes({ "goat.http_status_code": c.res.status });
               if (c.res.status >= 500) {
                 span.fail(error, { "goat.http_status_code": c.res.status });
@@ -2473,6 +2661,15 @@ export function createApiApp(input: CreateApiAppInput) {
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
   if (input.mcp) {
     app.on(["GET", "POST", "DELETE"], "/mcp", (c) => input.mcp!.handle(c.req.raw));
+  }
+  if (input.gmailMcp) {
+    app.post("/mcp/plugins/gmail", (c) => input.gmailMcp!.handle(c.req.raw));
+  }
+  if (input.googleCalendarMcp) {
+    app.post("/mcp/plugins/google-calendar", (c) => input.googleCalendarMcp!.handle(c.req.raw));
+  }
+  if (input.googleDriveMcp) {
+    app.post("/mcp/plugins/google-drive", (c) => input.googleDriveMcp!.handle(c.req.raw));
   }
   app.post("/internal/onboarding-emails/enroll", async (c) => {
     authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
@@ -2583,6 +2780,17 @@ export function createApiApp(input: CreateApiAppInput) {
     app.use("/webhooks/github/events", ingressBodyLimit(25 * 1024 * 1024));
     app.post("/webhooks/github/events", (c) => ingress.webhook(c.req.raw));
   }
+  if (input.githubUserIngress) {
+    const ingress = input.githubUserIngress;
+    app.get("/integrations/github-user/start", (c) => ingress.start(c.req.raw));
+    app.get("/integrations/github-user/callback", (c) => ingress.callback(c.req.raw));
+    app.get("/integrations/github-user/installations", (c) =>
+      ingress.installations(c.req.raw, requestIdFrom(c)),
+    );
+    app.post("/integrations/github-user/installations", (c) =>
+      ingress.installations(c.req.raw, requestIdFrom(c)),
+    );
+  }
   if (input.googleIngress) {
     const ingress = input.googleIngress;
     app.get("/integrations/gmail/start", (c) => ingress.start("gmail", c.req.raw));
@@ -2603,10 +2811,6 @@ export function createApiApp(input: CreateApiAppInput) {
     const ingress = input.slackIngress;
     app.get("/integrations/slack/start", (c) => ingress.start(c.req.raw));
     app.get("/integrations/slack/callback", (c) => ingress.callback(c.req.raw));
-    // Slack event payloads are small; Render enforces no platform body cap, so
-    // bound the unauthenticated raw-body read here.
-    app.use("/webhooks/slack/events", ingressBodyLimit(5 * 1024 * 1024));
-    app.post("/webhooks/slack/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.linearIngress) {
     const ingress = input.linearIngress;
@@ -2638,8 +2842,16 @@ export function createApiApp(input: CreateApiAppInput) {
   }
   if (input.mcpOAuthIngress) {
     const ingress = input.mcpOAuthIngress;
+    app.get("/integrations/betterstack/start", (c) => ingress.start("betterstack", c.req.raw));
+    app.get("/integrations/betterstack/callback", (c) =>
+      ingress.callback("betterstack", c.req.raw),
+    );
+    app.get("/integrations/signoz/start", (c) => ingress.start("signoz", c.req.raw));
+    app.get("/integrations/signoz/callback", (c) => ingress.callback("signoz", c.req.raw));
     app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));
     app.get("/integrations/linear/callback", (c) => ingress.callback("linear", c.req.raw));
+    app.get("/integrations/hubspot-mcp/start", (c) => ingress.start("hubspot", c.req.raw));
+    app.get("/integrations/hubspot-mcp/callback", (c) => ingress.callback("hubspot", c.req.raw));
     app.get("/integrations/posthog/start", (c) => ingress.start("posthog", c.req.raw));
     app.get("/integrations/posthog/callback", (c) => ingress.callback("posthog", c.req.raw));
     app.get("/integrations/neon/start", (c) => ingress.start("neon", c.req.raw));
@@ -2931,6 +3143,14 @@ function requestIdFrom(c: Context) {
   return (getContextValue(c, "requestId") as string | undefined) ?? `request_${randomUUID()}`;
 }
 
+function etagMatches(value: string | undefined, etag: string) {
+  if (!value) return false;
+  return value
+    .split(",")
+    .map((candidate) => candidate.trim())
+    .some((candidate) => candidate === "*" || candidate === etag);
+}
+
 function contentDisposition(value: string, inline = true) {
   const filename = value.replace(/[\u0000-\u001f\u007f"\\]/gu, "_").trim() || "file";
   const fallback = filename.replace(/[^\x20-\x7e]/gu, "_") || "file";
@@ -2980,6 +3200,7 @@ function conversationDto(conversation: {
   title: string;
   engine: "opencompany" | "codex" | "claude_code";
   model: string;
+  messageShapeEpoch: number;
   runtime: {
     status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
     activeRunId: string | null;
@@ -2992,8 +3213,9 @@ function conversationDto(conversation: {
   createdAt: Date;
   updatedAt: Date;
 }) {
+  const { messageShapeEpoch: _messageShapeEpoch, ...publicConversation } = conversation;
   return {
-    ...conversation,
+    ...publicConversation,
     runtime: conversation.runtime
       ? { ...conversation.runtime, updatedAt: conversation.runtime.updatedAt.toISOString() }
       : null,
@@ -3162,7 +3384,7 @@ async function authorizeConversationRead(
   actor: Actor,
   conversationId: string,
 ) {
-  await getConversationOrTask(input, actor, conversationId, { includeArchived: true });
+  return getConversationOrTask(input, actor, conversationId, { includeArchived: true });
 }
 
 async function getConversationOrTask(
@@ -3297,6 +3519,19 @@ function granolaStateDto(state: GranolaProviderState) {
   };
 }
 
+function renderStateDto(state: RenderProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountName: state.accountName,
+    statusReason: state.statusReason,
+    capabilityModes: state.capabilityModes,
+    toolModes: state.toolModes,
+  };
+}
+
 function imessageStateDto(state: ImessageProviderState) {
   return {
     provider: state.provider,
@@ -3317,6 +3552,8 @@ function stripeStateDto(state: StripeProviderState) {
     accountName: state.accountName,
     livemode: state.livemode,
     statusReason: state.statusReason,
+    capabilityModes: state.capabilityModes,
+    toolModes: state.toolModes,
   };
 }
 

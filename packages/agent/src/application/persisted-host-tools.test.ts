@@ -11,6 +11,7 @@ function executeHostTool(input: {
     runtime: {
       wakeTaskWorker: vi.fn(),
       defer: vi.fn(),
+      gatewayApiKey: "gateway-key",
       planHarness: vi.fn(),
     },
     ...(input.dependencies ? { dependencies: input.dependencies } : {}),
@@ -68,7 +69,7 @@ describe("headless Chat host tools", () => {
           timezone: "Europe/London",
           taskToolsEnabled: true,
           skillToolsEnabled: true,
-          wikiEnabled: true,
+          legacyBrainEnabled: false,
         })),
         browserProfilesAvailable: () => true,
         listBrowserProfiles: vi.fn(async () => [activeSession.profile]),

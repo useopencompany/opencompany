@@ -63,7 +63,6 @@ import {
   integrations,
   isWorkspaceOwnedIntegrationProvider,
 } from "@opencompany/db/product-schema";
-import type { SlackConversationRef } from "@opencompany/db/slack";
 import { getBrainAccess, getDefaultBrainForUser } from "@opencompany/db/workspaces";
 import { and, desc, eq, inArray, isNull, ne, or, type SQL } from "drizzle-orm";
 import { getAppUrl } from "./app-url";
@@ -76,7 +75,6 @@ import type {
   HubspotSourceProviderState,
   JamieProviderState,
   LinearSourceProviderState,
-  SlackProviderState,
 } from "./integration-state";
 import type { GitHubProviderState } from "./integrations/github";
 import {
@@ -88,11 +86,6 @@ import {
   listGoogleSharedDrives,
   loadOwnGoogleDriveAccount,
 } from "./integrations/google-drive-source";
-import {
-  listSlackConversationOptions,
-  type SlackChannelOption,
-  type SlackDmOption,
-} from "./integrations/slack-conversations";
 
 type DbLike = any;
 
@@ -101,7 +94,6 @@ const SOURCE_INTEGRATION_PROVIDERS = [
   "gmail",
   "google_drive",
   "github",
-  "slack",
   "linear",
   "hubspot",
   "granola",
@@ -142,7 +134,7 @@ export type BrainSourcesDetails = {
   viewer: { actorId: string; isAdmin: boolean };
   sources: BrainSourceView[];
   ownAccounts: Record<
-    "slack" | "linear" | "gmail" | "google_drive" | "hubspot" | "granola" | "fathom" | "attio",
+    "linear" | "gmail" | "google_drive" | "hubspot" | "granola" | "fathom" | "attio",
     OwnSourceAccount[]
   >;
   jamie: {
@@ -150,7 +142,6 @@ export type BrainSourcesDetails = {
     legacyDefaultDelivery: boolean;
     isDefaultBrain: boolean;
   };
-  slack: { integration: SlackProviderState };
   linear: { integration: LinearSourceProviderState };
   github: { integration: GitHubProviderState };
   gmail: { integration: GmailSourceProviderState };
@@ -166,13 +157,6 @@ export type BrainSourceCommand =
       operation: "set_enabled";
       provider: BrainSourceConfigProvider;
       enabled: boolean;
-    }
-  | {
-      operation: "configure";
-      provider: "slack";
-      enabled: boolean;
-      channels: SlackConversationRef[];
-      dms: SlackConversationRef[];
     }
   | {
       operation: "configure";
@@ -218,7 +202,6 @@ export type BrainSourceCommand =
     };
 
 export type BrainSourceOptionsCommand =
-  | { provider: "slack" }
   | { provider: "linear" }
   | { provider: "github" }
   | {
@@ -229,12 +212,6 @@ export type BrainSourceOptionsCommand =
     };
 
 export type BrainSourceOptions =
-  | {
-      provider: "slack";
-      channels: SlackChannelOption[];
-      dms: SlackDmOption[];
-      partial: boolean;
-    }
   | { provider: "linear"; teams: LinearTeamRef[]; partial: boolean }
   | {
       provider: "github";
@@ -294,38 +271,39 @@ export class BrainSourceApplicationService {
 
     return {
       viewer: { actorId: actor.userId, isAdmin },
-      sources: sources.map((source) => {
-        const workspaceOwned = Boolean(source.integrationWorkspaceId);
-        const ownWorkspaceSource =
-          workspaceOwned && source.integrationWorkspaceId === actor.workspaceId;
-        const isOwn = !workspaceOwned && source.userWorkosId === actor.userId;
-        return {
-          sourceId: source.id,
-          provider: source.provider,
-          integrationId: source.integrationId,
-          enabled: source.enabled,
-          connectedByName: source.ownerName ?? source.ownerEmail ?? "Unknown",
-          ownerEmail: source.ownerEmail,
-          ownerAvatarUrl: source.ownerAvatarUrl,
-          accountEmail: source.integrationAccountEmail,
-          accountName: source.integrationAccountName,
-          connectionLabel: source.integrationConnectionLabel,
-          ownerKind: workspaceOwned ? "workspace" : "user",
-          isOwn,
-          canConfigure: workspaceOwned ? ownWorkspaceSource && isAdmin : isOwn,
-          canToggle: workspaceOwned ? ownWorkspaceSource && isAdmin : isOwn || isAdmin,
-          canRemove: workspaceOwned ? ownWorkspaceSource && isAdmin : isOwn || isAdmin,
-          integrationStatus: source.integrationStatus,
-          config: source.config,
-        };
-      }),
+      sources: sources
+        .filter((source) => source.provider !== "slack")
+        .map((source) => {
+          const workspaceOwned = Boolean(source.integrationWorkspaceId);
+          const ownWorkspaceSource =
+            workspaceOwned && source.integrationWorkspaceId === actor.workspaceId;
+          const isOwn = !workspaceOwned && source.userWorkosId === actor.userId;
+          return {
+            sourceId: source.id,
+            provider: source.provider,
+            integrationId: source.integrationId,
+            enabled: source.enabled,
+            connectedByName: source.ownerName ?? source.ownerEmail ?? "Unknown",
+            ownerEmail: source.ownerEmail,
+            ownerAvatarUrl: source.ownerAvatarUrl,
+            accountEmail: source.integrationAccountEmail,
+            accountName: source.integrationAccountName,
+            connectionLabel: source.integrationConnectionLabel,
+            ownerKind: workspaceOwned ? "workspace" : "user",
+            isOwn,
+            canConfigure: workspaceOwned ? ownWorkspaceSource && isAdmin : isOwn,
+            canToggle: workspaceOwned ? ownWorkspaceSource && isAdmin : isOwn || isAdmin,
+            canRemove: workspaceOwned ? ownWorkspaceSource && isAdmin : isOwn || isAdmin,
+            integrationStatus: source.integrationStatus,
+            config: source.config,
+          };
+        }),
       ownAccounts,
       jamie: {
         integration: state.jamie,
         legacyDefaultDelivery: state.jamie.apiKeyConfigured && !jamieConfigured,
         isDefaultBrain: jamieOwnerDefaultBrain?.id === id,
       },
-      slack: { integration: state.slack },
       linear: { integration: state.linear },
       github: { integration: state.github },
       gmail: { integration: state.gmail },
@@ -359,11 +337,6 @@ export class BrainSourceApplicationService {
       return;
     }
     switch (command.provider) {
-      case "slack":
-        return this.configurePersonalSource(actor, id, integration, command, {
-          channels: sanitizeConversationRefs(command.channels),
-          dms: sanitizeConversationRefs(command.dms),
-        });
       case "linear":
         return this.configurePersonalSource(actor, id, integration, command, {
           teams: sanitizeTeamRefs(command.teams),
@@ -401,8 +374,6 @@ export class BrainSourceApplicationService {
     requireBrainRead(actor);
     const integration = resourceId(integrationId, "integrationId");
     switch (command.provider) {
-      case "slack":
-        return this.listSlackOptions(actor, integration);
       case "linear":
         return this.listLinearOptions(actor, integration);
       case "github":
@@ -690,38 +661,6 @@ export class BrainSourceApplicationService {
     });
   }
 
-  private async listSlackOptions(
-    actor: Actor,
-    integrationId: string,
-  ): Promise<Extract<BrainSourceOptions, { provider: "slack" }>> {
-    const integration = await this.loadSourceIntegration(actor, integrationId, "slack");
-    if (!integration || integration.status !== "connected") {
-      throw new CoreError("conflict", "Connect Slack in your settings first.");
-    }
-    const credential = await loadIntegrationCredential({
-      userWorkosId: actor.userId,
-      integrationId,
-      provider: "slack",
-      kind: "oauth_token",
-      db: this.db,
-    }).catch(() => null);
-    const token = credential?.payload.access_token;
-    const teamId = credential?.payload.team_id ?? integration.externalId;
-    const authedUserId = credential?.payload.authed_user_id;
-    if (
-      typeof token !== "string" ||
-      !token ||
-      typeof teamId !== "string" ||
-      !teamId ||
-      typeof authedUserId !== "string" ||
-      !authedUserId
-    ) {
-      throw new CoreError("conflict", "Connect Slack in your settings first.");
-    }
-    const options = await listSlackConversationOptions({ token, teamId, authedUserId });
-    return { provider: "slack", ...options };
-  }
-
   private async listLinearOptions(
     actor: Actor,
     integrationId: string,
@@ -962,7 +901,6 @@ export class BrainSourceApplicationService {
 
   private async listOwnAccounts(actorId: string): Promise<BrainSourcesDetails["ownAccounts"]> {
     const providers = [
-      "slack",
       "linear",
       "gmail",
       "google_drive",
@@ -1017,7 +955,6 @@ function sourceProviderStates(rows: IntegrationRow[], actor: Actor) {
     );
   };
   const jamieRow = connectedStateRow(workspaceRow("jamie"));
-  const slackRow = connectedStateRow(personalRow("slack"));
   const linearRow = connectedStateRow(personalRow("linear"));
   const githubRow = connectedStateRow(workspaceRow("github"));
   const gmailRow = connectedStateRow(personalRow("gmail"));
@@ -1039,17 +976,6 @@ function sourceProviderStates(rows: IntegrationRow[], actor: Actor) {
           apiKeyConfigured: isJamieApiKeyConfigured(jamieRow),
         }
       : emptyJamieState(),
-    slack: slackRow
-      ? {
-          provider: "slack" as const,
-          connected: slackRow.status === "connected",
-          status: slackRow.status,
-          integrationId: slackRow.id,
-          accountName: slackRow.accountName,
-          teamName: slackRow.connectionLabel,
-          statusReason: slackRow.statusReason,
-        }
-      : emptySlackState(),
     linear: linearRow
       ? {
           provider: "linear" as const,
@@ -1189,18 +1115,6 @@ function emptyJamieState(): JamieProviderState {
   };
 }
 
-function emptySlackState(): SlackProviderState {
-  return {
-    provider: "slack",
-    connected: false,
-    status: "not_connected",
-    integrationId: null,
-    accountName: null,
-    teamName: null,
-    statusReason: null,
-  };
-}
-
 function emptyLinearState(): LinearSourceProviderState {
   return {
     provider: "linear",
@@ -1294,7 +1208,7 @@ function emptyAttioState(): AttioProviderState {
 }
 
 function integrationProviderFor(provider: BrainSourceConfigProvider): IntegrationProvider | null {
-  return provider === "slack_bot" ? null : provider;
+  return provider === "slack" || provider === "slack_bot" ? null : provider;
 }
 
 function sourceIntegrationOwnerWhere(provider: IntegrationProvider, actor: Actor): SQL {
@@ -1366,10 +1280,6 @@ function providerDisplayName(provider: BrainSourceConfigProvider) {
   }
 }
 
-function sanitizeConversationRefs(refs: SlackConversationRef[]) {
-  return sanitizeNamedRefs(refs);
-}
-
 function sanitizeTeamRefs(refs: LinearTeamRef[]): LinearTeamRef[] {
   const seen = new Set<string>();
   return refs.flatMap((ref) => {
@@ -1387,17 +1297,6 @@ function sanitizeTeamRefs(refs: LinearTeamRef[]): LinearTeamRef[] {
         ...(triageStateId ? { triageStateId } : {}),
       },
     ];
-  });
-}
-
-function sanitizeNamedRefs(refs: Array<{ id: string; name: string }>) {
-  const seen = new Set<string>();
-  return refs.flatMap((ref) => {
-    const id = typeof ref.id === "string" ? ref.id.trim() : "";
-    if (!id || seen.has(id)) return [];
-    seen.add(id);
-    const name = typeof ref.name === "string" ? ref.name.trim() : "";
-    return [{ id, name: name || id }];
   });
 }
 

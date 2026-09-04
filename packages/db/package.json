@@ -36,6 +36,10 @@
       "types": "./src/plugin-repository.ts",
       "default": "./src/plugin-repository.ts"
     },
+    "./plugin-gateway-repository": {
+      "types": "./src/plugin-gateway-repository.ts",
+      "default": "./src/plugin-gateway-repository.ts"
+    },
     "./plugin-runtime-repository": {
       "types": "./src/plugin-runtime-repository.ts",
       "default": "./src/plugin-runtime-repository.ts"
@@ -43,6 +47,10 @@
     "./plugin-data-runtime-repository": {
       "types": "./src/plugin-data-runtime-repository.ts",
       "default": "./src/plugin-data-runtime-repository.ts"
+    },
+    "./postgres-json": {
+      "types": "./src/postgres-json.ts",
+      "default": "./src/postgres-json.ts"
     },
     "./skill-catalog": {
       "types": "./src/skill-catalog.ts",
@@ -180,10 +188,6 @@
       "types": "./src/linear.ts",
       "default": "./src/linear.ts"
     },
-    "./slack": {
-      "types": "./src/slack.ts",
-      "default": "./src/slack.ts"
-    },
     "./slack-bot": {
       "types": "./src/slack-bot.ts",
       "default": "./src/slack-bot.ts"
@@ -244,7 +248,7 @@
     "pg": "^8.23.0"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.5",
+    "@electric-sql/pglite": "^0.5.8",
     "@types/node": "^25.9.1",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.10",

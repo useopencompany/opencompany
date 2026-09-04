@@ -1,9 +1,11 @@
 "use client";
 
+import { cn } from "@opencompany/ui/lib/utils";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
   Blocks,
+  BrainCircuit,
   CircleDollarSign,
   CreditCard,
   FolderGit2,
@@ -70,6 +72,12 @@ const NAV_GROUPS: SettingsNavGroup[] = [
   {
     label: "Workspace",
     items: [
+      {
+        href: "/settings/workspace/inference",
+        icon: BrainCircuit,
+        label: "Inference",
+        isActive: (pathname) => pathname === "/settings/workspace/inference",
+      },
       {
         href: "/settings/workspace/capabilities",
         icon: SearchCheck,
@@ -233,17 +241,24 @@ export function SettingsContent({
   title,
   description,
   backLink,
+  contentClassName,
   children,
 }: {
   title: string;
   description?: string;
   backLink?: { href: string; label: string };
+  contentClassName?: string;
   children: ReactNode;
 }) {
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 overflow-y-auto px-6 md:px-10">
-        <div className="mx-auto flex w-full max-w-[680px] flex-col gap-8 pb-24 pt-14 sm:pt-20">
+        <div
+          className={cn(
+            "mx-auto flex w-full max-w-[680px] flex-col gap-8 pb-24 pt-14 sm:pt-20",
+            contentClassName,
+          )}
+        >
           {backLink ? (
             <Link
               href={backLink.href}

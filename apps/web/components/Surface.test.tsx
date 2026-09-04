@@ -83,6 +83,7 @@ const taskCommandMocks = vi.hoisted(() => ({
     },
     transactionId: "1",
   })),
+  comment: vi.fn(async () => ({ replayed: false })),
 }));
 
 const automationCommandMocks = vi.hoisted(() => ({
@@ -187,6 +188,8 @@ vi.mock("@/lib/headless-task-commands", () => ({
   archiveHeadlessTask: taskCommandMocks.archive,
   cancelHeadlessTaskRun: taskCommandMocks.cancel,
   createHeadlessTask: taskCommandMocks.create,
+  createHeadlessTaskComment: taskCommandMocks.comment,
+  newHeadlessTaskCommentId: () => "task_activity_comment_test",
 }));
 
 vi.mock("@/lib/headless-automation-commands", () => ({
@@ -452,6 +455,8 @@ describe("Surface chat streaming UI", () => {
     taskCommandMocks.cancel.mockReset();
     taskCommandMocks.cancel.mockResolvedValue({});
     taskCommandMocks.create.mockClear();
+    taskCommandMocks.comment.mockReset();
+    taskCommandMocks.comment.mockResolvedValue({ replayed: false });
     automationCommandMocks.invokeWorkflow.mockClear();
     automationCommandMocks.listWorkflowCatalog.mockClear();
     automationCommandMocks.archiveSchedule.mockClear();
@@ -1247,8 +1252,9 @@ describe("Surface chat streaming UI", () => {
     );
   });
 
-  it("continues a session-backed workflow task through the same chat composer", async () => {
+  it("posts a session-backed Task comment verbatim without a Chat LLM hop", async () => {
     const user = userEvent.setup();
+    const taskId = "goat_task_1";
 
     render(
       <Surface
@@ -1283,10 +1289,11 @@ describe("Surface chat streaming UI", () => {
           ],
         }}
         taskConversation={{
-          taskId: "goat_task_1",
+          taskId,
           status: "succeeded",
           startedAtMs: Date.now(),
         }}
+        workspaceId="workspace_1"
       />,
     );
 
@@ -1296,16 +1303,69 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("TASK-1 · Done")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Share task run" })).toBeInTheDocument();
 
-    await user.type(screen.getByPlaceholderText("Reply..."), "Please check the afternoon too");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    const body = "  Please check the afternoon too.\n  Preserve this indent.  ";
+    fireEvent.change(screen.getByPlaceholderText("Add a comment…"), { target: { value: body } });
+    await user.click(screen.getByRole("button", { name: "Post comment" }));
 
     await waitFor(() =>
-      expect(chatMock.sendMessage).toHaveBeenCalledWith({
-        text: "Please check the afternoon too",
-      }),
+      expect(taskCommandMocks.comment).toHaveBeenCalledWith(
+        taskId,
+        { id: "task_activity_comment_test", body },
+        { scopeKey: "workspace_1" },
+      ),
     );
-    expect(chatMock.lastResume).toBe(true);
-    expect(screen.getByText("Please check the afternoon too")).toBeInTheDocument();
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(screen.getByText("Comments are sent verbatim to this task.")).toBeVisible();
+  });
+
+  it("attaches a dropped screenshot when continuing a session-backed task", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "chat_task_1",
+          title: "Investigate task",
+          model: DEFAULT_MODEL,
+          engine: "opencompany",
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "task_1",
+          status: "succeeded",
+          startedAtMs: Date.now(),
+        }}
+        userWorkosId="user_1"
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Attach files" })).toBeInTheDocument();
+
+    const screenshot = new File(["image"], "screenshot.png", { type: "image/png" });
+    fireEvent.drop(window, {
+      dataTransfer: { types: ["Files"], files: [screenshot] },
+    });
+
+    await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
+    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({
+      file: screenshot,
+      pendingId: expect.any(String),
+    });
+    expect(await screen.findByText("screenshot.png")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Post comment" }));
+
+    expect(taskCommandMocks.comment).toHaveBeenCalledWith(
+      "task_1",
+      {
+        id: "task_activity_comment_test",
+        body: "",
+        attachmentIds: ["attachment_1"],
+      },
+      { scopeKey: "" },
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
   it("keeps pre-cutover Task history explicitly read-only", () => {
@@ -1331,25 +1391,27 @@ describe("Surface chat streaming UI", () => {
           status: "succeeded",
           startedAtMs: Date.now(),
         }}
+        userWorkosId="user_1"
         readOnlyNotice="This pre-cutover task is available as read-only history. Start a new task to continue the work."
       />,
     );
 
     expect(screen.getByText(/pre-cutover task is available as read-only history/i)).toBeVisible();
-    expect(screen.getByPlaceholderText("Reply...")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    expect(screen.getByPlaceholderText("Add a comment…")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Post comment" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Attach files" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start voice dictation" })).toBeDisabled();
-    expect(screen.getByLabelText("Model")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Start voice dictation" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
 
-    const form = screen.getByRole("button", { name: "Send message" }).closest("form");
+    const form = screen.getByRole("button", { name: "Post comment" }).closest("form");
     expect(form).not.toBeNull();
     fireEvent.submit(form!);
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("offers Skill mentions when continuing a session-backed task", async () => {
+  it("treats slash text in a Task comment as verbatim content, not a Skill mention", async () => {
     const user = userEvent.setup();
+    const taskId = "goat_task_1";
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
       {
         id: "product-work",
@@ -1370,7 +1432,7 @@ describe("Surface chat streaming UI", () => {
           messages: [],
         }}
         taskConversation={{
-          taskId: "goat_task_1",
+          taskId,
           status: "succeeded",
           startedAtMs: Date.now(),
         }}
@@ -1378,23 +1440,23 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
-    await user.type(textarea, "/prod");
-    await user.click(await screen.findByRole("option", { name: /Product work/i }));
-    await user.type(textarea, "investigate the mention menu");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    const textarea = screen.getByPlaceholderText("Add a comment…");
+    await user.type(textarea, "/prod investigate the mention menu");
+    expect(screen.queryByRole("option", { name: /Product work/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Post comment" }));
 
     await waitFor(() =>
-      expect(chatMock.sendMessage).toHaveBeenCalledWith({
-        text: "/product-work investigate the mention menu",
-        metadata: { mentions: [{ kind: "skill", id: "product-work" }] },
-      }),
+      expect(taskCommandMocks.comment).toHaveBeenCalledWith(
+        taskId,
+        { id: "task_activity_comment_test", body: "/prod investigate the mention menu" },
+        { scopeKey: "" },
+      ),
     );
+    expect(knowledgeCommandMocks.listSkillCatalog).not.toHaveBeenCalled();
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("starts an ampersand ad-hoc task from an active task conversation", async () => {
-    const user = userEvent.setup();
-
+  it("disables comments while the Task run is active", () => {
     render(
       <Surface
         tasks={[]}
@@ -1421,28 +1483,12 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
-    await user.type(textarea, "& #task research competitors");
-
-    expect(screen.getByTestId("ad-hoc-task-hint")).toHaveTextContent(
-      "Sending starts this as an ad-hoc background task.",
-    );
-    const submit = screen.getByRole("button", { name: "Start task" });
-    expect(submit).toBeEnabled();
-    await user.click(submit);
-
-    await waitFor(() => expect(taskCommandMocks.create).toHaveBeenCalledTimes(1));
-    expect(taskCommandMocks.create).toHaveBeenCalledWith(
-      {
-        goal: "research competitors",
-        engine: "opencompany",
-        model: DEFAULT_MODEL,
-      },
-      { scopeKey: "" },
-    );
+    expect(screen.getByPlaceholderText("Add a comment…")).toBeDisabled();
+    expect(screen.getByText("You can comment when the current run finishes.")).toBeVisible();
+    expect(screen.queryByTestId("ad-hoc-task-hint")).not.toBeInTheDocument();
+    expect(taskCommandMocks.create).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    expect(taskCommandMocks.cancel).not.toHaveBeenCalled();
-    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+    expect(taskCommandMocks.comment).not.toHaveBeenCalled();
   });
 
   it("uses the chat stop control for an active workflow task", async () => {
@@ -1524,7 +1570,7 @@ describe("Surface chat streaming UI", () => {
     await waitFor(() =>
       expect(screen.queryByRole("status", { name: "Stopping task…" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Post comment" })).toBeInTheDocument();
   });
 
   it("restores the task stop control when cancellation fails", async () => {
@@ -1889,6 +1935,9 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("Capability / Speed / Cost")).not.toBeInTheDocument();
     expect(screen.getAllByText("Claude Sonnet 5").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Claude Opus 4.8")).toBeInTheDocument();
+    expect(screen.getByText("GPT 6 Astra")).toBeInTheDocument();
+    expect(screen.getByText("GPT 5.6 Sol")).toBeInTheDocument();
+    expect(screen.getByText("GPT 5.6 Terra")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.5")).toBeInTheDocument();
     expect(screen.getByText("Qwen 3.8 Max")).toBeInTheDocument();
     expect(screen.getByText("Alibaba")).toBeInTheDocument();
@@ -2094,7 +2143,11 @@ describe("Surface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
-    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" })).toBeInTheDocument();
+    const codexModelPicker = screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" });
+    expect(codexModelPicker).toBeInTheDocument();
+    await user.click(codexModelPicker);
+    await user.click(screen.getByText("GPT 6 Astra"));
+    expect(screen.getByRole("button", { name: "Codex model: GPT 6 Astra" })).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Clone my repo");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -2107,7 +2160,7 @@ describe("Surface chat streaming UI", () => {
         schemaVersion: 1,
         settings: { reasoningEffort: "xhigh" },
       },
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6-astra",
     });
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
@@ -2139,7 +2192,7 @@ describe("Surface chat streaming UI", () => {
         message_id: "assistant_accepted_1",
         engine: "codex",
         model: CODEX_CHAT_DEFAULT_MODEL_ID,
-        selected_model: CODEX_CHAT_DEFAULT_MODEL_ID,
+        selected_model: "openai/gpt-6-astra",
         is_new_session: true,
         sandbox_status_at_send: "not_created",
         send_source: "composer",
@@ -2579,6 +2632,36 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByRole("button", { name: "Share Claude Code chat" })).toBeInTheDocument();
   });
 
+  it("keeps a reloaded Claude session on its persisted model for the next turn", async () => {
+    const user = userEvent.setup();
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        claudeCodeConnected
+        initialChat={{
+          id: "chat_claude_fable",
+          title: "Fable session",
+          model: "anthropic/claude-fable-5",
+          engine: "claude_code",
+          messages: [],
+        }}
+      />,
+    );
+
+    const modelPicker = screen.getByRole("button", { name: "Claude model: Claude Fable 5" });
+    expect(modelPicker).toBeDisabled();
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Continue with the same model");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
+      sessionId: "chat_claude_fable",
+      model: "anthropic/claude-fable-5",
+      engine: { type: "claude_code", schemaVersion: 1 },
+    });
+  });
+
   it("uses the task readiness status in the Codex detail header", () => {
     render(
       <Surface
@@ -2664,6 +2747,29 @@ describe("Surface chat streaming UI", () => {
     await user.hover(contextMeter);
 
     expect(await screen.findByText("14k / 1.0M context · 1%")).toBeVisible();
+  });
+
+  it("shows the session model in a tooltip from the header icon", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_model_tooltip_1",
+          title: "Model details",
+          model: "openai/gpt-5.6-terra",
+          engine: "codex",
+          messages: [],
+        }}
+      />,
+    );
+
+    const modelIcon = screen.getByRole("button", { name: "Model: GPT 5.6 Terra" });
+    await user.hover(modelIcon);
+
+    expect(await screen.findByText("Model: GPT 5.6 Terra")).toBeVisible();
   });
 
   it("shows when a Codex chat is waiting for runner capacity", () => {
@@ -3998,7 +4104,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
     await user.type(
-      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      within(dialog).getByPlaceholderText("Search tasks and chats or start something new..."),
       "Research Q3",
     );
     await user.click(within(dialog).getByRole("option", { name: 'Start new chat: "Research Q3"' }));
@@ -4112,7 +4218,10 @@ describe("Surface chat streaming UI", () => {
     });
 
     await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
-    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({ file });
+    expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({
+      file,
+      pendingId: expect.any(String),
+    });
     expect(await within(dialog).findByText("PDF")).toBeInTheDocument();
   });
 
@@ -4317,7 +4426,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
     await user.type(
-      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      within(dialog).getByPlaceholderText("Search tasks and chats or start something new..."),
       "Q2 planning",
     );
     const result = await within(dialog).findByText("Q2 planning");
@@ -4387,6 +4496,65 @@ describe("Surface chat streaming UI", () => {
     expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_archived");
   });
 
+  it("mixes active and archived tasks with chats in Cmd+K recency order", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        taskSpawningEnabled
+        tasks={[]}
+        allTasks={[
+          taskView({
+            id: "task_archived",
+            displayId: "TASK-42",
+            name: "Newest archived task",
+            prompt: "Prepare the board update",
+            archivedAt: "2026-08-10T12:00:00.000Z",
+            updatedAt: "2026-08-10T12:00:00.000Z",
+          }),
+          taskView({
+            id: "task_active",
+            displayId: "TASK-41",
+            name: "Older active task",
+            prompt: "Review customer notes",
+            updatedAt: "2026-08-08T12:00:00.000Z",
+          }),
+        ]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_middle",
+            title: "Middle active chat",
+            model: DEFAULT_MODEL,
+            preview: "Plan the next release",
+            updatedAt: "2026-08-09T12:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    const archivedTaskOption = within(dialog).getByRole("option", {
+      name: /Newest archived task/,
+    });
+    const chatOption = within(dialog).getByRole("option", { name: /Middle active chat/ });
+    const activeTaskOption = within(dialog).getByRole("option", { name: /Older active task/ });
+
+    expect(archivedTaskOption.compareDocumentPosition(chatOption)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(chatOption.compareDocumentPosition(activeTaskOption)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(within(archivedTaskOption).getByText("Archived")).toBeInTheDocument();
+
+    await user.click(archivedTaskOption);
+
+    expect(routerMock.push).toHaveBeenCalledWith("/tasks/TASK-42");
+  });
+
   it("drills from Cmd+K search into compose on Enter, prefilled with the typed query", async () => {
     const user = userEvent.setup();
 
@@ -4395,7 +4563,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
     await user.type(
-      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      within(dialog).getByPlaceholderText("Search tasks and chats or start something new..."),
       "Research Q3",
     );
     // The pinned "Start new chat" action is the only forceMounted item, so it stays
@@ -4438,7 +4606,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(
-      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      within(dialog).getByPlaceholderText("Search tasks and chats or start something new..."),
     ).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
@@ -5063,7 +5231,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText(/Task running/i)).not.toBeInTheDocument();
   });
 
-  it("renders assistant text and task cards in message part order", () => {
+  it("renders assistant text and task cards in message part order", async () => {
     render(
       <Surface
         tasks={[]}
@@ -5102,6 +5270,10 @@ describe("Surface chat streaming UI", () => {
         }}
       />,
     );
+
+    // The resting turn folds the intermediate update behind the disclosure; expanding it must
+    // restore the original part order around the always-visible task card and final message.
+    await userEvent.click(screen.getByRole("button", { name: "1 message" }));
 
     const firstText = screen.getByText("I'll start now.");
     const taskCard = screen.getByRole("link", { name: /Research market/ });
@@ -5528,7 +5700,10 @@ describe("Surface chat streaming UI", () => {
       fireEvent.drop(window, { dataTransfer: { types: ["Files"], files: [file] } });
 
       await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
-      expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({ file });
+      expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledWith({
+        file,
+        pendingId: expect.any(String),
+      });
     });
 
     it("reports local chat selection changes through onOpenChat", async () => {

@@ -1,4 +1,4 @@
-import type { StoredChatMessage } from "@opencompany/agent/chat-ui";
+import { type StoredChatMessage, toChatUiMessage } from "@opencompany/agent/chat-ui";
 import { ensureMonthlyIncludedUsage } from "@opencompany/db/billing";
 import { hasPositiveCreditBalance } from "@opencompany/db/credits";
 import type { ChatMessage, ChatMessageAttachment } from "@opencompany/db/product-schema";
@@ -212,9 +212,9 @@ describe("consumeProductChatStream", () => {
           type: "finish",
           finishReason: "stop",
           totalUsage: {
-            inputTokens: 130,
-            outputTokens: 35,
-            totalTokens: 165,
+            inputTokens: 1_300,
+            outputTokens: 350,
+            totalTokens: 1_650,
             inputTokenDetails: {
               noCacheTokens: 110,
               cacheReadTokens: 20,
@@ -236,7 +236,9 @@ describe("consumeProductChatStream", () => {
 
     expect(result).toMatchObject({
       finishReason: "stop",
-      usage: { totalTokens: 165 },
+      // The projection powers the context meter, so it keeps the final step's
+      // occupancy rather than the finish event's cumulative turn usage.
+      contextUsage: { totalTokens: 150 },
       parts: [
         {
           type: "text",
@@ -536,6 +538,53 @@ describe("consumeProductChatStream", () => {
 });
 
 describe("opencompanyModelMessagesFromStored", () => {
+  it("replays encrypted Responses reasoning metadata without exposing it through normal UI serialization", async () => {
+    const encryptedContent = "encrypted-reasoning-continuity";
+    const messages = [
+      storedMessage({
+        id: "user_1",
+        role: "user",
+        content: "Solve this carefully.",
+      }),
+      storedMessage({
+        id: "assistant_1",
+        role: "assistant",
+        content: "First result.",
+        debugTrace: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          model: "openai/gpt-5.6-sol",
+          uiMessageParts: [
+            {
+              type: "reasoning",
+              text: "A safe summary",
+              state: "done",
+              providerMetadata: {
+                openai: {
+                  itemId: "reasoning_item_1",
+                  reasoningEncryptedContent: encryptedContent,
+                },
+              },
+            },
+            { type: "text", text: "First result.", state: "done" },
+          ],
+        },
+      }),
+      storedMessage({
+        id: "user_2",
+        role: "user",
+        content: "Continue.",
+      }),
+    ];
+
+    const modelMessages = await opencompanyModelMessagesFromStored(messages, "user_2", {
+      modelId: "openai/gpt-5.6-sol",
+    });
+
+    expect(JSON.stringify(modelMessages)).toContain(encryptedContent);
+    expect(JSON.stringify(modelMessages)).toContain("reasoning_item_1");
+    expect(JSON.stringify(toChatUiMessage(messages[1]!))).not.toContain(encryptedContent);
+  });
+
   it("keeps completed tool calls and results in follow-up model history", async () => {
     const messages = [
       storedMessage({

@@ -28,6 +28,11 @@ environments are `production-database`, `production-api`, `production-runner`, `
 `production-marketing`. They are state records created inside the protected `production` job; they
 do not hold production credentials.
 
+The credential-free PR verifier cannot call production-authenticated providers. After the protected
+release job loads its credentials, it verifies every live managed-capability contract before making
+production changes. The probe retries bounded transport, rate-limit, malformed-success, and upstream
+server failures; authentication failures and deterministic contract mismatches remain fail-closed.
+
 The workflow loads release credentials from Infisical `prod` `/release`, validates selected
 web/API/runner configuration, and builds selected Vercel artifacts in runner-local storage before
 changing production. It then rechecks the current `main` SHA, runs production migrations once when
@@ -108,6 +113,14 @@ stale tabs with a refresh instruction; it does not normalize their payload throu
 External webhook or OAuth recovery may require restoring a provider dashboard URL. Historical web
 URLs intentionally remain stable where the web app is a byte-preserving relay to API-owned ingress;
 call out any provider URL change and its recovery plan in the pull request.
+
+The Google Calendar and Drive Plugins use opencompany's API-hosted MCPs at
+`/mcp/plugins/google-calendar` and `/mcp/plugins/google-drive`. Their packages pin the public API
+URLs, while both API and runner use `OPENCOMPANY_API_ORIGIN` for environment-local routing.
+`API_INTERNAL_TOKEN` must match on those two services: the runner uses it to sign short-lived
+tickets bound to one plugin registration, integration, operation, and tool; the API verifies each
+ticket and rechecks the installation, connection scopes, and current permission before calling a
+stable Google REST API. Google access and refresh tokens are never used as MCP bearer credentials.
 
 ## Stripe production endpoint
 

@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { useAppDataOptional } from "@/components/AppDataProvider";
+import { GitHubInstallGapCard } from "@/components/GitHubRepositoryAccess";
 import {
   BRAIN_TOOL_NAME,
   CODEX_APPROVAL_TOOL_NAME,
@@ -27,12 +29,18 @@ import {
   SCHEDULE_TASK_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
+import { githubInstallGapCandidate } from "@/lib/github-repository-access";
 import {
+  actionToolLabel,
   formatDebugValue,
   isBrainToolOutput,
   isRecord,
   type ToolCallView,
 } from "./assistant-items";
+import {
+  type HistoricalPresentationDetailController,
+  HistoricalPresentationDetailStatus,
+} from "./HistoricalPresentationDetail";
 
 export type CodexToolAction =
   | { type: "implement-plan" }
@@ -59,6 +67,7 @@ export function ToolCallItem({
   onActionApproval,
   allowActionApproval = false,
   readOnly = false,
+  detail,
 }: {
   tool: ToolCallView;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
@@ -66,14 +75,43 @@ export function ToolCallItem({
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
   allowActionApproval?: boolean;
   readOnly?: boolean;
+  detail?: HistoricalPresentationDetailController;
 }) {
-  if (readOnly) return <ToolCallRow tool={tool} />;
+  // Summary-backed messages retain the approval id, action, and bounded params. The latest
+  // authorized approval must use those fields before the historical-detail guard collapses it.
+  if (
+    !readOnly &&
+    tool.name === USE_ACTION_TOOL_NAME &&
+    tool.state === "approval-requested" &&
+    tool.approvalId &&
+    allowActionApproval &&
+    onActionApproval
+  ) {
+    if (managedCapabilityActionFromTool(tool)) {
+      return <CapabilityApprovalCard tool={tool} onDecision={onActionApproval} />;
+    }
+    return <ActionApprovalCard tool={tool} onDecision={onActionApproval} />;
+  }
+  if (detail && detail.state !== "loaded") return <ToolCallRow tool={tool} detail={detail} />;
+  // Shared transcripts are intentionally observational: repository recovery
+  // acts on the signed-in viewer's private GitHub connection, so only an
+  // editable conversation may render those controls.
+  if (readOnly) return <ToolCallRow tool={tool} {...(detail ? { detail } : {})} />;
 
   if (tool.name === BRAIN_TOOL_NAME) {
-    return <BrainToolCallRow tool={tool} />;
+    return <BrainToolCallRow tool={tool} initiallyExpanded={Boolean(detail)} />;
   }
   if (tool.name === CODEX_COMMAND_TOOL_NAME) {
-    return <CodexCommandRow tool={tool} />;
+    const target = githubInstallGapCandidate(tool);
+    const row = <CodexCommandRow tool={tool} initiallyExpanded={Boolean(detail)} />;
+    return target ? (
+      <>
+        {row}
+        <GitHubInstallGapCard owner={target.owner} repo={target.repo} />
+      </>
+    ) : (
+      row
+    );
   }
   if (tool.name === CODEX_PLAN_TOOL_NAME && planImplementationAvailable(tool)) {
     return (
@@ -95,21 +133,16 @@ export function ToolCallItem({
   if (tool.name === USE_ACTION_TOOL_NAME && capabilityApprovalFromTool(tool)) {
     return <LegacyCapabilityApprovalRow tool={tool} />;
   }
-  if (
-    tool.name === USE_ACTION_TOOL_NAME &&
-    tool.state === "approval-requested" &&
-    tool.approvalId
-  ) {
-    // A pending approval mid-thread (the user kept chatting past it) stays a
-    // plain row: only the latest assistant message is actionable.
-    if (allowActionApproval && onActionApproval) {
-      if (managedCapabilityActionFromTool(tool)) {
-        return <CapabilityApprovalCard tool={tool} onDecision={onActionApproval} />;
-      }
-      return <ActionApprovalCard tool={tool} onDecision={onActionApproval} />;
-    }
-  }
-  return <ToolCallRow tool={tool} />;
+  const target = githubInstallGapCandidate(tool);
+  const row = <ToolCallRow tool={tool} {...(detail ? { detail } : {})} />;
+  return target ? (
+    <>
+      {row}
+      <GitHubInstallGapCard owner={target.owner} repo={target.repo} />
+    </>
+  ) : (
+    row
+  );
 }
 
 function LegacyCapabilityApprovalRow({ tool }: { tool: ToolCallView }) {
@@ -310,6 +343,7 @@ function ActionApprovalCard({
 }) {
   const [submitting, setSubmitting] = useState<ActionApprovalDecision | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const appData = useAppDataOptional();
   const summary = actionApprovalSummary(tool.input);
   const approvalId = tool.approvalId;
   const action =
@@ -334,6 +368,9 @@ function ActionApprovalCard({
       className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
     >
       <div className="text-[12px] font-semibold text-ink">{summary.heading}</div>
+      {action.startsWith("plugin:") && appData?.user.email ? (
+        <p className="mt-1 text-[11.5px] leading-4 text-ink-subtle">as {appData.user.email}</p>
+      ) : null}
       {summary.lines.length > 0 ? (
         <dl className="mt-2 space-y-1">
           {summary.lines.map((line, index) => (
@@ -522,7 +559,7 @@ function actionApprovalSummary(input: unknown): {
 
   return {
     heading: action
-      ? `Run ${action.split(".").join(" · ").split("_").join(" ")}?`
+      ? `Run ${action.startsWith("plugin:") ? actionToolLabel(record) : action.split(".").join(" ")}?`
       : "Run this action?",
     lines: Object.entries(params).flatMap(([key, value]) => {
       if (value === undefined || value === null) return [];
@@ -847,7 +884,13 @@ function codexQuestionInput(
     : null;
 }
 
-function ToolCallRow({ tool }: { tool: ToolCallView }) {
+function ToolCallRow({
+  tool,
+  detail,
+}: {
+  tool: ToolCallView;
+  detail?: HistoricalPresentationDetailController;
+}) {
   const [expanded, setExpanded] = useState(false);
   const meta = getToolCallMeta(tool);
   const Icon = meta.icon;
@@ -864,7 +907,11 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => {
+            const next = !expanded;
+            setExpanded(next);
+            if (next && detail?.state !== "loaded") void detail?.load();
+          }}
           className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <ChevronRight
@@ -894,16 +941,25 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
       </div>
       {expanded ? (
         <div className="ml-6 mt-1 border-l border-border pl-3">
-          <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input) || "No input"} />
-          {hasOutput ? (
-            <ToolPreviewBlock label="Output" value={formatDebugValue(tool.output) || "No output"} />
-          ) : null}
-          {tool.errorText?.trim() ? (
-            <ToolPreviewBlock label="Error" value={tool.errorText} />
-          ) : null}
-          {!hasOutput && !tool.errorText ? (
-            <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
-          ) : null}
+          {detail && detail.state !== "loaded" ? (
+            <HistoricalPresentationDetailStatus detail={detail} />
+          ) : (
+            <>
+              <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input) || "No input"} />
+              {hasOutput ? (
+                <ToolPreviewBlock
+                  label="Output"
+                  value={formatDebugValue(tool.output) || "No output"}
+                />
+              ) : null}
+              {tool.errorText?.trim() ? (
+                <ToolPreviewBlock label="Error" value={tool.errorText} />
+              ) : null}
+              {!hasOutput && !tool.errorText ? (
+                <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
+              ) : null}
+            </>
+          )}
         </div>
       ) : null}
       {screenshotUrl ? (
@@ -925,10 +981,12 @@ export function SubagentRow({
   tool,
   childCount,
   children,
+  detail,
 }: {
   tool: ToolCallView;
   childCount: number;
   children: ReactNode;
+  detail?: HistoricalPresentationDetailController;
 }) {
   // Expanded while the subagent is still working so its live trace is visible; collapsed once it
   // finishes to keep the transcript tidy (the user can re-open it).
@@ -948,7 +1006,11 @@ export function SubagentRow({
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => {
+            const next = !expanded;
+            setExpanded(next);
+            if (next && detail?.state !== "loaded") void detail?.load();
+          }}
           className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <ChevronRight
@@ -986,24 +1048,32 @@ export function SubagentRow({
       </div>
       {expanded ? (
         <div className="ml-[13px] mt-1 flex flex-col gap-2 border-l border-border pl-3">
-          {childCount > 0 ? (
-            children
+          {detail && detail.state !== "loaded" ? (
+            <HistoricalPresentationDetailStatus detail={detail} />
           ) : (
-            <div className="py-1 text-[11px] text-ink-subtle">
-              {tool.status === "running" ? "Subagent working..." : "No steps recorded"}
-            </div>
+            <>
+              {childCount > 0 ? (
+                children
+              ) : (
+                <div className="py-1 text-[11px] text-ink-subtle">
+                  {tool.status === "running" ? "Subagent working..." : "No steps recorded"}
+                </div>
+              )}
+              {result ? (
+                <div className="border-t border-border/60 pt-1.5">
+                  <div className="mb-0.5 text-[10px] font-medium uppercase text-ink-subtle">
+                    Result
+                  </div>
+                  <div className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-[11.5px] leading-5 text-ink/70">
+                    {result}
+                  </div>
+                </div>
+              ) : null}
+              {tool.errorText?.trim() ? (
+                <ToolPreviewBlock label="Error" value={tool.errorText} />
+              ) : null}
+            </>
           )}
-          {result ? (
-            <div className="border-t border-border/60 pt-1.5">
-              <div className="mb-0.5 text-[10px] font-medium uppercase text-ink-subtle">Result</div>
-              <div className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-[11.5px] leading-5 text-ink/70">
-                {result}
-              </div>
-            </div>
-          ) : null}
-          {tool.errorText?.trim() ? (
-            <ToolPreviewBlock label="Error" value={tool.errorText} />
-          ) : null}
         </div>
       ) : null}
     </div>
@@ -1018,8 +1088,14 @@ function browserScreenshotUrl(value: unknown) {
     : null;
 }
 
-function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
-  const [expanded, setExpanded] = useState(false);
+function BrainToolCallRow({
+  tool,
+  initiallyExpanded = false,
+}: {
+  tool: ToolCallView;
+  initiallyExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const detail = tool.detail ?? "goat_brain";
   const commandPreview = brainOutputCommand(tool.output);
   const stdoutPreview = brainOutputStdout(tool.output);
@@ -1073,8 +1149,14 @@ function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
   );
 }
 
-function CodexCommandRow({ tool }: { tool: ToolCallView }) {
-  const [expanded, setExpanded] = useState(false);
+function CodexCommandRow({
+  tool,
+  initiallyExpanded = false,
+}: {
+  tool: ToolCallView;
+  initiallyExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const command = tool.detailChips[0] ?? tool.detail;
   const output = isCodexCommandToolOutput(tool.output) ? tool.output : null;
   const outputPreview = output?.outputPreview?.trim() ? output.outputPreview : null;

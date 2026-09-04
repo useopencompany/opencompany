@@ -1,11 +1,19 @@
 import type { IntegrationProvider, IntegrationStatus } from "@opencompany/db/product-schema";
+import {
+  GOOGLE_CALENDAR_MCP_RECONNECT_REASON,
+  googleCalendarMcpScopesSatisfied,
+} from "./integrations/google-calendar-scopes";
+import { SLACK_MCP_RECONNECT_REASON, slackMcpScopesSatisfied } from "./integrations/slack-scopes";
 
 export type GoogleProviderState = {
   provider: "gmail" | "google_calendar" | "google_drive";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
   accountEmail: string | null;
   accountName: string | null;
+  scopes: string[];
+  capabilityModes: Record<string, unknown>;
 };
 
 export type GoogleDriveSourceProviderState = {
@@ -17,9 +25,8 @@ export type GoogleDriveSourceProviderState = {
   statusReason: string | null;
 };
 
-// The Gmail brain-source connection view: unlike GoogleProviderState it
-// carries the integration id, which the brain-source picker and save action
-// need to key config rows on.
+// The Gmail brain-source connection view adds ingestion-specific status detail
+// used by the brain-source picker and save action.
 export type GmailSourceProviderState = {
   provider: "gmail";
   connected: boolean;
@@ -41,6 +48,16 @@ export type LinearProviderState = {
 
 export type PostHogProviderState = {
   provider: "posthog";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
+};
+
+export type HubSpotProviderState = {
+  provider: "hubspot";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
   integrationId: string | null;
@@ -153,6 +170,8 @@ export type StripeProviderState = {
   accountName: string | null;
   livemode: boolean | null;
   statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
+  toolModes: Record<string, unknown>;
 };
 
 export type SlackProviderState = {
@@ -183,6 +202,15 @@ export type CodexProviderState = {
   status: "connected" | "needs_reauth" | "not_connected";
   statusReason: string | null;
   lastValidatedAt: string | null;
+  workspaceEngine: {
+    enabled: boolean;
+    providerDisplayName: string;
+    providerEmail: string;
+    credentialStatus: "connected" | "needs_reauth";
+    credentialStatusReason: string | null;
+    lastValidatedAt: string | null;
+    isCurrentUser: boolean;
+  } | null;
 };
 
 export type ClaudeCodeProviderState = {
@@ -207,9 +235,9 @@ export type InfisicalProviderState = {
 // accounts per provider (two Gmails, two Slack workspaces) — uniqueness in the
 // DB is (user, provider, external_id), so a second OAuth pass creates a
 // second row rather than replacing the first.
-export type IntegrationAccountView = {
+export type IntegrationAccountView<Provider extends string = PersonalAccountProvider> = {
   integrationId: string;
-  provider: PersonalAccountProvider;
+  provider: Provider;
   status: IntegrationStatus;
   connected: boolean;
   accountEmail: string | null;
@@ -226,11 +254,15 @@ export type PersonalAccountProvider =
   | "google_calendar"
   | "google_drive"
   | "linear"
+  | "github_user"
   | "slack"
   | "hubspot"
   | "granola"
   | "fathom"
   | "attio"
+  | "betterstack"
+  | "render"
+  | "signoz"
   | "latitude"
   | "neon"
   | "x_account";
@@ -240,6 +272,7 @@ export type IntegrationState = {
   google_calendar: GoogleProviderState;
   google_drive: GoogleProviderState;
   linear: LinearProviderState;
+  hubspot: HubSpotProviderState;
   posthog: PostHogProviderState;
   github: GitHubProviderState;
   jamie: JamieProviderState;
@@ -280,13 +313,15 @@ type IntegrationStateRow = {
   scopes?: string[] | null;
   capabilityModes?: Record<string, unknown> | null;
   capability_modes?: Record<string, unknown> | null;
+  toolModes?: Record<string, unknown> | null;
+  tool_modes?: Record<string, unknown> | null;
 };
 
 const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
 
 // Collects every personal (non-workspace) account row per provider. The
-// Linear ingest connections count as accounts; the MCP connector row
-// (external_id "linear_mcp") never does.
+// Linear and HubSpot ingestion connections count as accounts; their dedicated
+// MCP connector rows (external_id "linear_mcp" / "hubspot_mcp") never do.
 export function personalAccountsFromRows(
   rows: readonly IntegrationStateRow[],
 ): Record<PersonalAccountProvider, IntegrationAccountView[]> {
@@ -295,11 +330,15 @@ export function personalAccountsFromRows(
     google_calendar: [],
     google_drive: [],
     linear: [],
+    github_user: [],
     slack: [],
     hubspot: [],
     granola: [],
     fathom: [],
     attio: [],
+    betterstack: [],
+    render: [],
+    signoz: [],
     latitude: [],
     neon: [],
     x_account: [],
@@ -313,15 +352,24 @@ export function personalAccountsFromRows(
       }
       continue;
     }
+    if (row.provider === "hubspot") {
+      if ((row.externalId ?? row.external_id) !== "hubspot_mcp") {
+        personalAccounts.hubspot.push(accountViewFromRow("hubspot", row));
+      }
+      continue;
+    }
     if (
       row.provider === "gmail" ||
       row.provider === "google_calendar" ||
       row.provider === "google_drive" ||
+      row.provider === "github_user" ||
       row.provider === "slack" ||
-      row.provider === "hubspot" ||
       row.provider === "granola" ||
       row.provider === "fathom" ||
       row.provider === "attio" ||
+      row.provider === "betterstack" ||
+      row.provider === "render" ||
+      row.provider === "signoz" ||
       row.provider === "latitude" ||
       row.provider === "neon" ||
       row.provider === "x_account"
@@ -342,6 +390,11 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     if (row.provider === "linear" && (row.externalId ?? row.external_id) !== "linear_mcp") {
       continue;
     }
+    // HubSpot also has a separate OAuth connection for Wiki ingestion. Only
+    // the MCP-auth-app row belongs to the plugin settings and action gateway.
+    if (row.provider === "hubspot" && (row.externalId ?? row.external_id) !== "hubspot_mcp") {
+      continue;
+    }
     // GitHub, Jamie, and Stripe are workspace-owned; personal rows for those
     // providers are pre-ownership leftovers and must not shadow the workspace
     // connection.
@@ -360,6 +413,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     google_calendar: googleProviderState("google_calendar", byProvider.get("google_calendar")),
     google_drive: googleProviderState("google_drive", byProvider.get("google_drive")),
     linear: linearProviderState(byProvider.get("linear")),
+    hubspot: hubspotProviderState(byProvider.get("hubspot")),
     posthog: posthogProviderState(byProvider.get("posthog")),
     github: githubProviderState(byProvider.get("github")),
     jamie: jamieProviderState(byProvider.get("jamie")),
@@ -376,6 +430,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
       status: "not_connected",
       statusReason: null,
       lastValidatedAt: null,
+      workspaceEngine: null,
     },
     claude_code: {
       provider: "claude_code",
@@ -401,18 +456,30 @@ function accountViewFromRow(
   provider: PersonalAccountProvider,
   row: IntegrationStateRow,
 ): IntegrationAccountView {
+  const scopes = Array.isArray(row.scopes)
+    ? row.scopes.filter((scope): scope is string => typeof scope === "string")
+    : [];
+  const needsSlackPluginGrant =
+    provider === "slack" && row.status === "connected" && !slackMcpScopesSatisfied(scopes);
+  const needsGoogleCalendarPluginGrant =
+    provider === "google_calendar" &&
+    row.status === "connected" &&
+    !googleCalendarMcpScopesSatisfied(scopes);
+  const needsPluginGrant = needsSlackPluginGrant || needsGoogleCalendarPluginGrant;
   return {
     integrationId: row.id ?? "",
     provider,
-    status: row.status,
-    connected: row.status === "connected",
+    status: needsPluginGrant ? "needs_reauth" : row.status,
+    connected: row.status === "connected" && !needsPluginGrant,
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     connectionLabel: row.connectionLabel ?? row.connection_label ?? null,
-    statusReason: row.statusReason ?? row.status_reason ?? null,
-    scopes: Array.isArray(row.scopes)
-      ? row.scopes.filter((scope): scope is string => typeof scope === "string")
-      : [],
+    statusReason: needsSlackPluginGrant
+      ? SLACK_MCP_RECONNECT_REASON
+      : needsGoogleCalendarPluginGrant
+        ? GOOGLE_CALENDAR_MCP_RECONNECT_REASON
+        : (row.statusReason ?? row.status_reason ?? null),
+    scopes,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }
@@ -428,17 +495,27 @@ function googleProviderState(
       provider,
       connected: false,
       status: "not_connected",
+      integrationId: null,
       accountEmail: null,
       accountName: null,
+      scopes: [],
+      capabilityModes: {},
     };
   }
+
+  const scopes = Array.isArray(row.scopes)
+    ? row.scopes.filter((scope): scope is string => typeof scope === "string")
+    : [];
 
   return {
     provider,
     connected: row.status === "connected",
     status: row.status,
+    integrationId: row.id ?? null,
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
+    scopes,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }
 
@@ -490,6 +567,30 @@ function posthogProviderState(row: IntegrationStateRow | undefined): PostHogProv
   };
 }
 
+function hubspotProviderState(row: IntegrationStateRow | undefined): HubSpotProviderState {
+  if (!row) {
+    return {
+      provider: "hubspot",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      statusReason: null,
+      capabilityModes: {},
+    };
+  }
+
+  return {
+    provider: "hubspot",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+  };
+}
+
 function githubProviderState(row: IntegrationStateRow | undefined): GitHubProviderState {
   if (!row) {
     return {
@@ -523,14 +624,21 @@ function slackProviderState(row: IntegrationStateRow | undefined): SlackProvider
     };
   }
 
+  const scopes = Array.isArray(row.scopes)
+    ? row.scopes.filter((scope): scope is string => typeof scope === "string")
+    : [];
+  const needsPluginGrant = row.status === "connected" && !slackMcpScopesSatisfied(scopes);
+
   return {
     provider: "slack",
-    connected: row.status === "connected",
-    status: row.status,
+    connected: row.status === "connected" && !needsPluginGrant,
+    status: needsPluginGrant ? "needs_reauth" : row.status,
     integrationId: row.id ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     teamName: row.connectionLabel ?? row.connection_label ?? null,
-    statusReason: row.statusReason ?? row.status_reason ?? null,
+    statusReason: needsPluginGrant
+      ? SLACK_MCP_RECONNECT_REASON
+      : (row.statusReason ?? row.status_reason ?? null),
   };
 }
 
@@ -660,6 +768,8 @@ function stripeProviderState(row: IntegrationStateRow | undefined): StripeProvid
       accountName: null,
       livemode: null,
       statusReason: null,
+      capabilityModes: {},
+      toolModes: {},
     };
   }
 
@@ -677,6 +787,8 @@ function stripeProviderState(row: IntegrationStateRow | undefined): StripeProvid
           ? false
           : null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+    toolModes: row.toolModes ?? row.tool_modes ?? {},
   };
 }
 

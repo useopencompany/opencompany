@@ -1,47 +1,61 @@
-import { createHmac } from "node:crypto";
-import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
+import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import {
-  insertSlackMessageEvents,
-  listEnabledSlackBrainSourceRoutes,
-  listEnabledSlackWikiSourceRoutes,
-  listSlackIntegrationsForTeam,
-} from "@opencompany/db/slack";
+  createSlackIntegrationState,
+  exchangeSlackCode,
+  fetchSlackIdentity,
+  SLACK_MCP_USER_SCOPES,
+  SlackOAuthResponseError,
+} from "@opencompany/agent/integrations/slack";
+import { connectSlackIntegration } from "@opencompany/db/integrations";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
 import { createSlackIngress } from "./slack-ingress";
 
+const logger = vi.hoisted(() => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+
+vi.mock("@opencompany/observability", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  createLogger: () => logger,
+}));
+
+vi.mock("@opencompany/agent/integrations/analytics", () => ({
+  captureIntegrationAddedAnalytics: vi.fn(async () => undefined),
+}));
+vi.mock("@opencompany/agent/integrations/slack", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  exchangeSlackCode: vi.fn(),
+  fetchSlackIdentity: vi.fn(),
+}));
 vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  loadIntegrationCredential: vi.fn(),
-  markIntegrationStatus: vi.fn(async () => undefined),
+  connectSlackIntegration: vi.fn(async () => ({ integrationId: "gint_slack" })),
 }));
-vi.mock("@opencompany/db/slack", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@opencompany/db/slack")>();
-  return {
-    ...original,
-    insertSlackMessageEvents: vi.fn(),
-    listEnabledSlackBrainSourceRoutes: vi.fn(),
-    listEnabledSlackWikiSourceRoutes: vi.fn(),
-    listSlackIntegrationsForTeam: vi.fn(),
-  };
-});
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listWorkspacesForUser: vi.fn(),
 }));
 
-const SIGNING_SECRET = "test-signing-secret";
-const sentinelDb = { sentinel: "db" };
+const db = { sentinel: "db" };
 
-function ingress(overrides: { authError?: ApiError } = {}) {
+function ingress(
+  input: {
+    authError?: ApiError;
+    refresh?: (input: { userWorkosId: string; workspaceIds: string[] }) => Promise<void>;
+  } = {},
+) {
   vi.mocked(listWorkspacesForUser).mockResolvedValue([
-    { workspace: { id: "workspace_1", workosOrganizationId: null }, role: "admin" },
+    { workspace: { id: "workspace_1", workosOrganizationId: null }, role: "member" },
   ] as never);
   return createSlackIngress({
-    db: sentinelDb,
+    db,
     identify: async () => {
-      if (overrides.authError) throw overrides.authError;
+      if (input.authError) throw input.authError;
       return {
         userId: "user_1",
         organizationId: null,
@@ -51,66 +65,31 @@ function ingress(overrides: { authError?: ApiError } = {}) {
         activeBrainId: null,
       };
     },
+    ...(input.refresh ? { refreshPluginRegistrations: input.refresh } : {}),
   });
 }
 
-function signedRequest(
-  payload: unknown,
-  overrides: { timestamp?: string; signature?: string } = {},
-) {
-  const rawBody = JSON.stringify(payload);
-  const timestamp = overrides.timestamp ?? String(Math.floor(Date.now() / 1000));
-  const signature =
-    overrides.signature ??
-    `v0=${createHmac("sha256", SIGNING_SECRET).update(`v0:${timestamp}:${rawBody}`).digest("hex")}`;
-  return new Request("https://api.example.com/webhooks/slack/events", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-slack-request-timestamp": timestamp,
-      "x-slack-signature": signature,
-    },
-    body: rawBody,
-  });
-}
-
-function messageEnvelope(event: Record<string, unknown> = {}) {
-  return {
-    type: "event_callback",
-    team_id: "T012345",
-    event: {
-      type: "message",
-      channel: "C09ABC",
-      channel_type: "channel",
-      user: "U01",
-      ts: "1783950060.000100",
-      text: "We decided to ship next week.",
-      ...event,
-    },
-  };
-}
-
-describe("Slack ingress", () => {
+describe("Slack plugin OAuth ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://opencompany.example.com");
-    vi.stubEnv("OPENCOMPANY_SLACK_SIGNING_SECRET", SIGNING_SECRET);
     vi.stubEnv("OPENCOMPANY_SLACK_CLIENT_ID", "slack-client");
     vi.stubEnv("OPENCOMPANY_SLACK_CLIENT_SECRET", "slack-secret");
     vi.stubEnv("OPENCOMPANY_SLACK_STATE_SECRET", "slack-state-secret-slack-state-secret");
-    vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", "a".repeat(44));
-    vi.mocked(listSlackIntegrationsForTeam).mockResolvedValue([
-      { id: "gint_1", userWorkosId: "user_1", status: "connected" },
-    ] as never);
-    vi.mocked(listEnabledSlackBrainSourceRoutes).mockResolvedValue([
-      {
-        integrationId: "gint_1",
-        brainRef: "gbrain_1",
-        config: { channels: [{ id: "C09ABC", name: "product" }] },
-      },
-    ] as never);
-    vi.mocked(listEnabledSlackWikiSourceRoutes).mockResolvedValue([]);
-    vi.mocked(insertSlackMessageEvents).mockResolvedValue(1);
+    vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 9).toString("base64"));
+    vi.mocked(exchangeSlackCode).mockResolvedValue({
+      teamId: "T123",
+      teamName: "Acme",
+      authedUserId: null,
+      accessToken: "xoxp-slack-token",
+      scopes: [...SLACK_MCP_USER_SCOPES],
+    });
+    vi.mocked(fetchSlackIdentity).mockResolvedValue({
+      authedUserId: "U123",
+      userName: "Ada",
+      userEmail: "ada@acme.example",
+      teamDomain: "acme",
+    });
   });
 
   afterEach(() => {
@@ -118,168 +97,229 @@ describe("Slack ingress", () => {
     vi.restoreAllMocks();
   });
 
-  describe("oauth", () => {
-    it("redirects an authenticated user to the Slack consent screen with signed state", async () => {
-      const response = await ingress().start(
-        new Request("https://api.example.com/integrations/slack/start?returnTo=/settings"),
-      );
-      expect(response.status).toBe(302);
-      const location = new URL(response.headers.get("location") ?? "");
-      expect(location.origin).toBe("https://slack.com");
-      expect(location.searchParams.get("client_id")).toBe("slack-client");
-      expect(location.searchParams.get("state")).toBeTruthy();
-    });
+  it("always starts Slack's dedicated user consent flow with MCP scopes", async () => {
+    const response = await ingress().start(
+      new Request("https://api.example.com/integrations/slack/start"),
+    );
 
-    it("redirects anonymous browsers to the web sign-in", async () => {
-      const response = await ingress({
-        authError: new ApiError(401, "authentication_required", "Authentication required."),
-      }).start(new Request("https://api.example.com/integrations/slack/start"));
-      expect(response.headers.get("location")).toBe("https://opencompany.example.com/signin");
-    });
-
-    it("rejects a tampered callback state", async () => {
-      const response = await ingress().callback(
-        new Request("https://api.example.com/integrations/slack/callback?state=garbage"),
-      );
-      const location = new URL(response.headers.get("location") ?? "");
-      expect(location.origin).toBe("https://opencompany.example.com");
-      expect(location.searchParams.get("reason")).toBe("invalid_state");
-    });
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.origin + location.pathname).toBe("https://slack.com/oauth/v2_user/authorize");
+    expect(location.searchParams.get("scope")?.split(",")).toEqual([...SLACK_MCP_USER_SCOPES]);
+    expect(location.searchParams.has("user_scope")).toBe(false);
+    expect(location.searchParams.get("state")).toBeTruthy();
   });
 
-  describe("webhook", () => {
-    it("rejects a bad signature", async () => {
-      const response = await ingress().webhook(
-        signedRequest(messageEnvelope(), { signature: "v0=nope" }),
-      );
-      expect(response.status).toBe(401);
-      expect(insertSlackMessageEvents).not.toHaveBeenCalled();
+  it("redirects anonymous users to sign in", async () => {
+    const response = await ingress({
+      authError: new ApiError(401, "authentication_required", "Authentication required."),
+    }).start(new Request("https://api.example.com/integrations/slack/start"));
+
+    expect(response.headers.get("location")).toBe("https://opencompany.example.com/signin");
+  });
+
+  it("stores the user token and refreshes plugin discovery", async () => {
+    const refresh = vi.fn(async () => undefined);
+    const state = createSlackIntegrationState({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/slack",
+    });
+    const response = await ingress({ refresh }).callback(
+      new Request(
+        `https://api.example.com/integrations/slack/callback?state=${encodeURIComponent(state)}&code=oauth-code`,
+      ),
+    );
+
+    expect(exchangeSlackCode).toHaveBeenCalledWith("oauth-code");
+    expect(fetchSlackIdentity).toHaveBeenCalledWith({
+      accessToken: "xoxp-slack-token",
+      authedUserId: null,
+      teamId: "T123",
+    });
+    expect(connectSlackIntegration).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      teamId: "T123",
+      teamName: "Acme",
+      teamDomain: "acme",
+      authedUserId: "U123",
+      accountName: "Ada",
+      accountEmail: "ada@acme.example",
+      accessToken: "xoxp-slack-token",
+      scopes: [...SLACK_MCP_USER_SCOPES],
+      db,
+    });
+    expect(refresh).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceIds: ["workspace_1"],
+    });
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.pathname).toBe("/settings/plugins/slack");
+    expect(location.searchParams.get("integration")).toBe("slack");
+    expect(location.searchParams.get("setup")).toBe("connected");
+  });
+
+  it("logs discovery refresh failures without changing the successful connection result", async () => {
+    const refresh = vi.fn(async () => {
+      throw new Error("Slack MCP discovery returned 503");
+    });
+    const state = createSlackIntegrationState({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/slack",
     });
 
-    it("rejects a stale timestamp (replay guard)", async () => {
-      const stale = String(Math.floor(Date.now() / 1000) - 3600);
-      const response = await ingress().webhook(
-        signedRequest(messageEnvelope(), { timestamp: stale }),
-      );
-      expect(response.status).toBe(401);
+    const response = await ingress({ refresh }).callback(
+      new Request(
+        `https://api.example.com/integrations/slack/callback?state=${encodeURIComponent(state)}&code=oauth-code`,
+        { headers: { "Rndr-Id": "request-slack-discovery" } },
+      ),
+    );
+
+    expect(new URL(response.headers.get("location") ?? "").searchParams.get("setup")).toBe(
+      "connected",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Slack plugin discovery refresh after connection failed",
+      expect.objectContaining({
+        event: "goat.slack_plugin_reconnect_refresh_failed",
+        failure_stage: "plugin_discovery_refresh",
+        request_id: "request-slack-discovery",
+        error_message: "Slack MCP discovery returned 503",
+      }),
+    );
+  });
+
+  it("rejects state for another opencompany user before exchanging the code", async () => {
+    const state = createSlackIntegrationState({
+      userWorkosId: "user_other",
+      returnTo: "/settings/plugins/slack",
+    });
+    const response = await ingress().callback(
+      new Request(
+        `https://api.example.com/integrations/slack/callback?state=${encodeURIComponent(state)}&code=oauth-code`,
+      ),
+    );
+
+    expect(new URL(response.headers.get("location") ?? "").searchParams.get("reason")).toBe(
+      "session_mismatch",
+    );
+    expect(exchangeSlackCode).not.toHaveBeenCalled();
+  });
+
+  it("rejects a tampered callback state", async () => {
+    const response = await ingress().callback(
+      new Request("https://api.example.com/integrations/slack/callback?state=garbage"),
+    );
+
+    expect(new URL(response.headers.get("location") ?? "").searchParams.get("reason")).toBe(
+      "invalid_state",
+    );
+  });
+
+  it("logs the OAuth response shape and callback stage without credential values", async () => {
+    vi.mocked(exchangeSlackCode).mockRejectedValueOnce(
+      new SlackOAuthResponseError(["team.id"], {
+        credentialLocation: "top_level",
+        hasAuthedUserId: false,
+        hasTeamId: false,
+        hasEnterpriseId: true,
+        isEnterpriseInstall: true,
+      }),
+    );
+    const state = createSlackIntegrationState({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/slack",
     });
 
-    it("answers the url_verification challenge", async () => {
-      const response = await ingress().webhook(
-        signedRequest({ type: "url_verification", challenge: "challenge_123" }),
-      );
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ challenge: "challenge_123" });
-    });
+    await ingress().callback(
+      new Request(
+        `https://api.example.com/integrations/slack/callback?state=${encodeURIComponent(state)}&code=oauth-code`,
+        { headers: { "Rndr-Id": "request-slack-oauth" } },
+      ),
+    );
 
-    it("buffers a selected-channel message through the injected db", async () => {
-      const response = await ingress().webhook(signedRequest(messageEnvelope()));
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ ok: true, buffered: 1 });
-      expect(insertSlackMessageEvents).toHaveBeenCalledWith(
-        [
-          expect.objectContaining({
-            integrationId: "gint_1",
-            teamId: "T012345",
-            channelId: "C09ABC",
-            messageTs: "1783950060.000100",
-            text: "We decided to ship next week.",
-          }),
-        ],
-        expect.objectContaining({ sentinel: "db" }),
-      );
-    });
-
-    it("buffers a selected-channel message for a wiki-only route", async () => {
-      vi.mocked(listEnabledSlackBrainSourceRoutes).mockResolvedValue([]);
-      vi.mocked(listEnabledSlackWikiSourceRoutes).mockResolvedValue([
-        {
-          integrationId: "gint_1",
-          workspaceId: "workspace_1",
-          config: { channels: [{ id: "C09ABC", name: "product" }] },
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Slack plugin connection failed",
+      expect.objectContaining({
+        event: "goat.slack_plugin_callback_failed",
+        failure_stage: "oauth_exchange",
+        request_id: "request-slack-oauth",
+        error_message: "Slack OAuth response missing required fields: team.id.",
+        missing_response_fields: ["team.id"],
+        oauth_response_shape: {
+          credential_location: "top_level",
+          has_authed_user_id: false,
+          has_team_id: false,
+          has_enterprise_id: true,
+          is_enterprise_install: true,
         },
-      ] as never);
+      }),
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("xoxp");
+  });
 
-      const response = await ingress().webhook(signedRequest(messageEnvelope()));
-
-      expect(await response.json()).toMatchObject({ ok: true, buffered: 1 });
-      expect(insertSlackMessageEvents).toHaveBeenCalledOnce();
+  it.each([
+    {
+      stage: "identity_lookup",
+      fail: () =>
+        vi.mocked(fetchSlackIdentity).mockRejectedValueOnce(new Error("users.info failed")),
+    },
+    {
+      stage: "connection_persistence",
+      fail: () =>
+        vi.mocked(connectSlackIntegration).mockRejectedValueOnce(new Error("database unavailable")),
+    },
+    {
+      stage: "integration_analytics",
+      fail: () =>
+        vi
+          .mocked(captureIntegrationAddedAnalytics)
+          .mockRejectedValueOnce(new Error("analytics unavailable")),
+    },
+  ])("logs $stage as the callback failure stage", async ({ stage, fail }) => {
+    fail();
+    const state = createSlackIntegrationState({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/slack",
     });
 
-    it("drops unselected channels, bots, and noise subtypes", async () => {
-      for (const event of [
-        { channel: "C_OTHER" },
-        { bot_id: "B01" },
-        { subtype: "message_changed" },
-        { user: undefined },
-      ]) {
-        const response = await ingress().webhook(signedRequest(messageEnvelope(event)));
-        expect(await response.json()).toMatchObject({ ok: true, dropped: true });
-      }
-      expect(insertSlackMessageEvents).not.toHaveBeenCalled();
+    await ingress().callback(
+      new Request(
+        `https://api.example.com/integrations/slack/callback?state=${encodeURIComponent(state)}&code=oauth-code`,
+      ),
+    );
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Slack plugin connection failed",
+      expect.objectContaining({
+        event: "goat.slack_plugin_callback_failed",
+        failure_stage: stage,
+      }),
+    );
+  });
+
+  it("sanitizes database query details before logging a persistence failure", async () => {
+    const cause = Object.assign(new Error("duplicate key"), { code: "23505" });
+    vi.mocked(connectSlackIntegration).mockRejectedValueOnce(
+      new Error("Failed query: insert xoxp-sensitive-value", { cause }),
+    );
+    const state = createSlackIntegrationState({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/slack",
     });
 
-    it("keeps file_share and thread_broadcast subtypes", async () => {
-      for (const subtype of ["file_share", "thread_broadcast"]) {
-        const response = await ingress().webhook(signedRequest(messageEnvelope({ subtype })));
-        expect(await response.json()).toMatchObject({ ok: true, buffered: 1 });
-      }
-      expect(insertSlackMessageEvents).toHaveBeenCalledTimes(2);
-    });
+    await ingress().callback(
+      new Request(
+        `https://api.example.com/integrations/slack/callback?state=${encodeURIComponent(state)}&code=oauth-code`,
+      ),
+    );
 
-    it("marks all team integrations needs_reauth on app_uninstalled with the injected db", async () => {
-      const response = await ingress().webhook(
-        signedRequest({
-          type: "event_callback",
-          team_id: "T012345",
-          event: { type: "app_uninstalled" },
-        }),
-      );
-      expect(await response.json()).toMatchObject({ ok: true, marked: 1 });
-      expect(markIntegrationStatus).toHaveBeenCalledWith(
-        expect.objectContaining({
-          integrationId: "gint_1",
-          status: "needs_reauth",
-          db: expect.objectContaining({ sentinel: "db" }),
-        }),
-      );
-    });
-
-    it("marks only the revoked user's integration on tokens_revoked", async () => {
-      vi.mocked(listSlackIntegrationsForTeam).mockResolvedValue([
-        { id: "gint_1", userWorkosId: "user_1", status: "connected" },
-        { id: "gint_2", userWorkosId: "user_2", status: "connected" },
-      ] as never);
-      vi.mocked(loadIntegrationCredential).mockImplementation(
-        async (input) =>
-          ({
-            payload: { authed_user_id: input.integrationId === "gint_1" ? "U01" : "U02" },
-            expiresAt: null,
-            lastRotatedAt: null,
-            updatedAt: new Date(),
-            encryptionKeyVersion: 1,
-          }) as never,
-      );
-
-      const response = await ingress().webhook(
-        signedRequest({
-          type: "event_callback",
-          team_id: "T012345",
-          event: { type: "tokens_revoked", tokens: { oauth: ["U02"] } },
-        }),
-      );
-      expect(await response.json()).toMatchObject({ ok: true, marked: 1 });
-      expect(markIntegrationStatus).toHaveBeenCalledTimes(1);
-      expect(markIntegrationStatus).toHaveBeenCalledWith(
-        expect.objectContaining({ integrationId: "gint_2" }),
-      );
-    });
-
-    it("acks with 200 when processing fails after verification", async () => {
-      vi.mocked(listSlackIntegrationsForTeam).mockRejectedValue(new Error("db down"));
-      const response = await ingress().webhook(signedRequest(messageEnvelope()));
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ ok: true });
-    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Slack plugin connection failed",
+      expect.objectContaining({
+        failure_stage: "connection_persistence",
+        error_message: "Database query failed",
+      }),
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("xoxp-sensitive-value");
   });
 });

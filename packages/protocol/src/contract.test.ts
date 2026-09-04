@@ -111,6 +111,7 @@ describe("v1 protocol contract", () => {
     expect(
       ConversationReadModelSchema.parse({
         ...conversation,
+        messageShapeEpoch: 3,
         archivedAt: null,
         pinnedAt: null,
         lastSeenAt: null,
@@ -185,6 +186,7 @@ describe("v1 protocol contract", () => {
     const document = createOpenApiDocument();
     expect(Object.keys(document.paths ?? {})).toEqual([
       "/v1/tasks",
+      "/v1/tasks/{taskId}/comments",
       "/v1/tasks/{taskId}",
       "/v1/tasks/{taskId}/summary",
       "/v1/compatibility/tasks",
@@ -236,6 +238,10 @@ describe("v1 protocol contract", () => {
       "/v1/brains/{brainId}/imports/{importRunId}/confirm",
       "/v1/brains/{brainId}/imports/{importRunId}/cancel",
       "/v1/brains/{brainId}/imports/{importRunId}/retry",
+      "/v1/wiki/imports",
+      "/v1/wiki/imports/{importRunId}/confirm",
+      "/v1/wiki/imports/{importRunId}/cancel",
+      "/v1/wiki/imports/{importRunId}/retry",
       "/v1/brains/{brainId}/documents",
       "/v1/brains/{brainId}/assets",
       "/v1/brains/{brainId}/assets/{documentId}/replace",
@@ -273,6 +279,7 @@ describe("v1 protocol contract", () => {
       "/v1/chat-artifacts/{artifactId}",
       "/v1/chat-artifacts/{artifactId}/versions/{versionId}",
       "/v1/chat-attachments/{messageId}/{attachmentId}",
+      "/v1/conversations/{conversationId}/messages/{messageId}/presentation",
       "/v1/chat-screenshots/{conversationId}/{filename}",
       "/public/chat-shares/{shareId}",
       "/public/chat-shares/{shareId}/metadata",
@@ -296,6 +303,7 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/attio/{integrationId}",
       "/v1/integration-accounts/fathom",
       "/v1/integration-accounts/granola",
+      "/v1/integration-accounts/render",
       "/v1/integration-accounts/imessage/pairing",
       "/v1/integration-accounts/imessage/pairing/confirm",
       "/v1/integration-accounts/stripe",
@@ -311,6 +319,7 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/{integrationId}",
       "/v1/engine-auth/claude-code",
       "/v1/engine-auth/codex",
+      "/v1/engine-auth/codex/workspace",
       "/v1/engine-auth/codex/device",
       "/v1/engine-auth/codex/device/{flowId}/poll",
       "/v1/engine-auth/infisical",
@@ -332,6 +341,7 @@ describe("v1 protocol contract", () => {
       "/v1/plugins/{name}/disable",
       "/v1/plugins/{name}/mcp/approve",
       "/v1/plugins/{name}/mcp/revoke",
+      "/v1/plugins/{name}/mcp/refresh",
       "/v1/plugins/{name}/data/delete",
     ]);
     expect(document.paths?.["/v1/skills"]).toHaveProperty("get");
@@ -348,6 +358,24 @@ describe("v1 protocol contract", () => {
         }),
       ]),
     );
+    expect(document.paths?.["/v1/attachments"]?.post?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          in: "header",
+          name: "idempotency-key",
+          required: false,
+          schema: expect.objectContaining({ minLength: 1, maxLength: 200 }),
+        }),
+      ]),
+    );
+    expect(document.components?.schemas?.AttachmentUploadEnvelope).toMatchObject({
+      properties: {
+        data: {
+          required: expect.arrayContaining(["replayed"]),
+          properties: { replayed: { type: "boolean" } },
+        },
+      },
+    });
     expect(JSON.stringify(document)).not.toMatch(/workos|codex_chat_turn|lease_owner/iu);
 
     const client = createApiClient("https://api.opencompany.test");

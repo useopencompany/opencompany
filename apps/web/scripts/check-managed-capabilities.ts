@@ -5,6 +5,10 @@ import {
 } from "../lib/capabilities/catalog";
 import { assertManagedCapabilityInspection } from "../lib/capabilities/contract";
 import type { MonidInspection } from "../lib/capabilities/monid";
+import {
+  inspectManagedCapability,
+  ManagedCapabilityInspectionError,
+} from "./managed-capability-inspection";
 
 const apiKey = process.env.MONID_API_KEY?.trim();
 if (!apiKey) {
@@ -13,89 +17,57 @@ if (!apiKey) {
   );
 }
 
-// Keep production releases fail-closed for new contract drift without letting
-// pre-existing drift hide the signal from newly reviewed capabilities. Remove
-// entries as their catalog contracts are repaired.
-const KNOWN_DRIFTED_CONTRACTS = new Map([
-  ["lead.get_linkedin_contact", "tikhub:/api/v1/linkedin/web/get_user_contact"],
-  ["lead.search_prospects", "pdl:/v5/person/search"],
-  ["linkedin.search_posts", "tikhub:/api/v1/linkedin/web/search_posts"],
-]);
-
-for (const [actionId, expectedContract] of KNOWN_DRIFTED_CONTRACTS) {
-  const action = MANAGED_CAPABILITY_ACTIONS.find((candidate) => candidate.id === actionId);
-  const actualContract = action ? `${action.provider}:${action.endpoint}` : null;
-  if (actualContract !== expectedContract) {
-    throw new Error(`Known drift baseline for ${actionId} is stale and requires review.`);
-  }
-}
-
-let failed = 0;
-let knownDrifted = 0;
-const inspections = new Map<string, { response: Response; value: unknown }>();
+let drifted = 0;
+const unavailableContracts = new Set<string>();
+const inspections = new Map<string, Promise<MonidInspection>>();
 for (const action of MANAGED_CAPABILITY_ACTIONS) {
   if (isImageGenerationActionSpec(action)) continue;
   const contractKey = `${action.provider}:${action.endpoint}`;
-  let inspected = inspections.get(contractKey);
-  if (!inspected) {
-    const response = await fetch("https://api.monid.ai/v1/inspect", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        provider: action.provider,
-        endpoint: action.endpoint,
-      }),
+  let inspection = inspections.get(contractKey);
+  if (!inspection) {
+    inspection = inspectManagedCapability({
+      apiKey,
+      provider: action.provider,
+      endpoint: action.endpoint,
     });
-    inspected = {
-      response,
-      value: await response.json().catch(() => null),
-    };
-    inspections.set(contractKey, inspected);
+    inspections.set(contractKey, inspection);
   }
   try {
-    if (!inspected.response.ok || !isRecord(inspected.value) || !isRecord(inspected.value.price)) {
-      throw new Error("Malformed inspection response.");
-    }
-    const price = normalizeInspectionPrice(inspected.value.price);
+    const inspected = await inspection;
+    const price = normalizeInspectionPrice(inspected.price as unknown as Record<string, unknown>);
     assertManagedCapabilityInspection(
       action,
       action.mapInput(managedCapabilityContractProbeParams(action.id)),
       {
-        ...inspected.value,
+        ...inspected,
         price,
       } as unknown as MonidInspection,
     );
-    if (KNOWN_DRIFTED_CONTRACTS.get(action.id) === contractKey) {
-      console.warn(`RESOLVED ${action.id} ${action.provider} ${action.endpoint}: remove baseline.`);
-    }
     console.log(`OK   ${action.provider} ${action.endpoint} ${action.priceType}`);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown contract error.";
-    if (KNOWN_DRIFTED_CONTRACTS.get(action.id) === contractKey) {
-      knownDrifted += 1;
-      console.warn(`KNOWN ${action.id} ${action.provider} ${action.endpoint}: ${reason}`);
+    if (error instanceof ManagedCapabilityInspectionError) {
+      if (!unavailableContracts.has(contractKey)) {
+        console.error(`ERROR ${action.provider} ${action.endpoint}: ${reason}`);
+      }
+      unavailableContracts.add(contractKey);
       continue;
     }
-    failed += 1;
+    drifted += 1;
     console.error(`FAIL ${action.id} ${action.provider} ${action.endpoint}: ${reason}`);
   }
 }
 
-if (knownDrifted > 0) {
-  console.warn(
-    `${knownDrifted} known managed capability contract${knownDrifted === 1 ? " remains" : "s remain"} to repair.`,
+if (unavailableContracts.size > 0) {
+  throw new Error(
+    `${unavailableContracts.size} managed capability inspection request${
+      unavailableContracts.size === 1 ? " was" : "s were"
+    } unavailable; contract verification could not complete.`,
   );
 }
 
-if (failed > 0) {
-  throw new Error(`${failed} managed capability contract${failed === 1 ? "" : "s"} drifted.`);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+if (drifted > 0) {
+  throw new Error(`${drifted} managed capability contract${drifted === 1 ? "" : "s"} drifted.`);
 }
 
 function normalizeInspectionPrice(value: Record<string, unknown>): MonidInspection["price"] {
@@ -120,4 +92,8 @@ function normalizeMoney(
     throw new Error("Malformed inspection price.");
   }
   return { value: amount, currency };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

@@ -9,8 +9,10 @@ import {
   CoreError,
   type CreateMessageCommand,
   type CreateTaskCommand,
+  type CreateTaskCommentCommand,
   KnowledgeApplicationService,
   type KnowledgeRepository,
+  type PluginGatewayLifecycle,
   PluginImportApplicationService,
   type PluginImportResolver,
   type PluginInstallation,
@@ -40,6 +42,7 @@ import {
   PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_HEADER,
+  V1_BROWSER_REQUEST_HEADERS,
 } from "@opencompany/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { createApiApp } from "./app";
@@ -83,6 +86,51 @@ function messageHeaders(idempotencyKey: string) {
 }
 
 describe("canonical Hono API", () => {
+  it("mounts the first-party Gmail MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { gmailMcp: { handle } });
+    const response = await app.request("/mcp/plugins/gmail", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/gmail", { method: "GET" })).status).toBe(404);
+  });
+
+  it("mounts the first-party Google Calendar MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { googleCalendarMcp: { handle } });
+    const response = await app.request("/mcp/plugins/google-calendar", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/google-calendar", { method: "GET" })).status).toBe(404);
+  });
+
+  it("mounts the first-party Google Drive MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { googleDriveMcp: { handle } });
+    const response = await app.request("/mcp/plugins/google-drive", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/google-drive", { method: "GET" })).status).toBe(404);
+  });
+
   it("reports the deployed API release for expected-SHA health gates", async () => {
     const previousRelease = process.env.RENDER_GIT_COMMIT;
     process.env.RENDER_GIT_COMMIT = "api-release-sha";
@@ -118,6 +166,7 @@ describe("canonical Hono API", () => {
       wikiSources: fakeWikiSources(),
       brainSources: fakeBrainSources(),
       brainImports: fakeBrainImports(),
+      wikiImports: fakeWikiImports(),
       browserProfiles: fakeBrowserProfiles(),
       skillImports: fakeSkillImportService(),
       pluginImports: fakePluginImportService(),
@@ -212,6 +261,51 @@ describe("canonical Hono API", () => {
       model: "moonshotai/kimi-k3",
       source: "manual",
     });
+
+    const commentBody = "  Continue with the revised brief.\nKeep this indentation.  ";
+    const commented = await app.request("/v1/tasks/task_1/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "task_activity_comment_1",
+        body: commentBody,
+        attachmentIds: ["attachment_1"],
+      }),
+    });
+    expect(commented.status).toBe(202);
+    await expect(commented.json()).resolves.toMatchObject({
+      data: {
+        task: { id: "task_1", status: "running" },
+        comment: {
+          id: "task_activity_comment_1",
+          taskId: "task_1",
+          author: "user",
+          kind: "comment",
+          body: commentBody,
+        },
+        messageId: "message_task_comment_1",
+        assistantMessageId: "message_task_comment_assistant_1",
+        runId: "run_task_comment_1",
+        transactionId: "45",
+        replayed: false,
+      },
+    });
+    expect(tasks.lastComment).toEqual({
+      id: "task_activity_comment_1",
+      body: commentBody,
+      attachmentIds: ["attachment_1"],
+    });
+
+    tasks.createTaskCommentAndRun = vi.fn(async () => {
+      throw new CoreError("conflict", "Wait for the active Task run to finish before commenting.");
+    });
+    const activeComment = await app.request("/v1/tasks/task_1/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "task_activity_comment_2", body: "One more note" }),
+    });
+    expect(activeComment.status).toBe(409);
+    await expect(activeComment.json()).resolves.toMatchObject({ error: { code: "conflict" } });
 
     const listed = await app.request("/v1/tasks?archived=false");
     expect(listed.status).toBe(200);
@@ -471,6 +565,7 @@ describe("canonical Hono API", () => {
     const resolve = vi.fn(async () => ({
       status: "resolved" as const,
       bundle,
+      warnings: [],
     }));
     const install = vi.fn(async () => ({
       installation: fakeSkillInstallation(),
@@ -710,7 +805,7 @@ describe("canonical Hono API", () => {
         items: [
           {
             id: "gwjob_1",
-            provider: "slack",
+            provider: "gmail",
             outcome: "succeeded",
             pages: [{ path: "projects/launch", action: "updated" }],
           },
@@ -838,7 +933,13 @@ describe("canonical Hono API", () => {
     const app = testApp(fakeRepository(), {
       skillImports: fakeSkillImportService(
         { list, get, readFile, setEnabled, replace, archive },
-        { resolve: vi.fn(async () => ({ status: "resolved" as const, bundle: resolvedBundle })) },
+        {
+          resolve: vi.fn(async () => ({
+            status: "resolved" as const,
+            bundle: resolvedBundle,
+            warnings: [],
+          })),
+        },
       ),
     });
 
@@ -900,6 +1001,17 @@ describe("canonical Hono API", () => {
       totalBytes: packageBytes.length,
       skills: [],
       stdioServers: installation.stdioServers,
+      remoteServers: [
+        {
+          name: "remote",
+          type: "streamable-http",
+          url: "https://mcp.example.test",
+          headers: { Authorization: "Bearer secret-value" },
+        },
+      ],
+      capabilities: [
+        { id: "read", label: "Read tools", defaultMode: "on", tools: ["list_issues"] },
+      ],
       report: {
         ignoredManifestFields: [],
         skills: [],
@@ -909,6 +1021,7 @@ describe("canonical Hono API", () => {
     const install = vi.fn(async () => ({ plugin: installation, idempotentReplay: false }));
     const {
       stdioServers: _stdioServers,
+      remoteMcpServers: _remoteMcpServers,
       files: _pluginFiles,
       skills: _pluginSkills,
       ...pluginListFields
@@ -929,10 +1042,12 @@ describe("canonical Hono API", () => {
     const revokeMcp = vi.fn(async () => ({ ...installation, mcpApprovedIntegrity: null }));
     const archive = vi.fn(async () => undefined);
     const deleteData = vi.fn(async () => ({ deleted: true }));
+    const refresh = vi.fn(async () => undefined);
     const app = testApp(fakeRepository(), {
       pluginImports: fakePluginImportService(
         { install, list, get, setStatus, approveMcp, revokeMcp, archive, deleteData },
         { resolve: vi.fn(async () => resolved) },
+        { refresh },
       ),
     });
 
@@ -948,10 +1063,19 @@ describe("canonical Hono API", () => {
         manifest: { name: "quality-tools" },
         files: [{ path: "plugin.json", sizeBytes: packageBytes.length }],
         stdioServers: [{ name: "local", envKeys: ["PRIVATE_TOKEN"] }],
+        remoteMcpServers: [
+          {
+            name: "remote",
+            type: "streamable-http",
+            connectionProvider: "quality-tools",
+            capabilities: [{ id: "read", tools: ["list_issues"] }],
+          },
+        ],
       },
     });
     expect(JSON.stringify(previewBody)).not.toContain("private plugin package");
     expect(JSON.stringify(previewBody)).not.toContain("secret-value");
+    expect(JSON.stringify(previewBody)).not.toContain("https://mcp.example.test");
 
     const imported = await app.request("/v1/plugins/imports", {
       method: "POST",
@@ -970,10 +1094,20 @@ describe("canonical Hono API", () => {
     expect(JSON.stringify(importedBody)).not.toContain("secret-value");
 
     await expect(app.request("/v1/plugins")).resolves.toMatchObject({ status: 200 });
-    await expect(app.request("/v1/plugins/quality-tools")).resolves.toMatchObject({ status: 200 });
-    await expect(
-      app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
-    ).resolves.toMatchObject({ status: 200 });
+    const inspected = await app.request("/v1/plugins/quality-tools");
+    expect(inspected.status).toBe(200);
+    await expect(inspected.json()).resolves.toMatchObject({
+      data: {
+        remoteMcpServers: [
+          {
+            name: "remote",
+            discoveryStatus: "stale",
+            tools: [{ name: "list_issues" }],
+            lastDiscoveryError: "Provider discovery timed out.",
+          },
+        ],
+      },
+    });
     await expect(
       app.request("/v1/plugins/quality-tools/mcp/approve", {
         method: "POST",
@@ -983,6 +1117,12 @@ describe("canonical Hono API", () => {
     ).resolves.toMatchObject({ status: 200 });
     await expect(
       app.request("/v1/plugins/quality-tools/mcp/revoke", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/mcp/refresh", { method: "POST" }),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      app.request("/v1/plugins/quality-tools/disable", { method: "POST" }),
     ).resolves.toMatchObject({ status: 200 });
     await expect(
       app.request("/v1/plugins/quality-tools/data/delete", { method: "POST" }),
@@ -998,6 +1138,11 @@ describe("canonical Hono API", () => {
       integrity: installation.integrity,
     });
     expect(revokeMcp).toHaveBeenCalledWith({ actor, name: "quality-tools" });
+    expect(refresh).toHaveBeenLastCalledWith({
+      actor,
+      pluginName: "quality-tools",
+      reason: "explicit",
+    });
     expect(deleteData).toHaveBeenCalledWith({ actor, name: "quality-tools" });
     expect(archive).toHaveBeenCalledWith({ actor, name: "quality-tools" });
   });
@@ -1130,6 +1275,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({ start, confirm, cancel, retry }),
+      wikiImports: fakeWikiImports(),
     });
 
     const started = await app.request("/v1/brains/brain_1/imports", {
@@ -1198,6 +1344,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({ start }),
+      wikiImports: fakeWikiImports(),
     });
 
     const missingKey = await app.request("/v1/brains/brain_1/imports", {
@@ -1221,6 +1368,58 @@ describe("canonical Hono API", () => {
     expect(start).not.toHaveBeenCalled();
   });
 
+  it("drives the workspace Wiki import lifecycle without a Brain parameter", async () => {
+    const start = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    }));
+    const confirm = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "ingesting" as const,
+      replayed: false,
+    }));
+    const cancel = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "canceled" as const,
+      replayed: false,
+    }));
+    const retry = vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    }));
+    const app = testApp(fakeRepository(), {
+      wikiImports: wikiImportService({ start, confirm, cancel, retry }),
+    });
+
+    const started = await app.request("/v1/wiki/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "wiki-import-1" },
+      body: JSON.stringify({
+        companyUrl: "acme.com",
+        sourceSelection: { public_web: { enabled: true } },
+      }),
+    });
+    expect(started.status).toBe(201);
+    expect(start).toHaveBeenCalledWith(actor, {
+      idempotencyKey: "wiki-import-1",
+      companyUrl: "acme.com",
+      sourceSelection: { public_web: { enabled: true } },
+    });
+
+    await app.request("/v1/wiki/imports/gbimp_wiki/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabledProviders: ["public_web"] }),
+    });
+    expect(confirm).toHaveBeenCalledWith(actor, "gbimp_wiki", ["public_web"]);
+    await app.request("/v1/wiki/imports/gbimp_wiki/cancel", { method: "POST" });
+    expect(cancel).toHaveBeenCalledWith(actor, "gbimp_wiki");
+    await app.request("/v1/wiki/imports/gbimp_wiki/retry", { method: "POST" });
+    expect(retry).toHaveBeenCalledWith(actor, "gbimp_wiki");
+  });
+
   it("maps import state conflicts to typed conflict responses", async () => {
     const app = testApp(fakeRepository(), {
       brainImports: brainImportService({
@@ -1231,6 +1430,7 @@ describe("canonical Hono API", () => {
           );
         },
       }),
+      wikiImports: fakeWikiImports(),
     });
     const response = await app.request("/v1/brains/brain_1/imports/gbimp_1/confirm", {
       method: "POST",
@@ -1242,28 +1442,53 @@ describe("canonical Hono API", () => {
   });
 
   it("returns a retryable typed error when external Skill resolution is unavailable", async () => {
-    const app = testApp(fakeRepository(), {
-      skillImports: fakeSkillImportService(
-        {},
-        {
-          resolve: async () => {
-            throw new CoreError("unavailable", "Couldn't read that skill right now.");
+    const upstreamError = Object.assign(new Error("GitHub artifact request was rate limited."), {
+      upstreamService: "github",
+      upstreamOperation: "resolve_commit",
+      upstreamStatus: 403,
+      failureKind: "rate_limit",
+      rateLimitRemaining: 0,
+    });
+    const failure = new CoreError("unavailable", "Couldn't read that skill right now.", {
+      cause: upstreamError,
+    });
+    const captureException = vi.fn();
+    setExceptionReporter({ captureException });
+    try {
+      const app = testApp(fakeRepository(), {
+        skillImports: fakeSkillImportService(
+          {},
+          {
+            resolve: async () => {
+              throw failure;
+            },
           },
-        },
-      ),
-    });
+        ),
+      });
 
-    const response = await app.request("/v1/skills/imports/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: "github.com/o/r" }),
-    });
+      const response = await app.request("/v1/skills/imports/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "github.com/o/r" }),
+      });
 
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: "unavailable", retryable: true },
-      meta: { apiVersion: "v1" },
-    });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "unavailable", retryable: true },
+        meta: { apiVersion: "v1" },
+      });
+      expect(captureException).toHaveBeenCalledWith(
+        failure,
+        expect.objectContaining({
+          event: "opencompany.api_request_failed",
+          method: "POST",
+          path: "/v1/skills/imports/preview",
+          request_id: expect.stringMatching(/^request_/u),
+        }),
+      );
+    } finally {
+      setExceptionReporter(undefined);
+    }
   });
 
   it("serves and mutates browser profiles through the authenticated owner boundary", async () => {
@@ -1486,6 +1711,11 @@ describe("canonical Hono API", () => {
         callback: record("github.callback", calls),
         webhook: record("github.webhook", calls),
       },
+      githubUserIngress: {
+        start: record("github-user.start", calls),
+        callback: record("github-user.callback", calls),
+        installations: record("github-user.installations", calls),
+      },
       googleIngress: {
         start: record("google.start", calls),
         callback: record("google.callback", calls),
@@ -1494,7 +1724,6 @@ describe("canonical Hono API", () => {
       slackIngress: {
         start: record("slack.start", calls),
         callback: record("slack.callback", calls),
-        webhook: record("slack.webhook", calls),
       },
       linearIngress: {
         start: record("linear.start", calls),
@@ -1532,6 +1761,10 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/github/start", "github.start"],
       ["GET", "/integrations/github/callback", "github.callback"],
       ["POST", "/webhooks/github/events", "github.webhook"],
+      ["GET", "/integrations/github-user/start", "github-user.start"],
+      ["GET", "/integrations/github-user/callback", "github-user.callback"],
+      ["GET", "/integrations/github-user/installations", "github-user.installations"],
+      ["POST", "/integrations/github-user/installations", "github-user.installations"],
       ["GET", "/integrations/gmail/start", "google.start"],
       ["GET", "/integrations/gmail/callback", "google.callback"],
       ["GET", "/integrations/google-calendar/start", "google.start"],
@@ -1541,7 +1774,6 @@ describe("canonical Hono API", () => {
       ["POST", "/webhooks/google-drive", "google.driveWebhook"],
       ["GET", "/integrations/slack/start", "slack.start"],
       ["GET", "/integrations/slack/callback", "slack.callback"],
-      ["POST", "/webhooks/slack/events", "slack.webhook"],
       ["GET", "/integrations/linear-ingest/start", "linear.start"],
       ["GET", "/integrations/linear-ingest/callback", "linear.callback"],
       ["POST", "/webhooks/linear/events", "linear.webhook"],
@@ -1553,12 +1785,16 @@ describe("canonical Hono API", () => {
       ["POST", "/webhooks/jamie/gint_1", "jamie.webhookForIntegration"],
       ["GET", "/integrations/linear/start", "mcp.start.linear"],
       ["GET", "/integrations/linear/callback", "mcp.callback.linear"],
+      ["GET", "/integrations/hubspot-mcp/start", "mcp.start.hubspot"],
+      ["GET", "/integrations/hubspot-mcp/callback", "mcp.callback.hubspot"],
       ["GET", "/integrations/posthog/start", "mcp.start.posthog"],
       ["GET", "/integrations/posthog/callback", "mcp.callback.posthog"],
       ["GET", "/integrations/neon/start", "mcp.start.neon"],
       ["GET", "/integrations/neon/callback", "mcp.callback.neon"],
       ["GET", "/integrations/latitude/start", "mcp.start.latitude"],
       ["GET", "/integrations/latitude/callback", "mcp.callback.latitude"],
+      ["GET", "/integrations/signoz/start", "mcp.start.signoz"],
+      ["GET", "/integrations/signoz/callback", "mcp.callback.signoz"],
       ["GET", "/integrations/x-account/start", "x-account.start"],
       ["GET", "/integrations/x-account/callback", "x-account.callback"],
       ["GET", "/integrations/slack-bot/start", "slack-bot.start"],
@@ -1570,6 +1806,9 @@ describe("canonical Hono API", () => {
       expect(response.status, `${method} ${path}`).toBe(200);
       await expect(response.json()).resolves.toMatchObject({ ok: true, service });
     }
+    expect(
+      (await app.request("/webhooks/slack/events", { method: "POST", body: "{}" })).status,
+    ).toBe(404);
   });
 
   it("allows credentialed browser preflight only for configured origins", async () => {
@@ -1588,10 +1827,9 @@ describe("canonical Hono API", () => {
     expect(allowed.status).toBe(204);
     expect(allowed.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true");
-    expect(allowed.headers.get("access-control-allow-headers")).toContain("Idempotency-Key");
-    expect(allowed.headers.get("access-control-allow-headers")).toContain(
-      "X-OpenCompany-Protocol-Version",
-    );
+    const allowedHeaders = allowed.headers.get("access-control-allow-headers")?.toLowerCase();
+    expect(allowedHeaders).toContain("idempotency-key");
+    expect(allowedHeaders).toContain("x-opencompany-protocol-version");
     expect(allowed.headers.get("access-control-allow-methods")).toContain("PUT");
     expect(allowed.headers.get("access-control-allow-methods")).toContain("DELETE");
 
@@ -1604,6 +1842,29 @@ describe("canonical Hono API", () => {
     });
     expect(disallowed.status).toBe(204);
     expect(disallowed.headers.has("access-control-allow-origin")).toBe(false);
+  });
+
+  it("allows conditional cross-origin Message presentation reads", async () => {
+    const app = testApp(fakeRepository(), {
+      browserOrigins: ["https://my.opencompany.chat"],
+    });
+    const response = await app.request(
+      "/v1/conversations/conversation_1/messages/message_assistant_1/presentation",
+      {
+        method: "OPTIONS",
+        headers: {
+          Origin: "https://my.opencompany.chat",
+          "Access-Control-Request-Method": "GET",
+          "Access-Control-Request-Headers": "if-none-match",
+        },
+      },
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://my.opencompany.chat");
+    expect(response.headers.get("access-control-allow-headers")?.split(",")).toEqual(
+      expect.arrayContaining([...V1_BROWSER_REQUEST_HEADERS]),
+    );
   });
 
   it("rejects cookie mutations without an allowed Origin while preserving bearer clients", async () => {
@@ -1724,6 +1985,7 @@ describe("canonical Hono API", () => {
       statusReason: null,
       lastValidatedAt: null,
       lastRotatedAt: null,
+      workspaceEngine: null,
     }));
     const app = testApp(repository, {
       engineAuth: engineAuthService({ getCodexStatus }),
@@ -2249,7 +2511,7 @@ describe("canonical Hono API", () => {
           workspaceId: actor.workspaceId,
           role: actor.role,
           taskSpawningEnabled: true,
-          wikiEnabled: true,
+          legacyBrainEnabled: true,
         },
       ],
     }));
@@ -2278,6 +2540,73 @@ describe("canonical Hono API", () => {
       data: [{ id: "conversation_1" }],
     });
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("serves an authorized full Message presentation with ETag revalidation", async () => {
+    const get = vi.fn(async () => ({
+      presentation: {
+        schemaVersion: "opencompany.chat.debug.v1",
+        uiMessageParts: [
+          {
+            type: "tool-search",
+            state: "output-available",
+            input: { query: "launch" },
+            output: { detail: "Full provider result" },
+          },
+        ],
+      },
+      updatedAt: "2026-08-10T20:00:01.000Z",
+    }));
+    const app = testApp(fakeRepository(), { messagePresentations: { get } });
+
+    const response = await app.request(
+      "/v1/conversations/conversation_1/messages/message_assistant_1/presentation",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, max-age=0, must-revalidate");
+    expect(response.headers.get("etag")).toMatch(/^W\//u);
+    expect(get).toHaveBeenCalledWith({
+      actor,
+      conversationId: "conversation_1",
+      messageId: "message_assistant_1",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        presentation: {
+          uiMessageParts: [{ output: { detail: "Full provider result" } }],
+        },
+        updatedAt: "2026-08-10T20:00:01.000Z",
+      },
+    });
+
+    const notModified = await app.request(
+      "/v1/conversations/conversation_1/messages/message_assistant_1/presentation",
+      { headers: { "If-None-Match": response.headers.get("etag")! } },
+    );
+    expect(notModified.status).toBe(304);
+    await expect(notModified.text()).resolves.toBe("");
+  });
+
+  it("authorizes Task presentations through the canonical Task conversation boundary", async () => {
+    const repository = fakeRepository();
+    repository.getConversation = vi.fn(async () => null);
+    const get = vi.fn(async () => ({
+      presentation: null,
+      updatedAt: "2026-08-10T20:00:01.000Z",
+    }));
+    const app = testApp(repository, { messagePresentations: { get } });
+
+    const response = await app.request(
+      "/v1/conversations/conversation_task_1/messages/message_task_1/presentation",
+    );
+
+    expect(response.status).toBe(200);
+    expect(get).toHaveBeenCalledWith({
+      actor,
+      conversationId: "conversation_task_1",
+      messageId: "message_task_1",
+    });
   });
 
   it("authorizes a conversation-scoped v2 summary before contacting Electric", async () => {
@@ -2330,6 +2659,25 @@ describe("canonical Hono API", () => {
     expect(stream).not.toHaveBeenCalled();
   });
 
+  it("uses the authorized Conversation epoch instead of a client-selected Message shape epoch", async () => {
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(fakeRepository(), { readModels: { stream } });
+
+    const response = await app.request(
+      "/v1/read-models/chat-messages-v2?conversationId=conversation_1&messageShapeEpoch=999",
+    );
+
+    expect(response.status).toBe(200);
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor,
+        readModel: "chat-messages-v2",
+        conversationId: "conversation_1",
+        messageShapeEpoch: 4,
+      }),
+    );
+  });
+
   it("authorizes canonical Message and Run read models through their owning Task", async () => {
     const repository = fakeRepository();
     repository.getConversation = vi.fn(async () => null);
@@ -2337,17 +2685,45 @@ describe("canonical Hono API", () => {
     const app = testApp(repository, { readModels: { stream } });
 
     const response = await app.request(
-      "/v1/read-models/chat-messages-v1?conversationId=conversation_task_1",
+      "/v1/read-models/chat-messages-v2?conversationId=conversation_task_1",
     );
 
     expect(response.status).toBe(200);
     expect(stream).toHaveBeenCalledWith(
       expect.objectContaining({
         actor,
-        readModel: "chat-messages-v1",
+        readModel: "chat-messages-v2",
         conversationId: "conversation_task_1",
       }),
     );
+  });
+
+  it("authorizes a task-scoped activity read model before contacting Electric", async () => {
+    const tasks = fakeTaskRepository();
+    const getTask = vi.fn(tasks.getTask);
+    tasks.getTask = getTask;
+    const stream = vi.fn(async () => Response.json([]));
+    const app = testApp(fakeRepository(), {
+      tasks: new TaskApplicationService(tasks),
+      readModels: { stream },
+    });
+
+    const response = await app.request("/v1/read-models/task-activities-v1?taskId=task_1");
+
+    expect(response.status).toBe(200);
+    expect(getTask).toHaveBeenCalledWith({ actor, taskId: "task_1" });
+    expect(stream).toHaveBeenCalledWith(
+      expect.objectContaining({ actor, readModel: "task-activities-v1", taskId: "task_1" }),
+    );
+
+    const missing = await app.request("/v1/read-models/task-activities-v1?taskId=task_other");
+    expect(missing.status).toBe(404);
+    expect(stream).toHaveBeenCalledTimes(1);
+
+    const unscoped = await app.request("/v1/read-models/task-activities-v1");
+    expect(unscoped.status).toBe(400);
+    const misplacedScope = await app.request("/v1/read-models/tasks-v1?taskId=task_1");
+    expect(misplacedScope.status).toBe(400);
   });
 
   it("authorizes Brain read models before forwarding the fixed Brain scope", async () => {
@@ -2404,6 +2780,7 @@ describe("canonical Hono API", () => {
           mediaType: file.type,
           sizeBytes: file.size,
           expiresAt: new Date("2026-08-11T20:00:00.000Z"),
+          replayed: false,
         };
       },
     };
@@ -2421,9 +2798,46 @@ describe("canonical Hono API", () => {
           filename: "brief.pdf",
           kind: "document",
         },
+        replayed: false,
       },
     });
     expect(JSON.stringify(json)).not.toMatch(/blob|pathname|url/iu);
+  });
+
+  it("passes a valid optional attachment idempotency key and rejects non-visible ASCII", async () => {
+    const upload = vi.fn(async ({ file }) => ({
+      id: "attachment_1",
+      format: "text" as const,
+      filename: file.name,
+      mediaType: file.type,
+      sizeBytes: file.size,
+      expiresAt: new Date("2026-08-11T20:00:00.000Z"),
+      replayed: true,
+    }));
+    const app = testApp(fakeRepository(), { attachments: { upload } });
+    const form = new FormData();
+    form.set("file", new File(["text"], "brief.txt", { type: "text/plain" }));
+
+    const response = await app.request("/v1/attachments", {
+      method: "POST",
+      headers: { "Idempotency-Key": "web-chat-attachment:pending-1" },
+      body: form,
+    });
+    expect(response.status).toBe(201);
+    expect(upload).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: "web-chat-attachment:pending-1" }),
+    );
+    await expect(response.json()).resolves.toMatchObject({ data: { replayed: true } });
+
+    const invalidForm = new FormData();
+    invalidForm.set("file", new File(["text"], "brief.txt", { type: "text/plain" }));
+    const invalid = await app.request("/v1/attachments", {
+      method: "POST",
+      headers: { "Idempotency-Key": "contains a space" },
+      body: invalidForm,
+    });
+    expect(invalid.status).toBe(400);
+    expect(upload).toHaveBeenCalledOnce();
   });
 
   it("owns authenticated Conversation shares behind the canonical resource", async () => {
@@ -2756,7 +3170,7 @@ describe("canonical Hono API", () => {
     const updatePreferences = vi.fn(async () => ({
       timezone: "Europe/Berlin",
       taskSpawningEnabled: true,
-      wikiEnabled: false,
+      wikiEnabled: true as const,
       taskViewMode: "list" as const,
       imessageEnabled: false,
       autoModelRoutingEnabled: true,
@@ -3140,6 +3554,8 @@ describe("canonical Hono API", () => {
       accountName: "Acme",
       livemode: false,
       statusReason: null,
+      capabilityModes: {},
+      toolModes: {},
     }));
     const disconnectStripe = vi.fn(async () => undefined);
     const connectAttio = vi.fn(async () => ({
@@ -3150,11 +3566,22 @@ describe("canonical Hono API", () => {
       workspaceName: "Acme CRM",
       statusReason: null,
     }));
+    const connectRender = vi.fn(async () => ({
+      provider: "render" as const,
+      connected: true,
+      status: "connected" as const,
+      integrationId: "gint_render",
+      accountName: "Acme Hosting",
+      statusReason: null,
+      capabilityModes: {},
+      toolModes: {},
+    }));
     const app = testApp(fakeRepository(), {
       integrationAccounts: integrationAccountService({
         connectStripe,
         disconnectStripe,
         connectAttio,
+        connectRender,
       }),
     });
 
@@ -3188,6 +3615,20 @@ describe("canonical Hono API", () => {
     await expect(attio.json()).resolves.toMatchObject({
       data: { state: { provider: "attio", workspaceName: "Acme CRM" } },
     });
+
+    const renderKey = "rnd_supersecretrenderkey000";
+    const render = await app.request("/v1/integration-accounts/render", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: renderKey }),
+    });
+    expect(render.status).toBe(200);
+    const renderBody = await render.json();
+    expect(JSON.stringify(renderBody)).not.toContain(renderKey);
+    expect(renderBody).toMatchObject({
+      data: { state: { provider: "render", connected: true, accountName: "Acme Hosting" } },
+    });
+    expect(connectRender).toHaveBeenCalledWith(actor, renderKey);
   });
 
   it("gives iMessage pairing starts their own small rate bucket", async () => {
@@ -3251,6 +3692,7 @@ describe("canonical Hono API", () => {
       statusReason: null,
       lastValidatedAt: null,
       lastRotatedAt: null,
+      workspaceEngine: null,
     }));
     const getInfisicalStatus = vi.fn(async () => ({
       status: "needs_reauth" as const,
@@ -4132,7 +4574,24 @@ describe("POST /internal/wiki/commands", () => {
     const response = await app.request("/internal/wiki/commands", {
       method: "POST",
       headers: headers(),
-      body: body({ command: "write", path: "projects/plan", body: "# Plan" }),
+      body: body({
+        command: "write",
+        path: "projects/plan",
+        body: "# Plan",
+        kind: "other",
+        title: "",
+        pages: "",
+        query: "",
+        since: "",
+        to: "",
+        at: "",
+        text: "",
+        depth: 0,
+        limit: 100,
+        offset: 0,
+        recursive: false,
+        ignoreCase: true,
+      }),
     });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -4184,6 +4643,7 @@ function testApp(
     wikiSources: fakeWikiSources(),
     brainSources: fakeBrainSources(),
     brainImports: fakeBrainImports(),
+    wikiImports: fakeWikiImports(),
     browserProfiles: fakeBrowserProfiles(),
     skillImports: fakeSkillImportService(),
     pluginImports: fakePluginImportService(),
@@ -4356,7 +4816,6 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       imessageEnabled: false,
-      wikiEnabled: true,
       taskViewMode: "board" as const,
       preferredMcpClient: null,
       mcpSetupCompletedAt: null,
@@ -4370,6 +4829,7 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
         name: "Workspace",
         slug: "workspace",
         role: "admin" as const,
+        legacyBrainEnabled: true,
       },
     ],
     activeWorkspaceId: actor.workspaceId,
@@ -4436,10 +4896,41 @@ function fakeBrainImports(): Parameters<typeof createApiApp>[0]["brainImports"] 
   };
 }
 
+function fakeWikiImports(): Parameters<typeof createApiApp>[0]["wikiImports"] {
+  return {
+    start: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    })),
+    confirm: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "ingesting" as const,
+      replayed: false,
+    })),
+    cancel: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "canceled" as const,
+      replayed: false,
+    })),
+    retry: vi.fn(async () => ({
+      importRunId: "gbimp_wiki",
+      status: "discovering" as const,
+      replayed: false,
+    })),
+  };
+}
+
 function brainImportService(
   overrides: Partial<Parameters<typeof createApiApp>[0]["brainImports"]>,
 ): Parameters<typeof createApiApp>[0]["brainImports"] {
   return { ...fakeBrainImports(), ...overrides };
+}
+
+function wikiImportService(
+  overrides: Partial<Parameters<typeof createApiApp>[0]["wikiImports"]>,
+): Parameters<typeof createApiApp>[0]["wikiImports"] {
+  return { ...fakeWikiImports(), ...overrides };
 }
 
 function fakeUserSettings(): Parameters<typeof createApiApp>[0]["userSettings"] {
@@ -4536,6 +5027,9 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     connectGranola: async () => {
       throw new Error("Unexpected Granola connect.");
     },
+    connectRender: async () => {
+      throw new Error("Unexpected Render connect.");
+    },
     startImessagePairing: async () => {
       throw new Error("Unexpected iMessage pairing start.");
     },
@@ -4596,6 +5090,9 @@ function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
     },
     getCodexStatus: async () => {
       throw new Error("Unexpected Codex status read.");
+    },
+    setCodexWorkspaceEngine: async () => {
+      throw new Error("Unexpected Codex workspace engine mutation.");
     },
     startCodexDeviceAuth: async () => {
       throw new Error("Unexpected Codex device auth start.");
@@ -4673,9 +5170,9 @@ function wikiSourceService(
 function wikiActivityItem() {
   return {
     id: "gwjob_1",
-    provider: "slack" as const,
-    sourceType: "conversation" as const,
-    title: "#product",
+    provider: "gmail" as const,
+    sourceType: "thread" as const,
+    title: "Launch update",
     outcome: "succeeded" as const,
     reason: null,
     pages: [{ path: "projects/launch", title: "Launch", action: "updated" as const }],
@@ -4773,7 +5270,6 @@ function brainSourceDetails() {
     viewer: { actorId: actor.userId, isAdmin: true },
     sources: [],
     ownAccounts: {
-      slack: [],
       linear: [],
       gmail: [],
       google_drive: [],
@@ -4792,14 +5288,6 @@ function brainSourceDetails() {
       },
       legacyDefaultDelivery: false,
       isDefaultBrain: false,
-    },
-    slack: {
-      integration: {
-        ...unavailableBase,
-        provider: "slack" as const,
-        accountName: null,
-        teamName: null,
-      },
     },
     linear: {
       integration: {
@@ -4948,6 +5436,7 @@ function fakeSkillImportService(
 function fakePluginImportService(
   repositoryOverrides: Partial<PluginRepository> = {},
   resolverOverrides: Partial<PluginImportResolver> = {},
+  gatewayLifecycle?: PluginGatewayLifecycle,
 ) {
   const unexpected = async (): Promise<never> => {
     throw new Error("Unexpected Plugin installation operation.");
@@ -4969,7 +5458,7 @@ function fakePluginImportService(
     },
     ...resolverOverrides,
   };
-  return new PluginImportApplicationService(repository, resolver);
+  return new PluginImportApplicationService(repository, resolver, gatewayLifecycle);
 }
 
 function knowledgeService(overrides: Partial<KnowledgeRepository>) {
@@ -5093,6 +5582,33 @@ function fakePluginInstallation(): PluginInstallation {
         env: { PRIVATE_TOKEN: "secret-value" },
       },
     ],
+    remoteMcpServers: [
+      {
+        name: "remote",
+        type: "streamable-http",
+        connectionProvider: "quality-tools",
+        capabilities: [
+          { id: "read", label: "Read tools", defaultMode: "on", tools: ["list_issues"] },
+        ],
+        tools: [
+          {
+            name: "list_issues",
+            description: "List issues.",
+            classification: {
+              capabilityId: "read",
+              capabilityLabel: "Read tools",
+              defaultMode: "on",
+              bucket: "read",
+              curated: true,
+            },
+          },
+        ],
+        discoveryStatus: "stale",
+        discoveredAt: createdAt,
+        refreshAfter: createdAt,
+        lastDiscoveryError: "Provider discovery timed out.",
+      },
+    ],
     installReport: {
       ignoredManifestFields: [],
       skills: [],
@@ -5112,7 +5628,10 @@ function fakePluginInstallation(): PluginInstallation {
 
 type FakeRepository = ChatRepository & { lastCommand: CreateMessageCommand | null };
 
-type FakeTaskRepository = TaskRepository & { lastCommand: CreateTaskCommand | null };
+type FakeTaskRepository = TaskRepository & {
+  lastCommand: CreateTaskCommand | null;
+  lastComment: CreateTaskCommentCommand | null;
+};
 
 function fakeAutomationServices() {
   const workflowRepository: WorkflowRepository = {
@@ -5338,6 +5857,7 @@ function populatedAutomationServices() {
 function fakeTaskRepository(): FakeTaskRepository {
   const repository: FakeTaskRepository = {
     lastCommand: null,
+    lastComment: null,
     listTasks: async () => ({ tasks: [fakeTask()], nextCursor: null }),
     getTask: async ({ taskId }) => (taskId === "task_1" ? fakeTask() : null),
     getTaskSummary: async ({ taskId }) =>
@@ -5365,6 +5885,25 @@ function fakeTaskRepository(): FakeTaskRepository {
         assistantMessageId: "message_task_assistant_1",
         runId: "run_task_1",
         transactionId: "43",
+        idempotentReplay: false,
+      };
+    },
+    createTaskCommentAndRun: async ({ actor, taskId, command }) => {
+      repository.lastComment = command;
+      if (taskId !== "task_1") return null;
+      return {
+        task: fakeTask({ status: "running" }),
+        comment: {
+          id: command.id,
+          taskId: "task_1",
+          authorWorkosId: actor.userId,
+          body: command.body,
+          createdAt,
+        },
+        messageId: "message_task_comment_1",
+        assistantMessageId: "message_task_comment_assistant_1",
+        runId: "run_task_comment_1",
+        transactionId: "45",
         idempotentReplay: false,
       };
     },
@@ -5405,6 +5944,7 @@ function fakeRepository(): FakeRepository {
           title: "Chat",
           engine: "opencompany",
           model: "provider/default",
+          messageShapeEpoch: 4,
           runtime: {
             status: "running",
             activeRunId: "run_1",
@@ -5425,6 +5965,7 @@ function fakeRepository(): FakeRepository {
       title: "Chat",
       engine: "opencompany",
       model: "provider/default",
+      messageShapeEpoch: 4,
       runtime: {
         status: "running",
         activeRunId: "run_1",

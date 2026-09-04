@@ -6,11 +6,7 @@ import {
   WIKI_WRITE_PERMISSION,
 } from "@opencompany/core";
 import { LINEAR_MCP_EXTERNAL_ID } from "@opencompany/db/linear";
-import {
-  integrations,
-  isWorkspaceOwnedIntegrationProvider,
-  type WikiSourceProvider,
-} from "@opencompany/db/product-schema";
+import { integrations, isWorkspaceOwnedIntegrationProvider } from "@opencompany/db/product-schema";
 import {
   listWikiIngestActivityRows,
   type WikiIngestActivityRow,
@@ -32,10 +28,15 @@ import { isValidWikiPath } from "@opencompany/wiki";
 import { and, eq, isNull, ne, type SQL } from "drizzle-orm";
 
 type DbLike = any;
+type ActiveWikiSourceProvider = WikiSourceDto["provider"];
+type ActiveWikiSource = WikiSourceWithIntegration & { provider: ActiveWikiSourceProvider };
+type ActiveWikiIngestActivityRow = WikiIngestActivityRow & {
+  sourceProvider: ActiveWikiSourceProvider;
+};
 
 type SourceIntegration = {
   id: string;
-  provider: WikiSourceProvider;
+  provider: ActiveWikiSourceProvider;
   userWorkosId: string;
   workspaceId: string | null;
   status: WikiSourceWithIntegration["integrationStatus"];
@@ -70,7 +71,7 @@ export function createWikiSourceService(input: { db: DbLike }): WikiSourceServic
         before,
         db,
       });
-      const visible = rows.slice(0, command.limit);
+      const visible = rows.filter(isActiveWikiIngestActivityRow).slice(0, command.limit);
       const last = visible.at(-1);
       return {
         items: visible.map(wikiIngestActivityView),
@@ -168,6 +169,7 @@ export function createWikiSourceService(input: { db: DbLike }): WikiSourceServic
 async function listSourceViews(actor: Actor, db: DbLike): Promise<WikiSourceDto[]> {
   const sources = await listWikiSourcesForWorkspace(actor.workspaceId, db);
   return sources
+    .filter(isActiveWikiSource)
     .map((source) => sourceView(source, actor))
     .toSorted((left, right) =>
       `${left.provider}:${left.ownerName ?? left.ownerEmail ?? left.id}`.localeCompare(
@@ -184,11 +186,11 @@ async function findWorkspaceSource(actor: Actor, integrationId: string, db: DbLi
 async function requireSourceView(actor: Actor, sourceId: string, db: DbLike) {
   const sources = await listWikiSourcesForWorkspace(actor.workspaceId, db);
   const source = sources.find((entry) => entry.id === sourceId);
-  if (!source) throw sourceNotFound();
+  if (!source || !isActiveWikiSource(source)) throw sourceNotFound();
   return sourceView(source, actor);
 }
 
-function sourceView(source: WikiSourceWithIntegration, actor: Actor): WikiSourceDto {
+function sourceView(source: ActiveWikiSource, actor: Actor): WikiSourceDto {
   const capabilities = sourceCapabilities(source, actor);
   const workspaceOwned = Boolean(source.integrationWorkspaceId);
   return {
@@ -269,13 +271,23 @@ function sourceNotFound() {
   return new CoreError("not_found", "Wiki source not found.");
 }
 
-function providerDisplayName(provider: WikiSourceProvider) {
+function isActiveWikiSource(source: WikiSourceWithIntegration): source is ActiveWikiSource {
+  return source.provider !== "slack";
+}
+
+function isActiveWikiIngestActivityRow(
+  row: WikiIngestActivityRow,
+): row is ActiveWikiIngestActivityRow {
+  return row.sourceProvider !== "slack";
+}
+
+function providerDisplayName(provider: ActiveWikiSourceProvider) {
   if (provider === "github") return "GitHub";
   if (provider === "gmail") return "Gmail";
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
-function wikiIngestActivityView(row: WikiIngestActivityRow): WikiIngestActivityItemDto {
+function wikiIngestActivityView(row: ActiveWikiIngestActivityRow): WikiIngestActivityItemDto {
   return {
     id: row.id,
     provider: row.sourceProvider,

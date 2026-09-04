@@ -1,5 +1,7 @@
+import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
+  ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
   CODEX_COMMAND_TOOL_PART_TYPE,
   type CodexUiMessagePart,
   verifyExternalEngineGatewayTicket,
@@ -54,10 +56,15 @@ const pluginMcpMocks = vi.hoisted(() => ({
   stopPluginMcpProcesses: vi.fn(),
 }));
 const eventMocks = vi.hoisted(() => ({
+  appendNotice: vi.fn(async () => undefined),
   createExternalEngineProjector: vi.fn(),
   loadCodexChatAssistantMessageParts: vi.fn(),
 }));
 const historyMocks = vi.hoisted(() => ({ loadCodingChatHistory: vi.fn() }));
+const githubAuthMocks = vi.hoisted(() => ({ loadGitHubAuthForUser: vi.fn() }));
+const workspaceMocks = vi.hoisted(() => ({
+  isLegacyBrainEnabledForWorkspace: vi.fn(async () => false),
+}));
 const repoMocks = vi.hoisted(() => ({
   loadRepositoryBootstrap: vi.fn(),
   stageRepositoryBootstrap: vi.fn(),
@@ -66,6 +73,7 @@ const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
+  isCommandTimeoutError: vi.fn(),
   isRetryableCommandStreamError: vi.fn(),
   isRetryableSandboxAcquisitionError: vi.fn(),
   writeSandboxTextFiles: vi.fn(),
@@ -101,15 +109,30 @@ vi.mock("./codex-cli", () => ({
 }));
 
 vi.mock("./coding-agent-shared", () => ({
+  GITHUB_RECONNECT_NOTICE:
+    "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+  GITHUB_UNAVAILABLE_NOTICE:
+    "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
   buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
   gitAuthHeader: (token: string) => `Authorization: Basic ${token}`,
+  loadGitHubAuthForUser: githubAuthMocks.loadGitHubAuthForUser,
+  shouldAppendGitHubAuthNotice: (
+    history: { messages: Array<{ role: string; content: string }> },
+    notice: string,
+  ) =>
+    !notice.startsWith("GitHub needs reconnecting") ||
+    !history.messages.some(
+      (message) => message.role === "assistant" && message.content.includes(notice),
+    ),
 }));
 
 vi.mock("./coding-chat-history", async (importOriginal) => {
   const original = await importOriginal<typeof import("./coding-chat-history")>();
   return { ...original, loadCodingChatHistory: historyMocks.loadCodingChatHistory };
 });
+
+vi.mock("@opencompany/db/workspaces", () => workspaceMocks);
 
 vi.mock("./codex-chat-events", () => ({
   createExternalEngineProjector: eventMocks.createExternalEngineProjector,
@@ -167,18 +190,21 @@ vi.mock("./repo-bootstrap", () => ({
 
 vi.mock("./sandbox", () => ({
   managedSandboxMetadata: (input: {
+    namespace: string;
     ownerKind: string;
     ownerId: string;
     metadata?: Record<string, string>;
   }) => ({
     ...input.metadata,
     opencompany_managed: "true",
+    opencompany_sandbox_namespace: input.namespace,
     opencompany_owner_kind: input.ownerKind,
     opencompany_owner_id: input.ownerId,
   }),
   armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
+  isCommandTimeoutError: sandboxMocks.isCommandTimeoutError,
   isRetryableCommandStreamError: sandboxMocks.isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
   writeSandboxTextFiles: sandboxMocks.writeSandboxTextFiles,
@@ -455,9 +481,11 @@ describe("runCodexChatTurn over ACP", () => {
     cliMocks.ensureCodexAcpAdapterInstalled.mockResolvedValue(undefined);
     cliMocks.killLeftoverCodexTurnProcesses.mockResolvedValue(undefined);
     historyMocks.loadCodingChatHistory.mockResolvedValue(emptyHistory());
+    githubAuthMocks.loadGitHubAuthForUser.mockResolvedValue(null);
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
     eventMocks.createExternalEngineProjector.mockImplementation(
       (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
+        appendNotice: eventMocks.appendNotice,
         push: vi.fn(async (events: Record<string, unknown>[]) => {
           for (const event of events) input.normalizeEvent?.(event);
         }),
@@ -480,6 +508,7 @@ describe("runCodexChatTurn over ACP", () => {
     sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
+    sandboxMocks.isCommandTimeoutError.mockReturnValue(false);
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
     sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
     sandboxMocks.writeSandboxTextFiles.mockResolvedValue(undefined);
@@ -501,7 +530,7 @@ describe("runCodexChatTurn over ACP", () => {
         session: codexSession({
           workspaceId: "workspace_1",
           brainRef: "brain_1",
-          hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
+          hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
         }),
         canonicalAttemptId: "attempt_1",
         env: env({ runnerPublicUrl: "https://runner.example.com" }),
@@ -522,7 +551,11 @@ describe("runCodexChatTurn over ACP", () => {
     );
     const harnessInput = acpMocks.runTurn.mock.calls[0]?.[0] as AcpHarnessTurnInput;
     expect(harnessInput.task).toContain("list_actions and use_action");
-    expect(harnessInput.task).toContain("save_to_brain");
+    expect(harnessInput.task).toContain("Actions may modify connected services");
+    expect(harnessInput.task).toContain("denial is a normal outcome");
+    expect(harnessInput.task).not.toContain("cannot modify connected services");
+    expect(harnessInput.task).not.toContain("save_to_brain");
+    expect(harnessInput.task).toContain("A wiki tool is available");
     const [mcpServer] = harnessInput.mcpServers;
     expect(mcpServer).toMatchObject({
       name: "opencompany",
@@ -542,8 +575,101 @@ describe("runCodexChatTurn over ACP", () => {
     });
   });
 
+  it("retries a Codex ACP setup command timeout as infrastructure failure", async () => {
+    const timeout = new Error("The operation timed out.");
+    timeout.name = "TimeoutError";
+    cliMocks.ensureCodexAcpAdapterInstalled.mockRejectedValueOnce(timeout);
+    sandboxMocks.isCommandTimeoutError.mockReturnValueOnce(true);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: "CodexChatRetryableInfrastructureError",
+      cause: timeout,
+      diagnosticMessage: "[ensure_codex_acp] TimeoutError: The operation timed out.",
+    });
+  });
+
+  it.each([
+    [
+      "a personal credential that needs reconnecting",
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+      "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+    ],
+    [
+      "a transient refresh failure",
+      new Error("GitHub token refresh failed with 503."),
+      "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
+    ],
+  ])("continues without GitHub auth after %s", async (_case, error, notice) => {
+    githubAuthMocks.loadGitHubAuthForUser.mockRejectedValueOnce(error);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(eventMocks.appendNotice).toHaveBeenCalledWith(notice);
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
+  it("continues when the GitHub auth notice cannot be persisted", async () => {
+    githubAuthMocks.loadGitHubAuthForUser.mockRejectedValueOnce(
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+    );
+    eventMocks.appendNotice.mockRejectedValueOnce(new Error("database unavailable"));
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
+  it("does not repeat a reconnect notice already present in durable history", async () => {
+    githubAuthMocks.loadGitHubAuthForUser.mockRejectedValueOnce(
+      new GitHubUserAccessAuthError("Reconnect GitHub in Settings."),
+    );
+    historyMocks.loadCodingChatHistory.mockResolvedValueOnce({
+      messages: [
+        {
+          role: "assistant",
+          content:
+            "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
+          attachments: [],
+        },
+      ],
+      materializableAttachments: [],
+      omittedTurnCount: 0,
+      omittedAttachmentCount: 0,
+    });
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(eventMocks.appendNotice).not.toHaveBeenCalled();
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
   it("sends current-turn images as standard ACP prompt blocks", async () => {
-    dbMocks.selectRows.push([], [{ attachments: [imageAttachment("image_1")] }], []);
+    dbMocks.selectRows.push([{ attachments: [imageAttachment("image_1")] }], []);
 
     await runCodexChatTurn({
       turn: codexTurn(),
@@ -671,7 +797,6 @@ describe("runCodexChatTurn over ACP", () => {
 
   it("bootstraps durable history after ACP invalidates a stored session", async () => {
     dbMocks.selectRows.push(
-      [],
       [],
       [],
       [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
@@ -1142,6 +1267,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     exaApiKey: "exa",
     browserEnabled: false,
     codexE2bTemplate: undefined,
+    sandboxNamespace: "test",
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
     codexChatIdleTimeoutMs: 300_000,

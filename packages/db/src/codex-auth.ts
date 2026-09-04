@@ -7,13 +7,16 @@ import {
   loadEncryptionKey,
   UnsupportedKeyVersionError,
 } from "@opencompany/crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, lte, or } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type * as schema from "./product-schema";
 import {
   type CodexCredentialStatus,
   codexCredentials,
   type IntegrationCredentialEncryptedPayload,
+  users,
+  workspaceCodexEngineAccounts,
+  workspaceMembers,
 } from "./product-schema";
 
 const ENCRYPTION_KEY_VERSION = 1;
@@ -34,6 +37,20 @@ export type LoadedCodexCredential = {
   lastRotatedAt: Date | null;
   updatedAt: Date;
   encryptionKeyVersion: number;
+  refreshLockId: string | null;
+  refreshLockExpiresAt: Date | null;
+};
+
+export type WorkspaceCodexEngineAccountView = {
+  workspaceId: string;
+  providerUserWorkosId: string;
+  providerDisplayName: string;
+  providerEmail: string;
+  enabled: boolean;
+  credentialStatus: CodexCredentialStatus;
+  credentialStatusReason: string | null;
+  lastValidatedAt: Date | null;
+  updatedAt: Date;
 };
 
 export function newCodexDeviceAuthFlowId() {
@@ -78,6 +95,8 @@ export async function saveCodexCredential(input: {
         statusReason: input.statusReason ?? null,
         lastValidatedAt: input.validatedAt ?? now,
         lastRotatedAt: now,
+        refreshLockId: null,
+        refreshLockExpiresAt: null,
         updatedAt: now,
       },
     })
@@ -115,6 +134,8 @@ export async function rotateCodexCredential(input: {
       statusReason: null,
       lastValidatedAt: input.validatedAt ?? now,
       lastRotatedAt: now,
+      refreshLockId: null,
+      refreshLockExpiresAt: null,
       updatedAt: now,
     })
     .where(
@@ -140,6 +161,8 @@ export async function markCodexCredentialNeedsReauth(input: {
     .set({
       status: "needs_reauth",
       statusReason: input.statusReason,
+      refreshLockId: null,
+      refreshLockExpiresAt: null,
       updatedAt: input.now ?? new Date(),
     })
     .where(eq(codexCredentials.userWorkosId, input.userWorkosId));
@@ -159,6 +182,8 @@ export async function loadCodexCredential(input: {
       lastValidatedAt: codexCredentials.lastValidatedAt,
       lastRotatedAt: codexCredentials.lastRotatedAt,
       updatedAt: codexCredentials.updatedAt,
+      refreshLockId: codexCredentials.refreshLockId,
+      refreshLockExpiresAt: codexCredentials.refreshLockExpiresAt,
     })
     .from(codexCredentials)
     .where(eq(codexCredentials.userWorkosId, input.userWorkosId))
@@ -181,6 +206,8 @@ export async function loadCodexCredential(input: {
     lastRotatedAt: credential.lastRotatedAt,
     updatedAt: credential.updatedAt,
     encryptionKeyVersion: credential.encryptionKeyVersion,
+    refreshLockId: credential.refreshLockId,
+    refreshLockExpiresAt: credential.refreshLockExpiresAt,
   };
 }
 
@@ -214,6 +241,160 @@ export async function deleteCodexCredential(input: { db: CodexAuthDb; userWorkos
   await input.db
     .delete(codexCredentials)
     .where(eq(codexCredentials.userWorkosId, input.userWorkosId));
+}
+
+export async function tryAcquireCodexCredentialRefreshLock(input: {
+  db: CodexAuthDb;
+  userWorkosId: string;
+  lockId?: string;
+  now?: Date;
+  ttlMs?: number;
+}) {
+  const now = input.now ?? new Date();
+  const lockId = input.lockId ?? `codex_refresh_${randomUUID()}`;
+  const expiresAt = new Date(now.getTime() + (input.ttlMs ?? 30_000));
+  const [credential] = await input.db
+    .update(codexCredentials)
+    .set({ refreshLockId: lockId, refreshLockExpiresAt: expiresAt, updatedAt: now })
+    .where(
+      and(
+        eq(codexCredentials.userWorkosId, input.userWorkosId),
+        eq(codexCredentials.status, "connected"),
+        or(
+          isNull(codexCredentials.refreshLockExpiresAt),
+          lte(codexCredentials.refreshLockExpiresAt, now),
+        ),
+      ),
+    )
+    .returning({ userWorkosId: codexCredentials.userWorkosId });
+  return credential ? { lockId, expiresAt } : null;
+}
+
+export async function releaseCodexCredentialRefreshLock(input: {
+  db: CodexAuthDb;
+  userWorkosId: string;
+  lockId: string;
+  now?: Date;
+}) {
+  await input.db
+    .update(codexCredentials)
+    .set({ refreshLockId: null, refreshLockExpiresAt: null, updatedAt: input.now ?? new Date() })
+    .where(
+      and(
+        eq(codexCredentials.userWorkosId, input.userWorkosId),
+        eq(codexCredentials.refreshLockId, input.lockId),
+      ),
+    );
+}
+
+export async function loadWorkspaceCodexEngineAccount(input: {
+  db: any;
+  workspaceId: string;
+}): Promise<WorkspaceCodexEngineAccountView | null> {
+  const [row] = await input.db
+    .select({
+      workspaceId: workspaceCodexEngineAccounts.workspaceId,
+      providerUserWorkosId: workspaceCodexEngineAccounts.providerUserWorkosId,
+      providerEmail: users.email,
+      providerFirstName: users.firstName,
+      providerLastName: users.lastName,
+      enabled: workspaceCodexEngineAccounts.enabled,
+      credentialStatus: codexCredentials.status,
+      credentialStatusReason: codexCredentials.statusReason,
+      lastValidatedAt: codexCredentials.lastValidatedAt,
+      updatedAt: workspaceCodexEngineAccounts.updatedAt,
+    })
+    .from(workspaceCodexEngineAccounts)
+    .innerJoin(
+      codexCredentials,
+      eq(codexCredentials.userWorkosId, workspaceCodexEngineAccounts.providerUserWorkosId),
+    )
+    .innerJoin(users, eq(users.workosUserId, workspaceCodexEngineAccounts.providerUserWorkosId))
+    .where(eq(workspaceCodexEngineAccounts.workspaceId, input.workspaceId))
+    .limit(1);
+  if (!row) return null;
+  const providerDisplayName = [row.providerFirstName, row.providerLastName]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(" ")
+    .trim();
+  return {
+    workspaceId: row.workspaceId,
+    providerUserWorkosId: row.providerUserWorkosId,
+    providerDisplayName: providerDisplayName || row.providerEmail,
+    providerEmail: row.providerEmail,
+    enabled: row.enabled,
+    credentialStatus: row.credentialStatus,
+    credentialStatusReason: row.credentialStatusReason,
+    lastValidatedAt: row.lastValidatedAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export async function setWorkspaceCodexEngineAccount(input: {
+  db: any;
+  workspaceId: string;
+  providerUserWorkosId: string;
+  updatedByWorkosId: string;
+  now?: Date;
+}) {
+  const [eligible] = await input.db
+    .select({
+      role: workspaceMembers.role,
+      credentialStatus: codexCredentials.status,
+    })
+    .from(workspaceMembers)
+    .innerJoin(codexCredentials, eq(codexCredentials.userWorkosId, workspaceMembers.userWorkosId))
+    .where(
+      and(
+        eq(workspaceMembers.workspaceId, input.workspaceId),
+        eq(workspaceMembers.userWorkosId, input.providerUserWorkosId),
+      ),
+    )
+    .limit(1);
+  if (eligible?.role !== "admin") {
+    throw new Error("Only a workspace admin can provide the Codex engine account.");
+  }
+  if (eligible.credentialStatus !== "connected") {
+    throw new Error("Reconnect Codex before enabling subscription-backed models.");
+  }
+
+  const now = input.now ?? new Date();
+  await input.db
+    .insert(workspaceCodexEngineAccounts)
+    .values({
+      workspaceId: input.workspaceId,
+      providerUserWorkosId: input.providerUserWorkosId,
+      enabled: true,
+      updatedByWorkosId: input.updatedByWorkosId,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: workspaceCodexEngineAccounts.workspaceId,
+      set: {
+        providerUserWorkosId: input.providerUserWorkosId,
+        enabled: true,
+        updatedByWorkosId: input.updatedByWorkosId,
+        updatedAt: now,
+      },
+    });
+  return loadWorkspaceCodexEngineAccount({ db: input.db, workspaceId: input.workspaceId });
+}
+
+export async function disableWorkspaceCodexEngineAccount(input: {
+  db: any;
+  workspaceId: string;
+  updatedByWorkosId: string;
+  now?: Date;
+}) {
+  await input.db
+    .update(workspaceCodexEngineAccounts)
+    .set({
+      enabled: false,
+      updatedByWorkosId: input.updatedByWorkosId,
+      updatedAt: input.now ?? new Date(),
+    })
+    .where(eq(workspaceCodexEngineAccounts.workspaceId, input.workspaceId));
+  return loadWorkspaceCodexEngineAccount({ db: input.db, workspaceId: input.workspaceId });
 }
 
 function encryptAuthJson(

@@ -1,6 +1,6 @@
 import type { ResolvedAction, ResolvedActionCatalog } from "./types";
 
-export type ActionCatalogPolicyName = "foregroundInteractive" | "cloudReadOnly" | "headless";
+export type ActionCatalogPolicyName = "foregroundInteractive" | "headless";
 
 export type ActionCatalogPolicy = {
   name: ActionCatalogPolicyName;
@@ -20,17 +20,10 @@ export const ACTION_CATALOG_POLICIES: Record<ActionCatalogPolicyName, ActionCata
     approvalCapable: true,
     includeAction: includeEveryAction,
   },
-  cloudReadOnly: {
-    name: "cloudReadOnly",
-    sourceKinds: ["integration", "managed"],
-    permissionModes: ["on"],
-    approvalCapable: false,
-    includeAction: (action) => !action.effects.mutatesExternalSystem,
-  },
   headless: {
     name: "headless",
     sourceKinds: ["integration"],
-    permissionModes: ["on"],
+    permissionModes: ["on", "ask"],
     approvalCapable: false,
     includeAction: includeEveryAction,
   },

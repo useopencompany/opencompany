@@ -16,7 +16,7 @@ describe("claimBrainSourceEvents", () => {
     await expect(
       claimBrainSourceEvents({
         brainRef: "brain_123",
-        sourceProvider: "slack",
+        sourceProvider: "gmail",
         eventKeys: ["message:existing", "message:new", "message:new"],
         db,
       }),

@@ -66,10 +66,43 @@ export type WikiToolInput = {
 
 export type WikiToolOutput = { ok: true; result: unknown } | { ok: false; error: string };
 
+// Some structured-output providers materialize every optional tool property,
+// using an empty string when the model did not select that property. Empty
+// `body` is meaningful (it clears a page), but the other optional strings are
+// equivalent to omission. Normalize that wire representation before runtime
+// validation so every wiki surface accepts the same advertised tool contract.
+const WIKI_EMPTY_PLACEHOLDER_FIELDS = [
+  "pages",
+  "path",
+  "kind",
+  "title",
+  "query",
+  "since",
+  "to",
+  "at",
+  "text",
+] as const;
+
+export function normalizeWikiToolInput(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const normalized = { ...(input as Record<string, unknown>) };
+  for (const field of WIKI_EMPTY_PLACEHOLDER_FIELDS) {
+    const value = normalized[field];
+    if (typeof value === "string" && !value.trim()) delete normalized[field];
+  }
+  return normalized;
+}
+
 export const WIKI_TOOL_DESCRIPTION = [
   "Workspace wiki: folders and markdown pages in a tree, like a filesystem. Folders are containers and pages are leaf documents. A node's full `path` is its identity; start with `tree`, `read` promising pages, and use `grep` when hunting for a phrase.",
   'Commands: tree {depth?: 0-10} (folders end in `/`; depth 0 shows root entries; wikis over 40 entries default to depth 0) · read {pages: path|basename|[...]} (page bodies + backlinks; a folder returns its children) · grep {query: regex} · search {query} · recent {since: "2d"} · timeline {pages: path, since?} · mkdir {path, title?} (create a folder and missing ancestor folders) · write {path, body, kind?, title?} (create or overwrite a page; missing ancestor folders are auto-created) · move {pages: path, to: folder-path|"/"} (move a page or folder subtree and update links) · delete {pages: path, recursive?} (recursive is required for a non-empty folder) · timeline-add {pages: path, text, at?}.',
   "Pages link inline with [[path/to/page]] or [[path/to/page|Label]], and to artifacts in other tools with [[source:provider:id]] (e.g. [[source:linear:issue:ENG-123]]) — keep those links when rewriting. Bare basenames resolve only when unique. `kind` is one of project, person, company, research, meeting, other. Writes overwrite the whole page body: read before you rewrite.",
+].join(" ");
+
+export const WIKI_READ_TOOL_DESCRIPTION = [
+  "Read-only workspace wiki: folders and markdown pages in a tree, like a filesystem. A node's full `path` is its identity; start with `tree`, read promising pages, and use `grep` when hunting for a phrase.",
+  'Commands: tree {depth?: 0-10} · read {pages: path|basename|[...]} · grep {query: regex} · search {query} · recent {since: "2d"} · timeline {pages: path, since?}.',
+  "Pages link inline with [[path/to/page]] or [[path/to/page|Label]], and to artifacts in other tools with [[source:provider:id]]. Bare basenames resolve only when unique.",
 ].join(" ");
 
 // JSON schema for AI-SDK / MCP registration. Descriptions repeat the contract
@@ -97,11 +130,13 @@ export const WIKI_TOOL_INPUT_JSON_SCHEMA = {
     },
     path: {
       type: "string",
+      maxLength: 512,
       description:
         'mkdir/write: the folder or page full path, lowercase slugs joined by "/" (e.g. "projects/website-redesign").',
     },
     body: {
       type: "string",
+      maxLength: 1_000_000,
       description: "write: full markdown body. No frontmatter — kind is a separate parameter.",
     },
     kind: {
@@ -111,6 +146,7 @@ export const WIKI_TOOL_INPUT_JSON_SCHEMA = {
     },
     title: {
       type: "string",
+      maxLength: 160,
       description:
         "write/mkdir: display name for the page or folder. Optional — a page defaults to the body's first H1, a folder to its slug; an existing name is kept when omitted.",
     },
@@ -145,6 +181,29 @@ export const WIKI_TOOL_INPUT_JSON_SCHEMA = {
     },
     limit: { type: "integer", minimum: 1, maximum: 200 },
     offset: { type: "integer", minimum: 0 },
+  },
+  required: ["command"],
+} as const;
+
+export const WIKI_READ_TOOL_INPUT_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    command: {
+      ...WIKI_TOOL_INPUT_JSON_SCHEMA.properties.command,
+      enum: [...WIKI_READ_COMMANDS],
+      description: "What to read: tree, read, grep, search, recent, or timeline.",
+    },
+    depth: WIKI_TOOL_INPUT_JSON_SCHEMA.properties.depth,
+    pages: {
+      ...WIKI_TOOL_INPUT_JSON_SCHEMA.properties.pages,
+      description: "Page path(s) or unique basename(s). Used by read or timeline.",
+    },
+    query: WIKI_TOOL_INPUT_JSON_SCHEMA.properties.query,
+    since: WIKI_TOOL_INPUT_JSON_SCHEMA.properties.since,
+    ignoreCase: WIKI_TOOL_INPUT_JSON_SCHEMA.properties.ignoreCase,
+    limit: WIKI_TOOL_INPUT_JSON_SCHEMA.properties.limit,
+    offset: WIKI_TOOL_INPUT_JSON_SCHEMA.properties.offset,
   },
   required: ["command"],
 } as const;

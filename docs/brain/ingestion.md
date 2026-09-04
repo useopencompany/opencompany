@@ -34,8 +34,8 @@ carry source content, create jobs, or bypass polling and leases.
 ## Current source families
 
 The registered handlers cover meeting sources (Jamie, Granola, and Fathom), explicit Chat/MCP
-captures, uploaded assets, Google Drive documents, provider pointers (Slack, Gmail, and Linear),
-provider activity or content (Slack, Gmail, Linear, GitHub, HubSpot, and Attio), and whole-Brain
+captures, uploaded assets, Google Drive documents, provider pointers (Gmail and Linear),
+provider activity or content (Gmail, Linear, GitHub, HubSpot, and Attio), and whole-Brain
 imports. The exact `(kind, sourceProvider, sourceType)` registry in the runner is the source of truth;
 update that registry, payload validation, and this overview together.
 
@@ -54,7 +54,7 @@ The runner's curation handler may improve the title and entity type, move the dr
 relations, promote it, or merge it into an existing page. Chat and MCP callers do not receive raw
 Brain mutation CLI commands.
 
-Ref-only Slack, Gmail, and Linear captures use a pointer-hydration job. The runner loads the scoped
+Ref-only Gmail and Linear captures use a pointer-hydration job. The runner loads the scoped
 credential, refetches bounded provider content, validates it, and delegates to the provider's ingest
 profile. A deleted or forbidden source is reported as unreachable rather than silently replaced
 with unrelated content.

@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   listWikiSources: vi.fn(),
   setWikiSourceEnabled: vi.fn(),
   upsertWikiSource: vi.fn(),
-  listSlackConversations: vi.fn(),
   listGitHubRepositories: vi.fn(),
   listLinearTeams: vi.fn(),
   toastError: vi.fn(),
@@ -34,6 +33,14 @@ vi.mock("@/components/WikiIngestActivityFeed", () => ({
   WikiIngestActivitySkeleton: () => <section>Loading Wiki ingestion activity</section>,
 }));
 
+vi.mock("@/components/JamieIntegrationSetup", () => ({
+  JamieIntegrationSetup: () => <div>Jamie setup form</div>,
+}));
+
+vi.mock("@/components/GranolaIntegrationSetup", () => ({
+  GranolaIntegrationSetup: () => <div>Granola setup form</div>,
+}));
+
 vi.mock("@/lib/headless-integration-collections", () => ({
   getHeadlessIntegrationAccounts: () => ({ id: "integration-accounts" }),
 }));
@@ -45,7 +52,6 @@ vi.mock("@/lib/wiki-source-api", () => ({
 }));
 
 vi.mock("@/lib/brain-source-actions", () => ({
-  listSlackConversationsAction: mocks.listSlackConversations,
   listGitHubRepositoriesAction: mocks.listGitHubRepositories,
   listLinearTeamsAction: mocks.listLinearTeams,
 }));
@@ -68,13 +74,6 @@ describe("WikiSourcesPanel", () => {
     mocks.listWikiSources.mockResolvedValue([]);
     mocks.setWikiSourceEnabled.mockReset();
     mocks.upsertWikiSource.mockReset();
-    mocks.listSlackConversations.mockReset();
-    mocks.listSlackConversations.mockResolvedValue({
-      ok: true,
-      channels: [],
-      dms: [],
-      partial: false,
-    });
     mocks.listGitHubRepositories.mockReset();
     mocks.listLinearTeams.mockReset();
     mocks.toastError.mockReset();
@@ -87,7 +86,29 @@ describe("WikiSourcesPanel", () => {
     const connect = await screen.findByRole("link", { name: "Connect Gmail" });
     expect(connect).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/wiki/sources");
     expect(screen.getByText("No sources are feeding yet")).toBeInTheDocument();
-    expect(screen.getAllByText("Not connected")).toHaveLength(6);
+    expect(screen.getAllByText("Not connected")).toHaveLength(5);
+  });
+
+  it("keeps OAuth connections in onboarding and ships no dead scope placeholder", async () => {
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin mode="onboarding" />);
+
+    expect(await screen.findByText("Connect your sources")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Gmail" })).toHaveAttribute(
+      "href",
+      "/api/integrations/gmail/start?returnTo=%2Fonboarding%2Fconnected",
+    );
+    expect(screen.queryByText("Scope configuration coming soon")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recent ingestion activity")).not.toBeInTheDocument();
+  });
+
+  it("opens meeting-source setup during fresh onboarding without a server snapshot", async () => {
+    const user = userEvent.setup();
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin mode="onboarding" />);
+
+    await user.click(await screen.findByRole("button", { name: "Set up Jamie" }));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("Connect Jamie");
+    expect(screen.getByText("Jamie setup form")).toBeInTheDocument();
   });
 
   it("does not start the live integration collection during server rendering", () => {
@@ -162,45 +183,6 @@ describe("WikiSourcesPanel", () => {
         },
       }),
     );
-  });
-
-  it("loads Slack conversations and saves selected channels through the Wiki sources API", async () => {
-    mocks.integrations = [
-      integration({ provider: "slack", accountName: "Acme", accountEmail: null }),
-    ];
-    mocks.listWikiSources.mockResolvedValue([
-      source({ provider: "slack", accountEmail: null, accountName: "Acme", config: {} }),
-    ]);
-    mocks.listSlackConversations.mockResolvedValue({
-      ok: true,
-      channels: [{ id: "C123", name: "product", isPrivate: false, isSlackConnect: false }],
-      dms: [],
-      partial: false,
-    });
-    mocks.upsertWikiSource.mockResolvedValue(
-      source({
-        provider: "slack",
-        accountEmail: null,
-        accountName: "Acme",
-        config: { channels: [{ id: "C123", name: "product" }], dms: [] },
-      }),
-    );
-    const user = userEvent.setup();
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
-
-    await user.click(await screen.findByRole("button", { name: "Choose conversations" }));
-    await user.click(await screen.findByRole("checkbox", { name: "#product" }));
-    await user.click(screen.getByRole("button", { name: "Save conversations" }));
-
-    await waitFor(() =>
-      expect(mocks.upsertWikiSource).toHaveBeenCalledWith({
-        integrationId: "integration_1",
-        provider: "slack",
-        enabled: true,
-        config: { channels: [{ id: "C123", name: "product" }], dms: [] },
-      }),
-    );
-    expect(mocks.listSlackConversations).toHaveBeenCalledWith("integration_1");
   });
 
   it("configures selected Linear teams and events through the Wiki sources API", async () => {

@@ -407,8 +407,11 @@ export function BillingPanel({
                 </div>
                 <div className="shrink-0 text-right">
                   <div className="text-[12.5px] font-medium text-ink">
-                    {entry.amountUsdMicros < 0 ? "-" : "+"}
-                    {formatUsdMicros(Math.abs(entry.amountUsdMicros))}
+                    {entry.source === "subscription_covered"
+                      ? "Covered"
+                      : `${entry.amountUsdMicros < 0 ? "-" : "+"}${formatUsdMicros(
+                          Math.abs(entry.amountUsdMicros),
+                        )}`}
                   </div>
                   {entry.amountUsdMicros < 0 ? (
                     <div className="text-[10.5px] text-ink-subtle">
@@ -458,6 +461,7 @@ function billingActivityLabel(
   isAutoRefill: boolean,
 ) {
   if (source === "chat_model_usage") return "Chat";
+  if (source === "subscription_covered") return "Chat · covered by ChatGPT subscription";
   if (
     source === "ingest_model_usage" ||
     source === "ingest_fee" ||

@@ -24,6 +24,7 @@ const SETTINGS_TITLES: Record<string, string> = {
   "/settings/workspace": "Workspace",
   "/settings/usage": "Usage",
   "/settings/integrations": "Integrations",
+  "/settings/workspace/inference": "Inference",
   "/settings/repositories": "Repositories",
   "/settings/skills": "Skills",
   "/settings/mcp": "MCP",
@@ -32,7 +33,6 @@ const SETTINGS_TITLES: Record<string, string> = {
   "/settings/granola": "Granola",
   "/settings/imessage": "iMessage",
   "/settings/jamie": "Jamie",
-  "/settings/stripe": "Stripe",
 };
 
 function pathSegmentLabel(value: string | undefined, fallback: string) {

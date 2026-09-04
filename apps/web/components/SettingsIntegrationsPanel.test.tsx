@@ -33,22 +33,10 @@ vi.mock("@/components/useHydrated", () => ({
   useHydrated: () => false,
 }));
 
-vi.mock("@/lib/codex-auth", () => ({
-  disconnectCodexAuth: vi.fn(),
-  pollCodexDeviceAuth: vi.fn(),
-  startCodexDeviceAuth: vi.fn(),
-}));
-
 vi.mock("@/lib/infisical-auth", () => ({
   completeInfisicalAuth: completeInfisicalAuth,
   disconnectInfisicalAuth: disconnectInfisicalAuth,
   startInfisicalAuth: startInfisicalAuth,
-}));
-
-// Pulls in @/lib/auth (authkit), which vitest cannot resolve.
-vi.mock("@/lib/claude-code-auth", () => ({
-  disconnectClaudeCodeAuth: vi.fn(async () => ({ ok: true })),
-  saveClaudeCodeToken: vi.fn(async () => ({ ok: true })),
 }));
 
 // Pulls in @/lib/auth (authkit), which vitest cannot resolve.
@@ -126,7 +114,7 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.queryByRole("link", { name: "/settings/mcp" })).not.toBeInTheDocument();
   });
 
-  it("shows a saved Claude Code token as pending until a successful turn validates it", () => {
+  it("keeps coding subscriptions out of the personal integrations scope", () => {
     const integrations = integrationStateFromRows([]) as IntegrationState;
     integrations.claude_code = {
       provider: "claude_code",
@@ -139,7 +127,9 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    expect(screen.getByText("Token saved; validation pending")).toBeInTheDocument();
+    expect(screen.queryByText("Codex")).not.toBeInTheDocument();
+    expect(screen.queryByText("Claude Code")).not.toBeInTheDocument();
+    expect(screen.queryByText("Token saved; validation pending")).not.toBeInTheDocument();
   });
 
   it("switches between the workspace and personal scopes", () => {
@@ -150,22 +140,55 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    // Workspace scope is shown first: GitHub is a workspace-owned connection and
-    // Gmail (personal) is hidden.
+    // Workspace scope is shown first and personal connections are hidden.
     expect(
-      screen.getByText("Bring pull requests and issues from your repositories into opencompany."),
+      screen.getByText(
+        "Ingest pull requests and issues from selected repositories through webhooks.",
+      ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("Let opencompany read and act on your email."),
+      screen.queryByText("Let opencompany view and update your schedule and events."),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    // Personal scope reveals the personal connections and hides the workspace ones.
-    expect(screen.getByText("Let opencompany read and act on your email.")).toBeInTheDocument();
+    // Personal scope reveals non-plugin connections and hides workspace-owned ones.
     expect(
-      screen.queryByText("Bring pull requests and issues from your repositories into opencompany."),
+      screen.getByText("Observe, understand, and improve your AI agents from opencompany."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Sync files and folders you choose into opencompany."),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Let opencompany read and act on your email."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Let opencompany view and update your schedule and events."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "Ingest pull requests and issues from selected repositories through webhooks.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps subscription-backed model routing out of Integrations", () => {
+    const integrations = integrationStateFromRows([]) as IntegrationState;
+    integrations.codex.workspaceEngine = {
+      enabled: true,
+      providerDisplayName: "Provider Admin",
+      providerEmail: "provider@example.com",
+      credentialStatus: "connected",
+      credentialStatusReason: null,
+      lastValidatedAt: null,
+      isCurrentUser: false,
+    };
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    expect(screen.getByRole("button", { name: "Workspace" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Workspace 1" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Subscription-backed models")).not.toBeInTheDocument();
   });
 
   it("lets workspace admins complete the Infisical browser-token handoff", async () => {
@@ -315,13 +338,14 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
+    expect(screen.getByText("GitHub workspace ingestion")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Configure repositories" })).toHaveAttribute(
       "href",
       "/settings/repositories",
     );
   });
 
-  it("renders the Linear MCP connection instead of the separate brain-source accounts", () => {
+  it("keeps Linear out of the legacy Integrations panel", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_linear_mcp",
@@ -342,69 +366,56 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
-    // Linear lives under the Workspace scope, which is shown first.
-    const linearCard = screen
-      .getByText("Connect issues, projects, and comments from Linear.")
-      .closest("div.rounded-2xl");
-    expect(linearCard).not.toBeNull();
-    expect(within(linearCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
     expect(
-      within(linearCard as HTMLElement).queryByText("Source workspace"),
+      screen.queryByText("Connect issues, projects, and comments from Linear."),
     ).not.toBeInTheDocument();
-    expect(within(linearCard as HTMLElement).queryByRole("link", { name: "Connect" })).toBeNull();
-    const readPermission = within(linearCard as HTMLElement).getByRole("group", {
-      name: "Read Linear permission",
-    });
-    const writePermission = within(linearCard as HTMLElement).getByRole("group", {
-      name: "Manage issues permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.queryByText("Source workspace")).not.toBeInTheDocument();
   });
 
-  it("flags a Linear MCP auth error and lets the user reconnect from integrations settings", () => {
+  it("keeps Slack out of the legacy Integrations panel", () => {
     const integrations = integrationStateFromRows([
       {
-        id: "gint_linear_mcp",
-        provider: "linear",
-        externalId: "linear_mcp",
-        accountName: "Linear",
-        status: "needs_reauth",
-        statusReason: "Linear authorization expired. Reconnect Linear in Settings.",
+        id: "gint_slack",
+        provider: "slack",
+        externalId: "T123",
+        connectionLabel: "Acme",
+        accountName: "Louis",
+        status: "connected",
         capabilityModes: {},
       },
     ]) as IntegrationState;
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const linearCard = screen
-      .getByText("Connect issues, projects, and comments from Linear.")
-      .closest("div.rounded-2xl");
-    expect(linearCard).not.toBeNull();
-    expect(within(linearCard as HTMLElement).getByText("Needs reconnect")).toBeInTheDocument();
-    expect(
-      within(linearCard as HTMLElement).getByText(
-        "Linear authorization expired. Reconnect Linear in Settings.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(linearCard as HTMLElement).getByRole("link", { name: "Reconnect" }),
-    ).toHaveAttribute("href", "/api/integrations/linear/start?returnTo=/settings/integrations");
-    expect(within(linearCard as HTMLElement).queryByText("Connected")).not.toBeInTheDocument();
-    expect(
-      within(linearCard as HTMLElement).queryByRole("group", {
-        name: "Read Linear permission",
-      }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Acme")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Personal" })).not.toHaveTextContent("1");
   });
 
-  it("shows PostHog with read-on and create-insights-ask permissions", () => {
+  it("keeps Google Calendar out of the legacy Integrations panel", () => {
+    const integrations = integrationStateFromRows([
+      {
+        id: "gint_google_calendar",
+        provider: "google_calendar",
+        externalId: "google-user-1",
+        accountEmail: "ada@example.com",
+        accountName: "Ada",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as IntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    expect(screen.queryByText("Ada")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Let opencompany read and manage your calendar events."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Personal" })).not.toHaveTextContent("1");
+  });
+
+  it("keeps the PostHog connection off the legacy integrations surface", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_posthog_mcp",
@@ -418,28 +429,29 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
-    const posthogCard = screen
-      .getByText("Explore product analytics and create focused insights from opencompany.")
-      .closest("div.rounded-2xl");
-    expect(posthogCard).not.toBeNull();
-    expect(within(posthogCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
-    const readPermission = within(posthogCard as HTMLElement).getByRole("group", {
-      name: "Read analytics permission",
-    });
-    const writePermission = within(posthogCard as HTMLElement).getByRole("group", {
-      name: "Create insights permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.queryByText("PostHog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
   });
 
-  it("shows separate Gmail read, draft, and send controls with one scope-upgrade prompt", () => {
+  it("keeps HubSpot ingestion accounts off the legacy integrations surface", () => {
+    const integrations = integrationStateFromRows([
+      {
+        id: "gint_hubspot_ingest",
+        provider: "hubspot",
+        externalId: "portal_123",
+        connectionLabel: "Acme CRM",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as IntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    expect(screen.queryByText("Acme CRM")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Workspace" })).not.toHaveTextContent("1");
+  });
+
+  it("removes the legacy Gmail settings card after the plugin cutover", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_gmail",
@@ -455,100 +467,8 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const gmailCard = screen
-      .getByText("Let opencompany read and act on your email.")
-      .closest("div.rounded-2xl");
-    expect(gmailCard).not.toBeNull();
-    const readPermission = within(gmailCard as HTMLElement).getByRole("group", {
-      name: "Read emails permission",
-    });
-    const sendPermission = within(gmailCard as HTMLElement).getByRole("group", {
-      name: "Send emails permission",
-    });
-    const draftPermission = within(gmailCard as HTMLElement).getByRole("group", {
-      name: "Create drafts permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(draftPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(sendPermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(
-      within(gmailCard as HTMLElement).getByRole("link", { name: "Enable drafts & sending" }),
-    ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
-  });
-
-  it("flags personal accounts with persisted auth errors without showing capability controls", () => {
-    const integrations = integrationStateFromRows([
-      {
-        id: "gint_gmail",
-        provider: "gmail",
-        externalId: "google_account_1",
-        accountEmail: "louis@example.com",
-        status: "needs_reauth",
-        statusReason: "Google authorization expired. Reconnect Gmail.",
-        scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
-        capabilityModes: {},
-      },
-    ]) as IntegrationState;
-
-    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
-    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
-
-    const gmailCard = screen
-      .getByText("Let opencompany read and act on your email.")
-      .closest("div.rounded-2xl");
-    expect(gmailCard).not.toBeNull();
-    expect(within(gmailCard as HTMLElement).getByText("Needs reconnect")).toBeInTheDocument();
-    expect(
-      within(gmailCard as HTMLElement).getByText("Google authorization expired. Reconnect Gmail."),
-    ).toBeInTheDocument();
-    expect(
-      within(gmailCard as HTMLElement).getByRole("link", { name: "Reconnect" }),
-    ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
-    expect(
-      within(gmailCard as HTMLElement).queryByRole("group", {
-        name: "Read emails permission",
-      }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("prompts send-enabled Gmail accounts only for draft access", () => {
-    const integrations = integrationStateFromRows([
-      {
-        id: "gint_gmail",
-        provider: "gmail",
-        externalId: "google_account_1",
-        accountEmail: "louis@example.com",
-        status: "connected",
-        scopes: [
-          "https://www.googleapis.com/auth/gmail.readonly",
-          "https://www.googleapis.com/auth/gmail.send",
-        ],
-        capabilityModes: {},
-      },
-    ]) as IntegrationState;
-
-    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
-    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
-
-    const gmailCard = screen
-      .getByText("Let opencompany read and act on your email.")
-      .closest("div.rounded-2xl");
-    expect(gmailCard).not.toBeNull();
-    expect(
-      within(gmailCard as HTMLElement).getByRole("link", { name: "Enable drafts" }),
-    ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
-    expect(
-      within(gmailCard as HTMLElement).queryByRole("link", { name: "Enable drafts & sending" }),
-    ).toBeNull();
+    expect(screen.queryByText("Let opencompany read and act on your email.")).toBeNull();
+    expect(screen.queryByText("louis@example.com")).toBeNull();
   });
 
   it("shows Attio read and write permission controls on the connected workspace", () => {
@@ -585,7 +505,7 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
-  it("shows Drive read and write controls plus an OAuth upgrade when writes are unavailable", () => {
+  it("keeps Google Drive out of legacy integrations now that its account lives under Plugins", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_drive",
@@ -601,66 +521,10 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const driveCard = screen
-      .getByText("Sync files and folders you choose into opencompany.")
-      .closest("div.rounded-2xl");
-    expect(driveCard).not.toBeNull();
-    const readPermission = within(driveCard as HTMLElement).getByRole("group", {
-      name: "Find & read files permission",
-    });
-    const writePermission = within(driveCard as HTMLElement).getByRole("group", {
-      name: "Edit Docs & Sheets permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
     expect(
-      within(driveCard as HTMLElement).getByRole("link", {
-        name: "Enable Docs & Sheets editing",
-      }),
-    ).toHaveAttribute(
-      "href",
-      "/api/integrations/google-drive/start?returnTo=/settings/integrations",
-    );
-  });
-
-  it("shows one broad Slack read permission for each connected workspace", () => {
-    const integrations = integrationStateFromRows([
-      {
-        id: "gint_slack",
-        provider: "slack",
-        externalId: "T123",
-        connectionLabel: "Acme",
-        accountName: "Louis",
-        status: "connected",
-        capabilityModes: {},
-      },
-    ]) as IntegrationState;
-
-    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
-    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
-
-    const slackCard = screen
-      .getByText("Let opencompany search and read your Slack conversations.")
-      .closest("div.rounded-2xl");
-    expect(slackCard).not.toBeNull();
-    const readPermission = within(slackCard as HTMLElement).getByRole("group", {
-      name: "Read Slack permission",
-    });
-    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(
-      within(slackCard as HTMLElement).queryByRole("group", {
-        name: /write|send/i,
-      }),
+      screen.queryByText("Sync files and folders you choose into opencompany."),
     ).not.toBeInTheDocument();
+    expect(screen.queryByText("founder@example.com")).not.toBeInTheDocument();
   });
 
   it("connects Latitude as a personal OAuth integration with guarded writes", () => {
@@ -698,7 +562,7 @@ describe("SettingsIntegrationsPanel", () => {
     ).toHaveAttribute("href", "/api/integrations/latitude/start?returnTo=/settings/integrations");
   });
 
-  it("connects Neon personally with structure On and database queries Ask", () => {
+  it("keeps Neon out of legacy integrations now that its account lives under Plugins", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_neon",
@@ -714,31 +578,14 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const neonCard = screen
-      .getByText("Inspect Neon projects and schemas, and run permission-gated read-only SQL.")
-      .closest("div.rounded-2xl");
-    expect(neonCard).not.toBeNull();
-    expect(within(neonCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
-    const structurePermission = within(neonCard as HTMLElement).getByRole("group", {
-      name: "Inspect Neon structure permission",
-    });
-    const queryPermission = within(neonCard as HTMLElement).getByRole("group", {
-      name: "Query database data permission",
-    });
-    expect(within(structurePermission).getByRole("button", { name: "On" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(within(queryPermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
     expect(
-      within(neonCard as HTMLElement).getByRole("link", { name: "Reconnect" }),
-    ).toHaveAttribute("href", "/api/integrations/neon/start?returnTo=/settings/integrations");
+      screen.queryByText(
+        "Inspect Neon projects and schemas, and run permission-gated read-only SQL.",
+      ),
+    ).not.toBeInTheDocument();
   });
 
-  it("shows two connected X identities and keeps the add-account path available", () => {
+  it("keeps X accounts out of legacy settings now that they live under Plugins", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_x_founder",
@@ -763,20 +610,14 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const xCard = screen
-      .getByText("Connect X accounts and publish account-specific posts from chat.")
-      .closest("div.rounded-2xl");
-    expect(xCard).not.toBeNull();
-    expect(within(xCard as HTMLElement).getByText("@founder · Founder")).toBeVisible();
-    expect(within(xCard as HTMLElement).getByText("@acme · Acme")).toBeVisible();
-    expect(within(xCard as HTMLElement).getAllByText("Connected")).toHaveLength(2);
-    expect(within(xCard as HTMLElement).getByRole("link", { name: "Add account" })).toHaveAttribute(
-      "href",
-      "/api/integrations/x-account/start?returnTo=/settings/integrations",
-    );
+    expect(
+      screen.queryByText("Connect X accounts and publish account-specific posts from chat."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("@founder · Founder")).not.toBeInTheDocument();
+    expect(screen.queryByText("@acme · Acme")).not.toBeInTheDocument();
   });
 
-  it("shows a workspace-owned Stripe connection and test-mode label", () => {
+  it("keeps Stripe out of legacy settings now that it lives under Plugins", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_stripe",
@@ -791,18 +632,7 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
-    const stripeCard = screen
-      .getByText(
-        "Give opencompany read-only access to payment activity, subscriptions, and receivables.",
-      )
-      .closest("div.rounded-2xl");
-    expect(stripeCard).not.toBeNull();
-    expect(within(stripeCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
-    expect(within(stripeCard as HTMLElement).getByText(/Acme Payments · Test mode/)).toBeVisible();
-    expect(within(stripeCard as HTMLElement).queryByRole("link", { name: "Connect" })).toBeNull();
-    expect(within(stripeCard as HTMLElement).getByRole("link", { name: "Manage" })).toHaveAttribute(
-      "href",
-      "/settings/stripe",
-    );
+    expect(screen.queryByText("Stripe")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Acme Payments/)).not.toBeInTheDocument();
   });
 });

@@ -1,18 +1,38 @@
 ---
 title: X
-description: Connect one or more X accounts for account-specific publishing.
+description: Research conversations and manage an X account through the official MCP plugin.
 ---
 
-## What connecting does
+## Install and connect
 
-X is a personal OAuth connection. You can add more than one account and ask Chat to publish for a
-specific connected identity.
+X is an official Agent Plugin backed by [X's hosted MCP server](https://docs.x.com/tools/mcp).
+A workspace admin installs the immutable package from **Settings → Plugins → X**. Each person who
+wants to use X tools then connects their own X account from that plugin page.
+
+The most recently connected account powers plugin tools. Older X connections remain stored as a
+legacy fallback and become available again if the plugin is uninstalled.
 
 ## Scopes and permissions
 
-Posting defaults to **Ask**. opencompany rejects identical or substantially similar cross-account
-copy. The exact X OAuth scope and publishing-policy reference is coming soon. The connected posting
-account is separate from opencompany's managed, read-only public X research tools.
+The connection requests `tweet.read`, `tweet.write`, `users.read`, and `offline.access`. The plugin
+groups X's current non-streaming MCP tools into three controls:
+
+- **Research public X data — On:** public posts, profiles, lists, communities, trends, news, and
+  Spaces can be inspected automatically.
+- **Read account & private X data — Ask:** account data, analytics, timelines, bookmarks, messages,
+  and usage require approval by default.
+- **Manage X — Ask:** publishing, deleting, messaging, following, liking, list changes, and every
+  other mutation require approval by default.
+
+Some tools exposed by X require additional scopes or an X API access tier that the standard
+opencompany connection does not request. X can reject those calls until the account or app has the
+required access. X API usage may consume the connected developer app's paid credits. New or
+unclassified tools always start at **Ask**, even when X marks them read-only.
+
+OAuth credentials remain encrypted and server-side. The plugin gateway sends them only to the
+fixed `https://api.x.com/mcp` endpoint. Reconnect the account if X revokes the grant or the saved
+refresh token expires. X's own automation, duplicate-content, display, and developer policies still
+apply to every call; review proposed posts and destructive actions before approving them.
 
 ## Brain ingestion
 

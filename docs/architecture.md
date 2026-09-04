@@ -79,9 +79,10 @@ recovery. The runner never calls the public API for execution persistence.
 ## Wiki ingestion
 
 Provider ingress validates and normalizes source events before polling providers or buffering
-conversation windows. Buffer flushes use one transaction to enqueue the existing Brain work and the
-independent Wiki ingest job, so enabling Wiki does not change Brain behavior. A leased runner worker
-then cheaply triages Slack, Gmail, and GitHub items before the librarian applies page mutations
+activity windows. The Wiki is the default knowledge system and its source rows drive new ingestion.
+The retained Brain pipeline is a reversible legacy path: workspace UI and agent tools require
+`workspaces.legacy_brain_enabled`, while operations disable legacy `brain_sources` separately after
+cutover. A leased runner worker then cheaply triages Gmail and GitHub items before the librarian applies page mutations
 through the same authorized Wiki tool used by interactive agents; job results retain the outcome and
 touched page paths for ingestion activity.
 

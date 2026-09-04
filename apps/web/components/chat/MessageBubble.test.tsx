@@ -6,7 +6,7 @@ import {
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
 } from "@opencompany/agent-runtime";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BRAIN_TOOL_PART_TYPE, type ChatUiMessage, USE_ACTION_TOOL_PART_TYPE } from "@/lib/chat-ui";
@@ -15,9 +15,141 @@ import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";
 
 const emptyTaskLookup: ChatTaskLookup = new Map();
+const presentationMocks = vi.hoisted(() => ({
+  load: vi.fn(),
+}));
+
+vi.mock("@/components/AppDataProvider", () => ({
+  useAppDataOptional: () => ({ user: { email: "louis@acta.so" } }),
+}));
+vi.mock("@/lib/headless-chat-presentations", () => ({
+  loadHeadlessChatMessagePresentation: presentationMocks.load,
+}));
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  presentationMocks.load.mockReset();
+});
+
+describe("MessageBubble historical presentation details", () => {
+  it("renders a summary-backed pending use_action approval without loading historical detail", () => {
+    const onActionApproval = vi.fn(async () => undefined);
+    const summaryMessage = {
+      id: "assistant_pending_approval_summary",
+      role: "assistant",
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: {
+          source: "summary",
+          updatedAt: "2026-09-03T10:00:00.000Z",
+        },
+      },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_slack_search",
+          state: "approval-requested",
+          input: {
+            action: "plugin:slack:slack.slack_search_public_and_private",
+            params: { query: "launch plan", include_private: true },
+          },
+          approval: { id: "approval_slack_search" },
+        },
+      ],
+    } as ChatUiMessage;
+
+    const { rerender } = render(
+      <MessageBubble
+        message={summaryMessage}
+        taskLookup={emptyTaskLookup}
+        onActionApproval={onActionApproval}
+        allowActionApproval
+      />,
+    );
+
+    expect(screen.getByTestId("chat-action-approval")).toBeVisible();
+    expect(screen.getByText("Run Slack · Slack Search Public And Private?")).toBeVisible();
+    expect(screen.getByText("launch plan")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Accept" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Always allow" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Decline" })).toBeVisible();
+    expect(presentationMocks.load).not.toHaveBeenCalled();
+    expect(onActionApproval).not.toHaveBeenCalled();
+
+    rerender(
+      <MessageBubble
+        message={summaryMessage}
+        taskLookup={emptyTaskLookup}
+        onActionApproval={onActionApproval}
+      />,
+    );
+
+    expect(screen.queryByTestId("chat-action-approval")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-tool-call-use_action")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Decline" })).not.toBeInTheDocument();
+    expect(presentationMocks.load).not.toHaveBeenCalled();
+  });
+
+  it("shows loading and retry states before replacing a compact tool summary with full detail", async () => {
+    const user = userEvent.setup();
+    const summaryMessage = {
+      id: "assistant_summary",
+      role: "assistant",
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: {
+          source: "summary",
+          updatedAt: "2026-08-10T20:00:01.000Z",
+        },
+      },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: "history_search",
+          toolCallId: "tool_1",
+          state: "output-available",
+          input: { query: "launch" },
+          output: { result: "Compact preview" },
+        },
+      ],
+    } as ChatUiMessage;
+    const fullMessage = {
+      ...summaryMessage,
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: "history_search",
+          toolCallId: "tool_1",
+          state: "output-available",
+          input: { query: "launch", filters: { owner: "product" } },
+          output: { result: "Full provider result with every historical detail" },
+        },
+      ],
+    } as ChatUiMessage;
+    let rejectFirst!: (cause: Error) => void;
+    presentationMocks.load
+      .mockReturnValueOnce(
+        new Promise<ChatUiMessage>((_resolve, reject) => {
+          rejectFirst = reject;
+        }),
+      )
+      .mockResolvedValueOnce(fullMessage);
+
+    render(<MessageBubble message={summaryMessage} taskLookup={emptyTaskLookup} />);
+    await user.click(screen.getByRole("button", { name: /History Search/u }));
+    expect(screen.getByText("Loading details…")).toBeVisible();
+
+    await act(async () => rejectFirst(new Error("Temporary trace failure")));
+    expect(await screen.findByText("Temporary trace failure")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Full provider result with every historical detail/u)).toBeVisible(),
+    );
+    expect(presentationMocks.load).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("MessageBubble scheduled wakeups", () => {
@@ -352,7 +484,7 @@ describe("MessageBubble assistant errors", () => {
       ],
     };
 
-    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} turnActive />);
 
     const toolCall = screen.getByTestId("chat-tool-call-use_action");
     const disclosure = within(toolCall).getByRole("button", { name: /Linear List Issues/i });
@@ -368,6 +500,170 @@ describe("MessageBubble assistant errors", () => {
     expect(within(toolCall).getByText(/"team": "opencompany"/)).toBeInTheDocument();
     expect(within(toolCall).getByText(/"issues": \[\]/)).toBeInTheDocument();
     expect(screen.getByText("No open issues for the opencompany team.")).toBeInTheDocument();
+  });
+
+  it("confirms a failed GitHub tool is outside install scope before offering Add access", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        checkedAt: "2026-09-02T12:00:00.000Z",
+        installations: [],
+        target: {
+          owner: "opencompany",
+          repo: "private-repo",
+          state: "missing_installation",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const message: ChatUiMessage = {
+      id: "assistant_github_install_gap",
+      role: "assistant",
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_github_install_gap",
+          state: "output-available",
+          input: {
+            action: "plugin:github:github.pull_request_read",
+            params: { owner: "opencompany", repo: "private-repo", pullNumber: 12 },
+          },
+          output: {
+            ok: false,
+            action: "plugin:github:github.pull_request_read",
+            error: {
+              code: "provider_error",
+              source: "github",
+              message: "Resource not accessible by integration",
+            },
+          },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(await screen.findByTestId("github-install-gap")).toHaveTextContent(
+      "GitHub App is not installed on opencompany",
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/integrations/github-user/installations?owner=opencompany",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(screen.getByRole("link", { name: "Add access" })).toHaveAttribute(
+      "href",
+      "/api/integrations/github-user/start?returnTo=%2F&owner=opencompany",
+    );
+    await userEvent.click(screen.getByRole("link", { name: "Add access" }));
+    expect(screen.getByTestId("github-install-gap")).toHaveTextContent(
+      "Pending admin approval for opencompany",
+    );
+  });
+
+  it("keeps private GitHub recovery controls out of shared transcripts", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const message: ChatUiMessage = {
+      id: "assistant_shared_github_gap",
+      role: "assistant",
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_shared_github_gap",
+          state: "output-available",
+          input: {
+            action: "plugin:github:github.pull_request_read",
+            params: { owner: "opencompany", repo: "private-repo", pullNumber: 12 },
+          },
+          output: {
+            ok: false,
+            action: "plugin:github:github.pull_request_read",
+            error: { code: "provider_error", message: "Resource not accessible by integration" },
+          },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} readOnly />);
+
+    expect(screen.queryByTestId("github-install-gap")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("presents plugin action labels and acting identity without changing the canonical id", async () => {
+    const user = userEvent.setup();
+    const onActionApproval = vi.fn(async () => undefined);
+    const message: ChatUiMessage = {
+      id: "assistant_plugin_approval",
+      role: "assistant",
+      metadata: { sessionId: "chat_session_1" },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_plugin_approval",
+          state: "approval-requested",
+          input: {
+            action: "plugin:linear:linear.save_comment",
+            params: { issueId: "PRO-185", body: "Acceptance test" },
+          },
+          approval: { id: "approval_plugin_1" },
+        },
+      ],
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onActionApproval={onActionApproval}
+        allowActionApproval
+      />,
+    );
+
+    expect(screen.getByText("Run Linear · Save Comment?")).toBeVisible();
+    expect(screen.getByText("as louis@acta.so")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Decline" }));
+    await waitFor(() =>
+      expect(onActionApproval).toHaveBeenCalledWith({
+        approvalId: "approval_plugin_1",
+        action: "plugin:linear:linear.save_comment",
+        decision: "decline",
+      }),
+    );
+  });
+
+  it("labels a persisted declined plugin action as declined", async () => {
+    const user = userEvent.setup();
+    const message: ChatUiMessage = {
+      id: "assistant_plugin_declined",
+      role: "assistant",
+      metadata: { sessionId: "chat_session_1" },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_plugin_declined",
+          state: "approval-responded",
+          input: {
+            action: "plugin:linear:linear.save_comment",
+            params: { issueId: "PRO-185", body: "Do not create" },
+          },
+          approval: {
+            id: "approval_plugin_declined",
+            approved: false,
+            reason: "The user declined this action.",
+          },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    const disclosure = screen.getByRole("button", {
+      name: /Linear · Save Comment.*Declined/u,
+    });
+    expect(disclosure).toBeVisible();
+    expect(screen.queryByText("Approved")).not.toBeInTheDocument();
+    await user.click(disclosure);
+    expect(screen.getByText("The user declined this action.")).toBeVisible();
   });
 
   it("renders browser screenshots from the authenticated transcript route", () => {
@@ -704,7 +1000,7 @@ describe("MessageBubble assistant errors", () => {
       ],
     };
 
-    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} turnActive />);
 
     expect(screen.getByText("Use Capability")).toBeInTheDocument();
     expect(screen.getByText("ENG-123 tracks the launch.")).toBeInTheDocument();
@@ -712,6 +1008,233 @@ describe("MessageBubble assistant errors", () => {
 });
 
 describe("MessageBubble Codex interactions", () => {
+  it("compacts prior tool calls and assistant updates behind one disclosure", async () => {
+    const message: ChatUiMessage = {
+      id: "assistant_compacted_trace",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "I’ll inspect the current implementation." },
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_1",
+          state: "output-available",
+          input: { description: "Inspect implementation", command: "rg MessageBubble" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+        { type: "text", text: "The rendering path is client-side." },
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_2",
+          state: "output-available",
+          input: { description: "Run focused tests", command: "bun test MessageBubble" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+        { type: "text", text: "Shipped the compact turn UI." },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    const disclosure = screen.getByRole("button", { name: "2 tool calls, 2 messages" });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("Shipped the compact turn UI.")).toBeVisible();
+    expect(screen.queryByText("I’ll inspect the current implementation.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Inspect implementation")).not.toBeInTheDocument();
+
+    await userEvent.click(disclosure);
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("I’ll inspect the current implementation.")).toBeVisible();
+    expect(screen.getByText("The rendering path is client-side.")).toBeVisible();
+    expect(screen.getByText("Inspect implementation")).toBeVisible();
+    expect(screen.getByText("Run focused tests")).toBeVisible();
+  });
+
+  it("keeps adjacent persisted assistant updates distinct when compacting", async () => {
+    const message: ChatUiMessage = {
+      id: "assistant_adjacent_updates",
+      role: "assistant",
+      parts: [
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_1",
+          state: "output-available",
+          input: { description: "Inspect implementation", command: "rg MessageBubble" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+        {
+          type: "text",
+          text: "I found the rendering path.",
+          itemId: "assistant_update_1",
+        } as ChatUiMessage["parts"][number],
+        {
+          type: "text",
+          text: "The focused tests pass.",
+          itemId: "assistant_update_2",
+        } as ChatUiMessage["parts"][number],
+        {
+          type: "text",
+          text: "Shipped the compact turn UI.",
+          itemId: "assistant_final",
+        } as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    const disclosure = screen.getByRole("button", { name: "1 tool call, 2 messages" });
+    expect(screen.getByText("Shipped the compact turn UI.")).toBeVisible();
+    expect(screen.queryByText("I found the rendering path.")).not.toBeInTheDocument();
+    expect(screen.queryByText("The focused tests pass.")).not.toBeInTheDocument();
+
+    await userEvent.click(disclosure);
+
+    expect(screen.getByText("I found the rendering path.")).toBeVisible();
+    expect(screen.getByText("The focused tests pass.")).toBeVisible();
+  });
+
+  it("keeps a running tool visible during a compact coding turn", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_running_trace",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "I’m checking the viewer now." },
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_running",
+          state: "input-available",
+          input: { description: "Inspect viewer", command: "rg MessageBubble" },
+        } as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.queryByText(/tool call/)).not.toBeInTheDocument();
+    expect(screen.getByText("I’m checking the viewer now.")).toBeVisible();
+    expect(screen.getByText("Inspect viewer")).toBeVisible();
+  });
+
+  it("waits for the assistant turn to finish before compacting completed work", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_active_trace",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "I’m checking the viewer now." },
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_completed",
+          state: "output-available",
+          input: { description: "Inspect viewer", command: "rg MessageBubble" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+        { type: "text", text: "The first check passed. I’ll verify the lifecycle next." },
+      ],
+    };
+
+    const { rerender } = render(
+      <MessageBubble message={message} taskLookup={emptyTaskLookup} turnActive />,
+    );
+
+    expect(screen.queryByText("1 tool call, 1 message")).not.toBeInTheDocument();
+    expect(screen.getByText("I’m checking the viewer now.")).toBeVisible();
+    expect(screen.getByText("Inspect viewer")).toBeVisible();
+
+    rerender(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByRole("button", { name: "1 tool call, 1 message" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByText("I’m checking the viewer now.")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("The first check passed. I’ll verify the lifecycle next."),
+    ).toBeVisible();
+  });
+
+  it("keeps artifact cards visible while the surrounding trace compacts", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_artifact_trace",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Generating the launch plan now." },
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_artifact",
+          state: "output-available",
+          input: { description: "Write launch plan", command: "write launch-plan.md" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+        {
+          type: "data-artifact-file",
+          data: {
+            artifactId: "artifact_trace_1",
+            artifactVersionId: "version_1",
+            version: 1,
+            title: "Launch plan",
+            filename: "launch-plan.md",
+            mediaType: "text/markdown",
+            sizeBytes: 2_048,
+            state: "ready",
+          },
+        } as ChatUiMessage["parts"][number],
+        { type: "text", text: "The plan is attached above." },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByRole("button", { name: "1 tool call, 1 message" })).toBeVisible();
+    expect(screen.getByText("Launch plan")).toBeVisible();
+    expect(screen.getByText("The plan is attached above.")).toBeVisible();
+    expect(screen.queryByText("Generating the launch plan now.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Write launch plan")).not.toBeInTheDocument();
+  });
+
+  it("compacts trailing tool calls that follow the final assistant message", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_trailing_tools",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Done — everything is verified." },
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_trailing",
+          state: "output-available",
+          input: { description: "Clean up worktree", command: "git status" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByRole("button", { name: "1 tool call" })).toBeVisible();
+    expect(screen.getByText("Done — everything is verified.")).toBeVisible();
+    expect(screen.queryByText("Clean up worktree")).not.toBeInTheDocument();
+  });
+
+  it("keeps a tool-only turn expanded because no final message anchors the collapse", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_tool_only",
+      role: "assistant",
+      parts: [
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_only",
+          state: "output-available",
+          input: { description: "Inspect repository", command: "git log" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.queryByText(/tool call/)).not.toBeInTheDocument();
+    expect(screen.getByText("Inspect repository")).toBeVisible();
+  });
+
   it("renders described commands without shell wrappers or internal tool constants", () => {
     const message: ChatUiMessage = {
       id: "assistant_command",
@@ -737,6 +1260,64 @@ describe("MessageBubble Codex interactions", () => {
     expect(row).toHaveTextContent("git status --short");
     expect(row).not.toHaveTextContent("/bin/bash -lc");
     expect(row).not.toHaveTextContent(CODEX_COMMAND_TOOL_NAME);
+  });
+
+  it("offers repository access recovery for a failed sandbox git operation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          checkedAt: "2026-09-02T12:00:00.000Z",
+          installations: [
+            {
+              id: "123",
+              account: {
+                id: "987",
+                login: "opencompany",
+                type: "Organization",
+                avatarUrl: null,
+                htmlUrl: "https://github.com/opencompany",
+              },
+              repositorySelection: "selected",
+              permissions: { metadata: "read" },
+              pendingPermissions: ["actions", "checks", "contents", "issues", "pull_requests"],
+              suspendedAt: null,
+              repositories: [],
+            },
+          ],
+          target: {
+            owner: "opencompany",
+            repo: "private-repo",
+            state: "missing_repository",
+          },
+        }),
+      ),
+    );
+    const message: ChatUiMessage = {
+      id: "assistant_github_sandbox_gap",
+      role: "assistant",
+      parts: [
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_github_gap",
+          state: "output-available",
+          input: {
+            command: "git push https://github.com/opencompany/private-repo.git HEAD",
+          },
+          output: {
+            status: "failed",
+            exitCode: 128,
+            outputPreview: "remote: Resource not accessible by integration",
+          },
+        } as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(await screen.findByTestId("github-install-gap")).toHaveTextContent(
+      "GitHub App cannot access opencompany/private-repo",
+    );
   });
 
   it("renders semantic Read and MCP rows with file and tool chips", () => {

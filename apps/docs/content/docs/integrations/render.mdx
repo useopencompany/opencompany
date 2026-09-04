@@ -1,0 +1,61 @@
+---
+title: Render
+description: Deploy and operate services and datastores through Render's official MCP server.
+---
+
+## What the Plugin does
+
+Render is an official Agent Plugin for main Chat and persistent Codex or Claude Code sessions. Its
+integrity-pinned package connects Render's hosted MCP server to opencompany's action gateway. It can
+inspect services and deploys, troubleshoot with logs and metrics, create supported services and
+datastores, update environment variables, and trigger deploys.
+
+The Plugin is workspace-installed, while each person connects their own Render account. Installing
+or uninstalling the package never creates or removes that personal connection.
+
+## Permission layers
+
+The package uses three reviewed permission groups:
+
+1. **Inspect Render resources** defaults to **On** for service, deploy, database, Key Value, and
+   workspace inventory.
+2. **Read operational data** defaults to **Ask** because logs, metrics, and database query results
+   can contain sensitive production or customer data.
+3. **Manage Render infrastructure** defaults to **Ask** because these tools can create billable
+   resources, replace environment variables, and trigger deploys.
+4. Newly discovered tools stay on **Ask** until a reviewed package version classifies them.
+
+Persistent coding sessions receive only permissions set to **On**. Leave operational reads and
+infrastructure management on **Ask** unless you intentionally trust a session to run them without a
+pause.
+
+## Connect Render
+
+1. Ask a workspace admin to install Render under **Settings → Plugins → Render**.
+2. Open [Render API Keys](https://dashboard.render.com/u/settings/api-keys), create a named key, and
+   copy it when Render displays it.
+3. Paste the key on the Render Plugin page and save it.
+4. Review the three permission groups before allowing operational reads or infrastructure changes.
+
+Render API keys currently provide account-level access rather than granular scopes. opencompany
+encrypts the key, keeps it server-side, and binds it only to Render's official hosted MCP endpoint
+at `https://mcp.render.com/mcp`. Disconnecting Render removes the saved credential. Revoke the key
+in Render immediately if you suspect it was exposed.
+
+## Provider limitations
+
+The hosted MCP server currently creates web services, static sites, cron jobs, Postgres databases,
+and Key Value instances. It does not expose every Render configuration or service type, and direct
+updates to existing services are limited to environment variables and deploy triggers. Read-only
+SQL is enforced by Render for Postgres query calls.
+
+See [Render's MCP documentation](https://render.com/docs/mcp-server) for the current tool set and
+provider limitations.
+
+## Example requests
+
+- “List my Render services and show the latest deploy status for each.”
+- “Summarize production error logs from the last hour without returning request payloads.”
+- “Deploy this API as a Render web service after showing me the proposed configuration.”
+
+Render is not a Brain source. Tool results enter Brain only through an explicit supported capture.

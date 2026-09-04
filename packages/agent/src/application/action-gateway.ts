@@ -4,9 +4,12 @@ import type {
   ActionHostGatewayRequest,
 } from "@opencompany/agent-runtime";
 import type { CodexChatEngine } from "@opencompany/db/product-schema";
+import { createLogger } from "@opencompany/observability";
 import { type ActionCatalogPolicyName, projectActionCatalog } from "../actions/policy";
 import { type ActionInvocationClaim, serveActionRequest } from "../actions/service";
 import type { CapabilityTurnState, ResolvedActionCatalog } from "../actions/types";
+
+const logger = createLogger({ service: "opencompany-agent", runtime: "action-gateway" });
 
 export type ActionPrincipal = {
   actorId: string;
@@ -24,6 +27,14 @@ export type ActionServiceRunRef = {
   actorId: string;
   workspaceId: string;
   policy: ActionCatalogPolicyName;
+};
+
+export type ActionGatewayApprovalRecord = {
+  actionId: string;
+  sourceId: string;
+  capabilityId: string;
+  inputHash: string;
+  status: "pending" | "approved" | "denied";
 };
 
 type WithRunId<T> = T extends { turnId: string } ? Omit<T, "turnId"> & { runId: string } : never;
@@ -64,6 +75,15 @@ export type ActionGatewayServiceDependencies = {
     invocationId: string;
     maxCalls: number;
   }) => Promise<ActionInvocationClaim>;
+  registerApproval: (input: {
+    run: ActionServiceRunRef;
+    invocationId: string;
+    actionId: string;
+    sourceId: string;
+    capabilityId: string;
+    params: Record<string, unknown>;
+    decision?: "pending" | "denied";
+  }) => Promise<ActionGatewayApprovalRecord | null>;
   evaluateApproval: (input: {
     request: Extract<ActionServiceRequest, { operation: "approval" }>;
     context: ActionPrincipal;
@@ -103,7 +123,7 @@ export async function executeActionHostGatewayService(input: {
         actorId: context.actorId,
         workspaceId: context.workspaceId,
       }),
-      context.policy ?? "cloudReadOnly",
+      context.policy ?? "foregroundInteractive",
     );
   } catch {
     return gatewayError("internal", "The action catalog could not be loaded.");
@@ -133,7 +153,27 @@ export async function executeActionHostGatewayService(input: {
           `"${approvalRequest.action}" is not an available action.`,
         );
       }
-      if (action.permissionMode === "ask") return { ok: true, needsApproval: true };
+      if (action.permissionMode === "ask") {
+        const approval = await dependencies.registerApproval({
+          run,
+          invocationId: approvalRequest.invocationId,
+          actionId: action.id,
+          sourceId: action.provider,
+          capabilityId: action.capability,
+          params: approvalRequest.params,
+          ...(run.policy === "headless" ? { decision: "denied" as const } : {}),
+        });
+        if (!approval) {
+          return gatewayError(
+            "invalid_params",
+            "This action invocation does not match its existing approval request.",
+          );
+        }
+        return {
+          ok: true,
+          needsApproval: run.policy !== "headless" && approval.status === "pending",
+        };
+      }
       await dependencies.recordSourceDiscovery({ run, sourceId: action.provider });
       return {
         ok: true,
@@ -144,6 +184,52 @@ export async function executeActionHostGatewayService(input: {
           signal: input.signal,
         }),
       };
+    }
+    if (input.request.operation === "execute") {
+      const executeRequest = input.request;
+      const action = catalog.actions.find((candidate) => candidate.id === executeRequest.action);
+      if (action?.permissionMode === "ask") {
+        const approval = await dependencies.registerApproval({
+          run,
+          invocationId: executeRequest.invocationId,
+          actionId: action.id,
+          sourceId: action.provider,
+          capabilityId: action.capability,
+          params: executeRequest.params,
+          ...(run.policy === "headless" ? { decision: "denied" as const } : {}),
+        });
+        if (!approval) {
+          return gatewayError(
+            "invalid_params",
+            "This action invocation does not match its existing approval request.",
+          );
+        }
+        if (approval.status === "pending") {
+          return {
+            ok: false,
+            action: action.id,
+            error: {
+              code: "approval_required",
+              source: action.provider,
+              message: `Approval is required before ${JSON.stringify(action.id)} can run.`,
+            },
+          };
+        }
+        if (approval.status === "denied") {
+          return {
+            ok: false,
+            action: action.id,
+            error: {
+              code: "not_permitted",
+              source: action.provider,
+              message:
+                run.policy === "headless"
+                  ? `Headless turns cannot approve ${JSON.stringify(action.id)}, so it was denied.`
+                  : `The user denied approval for ${JSON.stringify(action.id)}.`,
+            },
+          };
+        }
+      }
     }
     return await serveActionRequest({
       request: gatewayRequest(input.request),
@@ -171,7 +257,14 @@ export async function executeActionHostGatewayService(input: {
           ...(context.engine ? { sourceEngine: context.engine } : {}),
         }),
     });
-  } catch {
+  } catch (error) {
+    logger.error("Action gateway service request failed", {
+      event: "opencompany.action_gateway_service_request_failed",
+      operation: input.request.operation,
+      action_id: "action" in input.request ? input.request.action : undefined,
+      invocation_id: "invocationId" in input.request ? input.request.invocationId : undefined,
+      error,
+    });
     return gatewayError("internal", "The action request could not be completed.");
   }
 }
@@ -186,7 +279,7 @@ function actionRunRef(request: ActionServiceRequest, context: ActionPrincipal) {
     runId: request.runId,
     actorId: context.actorId,
     workspaceId: context.workspaceId,
-    policy: context.policy ?? "cloudReadOnly",
+    policy: context.policy ?? "foregroundInteractive",
   };
 }
 

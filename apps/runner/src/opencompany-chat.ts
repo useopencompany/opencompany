@@ -1,7 +1,3 @@
-import { resolveActionCatalog } from "@opencompany/agent/actions/catalog";
-import { executeAction } from "@opencompany/agent/actions/execute";
-import { projectActionCatalog } from "@opencompany/agent/actions/policy";
-import type { ResolvedActionCatalog } from "@opencompany/agent/actions/types";
 import {
   CHAT_MAX_STEPS,
   CHAT_MAX_STEPS_WITH_SANDBOX,
@@ -11,7 +7,6 @@ import {
   TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
 } from "@opencompany/agent/chat-agent";
 import type {
-  ChatActionCatalog,
   ChatUiMessage,
   StoredChatMessage,
   WebFetchToolOutput,
@@ -26,6 +21,7 @@ import { executeChatExaFetch } from "@opencompany/agent/chat-web-fetch";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
 import { resolveImessageProvider } from "@opencompany/agent/imessage/provider";
 import { createSendUserMessageRunner } from "@opencompany/agent/imessage/send-user-message";
+import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import {
   AGENT_MODEL_CATALOG,
@@ -43,12 +39,15 @@ import {
   type ChatMessageAttachment,
   type CodexChatSession,
   type CodexChatTurn,
+  chatContextCompactions,
   chatMessages,
+  type ProductChatContextCompactionState,
 } from "@opencompany/db/product-schema";
 import {
   DEFAULT_BRAIN_SLUG,
   getBrainAccess,
   getWorkspaceRole,
+  isLegacyBrainEnabledForWorkspace,
   listAccessibleBrains,
 } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
@@ -60,14 +59,8 @@ import {
 } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
 import * as ai from "ai";
-import {
-  convertToModelMessages,
-  createGateway,
-  type LanguageModelUsage,
-  parsePartialJson,
-  stepCountIs,
-} from "ai";
-import { asc, eq } from "drizzle-orm";
+import { convertToModelMessages, type LanguageModelUsage, parsePartialJson, stepCountIs } from "ai";
+import { asc, eq, sql } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
 import { runTaskBrainRead } from "./codex-brain-tool";
 import {
@@ -86,12 +79,19 @@ import {
   type ProductChatProjector,
   type ProductChatUiPart,
 } from "./opencompany-chat-projector";
+import {
+  CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
+  CONTEXT_COMPACTION_SYSTEM_PROMPT,
+  compactProductChatContextIfNeeded,
+} from "./opencompany-context-compaction";
 import { attachHostSkillsToPrompt, loadHostTools } from "./opencompany-host-tools";
+import { rowsFromExecute } from "./sql-exec";
 import {
   buildTaskTerminalProjection,
   buildTaskTurnCompletion,
   closeTaskTurn,
   markTaskTurnRunning,
+  orchestrateTaskFailure,
   type TaskTurnContext,
 } from "./task-turn";
 import { loadWorkflowTaskSkillBundles } from "./workflow-skill-bundles";
@@ -142,6 +142,18 @@ export async function runProductChatTurn(input: {
     throw new Error(`Session ${session.id} is not an opencompany-engine session.`);
   }
 
+  const feature = input.taskContext ? "task" : "chat";
+  const modelResolution = session.workspaceId
+    ? await resolveProductLanguageModel({
+        workspaceId: session.workspaceId,
+        modelId: session.model,
+        feature,
+        gatewayApiKey: env.vercelAiGatewayApiKey,
+        db: getDb(),
+      })
+    : null;
+  const subscriptionCovered = modelResolution?.billing === "subscription_covered";
+
   const projector = createProductChatProjector({
     target: {
       userWorkosId: turn.userWorkosId,
@@ -153,6 +165,8 @@ export async function runProductChatTurn(input: {
       assistantMessageId: turn.assistantMessageId,
       workspaceId: session.workspaceId,
       model: session.model,
+      billing: subscriptionCovered ? "subscription_covered" : "metered_gateway",
+      provider: subscriptionCovered ? "codex-backend" : "gateway",
       leaseId,
       leaseOwner,
       ...(input.canonicalAttemptId ? { canonicalAttemptId: input.canonicalAttemptId } : {}),
@@ -173,16 +187,21 @@ export async function runProductChatTurn(input: {
     return "settled";
   }
 
-  if (session.workspaceId) {
+  if (session.workspaceId && !subscriptionCovered) {
     if (!(await hasHostedTurnCredits(session.workspaceId))) {
       const message =
         "This workspace is out of credits. Hobby usage refreshes on the first of the month; Pro admins can add credits in Settings → Billing.";
       projection = { parts: [{ type: "text", text: message }] };
-      await projector.failed(
-        message,
-        projection,
-        input.taskContext ? buildTaskTerminalProjection(input.taskContext) : null,
-      );
+      const taskCompletion = input.taskContext
+        ? await orchestrateTaskFailure({
+            context: input.taskContext,
+            error: message,
+            env,
+            session,
+            turn,
+          })
+        : null;
+      await projector.failed(message, projection, taskCompletion);
       return "settled";
     }
   }
@@ -209,26 +228,92 @@ export async function runProductChatTurn(input: {
     });
     runtimeCleanup = runtime.cleanup;
     throwIfAborted(generationController.signal);
-    const messages = await loadProductChatModelMessages({
+    const storedMessages = await loadProductChatStoredMessages({
       chatSessionId: session.chatSessionId,
       currentUserMessageId: turn.userMessageId,
-      modelId: runtime.model,
-      blobToken: env.blobReadWriteToken,
       includeCurrentAssistantMessage: turn.settings.approvalContinuation === true,
-      activeSkills: runtime.activeSkills,
     });
     throwIfAborted(generationController.signal);
-    const gateway = createGateway({ apiKey: env.vercelAiGatewayApiKey });
-    const { streamText } = getBraintrustAISDK(ai);
+    if (!modelResolution) {
+      throw new Error("Durable opencompany chat session is missing its workspace.");
+    }
+    const { generateText, streamText } = getBraintrustAISDK(ai);
     const attribution = createGatewayAttribution({
       userWorkosId: turn.userWorkosId,
-      feature: input.taskContext ? "task" : "chat",
+      feature,
       chatSessionId: session.chatSessionId,
       ...(input.taskContext ? { taskId: input.taskContext.task.id } : {}),
       ...(runtime.brain ? { brainRef: runtime.brain.id } : {}),
     });
+    const providerOptions =
+      modelResolution.providerOptions ?? productChatGatewayProviderOptions(attribution);
+    const previousCompaction = await loadProductChatContextCompaction(session.chatSessionId);
+    let context;
+    try {
+      context = await compactProductChatContextIfNeeded({
+        storedMessages,
+        currentUserMessageId: turn.userMessageId,
+        modelId: runtime.model,
+        system: runtime.system,
+        tools: runtime.toolContext.tools,
+        previousState: previousCompaction,
+        toModelMessages: (messages) =>
+          productModelMessagesFromReplay(messages, turn.userMessageId, {
+            modelId: runtime.model,
+            blobToken: env.blobReadWriteToken,
+            activeSkills: runtime.activeSkills,
+          }),
+        summarize: async (prompt) => {
+          const result = await generateText({
+            model: modelResolution.model,
+            system: `${runtime.system}\n\n${CONTEXT_COMPACTION_SYSTEM_PROMPT}`,
+            prompt,
+            maxOutputTokens: CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
+            abortSignal: generationController.signal,
+            providerOptions,
+          });
+          return { text: result.text, usage: result.usage };
+        },
+        persist: (state) =>
+          persistProductChatContextCompaction({
+            state,
+            chatSessionId: session.chatSessionId,
+            codexChatSessionId: session.id,
+            turnId: turn.id,
+            leaseId,
+            leaseOwner,
+          }),
+      });
+    } catch (error) {
+      logger.warn("Durable opencompany chat context compaction failed", {
+        event: "opencompany.goat_opencompany_chat_context_compaction_failed",
+        turn_id: turn.id,
+        chat_session_id: session.chatSessionId,
+        model: runtime.model,
+        error: errorMessage(error),
+      });
+      throw error;
+    }
+    if (context.compacted && context.state) {
+      logger.info("Durable opencompany chat context compacted", {
+        event: "opencompany.goat_opencompany_chat_context_compacted",
+        turn_id: turn.id,
+        chat_session_id: session.chatSessionId,
+        model: runtime.model,
+        generation: context.state.generation,
+        compacted_from_message_id: context.state.compactedFromMessageId,
+        compacted_through_message_id: context.state.compactedThroughMessageId,
+        first_retained_message_id: context.state.firstRetainedMessageId,
+        estimated_tokens_before: context.state.estimatedTokensBefore,
+        estimated_tokens_after: context.state.estimatedTokensAfter,
+      });
+      if (context.usage) {
+        await projector.recordStepUsage({ stepIndex: -1, usage: context.usage });
+      }
+    }
+    const messages = context.messages;
     const stream = streamText({
-      model: gateway(runtime.model),
+      model: modelResolution.model,
       system: runtime.system,
       messages,
       tools: runtime.toolContext.tools,
@@ -242,7 +327,7 @@ export async function runProductChatTurn(input: {
         ? { experimental_repairToolCall: runtime.toolContext.repairToolCall }
         : {}),
       abortSignal: generationController.signal,
-      providerOptions: productChatGatewayProviderOptions(attribution),
+      providerOptions,
     });
 
     projection = await consumeProductChatStream({
@@ -286,7 +371,7 @@ export async function runProductChatTurn(input: {
     const taskOutcome = input.taskContext
       ? await closeTaskTurn({
           context: input.taskContext,
-          finalContent: taskResult,
+          run: { status: "completed", result: taskResult },
           env,
           session,
           turn,
@@ -301,8 +386,13 @@ export async function runProductChatTurn(input: {
         ? buildTaskTurnCompletion({
             context: input.taskContext,
             result: taskResult,
-            reportedOutcome: taskOutcome?.reportedOutcome,
-            outcomeComment: taskOutcome?.outcomeComment,
+            disposition:
+              taskOutcome?.disposition === "done" ||
+              taskOutcome?.disposition === "needs_attention" ||
+              taskOutcome?.disposition === "waiting"
+                ? taskOutcome.disposition
+                : null,
+            outcomeComment: taskOutcome?.comment,
           })
         : null,
     );
@@ -343,11 +433,16 @@ export async function runProductChatTurn(input: {
       error_name: effectiveError instanceof Error ? effectiveError.name : typeof effectiveError,
       error: message,
     });
-    await projector.failed(
-      message,
-      projection,
-      input.taskContext ? buildTaskTerminalProjection(input.taskContext) : null,
-    );
+    const taskCompletion = input.taskContext
+      ? await orchestrateTaskFailure({
+          context: input.taskContext,
+          error: message,
+          env,
+          session,
+          turn,
+        })
+      : null;
+    await projector.failed(message, projection, taskCompletion);
     return "settled";
   } finally {
     await abortWatcher.stop();
@@ -391,7 +486,10 @@ export async function consumeProductChatStream(input: {
   let lastPresentationAt = now() - presentationFlushIntervalMs;
   let presentedContent = projectionText(input.initialProjection ?? { parts: [] });
   let dirty = false;
-  let latestUsage: LanguageModelUsage | undefined;
+  // The persisted usage drives the context-window meter, so it must remain the
+  // latest individual model step. AI SDK's finish event reports cumulative usage
+  // across every step in the turn, which can exceed the model's context window.
+  let latestStepUsage: LanguageModelUsage | undefined;
   let finishReason: string | undefined;
   let stepIndex = 0;
 
@@ -401,7 +499,7 @@ export async function consumeProductChatStream(input: {
 
   const projection = (): ProductChatProjection => ({
     parts: cloneParts(parts),
-    ...(latestUsage ? { usage: latestUsage } : {}),
+    ...(latestStepUsage ? { contextUsage: latestStepUsage } : {}),
     ...(finishReason ? { finishReason } : {}),
   });
   const flush = async (force = false) => {
@@ -664,16 +762,13 @@ export async function consumeProductChatStream(input: {
         appendPart({ type: "step-start" });
       } else if (part.type === "finish-step") {
         if (isLanguageModelUsage(part.usage)) {
-          latestUsage = part.usage;
+          latestStepUsage = part.usage;
           await input.sink.recordStepUsage({ stepIndex, usage: part.usage });
         }
         stepIndex += 1;
         await flush(true);
       } else if (part.type === "finish") {
         finishReason = readString(part.finishReason) ?? undefined;
-        if (isLanguageModelUsage(part.totalUsage)) {
-          latestUsage = part.totalUsage;
-        }
       } else if (part.type === "abort") {
         throw abortReason(input.signal, readString(part.reason) ?? "Model stream was aborted.");
       } else if (part.type === "error") {
@@ -730,6 +825,19 @@ export async function opencompanyModelMessagesFromStored(
     }>;
   },
 ) {
+  const replayMessages = replayMessagesThroughCurrent(
+    storedMessages,
+    currentUserMessageId,
+    options?.includeCurrentAssistantMessage === true,
+  );
+  return productModelMessagesFromReplay(replayMessages, currentUserMessageId, options);
+}
+
+function replayMessagesThroughCurrent(
+  storedMessages: readonly StoredChatMessage[],
+  currentUserMessageId: string,
+  includeCurrentAssistantMessage: boolean,
+) {
   const currentIndex = storedMessages.findIndex(
     (message) => message.id === currentUserMessageId && message.role === "user",
   );
@@ -737,13 +845,30 @@ export async function opencompanyModelMessagesFromStored(
     throw new Error(`opencompany chat user message ${currentUserMessageId} was not found.`);
   }
   const nextMessage = storedMessages[currentIndex + 1];
-  const replayMessages = storedMessages.slice(
+  return storedMessages.slice(
     0,
-    currentIndex +
-      (options?.includeCurrentAssistantMessage && nextMessage?.role === "assistant" ? 2 : 1),
+    currentIndex + (includeCurrentAssistantMessage && nextMessage?.role === "assistant" ? 2 : 1),
   );
+}
+
+async function productModelMessagesFromReplay(
+  replayMessages: readonly StoredChatMessage[],
+  currentUserMessageId: string,
+  options?: {
+    modelId?: string | undefined;
+    blobToken?: string | undefined;
+    activeSkills?: Array<{
+      id: string;
+      name: string;
+      description: string;
+      instructions: string;
+    }>;
+  },
+) {
   const uiMessages = replayMessages.map((message) => {
-    const uiMessage = toChatUiMessage(message);
+    // Server-side replay retains only the provider metadata needed for encrypted
+    // Responses reasoning continuity. Browser-facing serialization still strips it.
+    const uiMessage = toChatUiMessage(message, { preserveProviderMetadata: true });
     return message.id === currentUserMessageId && options?.activeSkills?.length
       ? replaceChatUiMessageText(
           uiMessage,
@@ -761,18 +886,10 @@ export async function opencompanyModelMessagesFromStored(
   );
 }
 
-async function loadProductChatModelMessages(input: {
+async function loadProductChatStoredMessages(input: {
   chatSessionId: string;
   currentUserMessageId: string;
-  modelId: string;
-  blobToken: string | undefined;
   includeCurrentAssistantMessage: boolean;
-  activeSkills?: Array<{
-    id: string;
-    name: string;
-    description: string;
-    instructions: string;
-  }>;
 }) {
   const rows = await getDb()
     .select({
@@ -797,12 +914,91 @@ async function loadProductChatModelMessages(input: {
     taskPrompt: null,
     taskStatus: null,
   }));
-  return opencompanyModelMessagesFromStored(storedMessages, input.currentUserMessageId, {
-    modelId: input.modelId,
-    blobToken: input.blobToken,
-    includeCurrentAssistantMessage: input.includeCurrentAssistantMessage,
-    ...(input.activeSkills ? { activeSkills: input.activeSkills } : {}),
-  });
+  return replayMessagesThroughCurrent(
+    storedMessages,
+    input.currentUserMessageId,
+    input.includeCurrentAssistantMessage,
+  );
+}
+
+async function loadProductChatContextCompaction(
+  chatSessionId: string,
+): Promise<ProductChatContextCompactionState | null> {
+  const [row] = await getDb()
+    .select({
+      summary: chatContextCompactions.summary,
+      model: chatContextCompactions.model,
+      generation: chatContextCompactions.generation,
+      compactedFromMessageId: chatContextCompactions.compactedFromMessageId,
+      compactedThroughMessageId: chatContextCompactions.compactedThroughMessageId,
+      firstRetainedMessageId: chatContextCompactions.firstRetainedMessageId,
+      estimatedTokensBefore: chatContextCompactions.estimatedTokensBefore,
+      estimatedTokensAfter: chatContextCompactions.estimatedTokensAfter,
+    })
+    .from(chatContextCompactions)
+    .where(eq(chatContextCompactions.chatSessionId, chatSessionId))
+    .limit(1);
+  return row ?? null;
+}
+
+async function persistProductChatContextCompaction(input: {
+  state: ProductChatContextCompactionState;
+  chatSessionId: string;
+  codexChatSessionId: string;
+  turnId: string;
+  leaseId: string;
+  leaseOwner: string;
+}) {
+  const { state } = input;
+  const now = new Date();
+  const result = await getDb().execute(sql`
+    INSERT INTO goat.chat_context_compactions (
+      chat_session_id,
+      summary,
+      model,
+      generation,
+      compacted_from_message_id,
+      compacted_through_message_id,
+      first_retained_message_id,
+      estimated_tokens_before,
+      estimated_tokens_after,
+      created_at,
+      updated_at
+    )
+    SELECT
+      ${input.chatSessionId},
+      ${state.summary},
+      ${state.model},
+      ${state.generation},
+      ${state.compactedFromMessageId},
+      ${state.compactedThroughMessageId},
+      ${state.firstRetainedMessageId},
+      ${state.estimatedTokensBefore},
+      ${state.estimatedTokensAfter},
+      ${now},
+      ${now}
+    WHERE EXISTS (
+      SELECT 1
+      FROM goat.codex_chat_turns AS turn
+      WHERE turn.id = ${input.turnId}
+        AND turn.codex_chat_session_id = ${input.codexChatSessionId}
+        AND turn.lease_id = ${input.leaseId}
+        AND turn.lease_owner = ${input.leaseOwner}
+        AND turn.status = 'running'
+    )
+    ON CONFLICT (chat_session_id) DO UPDATE
+    SET summary = EXCLUDED.summary,
+        model = EXCLUDED.model,
+        generation = EXCLUDED.generation,
+        compacted_from_message_id = EXCLUDED.compacted_from_message_id,
+        compacted_through_message_id = EXCLUDED.compacted_through_message_id,
+        first_retained_message_id = EXCLUDED.first_retained_message_id,
+        estimated_tokens_before = EXCLUDED.estimated_tokens_before,
+        estimated_tokens_after = EXCLUDED.estimated_tokens_after,
+        updated_at = EXCLUDED.updated_at
+    RETURNING chat_session_id
+  `);
+  if (rowsFromExecute(result).length === 0) throw new CodexChatLeaseLostError();
 }
 
 async function loadProductChatProjection(
@@ -947,9 +1143,10 @@ async function resolveProductChatRuntime(input: {
   if (!workspaceRole) {
     throw new Error("You no longer have access to this chat's workspace.");
   }
+  const legacyBrainEnabled = await isLegacyBrainEnabledForWorkspace(workspaceId, { db: getDb() });
 
   let brain = null;
-  if (session.brainRef) {
+  if (legacyBrainEnabled && session.brainRef) {
     const access = await getBrainAccess(
       { userWorkosId: turn.userWorkosId, brainRef: session.brainRef },
       { db: getDb() },
@@ -958,7 +1155,7 @@ async function resolveProductChatRuntime(input: {
       throw new Error("You no longer have access to this chat's Brain.");
     }
     brain = access.brain;
-  } else {
+  } else if (legacyBrainEnabled) {
     const brains = await listAccessibleBrains(
       { userWorkosId: turn.userWorkosId, workspaceId },
       { db: getDb() },
@@ -966,81 +1163,32 @@ async function resolveProductChatRuntime(input: {
     brain = brains.find((candidate) => candidate.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
   }
 
-  const resolved = await resolveActionCatalog({
-    userWorkosId: turn.userWorkosId,
-    workspaceId,
-  }).catch(() => ({ providers: [], actions: [] }) as ResolvedActionCatalog);
-  const onCatalog = projectActionCatalog(resolved, "headless");
-  const dispatcherCatalog: ChatActionCatalog = {
-    sources: onCatalog.providers.map((source) => ({
-      ...source,
-      kind: source.kind ?? "integration",
-    })),
-    actions: onCatalog.actions.map((action) => ({
-      id: action.id,
-      source: action.provider,
-      description: action.description,
-      params: action.params,
-      permissionMode: action.permissionMode,
-    })),
-  };
-  const directActionDispatcher =
-    dispatcherCatalog.actions.length > 0
-      ? {
-          catalog: dispatcherCatalog,
-          execute: (call: {
-            action: string;
-            params: Record<string, unknown>;
-            toolCallId: string;
-          }) =>
-            executeAction({
-              catalog: onCatalog,
-              actionId: call.action,
-              params: call.params,
-              userWorkosId: turn.userWorkosId,
-              workspaceId,
-              chatSessionId: session.chatSessionId,
-              toolCallId: call.toolCallId,
-              sourceTurnId: turn.id,
-              sourceMessageId: turn.assistantMessageId,
-              sourceEngine: "opencompany",
-              signal,
-              currentDate: new Date(),
-              userTimezone: "UTC",
-            }),
-        }
-      : null;
-  const actionDispatcher = taskContext
-    ? directActionDispatcher
-    : await createActionDispatcher({
-        sessionId: session.id,
-        turnId: turn.id,
-        signal,
-        approvalContinuation: Boolean(turn.settings.approvalContinuation),
-      });
-  const hostTools = taskContext
-    ? null
-    : await loadHostTools({
-        sessionId: session.id,
-        turnId: turn.id,
-        env,
-        signal,
-        mentionedSkillIds: (turn.settings.mentions ?? []).map((mention) => mention.id),
-        approvalContinuation: Boolean(turn.settings.approvalContinuation),
-      });
-  if (!taskContext && (!actionDispatcher || !hostTools)) {
+  const actionDispatcher = await createActionDispatcher({
+    sessionId: session.id,
+    turnId: turn.id,
+    signal,
+    approvalContinuation: Boolean(turn.settings.approvalContinuation),
+  });
+  const hostTools = await loadHostTools({
+    sessionId: session.id,
+    turnId: turn.id,
+    env,
+    signal,
+    mentionedSkillIds: (turn.settings.mentions ?? []).map((mention) => mention.id),
+    approvalContinuation: Boolean(turn.settings.approvalContinuation),
+  });
+  if (!actionDispatcher || !hostTools) {
     throw new Error("The durable Chat host gateways are not configured.");
   }
 
   const currentDate = new Date();
-  const brainCapture =
-    brain && !taskContext
-      ? createBrainCaptureRunner({
-          sessionId: session.id,
-          turnId: turn.id,
-          signal,
-        })
-      : null;
+  const brainCapture = brain
+    ? createBrainCaptureRunner({
+        sessionId: session.id,
+        turnId: turn.id,
+        signal,
+      })
+    : null;
   const exaApiKey = env.exaApiKey?.trim();
   const imessageDelivery =
     resolveImessageProvider() !== null
@@ -1082,6 +1230,7 @@ async function resolveProductChatRuntime(input: {
     ...(hostTools?.createWorkspaceSkill
       ? { createWorkspaceSkill: hostTools.createWorkspaceSkill }
       : {}),
+    ...(hostTools?.editWorkspaceSkill ? { editWorkspaceSkill: hostTools.editWorkspaceSkill } : {}),
     ...(hostTools?.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
     ...(hostTools?.browserTools ? { browserTools: hostTools.browserTools } : {}),
     ...(hostTools?.browserProfiles ? { browserProfiles: hostTools.browserProfiles } : {}),
@@ -1138,7 +1287,7 @@ async function resolveProductChatRuntime(input: {
     browserToolsEnabled: Boolean(hostTools?.browserTools),
     taskToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
     scheduleToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
-    brainCaptureEnabled: Boolean(brainCapture),
+    wikiToolEnabled: Boolean(hostTools?.runWiki),
     activeBrain: brain
       ? {
           name: brain.name,

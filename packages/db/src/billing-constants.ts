@@ -52,8 +52,10 @@ export function calendarMonthWindow(now: Date) {
   return { start, resetAt };
 }
 
-// Ingestion model tiers: both are metered (model cost + fee); "frontier" just
-// runs a more expensive model.
+export const WIKI_INGEST_MODEL = "deepseek/deepseek-v4-flash";
+
+// Brain ingestion model tiers: both are metered (model cost + fee); "frontier"
+// just runs a more expensive model.
 //
 // Basic is Haiku 4.5, not an open-source model: kimi-k2.6's per-token discount
 // ($0.95/$4 vs Haiku's $1/$5) was erased by step inflation — in prod it

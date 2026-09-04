@@ -7,6 +7,7 @@ import {
   createOrResetJamieWebhookEndpointAction,
   saveJamieWebhookApiKeyAction,
 } from "./jamie-actions";
+import { saveRenderApiKeyAction } from "./render-actions";
 import {
   disconnectStripeIntegrationAction,
   saveStripeRestrictedApiKeyAction,
@@ -72,6 +73,33 @@ describe("provider account command adapters", () => {
     expect(request.method).toBe("PUT");
     expect(new URL(request.url).pathname).toBe("/v1/integration-accounts/attio");
     await expect(request.json()).resolves.toEqual({ apiKey: "attio-key-1234567890" });
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("connects Render through PUT without exposing the API key in the response", async () => {
+    const requests = stubApi(() =>
+      Response.json({
+        data: {
+          state: {
+            provider: "render",
+            connected: true,
+            status: "connected",
+            integrationId: "gint_render",
+            accountName: "Acme",
+            statusReason: null,
+            capabilityModes: {},
+            toolModes: {},
+          },
+        },
+        meta,
+      }),
+    );
+
+    await expect(saveRenderApiKeyAction(" rnd_abcdefgh12345678 ")).resolves.toEqual({ ok: true });
+    const request = requests[0] as Request;
+    expect(request.method).toBe("PUT");
+    expect(new URL(request.url).pathname).toBe("/v1/integration-accounts/render");
+    await expect(request.json()).resolves.toEqual({ apiKey: "rnd_abcdefgh12345678" });
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 

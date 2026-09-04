@@ -33,6 +33,12 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "on",
     },
     {
+      id: "query",
+      label: "Read Gmail",
+      description: "Search and read messages, threads, drafts, and labels in your Gmail account.",
+      defaultMode: "ask",
+    },
+    {
       id: "draft",
       label: "Create drafts",
       description: "Save new email drafts in Gmail for you to review and send.",
@@ -49,27 +55,55 @@ export const PROVIDER_CAPABILITIES: Partial<
     {
       id: "read",
       label: "Find & read files",
-      description: "Search Google Drive and read the contents of Google Docs and Sheets.",
+      description: "Search Google Drive and inspect files you can access.",
       defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read files & permissions",
+      description: "Read or download file contents and inspect who can access a file.",
+      defaultMode: "ask",
     },
     {
       id: "write",
       label: "Edit Docs & Sheets",
-      description: "Create and edit Google Docs, and update spreadsheets you can edit.",
+      description: "Create or copy Drive files, or edit supported Google Docs and Sheets.",
       defaultMode: "ask",
     },
   ],
   google_calendar: [
     {
       id: "read",
-      label: "Read calendar",
-      description: "Look up events on your calendars.",
+      label: "Check calendars & availability",
+      description: "List calendars and inspect availability without reading event details.",
+      defaultMode: "ask",
+    },
+    {
+      id: "query",
+      label: "Read calendar events",
+      description: "Search and read event details from your calendars.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage calendar events",
+      description: "Create, update, delete, and respond to events on your calendars.",
+      defaultMode: "ask",
+    },
+  ],
+  github_user: [
+    {
+      id: "read",
+      label: "Read GitHub",
+      description:
+        "Inspect repositories, code, issues, pull requests, releases, and GitHub Actions results.",
       defaultMode: "on",
     },
     {
       id: "write",
-      label: "Add events",
-      description: "Create new events on your calendars.",
+      label: "Manage GitHub",
+      description:
+        "Change repository content, issues, and pull requests, including merging pull requests.",
       defaultMode: "ask",
     },
   ],
@@ -87,6 +121,29 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  hubspot: [
+    {
+      id: "read",
+      label: "Inspect HubSpot structure",
+      description:
+        "Inspect your HubSpot user access, object schemas, and property definitions without reading CRM records.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read CRM & marketing data",
+      description:
+        "Read CRM records, conversations, owners, campaigns, content, and marketing analytics.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Change HubSpot",
+      description:
+        "Create or update CRM records, campaigns, marketing emails, landing pages, and blog posts.",
+      defaultMode: "ask",
+    },
+  ],
   posthog: [
     {
       id: "read",
@@ -101,12 +158,46 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  stripe: [
+    {
+      id: "read",
+      label: "Learn about Stripe",
+      description: "Search Stripe documentation and inspect API reference details.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read Stripe data",
+      description: "Read account, customer, payment, billing, balance, and analytics data.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage Stripe",
+      description:
+        "Create, update, or delete Stripe resources, including refunds and billing changes.",
+      defaultMode: "ask",
+    },
+  ],
   slack: [
     {
       id: "read",
-      label: "Read Slack",
-      description: "Search and read channels, direct messages, threads, and people in Slack.",
+      label: "Search public Slack",
+      description: "Search public channels, users, and emoji available to your Slack account.",
       defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read private Slack",
+      description:
+        "Read private channels, direct messages, threads, canvases, files, and profiles.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Change Slack",
+      description: "Send or schedule messages, upload files, add reactions, and change canvases.",
+      defaultMode: "ask",
     },
   ],
   attio: [
@@ -153,11 +244,91 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
-  x_account: [
+  betterstack: [
+    {
+      id: "read",
+      label: "Search Better Stack docs",
+      description: "Search Better Stack's public product documentation.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Inspect observability data",
+      description:
+        "Read monitors, incidents, on-call schedules, logs, metrics, errors, dashboards, and team access.",
+      defaultMode: "ask",
+    },
     {
       id: "write",
-      label: "Post to X",
-      description: "Post new tweets from your connected X account.",
+      label: "Manage Better Stack",
+      description:
+        "Change monitoring, incidents, dashboards, alerts, status pages, error state, and team access.",
+      defaultMode: "ask",
+    },
+  ],
+  render: [
+    {
+      id: "read",
+      label: "Inspect Render resources",
+      description: "List workspaces, services, deploys, Postgres databases, and Key Value stores.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read operational data",
+      description: "Read logs and metrics, and run provider-enforced read-only database queries.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage Render infrastructure",
+      description:
+        "Create services and datastores, change environment variables, and trigger deploys.",
+      defaultMode: "ask",
+    },
+  ],
+  signoz: [
+    {
+      id: "read",
+      label: "Read SigNoz documentation",
+      description: "Search SigNoz's public product documentation.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Inspect observability data",
+      description:
+        "Query logs, metrics, traces, alerts, dashboards, views, and notification channels.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage SigNoz",
+      description:
+        "Create, update, import, or delete alerts, dashboards, views, and notification channels.",
+      defaultMode: "ask",
+    },
+  ],
+  x_account: [
+    {
+      id: "read",
+      label: "Research public X data",
+      description:
+        "Search and inspect public posts, profiles, lists, communities, trends, and news.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read account & private X data",
+      description:
+        "Read account-specific data such as analytics, timelines, bookmarks, messages, and usage.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage X",
+      description:
+        "Post and delete content or make other changes through your connected X account.",
       defaultMode: "ask",
     },
   ],

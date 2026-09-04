@@ -45,7 +45,9 @@ locator fields never enter client DTOs.
 Manual, Workflow, schedule, and agent producers call shared application services. Creation writes a
 Task, its Conversation, initial Message, and Run atomically. Follow-ups use the Message command and
 cancellation targets the active Run. The runner applies per-Conversation FIFO, fenced leases, retries,
-and terminal settlement.
+and terminal settlement. An opencompany Task turn uses the same host-tool contract and runtime tool
+composition as an interactive opencompany turn; the Task context adds autonomous-run instructions,
+larger call budgets, and the headless action policy that denies operations requiring live approval.
 
 The 35 known sessionless pre-cutover Tasks are intentionally separate. They remain readable through
 the actor-scoped compatibility API and cannot be replied to, canceled, or archived. ADR 0002 owns
@@ -63,6 +65,18 @@ archives.
 Browser reads use typed `/v1` resources and fixed authorized API read models, including
 `integration-accounts-v1`. The generic web Electric shape proxy and the legacy `/api/skills`
 response adapter are deleted; clients cannot select physical tables or predicates.
+
+GitHub has two intentionally separate identities. The workspace-owned GitHub App (`github`)
+handles selected-repository ingestion and webhooks, and provides sandbox git access when a user has
+not connected a personal account. The official **GitHub as you** Plugin uses the personal
+`github_user` connection for user-authorized tools and coding-sandbox git/gh access. For members
+with that personal connection, its MCP tools replace the legacy `github.search_issues` action so
+the catalog never presents two GitHub issue-search paths. Plugin settings read the user token's
+reachable App installations and repositories from GitHub. A tool or sandbox git failure that is
+confirmed outside that intersection links back through the combined install-and-authorize flow;
+the client uses bounded, backoff polling with ordinary access reads instead of depending on
+GitHub's setup redirect, which can omit OAuth state for an existing installation. An explicit
+re-check may refresh the expiring user token once per install attempt.
 
 ## Ownership rules
 

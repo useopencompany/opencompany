@@ -5,12 +5,18 @@ import { computeArtifactIntegrity } from "@opencompany/agent-runtime";
 import type { Actor, ResolvedPluginPackage, ResolvedSkillBundle } from "@opencompany/core";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  listActivePluginGatewayRegistrations,
+  storePluginGatewayDiscoveryFailure,
+  storePluginGatewayDiscoverySnapshot,
+} from "./plugin-gateway-repository";
 import { PostgresPluginRepository } from "./plugin-repository";
 import { loadChatSessionPluginRuntime } from "./plugin-runtime-repository";
 import { PostgresSkillBundleRepository } from "./skill-bundle-repository";
 
 describe("Postgres immutable Plugin repository", () => {
   let database: PGlite;
+  let db: ReturnType<typeof drizzle>;
   let repository: PostgresPluginRepository;
   let skillRepository: PostgresSkillBundleRepository;
   const deletePluginDataBlob = vi.fn(async () => undefined);
@@ -21,6 +27,7 @@ describe("Postgres immutable Plugin repository", () => {
       CREATE SCHEMA goat;
       CREATE TABLE goat.workspaces (id text PRIMARY KEY);
       CREATE TABLE goat.chat_sessions (id text PRIMARY KEY);
+      CREATE TABLE goat.integrations (id text PRIMARY KEY);
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
       INSERT INTO goat.chat_sessions (id) VALUES ('chat_1');
     `);
@@ -28,6 +35,7 @@ describe("Postgres immutable Plugin repository", () => {
       "0226_goat_immutable_skill_bundles.sql",
       "0228_goat_plugins.sql",
       "0232_workspace_authored_skills.sql",
+      "0234_goat_plugin_gateway_registrations.sql",
     ]) {
       const migration = await readFile(
         path.resolve(import.meta.dirname, "../../..", `drizzle/${migrationName}`),
@@ -37,7 +45,7 @@ describe("Postgres immutable Plugin repository", () => {
         if (statement.trim()) await database.exec(statement);
       }
     }
-    const db = drizzle(database);
+    db = drizzle(database);
     repository = new PostgresPluginRepository(db, {
       pluginDataStorage: { delete: deletePluginDataBlob },
     });
@@ -49,6 +57,8 @@ describe("Postgres immutable Plugin repository", () => {
     await database.exec(`
       DELETE FROM goat.chat_session_plugins;
       DELETE FROM goat.workspace_plugin_data;
+      DELETE FROM goat.plugin_gateway_registrations;
+      DELETE FROM goat.integrations;
       DELETE FROM goat.plugin_skills;
       DELETE FROM goat.plugin_files;
       DELETE FROM goat.plugins;
@@ -335,6 +345,177 @@ describe("Postgres immutable Plugin repository", () => {
     });
   });
 
+  it("keeps remote MCP endpoint configuration out of sandbox packages", async () => {
+    const installed = await repository.install({
+      actor: actor(),
+      idempotencyKey: "remote-mcp-runtime-plugin",
+      plugin: await resolvedPlugin("quality-tools", "review", "Remote MCP runtime.", {
+        mcp: true,
+        remoteMcp: true,
+      }),
+    });
+    await database.query(
+      "INSERT INTO goat.chat_session_plugins (chat_session_id, plugin_id) VALUES ($1, $2)",
+      ["chat_1", installed.plugin.id],
+    );
+    const db = drizzle(database);
+
+    const runtime = await loadChatSessionPluginRuntime(db, {
+      workspaceId: "workspace_1",
+      chatSessionId: "chat_1",
+    });
+    expect(runtime.plugins[0]?.files.map((file: { path: string }) => file.path)).not.toContain(
+      "mcp.json",
+    );
+    expect(installed.plugin.files.map((file: { path: string }) => file.path)).toContain("mcp.json");
+
+    await repository.approveMcp({
+      actor: actor(),
+      name: "quality-tools",
+      integrity: installed.plugin.integrity,
+    });
+    await expect(
+      loadChatSessionPluginRuntime(db, { workspaceId: "workspace_1", chatSessionId: "chat_1" }),
+    ).resolves.toMatchObject({
+      mcpPlugins: [
+        {
+          name: "quality-tools",
+          stdioServers: [{ name: "local", type: "stdio", command: "node" }],
+        },
+      ],
+    });
+  });
+
+  it("persists gateway registration and snapshot lifecycle without deleting connection modes", async () => {
+    const installed = await repository.install({
+      actor: actor(),
+      idempotencyKey: "linear-gateway",
+      plugin: await resolvedPlugin("linear", "review", "Linear gateway.", {
+        mcp: true,
+        remoteMcp: true,
+        capabilities: true,
+      }),
+    });
+    await database.exec(`
+      INSERT INTO goat.integrations (id, tool_modes)
+      VALUES ('gint_linear_1', '{"new_tool":"on"}'::jsonb)
+    `);
+
+    const [registration] = await listActivePluginGatewayRegistrations(db, {
+      workspaceId: "workspace_1",
+      pluginName: "linear",
+    });
+    expect(registration).toMatchObject({
+      pluginId: installed.plugin.id,
+      pluginName: "linear",
+      connectionProvider: "linear",
+      server: {
+        name: "remote",
+        type: "streamable-http",
+        url: "https://mcp.example.com/private-endpoint",
+      },
+      capabilities: [
+        { id: "read", label: "Read Linear", defaultMode: "on", tools: ["list_issues"] },
+        { id: "write", label: "Manage issues", defaultMode: "ask", tools: ["save_issue"] },
+      ],
+      discoverySnapshot: [],
+      discoveredAt: null,
+    });
+
+    const discoveredAt = new Date("2026-08-26T12:00:00.000Z");
+    const refreshAfter = new Date("2026-08-26T13:00:00.000Z");
+    await storePluginGatewayDiscoverySnapshot(db, {
+      workspaceId: "workspace_1",
+      registrationId: registration!.id,
+      discoveredAt,
+      refreshAfter,
+      snapshot: [
+        {
+          name: "new_tool",
+          inputSchema: { type: "object" },
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Write & other tools",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: false,
+          },
+        },
+      ],
+    });
+    await expect(
+      listActivePluginGatewayRegistrations(db, {
+        workspaceId: "workspace_1",
+        pluginName: "linear",
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        discoverySnapshot: [
+          expect.objectContaining({
+            name: "new_tool",
+            classification: expect.objectContaining({ curated: false, defaultMode: "ask" }),
+          }),
+        ],
+        discoveredAt,
+        refreshAfter,
+      }),
+    ]);
+    await expect(repository.get({ actor: actor(), name: "linear" })).resolves.toMatchObject({
+      remoteMcpServers: [
+        {
+          name: "remote",
+          connectionProvider: "linear",
+          discoveryStatus: "ready",
+          tools: [expect.objectContaining({ name: "new_tool" })],
+          discoveredAt,
+          refreshAfter,
+          lastDiscoveryError: null,
+        },
+      ],
+    });
+
+    const attemptedAt = new Date("2026-08-26T12:30:00.000Z");
+    await storePluginGatewayDiscoveryFailure(db, {
+      workspaceId: "workspace_1",
+      registrationId: registration!.id,
+      error: "Provider discovery timed out.",
+      attemptedAt,
+      retryAfter: new Date("2026-08-26T12:35:00.000Z"),
+    });
+    await expect(repository.get({ actor: actor(), name: "linear" })).resolves.toMatchObject({
+      remoteMcpServers: [
+        {
+          discoveryStatus: "stale",
+          tools: [expect.objectContaining({ name: "new_tool" })],
+          lastDiscoveryError: "Provider discovery timed out.",
+        },
+      ],
+    });
+
+    await repository.setStatus({ actor: actor(), name: "linear", status: "disabled" });
+    await expect(
+      listActivePluginGatewayRegistrations(db, { workspaceId: "workspace_1" }),
+    ).resolves.toEqual([]);
+    await expect(
+      database.query<{ count: number }>(
+        "SELECT COUNT(*)::int AS count FROM goat.plugin_gateway_registrations",
+      ),
+    ).resolves.toMatchObject({ rows: [{ count: 1 }] });
+
+    await repository.setStatus({ actor: actor(), name: "linear", status: "enabled" });
+    await repository.archive({ actor: actor(), name: "linear" });
+    await expect(
+      database.query<{ registrations: number; connections: number; tool_mode: string }>(`
+        SELECT
+          (SELECT COUNT(*)::int FROM goat.plugin_gateway_registrations) AS registrations,
+          (SELECT COUNT(*)::int FROM goat.integrations) AS connections,
+          (SELECT tool_modes->>'new_tool' FROM goat.integrations WHERE id = 'gint_linear_1') AS tool_mode
+      `),
+    ).resolves.toMatchObject({
+      rows: [{ registrations: 0, connections: 1, tool_mode: "on" }],
+    });
+  });
+
   it("archives without deleting immutable rows and makes the live name replaceable", async () => {
     const installed = await repository.install({
       actor: actor(),
@@ -404,7 +585,12 @@ async function resolvedPlugin(
   pluginName: string,
   skillName: string,
   description: string,
-  options: { skippedSkill?: boolean; mcp?: boolean } = {},
+  options: {
+    skippedSkill?: boolean;
+    mcp?: boolean;
+    remoteMcp?: boolean;
+    capabilities?: boolean;
+  } = {},
 ): Promise<ResolvedPluginPackage> {
   const skill = await resolvedSkill(skillName, description, `skills/${skillName}`);
   const pluginJson = new TextEncoder().encode(
@@ -412,6 +598,16 @@ async function resolvedPlugin(
       $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
       name: pluginName,
       description: `${pluginName} plugin.`,
+      ...(options.capabilities
+        ? {
+            extensions: {
+              "so.opencompany.capabilities": {
+                read: { label: "Read Linear", defaultMode: "on", tools: ["list_issues"] },
+                write: { label: "Manage issues", defaultMode: "ask", tools: ["save_issue"] },
+              },
+            },
+          }
+        : {}),
     }),
   );
   const mcpJson = new TextEncoder().encode(
@@ -425,6 +621,14 @@ async function resolvedPlugin(
           cwd: "${PLUGIN_DATA}",
           env: { CACHE_DIR: "${PLUGIN_DATA}/cache", PUBLIC_MODE: "safe" },
         },
+        ...(options.remoteMcp
+          ? {
+              remote: {
+                type: "streamable-http",
+                url: "https://mcp.example.com/private-endpoint",
+              },
+            }
+          : {}),
       },
     }),
   );
@@ -443,7 +647,20 @@ async function resolvedPlugin(
       : []),
   ];
   return {
-    manifest: { name: pluginName, description: `${pluginName} plugin.` },
+    manifest: {
+      name: pluginName,
+      description: `${pluginName} plugin.`,
+      ...(options.capabilities
+        ? {
+            extensions: {
+              "so.opencompany.capabilities": {
+                read: { label: "Read Linear", defaultMode: "on", tools: ["list_issues"] },
+                write: { label: "Manage issues", defaultMode: "ask", tools: ["save_issue"] },
+              },
+            },
+          }
+        : {}),
+    },
     source: {
       type: "github",
       url: "https://github.com/example/plugins",
@@ -466,6 +683,23 @@ async function resolvedPlugin(
             env: { CACHE_DIR: "${PLUGIN_DATA}/cache", PUBLIC_MODE: "safe" },
             cwd: "${PLUGIN_DATA}",
           },
+        ]
+      : [],
+    remoteServers:
+      options.mcp && options.remoteMcp
+        ? [
+            {
+              name: "remote",
+              type: "streamable-http",
+              url: "https://mcp.example.com/private-endpoint",
+              headers: {},
+            },
+          ]
+        : [],
+    capabilities: options.capabilities
+      ? [
+          { id: "read", label: "Read Linear", defaultMode: "on", tools: ["list_issues"] },
+          { id: "write", label: "Manage issues", defaultMode: "ask", tools: ["save_issue"] },
         ]
       : [],
     report: {
@@ -492,8 +726,22 @@ async function resolvedPlugin(
         ? {
             present: true,
             status: "parsed",
-            reports: [{ name: "local", status: "selected", transport: "stdio" }],
+            reports: [
+              { name: "local", status: "selected", transport: "stdio" },
+              ...(options.remoteMcp
+                ? [
+                    {
+                      name: "remote",
+                      status: "gateway-registered" as const,
+                      transport: "streamable-http" as const,
+                    },
+                  ]
+                : []),
+            ],
           }
+        : { status: "absent" },
+      capabilities: options.capabilities
+        ? { present: true, status: "parsed", issues: [] }
         : { status: "absent" },
     },
   };

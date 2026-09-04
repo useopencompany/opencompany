@@ -2,11 +2,14 @@
 // Purpose: resolves the web dev environment without letting public tunnels replace
 // local WorkOS callbacks.
 
+import { localSandboxNamespace } from "./sandbox-namespace.mjs";
+
 export function resolveWebDevEnv({
   port = "3002",
   processEnv = process.env,
   tunnelEnv = {},
   webHttpsEnv = {},
+  workspacePath = process.cwd(),
 } = {}) {
   const localHttpAppUrl = `http://localhost:${port}`;
   const configuredAppUrl = configuredWebAppUrl(processEnv, webHttpsEnv);
@@ -42,6 +45,7 @@ export function resolveWebDevEnv({
       ),
     ),
     RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED: "true",
+    RUNNER_SANDBOX_NAMESPACE: localSandboxNamespace(workspacePath),
     RUNNER_ALLOWED_ORIGINS: appendCsvValues(
       processEnv.RUNNER_ALLOWED_ORIGINS,
       [webAppUrl, tunnelEnv.NEXT_PUBLIC_APP_URL, tunnelEnv.OPENCOMPANY_NEXT_PUBLIC_APP_URL].filter(

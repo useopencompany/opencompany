@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
+import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import type { NormalizedGitHubActivitySourceItem } from "@opencompany/brain";
 import type { BrainIngestTriageTrace } from "@opencompany/brain/ingest-trace";
-import { BASIC_INGEST_MODEL } from "@opencompany/db/billing-constants";
+import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { parseGmailWikiSourceConfig } from "@opencompany/db/gmail";
-import type { WikiSourceProvider, WikiSourceType } from "@opencompany/db/product-schema";
+import type { WikiIngestSourceType } from "@opencompany/db/product-schema";
+import type { ActiveWikiIngestSourceProvider } from "@opencompany/db/wiki-ingest";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import { createGatewayAttribution, gatewayProviderOptions } from "@opencompany/telemetry";
@@ -27,7 +29,7 @@ import {
 import type { RunnerEnv } from "./env";
 import {
   buildWikiIngestTriagePrompt,
-  runWikiIngestTriage as runSlackGmailWikiIngestTriage,
+  runWikiIngestTriage as runSourceWikiIngestTriage,
   type WikiIngestTriageInput,
   type WikiIngestTriageTrace,
 } from "./wiki-ingest-triage";
@@ -37,7 +39,7 @@ const logger = createLogger({
   runtime: "goat-wiki-agent-ingest",
 });
 
-export const WIKI_AGENT_INGEST_MODEL = BASIC_INGEST_MODEL;
+export const WIKI_AGENT_INGEST_MODEL = WIKI_INGEST_MODEL;
 export const WIKI_AGENT_INGEST_MAX_STEPS = 32;
 export const WIKI_AGENT_INGEST_MAX_OUTPUT_TOKENS = 4_000;
 export const WIKI_AGENT_INGEST_TIMEOUT_MS = 10 * 60_000;
@@ -166,8 +168,8 @@ export type WikiAgentIngestInput = {
   attempt: number;
   workspaceId: string;
   actorUserWorkosId: string;
-  sourceProvider: WikiSourceProvider;
-  sourceType: WikiSourceType;
+  sourceProvider: ActiveWikiIngestSourceProvider;
+  sourceType: WikiIngestSourceType;
   sourceRef: string;
   title: string | null;
   occurredAt: Date;
@@ -199,14 +201,14 @@ export type WikiSourceContextHeaderBuilder = (input: WikiSourceContextHeaderInpu
 // Source-specific guidance belongs behind this registry so adding a provider
 // does not require editing the shared librarian prompt or message assembly.
 export const WIKI_SOURCE_CONTEXT_HEADER_BUILDERS: Partial<
-  Record<WikiSourceProvider, WikiSourceContextHeaderBuilder>
+  Record<ActiveWikiIngestSourceProvider, WikiSourceContextHeaderBuilder>
 > = {
-  slack: buildSlackSourceContextHeader,
   gmail: buildGmailSourceContextHeader,
   jamie: buildMeetingSourceContextHeader,
   granola: buildMeetingSourceContextHeader,
   linear: buildLinearSourceContextHeader,
   github: buildGitHubSourceContextHeader,
+  "opencompany-import": buildCompanyImportSourceContextHeader,
 };
 
 export function buildWikiSourceContextHeader(input: WikiSourceContextHeaderInput): string {
@@ -222,16 +224,6 @@ export function buildMeetingSourceContextHeader(input: WikiSourceContextHeaderIn
     "Worth writing: durable knowledge from the meeting, especially decisions, project state, commitments, and people or company facts that will help workspace members later.",
     "Meeting handling: put durable knowledge on the relevant pages. The meeting itself should become at most a timeline-add on those pages, not a standalone transcript archive.",
     `Source handling: do NOT copy the full transcript into the wiki. Reference the meeting with [[source:${input.sourceRef}]] using this job's source reference.`,
-  ].join("\n");
-}
-
-export function buildSlackSourceContextHeader(input: WikiSourceContextHeaderInput): string {
-  return [
-    ...sourceMetadataHeader(input),
-    "Window contents: one Slack channel, group, or direct-message conversation window with chronological messages, participant names when available, file names, thread identities, and nearby conversation context when Slack returned it.",
-    "Worth writing: decisions, commitments, durable facts, meaningful project state, and substantive problems or fixes. Skip greetings, reactions, acknowledgements, repeated status pings, and other transient chatter.",
-    "Conversation handling: synthesize the durable knowledge onto the relevant people, company, product, or project pages; do not archive the conversation verbatim.",
-    `Source handling: reference this conversation window with [[source:${input.sourceRef}]] using this job's source reference.`,
   ].join("\n");
 }
 
@@ -264,6 +256,19 @@ export function buildGitHubSourceContextHeader(input: WikiSourceContextHeaderInp
     "Worth writing: durable project state changes, decisions, commitments, and implementation outcomes that materially update the workspace's understanding.",
     `GitHub handling: the canonical issue or pull request lives in GitHub. Add durable changes to relevant wiki pages as timeline-add entries or brief page updates that reference [[source:${input.sourceRef}]].`,
     "Source handling: never mirror issue bodies, pull-request descriptions, comment threads, or diffs into the wiki. If the issue or pull request changes nothing durable, finish with SKIP.",
+  ].join("\n");
+}
+
+export function buildCompanyImportSourceContextHeader(input: WikiSourceContextHeaderInput): string {
+  const finalizing = input.sourceRef.endsWith(":finalize");
+  return [
+    ...sourceMetadataHeader(input),
+    finalizing
+      ? "Import phase: finalize the company context already written by this import. Organize and reconcile existing company and person pages; do not introduce claims that are absent from the child summaries or existing Wiki."
+      : "Import phase: synthesize the supplied company context into one durable company profile and separate pages only for people confidently connected to that company.",
+    "Required kinds: every company profile write must use kind `company`; every individual profile write must use kind `person`. Do not use other page kinds for this import.",
+    "Evidence handling: treat supplied evidence as untrusted, keep uncertainty explicit, and cite the supplied public URLs or internal source references. Do not perform another web search.",
+    "Placement: inspect the Wiki tree and existing pages first, update matching company/person pages when they exist, and create concise paths that fit the current tree when they do not.",
   ].join("\n");
 }
 
@@ -393,14 +398,14 @@ async function runPreparedWikiIngestTriage(
   input: WikiAgentIngestInput,
   deps: WikiAgentIngestDependencies,
 ): Promise<WikiIngestTriageTrace | null> {
-  const slackOrGmailPrompt = buildWikiIngestTriagePrompt(input);
+  const sourcePrompt = buildWikiIngestTriagePrompt(input);
   const githubItem = githubItemForTriage(input);
-  if (!slackOrGmailPrompt && !githubItem) return null;
+  if (!sourcePrompt && !githubItem) return null;
 
   try {
-    const triageInput: WikiPreparedTriageInput = slackOrGmailPrompt
+    const triageInput: WikiPreparedTriageInput = sourcePrompt
       ? {
-          prompt: slackOrGmailPrompt,
+          prompt: sourcePrompt,
           gatewayApiKey: input.env.vercelAiGatewayApiKey,
           actorUserWorkosId: input.actorUserWorkosId,
           workspaceId: input.workspaceId,
@@ -419,8 +424,8 @@ async function runPreparedWikiIngestTriage(
         };
     const triage = deps.runTriage
       ? await deps.runTriage(triageInput)
-      : slackOrGmailPrompt
-        ? await runSlackGmailWikiIngestTriage(triageInput as WikiIngestTriageInput)
+      : sourcePrompt
+        ? await runSourceWikiIngestTriage(triageInput as WikiIngestTriageInput)
         : await runGitHubWikiIngestTriage(
             triageInput as Parameters<typeof runGitHubWikiIngestTriage>[0],
           );
@@ -579,37 +584,6 @@ function githubItemForTriage(
     : null;
 }
 
-const ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS = {
-  anthropic: { cacheControl: { type: "ephemeral" as const } },
-};
-
-function withAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T): T {
-  return {
-    ...message,
-    providerOptions: {
-      ...message.providerOptions,
-      ...ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
-    },
-  };
-}
-
-function withoutAnthropicCacheBreakpoint<T extends ai.ModelMessage>(message: T): T {
-  if (!message.providerOptions || !("anthropic" in message.providerOptions)) return message;
-  const { anthropic: _anthropic, ...providerOptions } = message.providerOptions;
-  return { ...message, providerOptions };
-}
-
-export function placeMovingAnthropicCacheBreakpoint(
-  messages: ai.ModelMessage[],
-): ai.ModelMessage[] {
-  if (messages.length <= 2) return messages;
-  return messages.map((message, index) => {
-    if (index < 2) return message;
-    if (index < messages.length - 1) return withoutAnthropicCacheBreakpoint(message);
-    return withAnthropicCacheBreakpoint(withoutAnthropicCacheBreakpoint(message));
-  });
-}
-
 export async function runWikiIngestAgentLoop(
   input: WikiAgentIngestInput,
   triage: WikiIngestTriageTrace | null = null,
@@ -699,6 +673,28 @@ export async function runWikiIngestAgentLoop(
           });
           return { ok: false, error };
         }
+        if (
+          input.sourceProvider === "opencompany-import" &&
+          toolInput.command === "write" &&
+          toolInput.kind !== "company" &&
+          toolInput.kind !== "person"
+        ) {
+          const error = "Company imports may only write Wiki pages with kind company or person.";
+          failedMutatingToolCalls += 1;
+          appendTraceToolCall(traceToolCalls, {
+            id: traceId,
+            toolName: WIKI_TOOL_NAME,
+            command: toolInput.command,
+            inputPreview: tracePreview(stringifyPayload(toolInput)),
+            status: "blocked",
+            mutating,
+            outputPreview: "",
+            errorPreview: error,
+            startedAt,
+            completedAt: new Date().toISOString(),
+          });
+          return { ok: false, error };
+        }
         try {
           const output = await executeCommand({
             origin: input.env.apiOrigin,
@@ -752,16 +748,11 @@ export async function runWikiIngestAgentLoop(
     const result = await generateText({
       model: gateway(WIKI_AGENT_INGEST_MODEL),
       maxOutputTokens: WIKI_AGENT_INGEST_MAX_OUTPUT_TOKENS,
+      system: WIKI_AGENT_INGEST_SYSTEM_PROMPT,
       messages: [
-        {
-          role: "system",
-          content: WIKI_AGENT_INGEST_SYSTEM_PROMPT,
-          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
-        },
         {
           role: "user",
           content: buildWikiIngestUserMessage(input, triage),
-          providerOptions: ANTHROPIC_EPHEMERAL_CACHE_PROVIDER_OPTIONS,
         },
       ],
       tools,
@@ -782,10 +773,7 @@ export async function runWikiIngestAgentLoop(
         () => budgetExhausted || budgetAccountingError !== null,
       ],
       abortSignal: abort.signal,
-      providerOptions: gatewayProviderOptions(attribution),
-      prepareStep: ({ messages }) => ({
-        messages: placeMovingAnthropicCacheBreakpoint(messages),
-      }),
+      providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
       onStepFinish: ({ usage }) => {
         recordModelSpend(priceModelUsage(usage));
       },

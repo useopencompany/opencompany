@@ -3,4 +3,4 @@
 // doesn't pull in the page's server-only imports.
 // Bump the key when the ordered step list changes so a numeric index written by
 // an older flow cannot resume on the wrong screen after a deployment.
-export const ONBOARDING_STEP_COOKIE = "goat-onboarding-step-v4";
+export const ONBOARDING_STEP_COOKIE = "goat-onboarding-step-v5";

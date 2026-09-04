@@ -63,6 +63,8 @@ import {
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
   CreateTaskBodySchema,
+  CreateTaskCommentBodySchema,
+  CreateTaskCommentEnvelopeSchema,
   CreateTaskEnvelopeSchema,
   CreateTaskScheduleBodySchema,
   CreateWikiPageBodySchema,
@@ -104,6 +106,7 @@ import {
   ManagedCapabilitySourceSchema,
   McpSetupEnvelopeSchema,
   MessagePageSchema,
+  MessagePresentationEnvelopeSchema,
   OnboardingCommandEnvelopeSchema,
   OnboardingStateEnvelopeSchema,
   OnboardingWorkspaceEnvelopeSchema,
@@ -122,6 +125,7 @@ import {
   RenameBrainDocumentBodySchema,
   RenameBrainFolderBodySchema,
   RenameWorkspaceBodySchema,
+  RenderAccountStateEnvelopeSchema,
   RepoConfigDeleteEnvelopeSchema,
   RepoConfigListEnvelopeSchema,
   RepoConfigMutationEnvelopeSchema,
@@ -172,6 +176,7 @@ import {
   TaskSummaryEnvelopeSchema,
   UpdateBillingAutoRefillBodySchema,
   UpdateBrainDocumentBodySchema,
+  UpdateCodexWorkspaceEngineBodySchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
   UpdateMcpSetupBodySchema,
@@ -247,6 +252,27 @@ export const createTaskRoute = createRoute({
     202: {
       description: "Task accepted with its initial Message and queued Run.",
       content: { "application/json": { schema: CreateTaskEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createTaskCommentRoute = createRoute({
+  method: "post",
+  path: "/v1/tasks/{taskId}/comments",
+  tags: ["Tasks"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ taskId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateTaskCommentBodySchema } },
+    },
+  },
+  responses: {
+    202: {
+      description: "Comment recorded verbatim and Task resumed with a queued Run.",
+      content: { "application/json": { schema: CreateTaskCommentEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -777,6 +803,78 @@ export const retryBrainImportRoute = createRoute({
   responses: {
     200: {
       description: "Failed pre-confirmation discovery reset and started again.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: StartBrainImportBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Workspace Wiki company-context discovery started or replayed.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const confirmWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/confirm",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ importRunId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: ConfirmBrainImportBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Discovered Wiki import confirmed; ingestion begins.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const cancelWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/cancel",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ importRunId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Active Wiki import canceled; queued ingestion jobs are skipped.",
+      content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const retryWikiImportRoute = createRoute({
+  method: "post",
+  path: "/v1/wiki/imports/{importRunId}/retry",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ importRunId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Failed Wiki discovery reset and started again.",
       content: { "application/json": { schema: BrainImportRunCommandEnvelopeSchema } },
     },
     default: errorResponse,
@@ -1529,6 +1627,21 @@ export const revokePluginMcpRoute = createRoute({
   },
 });
 
+export const refreshPluginMcpRoute = createRoute({
+  method: "post",
+  path: "/v1/plugins/{name}/mcp/refresh",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Plugin remote MCP discovery snapshot refreshed from the connected provider.",
+      content: { "application/json": { schema: PluginInstallationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const deletePluginDataRoute = createRoute({
   method: "post",
   path: "/v1/plugins/{name}/data/delete",
@@ -1714,6 +1827,14 @@ export const uploadAttachmentRoute = createRoute({
   tags: ["Chat"],
   security: actorSecurity,
   request: {
+    headers: z.object({
+      "idempotency-key": z
+        .string()
+        .regex(/^[\x21-\x7e]+$/u)
+        .min(1)
+        .max(200)
+        .optional(),
+    }),
     body: {
       required: true,
       content: { "multipart/form-data": { schema: AttachmentUploadBodySchema } },
@@ -1773,6 +1894,28 @@ export const downloadChatAttachmentRoute = createRoute({
     params: z.object({ messageId: ResourceIdSchema, attachmentId: ResourceIdSchema }),
   },
   responses: { 200: binaryResponse, default: errorResponse },
+});
+
+export const getMessagePresentationRoute = createRoute({
+  method: "get",
+  path: "/v1/conversations/{conversationId}/messages/{messageId}/presentation",
+  tags: ["Chat"],
+  security: actorSecurity,
+  request: {
+    params: z.object({
+      conversationId: ResourceIdSchema,
+      messageId: ResourceIdSchema,
+    }),
+    headers: z.object({ "if-none-match": z.string().min(1).max(512).optional() }),
+  },
+  responses: {
+    200: {
+      description: "The full authorized Message presentation used for lazy trace expansion.",
+      content: { "application/json": { schema: MessagePresentationEnvelopeSchema } },
+    },
+    304: { description: "The Message presentation has not changed." },
+    default: errorResponse,
+  },
 });
 
 export const downloadChatScreenshotRoute = createRoute({
@@ -1965,6 +2108,8 @@ export const streamReadModelRoute = createRoute({
     query: z.object({
       conversationId: ResourceIdSchema.optional(),
       brainId: ResourceIdSchema.optional(),
+      taskId: ResourceIdSchema.optional(),
+      messageShapeEpoch: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       offset: z.string().optional(),
       handle: z.string().optional(),
       live: z.string().optional(),
@@ -2778,6 +2923,27 @@ export const connectGranolaAccountRoute = createRoute({
   },
 });
 
+export const connectRenderAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/render",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: IntegrationApiKeyBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Render connected (or reconnected) for the acting user. The API key never appears in the response.",
+      content: { "application/json": { schema: RenderAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const startImessagePairingRoute = createRoute({
   method: "post",
   path: "/v1/integration-accounts/imessage/pairing",
@@ -3138,6 +3304,23 @@ export const startCodexDeviceAuthRoute = createRoute({
   },
 });
 
+export const updateCodexWorkspaceEngineRoute = createRoute({
+  method: "put",
+  path: "/v1/engine-auth/codex/workspace",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: { content: { "application/json": { schema: UpdateCodexWorkspaceEngineBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Workspace subscription-backed Codex routing updated by an admin.",
+      content: { "application/json": { schema: CodexAuthStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const pollCodexDeviceAuthRoute = createRoute({
   method: "post",
   path: "/v1/engine-auth/codex/device/{flowId}/poll",
@@ -3357,6 +3540,7 @@ export const updateBillingAutoRefillRoute = createRoute({
 export type V1RouteHandlers = {
   listTasks: RouteHandler<typeof listTasksRoute>;
   createTask: RouteHandler<typeof createTaskRoute>;
+  createTaskComment: RouteHandler<typeof createTaskCommentRoute>;
   getTask: RouteHandler<typeof getTaskRoute>;
   updateTask: RouteHandler<typeof updateTaskRoute>;
   getTaskSummary: RouteHandler<typeof getTaskSummaryRoute>;
@@ -3419,6 +3603,10 @@ export type V1RouteHandlers = {
   confirmBrainImport: RouteHandler<typeof confirmBrainImportRoute>;
   cancelBrainImport: RouteHandler<typeof cancelBrainImportRoute>;
   retryBrainImport: RouteHandler<typeof retryBrainImportRoute>;
+  startWikiImport: RouteHandler<typeof startWikiImportRoute>;
+  confirmWikiImport: RouteHandler<typeof confirmWikiImportRoute>;
+  cancelWikiImport: RouteHandler<typeof cancelWikiImportRoute>;
+  retryWikiImport: RouteHandler<typeof retryWikiImportRoute>;
   createBrainDocument: RouteHandler<typeof createBrainDocumentRoute>;
   uploadBrainAsset: RouteHandler<typeof uploadBrainAssetRoute>;
   replaceBrainAsset: RouteHandler<typeof replaceBrainAssetRoute>;
@@ -3460,6 +3648,7 @@ export type V1RouteHandlers = {
   disablePlugin: RouteHandler<typeof disablePluginRoute>;
   approvePluginMcp: RouteHandler<typeof approvePluginMcpRoute>;
   revokePluginMcp: RouteHandler<typeof revokePluginMcpRoute>;
+  refreshPluginMcp: RouteHandler<typeof refreshPluginMcpRoute>;
   deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
@@ -3474,6 +3663,7 @@ export type V1RouteHandlers = {
   deleteChatArtifact: RouteHandler<typeof deleteChatArtifactRoute>;
   downloadChatArtifact: RouteHandler<typeof downloadChatArtifactRoute>;
   downloadChatAttachment: RouteHandler<typeof downloadChatAttachmentRoute>;
+  getMessagePresentation: RouteHandler<typeof getMessagePresentationRoute>;
   downloadChatScreenshot: RouteHandler<typeof downloadChatScreenshotRoute>;
   getPublicChatShare: RouteHandler<typeof getPublicChatShareRoute>;
   getPublicChatShareMetadata: RouteHandler<typeof getPublicChatShareMetadataRoute>;
@@ -3498,6 +3688,7 @@ export type V1RouteHandlers = {
   disconnectAttioAccount: RouteHandler<typeof disconnectAttioAccountRoute>;
   connectFathomAccount: RouteHandler<typeof connectFathomAccountRoute>;
   connectGranolaAccount: RouteHandler<typeof connectGranolaAccountRoute>;
+  connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
   startImessagePairing: RouteHandler<typeof startImessagePairingRoute>;
   confirmImessagePairing: RouteHandler<typeof confirmImessagePairingRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
@@ -3518,6 +3709,7 @@ export type V1RouteHandlers = {
   saveClaudeCodeToken: RouteHandler<typeof saveClaudeCodeTokenRoute>;
   deleteClaudeCodeAuth: RouteHandler<typeof deleteClaudeCodeAuthRoute>;
   getCodexAuth: RouteHandler<typeof getCodexAuthRoute>;
+  updateCodexWorkspaceEngine: RouteHandler<typeof updateCodexWorkspaceEngineRoute>;
   startCodexDeviceAuth: RouteHandler<typeof startCodexDeviceAuthRoute>;
   pollCodexDeviceAuth: RouteHandler<typeof pollCodexDeviceAuthRoute>;
   deleteCodexAuth: RouteHandler<typeof deleteCodexAuthRoute>;
@@ -3547,6 +3739,7 @@ export function createV1Router(
     app
       .openapi(listTasksRoute, handlers.listTasks)
       .openapi(createTaskRoute, handlers.createTask)
+      .openapi(createTaskCommentRoute, handlers.createTaskComment)
       .openapi(getTaskRoute, handlers.getTask)
       .openapi(updateTaskRoute, handlers.updateTask)
       .openapi(getTaskSummaryRoute, handlers.getTaskSummary)
@@ -3611,6 +3804,10 @@ export function createV1Router(
       .openapi(confirmBrainImportRoute, handlers.confirmBrainImport)
       .openapi(cancelBrainImportRoute, handlers.cancelBrainImport)
       .openapi(retryBrainImportRoute, handlers.retryBrainImport)
+      .openapi(startWikiImportRoute, handlers.startWikiImport)
+      .openapi(confirmWikiImportRoute, handlers.confirmWikiImport)
+      .openapi(cancelWikiImportRoute, handlers.cancelWikiImport)
+      .openapi(retryWikiImportRoute, handlers.retryWikiImport)
       .openapi(createBrainDocumentRoute, handlers.createBrainDocument)
       .openapi(uploadBrainAssetRoute, handlers.uploadBrainAsset)
       .openapi(replaceBrainAssetRoute, handlers.replaceBrainAsset)
@@ -3656,6 +3853,7 @@ export function createV1Router(
       .openapi(deleteChatArtifactRoute, handlers.deleteChatArtifact)
       .openapi(downloadChatArtifactRoute, handlers.downloadChatArtifact)
       .openapi(downloadChatAttachmentRoute, handlers.downloadChatAttachment)
+      .openapi(getMessagePresentationRoute, handlers.getMessagePresentation)
       .openapi(downloadChatScreenshotRoute, handlers.downloadChatScreenshot)
       .openapi(getPublicChatShareRoute, handlers.getPublicChatShare)
       .openapi(getPublicChatShareMetadataRoute, handlers.getPublicChatShareMetadata)
@@ -3683,6 +3881,7 @@ export function createV1Router(
       .openapi(disconnectAttioAccountRoute, handlers.disconnectAttioAccount)
       .openapi(connectFathomAccountRoute, handlers.connectFathomAccount)
       .openapi(connectGranolaAccountRoute, handlers.connectGranolaAccount)
+      .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
       .openapi(startImessagePairingRoute, handlers.startImessagePairing)
       .openapi(confirmImessagePairingRoute, handlers.confirmImessagePairing)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
@@ -3703,6 +3902,7 @@ export function createV1Router(
       .openapi(saveClaudeCodeTokenRoute, handlers.saveClaudeCodeToken)
       .openapi(deleteClaudeCodeAuthRoute, handlers.deleteClaudeCodeAuth)
       .openapi(getCodexAuthRoute, handlers.getCodexAuth)
+      .openapi(updateCodexWorkspaceEngineRoute, handlers.updateCodexWorkspaceEngine)
       // POST /codex/device registers before the {flowId} poll route so the
       // static segment always wins route matching.
       .openapi(startCodexDeviceAuthRoute, handlers.startCodexDeviceAuth)
@@ -3728,6 +3928,7 @@ export function createV1Router(
       .openapi(disablePluginRoute, handlers.disablePlugin)
       .openapi(approvePluginMcpRoute, handlers.approvePluginMcp)
       .openapi(revokePluginMcpRoute, handlers.revokePluginMcp)
+      .openapi(refreshPluginMcpRoute, handlers.refreshPluginMcp)
       .openapi(deletePluginDataRoute, handlers.deletePluginData)
   );
 }
@@ -3780,6 +3981,14 @@ const placeholderTask = {
   archivedAt: null,
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
+};
+const placeholderTaskComment = {
+  id: "task_activity_comment_contract",
+  taskId: placeholderTask.id,
+  author: "user" as const,
+  kind: "comment" as const,
+  body: "Continue with this context.",
+  createdAt: placeholderTime,
 };
 const placeholderLegacyTask = {
   id: placeholderTask.id,
@@ -4030,6 +4239,22 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       202,
     ),
+  createTaskComment: (c) =>
+    c.json(
+      {
+        data: {
+          task: placeholderTask,
+          comment: placeholderTaskComment,
+          messageId: "message_task_comment_contract",
+          assistantMessageId: "message_task_comment_assistant_contract",
+          runId: "run_task_comment_contract",
+          transactionId: "1",
+          replayed: false,
+        },
+        meta,
+      },
+      202,
+    ),
   getTask: (c) => c.json({ data: placeholderTask, meta }, 200),
   updateTask: (c) => c.json({ data: { task: placeholderTask, transactionId: "1" }, meta }, 200),
   getTaskSummary: (c) =>
@@ -4122,7 +4347,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
           viewer: { actorId: "user_contract", isAdmin: true },
           sources: [],
           ownAccounts: {
-            slack: [],
             linear: [],
             gmail: [],
             google_drive: [],
@@ -4144,17 +4368,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
             },
             legacyDefaultDelivery: false,
             isDefaultBrain: false,
-          },
-          slack: {
-            integration: {
-              provider: "slack",
-              connected: false,
-              status: "not_connected",
-              integrationId: null,
-              accountName: null,
-              teamName: null,
-              statusReason: null,
-            },
           },
           linear: {
             integration: {
@@ -4251,7 +4464,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
         data: {
           brainId: "brain_contract",
           integrationId: "integration_contract",
-          provider: "slack",
+          provider: "gmail",
           enabled: true,
         },
         meta,
@@ -4479,6 +4692,38 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  startWikiImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "discovering" as const, replayed: false },
+        meta,
+      },
+      201,
+    ),
+  confirmWikiImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "ingesting" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
+  cancelWikiImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "canceled" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
+  retryWikiImport: (c) =>
+    c.json(
+      {
+        data: { importRunId: "gbimp_contract", status: "discovering" as const, replayed: false },
+        meta,
+      },
+      200,
+    ),
   createBrainDocument: (c) => c.json({ data: placeholderBrainDocument, meta }, 201),
   uploadBrainAsset: (c) =>
     c.json(
@@ -4566,6 +4811,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           files: placeholderSkillBundle.files,
           fileCount: 1,
           totalBytes: 128,
+          warnings: [],
         },
         meta,
       },
@@ -4675,6 +4921,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   revokePluginMcp: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  refreshPluginMcp: (c) => c.json({ data: placeholderPlugin, meta }, 200),
   deletePluginData: (c) =>
     c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
@@ -4743,6 +4990,17 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   downloadChatAttachment: (c) =>
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
+  getMessagePresentation: (c) =>
+    c.json(
+      {
+        data: {
+          presentation: null,
+          updatedAt: placeholderTime,
+        },
+        meta,
+      },
+      200,
+    ),
   downloadChatScreenshot: (c) =>
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   getPublicChatShare: (c) =>
@@ -4836,7 +5094,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
         data: {
           timezone: "UTC",
           taskSpawningEnabled: false,
-          wikiEnabled: false,
+          wikiEnabled: true as const,
           taskViewMode: "board" as const,
           imessageEnabled: false,
           autoModelRoutingEnabled: false,
@@ -4936,6 +5194,25 @@ const contractDocumentHandlers: V1RouteHandlers = {
             accountEmail: null,
             accountName: null,
             statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  connectRenderAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "render" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            accountName: "Contract",
+            statusReason: null,
+            capabilityModes: {},
+            toolModes: {},
           },
         },
         meta,
@@ -5096,6 +5373,37 @@ const contractDocumentHandlers: V1RouteHandlers = {
           statusReason: null,
           lastValidatedAt: placeholderTime,
           lastRotatedAt: placeholderTime,
+          workspaceEngine: {
+            enabled: true,
+            providerDisplayName: "Contract Owner",
+            providerEmail: "owner@example.com",
+            credentialStatus: "connected" as const,
+            credentialStatusReason: null,
+            lastValidatedAt: placeholderTime,
+            isCurrentUser: true,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  updateCodexWorkspaceEngine: (c) =>
+    c.json(
+      {
+        data: {
+          status: "connected" as const,
+          statusReason: null,
+          lastValidatedAt: placeholderTime,
+          lastRotatedAt: placeholderTime,
+          workspaceEngine: {
+            enabled: true,
+            providerDisplayName: "Contract Owner",
+            providerEmail: "owner@example.com",
+            credentialStatus: "connected" as const,
+            credentialStatusReason: null,
+            lastValidatedAt: placeholderTime,
+            isCurrentUser: true,
+          },
         },
         meta,
       },
@@ -5272,7 +5580,7 @@ function contractIdentity() {
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       imessageEnabled: false,
-      wikiEnabled: true,
+      wikiEnabled: true as const,
       taskViewMode: "board" as const,
       preferredMcpClient: null,
       mcpSetupCompletedAt: null,
@@ -5286,6 +5594,7 @@ function contractIdentity() {
         name: "Contract Workspace",
         slug: "contract-workspace",
         role: "admin" as const,
+        legacyBrainEnabled: false,
       },
     ],
     activeWorkspaceId: "goat_ws_contract",

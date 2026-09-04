@@ -15,6 +15,7 @@ import {
   type WorkflowTrigger,
 } from "@opencompany/core";
 import { type SQL, sql } from "drizzle-orm";
+import { stringifyPostgresJson } from "./postgres-json";
 
 export type WorkflowSqlExecute = (query: SQL) => Promise<unknown>;
 
@@ -216,7 +217,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         )
         SELECT
           winner.resource_id, ${input.actor.workspaceId}, candidate.slug, ${input.name},
-          ${input.description}, '', '', ${JSON.stringify([input.initialStep])}::jsonb,
+          ${input.description}, '', '', ${stringifyPostgresJson([input.initialStep])}::jsonb,
           'manual', NULL, 'UTC', '', NULL, NULL, false, NULL, 'active',
           ${input.actor.userId}, 1, ${now}, ${now}
         FROM winner
@@ -286,7 +287,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       UPDATE goat.workflows AS workflow
       SET name = ${input.name},
           description = ${input.description},
-          steps = ${JSON.stringify(input.steps)}::jsonb,
+          steps = ${stringifyPostgresJson(input.steps)}::jsonb,
           trigger = ${scheduled ? "schedule" : eventDriven ? "event" : "manual"},
           schedule_cron = ${scheduled ? (input.schedule?.definition.cron ?? null) : null},
           schedule_timezone = ${scheduled ? (input.schedule?.definition.timezone ?? "UTC") : "UTC"},
@@ -294,17 +295,19 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
           schedule_enabled = ${scheduleEnabled},
           schedule_user_workos_id = ${scheduled ? input.actor.userId : null},
           schedule_harness_spec = ${
-            input.schedule?.execution ? JSON.stringify(input.schedule.execution.payload) : null
+            input.schedule?.execution
+              ? stringifyPostgresJson(input.schedule.execution.payload)
+              : null
           }::jsonb,
           schedule_next_run_at = ${
             scheduled && scheduleEnabled && input.status === "active"
               ? (input.schedule?.definition.nextRunAt ?? null)
               : null
           },
-          event_config = ${eventDriven ? JSON.stringify(input.trigger) : null}::jsonb,
+          event_config = ${eventDriven ? stringifyPostgresJson(input.trigger) : null}::jsonb,
           event_user_workos_id = ${eventDriven ? input.actor.userId : null},
           event_harness_spec = ${
-            input.event?.execution ? JSON.stringify(input.event.execution.payload) : null
+            input.event?.execution ? stringifyPostgresJson(input.event.execution.payload) : null
           }::jsonb,
           status = ${input.status},
           version = workflow.version + 1,
@@ -577,7 +580,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         SELECT
           winner.resource_id, ${input.actor.userId}, ${input.actor.workspaceId},
           ${input.name}, ${input.sourceDescription}, ${input.schedule.cron},
-          ${input.schedule.timezone}, ${input.prompt}, ${JSON.stringify(input.execution.payload)}::jsonb,
+          ${input.schedule.timezone}, ${input.prompt}, ${stringifyPostgresJson(input.execution.payload)}::jsonb,
           true, ${input.schedule.nextRunAt}, 1, ${now}, ${now}
         FROM winner
         RETURNING *
@@ -644,7 +647,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
           cron = ${input.schedule.cron},
           timezone = ${input.schedule.timezone},
           prompt = ${input.prompt},
-          planned_harness_spec = ${JSON.stringify(input.execution.payload)}::jsonb,
+          planned_harness_spec = ${stringifyPostgresJson(input.execution.payload)}::jsonb,
           next_run_at = ${input.schedule.nextRunAt},
           version = schedule.version + 1,
           updated_at = ${now}

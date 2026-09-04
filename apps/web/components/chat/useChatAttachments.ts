@@ -33,6 +33,7 @@ export function useChatAttachments(opts: {
   upload: (input: {
     file: File;
     mediaType: string;
+    pendingId: string;
   }) => Promise<{ id: string; canonical?: boolean }>;
 }) {
   const { modelName, enabled = true, upload } = opts;
@@ -115,7 +116,7 @@ export function useChatAttachments(opts: {
             status: "uploading",
             ...(validation.kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
           });
-          const uploadPromise = upload({ file, mediaType: validation.mediaType });
+          const uploadPromise = upload({ file, mediaType: validation.mediaType, pendingId: id });
           void uploadPromise
             .then((res) => {
               if (mountedRef.current) {

@@ -16,6 +16,7 @@ export type SandboxLatencyObservation = {
 };
 
 export const OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY = "opencompany_managed";
+export const OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY = "opencompany_sandbox_namespace";
 export const OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY = "opencompany_owner_kind";
 export const OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY = "opencompany_owner_id";
 
@@ -25,6 +26,7 @@ export type ManagedSandboxOwnerKind =
   | "infisical_auth_flow";
 
 export function managedSandboxMetadata(input: {
+  namespace: string;
   ownerKind: ManagedSandboxOwnerKind;
   ownerId: string;
   metadata?: Record<string, string>;
@@ -32,6 +34,7 @@ export function managedSandboxMetadata(input: {
   return {
     ...input.metadata,
     [OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY]: "true",
+    [OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY]: input.namespace,
     [OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY]: input.ownerKind,
     [OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY]: input.ownerId,
   };

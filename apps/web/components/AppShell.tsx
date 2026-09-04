@@ -21,6 +21,7 @@ import { getFathomIntegrationState } from "@/lib/integrations/fathom";
 import { getGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGranolaIntegrationState } from "@/lib/integrations/granola";
+import { getHubSpotMcpIntegrationState } from "@/lib/integrations/hubspot-mcp";
 import { getImessageIntegrationState } from "@/lib/integrations/imessage";
 import { getJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
@@ -33,13 +34,17 @@ import { getWorkspaceSettingsAction } from "@/lib/workspace-actions";
 
 export async function AppShell({ children }: { children: ReactNode }) {
   const { authUser, user, workspace, role, workspaces, brains, activeBrain } = await currentUser();
-  const featureFlags = featureFlagsFromUser(user);
+  const featureFlags = featureFlagsFromUser({
+    ...user,
+    legacyBrainEnabled: workspace.legacyBrainEnabled,
+  });
   const emptyIntegrations = integrationStateFromRows([]);
   const [
     schedules,
     recentChats,
     googleIntegrations,
     linear,
+    hubspot,
     posthog,
     github,
     jamie,
@@ -69,6 +74,11 @@ export async function AppShell({ children }: { children: ReactNode }) {
       "linear_integration",
       () => getLinearIntegrationState(user.workosUserId),
       emptyIntegrations.linear,
+    ),
+    loadOptionalAppShellData(
+      "hubspot_mcp_integration",
+      () => getHubSpotMcpIntegrationState(user.workosUserId),
+      emptyIntegrations.hubspot,
     ),
     loadOptionalAppShellData(
       "posthog_integration",
@@ -125,6 +135,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
       statusReason: null,
       lastValidatedAt: null,
       lastRotatedAt: null,
+      workspaceEngine: null,
     }),
     loadOptionalAppShellData("claude_code_auth", loadCurrentClaudeCodeAuthSettings, {
       status: null,
@@ -173,8 +184,8 @@ export async function AppShell({ children }: { children: ReactNode }) {
       lastName: member.lastName,
       avatarUrl: member.avatarUrl,
     })),
-    brains: brains.map(brainSummaryView),
-    activeBrain: activeBrain ? brainSummaryView(activeBrain) : null,
+    brains: featureFlags.legacyBrain ? brains.map(brainSummaryView) : [],
+    activeBrain: featureFlags.legacyBrain && activeBrain ? brainSummaryView(activeBrain) : null,
     // Task metadata hydrates from the API-owned Electric read model. Keeping the server snapshot
     // empty prevents the Next.js composition root from regaining a direct Task database reader.
     tasks: [],
@@ -183,6 +194,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
     integrations: buildIntegrationState({
       googleIntegrations,
       linear,
+      hubspot,
       posthog,
       github,
       jamie,
@@ -200,6 +212,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
         status: codex.status ?? "not_connected",
         statusReason: codex.statusReason,
         lastValidatedAt: codex.lastValidatedAt,
+        workspaceEngine: codex.workspaceEngine,
       },
       claudeCode: {
         provider: "claude_code",
@@ -261,6 +274,7 @@ function brainSummaryView(brain: {
 function buildIntegrationState(input: {
   googleIntegrations: Pick<IntegrationState, "gmail" | "google_calendar" | "google_drive">;
   linear: IntegrationState["linear"];
+  hubspot: IntegrationState["hubspot"];
   posthog: IntegrationState["posthog"];
   github: IntegrationState["github"];
   jamie: IntegrationState["jamie"];
@@ -281,6 +295,7 @@ function buildIntegrationState(input: {
     google_calendar: input.googleIntegrations.google_calendar,
     google_drive: input.googleIntegrations.google_drive,
     linear: input.linear,
+    hubspot: input.hubspot,
     posthog: input.posthog,
     github: input.github,
     jamie: input.jamie,

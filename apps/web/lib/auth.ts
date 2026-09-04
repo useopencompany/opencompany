@@ -26,7 +26,8 @@ export type IdentityUser = {
   autoModelRoutingEnabled: boolean;
   chatCapabilitiesBetaEnabled: boolean;
   imessageEnabled: boolean;
-  wikiEnabled: boolean;
+  /** @deprecated Wiki is always enabled. */
+  wikiEnabled: true;
   taskViewMode: "board" | "list";
   preferredMcpClient: "claude" | "chatgpt" | "cursor" | null;
   mcpSetupCompletedAt: Date | null;
@@ -39,6 +40,7 @@ export type IdentityWorkspace = {
   id: string;
   name: string;
   slug: string | null;
+  legacyBrainEnabled: boolean;
 };
 
 export type WorkspaceWithRole = {
@@ -133,7 +135,12 @@ const resolveIdentity = cache(async (): Promise<IdentityContext | null> => {
     organizationId: session.organizationId,
     user: identityUser(session.data.user),
     workspaces: session.data.workspaces.map((entry: IdentityDto["workspaces"][number]) => ({
-      workspace: { id: entry.id, name: entry.name, slug: entry.slug },
+      workspace: {
+        id: entry.id,
+        name: entry.name,
+        slug: entry.slug,
+        legacyBrainEnabled: entry.legacyBrainEnabled,
+      },
       role: entry.role,
     })),
   };
@@ -221,7 +228,7 @@ function identityUser(user: IdentityDto["user"]): IdentityUser {
     autoModelRoutingEnabled: user.autoModelRoutingEnabled,
     chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
     imessageEnabled: user.imessageEnabled,
-    wikiEnabled: user.wikiEnabled,
+    wikiEnabled: true,
     taskViewMode: user.taskViewMode,
     preferredMcpClient: user.preferredMcpClient,
     mcpSetupCompletedAt: user.mcpSetupCompletedAt ? new Date(user.mcpSetupCompletedAt) : null,

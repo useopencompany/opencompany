@@ -1,15 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  ACTION_HOST_TOOL_CONTRACT_VERSION,
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
   getAgentModelDefinition,
+  hostToolContractVersionForEngine,
+  isCodexModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import {
   type Actor,
   CoreError,
   type CreateTaskCommand,
+  type CreateTaskCommentCommand,
+  type CreateTaskCommentResult,
   type CreateTaskResult,
   type LegacyTask,
   type LegacyTaskHistory,
@@ -29,6 +32,7 @@ import {
   type ResolvedChatAttachments,
   RUN_EVENT_NOTIFY_CHANNEL,
 } from "./chat-repository";
+import { stringifyPostgresJson } from "./postgres-json";
 import type { HarnessSpec } from "./product-schema";
 
 export type TaskRepositoryIdFactory = {
@@ -232,7 +236,8 @@ export class PostgresTaskRepository implements TaskRepository {
     if (!row) return null;
 
     const terminal =
-      row.archivedAt !== null || ["succeeded", "failed", "canceled"].includes(row.status);
+      row.archivedAt !== null ||
+      ["waiting", "succeeded", "failed", "canceled"].includes(row.status);
     const recordedDurationMs = nullableNumber(row.runDurationMs);
     const startedAt = nullableTimestamp(row.runStartedAt);
     const completedAt = nullableTimestamp(row.runCompletedAt);
@@ -429,6 +434,7 @@ export class PostgresTaskRepository implements TaskRepository {
     const runtimeId = ids.runtime();
     const runId = ids.run();
     const eventId = ids.event();
+    const activityId = `task_activity_${randomUUID()}`;
     const now = this.options.now?.() ?? new Date();
     const assistantCreatedAt = new Date(now.getTime() + 1);
     const initialMessageContent =
@@ -490,6 +496,13 @@ export class PostgresTaskRepository implements TaskRepository {
             AND workspace_id = ${input.actor.workspaceId}
             AND idempotency_key = ${input.command.idempotencyKey}
         ),
+        locked_attachment_commands AS MATERIALIZED (
+          -- Completion and cleanup also lock keyed commands before their upload row.
+          SELECT command.command_id
+          FROM goat.chat_attachment_upload_commands AS command
+          WHERE command.attachment_id IN (${attachmentIdList})
+          FOR UPDATE
+        ),
         eligible_attachments AS MATERIALIZED (
           SELECT upload.id
           FROM goat.chat_attachment_uploads AS upload
@@ -500,6 +513,7 @@ export class PostgresTaskRepository implements TaskRepository {
             AND upload.expires_at > ${now}
             AND upload.id IN (${attachmentIdList})
             AND EXISTS (SELECT 1 FROM actor_scope)
+            AND (SELECT count(*) FROM locked_attachment_commands) >= 0
           FOR UPDATE
         ),
         reservation AS MATERIALIZED (
@@ -561,19 +575,35 @@ export class PostgresTaskRepository implements TaskRepository {
             ${input.command.scheduledFor ?? null}, ${input.command.workflowId ?? null},
             ${this.options.compatibility?.workflowBrainRef ?? null},
             'queued', 'queued', ${now},
-            CASE WHEN ${JSON.stringify(harness)}::jsonb ? 'workflow'
+            CASE WHEN ${stringifyPostgresJson(harness)}::jsonb ? 'workflow'
               THEN jsonb_set(
-                ${JSON.stringify(harness)}::jsonb,
+                ${stringifyPostgresJson(harness)}::jsonb,
                 '{workflow,pluginIds}',
                 (SELECT plugin_ids FROM enabled_task_plugins),
                 true
               )
-              ELSE ${JSON.stringify(harness)}::jsonb
+              ELSE ${stringifyPostgresJson(harness)}::jsonb
             END,
             ${now}, ${now}
           FROM winner
           JOIN created_conversation AS conversation ON conversation.id = winner.conversation_id
           RETURNING *
+        ),
+        created_activity AS MATERIALIZED (
+          INSERT INTO goat.task_activities (
+            id, task_id, author, author_workos_id, kind, metadata, created_at
+          )
+          SELECT
+            ${activityId}, task.id, 'user', ${input.actor.userId}, 'created',
+            jsonb_strip_nulls(jsonb_build_object(
+              'source', task.source,
+              'workflowId', task.workflow_id,
+              'scheduleId', task.schedule_id,
+              'scheduledFor', task.scheduled_for
+            )),
+            ${now}
+          FROM created_task AS task
+          RETURNING id
         ),
         selected_task AS MATERIALIZED (
           SELECT created.*
@@ -592,6 +622,17 @@ export class PostgresTaskRepository implements TaskRepository {
           WHERE upload.id IN (SELECT id FROM eligible_attachments)
             AND upload.claimed_at IS NULL
           RETURNING upload.id
+        ),
+        terminal_attachment_commands AS MATERIALIZED (
+          UPDATE goat.chat_attachment_upload_commands AS command
+          SET claimed_at = ${now},
+              cleaned_at = ${now},
+              touched_at = ${now}
+          FROM claimed_attachments AS upload
+          WHERE command.attachment_id = upload.id
+            AND command.claimed_at IS NULL
+            AND command.cleaned_at IS NULL
+          RETURNING command.command_id
         ),
         inserted_user_message AS MATERIALIZED (
           INSERT INTO goat.chat_messages (
@@ -615,7 +656,7 @@ export class PostgresTaskRepository implements TaskRepository {
           )
           SELECT
             winner.assistant_message_id, task.session_id, 'assistant', '',
-            ${JSON.stringify(assistantDebugTrace)}::jsonb, ${assistantCreatedAt}, ${assistantCreatedAt}
+            ${stringifyPostgresJson(assistantDebugTrace)}::jsonb, ${assistantCreatedAt}, ${assistantCreatedAt}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
           RETURNING id
@@ -628,7 +669,7 @@ export class PostgresTaskRepository implements TaskRepository {
           SELECT
             winner.runtime_id, ${input.actor.userId}, task.session_id, ${input.command.engine},
             ${runtimeModel}, (SELECT id FROM resolved_brain), ${input.actor.workspaceId},
-            ${input.command.engine === "opencompany" ? null : ACTION_HOST_TOOL_CONTRACT_VERSION},
+            ${hostToolContractVersionForEngine(input.command.engine)},
             winner.run_id, 'queued', ${now}, ${now}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
@@ -642,7 +683,7 @@ export class PostgresTaskRepository implements TaskRepository {
           SELECT
             winner.run_id, ${input.actor.userId}, runtime.id, task.session_id,
             winner.message_id, winner.assistant_message_id, 'queued', ${initialMessageContent},
-            ${JSON.stringify(turnSettingsFromHarness(harness))}::jsonb, 1, ${now}, ${now}
+            ${stringifyPostgresJson(turnSettingsFromHarness(harness))}::jsonb, 1, ${now}, ${now}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
           JOIN inserted_runtime AS runtime ON true
@@ -686,7 +727,11 @@ export class PostgresTaskRepository implements TaskRepository {
           reservation.transaction_id AS "transactionId",
           reservation.command_id <> ${commandId} AS replayed,
           CASE
-            WHEN reservation.command_id <> ${commandId} OR EXISTS (SELECT 1 FROM inserted_run)
+            WHEN reservation.command_id <> ${commandId}
+              OR (
+                EXISTS (SELECT 1 FROM inserted_run)
+                AND EXISTS (SELECT 1 FROM created_activity)
+              )
               THEN true
             ELSE jsonb_array_length(jsonb_build_object('reason', 'unmaterialized')) = 0
           END AS materialized,
@@ -709,7 +754,8 @@ export class PostgresTaskRepository implements TaskRepository {
           task.archived_at AS "archivedAt",
           task.created_at AS "createdAt",
           task.updated_at AS "updatedAt",
-          (SELECT count(*) FROM notified) AS "notifyCount"
+          (SELECT count(*) FROM notified) AS "notifyCount",
+          (SELECT count(*) FROM terminal_attachment_commands) AS "terminalAttachmentCommandCount"
         FROM actor_scope
         LEFT JOIN reservation ON true
         LEFT JOIN selected_task AS task ON task.id = reservation.task_id
@@ -733,6 +779,415 @@ export class PostgresTaskRepository implements TaskRepository {
       return this.createTaskAndRun(input);
     }
     return taskCreateResult(row, requestHash);
+  }
+
+  async createTaskCommentAndRun(input: {
+    actor: Actor;
+    taskId: string;
+    command: CreateTaskCommentCommand;
+  }): Promise<CreateTaskCommentResult | null> {
+    const [preflight] = await this.rows<{ idExists: boolean }>(sql`
+      SELECT EXISTS (
+        SELECT 1 FROM goat.task_activities WHERE id = ${input.command.id}
+      ) AS "idExists"
+    `);
+    const attachmentIds = input.command.attachmentIds ?? [];
+    const resolvedAttachments = preflight?.idExists
+      ? { attachments: [], attachmentTexts: null }
+      : await this.resolveAttachments(input.actor, attachmentIds);
+    const attachmentsRequireClaim = !preflight?.idExists;
+    const attachmentIdList = attachmentIds.length
+      ? sql.join(
+          attachmentIds.map((id) => sql`${id}`),
+          sql`, `,
+        )
+      : sql`NULL`;
+    const ids = this.options.ids ?? defaultIds;
+    const messageId = ids.message();
+    const assistantMessageId = ids.message();
+    const runId = ids.run();
+    const eventId = ids.event();
+    const statusActivityId = `task_activity_${randomUUID()}`;
+    const now = this.options.now?.() ?? new Date();
+    const assistantCreatedAt = new Date(now.getTime() + 1);
+    const statusChangedAt = new Date(now.getTime() + 2);
+    let rows: TaskCommentCreateRow[];
+    try {
+      rows = await this.rows<TaskCommentCreateRow>(sql`
+      WITH existing_activity AS MATERIALIZED (
+        SELECT
+          activity.id,
+          activity.task_id,
+          activity.author,
+          activity.author_workos_id,
+          activity.kind,
+          activity.body,
+          activity.metadata,
+          activity.created_at
+        FROM goat.task_activities AS activity
+        WHERE activity.id = ${input.command.id}
+      ),
+      authorized AS MATERIALIZED (
+        SELECT
+          task.id,
+          task.status,
+          task.archived_at,
+          task.session_id,
+          task.user_workos_id,
+          task.harness_spec,
+          conversation.engine,
+          runtime.id AS runtime_id,
+          runtime.model AS runtime_model,
+          runtime.status AS runtime_status
+        FROM goat.tasks AS task
+        JOIN goat.chat_sessions AS conversation
+          ON conversation.id = task.session_id
+         AND conversation.kind = 'task'
+         AND conversation.closed_at IS NULL
+        JOIN goat.codex_chat_sessions AS runtime
+          ON runtime.chat_session_id = conversation.id
+         AND runtime.user_workos_id = task.user_workos_id
+         AND runtime.engine = conversation.engine
+         AND (runtime.workspace_id = ${input.actor.workspaceId} OR runtime.workspace_id IS NULL)
+        WHERE (task.id = ${input.taskId} OR upper(task.display_id) = upper(${input.taskId}))
+          AND ${taskAccessPredicate(input.actor)}
+        FOR UPDATE OF task, runtime
+      ),
+      locked_attachment_commands AS MATERIALIZED (
+        -- Completion and cleanup also lock keyed commands before their upload row.
+        SELECT command.command_id
+        FROM goat.chat_attachment_upload_commands AS command
+        WHERE command.attachment_id IN (${attachmentIdList})
+        FOR UPDATE
+      ),
+      eligible_attachments AS MATERIALIZED (
+        SELECT upload.id
+        FROM goat.chat_attachment_uploads AS upload
+        WHERE ${attachmentsRequireClaim}::boolean
+          AND upload.user_workos_id = ${input.actor.userId}
+          AND upload.workspace_id = ${input.actor.workspaceId}
+          AND upload.claimed_at IS NULL
+          AND upload.expires_at > ${now}
+          AND upload.id IN (${attachmentIdList})
+          AND EXISTS (SELECT 1 FROM authorized)
+          AND (SELECT count(*) FROM locked_attachment_commands) >= 0
+        FOR UPDATE
+      ),
+      matching_replay AS MATERIALIZED (
+        SELECT activity.*
+        FROM existing_activity AS activity
+        JOIN authorized AS task ON task.id = activity.task_id
+        WHERE activity.author = 'user'
+          AND activity.author_workos_id = ${input.actor.userId}
+          AND activity.kind = 'comment'
+          AND activity.body = ${input.command.body}
+          AND COALESCE(activity.metadata->'attachmentIds', '[]'::jsonb)
+            = ${stringifyPostgresJson(attachmentIds)}::jsonb
+          AND NULLIF(activity.metadata->>'messageId', '') IS NOT NULL
+          AND NULLIF(activity.metadata->>'assistantMessageId', '') IS NOT NULL
+          AND NULLIF(activity.metadata->>'runId', '') IS NOT NULL
+      ),
+      eligible AS MATERIALIZED (
+        SELECT task.*
+        FROM authorized AS task
+        WHERE task.archived_at IS NULL
+          AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
+          AND task.runtime_status NOT IN ('queued', 'starting', 'running')
+          AND NOT EXISTS (SELECT 1 FROM existing_activity)
+      ),
+      reopened_task AS MATERIALIZED (
+        UPDATE goat.tasks AS task
+        SET status = 'running',
+            stage = 'queued',
+            result = NULL,
+            error = NULL,
+            reported_outcome = NULL,
+            outcome_comment = NULL,
+            next_run_at = ${now},
+            lease_id = NULL,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            attempts = task.attempts + 1,
+            updated_at = ${now}
+        FROM eligible
+        WHERE task.id = eligible.id
+          AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
+          AND task.archived_at IS NULL
+        RETURNING task.id, eligible.status AS previous_status
+      ),
+      created_comment AS MATERIALIZED (
+        INSERT INTO goat.task_activities (
+          id, task_id, author, author_workos_id, kind, body, metadata, created_at
+        )
+        SELECT
+          ${input.command.id}, task.id, 'user', ${input.actor.userId}, 'comment',
+          ${input.command.body},
+          jsonb_build_object(
+            'messageId', ${messageId}::text,
+            'assistantMessageId', ${assistantMessageId}::text,
+            'runId', ${runId}::text,
+            'attachmentIds', ${stringifyPostgresJson(attachmentIds)}::jsonb
+          ),
+          ${now}
+        FROM reopened_task AS task
+        RETURNING *
+      ),
+      resumed_task_activity AS MATERIALIZED (
+        INSERT INTO goat.task_activities (
+          id, task_id, author, author_workos_id, kind, body, metadata, created_at
+        )
+        SELECT
+          ${statusActivityId}, task.id, 'user', ${input.actor.userId}, 'status_changed',
+          'Resumed by user.',
+          jsonb_build_object(
+            'fromStatus', task.previous_status,
+            'toStatus', 'running',
+            'runId', ${runId}::text
+          ),
+          ${statusChangedAt}
+        FROM reopened_task AS task
+        JOIN created_comment AS comment ON comment.task_id = task.id
+        RETURNING task_id
+      ),
+      queued_runtime AS MATERIALIZED (
+        UPDATE goat.codex_chat_sessions AS runtime
+        SET status = 'queued',
+            active_turn_id = ${runId},
+            error = NULL,
+            updated_at = ${now}
+        FROM eligible AS task
+        JOIN reopened_task AS reopened ON reopened.id = task.id
+        WHERE runtime.id = task.runtime_id
+          AND runtime.status NOT IN ('queued', 'starting', 'running')
+          AND EXISTS (
+            SELECT 1 FROM resumed_task_activity AS activity WHERE activity.task_id = task.id
+          )
+        RETURNING runtime.id, runtime.chat_session_id
+      ),
+      claimed_attachments AS MATERIALIZED (
+        UPDATE goat.chat_attachment_uploads AS upload
+        SET claimed_message_id = ${messageId},
+            claimed_at = ${now}
+        WHERE upload.id IN (SELECT id FROM eligible_attachments)
+          AND upload.claimed_at IS NULL
+        RETURNING upload.id
+      ),
+      terminal_attachment_commands AS MATERIALIZED (
+        UPDATE goat.chat_attachment_upload_commands AS command
+        SET claimed_at = ${now},
+            cleaned_at = ${now},
+            touched_at = ${now}
+        FROM claimed_attachments AS upload
+        WHERE command.attachment_id = upload.id
+          AND command.claimed_at IS NULL
+          AND command.cleaned_at IS NULL
+        RETURNING command.command_id
+      ),
+      inserted_user_message AS MATERIALIZED (
+        INSERT INTO goat.chat_messages (
+          id, session_id, role, content, task_id, attachments, attachment_texts,
+          created_at, updated_at
+        )
+        SELECT
+          ${messageId}, task.session_id, 'user', ${input.command.body}, task.id,
+          ${attachmentsJson(resolvedAttachments.attachments)}::jsonb,
+          ${attachmentTextsJson(resolvedAttachments.attachmentTexts)}::jsonb,
+          ${now}, ${now}
+        FROM eligible AS task
+        JOIN reopened_task AS reopened ON reopened.id = task.id
+        JOIN queued_runtime AS runtime ON runtime.id = task.runtime_id
+        JOIN created_comment AS comment ON comment.task_id = task.id
+        WHERE (
+          NOT ${attachmentsRequireClaim}::boolean
+          OR (SELECT COUNT(*) FROM claimed_attachments) = ${attachmentIds.length}
+        )
+        RETURNING id
+      ),
+      inserted_assistant_message AS MATERIALIZED (
+        INSERT INTO goat.chat_messages (
+          id, session_id, role, content, task_id, debug_trace, created_at, updated_at
+        )
+        SELECT
+          ${assistantMessageId}, task.session_id, 'assistant', '', task.id,
+          CASE
+            WHEN task.engine = 'opencompany' THEN jsonb_build_object(
+              'schemaVersion', 'opencompany.chat.debug.v1',
+              'model', task.runtime_model,
+              'steps', jsonb_build_array(),
+              'uiMessageParts', jsonb_build_array()
+            )
+            ELSE jsonb_build_object(
+              'schemaVersion', 'goat.codex_chat.debug.v1',
+              'model', task.runtime_model,
+              'uiMessageParts', jsonb_build_array()
+            )
+          END,
+          ${assistantCreatedAt}, ${assistantCreatedAt}
+        FROM eligible AS task
+        JOIN reopened_task AS reopened ON reopened.id = task.id
+        JOIN queued_runtime AS runtime ON runtime.id = task.runtime_id
+        JOIN inserted_user_message AS message ON message.id = ${messageId}
+        RETURNING id
+      ),
+      inserted_run AS MATERIALIZED (
+        INSERT INTO goat.codex_chat_turns (
+          id, user_workos_id, codex_chat_session_id, chat_session_id,
+          user_message_id, assistant_message_id, status, prompt, settings, event_sequence,
+          created_at, updated_at
+        )
+        SELECT
+          ${runId}, task.user_workos_id, task.runtime_id, task.session_id,
+          ${messageId}, ${assistantMessageId}, 'queued', ${input.command.body},
+          jsonb_strip_nulls(jsonb_build_object(
+            'reasoningEffort', task.harness_spec #>> '{codex,reasoningEffort}',
+            'goalMode', task.harness_spec #> '{codex,goalMode}',
+            'taskResultMode', 'assistant_final'
+          )),
+          1, ${now}, ${now}
+        FROM eligible AS task
+        JOIN reopened_task AS reopened ON reopened.id = task.id
+        JOIN queued_runtime AS runtime ON runtime.id = task.runtime_id
+        JOIN inserted_user_message AS user_message ON user_message.id = ${messageId}
+        JOIN inserted_assistant_message AS assistant_message
+          ON assistant_message.id = ${assistantMessageId}
+        RETURNING id
+      ),
+      inserted_event AS MATERIALIZED (
+        INSERT INTO goat.run_events (
+          id, run_id, sequence, schema_version, type, payload, created_at
+        )
+        SELECT
+          ${eventId}, run.id, 1, 1, 'run.queued',
+          jsonb_build_object(
+            'conversationId', task.session_id,
+            'triggerMessageId', ${messageId}::text
+          ),
+          ${now}
+        FROM inserted_run AS run
+        JOIN eligible AS task ON true
+        RETURNING run_id, sequence
+      ),
+      notified AS MATERIALIZED (
+        SELECT pg_notify(
+          ${RUN_EVENT_NOTIFY_CHANNEL},
+          jsonb_build_object('runId', run_id, 'sequence', sequence)::text
+        )
+        FROM inserted_event
+      ),
+      updated_conversation AS MATERIALIZED (
+        UPDATE goat.chat_sessions AS conversation
+        SET updated_at = ${now}, last_seen_at = ${now}, has_unseen = false
+        FROM eligible AS task, inserted_run
+        WHERE conversation.id = task.session_id
+        RETURNING conversation.id
+      ),
+      selected_comment AS MATERIALIZED (
+        SELECT * FROM created_comment
+        UNION ALL
+        SELECT * FROM matching_replay
+      )
+      SELECT
+        EXISTS (SELECT 1 FROM existing_activity) AS "idExists",
+        EXISTS (SELECT 1 FROM matching_replay) AS replayed,
+        authorized.status IN ('queued', 'running') AS active,
+        authorized.archived_at IS NOT NULL AS archived,
+        authorized.runtime_status IN ('queued', 'starting', 'running') AS "runtimeActive",
+        CASE
+          WHEN EXISTS (SELECT 1 FROM matching_replay) THEN (
+            EXISTS (
+              SELECT 1
+              FROM goat.chat_messages AS user_message
+              JOIN goat.chat_messages AS assistant_message
+                ON assistant_message.id = selected_comment.metadata->>'assistantMessageId'
+              JOIN goat.codex_chat_turns AS run
+                ON run.id = selected_comment.metadata->>'runId'
+              WHERE user_message.id = selected_comment.metadata->>'messageId'
+                AND run.user_message_id = user_message.id
+                AND run.assistant_message_id = assistant_message.id
+            )
+          )
+          WHEN EXISTS (SELECT 1 FROM eligible) THEN
+            CASE
+              WHEN EXISTS (SELECT 1 FROM inserted_event)
+                AND EXISTS (SELECT 1 FROM updated_conversation)
+                AND EXISTS (SELECT 1 FROM resumed_task_activity)
+                THEN true
+              ELSE jsonb_array_length(jsonb_build_object('reason', 'unmaterialized')) = 0
+            END
+          ELSE false
+        END AS materialized,
+        task.id,
+        task.display_id AS "displayId",
+        task.name,
+        task.prompt AS goal,
+        task.session_id AS "conversationId",
+        CASE
+          WHEN EXISTS (SELECT 1 FROM reopened_task) THEN 'running'
+          ELSE task.status
+        END AS status,
+        task.source,
+        conversation.engine,
+        task.model,
+        task.workflow_id AS "workflowId",
+        task.schedule_id AS "scheduleId",
+        task.scheduled_for AS "scheduledFor",
+        CASE WHEN EXISTS (SELECT 1 FROM reopened_task) THEN NULL ELSE task.result END AS result,
+        CASE WHEN EXISTS (SELECT 1 FROM reopened_task) THEN NULL ELSE task.error END AS error,
+        CASE
+          WHEN EXISTS (SELECT 1 FROM reopened_task) THEN NULL
+          ELSE task.reported_outcome
+        END AS "reportedStatus",
+        CASE
+          WHEN EXISTS (SELECT 1 FROM reopened_task) THEN NULL
+          ELSE task.outcome_comment
+        END AS "outcomeComment",
+        task.archived_at AS "archivedAt",
+        task.created_at AS "createdAt",
+        CASE
+          WHEN EXISTS (SELECT 1 FROM reopened_task) THEN ${now}
+          ELSE task.updated_at
+        END AS "updatedAt",
+        selected_comment.id AS "commentId",
+        selected_comment.task_id AS "commentTaskId",
+        selected_comment.author_workos_id AS "commentAuthorWorkosId",
+        selected_comment.body AS "commentBody",
+        selected_comment.created_at AS "commentCreatedAt",
+        selected_comment.metadata->>'messageId' AS "messageId",
+        selected_comment.metadata->>'assistantMessageId' AS "assistantMessageId",
+        selected_comment.metadata->>'runId' AS "runId",
+        pg_current_xact_id()::text AS "transactionId",
+        (SELECT count(*) FROM notified) AS "notifyCount",
+        (SELECT count(*) FROM terminal_attachment_commands) AS "terminalAttachmentCommandCount"
+      FROM authorized
+      JOIN goat.tasks AS task ON task.id = authorized.id
+      JOIN goat.chat_sessions AS conversation ON conversation.id = task.session_id
+      LEFT JOIN selected_comment ON selected_comment.task_id = task.id
+      LIMIT 1
+      `);
+    } catch (error) {
+      if (attachmentIds.length > 0 && isUnmaterializedGuardError(error)) {
+        throw new CoreError("invalid_argument", "An attachment is unavailable or has expired.");
+      }
+      throw error;
+    }
+    const [row] = rows;
+    if (!row) return null;
+    if (row.idExists && !row.replayed) {
+      throw new CoreError(
+        "idempotency_conflict",
+        "The comment ID was already used for another Task comment.",
+      );
+    }
+    if (!row.replayed && row.archived) {
+      throw new CoreError("conflict", "Archived Tasks cannot receive comments.");
+    }
+    if (!row.replayed && (row.active || row.runtimeActive)) {
+      throw new CoreError("conflict", "Wait for the active Task run to finish before commenting.");
+    }
+    if (!row.materialized) {
+      throw new Error("The Task comment, Message, and Run were not materialized.");
+    }
+    return taskCommentCreateResult(row);
   }
 
   async updateTask(input: {
@@ -854,7 +1309,7 @@ export class PostgresTaskRepository implements TaskRepository {
   }
 }
 
-type PhysicalTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+type PhysicalTaskStatus = "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled";
 
 type TaskRow = {
   id: string;
@@ -892,6 +1347,24 @@ type TaskCreateRow = Omit<TaskRow, "conversationId"> & {
   replayed: boolean;
   materialized: boolean;
   taskConversationId: string;
+};
+
+type TaskCommentCreateRow = TaskRow & {
+  idExists: boolean;
+  replayed: boolean;
+  active: boolean;
+  archived: boolean;
+  runtimeActive: boolean;
+  materialized: boolean;
+  commentId: string | null;
+  commentTaskId: string | null;
+  commentAuthorWorkosId: string | null;
+  commentBody: string | null;
+  commentCreatedAt: Date | string | null;
+  messageId: string | null;
+  assistantMessageId: string | null;
+  runId: string | null;
+  transactionId: number | string;
 };
 
 type TaskUpdateRow = TaskRow & {
@@ -1030,6 +1503,37 @@ function taskCreateResult(row: TaskCreateRow, requestHash: string): CreateTaskRe
   };
 }
 
+function taskCommentCreateResult(row: TaskCommentCreateRow): CreateTaskCommentResult {
+  if (
+    !row.commentId ||
+    !row.commentTaskId ||
+    row.commentTaskId !== row.id ||
+    !row.commentAuthorWorkosId ||
+    row.commentBody === null ||
+    !row.commentCreatedAt ||
+    !row.messageId ||
+    !row.assistantMessageId ||
+    !row.runId
+  ) {
+    throw new Error("The durable Task comment, Message, and Run references are incomplete.");
+  }
+  return {
+    task: mapTask(row),
+    comment: {
+      id: row.commentId,
+      taskId: row.commentTaskId,
+      authorWorkosId: row.commentAuthorWorkosId,
+      body: row.commentBody,
+      createdAt: asDate(row.commentCreatedAt),
+    },
+    messageId: row.messageId,
+    assistantMessageId: row.assistantMessageId,
+    runId: row.runId,
+    transactionId: validTransactionId(row.transactionId),
+    idempotentReplay: row.replayed,
+  };
+}
+
 function mapTask(row: TaskRow): Task {
   const archivedAt = nullableDate(row.archivedAt);
   return {
@@ -1106,7 +1610,7 @@ function hashTaskCommand(command: CreateTaskCommand) {
 }
 
 function runtimeModelName(engine: CreateTaskCommand["engine"], model: string) {
-  if (engine === "codex") return codexCliModelNameForModelId(model);
+  if (engine === "codex") return isCodexModelId(model) ? codexCliModelNameForModelId(model) : null;
   if (engine === "claude_code") return claudeCodeCliModelNameForModelId(model);
   return model;
 }
@@ -1148,12 +1652,12 @@ function turnSettingsFromHarness(harness: HarnessSpec) {
 }
 
 function attachmentsJson(attachments: ResolvedChatAttachments["attachments"]) {
-  return attachments.length > 0 ? JSON.stringify(attachments) : null;
+  return attachments.length > 0 ? stringifyPostgresJson(attachments) : null;
 }
 
 function attachmentTextsJson(attachmentTexts: ResolvedChatAttachments["attachmentTexts"]) {
   return attachmentTexts && Object.keys(attachmentTexts).length > 0
-    ? JSON.stringify(attachmentTexts)
+    ? stringifyPostgresJson(attachmentTexts)
     : null;
 }
 

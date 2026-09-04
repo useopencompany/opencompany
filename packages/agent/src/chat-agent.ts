@@ -1,7 +1,9 @@
 import {
   ACTION_TOOL_CONTRACT,
   AGENT_MODEL_CATALOG,
+  CLAUDE_CODE_AGENT_MODEL_IDS,
   CLAUDE_CODE_DEFAULT_MODEL_ID,
+  CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   isClaudeCodeModelId,
@@ -21,6 +23,8 @@ import {
 } from "@opencompany/telemetry";
 import { flushLatitude, latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import {
+  WIKI_READ_TOOL_DESCRIPTION,
+  WIKI_READ_TOOL_INPUT_JSON_SCHEMA,
   WIKI_TOOL_DESCRIPTION,
   WIKI_TOOL_INPUT_JSON_SCHEMA,
   WIKI_TOOL_NAME,
@@ -34,6 +38,7 @@ import {
   jsonSchema,
   type LanguageModelUsage,
   stepCountIs,
+  streamText,
   type ToolCallRepairFunction,
   type ToolSet,
   tool,
@@ -72,8 +77,11 @@ import {
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
+  EDIT_WORKSPACE_SKILL_TOOL_NAME,
   type EditTaskScheduleToolInput,
   type EditTaskScheduleToolOutput,
+  type EditWorkspaceSkillToolInput,
+  type EditWorkspaceSkillToolOutput,
   LIST_ACTIONS_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
   type ListActionsToolInput,
@@ -113,6 +121,7 @@ import {
 } from "./chat-ui";
 import { normalizePublicWebUrl } from "./chat-web-fetch";
 import type { SendUserMessageRunner } from "./imessage/send-user-message";
+import { type ProductLanguageModelResolution, resolveProductLanguageModel } from "./language-model";
 import {
   BRAIN_TOOL_DESCRIPTION,
   BROWSER_CHAT_CALL_LIMIT_DESCRIPTION,
@@ -127,6 +136,10 @@ import {
   createProductChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_NAME_DESCRIPTION,
+  EDIT_WORKSPACE_SKILL_TOOL_DESCRIPTION,
   LIST_ACTIONS_TOOL_DESCRIPTION,
   LIST_SKILLS_QUERY_DESCRIPTION,
   LIST_SKILLS_TOOL_DESCRIPTION,
@@ -220,7 +233,8 @@ export const UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA: JSONSchema7 = {
 };
 export const TASK_SYSTEM_BLOCK = [
   "<background_task_run>",
-  "You are running as an autonomous background task. There is no interactive user to answer questions or approve steps — work to completion with the tools available.",
+  "You are running as a background task, so the user cannot respond during this turn.",
+  "Follow the task and workflow instructions. If they call for a plan, question, decision, or approval before further work, end the turn with that request; the runner will pause the task for review. Otherwise complete the requested work with the tools available.",
   "When you have finished, write your final result as your last message. The task runner will decide the user-facing task status and card comment after your run finishes.",
   "</background_task_run>",
 ].join("\n");
@@ -243,6 +257,10 @@ export type StartedTask = {
 };
 
 type GenerateTextLike = typeof generateText;
+type ProductGenerationResult = Pick<
+  Awaited<ReturnType<GenerateTextLike>>,
+  "text" | "steps" | "finishReason" | "totalUsage"
+>;
 type BrainCliRunner = (
   input: BrainToolInput,
   executionContext?: unknown,
@@ -269,6 +287,10 @@ export type CreateWorkspaceSkillRunner = (
   input: CreateWorkspaceSkillToolInput,
   context: { toolCallId: string },
 ) => Promise<CreateWorkspaceSkillToolOutput>;
+export type EditWorkspaceSkillRunner = (
+  input: EditWorkspaceSkillToolInput,
+  context: { toolCallId: string },
+) => Promise<EditWorkspaceSkillToolOutput>;
 export type ActionDispatcher = {
   // The action catalog resolved server-side from real connection state; ids
   // become the dispatch enum, so a disconnected provider's actions cannot be
@@ -332,6 +354,8 @@ export type ProductChatAgentResult = {
   // last step only as a context-fullness proxy). Headless surfaces need this
   // for credit debits.
   totalUsage: LanguageModelUsage | undefined;
+  billing: "metered_gateway" | "subscription_covered";
+  provider: "gateway" | "codex-backend";
 };
 
 type ProductChatSystemPromptInput = NonNullable<
@@ -353,12 +377,15 @@ export async function runProductChatAgent(input: {
   messages: readonly ProductChatAgentMessage[];
   model: AgentModelId;
   gatewayApiKey: string;
+  workspaceId?: string;
+  modelResolution?: ProductLanguageModelResolution;
   startTask?: (task: StartTaskRequest, context: StartTaskExecutionContext) => Promise<StartedTask>;
   requestedEngine?: HarnessEngine;
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
+  editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
@@ -378,7 +405,7 @@ export async function runProductChatAgent(input: {
   userContext?: ProductChatSystemPromptInput["userContext"];
   recurringSchedules?: ProductChatSystemPromptInput["recurringSchedules"];
   taskToolsEnabled?: boolean;
-  brainCaptureEnabled?: boolean;
+  wikiToolReadOnly?: boolean;
   activeBrain?: ProductChatSystemPromptInput["activeBrain"];
   connectedIntegrations?: ProductChatSystemPromptInput["connectedIntegrations"];
   // Surface-specific prompt blocks appended after the shared system prompt
@@ -396,13 +423,7 @@ export async function runProductChatAgent(input: {
   generateTextImpl?: GenerateTextLike;
   maxSteps?: number;
 }): Promise<ProductChatAgentResult> {
-  const gatewayApiKey = input.gatewayApiKey.trim();
-  if (!gatewayApiKey) {
-    throw new Error("VERCEL_AI_GATEWAY_API_KEY is required for opencompany chat.");
-  }
-
   const generate = input.generateTextImpl ?? generateText;
-  const gateway = createGateway({ apiKey: gatewayApiKey });
   const attribution = createGatewayAttribution({
     userWorkosId: input.userWorkosId,
     feature: input.feature ?? "chat",
@@ -419,9 +440,12 @@ export async function runProductChatAgent(input: {
     ...(input.editTaskSchedule ? { editTaskSchedule: input.editTaskSchedule } : {}),
     ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
     ...(input.createWorkspaceSkill ? { createWorkspaceSkill: input.createWorkspaceSkill } : {}),
+    ...(input.editWorkspaceSkill ? { editWorkspaceSkill: input.editWorkspaceSkill } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
-    ...(input.runWiki ? { runWiki: input.runWiki } : {}),
+    ...(input.runWiki
+      ? { runWiki: input.runWiki, wikiToolReadOnly: Boolean(input.wikiToolReadOnly) }
+      : {}),
     ...(input.sendUserMessage ? { sendUserMessage: input.sendUserMessage } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
@@ -440,9 +464,8 @@ export async function runProductChatAgent(input: {
     ...(input.userContext ? { userContext: input.userContext } : {}),
     ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
     ...(input.taskToolsEnabled !== undefined ? { taskToolsEnabled: input.taskToolsEnabled } : {}),
-    ...(input.brainCaptureEnabled !== undefined
-      ? { brainCaptureEnabled: input.brainCaptureEnabled }
-      : {}),
+    wikiToolEnabled: Boolean(input.runWiki),
+    wikiToolReadOnly: Boolean(input.wikiToolReadOnly),
     ...(input.activeBrain !== undefined ? { activeBrain: input.activeBrain } : {}),
     ...(input.connectedIntegrations !== undefined
       ? { connectedIntegrations: input.connectedIntegrations }
@@ -456,35 +479,67 @@ export async function runProductChatAgent(input: {
   ].join("\n\n");
 
   const feature = input.feature ?? "chat";
+  const modelResolution: ProductLanguageModelResolution =
+    input.modelResolution ??
+    (input.workspaceId
+      ? await resolveProductLanguageModel({
+          workspaceId: input.workspaceId,
+          modelId: input.model,
+          feature: feature === "task" || feature === "slack-bot" ? feature : "chat",
+          gatewayApiKey: input.gatewayApiKey,
+        })
+      : {
+          model: createGateway({ apiKey: input.gatewayApiKey })(input.model),
+          provider: "gateway" as const,
+          billing: "metered_gateway" as const,
+        });
+  if (modelResolution.provider === "gateway" && !input.gatewayApiKey.trim()) {
+    throw new Error("VERCEL_AI_GATEWAY_API_KEY is required for opencompany chat.");
+  }
   const maxSteps = input.maxSteps ?? CHAT_MAX_STEPS;
-  let result: Awaited<ReturnType<GenerateTextLike>>;
+  const generationOptions = {
+    model: modelResolution.model,
+    system,
+    messages: input.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+    stopWhen: stepCountIs(maxSteps),
+    prepareStep: ({ stepNumber }: { stepNumber: number }) =>
+      prepareProductChatStep({ stepNumber, maxSteps }),
+    tools: toolContext.tools,
+    ...(toolContext.repairToolCall
+      ? { experimental_repairToolCall: toolContext.repairToolCall }
+      : {}),
+    providerOptions:
+      modelResolution.providerOptions ??
+      gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
+    ...latitudeTelemetry({
+      name: feature === "slack-bot" ? "slack-answer" : "chat-agent",
+      feature,
+      userId: input.userWorkosId,
+      sessionId: input.chatSessionId ?? input.telemetrySessionId,
+      metadata: {
+        model: input.model,
+        ...(input.brainRef ? { brainRef: input.brainRef } : {}),
+      },
+    }),
+    ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+  };
+  let result: ProductGenerationResult;
   try {
-    result = await generate({
-      model: gateway(input.model),
-      system,
-      messages: input.messages.map((message) => ({
-        role: message.role,
-        content: message.content,
-      })),
-      stopWhen: stepCountIs(maxSteps),
-      prepareStep: ({ stepNumber }) => prepareProductChatStep({ stepNumber, maxSteps }),
-      tools: toolContext.tools,
-      ...(toolContext.repairToolCall
-        ? { experimental_repairToolCall: toolContext.repairToolCall }
-        : {}),
-      providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
-      ...latitudeTelemetry({
-        name: feature === "slack-bot" ? "slack-answer" : "chat-agent",
-        feature,
-        userId: input.userWorkosId,
-        sessionId: input.chatSessionId ?? input.telemetrySessionId,
-        metadata: {
-          model: input.model,
-          ...(input.brainRef ? { brainRef: input.brainRef } : {}),
-        },
-      }),
-      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
-    });
+    if (modelResolution.provider === "codex-backend" && !input.generateTextImpl) {
+      const streamed = streamText(generationOptions);
+      const [text, steps, finishReason, totalUsage] = await Promise.all([
+        streamed.text,
+        streamed.steps,
+        streamed.finishReason,
+        streamed.totalUsage,
+      ]);
+      result = { text, steps, finishReason, totalUsage };
+    } else {
+      result = await generate(generationOptions);
+    }
   } finally {
     // Headless callers (Slack bot, schedulers) have no response lifecycle to
     // hook a flush onto, so export before returning. No-op when disabled.
@@ -504,6 +559,8 @@ export async function runProductChatAgent(input: {
       ...(finishReason ? { finishReason } : {}),
     }),
     totalUsage: result.totalUsage,
+    billing: modelResolution.billing,
+    provider: modelResolution.provider,
   };
 }
 
@@ -516,9 +573,11 @@ export function createProductChatToolContext(input: {
   editTaskSchedule?: EditTaskScheduleRunner;
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
+  editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
+  wikiToolReadOnly?: boolean;
   sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
@@ -578,24 +637,22 @@ export function createProductChatToolContext(input: {
       >[0])
     : BRAIN_READ_TOOL_AI_SCHEMA;
 
-  const tools: ToolSet = {
-    [BRAIN_TOOL_NAME]: tool<BrainToolInput, BrainToolOutput>({
+  const tools: ToolSet = {};
+  if (input.runBrainCli) {
+    tools[BRAIN_TOOL_NAME] = tool<BrainToolInput, BrainToolOutput, Record<string, unknown>>({
       description: BRAIN_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<BrainToolInput>(brainSchema),
       execute: async (args, executionContext?: unknown) => {
-        if (!input.runBrainCli) {
-          throw new Error("brain is not configured for this chat.");
-        }
         visibleToolActivity = true;
         // Multi-brain runners receive the raw args (including `brain`) and own
         // normalization after extracting the target.
         const toolArgs = multiBrain ? args : normalizeBrainToolInput(args);
         return executionContext === undefined
-          ? input.runBrainCli(toolArgs)
-          : input.runBrainCli(toolArgs, executionContext);
+          ? input.runBrainCli!(toolArgs)
+          : input.runBrainCli!(toolArgs, executionContext);
       },
-    }),
-  };
+    });
+  }
 
   const startTrackedTask = async (
     create: () => Promise<StartedTask>,
@@ -617,7 +674,18 @@ export function createProductChatToolContext(input: {
 
   const startTask = input.startTask;
   if (startTask) {
-    tools[START_TASK_TOOL_NAME] = tool<StartTaskToolInput, StartTaskToolOutput>({
+    const taskEngineHint = input.requestedEngine ?? inferStartTaskEngine(input.latestUserMessage);
+    const availableTaskModels =
+      taskEngineHint === "codex"
+        ? CODEX_AGENT_MODEL_IDS
+        : taskEngineHint === "claude_code"
+          ? CLAUDE_CODE_AGENT_MODEL_IDS
+          : AGENT_MODEL_CATALOG.map((model) => model.id);
+    tools[START_TASK_TOOL_NAME] = tool<
+      StartTaskToolInput,
+      StartTaskToolOutput,
+      Record<string, unknown>
+    >({
       description: START_TASK_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<StartTaskToolInput>({
         type: "object",
@@ -642,7 +710,7 @@ export function createProductChatToolContext(input: {
           },
           model: {
             type: "string",
-            enum: AGENT_MODEL_CATALOG.map((model) => model.id),
+            enum: [...availableTaskModels],
             description: START_TASK_MODEL_DESCRIPTION,
           },
         },
@@ -700,7 +768,11 @@ export function createProductChatToolContext(input: {
   const workflows = input.workflows;
   if (workflows && workflows.catalog.length > 0) {
     const workflowIds = workflows.catalog.map((workflow) => workflow.id);
-    tools[START_WORKFLOW_TOOL_NAME] = tool<StartWorkflowToolInput, StartWorkflowToolOutput>({
+    tools[START_WORKFLOW_TOOL_NAME] = tool<
+      StartWorkflowToolInput,
+      StartWorkflowToolOutput,
+      Record<string, unknown>
+    >({
       description: START_WORKFLOW_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<StartWorkflowToolInput>({
         type: "object",
@@ -737,10 +809,12 @@ export function createProductChatToolContext(input: {
 
   const runWiki = input.runWiki;
   if (runWiki) {
-    tools[WIKI_TOOL_NAME] = tool<WikiToolInput, WikiToolOutput>({
-      description: WIKI_TOOL_DESCRIPTION,
+    tools[WIKI_TOOL_NAME] = tool<WikiToolInput, WikiToolOutput, Record<string, unknown>>({
+      description: input.wikiToolReadOnly ? WIKI_READ_TOOL_DESCRIPTION : WIKI_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<WikiToolInput>(
-        WIKI_TOOL_INPUT_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0],
+        (input.wikiToolReadOnly
+          ? WIKI_READ_TOOL_INPUT_JSON_SCHEMA
+          : WIKI_TOOL_INPUT_JSON_SCHEMA) as unknown as Parameters<typeof jsonSchema>[0],
       ),
       execute: async (args, executionContext) => {
         visibleToolActivity = true;
@@ -760,7 +834,8 @@ export function createProductChatToolContext(input: {
   if (createWorkspaceSkill) {
     tools[CREATE_WORKSPACE_SKILL_TOOL_NAME] = tool<
       CreateWorkspaceSkillToolInput,
-      CreateWorkspaceSkillToolOutput
+      CreateWorkspaceSkillToolOutput,
+      Record<string, unknown>
     >({
       description: CREATE_WORKSPACE_SKILL_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<CreateWorkspaceSkillToolInput>({
@@ -810,10 +885,69 @@ export function createProductChatToolContext(input: {
     });
   }
 
+  const editWorkspaceSkill = input.editWorkspaceSkill;
+  if (editWorkspaceSkill) {
+    tools[EDIT_WORKSPACE_SKILL_TOOL_NAME] = tool<
+      EditWorkspaceSkillToolInput,
+      EditWorkspaceSkillToolOutput,
+      Record<string, unknown>
+    >({
+      description: EDIT_WORKSPACE_SKILL_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<EditWorkspaceSkillToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: {
+            type: "string",
+            minLength: 1,
+            maxLength: 64,
+            pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            description: EDIT_WORKSPACE_SKILL_NAME_DESCRIPTION,
+          },
+          description: {
+            type: "string",
+            minLength: 1,
+            maxLength: 1_024,
+            description: EDIT_WORKSPACE_SKILL_DESCRIPTION_DESCRIPTION,
+          },
+          instructions: {
+            type: "string",
+            minLength: 1,
+            maxLength: 512 * 1_024,
+            description: EDIT_WORKSPACE_SKILL_INSTRUCTIONS_DESCRIPTION,
+          },
+        },
+        required: ["name", "description", "instructions"],
+      }),
+      execute: async (args, executionContext) => {
+        visibleToolActivity = true;
+        const toolCallId =
+          executionContext &&
+          typeof executionContext === "object" &&
+          "toolCallId" in executionContext &&
+          typeof executionContext.toolCallId === "string"
+            ? executionContext.toolCallId
+            : `ai-sdk:edit-workspace-skill:${++internalWorkspaceSkillInvocationSequence}`;
+        return editWorkspaceSkill(
+          {
+            name: args.name.trim(),
+            description: args.description.trim(),
+            instructions: args.instructions.trim(),
+          },
+          { toolCallId },
+        );
+      },
+    });
+  }
+
   const saveToBrain = input.saveToBrain;
   if (saveToBrain) {
     const capturedByKey = new Map<string, SaveToBrainToolOutput>();
-    tools[SAVE_TO_BRAIN_TOOL_NAME] = tool<SaveToBrainToolInput, SaveToBrainToolOutput>({
+    tools[SAVE_TO_BRAIN_TOOL_NAME] = tool<
+      SaveToBrainToolInput,
+      SaveToBrainToolOutput,
+      Record<string, unknown>
+    >({
       description: SAVE_TO_BRAIN_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<SaveToBrainToolInput>({
         type: "object",
@@ -900,7 +1034,11 @@ export function createProductChatToolContext(input: {
   const sendUserMessage = input.sendUserMessage;
   if (sendUserMessage) {
     let sendUserMessageCallCount = 0;
-    tools[SEND_USER_MESSAGE_TOOL_NAME] = tool<SendUserMessageToolInput, SendUserMessageToolOutput>({
+    tools[SEND_USER_MESSAGE_TOOL_NAME] = tool<
+      SendUserMessageToolInput,
+      SendUserMessageToolOutput,
+      Record<string, unknown>
+    >({
       description: SEND_USER_MESSAGE_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<SendUserMessageToolInput>({
         type: "object",
@@ -932,7 +1070,11 @@ export function createProductChatToolContext(input: {
   }
 
   if (input.scheduleTask) {
-    tools[SCHEDULE_TASK_TOOL_NAME] = tool<ScheduleTaskToolInput, ScheduleTaskToolOutput>({
+    tools[SCHEDULE_TASK_TOOL_NAME] = tool<
+      ScheduleTaskToolInput,
+      ScheduleTaskToolOutput,
+      Record<string, unknown>
+    >({
       description: SCHEDULE_TASK_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<ScheduleTaskToolInput>({
         type: "object",
@@ -987,7 +1129,8 @@ export function createProductChatToolContext(input: {
   if (input.editTaskSchedule) {
     tools[EDIT_TASK_SCHEDULE_TOOL_NAME] = tool<
       EditTaskScheduleToolInput,
-      EditTaskScheduleToolOutput
+      EditTaskScheduleToolOutput,
+      Record<string, unknown>
     >({
       description: EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<EditTaskScheduleToolInput>({
@@ -1039,7 +1182,8 @@ export function createProductChatToolContext(input: {
   if (input.deleteTaskSchedule) {
     tools[DELETE_TASK_SCHEDULE_TOOL_NAME] = tool<
       DeleteTaskScheduleToolInput,
-      DeleteTaskScheduleToolOutput
+      DeleteTaskScheduleToolOutput,
+      Record<string, unknown>
     >({
       description: DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<DeleteTaskScheduleToolInput>({
@@ -1070,7 +1214,11 @@ export function createProductChatToolContext(input: {
 
   const webFetch = input.webFetch;
   if (webFetch) {
-    tools[WEB_FETCH_TOOL_NAME] = tool<WebFetchToolInput, WebFetchToolOutput>({
+    tools[WEB_FETCH_TOOL_NAME] = tool<
+      WebFetchToolInput,
+      WebFetchToolOutput,
+      Record<string, unknown>
+    >({
       description: WEB_FETCH_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<WebFetchToolInput>({
         type: "object",
@@ -1108,7 +1256,11 @@ export function createProductChatToolContext(input: {
 
   const webSearch = input.webSearch;
   if (webSearch) {
-    tools[WEB_SEARCH_TOOL_NAME] = tool<WebSearchToolInput, WebSearchToolOutput>({
+    tools[WEB_SEARCH_TOOL_NAME] = tool<
+      WebSearchToolInput,
+      WebSearchToolOutput,
+      Record<string, unknown>
+    >({
       description: WEB_SEARCH_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<WebSearchToolInput>({
         type: "object",
@@ -1158,7 +1310,8 @@ export function createProductChatToolContext(input: {
       const profileNames = browserProfiles.profiles.map((profile) => profile.name);
       tools[BROWSER_USE_PROFILE_TOOL_NAME] = tool<
         BrowserUseProfileToolInput,
-        BrowserUseProfileToolOutput
+        BrowserUseProfileToolOutput,
+        Record<string, unknown>
       >({
         description: BROWSER_USE_PROFILE_TOOL_DESCRIPTION,
         needsApproval: async () => true,
@@ -1186,7 +1339,7 @@ export function createProductChatToolContext(input: {
     }
 
     for (const name of BROWSER_TOOL_NAMES) {
-      tools[name] = tool<BrowserToolInput, BrowserToolOutput>({
+      tools[name] = tool<BrowserToolInput, BrowserToolOutput, Record<string, unknown>>({
         description: `${BROWSER_CHAT_TOOL_DESCRIPTIONS[name]} ${BROWSER_CHAT_CALL_LIMIT_DESCRIPTION}`,
         needsApproval: async (args) => {
           if (name !== "browser_click" && name !== "browser_find") return false;
@@ -1218,7 +1371,11 @@ export function createProductChatToolContext(input: {
   const skills = input.skills;
   if (skills && skills.catalog.length > 0) {
     const skillIds = skills.catalog.map((skill) => skill.id);
-    tools[LIST_SKILLS_TOOL_NAME] = tool<ListSkillsToolInput, ListSkillsToolOutput>({
+    tools[LIST_SKILLS_TOOL_NAME] = tool<
+      ListSkillsToolInput,
+      ListSkillsToolOutput,
+      Record<string, unknown>
+    >({
       description: LIST_SKILLS_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<ListSkillsToolInput>({
         type: "object",
@@ -1234,11 +1391,23 @@ export function createProductChatToolContext(input: {
         visibleToolActivity = true;
         const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
         const queryTerms = query.split(/\s+/).filter(Boolean);
-        const matches = skills.catalog.filter((skill) => {
-          if (queryTerms.length === 0) return true;
-          const searchable = `${skill.id} ${skill.name} ${skill.description}`.toLowerCase();
-          return queryTerms.every((term) => searchable.includes(term));
-        });
+        const matches = queryTerms.length
+          ? skills.catalog
+              .map((skill, catalogIndex) => {
+                const searchable = `${skill.id} ${skill.name} ${skill.description}`.toLowerCase();
+                return {
+                  skill,
+                  catalogIndex,
+                  matchedTerms: queryTerms.filter((term) => searchable.includes(term)).length,
+                };
+              })
+              .filter((candidate) => candidate.matchedTerms > 0)
+              .sort(
+                (left, right) =>
+                  right.matchedTerms - left.matchedTerms || left.catalogIndex - right.catalogIndex,
+              )
+              .map((candidate) => candidate.skill)
+          : [...skills.catalog];
         const listed = matches.slice(0, MAX_LIST_SKILL_RESULTS);
         for (const skill of listed) listedSkillIds.add(skill.id);
         return {
@@ -1249,7 +1418,11 @@ export function createProductChatToolContext(input: {
         };
       },
     });
-    tools[USE_SKILL_TOOL_NAME] = tool<UseSkillToolInput, UseSkillToolOutput>({
+    tools[USE_SKILL_TOOL_NAME] = tool<
+      UseSkillToolInput,
+      UseSkillToolOutput,
+      Record<string, unknown>
+    >({
       description: USE_SKILL_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<UseSkillToolInput>({
         type: "object",
@@ -1292,7 +1465,11 @@ export function createProductChatToolContext(input: {
       },
     });
     if (skills.readFile) {
-      tools[READ_SKILL_FILE_TOOL_NAME] = tool<ReadSkillFileToolInput, ReadSkillFileToolOutput>({
+      tools[READ_SKILL_FILE_TOOL_NAME] = tool<
+        ReadSkillFileToolInput,
+        ReadSkillFileToolOutput,
+        Record<string, unknown>
+      >({
         description: READ_SKILL_FILE_TOOL_DESCRIPTION,
         inputSchema: jsonSchema<ReadSkillFileToolInput>({
           type: "object",
@@ -1347,7 +1524,11 @@ export function createProductChatToolContext(input: {
         }),
       };
     };
-    tools[LIST_ACTIONS_TOOL_NAME] = tool<ListActionsToolInput, ListActionsToolOutput>({
+    tools[LIST_ACTIONS_TOOL_NAME] = tool<
+      ListActionsToolInput,
+      ListActionsToolOutput,
+      Record<string, unknown>
+    >({
       description: LIST_ACTIONS_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<ListActionsToolInput>({
         ...ACTION_TOOL_CONTRACT.list.inputSchema,
@@ -1378,19 +1559,23 @@ export function createProductChatToolContext(input: {
         }) as Promise<ListActionsToolOutput>;
       },
     });
-    tools[USE_ACTION_TOOL_NAME] = tool<UseActionToolInput, UseActionToolOutput>({
+    tools[USE_ACTION_TOOL_NAME] = tool<
+      UseActionToolInput,
+      UseActionToolOutput,
+      Record<string, unknown>
+    >({
       description: USE_ACTION_TOOL_DESCRIPTION,
       needsApproval: async (args, executionContext) => {
         const action = typeof args.action === "string" ? args.action : "";
         const resolvedAction = actions.catalog.actions.find((entry) => entry.id === action);
         if (!resolvedAction) return false;
-        if (resolvedAction.permissionMode === "ask") return true;
         if (
-          !actionTurnGovernance.hasDiscoveredSource?.(resolvedAction.source) ||
-          !actions.needsApproval
+          resolvedAction.permissionMode !== "ask" &&
+          !actionTurnGovernance.hasDiscoveredSource?.(resolvedAction.source)
         ) {
           return false;
         }
+        if (!actions.needsApproval) return false;
         const params =
           args.params && typeof args.params === "object" && !Array.isArray(args.params)
             ? args.params
@@ -1403,11 +1588,7 @@ export function createProductChatToolContext(input: {
             ? executionContext.toolCallId
             : "";
         if (!toolCallId) return false;
-        try {
-          return await actions.needsApproval({ action, params, toolCallId });
-        } catch {
-          return false;
-        }
+        return actions.needsApproval({ action, params, toolCallId });
       },
       inputSchema: jsonSchema<UseActionToolInput>({
         ...ACTION_TOOL_CONTRACT.execute.inputSchema,
@@ -1470,7 +1651,8 @@ export function createProductChatToolContext(input: {
   if (updateTaskStatus) {
     tools[UPDATE_TASK_STATUS_TOOL_NAME] = tool<
       UpdateTaskStatusToolInput,
-      UpdateTaskStatusToolOutput
+      UpdateTaskStatusToolOutput,
+      Record<string, unknown>
     >({
       description: UPDATE_TASK_STATUS_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<UpdateTaskStatusToolInput>(UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA),

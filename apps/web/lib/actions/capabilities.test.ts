@@ -8,23 +8,33 @@ import {
 } from "@/lib/actions/capabilities";
 
 describe("PROVIDER_CAPABILITIES", () => {
-  it("registers Gmail reads and drafts on by default and sends behind ask", () => {
+  it("preserves legacy Gmail defaults and adds sensitive plugin reads behind ask", () => {
     expect(PROVIDER_CAPABILITIES.gmail).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
       expect.objectContaining({ id: "draft", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
-  it("registers Drive reads on by default and document writes behind ask", () => {
+  it("keeps legacy Drive reads on and guards sensitive MCP reads and writes", () => {
     expect(PROVIDER_CAPABILITIES.google_drive).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
-  it("registers Google Calendar with read on by default and write behind ask", () => {
+  it("guards all Google Calendar data and mutations behind ask by default", () => {
     expect(PROVIDER_CAPABILITIES.google_calendar).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "ask" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
+  it("registers personal GitHub reads on by default and all writes behind ask", () => {
+    expect(PROVIDER_CAPABILITIES.github_user).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
@@ -37,9 +47,11 @@ describe("PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
-  it("registers Slack as one broad read permission", () => {
+  it("registers public Slack search on and guards private reads and writes", () => {
     expect(PROVIDER_CAPABILITIES.slack).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
@@ -54,6 +66,22 @@ describe("PROVIDER_CAPABILITIES", () => {
     expect(PROVIDER_CAPABILITIES.neon).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "query", defaultMode: "ask" }),
+    ]);
+  });
+
+  it("keeps SigNoz docs visible but gates telemetry reads and mutations", () => {
+    expect(PROVIDER_CAPABILITIES.signoz).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
+  it("keeps public Stripe guidance on and guards account data and mutations", () => {
+    expect(PROVIDER_CAPABILITIES.stripe).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
@@ -79,7 +107,7 @@ describe("effectiveCapabilityMode", () => {
     expect(effectiveCapabilityMode("google_calendar", "write", null)).toBe("ask");
     expect(effectiveCapabilityMode("google_calendar", "write", { write: "banana" })).toBe("ask");
     expect(effectiveCapabilityMode("google_calendar", "write", ["write"])).toBe("ask");
-    expect(effectiveCapabilityMode("google_calendar", "read", undefined)).toBe("on");
+    expect(effectiveCapabilityMode("google_calendar", "read", undefined)).toBe("ask");
   });
 
   it("treats unregistered providers as read on", () => {
@@ -111,12 +139,20 @@ describe("mode helpers", () => {
     expect(providerCapability("gmail", "write")?.label).toBe("Send emails");
     expect(providerCapability("google_drive", "read")?.label).toBe("Find & read files");
     expect(providerCapability("google_drive", "write")?.label).toBe("Edit Docs & Sheets");
-    expect(providerCapability("google_calendar", "write")?.label).toBe("Add events");
+    expect(providerCapability("google_calendar", "write")?.label).toBe("Manage calendar events");
+    expect(providerCapability("github_user", "read")?.label).toBe("Read GitHub");
+    expect(providerCapability("github_user", "write")?.label).toBe("Manage GitHub");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
-    expect(providerCapability("slack", "read")?.label).toBe("Read Slack");
+    expect(providerCapability("slack", "read")?.label).toBe("Search public Slack");
     expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
     expect(providerCapability("neon", "read")?.label).toBe("Inspect Neon structure");
     expect(providerCapability("neon", "query")?.label).toBe("Query database data");
-    expect(providerCapability("slack", "write")).toBeUndefined();
+    expect(providerCapability("signoz", "read")?.label).toBe("Read SigNoz documentation");
+    expect(providerCapability("signoz", "query")?.label).toBe("Inspect observability data");
+    expect(providerCapability("slack", "query")?.label).toBe("Read private Slack");
+    expect(providerCapability("slack", "write")?.label).toBe("Change Slack");
+    expect(providerCapability("stripe", "read")?.label).toBe("Learn about Stripe");
+    expect(providerCapability("stripe", "query")?.label).toBe("Read Stripe data");
+    expect(providerCapability("stripe", "write")?.label).toBe("Manage Stripe");
   });
 });

@@ -54,7 +54,10 @@ export type AcpEngineAdapter = {
   id: string;
   displayName: string;
   command: (workdir: string) => string;
-  sessionMeta?: (input: { hasMcpServers: boolean }) => Record<string, unknown> | null;
+  prepareSession?: (input: { mcpServers: AcpMcpServer[] }) => {
+    mcpServers?: AcpMcpServer[];
+    meta?: Record<string, unknown> | null;
+  };
   configOptions: {
     model?: string;
     reasoningEffort?: {
@@ -70,11 +73,15 @@ export type AcpEngineAdapter = {
       values: Record<"default" | "plan", string>;
     };
   };
-  goalControlMethod?: string;
   steeringControlMethod?: string;
 };
 
 export type AcpExtensionRequest = {
+  method: string;
+  params: Record<string, unknown>;
+};
+
+export type AcpNotification = {
   method: string;
   params: Record<string, unknown>;
 };
@@ -91,6 +98,7 @@ export type AcpHarnessTurnInput = {
   timeoutMs: number;
   redact: (value: string) => string;
   checkAbort: () => Promise<void>;
+  onNotification?: (notification: AcpNotification) => Promise<void>;
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
   onEngineSessionId: (sessionId: string) => Promise<void>;
   onExistingSessionInvalidated: () => Promise<void>;
@@ -125,6 +133,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       envs: input.envs,
       redact: input.redact,
       onNotification: async (notification) => {
+        await input.onNotification?.(notification);
         if (projectUpdates && notification.method === "session/update") {
           await input.onRuntimeEvents([notification]);
         }
@@ -166,17 +175,17 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
           _meta: { "subagent-transcript": true },
         },
       });
-      const capabilities = readRecord(readRecord(initialized)?.agentCapabilities) ?? {};
+      const initializedRecord = readRecord(initialized);
+      const capabilities = readRecord(initializedRecord?.agentCapabilities) ?? {};
+      const goalControlMethod = readGoalControlMethod(initializedRecord);
       for (const request of input.extensionRequests ?? []) {
         await client.request(request.method, request.params);
       }
-      const sessionMeta = input.adapter.sessionMeta?.({
-        hasMcpServers: input.mcpServers.length > 0,
-      });
+      const preparedSession = input.adapter.prepareSession?.({ mcpServers: input.mcpServers });
       const sessionParams = {
         cwd: input.workdir,
-        mcpServers: input.mcpServers,
-        ...(sessionMeta ? { _meta: sessionMeta } : {}),
+        mcpServers: preparedSession?.mcpServers ?? input.mcpServers,
+        ...(preparedSession?.meta ? { _meta: preparedSession.meta } : {}),
       };
 
       let loadedSession = false;
@@ -230,19 +239,26 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
 
       projectUpdates = true;
       await input.onRuntimeEvents([{ method: "session/started", params: { sessionId } }]);
-      if (input.goal) {
-        const controlMethod = input.adapter.goalControlMethod;
-        if (!controlMethod) {
-          throw new Error(`${input.adapter.displayName} does not advertise ACP goal controls.`);
-        }
-        await client.request(controlMethod, {
+      // Setting a Goal can itself run a backend turn before the control request returns. Treat it
+      // as execution, and share one deadline with the ordinary prompt that follows.
+      const executionDeadline = Date.now() + input.timeoutMs;
+      if (input.goal && goalControlMethod) {
+        await requestGoalWithAbort({
+          client,
+          input,
           sessionId,
-          action: "set",
-          objective: input.goal.objective,
-          ...(input.goal.tokenBudget != null ? { tokenBudget: input.goal.tokenBudget } : {}),
+          deadline: executionDeadline,
+          controlMethod: goalControlMethod,
+          goal: input.goal,
         });
       }
-      const promptResponse = await requestPromptWithAbort({ client, input, sessionId, prompt });
+      const promptResponse = await requestPromptWithAbort({
+        client,
+        input,
+        sessionId,
+        prompt,
+        deadline: executionDeadline,
+      });
       await client.flush();
       await input.onRuntimeEvents([
         {
@@ -330,7 +346,9 @@ async function requestPromptWithAbort(input: {
   input: AcpHarnessTurnInput;
   sessionId: string;
   prompt: AcpPromptBlock[];
+  deadline: number;
 }) {
+  const requestTimeoutMs = Math.max(1, input.deadline - Date.now()) + ACP_CANCEL_GRACE_MS;
   const outcome = input.client
     .request(
       "session/prompt",
@@ -338,7 +356,7 @@ async function requestPromptWithAbort(input: {
         sessionId: input.sessionId,
         prompt: input.prompt,
       },
-      input.input.timeoutMs + ACP_CANCEL_GRACE_MS,
+      requestTimeoutMs,
     )
     .then(
       (value) => ({ type: "prompt" as const, ok: true as const, value: readRecord(value) ?? {} }),
@@ -348,8 +366,6 @@ async function requestPromptWithAbort(input: {
   let nextSteering = steeringIterator
     ?.next()
     .then((value) => ({ type: "steering" as const, value }));
-  const deadline = Date.now() + input.input.timeoutMs;
-
   while (true) {
     const settled = await Promise.race([
       outcome,
@@ -393,7 +409,7 @@ async function requestPromptWithAbort(input: {
     } catch (error) {
       abortError = error;
     }
-    if (!abortError && Date.now() >= deadline) {
+    if (!abortError && Date.now() >= input.deadline) {
       abortError = new Error(`${input.input.adapter.displayName} ACP turn timed out.`);
     }
     if (!abortError) continue;
@@ -409,13 +425,72 @@ async function requestPromptWithAbort(input: {
   }
 }
 
+async function requestGoalWithAbort(input: {
+  client: AcpJsonRpcClient;
+  input: AcpHarnessTurnInput;
+  sessionId: string;
+  deadline: number;
+  controlMethod: string;
+  goal: { objective: string; tokenBudget?: number | null };
+}) {
+  const requestTimeoutMs = Math.max(1, input.deadline - Date.now()) + ACP_CANCEL_GRACE_MS;
+  const outcome = input.client
+    .request(
+      input.controlMethod,
+      {
+        sessionId: input.sessionId,
+        action: "set",
+        objective: input.goal.objective,
+        ...(input.goal.tokenBudget != null ? { tokenBudget: input.goal.tokenBudget } : {}),
+      },
+      requestTimeoutMs,
+    )
+    .then(
+      (value) => ({ ok: true as const, value: readRecord(value) ?? {} }),
+      (error) => ({ ok: false as const, error }),
+    );
+
+  while (true) {
+    const settled = await Promise.race([
+      outcome,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ACP_ABORT_POLL_INTERVAL_MS)),
+    ]);
+    if (settled) {
+      if (settled.ok) return settled.value;
+      throw settled.error;
+    }
+
+    let abortError: unknown = null;
+    try {
+      await input.input.checkAbort();
+    } catch (error) {
+      abortError = error;
+    }
+    if (!abortError && Date.now() >= input.deadline) {
+      abortError = new Error(`${input.input.adapter.displayName} ACP turn timed out.`);
+    }
+    if (!abortError) continue;
+
+    await input.client.notify("session/cancel", { sessionId: input.sessionId }).catch(() => {});
+    await Promise.race([
+      outcome,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ACP_CANCEL_GRACE_MS)),
+    ]);
+    await input.client.flush().catch(() => {});
+    throw abortError;
+  }
+}
+
+function readGoalControlMethod(initialized: Record<string, unknown> | null) {
+  const goal = readRecord(readRecord(initialized?._meta)?.goal);
+  if (goal?.version !== 1) return null;
+  const actions = Array.isArray(goal.actions) ? goal.actions : [];
+  if (!actions.includes("set")) return null;
+  return readString(goal.controlMethod);
+}
+
 type AcpJsonRpcRequest = {
   id: number | string;
-  method: string;
-  params: Record<string, unknown>;
-};
-
-type AcpJsonRpcNotification = {
   method: string;
   params: Record<string, unknown>;
 };
@@ -445,7 +520,7 @@ class AcpJsonRpcClient {
       command: string;
       envs: Record<string, string>;
       redact: (value: string) => string;
-      onNotification: (notification: AcpJsonRpcNotification) => Promise<void>;
+      onNotification: (notification: AcpNotification) => Promise<void>;
       onServerRequest: (request: AcpJsonRpcRequest) => Promise<Record<string, unknown>>;
     },
   ) {}
@@ -547,9 +622,13 @@ class AcpJsonRpcClient {
       return;
     }
     if (!method) return;
+    if (this.failure) return;
     const notification = { method, params: readRecord(record.params) ?? {} };
     this.processing = this.processing
-      .then(() => this.input.onNotification(notification))
+      .then(() => {
+        this.throwIfFailed();
+        return this.input.onNotification(notification);
+      })
       .catch((error) => this.fail(asError(error)));
   }
 

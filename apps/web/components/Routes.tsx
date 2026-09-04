@@ -7,6 +7,7 @@ import type {
   SkillBundleFileMetadataDto,
   SkillImportCandidateDto,
   SkillImportFileMetadataDto,
+  SkillImportWarningDto,
   SkillInstallationDto,
   SkillListItemDto,
   SkillSourceDto,
@@ -16,7 +17,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   ArrowLeft,
-  BookOpen,
   CalendarClock,
   CircleUserRound,
   ExternalLink,
@@ -50,12 +50,12 @@ import { BrainView } from "@/components/BrainView";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { IMessageIntegrationSetup } from "@/components/IMessageIntegrationSetup";
+import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsContent } from "@/components/SettingsChrome";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
-import { StripeIntegrationSetup } from "@/components/StripeIntegrationSetup";
 import { Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
@@ -85,7 +85,6 @@ import {
   updateAutoModelRoutingAction,
   updateImessageEnabledAction,
   updateTaskSpawningAction,
-  updateWikiEnabledAction,
 } from "@/lib/user-preferences";
 
 export function HomeRoute({
@@ -123,6 +122,7 @@ export function HomeRoute({
       <Surface
         key={data.activeBrain?.id ?? "no-brain"}
         tasks={data.tasks}
+        allTasks={data.allTasks}
         schedules={data.schedules}
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
@@ -213,6 +213,23 @@ export function IntegrationsSettingsRoute({
   );
 }
 
+export function InferenceSettingsRoute() {
+  const { integrations, workspace } = useAppData();
+
+  return (
+    <SettingsContent
+      title="Inference"
+      description="Connect model subscriptions and choose how your workspace runs AI."
+    >
+      <InferenceSettingsPanel
+        codex={integrations.codex}
+        claudeCode={integrations.claude_code}
+        canManage={workspace.role === "admin"}
+      />
+    </SettingsContent>
+  );
+}
+
 export function McpSettingsRoute() {
   const { mcpSetup, user, workspace } = useAppData();
   const displayName =
@@ -270,13 +287,6 @@ export function PreferencesSettingsRoute() {
           description="Pair your phone so opencompany can text you important updates over iMessage."
           checked={featureFlags.imessage}
           update={updateImessageEnabledAction}
-        />
-        <BetaFeatureSwitch
-          icon={BookOpen}
-          label="Wiki (preview)"
-          description="The next version of Brain: one workspace wiki of folders and markdown pages, built for you and your agents."
-          checked={featureFlags.wiki}
-          update={updateWikiEnabledAction}
         />
       </section>
     </SettingsContent>
@@ -376,10 +386,11 @@ function AppearanceSection() {
 }
 
 export function JamieSettingsRoute() {
-  const { activeBrain, integrations, workspace } = useAppData();
-  const brainSourcesHref = activeBrain
-    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-    : null;
+  const { activeBrain, featureFlags, integrations, workspace } = useAppData();
+  const brainSourcesHref =
+    featureFlags.legacyBrain && activeBrain
+      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+      : null;
 
   return (
     <SettingsContent
@@ -397,10 +408,11 @@ export function JamieSettingsRoute() {
 }
 
 export function GranolaSettingsRoute() {
-  const { activeBrain, integrations } = useAppData();
-  const brainSourcesHref = activeBrain
-    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-    : null;
+  const { activeBrain, featureFlags, integrations } = useAppData();
+  const brainSourcesHref =
+    featureFlags.legacyBrain && activeBrain
+      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+      : null;
 
   return (
     <SettingsContent
@@ -441,10 +453,11 @@ export function IMessageSettingsRoute() {
 }
 
 export function FathomSettingsRoute() {
-  const { activeBrain, integrations } = useAppData();
-  const brainSourcesHref = activeBrain
-    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-    : null;
+  const { activeBrain, featureFlags, integrations } = useAppData();
+  const brainSourcesHref =
+    featureFlags.legacyBrain && activeBrain
+      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+      : null;
 
   return (
     <SettingsContent
@@ -461,10 +474,11 @@ export function FathomSettingsRoute() {
 }
 
 export function AttioSettingsRoute() {
-  const { activeBrain, integrations } = useAppData();
-  const brainSourcesHref = activeBrain
-    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
-    : null;
+  const { activeBrain, featureFlags, integrations } = useAppData();
+  const brainSourcesHref =
+    featureFlags.legacyBrain && activeBrain
+      ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+      : null;
 
   return (
     <SettingsContent
@@ -475,23 +489,6 @@ export function AttioSettingsRoute() {
       <AttioIntegrationSetup
         initialState={integrations.attio}
         brainSourcesHref={brainSourcesHref}
-      />
-    </SettingsContent>
-  );
-}
-
-export function StripeSettingsRoute() {
-  const { integrations, workspace } = useAppData();
-
-  return (
-    <SettingsContent
-      title="Stripe"
-      description="Read-only founder metrics from your Stripe account"
-      backLink={{ href: "/settings/integrations", label: "Integrations" }}
-    >
-      <StripeIntegrationSetup
-        initialState={integrations.stripe}
-        canManage={workspace.role === "admin"}
       />
     </SettingsContent>
   );
@@ -1515,6 +1512,7 @@ type ImportPreviewState = {
   totalBytes: number;
   resolvedCommit: string;
   integrity: string;
+  warnings: SkillImportWarningDto[];
 };
 
 function WorkspaceSkillDialog({
@@ -1738,6 +1736,7 @@ function ImportSkillDialog({
           totalBytes: result.totalBytes,
           resolvedCommit: result.source.resolvedCommit,
           integrity: result.integrity,
+          warnings: result.warnings,
         });
       } catch (cause) {
         setError(errorMessage(cause));
@@ -1872,6 +1871,14 @@ function ImportSkillDialog({
 
           {preview ? (
             <div className="flex flex-col gap-3">
+              {preview.warnings.map((warning) => (
+                <div
+                  key={warning.code}
+                  className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-[12px] leading-5 text-warning"
+                >
+                  {warning.message}
+                </div>
+              ))}
               <EditorField label="Name">
                 <div className={`${EDITOR_INPUT_CLASS} flex items-center opacity-70`}>
                   {preview.name}

@@ -39,6 +39,12 @@ const files = [
 ];
 const resolved = {
   status: "resolved" as const,
+  warnings: [
+    {
+      code: "source_directory_normalized" as const,
+      message: "Source directory normalized.",
+    },
+  ],
   bundle: {
     name: "my-skill",
     description: "Does things.",
@@ -127,6 +133,12 @@ describe("SkillImportApplicationService", () => {
       status: "resolved",
       name: "my-skill",
       files: [{ path: "SKILL.md", sizeBytes: files[0]!.content.length }],
+      warnings: [
+        {
+          code: "source_directory_normalized",
+          message: "Source directory normalized.",
+        },
+      ],
     });
     expect(preview).not.toHaveProperty("body");
     expect(preview).not.toHaveProperty("files.0.content");

@@ -111,6 +111,30 @@ export type CreateTaskResult = {
   idempotentReplay: boolean;
 };
 
+export type CreateTaskCommentCommand = {
+  id: string;
+  body: string;
+  attachmentIds?: readonly string[];
+};
+
+export type TaskComment = {
+  id: string;
+  taskId: string;
+  authorWorkosId: string;
+  body: string;
+  createdAt: Date;
+};
+
+export type CreateTaskCommentResult = {
+  task: Task;
+  comment: TaskComment;
+  messageId: string;
+  assistantMessageId: string;
+  runId: string;
+  transactionId: string;
+  idempotentReplay: boolean;
+};
+
 export type UpdateTaskCommand = { archived: boolean } | { name: string };
 
 export type UpdateTaskResult = {
@@ -131,6 +155,11 @@ export interface TaskRepository {
   getLegacyTaskHistory(input: { actor: Actor; taskId: string }): Promise<LegacyTaskHistory | null>;
   getTaskByConversation(input: { actor: Actor; conversationId: string }): Promise<Task | null>;
   createTaskAndRun(input: { actor: Actor; command: CreateTaskCommand }): Promise<CreateTaskResult>;
+  createTaskCommentAndRun(input: {
+    actor: Actor;
+    taskId: string;
+    command: CreateTaskCommentCommand;
+  }): Promise<CreateTaskCommentResult | null>;
   updateTask(input: {
     actor: Actor;
     taskId: string;
@@ -139,6 +168,7 @@ export interface TaskRepository {
 }
 
 const MAX_GOAL_LENGTH = 10_000;
+const MAX_COMMENT_LENGTH = 10_000;
 const MAX_NAME_LENGTH = 160;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
 const MAX_RESOURCE_ID_LENGTH = 256;
@@ -273,6 +303,46 @@ export class TaskApplicationService {
         ...(scheduledFor ? { scheduledFor } : {}),
       },
     });
+  }
+
+  async createComment(
+    actor: Actor,
+    taskId: string,
+    input: CreateTaskCommentCommand,
+  ): Promise<CreateTaskCommentResult> {
+    requireTaskPermission(actor, TASK_WRITE_PERMISSION);
+    const body = input.body;
+    const attachmentIds = (input.attachmentIds ?? []).map((id) => resourceId(id, "attachmentId"));
+    if (!body.trim() && attachmentIds.length === 0) {
+      throw new CoreError("invalid_argument", "A comment or attachment is required.");
+    }
+    if (body.length > MAX_COMMENT_LENGTH) {
+      throw new CoreError(
+        "invalid_argument",
+        `A comment cannot exceed ${MAX_COMMENT_LENGTH} characters.`,
+      );
+    }
+    if (attachmentIds.length > CHAT_ATTACHMENTS_PER_MESSAGE) {
+      throw new CoreError(
+        "invalid_argument",
+        `A Task comment cannot contain more than ${CHAT_ATTACHMENTS_PER_MESSAGE} attachments.`,
+      );
+    }
+    if (new Set(attachmentIds).size !== attachmentIds.length) {
+      throw new CoreError("invalid_argument", "Attachment references must be unique.");
+    }
+    const result = await this.repository.createTaskCommentAndRun({
+      actor,
+      taskId: resourceId(taskId, "taskId"),
+      command: {
+        id: resourceId(input.id, "commentId"),
+        // Whitespace is deliberately preserved: this exact body becomes the next user Message.
+        body,
+        ...(attachmentIds.length ? { attachmentIds } : {}),
+      },
+    });
+    if (!result) throw new CoreError("not_found", "Task not found.");
+    return result;
   }
 
   async updateTask(

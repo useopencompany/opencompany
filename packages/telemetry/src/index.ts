@@ -290,8 +290,23 @@ export function sanitizeMetricAttributes(
 }
 
 export function categorizeFailure(error: unknown): FailureCategory {
-  const message = errorMessage(error).toLowerCase();
-  const name = error instanceof Error ? error.name.toLowerCase() : "";
+  const chain = errorCauseChain(error);
+  const upstreamFailure = chain.find(
+    (candidate) => readErrorString(candidate, "upstreamService") !== undefined,
+  );
+  if (upstreamFailure) {
+    const failureKind = readErrorString(upstreamFailure, "failureKind");
+    if (failureKind === "timeout") return "timeout";
+    if (failureKind === "network") return "network";
+    return "integration";
+  }
+
+  const message = (chain.length > 0 ? chain.map(errorMessage) : [errorMessage(error)])
+    .join(" ")
+    .toLowerCase();
+  const name = (chain.length > 0 ? chain.map(errorName) : [errorName(error)])
+    .join(" ")
+    .toLowerCase();
 
   if (message.includes("budget exhausted") || name.includes("budgeterror")) return "budget";
   if (message.includes("lease lost")) return "lease_lost";
@@ -583,6 +598,7 @@ function createSpanHandle(span: Span, onFail?: () => void): SpanHandle {
       span.setAttributes(
         sanitizeAttributes({
           ...attributes,
+          ...failureDiagnosticAttributes(error),
           "goat.outcome": "failure",
           "goat.failure_category": failureCategory,
         }),
@@ -622,6 +638,71 @@ function errorName(error: unknown) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+const ERROR_DIAGNOSTIC_ATTRIBUTES = [
+  ["upstreamService", "goat.upstream_service"],
+  ["upstreamOperation", "goat.upstream_operation"],
+  ["upstreamStatus", "goat.upstream_status"],
+  ["upstreamDurationMs", "goat.upstream_duration_ms"],
+  ["failureKind", "goat.upstream_failure_kind"],
+  ["rateLimitLimit", "goat.rate_limit_limit"],
+  ["rateLimitRemaining", "goat.rate_limit_remaining"],
+  ["rateLimitReset", "goat.rate_limit_reset"],
+  ["rateLimitResource", "goat.rate_limit_resource"],
+  ["retryAfterSeconds", "goat.retry_after_seconds"],
+  ["upstreamRequestId", "goat.upstream_request_id"],
+  ["networkErrorName", "goat.network_error_name"],
+  ["networkErrorCode", "goat.network_error_code"],
+] as const;
+
+function failureDiagnosticAttributes(error: unknown): TelemetryAttributes {
+  const source = errorCauseChain(error).find(
+    (candidate) => readErrorString(candidate, "upstreamService") !== undefined,
+  );
+  if (!source) return {};
+
+  const attributes: TelemetryAttributes = {};
+  for (const [sourceKey, attributeKey] of ERROR_DIAGNOSTIC_ATTRIBUTES) {
+    const value = readErrorField(source, sourceKey);
+    if (typeof value === "number" && Number.isFinite(value)) {
+      attributes[attributeKey] = value;
+    } else if (typeof value === "boolean") {
+      attributes[attributeKey] = value;
+    } else if (typeof value === "string" && isSafeDiagnosticValue(value)) {
+      attributes[attributeKey] = value;
+    }
+  }
+  return attributes;
+}
+
+function errorCauseChain(error: unknown) {
+  const chain: object[] = [];
+  const seen = new Set<object>();
+  let current = error;
+  while (current && typeof current === "object" && chain.length < 5 && !seen.has(current)) {
+    seen.add(current);
+    chain.push(current);
+    current = readErrorField(current, "cause");
+  }
+  return chain;
+}
+
+function readErrorField(value: object, key: string) {
+  try {
+    return (value as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function readErrorString(value: object, key: string) {
+  const field = readErrorField(value, key);
+  return typeof field === "string" ? field : undefined;
+}
+
+function isSafeDiagnosticValue(value: string) {
+  return value.length <= 128 && /^[A-Za-z0-9_.:-]+$/.test(value);
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

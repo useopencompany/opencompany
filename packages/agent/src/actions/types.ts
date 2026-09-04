@@ -8,16 +8,21 @@ export type ActionProviderId =
   | "google_calendar"
   | "google_drive"
   | "linear"
+  | "hubspot"
   | "posthog"
   | "attio"
   | "github"
+  | "github_user"
   | "stripe"
   | "revolut"
   | "latitude"
   | "neon"
+  | "betterstack"
+  | "render"
+  | "signoz"
   | "x_account";
 
-export type ActionSourceId = ActionProviderId | ManagedCapabilitySource;
+export type ActionSourceId = ActionProviderId | ManagedCapabilitySource | `plugin:${string}`;
 
 export type ActionErrorCode =
   | "not_connected"
@@ -83,7 +88,7 @@ export type ActionDescriptor = {
 };
 
 export type ActionProviderDescriptor = {
-  id: ActionProviderId;
+  id: ActionSourceId;
   label: string;
   description: string;
 };

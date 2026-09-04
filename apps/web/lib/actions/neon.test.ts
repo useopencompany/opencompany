@@ -99,6 +99,7 @@ describe("Neon actions", () => {
       accountName: "Neon",
       statusReason: null,
       capabilityModes: {},
+      toolModes: {},
     });
     vi.mocked(loadNeonMcpWorkerConnection).mockResolvedValue({
       ok: true,
@@ -253,6 +254,7 @@ describe("Neon actions", () => {
       accountName: "Neon",
       statusReason: null,
       capabilityModes: { query: "off" },
+      toolModes: {},
     });
 
     const catalog = await resolveNeonActions("user_1");

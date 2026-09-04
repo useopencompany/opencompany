@@ -7,6 +7,7 @@ import {
 } from "./codex-chat-errors";
 import {
   CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS,
+  CODEX_CHAT_MAX_TOTAL_ATTEMPTS,
   claimNextCodexChatTurn,
   codexChatLeaseTtlMs,
   codexChatRetryAt,
@@ -120,6 +121,7 @@ describe("claimNextCodexChatTurn", () => {
     expect(statement.match(/run_after IS NULL OR (?:turn|earlier)\.run_after <=/g)).toHaveLength(2);
     expect(statement).toContain("session.status <> 'closed'");
     expect(statement).toContain("chat.closed_at IS NULL");
+    expect(statement).toContain("task.status IN ('queued', 'running')");
   });
 
   it("fences queued turns on supported host-tool contract versions, bypassing reclaims", async () => {
@@ -717,9 +719,40 @@ describe("runClaimedTurn", () => {
     await expect(runClaimedTurn(turn(), env())).resolves.toBeUndefined();
 
     expect(eventMocks.fail).toHaveBeenCalledWith(
-      "This chat run failed before the coding engine could finish. Send your message again to retry.",
+      "This chat run failed unexpectedly. Send your message again to retry.",
       { sessionStatus: "failed" },
     );
+  });
+
+  it("forces a minimal settlement when the failure write itself throws", async () => {
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(
+      new Error("could not determine data type of parameter $51"),
+    );
+    eventMocks.fail.mockRejectedValueOnce(
+      new Error("could not determine data type of parameter $51"),
+    );
+
+    await expect(runClaimedTurn(turn(), env())).resolves.toBeUndefined();
+
+    const force = dbMock.execute.mock.calls
+      .map(([query]) => sqlText(query))
+      .find((text) => text.includes("WITH failed_turn AS"));
+    expect(force).toBeDefined();
+    expect(force).toContain("SET status = 'failed'");
+    expect(force).toContain("UPDATE goat.run_attempts");
+    expect(force).toContain("UPDATE goat.codex_chat_sessions");
+    expect(force).toContain("UPDATE goat.tasks");
+  });
+
+  it("does not force settlement when the failure write reports lease loss", async () => {
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(new Error("history projection failed"));
+    eventMocks.fail.mockRejectedValueOnce(new CodexChatLeaseLostError());
+
+    await expect(runClaimedTurn(turn(), env())).rejects.toBeInstanceOf(CodexChatLeaseLostError);
+
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH failed_turn AS")),
+    ).toBe(false);
   });
 
   it("terminally settles retryable infrastructure failures after the retry budget", async () => {
@@ -743,11 +776,55 @@ describe("runClaimedTurn", () => {
     ).toBe(false);
   });
 
+  it("settles turns past the total attempt budget without executing them", async () => {
+    await expect(
+      runClaimedTurn(turn({ attempts: CODEX_CHAT_MAX_TOTAL_ATTEMPTS + 1 }), env()),
+    ).resolves.toBeUndefined();
+
+    expect(chatMocks.runCodexChatTurn).not.toHaveBeenCalled();
+    expect(chatMocks.runProductChatTurn).not.toHaveBeenCalled();
+    expect(eventMocks.fail).toHaveBeenCalledWith(
+      "This chat run was retried too many times and has been stopped. Send your message again to retry.",
+      { sessionStatus: "failed" },
+    );
+  });
+
+  it("still executes a turn at exactly the total attempt budget", async () => {
+    await expect(
+      runClaimedTurn(turn({ attempts: CODEX_CHAT_MAX_TOTAL_ATTEMPTS }), env()),
+    ).resolves.toBeUndefined();
+
+    expect(chatMocks.runCodexChatTurn).toHaveBeenCalledOnce();
+    expect(eventMocks.fail).not.toHaveBeenCalled();
+  });
+
+  it("forces a minimal settlement when the attempt-cap failure write itself throws", async () => {
+    eventMocks.fail.mockRejectedValueOnce(
+      new Error("could not determine data type of parameter $51"),
+    );
+
+    await expect(
+      runClaimedTurn(turn({ attempts: CODEX_CHAT_MAX_TOTAL_ATTEMPTS + 1 }), env()),
+    ).resolves.toBeUndefined();
+
+    expect(chatMocks.runCodexChatTurn).not.toHaveBeenCalled();
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH failed_turn AS")),
+    ).toBe(true);
+  });
+
   it("caps infrastructure retry backoff at one minute", () => {
     const now = new Date("2026-07-10T09:00:00.000Z");
 
-    expect(codexChatRetryAt(now, 1)).toEqual(new Date("2026-07-10T09:00:05.000Z"));
-    expect(codexChatRetryAt(now, 20)).toEqual(new Date("2026-07-10T09:01:00.000Z"));
+    expect(codexChatRetryAt(now, 1, 0.5)).toEqual(new Date("2026-07-10T09:00:05.000Z"));
+    expect(codexChatRetryAt(now, 20, 0.5)).toEqual(new Date("2026-07-10T09:01:00.000Z"));
+  });
+
+  it("jitters infrastructure retries by up to twenty-five percent", () => {
+    const now = new Date("2026-07-10T09:00:00.000Z");
+
+    expect(codexChatRetryAt(now, 2, 0)).toEqual(new Date("2026-07-10T09:00:07.500Z"));
+    expect(codexChatRetryAt(now, 2, 1)).toEqual(new Date("2026-07-10T09:00:12.500Z"));
   });
 });
 
@@ -880,6 +957,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     exaApiKey: "exa",
     browserEnabled: false,
     codexE2bTemplate: undefined,
+    sandboxNamespace: "test",
     codexTimeoutMs: 1_200_000,
     codexModel: "gpt-5.5",
     codexChatIdleTimeoutMs: 1_800_000,

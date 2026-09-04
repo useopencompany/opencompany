@@ -1,23 +1,22 @@
+import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
-import {
-  isNormalizedGmailThreadSourceItem,
-  isNormalizedSlackConversationSourceItem,
-} from "@opencompany/brain";
+import { isNormalizedGmailThreadSourceItem } from "@opencompany/brain";
 import {
   BRAIN_INGEST_TRIAGE_ENTITY_HINT_LENGTH,
   BRAIN_INGEST_TRIAGE_MAX_ENTITY_HINTS,
   BRAIN_INGEST_TRIAGE_REASON_LENGTH,
 } from "@opencompany/brain/ingest-trace";
+import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { parseGmailWikiSourceConfig } from "@opencompany/db/gmail";
-import type { WikiSourceProvider } from "@opencompany/db/product-schema";
+import type { ActiveWikiIngestSourceProvider } from "@opencompany/db/wiki-ingest";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import { createGatewayAttribution, gatewayProviderOptions } from "@opencompany/telemetry";
 import { latitudeTelemetry } from "@opencompany/telemetry/latitude";
 import * as ai from "ai";
-import { buildGmailIngestTriagePrompt, buildSlackIngestTriagePrompt } from "./brain-ingest-triage";
+import { buildGmailIngestTriagePrompt } from "./brain-ingest-triage";
 import type { WikiIngestTraceUsage } from "./wiki-agent-ingest";
 
-export const WIKI_INGEST_TRIAGE_MODEL = "openai/gpt-5.4-nano";
+export const WIKI_INGEST_TRIAGE_MODEL = WIKI_INGEST_MODEL;
 export const WIKI_INGEST_TRIAGE_MAX_OUTPUT_TOKENS = 300;
 export const WIKI_INGEST_TRIAGE_TIMEOUT_MS = 30_000;
 
@@ -103,12 +102,7 @@ export async function runWikiIngestTriage(
         workspaceId: input.workspaceId,
       },
     }),
-    providerOptions: gatewayProviderOptions(attribution, {
-      openai: {
-        reasoningEffort: "low",
-        reasoningSummary: "concise",
-      },
-    }),
+    providerOptions: gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
   });
   const object = result.object as {
     decision: "skip" | "ingest";
@@ -127,16 +121,10 @@ export async function runWikiIngestTriage(
 }
 
 export function buildWikiIngestTriagePrompt(input: {
-  sourceProvider: WikiSourceProvider;
+  sourceProvider: ActiveWikiIngestSourceProvider;
   normalizedPayload: unknown;
   sourceConfig: Record<string, unknown>;
 }): string | null {
-  if (
-    input.sourceProvider === "slack" &&
-    isNormalizedSlackConversationSourceItem(input.normalizedPayload)
-  ) {
-    return buildSlackIngestTriagePrompt(input.normalizedPayload);
-  }
   if (
     input.sourceProvider === "gmail" &&
     isNormalizedGmailThreadSourceItem(input.normalizedPayload)

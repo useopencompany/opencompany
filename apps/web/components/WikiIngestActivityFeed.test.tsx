@@ -106,9 +106,9 @@ describe("WikiIngestActivityFeed", () => {
 function activity(overrides: Record<string, unknown> = {}) {
   return {
     id: "job_1",
-    provider: "slack",
-    sourceType: "conversation",
-    title: "#product",
+    provider: "gmail",
+    sourceType: "thread",
+    title: "Launch update",
     outcome: "succeeded",
     reason: null,
     pages: [],
