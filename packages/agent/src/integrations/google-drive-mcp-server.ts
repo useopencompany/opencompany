@@ -23,11 +23,16 @@ import { googleDriveMcpScopesSatisfied } from "./google-drive-scopes";
 
 const DRIVE_BASE = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
+const DOCS_BASE = "https://docs.googleapis.com/v1";
 const MCP_MAX_DURATION_SECONDS = 120;
 const MAX_FILE_ID_CHARS = 512;
 const MAX_FILE_NAME_CHARS = 300;
+const MAX_TAB_ID_CHARS = 512;
 const MAX_QUERY_CHARS = 1_000;
 const MAX_PAGE_TOKEN_CHARS = 2_048;
+const MAX_FIND_TEXT_CHARS = 20_000;
+const MAX_REPLACEMENT_TEXT_CHARS = 1_000_000;
+const MAX_REVISION_ID_CHARS = 2_048;
 const MAX_DOWNLOAD_BYTES = 5 * 1024 * 1024;
 const MAX_READ_BYTES = 20 * 1024 * 1024;
 const MAX_READ_OUTPUT_BYTES = 200_000;
@@ -68,6 +73,8 @@ const TOOL_CAPABILITIES = {
   read_file_content: "query",
   copy_file: "write",
   create_file: "write",
+  replace_document_text: "write",
+  replace_document_contents: "write",
 } as const satisfies Record<string, CapabilityId>;
 
 type GoogleDriveMcpToolName = keyof typeof TOOL_CAPABILITIES;
@@ -167,6 +174,51 @@ const createFileSchema = {
   parentId: fileIdSchema.optional(),
   disableConversionToGoogleType: z.boolean().optional(),
 };
+const replaceDocumentTextSchema = {
+  fileId: fileIdSchema.describe("Google Drive file id for the Google Doc to edit."),
+  findText: z
+    .string()
+    .min(1)
+    .max(MAX_FIND_TEXT_CHARS)
+    .describe("Exact text to find. Every occurrence in the selected tab or document is replaced."),
+  replaceText: z
+    .string()
+    .max(MAX_REPLACEMENT_TEXT_CHARS)
+    .describe("Replacement text. Pass an empty string to delete the matched text."),
+  matchCase: z.boolean().optional().describe("Match capitalization exactly. Defaults to true."),
+  tabId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MAX_TAB_ID_CHARS)
+    .optional()
+    .describe("Optional Google Docs tab id. When omitted, text is replaced across all tabs."),
+  requiredRevisionId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MAX_REVISION_ID_CHARS)
+    .optional()
+    .describe(
+      "Optional revision id. The edit fails if the document has changed since that revision.",
+    ),
+};
+const replaceDocumentContentsSchema = {
+  fileId: fileIdSchema.describe("Google Drive file id for the Google Doc to overwrite."),
+  text: z
+    .string()
+    .max(MAX_REPLACEMENT_TEXT_CHARS)
+    .describe(
+      "Complete new plain-text contents for the selected tab. Existing formatting and embedded content are removed.",
+    ),
+  tabId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MAX_TAB_ID_CHARS)
+    .optional()
+    .describe("Optional Google Docs tab id. When omitted, the first document tab is replaced."),
+};
 
 const READ_ANNOTATIONS = {
   readOnlyHint: true,
@@ -180,6 +232,18 @@ const CREATE_ANNOTATIONS = {
   destructiveHint: false,
   idempotentHint: false,
   openWorldHint: true,
+} as const;
+
+const EDIT_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: true,
+} as const;
+
+const REPLACE_CONTENTS_ANNOTATIONS = {
+  ...EDIT_ANNOTATIONS,
+  idempotentHint: true,
 } as const;
 
 export function createGoogleDriveMcpService(input: {
@@ -297,11 +361,35 @@ export function createGoogleDriveMcpService(input: {
             async (args) =>
               runTool(() => createFile(apiCall, apiUpload, payload, args, request.signal)),
           );
+          server.registerTool(
+            "replace_document_text",
+            {
+              title: "Replace text in Google Doc",
+              description:
+                "Replace every exact occurrence of text in an existing Google Doc. Use only when the user explicitly requested this edit.",
+              inputSchema: replaceDocumentTextSchema,
+              annotations: EDIT_ANNOTATIONS,
+            },
+            async (args) =>
+              runTool(() => replaceDocumentText(apiCall, payload, args, request.signal)),
+          );
+          server.registerTool(
+            "replace_document_contents",
+            {
+              title: "Replace Google Doc contents",
+              description:
+                "Replace all body content in one Google Docs tab with plain text, removing existing formatting and embedded content. Use only when the user explicitly requested a full replacement.",
+              inputSchema: replaceDocumentContentsSchema,
+              annotations: REPLACE_CONTENTS_ANNOTATIONS,
+            },
+            async (args) =>
+              runTool(() => replaceDocumentContents(apiCall, payload, args, request.signal)),
+          );
         },
         {
           serverInfo: { name: "opencompany-google-drive", version: "0.1.0" },
           instructions:
-            "Use search_files or list_recent_files to find file ids, read_file_content for bounded natural-language content, and write tools only after the user requested a Drive change.",
+            "Use search_files or list_recent_files to find file ids, read_file_content for bounded natural-language content, and write tools only after the user requested a Drive change. Prefer replace_document_text for focused Google Doc edits; replace_document_contents intentionally removes existing body formatting and embedded content.",
         },
         {
           streamableHttpEndpoint: "/mcp/plugins/google-drive",
@@ -644,6 +732,104 @@ async function createFile(
   );
 }
 
+async function replaceDocumentText(
+  apiCall: DriveApiCall,
+  payload: GoogleDriveMcpTicketPayload,
+  args: z.infer<z.ZodObject<typeof replaceDocumentTextSchema>>,
+  signal: AbortSignal,
+) {
+  const response = asRecord(
+    await callGoogle(apiCall, payload, "POST", documentBatchUpdateUrl(args.fileId), signal, {
+      requests: [
+        {
+          replaceAllText: {
+            containsText: { text: args.findText, matchCase: args.matchCase ?? true },
+            replaceText: args.replaceText,
+            ...(args.tabId ? { tabsCriteria: { tabIds: [args.tabId] } } : {}),
+          },
+        },
+      ],
+      ...(args.requiredRevisionId
+        ? { writeControl: { requiredRevisionId: args.requiredRevisionId } }
+        : {}),
+    }),
+  );
+  const documentId = confirmedDocumentId(response, args.fileId);
+  const replaceReply = asRecord(asRecord(asArray(response.replies)[0]).replaceAllText);
+  const occurrencesChanged = nonNegativeSafeInteger(replaceReply.occurrencesChanged);
+  return {
+    document: {
+      id: documentId,
+      viewUrl: googleDocumentUrl(documentId, args.tabId),
+      ...(args.tabId ? { tabId: args.tabId } : {}),
+      ...(occurrencesChanged !== undefined ? { occurrencesChanged } : {}),
+      ...responseRevision(response),
+    },
+  };
+}
+
+async function replaceDocumentContents(
+  apiCall: DriveApiCall,
+  payload: GoogleDriveMcpTicketPayload,
+  args: z.infer<z.ZodObject<typeof replaceDocumentContentsSchema>>,
+  signal: AbortSignal,
+) {
+  const getUrl = new URL(`${DOCS_BASE}/documents/${encodeURIComponent(args.fileId)}`);
+  getUrl.searchParams.set("includeTabsContent", "true");
+  const current = asRecord(await callGoogle(apiCall, payload, "GET", getUrl, signal));
+  confirmedDocumentId(current, args.fileId);
+  const tab = resolveDocumentTab(current, args.tabId);
+  const endIndex = documentBodyEndIndex(tab.documentTab);
+  const revisionId = boundedString(current.revisionId, MAX_REVISION_ID_CHARS);
+  if (!revisionId) throw new Error("Google Docs did not return a revision id for this document.");
+
+  const requests: Record<string, unknown>[] = [];
+  if (endIndex > 2) {
+    requests.push({
+      deleteContentRange: {
+        range: { startIndex: 1, endIndex: endIndex - 1, tabId: tab.tabId },
+      },
+    });
+  }
+  if (args.text) {
+    requests.push({
+      insertText: {
+        location: { index: 1, tabId: tab.tabId },
+        text: args.text,
+      },
+    });
+  }
+
+  if (requests.length === 0) {
+    return {
+      document: {
+        id: args.fileId,
+        viewUrl: googleDocumentUrl(args.fileId, tab.tabId),
+        tabId: tab.tabId,
+        revisionId,
+        changed: false,
+      },
+    };
+  }
+
+  const response = asRecord(
+    await callGoogle(apiCall, payload, "POST", documentBatchUpdateUrl(args.fileId), signal, {
+      requests,
+      writeControl: { requiredRevisionId: revisionId },
+    }),
+  );
+  const documentId = confirmedDocumentId(response, args.fileId);
+  return {
+    document: {
+      id: documentId,
+      viewUrl: googleDocumentUrl(documentId, tab.tabId),
+      tabId: tab.tabId,
+      changed: true,
+      ...responseRevision(response),
+    },
+  };
+}
+
 async function listComments(
   apiCall: DriveApiCall,
   payload: GoogleDriveMcpTicketPayload,
@@ -703,6 +889,77 @@ function fileUrl(fileId: string) {
   const url = new URL(`${DRIVE_BASE}/files/${encodeURIComponent(fileId)}`);
   url.searchParams.set("supportsAllDrives", "true");
   return url;
+}
+
+function documentBatchUpdateUrl(fileId: string) {
+  return new URL(`${DOCS_BASE}/documents/${encodeURIComponent(fileId)}:batchUpdate`);
+}
+
+function confirmedDocumentId(response: Record<string, unknown>, expectedId: string) {
+  const documentId = boundedString(response.documentId, MAX_FILE_ID_CHARS);
+  if (documentId !== expectedId) throw new Error("Google Docs did not confirm the document edit.");
+  return documentId;
+}
+
+function responseRevision(response: Record<string, unknown>) {
+  const revisionId = boundedString(
+    asRecord(response.writeControl).requiredRevisionId,
+    MAX_REVISION_ID_CHARS,
+  );
+  return revisionId ? { revisionId } : {};
+}
+
+function nonNegativeSafeInteger(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function resolveDocumentTab(document: Record<string, unknown>, requestedTabId?: string) {
+  const tabs = flattenDocumentTabs(asArray(document.tabs));
+  const tab = requestedTabId
+    ? tabs.find(
+        (candidate) =>
+          boundedString(asRecord(candidate.tabProperties).tabId, MAX_TAB_ID_CHARS) ===
+          requestedTabId,
+      )
+    : tabs[0];
+  if (!tab) {
+    throw new Error(
+      requestedTabId
+        ? `Google Docs did not return tab ${JSON.stringify(requestedTabId)}.`
+        : "Google Docs did not return a document tab.",
+    );
+  }
+  const tabId = boundedString(asRecord(tab.tabProperties).tabId, MAX_TAB_ID_CHARS);
+  const documentTab = asRecord(tab.documentTab);
+  if (!tabId || Object.keys(documentTab).length === 0) {
+    throw new Error("Google Docs returned an invalid document tab.");
+  }
+  return { tabId, documentTab };
+}
+
+function flattenDocumentTabs(tabs: unknown[]): Record<string, unknown>[] {
+  return tabs.flatMap((value) => {
+    const tab = asRecord(value);
+    return [tab, ...flattenDocumentTabs(asArray(tab.childTabs))];
+  });
+}
+
+function documentBodyEndIndex(documentTab: Record<string, unknown>) {
+  const indexes = asArray(asRecord(documentTab.body).content).flatMap((value) => {
+    const endIndex = asRecord(value).endIndex;
+    return typeof endIndex === "number" && Number.isSafeInteger(endIndex) && endIndex >= 2
+      ? [endIndex]
+      : [];
+  });
+  const endIndex = indexes.length > 0 ? Math.max(...indexes) : undefined;
+  if (!endIndex) throw new Error("Google Docs returned an invalid document body.");
+  return endIndex;
+}
+
+function googleDocumentUrl(fileId: string, tabId?: string) {
+  const url = new URL(`https://docs.google.com/document/d/${encodeURIComponent(fileId)}/edit`);
+  if (tabId) url.searchParams.set("tab", tabId);
+  return url.toString();
 }
 
 function compactFile(value: Record<string, unknown>) {

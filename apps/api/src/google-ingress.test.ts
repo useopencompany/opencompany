@@ -119,7 +119,7 @@ describe("Google ingress", () => {
     );
   });
 
-  it("requests only the official MCP scopes from the Google Drive plugin page", async () => {
+  it("requests the official Drive and Docs scopes from the Google Drive plugin page", async () => {
     const response = await ingress().start(
       "google_drive",
       new Request(
@@ -131,6 +131,7 @@ describe("Google ingress", () => {
     expect(location.searchParams.get("scope")?.split(" ")).toEqual([
       "https://www.googleapis.com/auth/drive.readonly",
       "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/documents",
       "openid",
       "email",
       "profile",
@@ -298,7 +299,7 @@ describe("Google ingress", () => {
         access_token: "at",
         refresh_token: "rt",
         scope:
-          "openid email https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file",
+          "openid email https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents",
       },
       expiresAt: new Date(Date.now() + 3_600_000),
     } as never);

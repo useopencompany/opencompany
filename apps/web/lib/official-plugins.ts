@@ -126,10 +126,11 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     name: "google-drive",
     kind: "mcp",
     label: "Google Drive",
-    description: "Browse, read, create, and copy files through opencompany's Google Drive MCP.",
+    description:
+      "Browse, read, create, copy, and edit files through opencompany's Google Drive MCP.",
     category: "productivity",
     source:
-      "https://github.com/useopencompany/plugins/tree/dc0c91221bcfa9b6088a19277f875c438b37e96e/google-drive",
+      "https://github.com/useopencompany/plugins/tree/bae88070e498725de008e358a74bd18bc46ed27c/google-drive",
     connectionProvider: "google_drive",
     connectHref: "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
     accountDescription:

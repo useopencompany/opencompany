@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "google-drive",
-  "version": "1.1.0",
-  "description": "Search, inspect, read, create, and copy files through opencompany's Google Drive MCP.",
+  "version": "1.2.0",
+  "description": "Search, inspect, read, create, copy, and edit files through opencompany's Google Drive MCP.",
   "author": {
     "name": "opencompany",
     "url": "https://opencompany.com"
@@ -24,9 +24,9 @@
         "tools": ["download_file_content", "get_file_permissions", "read_file_content"]
       },
       "write": {
-        "label": "Create & copy files",
+        "label": "Create & edit files",
         "defaultMode": "ask",
-        "tools": ["copy_file", "create_file"]
+        "tools": ["copy_file", "create_file", "replace_document_text", "replace_document_contents"]
       }
     }
   }
