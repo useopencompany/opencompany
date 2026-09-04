@@ -869,7 +869,9 @@ export async function runCodexChatTurn(input: {
       await turnProjector.finalize(
         { ...summary, result: finalResult },
         {
-          replacementContent: finalResult,
+          // Only a rewritten result (e.g. the Brain report pointer) needs appending; in the
+          // default mode the final message already streamed into the trace parts.
+          settledResultContent: finalResult === rawResult ? null : finalResult,
           taskCompletion: buildTaskTurnCompletion({
             context: taskContext,
             result: finalResult,

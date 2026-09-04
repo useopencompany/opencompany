@@ -36,7 +36,6 @@ export function MessageBubble({
   allowActionApproval = false,
   readOnly = false,
   isTaskSession = false,
-  compactTrace = false,
   turnActive = false,
   attachmentSrc,
   artifactHref,
@@ -51,7 +50,6 @@ export function MessageBubble({
   allowActionApproval?: boolean;
   readOnly?: boolean;
   isTaskSession?: boolean;
-  compactTrace?: boolean;
   turnActive?: boolean;
   attachmentSrc?: (messageId: string, attachment: ChatUiAttachment) => string | undefined;
   artifactHref?: (artifact: PublishedChatArtifact) => string;
@@ -71,7 +69,6 @@ export function MessageBubble({
       allowActionApproval={allowActionApproval}
       readOnly={readOnly}
       isTaskSession={isTaskSession}
-      compactTrace={compactTrace}
       turnActive={turnActive}
       {...(artifactHref ? { artifactHref } : {})}
     />
@@ -89,7 +86,6 @@ function AssistantTurn({
   allowActionApproval,
   readOnly,
   isTaskSession,
-  compactTrace,
   turnActive,
   artifactHref,
 }: {
@@ -103,7 +99,6 @@ function AssistantTurn({
   allowActionApproval: boolean;
   readOnly: boolean;
   isTaskSession: boolean;
-  compactTrace: boolean;
   turnActive: boolean;
   artifactHref?: (artifact: PublishedChatArtifact) => string;
 }) {
@@ -162,7 +157,9 @@ function AssistantTurn({
     stopped: stopped || resolvedMessage.metadata?.aborted === true,
     includeMetadataTaskCard: !isTaskSession,
   });
-  const compactedTrace = compactTrace && !turnActive ? compactAssistantTrace(items) : null;
+  // A resting turn folds its trace behind the disclosure regardless of model or engine; the
+  // active turn always renders its full trace in order while work is still happening.
+  const compactedTrace = turnActive ? null : compactAssistantTrace(items);
   // `nested` is set when rendering a subagent's own trace: its steps are historical, so they render
   // as plain read-only rows (no plan-implement / approval affordances).
   const renderItem = (item: AssistantRenderItem, nested: boolean): ReactNode => {
@@ -264,30 +261,38 @@ type CompactedAssistantTrace = {
   toolCallCount: number;
 };
 
+// Splits a resting turn into the trace folded behind the disclosure and the items that stay
+// visible: the final assistant message plus user-facing outputs (artifact and task cards), in
+// their original relative order. A turn with an unresolved tool keeps its full trace expanded so
+// a pending question or approval retains its surrounding context.
 function compactAssistantTrace(items: AssistantRenderItem[]): CompactedAssistantTrace | null {
-  const finalMessageIndex = items.findLastIndex((item) => item.type === "text");
-  if (finalMessageIndex <= 0) return null;
-
-  const hiddenItems = items.slice(0, finalMessageIndex);
-  // Artifact and task cards are user-facing outputs, not implementation trace. Keep the whole turn
-  // expanded rather than moving or hiding those cards. The same applies to an unresolved tool.
   if (
-    hiddenItems.some(
-      (item) =>
-        item.type === "artifact" ||
-        item.type === "task" ||
-        ((item.type === "tool" || item.type === "subagent") && hasUnresolvedTool(item)),
+    items.some(
+      (item) => (item.type === "tool" || item.type === "subagent") && hasUnresolvedTool(item),
     )
   ) {
     return null;
   }
 
-  const counts = countAssistantTraceItems(hiddenItems);
-  if (counts.messageCount === 0 && counts.toolCallCount === 0) return null;
+  // The final message anchors the collapsed presentation; a turn that produced no message at all
+  // (tool-only, stopped, or failed turns) keeps its trace expanded next to any error notice.
+  const finalMessageIndex = items.findLastIndex((item) => item.type === "text");
+  if (finalMessageIndex < 0) return null;
+
+  const hiddenItems: AssistantRenderItem[] = [];
+  const visibleItems: AssistantRenderItem[] = [];
+  for (const [index, item] of items.entries()) {
+    if (index === finalMessageIndex || item.type === "artifact" || item.type === "task") {
+      visibleItems.push(item);
+    } else {
+      hiddenItems.push(item);
+    }
+  }
+  if (hiddenItems.length === 0) return null;
   return {
     hiddenItems,
-    visibleItems: items.slice(finalMessageIndex),
-    ...counts,
+    visibleItems,
+    ...countAssistantTraceItems(hiddenItems),
   };
 }
 

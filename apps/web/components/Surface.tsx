@@ -1118,10 +1118,20 @@ export function Surface({
   );
   const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
+  // Unlike isTaskConversationWorking this ignores viewer permissions: a read-only viewer of a
+  // running task still watches a live trace, which must not compact mid-run.
+  const isTaskRunInFlight = Boolean(
+    activeTaskConversation &&
+      (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
+  );
+  // The message whose trace stays fully expanded. Prefer the turn identified by run metadata;
+  // while work is in flight without one (task runs, transports without a run id yet), protect the
+  // newest assistant message so a streaming trace never compacts mid-turn. A submitting turn has
+  // no assistant row yet, so it must not re-expand the previous turn's collapsed trace.
   const activeAssistantMessageId =
     foregroundAssistantMessageId && !isChatTurnTerminal(chatTurnPhase)
       ? foregroundAssistantMessageId
-      : isTaskConversationWorking && chatMessages.at(-1)?.role === "assistant"
+      : (isAgentWorking || isTaskRunInFlight) && chatTurnPhase !== "submitting"
         ? latestAssistantMessageId
         : null;
   const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
@@ -3008,7 +3018,6 @@ export function Surface({
                       onActionApproval={handleActionApproval}
                       allowActionApproval={message.id === latestAssistantMessageId}
                       isTaskSession={Boolean(activeTaskConversation)}
-                      compactTrace={isCloudCodingEngine(activeChatEngine)}
                       turnActive={message.id === activeAssistantMessageId}
                     />
                   ))}
