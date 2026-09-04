@@ -65,6 +65,43 @@ describe("createAcpEventNormalizer", () => {
     });
   });
 
+  it("accumulates usage across a repaired prompt in the same run", () => {
+    const normalizer = createAcpEventNormalizer();
+    normalizer.beginRun("session_1");
+    normalizer.normalize({
+      method: "session/prompt_result",
+      params: {
+        sessionId: "session_1",
+        stopReason: "end_turn",
+        usage: { inputTokens: 8, outputTokens: 2, cachedReadTokens: 5 },
+      },
+    });
+    normalizer.normalize(
+      update({
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Recovered result" },
+      }),
+    );
+    normalizer.normalize({
+      method: "session/prompt_result",
+      params: {
+        sessionId: "session_1",
+        stopReason: "end_turn",
+        usage: { inputTokens: 3, outputTokens: 4, cachedWriteTokens: 7 },
+      },
+    });
+
+    expect(normalizer.summary()).toMatchObject({
+      result: "Recovered result",
+      usage: {
+        input_tokens: 11,
+        output_tokens: 6,
+        cache_read_input_tokens: 5,
+        cache_creation_input_tokens: 7,
+      },
+    });
+  });
+
   it("normalizes Codex goals, plans, nested subagents, terminal output, and MCP identity", () => {
     const normalizer = createAcpEventNormalizer({ engineName: "Codex" });
     normalizer.beginRun("session_1");

@@ -9,6 +9,9 @@ const ACP_STDERR_TAIL_LIMIT = 4_000;
 const ACP_FAILURE_DIAGNOSTIC_LIMIT = 2_000;
 const ACP_COMMAND_STREAM_RECONNECT_ATTEMPTS = 3;
 
+export const ACP_EMPTY_RESULT_REPAIR_PROMPT =
+  "The previous turn completed successfully but produced no final assistant response. Do not repeat any completed actions. Inspect the work and current external state only as needed, then provide a concise final response summarizing what was done and its outcome.";
+
 export type AcpMcpServer =
   | {
       name: string;
@@ -114,6 +117,11 @@ export type AcpHarnessTurnInput = {
   collaborationMode?: "default" | "plan";
   goal?: { objective: string; tokenBudget?: number | null } | null;
   steering?: AsyncIterable<AcpPromptBlock[]>;
+  emptyResultRepair?: {
+    shouldRepair: () => boolean;
+    prompt?: string;
+    onRepair?: () => void | Promise<void>;
+  };
 };
 
 export type AcpHarnessTurnResult = {
@@ -252,7 +260,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
           goal: input.goal,
         });
       }
-      const promptResponse = await requestPromptWithAbort({
+      let promptResponse = await requestPromptWithAbort({
         client,
         input,
         sessionId,
@@ -260,16 +268,22 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
         deadline: executionDeadline,
       });
       await client.flush();
-      await input.onRuntimeEvents([
-        {
-          method: "session/prompt_result",
-          params: {
-            sessionId,
-            stopReason: readString(promptResponse.stopReason) ?? "end_turn",
-            ...(promptResponse.usage !== undefined ? { usage: promptResponse.usage } : {}),
-          },
-        },
-      ]);
+      await input.onRuntimeEvents([promptResultEvent(sessionId, promptResponse)]);
+      if (
+        readString(promptResponse.stopReason) === "end_turn" &&
+        input.emptyResultRepair?.shouldRepair()
+      ) {
+        await input.emptyResultRepair.onRepair?.();
+        promptResponse = await requestPromptWithAbort({
+          client,
+          input,
+          sessionId,
+          prompt: textPrompt(input.emptyResultRepair.prompt ?? ACP_EMPTY_RESULT_REPAIR_PROMPT),
+          deadline: executionDeadline,
+        });
+        await client.flush();
+        await input.onRuntimeEvents([promptResultEvent(sessionId, promptResponse)]);
+      }
       return {
         sessionId,
         loadedSession,
@@ -284,6 +298,20 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       }
     }
   }
+}
+
+function promptResultEvent(
+  sessionId: string,
+  promptResponse: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    method: "session/prompt_result",
+    params: {
+      sessionId,
+      stopReason: readString(promptResponse.stopReason) ?? "end_turn",
+      ...(promptResponse.usage !== undefined ? { usage: promptResponse.usage } : {}),
+    },
+  };
 }
 
 async function configureSession(
