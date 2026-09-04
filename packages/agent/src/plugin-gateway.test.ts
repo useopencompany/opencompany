@@ -30,6 +30,8 @@ const mocks = vi.hoisted(() => ({
   loadSlackConnection: vi.fn(),
   getSigNozState: vi.fn(),
   loadSigNozConnection: vi.fn(),
+  getStripeState: vi.fn(),
+  loadStripeConnection: vi.fn(),
   getXState: vi.fn(),
   loadXConnection: vi.fn(),
 }));
@@ -111,6 +113,11 @@ vi.mock("./integrations/signoz-mcp", () => ({
   SIGNOZ_MCP_ENDPOINT_URL: "https://mcp.us.signoz.cloud/mcp",
   getSigNozIntegrationState: mocks.getSigNozState,
   loadSigNozMcpWorkerConnection: mocks.loadSigNozConnection,
+}));
+vi.mock("./integrations/stripe", () => ({
+  STRIPE_MCP_ENDPOINT_URL: "https://mcp.stripe.com",
+  getStripeMcpIntegrationState: mocks.getStripeState,
+  loadStripeMcpWorkerConnection: mocks.loadStripeConnection,
 }));
 vi.mock("./integrations/x-mcp", () => ({
   X_MCP_ENDPOINT_URL: "https://api.x.com/mcp",
@@ -570,6 +577,40 @@ describe("plugin gateway registration cache", () => {
       {
         ...posthogRecord,
         server: { ...posthogRecord.server, url: "https://mcp.posthog.com/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Stripe credentials only to the reviewed hosted endpoint", async () => {
+    const stripeRecord = record({
+      pluginName: "stripe",
+      pluginLabel: "stripe",
+      pluginDescription: "Stripe account tools.",
+      connectionProvider: "stripe",
+      server: {
+        name: "stripe",
+        type: "streamable-http",
+        url: "https://mcp.stripe.com",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([stripeRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:stripe:stripe",
+        connectionProvider: "stripe",
+        getState: mocks.getStripeState,
+        loadConnection: mocks.loadStripeConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...stripeRecord,
+        server: { ...stripeRecord.server, url: "https://mcp.example.com" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

@@ -14,7 +14,12 @@ import {
   getRenderIntegrationState,
   validateRenderApiKey,
 } from "@opencompany/agent/integrations/render-mcp";
-import { disconnectStripeIntegration } from "@opencompany/agent/integrations/stripe";
+import {
+  connectStripeIntegration,
+  disconnectStripeIntegration,
+  getStripeIntegrationState,
+  validateStripeRestrictedApiKey,
+} from "@opencompany/agent/integrations/stripe";
 import type { Actor } from "@opencompany/core";
 import {
   consumeImessageChallenge,
@@ -283,7 +288,16 @@ describe("integration account service", () => {
   });
 
   it("rejects capability updates for providers without that capability", async () => {
-    const db = fakeDb([[{ id: "gint_x" }], [{ provider: "granola" }]]);
+    const db = fakeDb([
+      [
+        {
+          id: "gint_x",
+          provider: "granola",
+          userWorkosId: "user_1",
+          workspaceId: null,
+        },
+      ],
+    ]);
     const service = createIntegrationAccountService({ db });
     await expect(service.setCapabilityMode(member, "gint_x", "write", "on")).rejects.toMatchObject({
       status: 400,
@@ -292,13 +306,50 @@ describe("integration account service", () => {
   });
 
   it("applies a valid capability mode override", async () => {
-    const db = fakeDb([[{ id: "gint_x" }], [{ provider: "gmail" }]]);
+    const db = fakeDb([
+      [
+        {
+          id: "gint_x",
+          provider: "gmail",
+          userWorkosId: "user_1",
+          workspaceId: null,
+        },
+      ],
+    ]);
     const service = createIntegrationAccountService({ db });
     await expect(
       service.setCapabilityMode(member, "gint_x", "write", "ask"),
     ).resolves.toBeUndefined();
     expect(applyIntegrationCapabilityMode).toHaveBeenCalledWith(
       expect.objectContaining({ integrationIds: ["gint_x"], capabilityId: "write", mode: "ask" }),
+    );
+  });
+
+  it("admin-gates permission changes for the workspace Stripe connection", async () => {
+    const row = {
+      id: "gint_stripe",
+      provider: "stripe",
+      userWorkosId: "user_admin",
+      workspaceId: "workspace_1",
+    };
+    const memberService = createIntegrationAccountService({ db: fakeDb([[row]]) });
+    await expect(
+      memberService.setCapabilityMode(member, "gint_stripe", "query", "on"),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: "Only workspace admins can manage this integration's permissions.",
+    });
+
+    const adminService = createIntegrationAccountService({ db: fakeDb([[row]]) });
+    await expect(
+      adminService.setCapabilityMode(admin, "gint_stripe", "query", "on"),
+    ).resolves.toBeUndefined();
+    expect(applyIntegrationCapabilityMode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        integrationIds: ["gint_stripe"],
+        capabilityId: "query",
+        mode: "on",
+      }),
     );
   });
 
@@ -544,6 +595,53 @@ describe("integration account service", () => {
     await expect(service.saveJamieWebhookApiKey(member, "sk_x")).rejects.toMatchObject({
       status: 403,
       message: "Only workspace admins can manage the Jamie integration.",
+    });
+  });
+
+  it("connects Stripe and refreshes installed plugin discovery", async () => {
+    const apiKey = `rk_test_${"a".repeat(24)}`;
+    vi.mocked(validateStripeRestrictedApiKey).mockResolvedValueOnce({
+      ok: true,
+      identity: {
+        accountId: "acct_123",
+        accountName: "Acme Payments",
+        accountEmail: "finance@example.com",
+        country: "US",
+        livemode: false,
+      },
+    });
+    vi.mocked(getStripeIntegrationState).mockResolvedValueOnce({
+      provider: "stripe",
+      connected: true,
+      status: "connected",
+      integrationId: "gint_stripe",
+      accountName: "Acme Payments",
+      livemode: false,
+      statusReason: null,
+      capabilityModes: {},
+      toolModes: {},
+    });
+    const refreshStripePluginRegistrations = vi.fn(async () => undefined);
+    const service = createIntegrationAccountService({
+      db: fakeDb(),
+      refreshStripePluginRegistrations,
+    });
+
+    await expect(service.connectStripe(admin, apiKey)).resolves.toMatchObject({
+      provider: "stripe",
+      connected: true,
+      integrationId: "gint_stripe",
+    });
+    expect(connectStripeIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        apiKey,
+      }),
+    );
+    expect(refreshStripePluginRegistrations).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
     });
   });
 

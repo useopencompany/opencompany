@@ -41,10 +41,20 @@ const CODEX_CHAT_SANDBOX_SWEEP_INTERVAL_MS = 60_000;
 const CODEX_CHAT_RETRY_BASE_DELAY_MS = 5_000;
 const CODEX_CHAT_RETRY_MAX_DELAY_MS = 60_000;
 export const CODEX_CHAT_MAX_INFRASTRUCTURE_ATTEMPTS = 4;
+// Hard ceiling on total claims of one turn, counting every lease acquisition:
+// first run, approval-pause resumes, deploy handoffs, infrastructure retries
+// (bounded above at 4), and expired-lease reclaims. Legitimate turns stay in
+// single digits, so only a crash or settlement loop the specific guards don't
+// know about can approach this. The cap converts such an unknown loop from
+// unbounded re-execution (TASK-411 reached 53 attempts, burning an LLM call
+// per 90s cycle) into one failed turn.
+export const CODEX_CHAT_MAX_TOTAL_ATTEMPTS = 15;
 const CODEX_CHAT_UNEXPECTED_FAILURE_MESSAGE =
   "This chat run failed unexpectedly. Send your message again to retry.";
 const CODEX_CHAT_INFRASTRUCTURE_RETRY_EXHAUSTED_MESSAGE =
   "This chat run could not start after several infrastructure retries. Send your message again to retry.";
+const CODEX_CHAT_ATTEMPT_BUDGET_EXHAUSTED_MESSAGE =
+  "This chat run was retried too many times and has been stopped. Send your message again to retry.";
 
 // Host-tool contract versions this worker binary can serve. Sessions are stamped
 // by the API release that enqueued the turn, so a draining pre-deploy worker must
@@ -346,6 +356,27 @@ export async function runClaimedTurn(
       deploy_version: deployVersion,
       previous_deploy_version: attempt.previousDeployVersion ?? null,
     });
+  }
+
+  if (turn.attempts > CODEX_CHAT_MAX_TOTAL_ATTEMPTS) {
+    logger.error("opencompany chat turn exceeded the total attempt budget", {
+      event: "opencompany.goat_codex_chat_turn_attempt_cap_exceeded",
+      turn_id: turn.id,
+      codex_chat_session_id: session.id,
+      chat_session_id: session.chatSessionId,
+      engine: session.engine,
+      attempt: turn.attempts,
+      deploy_version: deployVersion,
+    });
+    await settleClaimedTurnFailure({
+      turn,
+      session,
+      canonicalAttemptId,
+      taskContext,
+      env,
+      message: CODEX_CHAT_ATTEMPT_BUDGET_EXHAUSTED_MESSAGE,
+    });
+    return;
   }
 
   let heartbeatAbort: CodexChatLeaseLostError | null = null;
