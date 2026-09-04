@@ -1024,7 +1024,10 @@ describe("canonical Hono API", () => {
         mcp: installation.installReport.mcp,
       },
     };
-    const install = vi.fn(async () => ({ plugin: installation, idempotentReplay: false }));
+    const install = vi
+      .fn(async () => ({ plugin: installation, idempotentReplay: false }))
+      .mockResolvedValueOnce({ plugin: installation, idempotentReplay: false })
+      .mockResolvedValueOnce({ plugin: installation, idempotentReplay: true });
     const {
       stdioServers: _stdioServers,
       remoteMcpServers: _remoteMcpServers,
@@ -1105,6 +1108,20 @@ describe("canonical Hono API", () => {
       skill_count: 0,
       mcp_server_count: 2,
     });
+
+    vi.mocked(captureProductServerEvent).mockClear();
+    const replayedImport = await app.request("/v1/plugins/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "plugin-import-1" },
+      body: JSON.stringify({
+        url: "github.com/example/plugins",
+        expectedResolvedCommit: installation.source.resolvedCommit,
+        expectedIntegrity: installation.integrity,
+      }),
+    });
+    expect(replayedImport.status).toBe(201);
+    await expect(replayedImport.json()).resolves.toMatchObject({ data: { replayed: true } });
+    expect(captureProductServerEvent).not.toHaveBeenCalled();
 
     await expect(app.request("/v1/plugins")).resolves.toMatchObject({ status: 200 });
     const inspected = await app.request("/v1/plugins/quality-tools");
