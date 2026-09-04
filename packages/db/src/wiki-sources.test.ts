@@ -35,12 +35,12 @@ describe("upsertWikiSource", () => {
     await expect(
       upsertWikiSource({
         workspaceId: "workspace_1",
-        provider: "github",
+        provider: "linear",
         integrationId: "integration_1",
         userWorkosId: "user_1",
         createdByWorkosId: "user_1",
         enabled: true,
-        config: { repositories: ["acme/api"] },
+        config: { teams: ["engineering"] },
         now: new Date("2026-08-24T09:00:00.000Z"),
       }),
     ).resolves.toEqual({ id: "gwscfg_1", created: true });

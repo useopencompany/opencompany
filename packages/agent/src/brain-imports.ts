@@ -1,4 +1,3 @@
-import { GITHUB_ACTIVITY_EVENT_TYPES } from "@opencompany/brain";
 import {
   type Actor,
   actorHasPermission,
@@ -29,22 +28,20 @@ import type { BrainSourceApplicationService } from "./brain-sources";
 
 type DbLike = any;
 
-const IMPORT_INTEGRATION_PROVIDERS = ["github", "granola", "fathom", "gmail", "linear"] as const;
+const IMPORT_INTEGRATION_PROVIDERS = ["granola", "fathom", "gmail", "linear"] as const;
 const IMPORT_PROVIDERS = ["public_web", ...IMPORT_INTEGRATION_PROVIDERS] as const;
-const WIKI_IMPORT_INTEGRATION_PROVIDERS = ["github", "granola", "gmail", "linear"] as const;
+const WIKI_IMPORT_INTEGRATION_PROVIDERS = ["granola", "gmail", "linear"] as const;
 const WIKI_IMPORT_PROVIDERS = ["public_web", ...WIKI_IMPORT_INTEGRATION_PROVIDERS] as const;
 
 type ImportIntegrationProvider = (typeof IMPORT_INTEGRATION_PROVIDERS)[number];
 
-// The command accepts the same requested shape the Brain sources catalog exposes. Only the
-// GitHub repository scope is honored from the client; every other provider reuses its stored
-// source configuration after ownership and capability are re-derived server-side.
+// The command accepts the same requested shape the Brain sources catalog exposes. Provider
+// configuration is re-derived server-side after ownership and capability checks.
 export type BrainImportSelectionInput = Record<
   string,
   {
     enabled: boolean;
     integrationId?: string;
-    config?: { repos?: Array<{ id?: string; fullName?: string }> };
   }
 >;
 
@@ -194,27 +191,6 @@ export class BrainImportApplicationService {
       }
 
       let config: Record<string, unknown> = manageableSource?.config ?? {};
-      if (provider === "github" && !manageableSource) {
-        const options = await this.brainSources.listOptions(actor, requested.integrationId, {
-          provider: "github",
-        });
-        if (options.provider !== "github") {
-          throw new CoreError("unavailable", "GitHub returned an invalid source-option response.");
-        }
-        const requestedRepos = Array.isArray(requested.config?.repos) ? requested.config.repos : [];
-        const requestedKeys = new Set(
-          requestedRepos.flatMap((repo) =>
-            [repo?.id, repo?.fullName].filter(
-              (key): key is string => typeof key === "string" && key.length > 0,
-            ),
-          ),
-        );
-        const repos = options.repos
-          .filter((repo) => requestedKeys.has(repo.id) || requestedKeys.has(repo.fullName))
-          .slice(0, 5)
-          .map(({ id, fullName }) => ({ id, fullName }));
-        config = { repos, events: [...GITHUB_ACTIVITY_EVENT_TYPES] };
-      }
       if (provider === "gmail") {
         const existingEvents = Array.isArray(config.events) ? config.events : [];
         if (existingEvents.length === 0) {
@@ -223,9 +199,6 @@ export class BrainImportApplicationService {
             events: [{ id: "email_received" }, { id: "email_sent" }],
           };
         }
-      }
-      if (provider === "github" && !hasConfiguredEntries(config.repos)) {
-        throw new CoreError("invalid_argument", "Select at least one GitHub repository.");
       }
       if (provider === "linear" && !hasConfiguredEntries(config.teams)) {
         throw new CoreError(
@@ -362,9 +335,6 @@ export class WikiImportApplicationService {
           `Configure ${providerLabel(provider)} in Wiki Sources first.`,
         );
       }
-      if (provider === "github" && !hasConfiguredEntries(source.config.repos)) {
-        throw new CoreError("invalid_argument", "Select at least one GitHub repository.");
-      }
       if (provider === "linear" && !hasConfiguredEntries(source.config.teams)) {
         throw new CoreError("invalid_argument", "Select at least one Linear team.");
       }
@@ -386,7 +356,7 @@ function integrationIdFor(
 }
 
 function providerLabel(provider: ImportIntegrationProvider) {
-  return provider === "github" ? "GitHub" : provider[0]!.toUpperCase() + provider.slice(1);
+  return provider[0]!.toUpperCase() + provider.slice(1);
 }
 
 function hasConfiguredEntries(value: unknown) {

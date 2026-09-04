@@ -9,7 +9,6 @@ import {
   isNormalizedBrainPointerSourceItem,
   isNormalizedChatCaptureSourceItem,
   isNormalizedFathomMeetingSourceItem,
-  isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
   isNormalizedGranolaMeetingSourceItem,
@@ -52,7 +51,6 @@ import {
   runAttioObjectAgentIngest,
   runChatCaptureAgentIngest,
   runFathomMeetingAgentIngest,
-  runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
   runGoogleDriveDocumentAgentIngest,
   runGranolaMeetingAgentIngest,
@@ -178,12 +176,6 @@ const LINEAR_ISSUE_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "issue",
 } as const satisfies BrainIngestJobDescriptor;
 
-const GITHUB_ACTIVITY_AGENT_INGEST_DESCRIPTOR = {
-  kind: "brain_agent_ingest",
-  sourceProvider: "github",
-  sourceType: "activity",
-} as const satisfies BrainIngestJobDescriptor;
-
 const HUBSPOT_OBJECT_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "hubspot",
@@ -246,11 +238,6 @@ const BRAIN_INGEST_HANDLERS: readonly BrainIngestHandler[] = [
     descriptor: LINEAR_ISSUE_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedLinearIssueSourceItem,
     run: runTypedBrainIngestHandler(runLinearIssueAgentIngest),
-  },
-  {
-    descriptor: GITHUB_ACTIVITY_AGENT_INGEST_DESCRIPTOR,
-    isPayload: isNormalizedGitHubActivitySourceItem,
-    run: runTypedBrainIngestHandler(runGitHubActivityAgentIngest),
   },
   {
     descriptor: HUBSPOT_OBJECT_AGENT_INGEST_DESCRIPTOR,

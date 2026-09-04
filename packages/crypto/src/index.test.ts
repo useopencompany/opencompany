@@ -130,12 +130,12 @@ describe("buildAad field ordering (golden, locks byte compatibility)", () => {
     const aad = buildAad({
       workspaceId: "wks_1",
       integrationId: "wint_1",
-      provider: "github",
+      provider: "github_user",
       kind: "oauth_token",
       keyVersion: 1,
     });
     expect(aad.toString("utf8")).toBe(
-      '{"workspaceId":"wks_1","integrationId":"wint_1","provider":"github","kind":"oauth_token","keyVersion":1}',
+      '{"workspaceId":"wks_1","integrationId":"wint_1","provider":"github_user","kind":"oauth_token","keyVersion":1}',
     );
   });
 

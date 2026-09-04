@@ -65,20 +65,6 @@ services:
         sync: false
       - key: MONID_API_KEY
         sync: false
-      - key: GITHUB_INTEGRATION_APP_ID
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_PRIVATE_KEY
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_SLUG
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_CLIENT_ID
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_CLIENT_SECRET
-        sync: false
-      - key: GITHUB_INTEGRATION_STATE_SECRET
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_WEBHOOK_SECRET
-        sync: false
       # Dedicated user-authorized GitHub App for the official GitHub Plugin.
       - key: GITHUB_USER_APP_SLUG
         sync: false
@@ -354,11 +340,6 @@ services:
       - key: APIFY_API_TOKEN
         sync: false
       - key: MONID_API_KEY
-        sync: false
-      # GitHub-backed tasks mint installation tokens inside the runner.
-      - key: GITHUB_INTEGRATION_APP_ID
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_PRIVATE_KEY
         sync: false
       # Refreshes the personal GitHub App user token before sandbox injection.
       - key: GITHUB_USER_APP_CLIENT_ID

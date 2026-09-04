@@ -54,14 +54,6 @@ const LINEAR_ENV_KEYS = [
   "OPENCOMPANY_FEEDBACK_LINEAR_PROJECT_ID",
   "OPENCOMPANY_FEEDBACK_LINEAR_LABELS",
 ];
-const GITHUB_WORK_INTEGRATION_ENV_KEYS = [
-  "GITHUB_INTEGRATION_APP_ID",
-  "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
-  "GITHUB_INTEGRATION_APP_SLUG",
-  "GITHUB_INTEGRATION_APP_CLIENT_ID",
-  "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
-  "GITHUB_INTEGRATION_STATE_SECRET",
-];
 const GITHUB_USER_INTEGRATION_ENV_KEYS = [
   "GITHUB_USER_APP_SLUG",
   "GITHUB_USER_APP_CLIENT_ID",
@@ -202,7 +194,6 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
 ];
 const SHARED_DEV_ENV_KEYS = [
   ...WORKOS_ENV_KEYS,
-  ...GITHUB_WORK_INTEGRATION_ENV_KEYS,
   ...GITHUB_USER_INTEGRATION_ENV_KEYS,
   ...INTEGRATION_CREDENTIAL_ENV_KEYS,
   ...GOOGLE_INTEGRATION_ENV_KEYS,
@@ -414,9 +405,6 @@ function inspectState() {
   const env = readEffectiveLocalEnv();
   const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
   const runnerMissing = LOCAL_RUNNER_REQUIRED_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
-  const githubIntegrationMissing = GITHUB_WORK_INTEGRATION_ENV_KEYS.filter((k) =>
-    isPlaceholder(env[k]),
-  );
   const billingMissing = BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(env[key]));
 
   return {
@@ -428,8 +416,6 @@ function inspectState() {
     workosMissingKeys: workosMissing,
     runner: runnerMissing.length === 0 ? "ready" : "placeholder",
     runnerMissingKeys: runnerMissing,
-    githubIntegration: githubIntegrationMissing.length === 0 ? "ready" : "placeholder",
-    githubIntegrationMissingKeys: githubIntegrationMissing,
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
     neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
@@ -857,33 +843,6 @@ async function ensureLocalRunnerEnv(state) {
   ok(`Runner credentials configured from ${source}`);
 }
 
-async function ensureGitHubIntegrationEnv(state) {
-  step("GitHub integration app credentials");
-  if (state.githubIntegration === "ready") {
-    ok("GitHub integration app env vars look set");
-    return;
-  }
-
-  warn(
-    `GitHub integration app env vars are missing (${state.githubIntegrationMissingKeys.join(
-      ", ",
-    )}). Pulling the shared main app credentials from Infisical.`,
-  );
-  const source = pullSharedDevEnv({
-    requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
-  });
-
-  const after = inspectState();
-  if (after.githubIntegration !== "ready") {
-    throw new Error(
-      `${source} env pull finished but GitHub integration app values are still placeholders: ${after.githubIntegrationMissingKeys.join(
-        ", ",
-      )}. Add them in Infisical dev /web, then run \`bun run env:pull\` again.`,
-    );
-  }
-  ok(`GitHub integration app credentials configured from ${source}`);
-}
-
 async function ensureSharedDatabaseUrl(state) {
   step("Shared database URL");
   if (state.databaseUrl === "set") {
@@ -1208,14 +1167,12 @@ async function main() {
     if (
       state.workos === "placeholder" ||
       state.runner === "placeholder" ||
-      state.githubIntegration === "placeholder" ||
       (!SHARED_DATABASE_MODE && state.neonProject === "placeholder") ||
       (SHARED_DATABASE_MODE && state.databaseUrl === "placeholder")
     ) {
       const missingShared = [
         ...state.workosMissingKeys,
         ...state.runnerMissingKeys,
-        ...state.githubIntegrationMissingKeys,
         ...(!SHARED_DATABASE_MODE && state.neonProject === "placeholder"
           ? ["NEON_PROJECT_ID"]
           : []),
@@ -1319,7 +1276,6 @@ async function main() {
   await ensureLocalDevDefaults();
   await ensureWorkOS(inspectState());
   await ensureLocalRunnerEnv(inspectState());
-  await ensureGitHubIntegrationEnv(inspectState());
   if (SHARED_DATABASE_MODE) {
     await ensureSharedDatabaseUrl(inspectState());
   } else {

@@ -34,9 +34,8 @@ export async function startBrainImportDiscoveryAction(input: {
   }, "The company-context import failed.");
 }
 
-// The API only honors the requested GitHub repository scope; every other provider reuses its
-// stored source configuration server-side, so the command sends only the fields the strict
-// protocol schema defines.
+// Provider configuration is re-derived server-side, so the command sends only
+// the fields the strict protocol schema defines.
 function protocolSourceSelection(
   selection: Record<
     string,
@@ -45,27 +44,23 @@ function protocolSourceSelection(
 ): StartBrainImportBody["sourceSelection"] {
   const next: StartBrainImportBody["sourceSelection"] = {};
   for (const [provider, entry] of Object.entries(selection)) {
-    const repos = Array.isArray(entry.config?.repos)
-      ? entry.config.repos
-          .flatMap((repo) => {
-            if (!repo || typeof repo !== "object") return [];
-            const { id, fullName } = repo as { id?: unknown; fullName?: unknown };
-            const ref = {
-              ...(typeof id === "string" && id ? { id } : {}),
-              ...(typeof fullName === "string" && fullName ? { fullName } : {}),
-            };
-            return Object.keys(ref).length > 0 ? [ref] : [];
-          })
-          .slice(0, 20)
-      : [];
+    if (!ACTIVE_IMPORT_PROVIDERS.has(provider as BrainImportProvider)) continue;
     next[provider] = {
       enabled: entry.enabled,
       ...(entry.integrationId ? { integrationId: entry.integrationId } : {}),
-      ...(repos.length > 0 ? { config: { repos } } : {}),
     };
   }
   return next;
 }
+
+const ACTIVE_IMPORT_PROVIDERS = new Set<BrainImportProvider>([
+  "public_web",
+  "jamie",
+  "granola",
+  "fathom",
+  "gmail",
+  "linear",
+]);
 
 export async function confirmBrainImportAction(input: {
   brainRef: string;

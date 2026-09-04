@@ -1,6 +1,5 @@
 import { resolvePluginGatewayRegistrations } from "../plugin-gateway";
 import { resolveAttioActions } from "./attio";
-import { resolveGitHubActions } from "./github";
 import { resolveGmailActions } from "./gmail";
 import { resolveGoogleCalendarActions } from "./google-calendar";
 import { resolveGoogleDriveActions } from "./google-drive";
@@ -66,9 +65,6 @@ export async function resolveActionCatalog(
   const attioPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:attio:"),
   );
-  const githubPluginInstalled = remoteMcpRegistrations.some((registration) =>
-    registration.source.startsWith("plugin:github:"),
-  );
   const gmailPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:gmail:"),
   );
@@ -78,15 +74,6 @@ export async function resolveActionCatalog(
   const googleCalendarPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:google-calendar:"),
   );
-  const githubPluginConnected =
-    githubPluginInstalled &&
-    (
-      await Promise.all(
-        remoteMcpRegistrations
-          .filter((registration) => registration.source.startsWith("plugin:github:"))
-          .map((registration) => registration.getState(input).catch(() => null)),
-      )
-    ).some((state) => state?.connected && state.integrationId);
   const neonPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:neon:"),
   );
@@ -115,7 +102,6 @@ export async function resolveActionCatalog(
     latitudePluginInstalled ? null : resolveLatitudeActions(input.userWorkosId).catch(() => null),
     neonPluginInstalled ? null : resolveNeonActions(input.userWorkosId).catch(() => null),
     attioPluginInstalled ? null : resolveAttioActions(input.userWorkosId).catch(() => null),
-    githubPluginConnected ? null : resolveGitHubActions(input.workspaceId).catch(() => null),
     stripePluginInstalled ? null : resolveStripeActions(input.workspaceId).catch(() => null),
     resolveRevolutActions(input.workspaceId).catch(() => null),
     xPluginInstalled ? null : resolveXAccountActions(input.userWorkosId).catch(() => null),
