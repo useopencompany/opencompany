@@ -2,7 +2,6 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { saveAttioApiKeyAction } from "./attio-actions";
-import { confirmImessagePairingAction, startImessagePairingAction } from "./imessage-actions";
 import {
   createOrResetJamieWebhookEndpointAction,
   saveJamieWebhookApiKeyAction,
@@ -111,30 +110,6 @@ describe("provider account command adapters", () => {
       error: "Attio rejected this API key. Check it and try again.",
     });
     expect(revalidatePath).not.toHaveBeenCalled();
-  });
-
-  it("starts iMessage pairing without revalidating and confirms with state", async () => {
-    const requests = stubApi(() => Response.json({ data: { started: true }, meta }));
-    await expect(startImessagePairingAction("+14155551234")).resolves.toEqual({ ok: true });
-    expect(new URL((requests[0] as Request).url).pathname).toBe(
-      "/v1/integration-accounts/imessage/pairing",
-    );
-    expect(revalidatePath).not.toHaveBeenCalled();
-
-    const state = {
-      provider: "imessage",
-      connected: true,
-      status: "connected",
-      integrationId: "gint_imsg",
-      phoneE164: "+14155551234",
-      statusReason: null,
-    };
-    const confirmRequests = stubApi(() => Response.json({ data: { state }, meta }));
-    await expect(confirmImessagePairingAction("123456")).resolves.toEqual({ ok: true, state });
-    expect(new URL((confirmRequests[0] as Request).url).pathname).toBe(
-      "/v1/integration-accounts/imessage/pairing/confirm",
-    );
-    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 
   it("keeps the retired admin-only Stripe copy from the API envelope", async () => {

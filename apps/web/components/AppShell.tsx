@@ -22,7 +22,6 @@ import { getGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGranolaIntegrationState } from "@/lib/integrations/granola";
 import { getHubSpotMcpIntegrationState } from "@/lib/integrations/hubspot-mcp";
-import { getImessageIntegrationState } from "@/lib/integrations/imessage";
 import { getJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
@@ -54,7 +53,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
     attio,
     stripe,
     xAccount,
-    imessage,
     codex,
     claudeCode,
     infisical,
@@ -124,11 +122,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
       "x_account_integration",
       () => getXAccountIntegrationState(user.workosUserId),
       emptyIntegrations.x_account,
-    ),
-    loadOptionalAppShellData(
-      "imessage_integration",
-      () => getImessageIntegrationState(user.workosUserId),
-      emptyIntegrations.imessage,
     ),
     loadOptionalAppShellData("codex_auth", loadCurrentCodexAuthSettings, {
       status: null,
@@ -204,7 +197,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
       attio,
       stripe,
       xAccount,
-      imessage,
       personalAccounts,
       codex: {
         provider: "codex",
@@ -284,7 +276,6 @@ function buildIntegrationState(input: {
   attio: IntegrationState["attio"];
   stripe: IntegrationState["stripe"];
   xAccount: IntegrationState["x_account"];
-  imessage: IntegrationState["imessage"];
   personalAccounts: IntegrationState["personalAccounts"];
   codex: CodexProviderState;
   claudeCode: ClaudeCodeProviderState;
@@ -305,7 +296,6 @@ function buildIntegrationState(input: {
     attio: input.attio,
     stripe: input.stripe,
     x_account: input.xAccount,
-    imessage: input.imessage,
     codex: input.codex,
     claude_code: input.claudeCode,
     infisical: input.infisical,

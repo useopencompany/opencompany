@@ -13,7 +13,6 @@ import type {
   AttioProviderState,
   FathomProviderState,
   GranolaProviderState,
-  ImessageProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import type { GmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
@@ -2240,23 +2239,6 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: { state: renderStateDto(state) }, meta }, 200);
     },
-    startImessagePairing: async (c) => {
-      const actor = actorFrom(c);
-      // Pairing sends a real text message, so it gets its own small bucket
-      // instead of sharing the general write counter.
-      await enforceRateLimit(rateLimiter, actor, "imessage-pairing", 5);
-      await input.integrationAccounts.startImessagePairing(actor, c.req.valid("json").phone);
-      return c.json({ data: { started: true as const }, meta }, 200);
-    },
-    confirmImessagePairing: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const state = await input.integrationAccounts.confirmImessagePairing(
-        actor,
-        c.req.valid("json").code,
-      );
-      return c.json({ data: { state: imessageStateDto(state) }, meta }, 200);
-    },
     connectStripeAccount: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -3549,17 +3531,6 @@ function renderStateDto(state: RenderProviderState) {
     statusReason: state.statusReason,
     capabilityModes: state.capabilityModes,
     toolModes: state.toolModes,
-  };
-}
-
-function imessageStateDto(state: ImessageProviderState) {
-  return {
-    provider: state.provider,
-    connected: state.connected,
-    status: integrationAccountStatusDto(state.status),
-    integrationId: state.integrationId,
-    phoneE164: state.phoneE164,
-    statusReason: state.statusReason,
   };
 }
 

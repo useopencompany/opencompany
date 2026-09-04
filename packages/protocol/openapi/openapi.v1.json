@@ -4548,9 +4548,6 @@
           "chatCapabilitiesBetaEnabled": {
             "type": "boolean"
           },
-          "imessageEnabled": {
-            "type": "boolean"
-          },
           "wikiEnabled": {
             "type": "boolean",
             "enum": [
@@ -4603,7 +4600,6 @@
           "taskSpawningEnabled",
           "autoModelRoutingEnabled",
           "chatCapabilitiesBetaEnabled",
-          "imessageEnabled",
           "wikiEnabled",
           "taskViewMode",
           "preferredMcpClient",
@@ -10053,9 +10049,6 @@
               "list"
             ]
           },
-          "imessageEnabled": {
-            "type": "boolean"
-          },
           "autoModelRoutingEnabled": {
             "type": "boolean"
           }
@@ -10065,7 +10058,6 @@
           "taskSpawningEnabled",
           "wikiEnabled",
           "taskViewMode",
-          "imessageEnabled",
           "autoModelRoutingEnabled"
         ],
         "additionalProperties": false
@@ -10090,9 +10082,6 @@
               "board",
               "list"
             ]
-          },
-          "imessageEnabled": {
-            "type": "boolean"
           },
           "autoModelRoutingEnabled": {
             "type": "boolean"
@@ -10755,135 +10744,6 @@
           "statusReason",
           "capabilityModes",
           "toolModes"
-        ],
-        "additionalProperties": false
-      },
-      "ImessagePairingStartedEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "started": {
-                "type": "boolean",
-                "enum": [
-                  true
-                ]
-              }
-            },
-            "required": [
-              "started"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "StartImessagePairingBody": {
-        "type": "object",
-        "properties": {
-          "phone": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          }
-        },
-        "required": [
-          "phone"
-        ],
-        "additionalProperties": false
-      },
-      "ImessageAccountStateEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "state": {
-                "$ref": "#/components/schemas/ImessageAccountState"
-              }
-            },
-            "required": [
-              "state"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "ImessageAccountState": {
-        "type": "object",
-        "properties": {
-          "provider": {
-            "type": "string",
-            "enum": [
-              "imessage"
-            ]
-          },
-          "connected": {
-            "type": "boolean"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "not_connected",
-              "connected",
-              "needs_reauth",
-              "sync_failed"
-            ]
-          },
-          "integrationId": {
-            "type": "string",
-            "nullable": true,
-            "minLength": 1,
-            "maxLength": 128,
-            "example": "gint_0f8e7d6c5b4a",
-            "description": "Integration connection id."
-          },
-          "phoneE164": {
-            "type": "string",
-            "nullable": true
-          },
-          "statusReason": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "required": [
-          "provider",
-          "connected",
-          "status",
-          "integrationId",
-          "phoneE164",
-          "statusReason"
-        ],
-        "additionalProperties": false
-      },
-      "ConfirmImessagePairingBody": {
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 16
-          }
-        },
-        "required": [
-          "code"
         ],
         "additionalProperties": false
       },
@@ -21660,100 +21520,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RenderAccountStateEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/integration-accounts/imessage/pairing": {
-      "post": {
-        "tags": [
-          "Integrations"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StartImessagePairingBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "A verification code was sent to the provided phone number.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ImessagePairingStartedEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/integration-accounts/imessage/pairing/confirm": {
-      "post": {
-        "tags": [
-          "Integrations"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConfirmImessagePairingBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Pairing confirmed; the iMessage connection is active.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ImessageAccountStateEnvelope"
                 }
               }
             }

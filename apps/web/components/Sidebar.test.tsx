@@ -135,7 +135,6 @@ vi.mock("@/components/AppDataProvider", () => ({
     featureFlags: {
       taskSpawning: featureFlagsMock.taskSpawning,
       autoModelRouting: featureFlagsMock.autoModelRouting,
-      imessage: false,
       legacyBrain: featureFlagsMock.legacyBrain,
     },
     mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },

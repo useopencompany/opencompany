@@ -9,7 +9,6 @@ const appDataMock = vi.hoisted(() => ({
   featureFlags: {
     taskSpawning: true,
     autoModelRouting: false,
-    imessage: false,
     legacyBrain: false,
   },
   workspace: { id: "workspace_1" },
