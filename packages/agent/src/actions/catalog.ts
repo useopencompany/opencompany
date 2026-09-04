@@ -90,6 +90,9 @@ export async function resolveActionCatalog(
   const posthogPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:posthog:"),
   );
+  const xPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:x:"),
+  );
   const resolved = await Promise.all([
     gmailPluginInstalled ? null : resolveGmailActions(input.userWorkosId).catch(() => null),
     googleCalendarPluginInstalled
@@ -106,7 +109,7 @@ export async function resolveActionCatalog(
     githubPluginConnected ? null : resolveGitHubActions(input.workspaceId).catch(() => null),
     resolveStripeActions(input.workspaceId).catch(() => null),
     resolveRevolutActions(input.workspaceId).catch(() => null),
-    resolveXAccountActions(input.userWorkosId).catch(() => null),
+    xPluginInstalled ? null : resolveXAccountActions(input.userWorkosId).catch(() => null),
     ...remoteMcpRegistrations.map((registration) =>
       resolveRemoteMcpActions(input, registration).catch(() => null),
     ),
@@ -119,6 +122,12 @@ export async function resolveActionCatalog(
         .resolveManagedCapabilities(input.workspaceId)
         .catch(() => ({ sources: [], actions: [] }) satisfies ManagedCapabilitiesResolution)
     : { sources: [], actions: [] };
+  const reconciledManaged = xPluginInstalled
+    ? {
+        sources: managed.sources.filter((source) => source.id !== "x"),
+        actions: managed.actions.filter((action) => action.provider !== "x"),
+      }
+    : managed;
   return {
     providers: [
       ...providers.map(
@@ -129,8 +138,8 @@ export async function resolveActionCatalog(
           description,
         }),
       ),
-      ...managed.sources,
+      ...reconciledManaged.sources,
     ],
-    actions: [...providers.flatMap((provider) => provider.actions), ...managed.actions],
+    actions: [...providers.flatMap((provider) => provider.actions), ...reconciledManaged.actions],
   };
 }

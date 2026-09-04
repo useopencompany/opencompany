@@ -22,6 +22,7 @@ import {
   RENDER_PLUGIN_SOURCE,
   SIGNOZ_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
+  X_PLUGIN_SOURCE,
   YC_ADVISE_PLUGIN_SOURCE,
 } from "./PluginSettings";
 
@@ -265,12 +266,16 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/posthog",
     );
+    expect(screen.getByRole("link", { name: /^x/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/x",
+    );
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
       "/settings/plugins/yc-advise",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(12);
-    expect(screen.getAllByText("Official package")).toHaveLength(11);
+    expect(screen.getAllByText("Not installed")).toHaveLength(13);
+    expect(screen.getAllByText("Official package")).toHaveLength(12);
     expect(screen.getByText("Official skill package")).toBeInTheDocument();
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
@@ -299,6 +304,9 @@ describe("Plugin settings", () => {
     expect(SLACK_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
     );
+    expect(X_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
+    );
     expect(GMAIL_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
     );
@@ -312,7 +320,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(12);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(13);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });

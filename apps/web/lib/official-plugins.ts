@@ -9,7 +9,8 @@ export type OfficialMcpPluginName =
   | "posthog"
   | "render"
   | "signoz"
-  | "slack";
+  | "slack"
+  | "x";
 export type OfficialSkillPluginName = "yc-advise";
 export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
 
@@ -34,7 +35,8 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "posthog"
     | "render"
     | "signoz"
-    | "slack";
+    | "slack"
+    | "x_account";
   connectHref: string;
   accountLabel?: string;
   accountDescription: string;
@@ -184,6 +186,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "slack",
     connectHref: "/api/integrations/slack/start?returnTo=/settings/plugins/slack",
     accountDescription: "The most recently connected Slack account powers Slack tools.",
+  },
+  x: {
+    name: "x",
+    kind: "mcp",
+    label: "X",
+    description: "Research public conversations and manage your X account with approval.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
+    connectionProvider: "x_account",
+    connectHref: "/api/integrations/x-account/start?returnTo=/settings/plugins/x",
+    accountLabel: "X",
+    accountDescription:
+      "The most recently connected X account powers plugin tools. Other connected X accounts remain available if the plugin is uninstalled.",
   },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginMetadata>;
 

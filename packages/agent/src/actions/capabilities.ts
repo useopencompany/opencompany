@@ -267,9 +267,24 @@ export const PROVIDER_CAPABILITIES: Partial<
   ],
   x_account: [
     {
+      id: "read",
+      label: "Research public X data",
+      description:
+        "Search and inspect public posts, profiles, lists, communities, trends, and news.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read account & private X data",
+      description:
+        "Read account-specific data such as analytics, timelines, bookmarks, messages, and usage.",
+      defaultMode: "ask",
+    },
+    {
       id: "write",
-      label: "Post to X",
-      description: "Post new tweets from your connected X account.",
+      label: "Manage X",
+      description:
+        "Post and delete content or make other changes through your connected X account.",
       defaultMode: "ask",
     },
   ],
