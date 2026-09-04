@@ -13,7 +13,6 @@ export type UserPreferenceSet = {
   taskSpawningEnabled: boolean;
   wikiEnabled: true;
   taskViewMode: TaskViewMode;
-  imessageEnabled: boolean;
   autoModelRoutingEnabled: boolean;
 };
 
@@ -40,7 +39,6 @@ const PREFERENCE_COLUMNS = {
   timezone: users.timezone,
   taskSpawningEnabled: users.taskSpawningEnabled,
   taskViewMode: users.taskViewMode,
-  imessageEnabled: users.imessageEnabled,
   autoModelRoutingEnabled: users.autoModelRoutingEnabled,
 };
 
@@ -58,11 +56,7 @@ export function createUserSettingsService(input: {
         const timezone = normalizeScheduleTimezone(command.timezone);
         if (timezone !== current.timezone) changes.timezone = timezone;
       }
-      for (const field of [
-        "taskSpawningEnabled",
-        "imessageEnabled",
-        "autoModelRoutingEnabled",
-      ] as const) {
+      for (const field of ["taskSpawningEnabled", "autoModelRoutingEnabled"] as const) {
         const value = command[field];
         if (value !== undefined && value !== current[field]) changes[field] = value;
       }

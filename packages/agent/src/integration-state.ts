@@ -123,18 +123,6 @@ export type GranolaProviderState = {
   statusReason: string | null;
 };
 
-// iMessage pairs the user's own phone number (verified with a one-time code
-// sent over iMessage); the E.164 number lives in account_name. There is no
-// credential row — the send transport is platform-level.
-export type ImessageProviderState = {
-  provider: "imessage";
-  connected: boolean;
-  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
-  integrationId: string | null;
-  phoneE164: string | null;
-  statusReason: string | null;
-};
-
 // Fathom connects with a personal API key minted in Fathom's user settings;
 // the integration id is what the brain-source picker and save action key
 // config rows on.
@@ -282,7 +270,6 @@ export type IntegrationState = {
   attio: AttioProviderState;
   stripe: StripeProviderState;
   x_account: XAccountProviderState;
-  imessage: ImessageProviderState;
   codex: CodexProviderState;
   claude_code: ClaudeCodeProviderState;
   infisical: InfisicalProviderState;
@@ -438,7 +425,6 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     attio: attioProviderState(byProvider.get("attio")),
     stripe: stripeProviderState(byProvider.get("stripe")),
     x_account: xAccountProviderState(byProvider.get("x_account")),
-    imessage: imessageProviderState(byProvider.get("imessage")),
     codex: {
       provider: "codex",
       connected: false,
@@ -701,28 +687,6 @@ function granolaProviderState(row: IntegrationStateRow | undefined): GranolaProv
     integrationId: row.id ?? null,
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
-    statusReason: row.statusReason ?? row.status_reason ?? null,
-  };
-}
-
-function imessageProviderState(row: IntegrationStateRow | undefined): ImessageProviderState {
-  if (!row || row.status === "disconnected") {
-    return {
-      provider: "imessage",
-      connected: false,
-      status: "not_connected",
-      integrationId: null,
-      phoneE164: null,
-      statusReason: null,
-    };
-  }
-
-  return {
-    provider: "imessage",
-    connected: row.status === "connected",
-    status: row.status,
-    integrationId: row.id ?? null,
-    phoneE164: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
   };
 }

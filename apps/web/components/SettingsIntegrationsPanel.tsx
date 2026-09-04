@@ -55,7 +55,6 @@ import {
 import {
   type GitHubProviderState,
   type GoogleProviderState,
-  type ImessageProviderState,
   type InfisicalProviderState,
   type IntegrationAccountView,
   type IntegrationState,
@@ -76,7 +75,7 @@ import {
 // components derive everything from the provider string.
 type SettingsPersonalAccountProvider = Exclude<PersonalAccountProvider, "slack" | "jamie">;
 
-type IntegrationMetaKey = SettingsPersonalAccountProvider | "github" | "infisical" | "imessage";
+type IntegrationMetaKey = SettingsPersonalAccountProvider | "github" | "infisical";
 
 type IntegrationMeta = {
   label: string;
@@ -185,12 +184,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: FathomIcon,
     tileClass: "bg-[#1355FF] text-white",
   },
-  imessage: {
-    label: "iMessage",
-    description: "Get important updates from opencompany as texts on your phone.",
-    monogram: "iM",
-    tileClass: "bg-[#34C759] text-white",
-  },
   x_account: {
     label: "X",
     description: "Connect X accounts and publish account-specific posts from chat.",
@@ -202,15 +195,11 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
 export function SettingsIntegrationsPanel({
   initialIntegrations,
   isWorkspaceAdmin,
-  imessageEnabled = false,
   browserProfilesEnabled = false,
   scopeKey = "active",
 }: {
   initialIntegrations: IntegrationState;
   isWorkspaceAdmin: boolean;
-  // The iMessage card only exists for users who turned the beta flag on in
-  // Preferences; pairing state alone must not surface it.
-  imessageEnabled?: boolean;
   browserProfilesEnabled?: boolean;
   scopeKey?: string;
 }) {
@@ -222,14 +211,12 @@ export function SettingsIntegrationsPanel({
         <IntegrationCards
           integrations={initialIntegrations}
           isWorkspaceAdmin={isWorkspaceAdmin}
-          imessageEnabled={imessageEnabled}
           browserProfilesEnabled={browserProfilesEnabled}
         />
       ) : (
         <LiveSettingsIntegrations
           initialIntegrations={initialIntegrations}
           isWorkspaceAdmin={isWorkspaceAdmin}
-          imessageEnabled={imessageEnabled}
           browserProfilesEnabled={browserProfilesEnabled}
           scopeKey={scopeKey}
         />
@@ -272,13 +259,11 @@ export function IntegrationSetupFeedback() {
 function LiveSettingsIntegrations({
   initialIntegrations,
   isWorkspaceAdmin,
-  imessageEnabled,
   browserProfilesEnabled,
   scopeKey,
 }: {
   initialIntegrations: IntegrationState;
   isWorkspaceAdmin: boolean;
-  imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
   scopeKey: string;
 }) {
@@ -306,7 +291,6 @@ function LiveSettingsIntegrations({
     <IntegrationCards
       integrations={integrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
-      imessageEnabled={imessageEnabled}
       browserProfilesEnabled={browserProfilesEnabled}
     />
   );
@@ -354,22 +338,17 @@ function countWorkspaceConnected(integrations: IntegrationState) {
   );
 }
 
-function countPersonalConnected(integrations: IntegrationState, includeImessage: boolean) {
-  return (
-    countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS) +
-    (includeImessage && integrations.imessage.connected ? 1 : 0)
-  );
+function countPersonalConnected(integrations: IntegrationState) {
+  return countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS);
 }
 
 function IntegrationCards({
   integrations,
   isWorkspaceAdmin,
-  imessageEnabled,
   browserProfilesEnabled,
 }: {
   integrations: IntegrationState;
   isWorkspaceAdmin: boolean;
-  imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
 }) {
   const [scope, setScope] = useState<IntegrationScope>("workspace");
@@ -380,7 +359,7 @@ function IntegrationCards({
         scope={scope}
         onScopeChange={setScope}
         workspaceCount={countWorkspaceConnected(integrations)}
-        personalCount={countPersonalConnected(integrations, imessageEnabled)}
+        personalCount={countPersonalConnected(integrations)}
       />
       {scope === "workspace" ? (
         <section className="flex flex-col gap-3">
@@ -419,9 +398,6 @@ function IntegrationCards({
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
             />
-            {imessageEnabled ? (
-              <IMessageIntegrationCard integration={integrations.imessage} />
-            ) : null}
             {browserProfilesEnabled ? <BrowserProfilesCard /> : null}
           </div>
         </section>
@@ -1392,31 +1368,6 @@ function InfisicalIntegrationCard({
   );
 }
 
-function IMessageIntegrationCard({ integration }: { integration: ImessageProviderState }) {
-  return (
-    <IntegrationCard
-      meta={INTEGRATION_META.imessage}
-      footer={
-        integration.connected ? (
-          <div className="flex min-w-0 items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <ConnectedStatus />
-              {integration.phoneE164 ? (
-                <span className="truncate text-[12px] leading-4 text-ink-subtle">
-                  · {integration.phoneE164}
-                </span>
-              ) : null}
-            </div>
-            <ConnectLink href="/settings/imessage" label="Manage" />
-          </div>
-        ) : (
-          <ConnectLink href="/settings/imessage" label="Set up" />
-        )
-      }
-    />
-  );
-}
-
 function integrationStatus(
   integration: GoogleProviderState | LinearProviderState | GitHubProviderState,
 ) {
@@ -1453,7 +1404,6 @@ function integrationConnectHref(
     return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "github_user")
     return "/api/integrations/github-user/start?returnTo=/settings/plugins/github";
-  if (provider === "imessage") return "/settings/imessage";
   if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
   if (provider === "attio") return "/settings/attio";

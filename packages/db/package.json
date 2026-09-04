@@ -164,10 +164,6 @@
       "types": "./src/granola.ts",
       "default": "./src/granola.ts"
     },
-    "./imessage": {
-      "types": "./src/imessage.ts",
-      "default": "./src/imessage.ts"
-    },
     "./fathom": {
       "types": "./src/fathom.ts",
       "default": "./src/fathom.ts"

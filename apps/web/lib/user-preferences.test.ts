@@ -15,7 +15,6 @@ const preferences = {
   taskSpawningEnabled: false,
   wikiEnabled: true,
   taskViewMode: "list",
-  imessageEnabled: false,
   autoModelRoutingEnabled: true,
 };
 

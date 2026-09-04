@@ -24,7 +24,6 @@ import {
   ListTodo,
   Loader2,
   Mail,
-  MessageCircle,
   Monitor,
   Moon,
   Plus,
@@ -49,7 +48,6 @@ import { BrainSettings } from "@/components/BrainSettings";
 import { BrainView } from "@/components/BrainView";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
-import { IMessageIntegrationSetup } from "@/components/IMessageIntegrationSetup";
 import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { RepositorySettings } from "@/components/RepositorySettings";
@@ -80,11 +78,7 @@ import type { IntegrationState } from "@/lib/integration-state";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
 import { buildHarnessRun, type HarnessRunViewModel } from "@/lib/task-harness-run";
-import {
-  updateAutoModelRoutingAction,
-  updateImessageEnabledAction,
-  updateTaskSpawningAction,
-} from "@/lib/user-preferences";
+import { updateAutoModelRoutingAction, updateTaskSpawningAction } from "@/lib/user-preferences";
 
 export function HomeRoute({
   chatId,
@@ -194,7 +188,7 @@ export function IntegrationsSettingsRoute({
 }: {
   browserProfilesEnabled?: boolean;
 }) {
-  const { featureFlags, integrations, workspace } = useAppData();
+  const { integrations, workspace } = useAppData();
 
   return (
     <SettingsContent
@@ -205,7 +199,6 @@ export function IntegrationsSettingsRoute({
         integrations={integrations}
         isWorkspaceAdmin={workspace.role === "admin"}
         workspaceId={workspace.id}
-        imessageEnabled={featureFlags.imessage}
         browserProfilesEnabled={browserProfilesEnabled}
       />
     </SettingsContent>
@@ -279,13 +272,6 @@ export function PreferencesSettingsRoute() {
           description="Let opencompany choose a model from your first message and keep it for the chat."
           checked={featureFlags.autoModelRouting}
           update={updateAutoModelRoutingAction}
-        />
-        <BetaFeatureSwitch
-          icon={MessageCircle}
-          label="iMessage notifications"
-          description="Pair your phone so opencompany can text you important updates over iMessage."
-          checked={featureFlags.imessage}
-          update={updateImessageEnabledAction}
         />
       </section>
     </SettingsContent>
@@ -401,30 +387,6 @@ export function GranolaSettingsRoute() {
         initialState={integrations.granola}
         brainSourcesHref={brainSourcesHref}
       />
-    </SettingsContent>
-  );
-}
-
-export function IMessageSettingsRoute() {
-  const { featureFlags, integrations } = useAppData();
-
-  return (
-    <SettingsContent
-      title="iMessage"
-      description="Get important updates from opencompany as texts on your phone."
-      backLink={{ href: "/settings/integrations", label: "Integrations" }}
-    >
-      {featureFlags.imessage ? (
-        <IMessageIntegrationSetup initialState={integrations.imessage} />
-      ) : (
-        <p className="px-2 text-[13px] leading-5 text-ink-subtle">
-          iMessage notifications are off. Enable them in{" "}
-          <Link href="/settings/preferences" prefetch className="font-medium text-ink underline">
-            Preferences
-          </Link>{" "}
-          first, then come back here to pair your phone.
-        </p>
-      )}
     </SettingsContent>
   );
 }
@@ -772,13 +734,11 @@ function IntegrationRows({
   integrations,
   isWorkspaceAdmin,
   workspaceId,
-  imessageEnabled,
   browserProfilesEnabled,
 }: {
   integrations: IntegrationState;
   isWorkspaceAdmin: boolean;
   workspaceId: string;
-  imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
 }) {
   return (
@@ -786,7 +746,6 @@ function IntegrationRows({
       initialIntegrations={integrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
       scopeKey={workspaceId}
-      imessageEnabled={imessageEnabled}
       browserProfilesEnabled={browserProfilesEnabled}
     />
   );

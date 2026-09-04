@@ -51,7 +51,6 @@ import {
   CodexDeviceAuthFlowEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
   ConfirmBrainImportBodySchema,
-  ConfirmImessagePairingBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
@@ -86,8 +85,6 @@ import {
   GenerateConversationTitleEnvelopeSchema,
   GranolaAccountStateEnvelopeSchema,
   IdentityEnvelopeSchema,
-  ImessageAccountStateEnvelopeSchema,
-  ImessagePairingStartedEnvelopeSchema,
   ImportSkillBodySchema,
   InfisicalAuthFlowEnvelopeSchema,
   InfisicalAuthStatusEnvelopeSchema,
@@ -160,7 +157,6 @@ import {
   SlackBotMutationEnvelopeSchema,
   SlackBotWorkspaceSettingsEnvelopeSchema,
   StartBrainImportBodySchema,
-  StartImessagePairingBodySchema,
   StartInfisicalAuthBodySchema,
   StripeAccountDeleteEnvelopeSchema,
   StripeAccountStateEnvelopeSchema,
@@ -2943,46 +2939,6 @@ export const connectRenderAccountRoute = createRoute({
   },
 });
 
-export const startImessagePairingRoute = createRoute({
-  method: "post",
-  path: "/v1/integration-accounts/imessage/pairing",
-  tags: ["Integrations"],
-  security: actorSecurity,
-  request: {
-    body: {
-      required: true,
-      content: { "application/json": { schema: StartImessagePairingBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "A verification code was sent to the provided phone number.",
-      content: { "application/json": { schema: ImessagePairingStartedEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const confirmImessagePairingRoute = createRoute({
-  method: "post",
-  path: "/v1/integration-accounts/imessage/pairing/confirm",
-  tags: ["Integrations"],
-  security: actorSecurity,
-  request: {
-    body: {
-      required: true,
-      content: { "application/json": { schema: ConfirmImessagePairingBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Pairing confirmed; the iMessage connection is active.",
-      content: { "application/json": { schema: ImessageAccountStateEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
 export const connectStripeAccountRoute = createRoute({
   method: "put",
   path: "/v1/integration-accounts/stripe",
@@ -3652,8 +3608,6 @@ export type V1RouteHandlers = {
   connectFathomAccount: RouteHandler<typeof connectFathomAccountRoute>;
   connectGranolaAccount: RouteHandler<typeof connectGranolaAccountRoute>;
   connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
-  startImessagePairing: RouteHandler<typeof startImessagePairingRoute>;
-  confirmImessagePairing: RouteHandler<typeof confirmImessagePairingRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
   disconnectStripeAccount: RouteHandler<typeof disconnectStripeAccountRoute>;
   listIntegrationAccounts: RouteHandler<typeof listIntegrationAccountsRoute>;
@@ -3843,8 +3797,6 @@ export function createV1Router(
       .openapi(connectFathomAccountRoute, handlers.connectFathomAccount)
       .openapi(connectGranolaAccountRoute, handlers.connectGranolaAccount)
       .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
-      .openapi(startImessagePairingRoute, handlers.startImessagePairing)
-      .openapi(confirmImessagePairingRoute, handlers.confirmImessagePairing)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
       .openapi(disconnectStripeAccountRoute, handlers.disconnectStripeAccount)
       .openapi(listIntegrationAccountsRoute, handlers.listIntegrationAccounts)
@@ -5041,7 +4993,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
           taskSpawningEnabled: false,
           wikiEnabled: true as const,
           taskViewMode: "board" as const,
-          imessageEnabled: false,
           autoModelRoutingEnabled: false,
         },
         meta,
@@ -5158,24 +5109,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
             statusReason: null,
             capabilityModes: {},
             toolModes: {},
-          },
-        },
-        meta,
-      },
-      200,
-    ),
-  startImessagePairing: (c) => c.json({ data: { started: true as const }, meta }, 200),
-  confirmImessagePairing: (c) =>
-    c.json(
-      {
-        data: {
-          state: {
-            provider: "imessage" as const,
-            connected: true,
-            status: "connected" as const,
-            integrationId: "gint_contract",
-            phoneE164: "+14155551234",
-            statusReason: null,
           },
         },
         meta,
@@ -5494,7 +5427,6 @@ function contractIdentity() {
       taskSpawningEnabled: true,
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
-      imessageEnabled: false,
       wikiEnabled: true as const,
       taskViewMode: "board" as const,
       preferredMcpClient: null,

@@ -3198,7 +3198,6 @@ describe("canonical Hono API", () => {
       taskSpawningEnabled: true,
       wikiEnabled: true as const,
       taskViewMode: "list" as const,
-      imessageEnabled: false,
       autoModelRoutingEnabled: true,
     }));
     const app = testApp(fakeRepository(), {
@@ -3655,31 +3654,6 @@ describe("canonical Hono API", () => {
       data: { state: { provider: "render", connected: true, accountName: "Acme Hosting" } },
     });
     expect(connectRender).toHaveBeenCalledWith(actor, renderKey);
-  });
-
-  it("gives iMessage pairing starts their own small rate bucket", async () => {
-    const startImessagePairing = vi.fn(async () => undefined);
-    const buckets: string[] = [];
-    const rateLimiter: ApiRateLimiter = {
-      consume: async ({ bucket, limit }) => {
-        buckets.push(`${bucket}:${limit}`);
-        return { allowed: true };
-      },
-    };
-    const app = testApp(fakeRepository(), {
-      integrationAccounts: integrationAccountService({ startImessagePairing }),
-      rateLimiter,
-    });
-
-    const started = await app.request("/v1/integration-accounts/imessage/pairing", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone: "+14155551234" }),
-    });
-    expect(started.status).toBe(200);
-    await expect(started.json()).resolves.toMatchObject({ data: { started: true } });
-    expect(startImessagePairing).toHaveBeenCalledWith(actor, "+14155551234");
-    expect(buckets).toEqual(["imessage-pairing:5"]);
   });
 
   it("surfaces integration account service errors as protocol envelopes", async () => {
@@ -4841,7 +4815,6 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
       taskSpawningEnabled: true,
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
-      imessageEnabled: false,
       taskViewMode: "board" as const,
       preferredMcpClient: null,
       mcpSetupCompletedAt: null,
@@ -5055,12 +5028,6 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     },
     connectRender: async () => {
       throw new Error("Unexpected Render connect.");
-    },
-    startImessagePairing: async () => {
-      throw new Error("Unexpected iMessage pairing start.");
-    },
-    confirmImessagePairing: async () => {
-      throw new Error("Unexpected iMessage pairing confirm.");
     },
     connectStripe: async () => {
       throw new Error("Unexpected Stripe connect.");

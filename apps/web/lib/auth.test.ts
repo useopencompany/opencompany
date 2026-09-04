@@ -58,7 +58,6 @@ const identity = {
     taskSpawningEnabled: true,
     autoModelRoutingEnabled: false,
     chatCapabilitiesBetaEnabled: false,
-    imessageEnabled: false,
     wikiEnabled: true as const,
     taskViewMode: "board" as const,
     preferredMcpClient: "claude" as const,

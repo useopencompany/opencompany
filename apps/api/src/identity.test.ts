@@ -43,7 +43,6 @@ const localUser = {
   taskSpawningEnabled: true,
   autoModelRoutingEnabled: false,
   chatCapabilitiesBetaEnabled: false,
-  imessageEnabled: false,
   wikiEnabled: false,
   taskViewMode: "board",
   preferredMcpClient: null,

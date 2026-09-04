@@ -1,25 +1,12 @@
-import { randomInt } from "node:crypto";
 import {
   isCapabilityId,
   isCapabilityMode,
   providerCapability,
 } from "@opencompany/agent/actions/capabilities";
-import {
-  connectImessageIntegration,
-  getImessageIntegrationState,
-  hashImessagePairingCode,
-  normalizeImessagePhoneE164,
-  verifyImessagePairingCode,
-} from "@opencompany/agent/imessage/connect";
-import {
-  type ImessageProvider,
-  resolveImessageProvider,
-} from "@opencompany/agent/imessage/provider";
 import type {
   AttioProviderState,
   FathomProviderState,
   GranolaProviderState,
-  ImessageProviderState,
   JamieProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
@@ -69,18 +56,11 @@ import {
   type AttioApiKeyCredentialPayload,
 } from "@opencompany/db/attio";
 import {
-  consumeImessageChallenge,
-  getImessagePairingChallenge,
-  incrementImessageChallengeAttempts,
-  recordImessageSend,
-  upsertImessagePairingChallenge,
-} from "@opencompany/db/imessage";
-import {
   applyIntegrationCapabilityMode,
   disconnectPersonalIntegration,
   loadIntegrationCredential,
 } from "@opencompany/db/integrations";
-import { brainSources, integrations, users } from "@opencompany/db/product-schema";
+import { brainSources, integrations } from "@opencompany/db/product-schema";
 import { ensureWikiSourceEnabledOnConnect } from "@opencompany/db/wiki-sources";
 import { createLogger } from "@opencompany/observability";
 import type { IntegrationAccountDto } from "@opencompany/protocol";
@@ -96,10 +76,6 @@ type DbLike = any;
 
 const OWNER_ONLY_MESSAGE = "Only the connection owner can manage this account.";
 const STRIPE_ADMIN_ONLY_MESSAGE = "Only workspace admins can manage the Stripe integration.";
-
-const IMESSAGE_CODE_TTL_MS = 10 * 60 * 1000;
-const IMESSAGE_RESEND_COOLDOWN_MS = 30 * 1000;
-const IMESSAGE_MAX_CONFIRM_ATTEMPTS = 5;
 
 export type IntegrationAccountService = {
   list(actor: Actor): Promise<IntegrationAccountDto[]>;
@@ -117,8 +93,6 @@ export type IntegrationAccountService = {
   connectFathom(actor: Actor, apiKey: string): Promise<FathomProviderState>;
   connectGranola(actor: Actor, apiKey: string): Promise<GranolaProviderState>;
   connectRender(actor: Actor, apiKey: string): Promise<RenderProviderState>;
-  startImessagePairing(actor: Actor, phone: string): Promise<void>;
-  confirmImessagePairing(actor: Actor, code: string): Promise<ImessageProviderState>;
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
   disconnectStripe(actor: Actor): Promise<void>;
 };
@@ -126,9 +100,6 @@ export type IntegrationAccountService = {
 export function createIntegrationAccountService(input: {
   db: DbLike;
   now?: () => Date;
-  // Injectable so tests can exercise the pairing flow without Linq credentials.
-  resolveImessageProvider?: () => ImessageProvider | null;
-  generatePairingCode?: () => string;
   runner?: RunnerClient;
   refreshRenderPluginRegistrations?: (input: {
     userWorkosId: string;
@@ -141,10 +112,6 @@ export function createIntegrationAccountService(input: {
 }): IntegrationAccountService {
   const db = input.db;
   const now = input.now ?? (() => new Date());
-  const imessageProviderResolver = input.resolveImessageProvider ?? resolveImessageProvider;
-  const generatePairingCode =
-    input.generatePairingCode ?? (() => String(randomInt(100000, 1000000)));
-
   return {
     async list(actor) {
       const rows = await db
@@ -386,139 +353,6 @@ export function createIntegrationAccountService(input: {
         return await getRenderIntegrationState(actor.userId, db);
       } catch (error) {
         throw commandFailure(error, "Could not save the Render API key.", "render_connect");
-      }
-    },
-
-    async startImessagePairing(actor, phone) {
-      const [user] = await db
-        .select({ imessageEnabled: users.imessageEnabled })
-        .from(users)
-        .where(eq(users.workosUserId, actor.userId))
-        .limit(1);
-      if (!user?.imessageEnabled) {
-        throw new ApiError(
-          400,
-          "invalid_request",
-          "Enable iMessage notifications in Preferences first.",
-        );
-      }
-      const provider = imessageProviderResolver();
-      if (!provider) {
-        throw new ApiError(
-          503,
-          "unavailable",
-          "iMessage sending is not configured on this environment.",
-          true,
-        );
-      }
-      const phoneE164 = normalizeImessagePhoneE164(phone);
-      if (!phoneE164) {
-        throw new ApiError(
-          400,
-          "invalid_request",
-          "Enter the number in international format, e.g. +14155551234.",
-        );
-      }
-
-      try {
-        const existing = await getImessagePairingChallenge(actor.userId, db);
-        if (
-          existing &&
-          !existing.consumedAt &&
-          now().getTime() - existing.createdAt.getTime() < IMESSAGE_RESEND_COOLDOWN_MS
-        ) {
-          throw new ApiError(
-            429,
-            "rate_limited",
-            "A code was just sent. Wait a moment before requesting another.",
-            true,
-          );
-        }
-
-        const code = generatePairingCode();
-        await upsertImessagePairingChallenge(
-          {
-            userWorkosId: actor.userId,
-            phoneE164,
-            codeHash: hashImessagePairingCode({
-              code,
-              userWorkosId: actor.userId,
-              phoneE164,
-            }),
-            expiresAt: new Date(now().getTime() + IMESSAGE_CODE_TTL_MS),
-          },
-          db,
-        );
-
-        const sendResult = await provider.send({
-          to: phoneE164,
-          text: `Your opencompany verification code is ${code}. It expires in 10 minutes.`,
-        });
-        await recordImessageSend(
-          {
-            userWorkosId: actor.userId,
-            source: "pairing",
-            status: sendResult.ok ? "sent" : "failed",
-            errorReason: sendResult.ok ? null : sendResult.error,
-          },
-          db,
-        );
-        if (!sendResult.ok) {
-          throw new ApiError(503, "unavailable", sendResult.error, true);
-        }
-      } catch (error) {
-        throw commandFailure(error, "Could not send the verification code.", "imessage_pairing");
-      }
-    },
-
-    async confirmImessagePairing(actor, code) {
-      const trimmed = code.trim();
-      if (!/^\d{6}$/.test(trimmed)) {
-        throw new ApiError(400, "invalid_request", "Enter the 6-digit code from the message.");
-      }
-      try {
-        const challenge = await getImessagePairingChallenge(actor.userId, db);
-        if (!challenge || challenge.consumedAt) {
-          throw new ApiError(
-            400,
-            "invalid_request",
-            "No pending verification. Request a new code.",
-          );
-        }
-        if (challenge.expiresAt.getTime() < now().getTime()) {
-          throw new ApiError(400, "invalid_request", "That code expired. Request a new one.");
-        }
-        if (challenge.attemptCount >= IMESSAGE_MAX_CONFIRM_ATTEMPTS) {
-          throw new ApiError(429, "rate_limited", "Too many attempts. Request a new code.");
-        }
-        if (
-          !verifyImessagePairingCode({
-            code: trimmed,
-            userWorkosId: actor.userId,
-            phoneE164: challenge.phoneE164,
-            expectedHash: challenge.codeHash,
-          })
-        ) {
-          await incrementImessageChallengeAttempts(challenge.id, db);
-          const remaining = IMESSAGE_MAX_CONFIRM_ATTEMPTS - challenge.attemptCount - 1;
-          throw new ApiError(
-            400,
-            "invalid_request",
-            remaining > 0
-              ? `That code doesn't match. ${remaining} attempt${remaining === 1 ? "" : "s"} left.`
-              : "That code doesn't match. Request a new code.",
-          );
-        }
-
-        await consumeImessageChallenge(challenge.id, db);
-        await connectImessageIntegration({
-          userWorkosId: actor.userId,
-          phoneE164: challenge.phoneE164,
-          db,
-        });
-        return await getImessageIntegrationState(actor.userId, db);
-      } catch (error) {
-        throw commandFailure(error, "Could not verify the code.", "imessage_confirm");
       }
     },
 
