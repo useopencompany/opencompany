@@ -1050,6 +1050,49 @@ describe("MessageBubble Codex interactions", () => {
     expect(screen.getByText("Run focused tests")).toBeVisible();
   });
 
+  it("keeps adjacent persisted assistant updates distinct when compacting", async () => {
+    const message: ChatUiMessage = {
+      id: "assistant_adjacent_updates",
+      role: "assistant",
+      parts: [
+        {
+          type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+          toolCallId: "command_1",
+          state: "output-available",
+          input: { description: "Inspect implementation", command: "rg MessageBubble" },
+          output: { status: "completed", exitCode: 0 },
+        } as ChatUiMessage["parts"][number],
+        {
+          type: "text",
+          text: "I found the rendering path.",
+          itemId: "assistant_update_1",
+        } as ChatUiMessage["parts"][number],
+        {
+          type: "text",
+          text: "The focused tests pass.",
+          itemId: "assistant_update_2",
+        } as ChatUiMessage["parts"][number],
+        {
+          type: "text",
+          text: "Shipped the compact turn UI.",
+          itemId: "assistant_final",
+        } as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} compactTrace />);
+
+    const disclosure = screen.getByRole("button", { name: "1 tool call, 2 messages" });
+    expect(screen.getByText("Shipped the compact turn UI.")).toBeVisible();
+    expect(screen.queryByText("I found the rendering path.")).not.toBeInTheDocument();
+    expect(screen.queryByText("The focused tests pass.")).not.toBeInTheDocument();
+
+    await userEvent.click(disclosure);
+
+    expect(screen.getByText("I found the rendering path.")).toBeVisible();
+    expect(screen.getByText("The focused tests pass.")).toBeVisible();
+  });
+
   it("keeps a running tool visible during a compact coding turn", () => {
     const message: ChatUiMessage = {
       id: "assistant_running_trace",

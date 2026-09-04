@@ -1,4 +1,7 @@
-import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/agent/chat-agent";
+import {
+  TASK_SYSTEM_BLOCK,
+  TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
+} from "@opencompany/agent/chat-agent";
 import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
@@ -28,7 +31,12 @@ import { isLegacyBrainEnabledForWorkspace } from "@opencompany/db/workspaces";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { ACP_ENGINE_ADAPTERS } from "./acp-engine-adapters";
-import { AcpHarness, type AcpPermissionRequest, type AcpPermissionResponse } from "./acp-harness";
+import {
+  AcpHarness,
+  type AcpNotification,
+  type AcpPermissionRequest,
+  type AcpPermissionResponse,
+} from "./acp-harness";
 import { buildAcpToolsMcpServers } from "./acp-tools-client";
 import {
   buildClaudeAcpCommandEnv,
@@ -116,6 +124,7 @@ import {
   closeTaskTurn,
   finalizeTaskResult,
   markTaskTurnRunning,
+  orchestrateTaskFailure,
   type TaskTurnContext,
 } from "./task-turn";
 import {
@@ -158,6 +167,15 @@ const logger = createLogger({
 
 export const CLAUDE_CODE_CHAT_REAUTH_MESSAGE =
   "Claude Code is disconnected. Reconnect Claude Code in opencompany settings, then send your message again.";
+export const CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE =
+  "Connected integrations are temporarily unavailable because opencompany tools did not initialize in Claude Code. Send your message again to retry.";
+
+class ClaudeCoreMcpUnavailableError extends Error {
+  constructor() {
+    super(CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE);
+    this.name = "ClaudeCoreMcpUnavailableError";
+  }
+}
 
 // "authenticat" covers both "Failed to authenticate" (real 401 result text, observed
 // against claude 2.1.220) and "authentication". Usage-credit and credit-balance failures are
@@ -166,6 +184,48 @@ const AUTH_FAILURE_PATTERN = /oauth|authenticat|unauthorized|401|login expired|i
 
 export function isClaudeCodeAuthenticationFailure(value: string) {
   return AUTH_FAILURE_PATTERN.test(value);
+}
+
+export type ClaudeCoreMcpInitialization = {
+  sessionId: string | null;
+  status: string;
+  advertisedToolCount: number;
+  hasListActions: boolean;
+  hasUseAction: boolean;
+  ready: boolean;
+  failureReason: "server_not_connected" | "required_tools_missing" | null;
+};
+
+export function inspectClaudeCoreMcpInitialization(
+  notification: AcpNotification,
+): ClaudeCoreMcpInitialization | null {
+  if (notification.method !== "_claude/sdkMessage") return null;
+  const message = recordFromUnknown(notification.params.message) ?? notification.params;
+  if (message.type !== "system" || message.subtype !== "init") return null;
+
+  const tools = new Set(
+    (Array.isArray(message.tools) ? message.tools : []).filter(
+      (tool): tool is string => typeof tool === "string",
+    ),
+  );
+  const coreServer = (Array.isArray(message.mcp_servers) ? message.mcp_servers : [])
+    .map(recordFromUnknown)
+    .find((server) => server?.name === "opencompany");
+  const status = mcpStatusForTelemetry(coreServer?.status);
+  const hasListActions = tools.has("mcp__opencompany__list_actions");
+  const hasUseAction = tools.has("mcp__opencompany__use_action");
+  const ready = status === "connected" && hasListActions && hasUseAction;
+  return {
+    sessionId:
+      typeof notification.params.sessionId === "string" ? notification.params.sessionId : null,
+    status,
+    advertisedToolCount: tools.size,
+    hasListActions,
+    hasUseAction,
+    ready,
+    failureReason:
+      status !== "connected" ? "server_not_connected" : ready ? null : "required_tools_missing",
+  };
 }
 
 export async function loadClaudeCodeAuth(
@@ -281,8 +341,16 @@ export async function runClaudeCodeChatTurn(input: {
       ) {
         await bareProjector().interrupted(buildTaskTerminalProjection(taskContext));
       } else {
-        await bareProjector().fail(errorMessage(effectiveError), {
-          taskCompletion: buildTaskTerminalProjection(taskContext),
+        const message = errorMessage(effectiveError);
+        const taskCompletion = await orchestrateTaskFailure({
+          context: taskContext,
+          error: message,
+          env,
+          session,
+          turn,
+        });
+        await bareProjector().fail(message, {
+          taskCompletion,
         });
       }
       return "settled";
@@ -293,9 +361,18 @@ export async function runClaudeCodeChatTurn(input: {
 
   const auth = await loadClaudeCodeAuth(turn.userWorkosId);
   if (!auth) {
+    const taskCompletion = taskContext
+      ? await orchestrateTaskFailure({
+          context: taskContext,
+          error: CLAUDE_CODE_CHAT_REAUTH_MESSAGE,
+          env,
+          session,
+          turn,
+        })
+      : null;
     await bareProjector().fail(CLAUDE_CODE_CHAT_REAUTH_MESSAGE, {
       sessionStatus: "failed",
-      ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
+      ...(taskCompletion ? { taskCompletion } : {}),
     });
     return "settled";
   }
@@ -336,12 +413,19 @@ export async function runClaudeCodeChatTurn(input: {
         failureDiagnostic("connect_sandbox", error, redactAcquisitionError),
       );
     }
-    await bareProjector().fail(
-      `Claude Code sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`,
-      {
-        ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
-      },
-    );
+    const message = `Claude Code sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`;
+    const taskCompletion = taskContext
+      ? await orchestrateTaskFailure({
+          context: taskContext,
+          error: message,
+          env,
+          session,
+          turn,
+        })
+      : null;
+    await bareProjector().fail(message, {
+      ...(taskCompletion ? { taskCompletion } : {}),
+    });
     return "settled";
   }
 
@@ -697,7 +781,8 @@ export async function runClaudeCodeChatTurn(input: {
     executionStage = "run_turn";
     const runAcpOnce = async (resume: string | null, prompt: string) => {
       const harness = new AcpHarness();
-      return harness.runTurn({
+      let coreMcpInitObserved = !actionGatewayTicket;
+      const result = await harness.runTurn({
         adapter: ACP_ENGINE_ADAPTERS.claude_code,
         sandbox,
         workdir: CLAUDE_CHAT_WORKDIR,
@@ -727,6 +812,38 @@ export async function runClaudeCodeChatTurn(input: {
           pluginDataRuntime?.assertHealthy();
           await checkAbort();
         },
+        ...(actionGatewayTicket
+          ? {
+              onNotification: async (notification: AcpNotification) => {
+                const initialization = inspectClaudeCoreMcpInitialization(notification);
+                if (!initialization || coreMcpInitObserved) return;
+                coreMcpInitObserved = true;
+                const fields = {
+                  turn_id: turn.id,
+                  codex_chat_session_id: session.id,
+                  attempt_id: canonicalAttemptId,
+                  engine_session_id: initialization.sessionId,
+                  mcp_status: initialization.status,
+                  advertised_tool_count: initialization.advertisedToolCount,
+                  list_actions_available: initialization.hasListActions,
+                  use_action_available: initialization.hasUseAction,
+                };
+                if (initialization.ready) {
+                  logger.info("Claude Code initialized opencompany tools", {
+                    event: "opencompany.goat_claude_core_mcp_initialized",
+                    ...fields,
+                  });
+                  return;
+                }
+                logger.warn("Claude Code could not initialize required opencompany tools", {
+                  event: "opencompany.goat_claude_core_mcp_unavailable",
+                  ...fields,
+                  failure_reason: initialization.failureReason,
+                });
+                throw new ClaudeCoreMcpUnavailableError();
+              },
+            }
+          : {}),
         onEngineSessionId: async (sessionId) => {
           acpNormalizer.beginRun(sessionId);
           await persistEngineSessionId();
@@ -761,6 +878,18 @@ export async function runClaudeCodeChatTurn(input: {
         // bypass-permissions behavior without surfacing an approval prompt.
         onPermissionRequest: async (request) => approveAcpPermission(request),
       });
+      if (actionGatewayTicket && !coreMcpInitObserved) {
+        logger.warn("Claude Code did not report opencompany tool initialization", {
+          event: "opencompany.goat_claude_core_mcp_unavailable",
+          turn_id: turn.id,
+          codex_chat_session_id: session.id,
+          attempt_id: canonicalAttemptId,
+          mcp_status: "missing",
+          failure_reason: "init_event_missing",
+        });
+        throw new ClaudeCoreMcpUnavailableError();
+      }
+      return result;
     };
 
     const acpResult = await runAcpOnce(resumeSessionId, task);
@@ -848,7 +977,7 @@ export async function runClaudeCodeChatTurn(input: {
         await checkAbort();
         reported = await closeTaskTurn({
           context: taskContext,
-          finalContent: rawResult,
+          run: { status: "completed", result: rawResult },
           env,
           session,
           turn,
@@ -872,8 +1001,13 @@ export async function runClaudeCodeChatTurn(input: {
           taskCompletion: buildTaskTurnCompletion({
             context: taskContext,
             result: finalResult,
-            reportedOutcome: reported?.reportedOutcome,
-            outcomeComment: reported?.outcomeComment,
+            disposition:
+              reported?.disposition === "done" ||
+              reported?.disposition === "needs_attention" ||
+              reported?.disposition === "waiting"
+                ? reported.disposition
+                : null,
+            outcomeComment: reported?.comment,
             ...(scheduledWakeup
               ? {
                   scheduledWakeup: {
@@ -886,8 +1020,15 @@ export async function runClaudeCodeChatTurn(input: {
         },
       );
     } else if (taskContext) {
+      const taskCompletion = await orchestrateTaskFailure({
+        context: taskContext,
+        error: engineSummary.error?.trim() || "Claude Code ended without a result.",
+        env,
+        session,
+        turn,
+      });
       await projector.finalize(engineSummary, {
-        taskCompletion: buildTaskTerminalProjection(taskContext),
+        taskCompletion,
       });
     } else {
       await projector.finalize(engineSummary);
@@ -987,8 +1128,17 @@ export async function runClaudeCodeChatTurn(input: {
         error_name: effectiveError instanceof Error ? effectiveError.name : typeof effectiveError,
         error: message,
       });
+      const taskCompletion = taskContext
+        ? await orchestrateTaskFailure({
+            context: taskContext,
+            error: message,
+            env,
+            session,
+            turn,
+          })
+        : null;
       await projector.fail(message, {
-        ...(taskContext ? { taskCompletion: buildTaskTerminalProjection(taskContext) } : {}),
+        ...(taskCompletion ? { taskCompletion } : {}),
         failureDiagnostic: failureDiagnostic(executionStage, effectiveError, redact),
       });
     }
@@ -1069,14 +1219,18 @@ export function extractAcpScheduleWakeup(
   const update = recordFromUnknown(params?.update);
   if (update?.sessionUpdate !== "tool_call") return null;
   const claudeMeta = recordFromUnknown(recordFromUnknown(update._meta)?.claudeCode);
-  const toolName =
-    typeof claudeMeta?.toolName === "string"
-      ? claudeMeta.toolName
-      : typeof update.name === "string"
-        ? update.name
-        : null;
-  if (toolName !== "ScheduleWakeup" && !toolName?.endsWith("__ScheduleWakeup")) return null;
-  return scheduleWakeupFromToolInput(recordFromUnknown(update.rawInput));
+  const rawInput = recordFromUnknown(update.rawInput);
+  const toolNames = [claudeMeta?.toolName, update.name, rawInput?.tool, rawInput?.toolName];
+  if (
+    !toolNames.some(
+      (value) =>
+        typeof value === "string" &&
+        (value === "ScheduleWakeup" || value.endsWith("__ScheduleWakeup")),
+    )
+  ) {
+    return null;
+  }
+  return scheduleWakeupFromToolInput(recordFromUnknown(rawInput?.arguments) ?? rawInput);
 }
 
 function scheduleWakeupFromToolInput(
@@ -1243,10 +1397,8 @@ function claudeBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
   const codex = context.harnessSpec.codex;
   return [
     "",
-    "<background_task_run>",
-    "You are running autonomously as a background task. There is no interactive user to answer questions or approve steps. Work to completion with the tools available, then give a concise final result.",
+    TASK_SYSTEM_BLOCK,
     TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
-    context.harnessSpec.systemPrompt.trim() || null,
     codex?.repository
       ? `The planner selected GitHub repository ${codex.repository}. Work in that repository unless the task itself clearly requires otherwise.`
       : null,
@@ -1255,7 +1407,7 @@ function claudeBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
       : codex?.createPullRequest === false
         ? "Do not open a pull request unless the task explicitly asks for one."
         : null,
-    "</background_task_run>",
+    context.harnessSpec.systemPrompt.trim() || null,
   ].filter((line): line is string => line !== null);
 }
 
@@ -1291,4 +1443,10 @@ function recordFromUnknown(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function mcpStatusForTelemetry(value: unknown) {
+  if (typeof value !== "string") return "missing";
+  const status = value.trim().toLowerCase();
+  return /^[a-z0-9_-]{1,32}$/.test(status) ? status : "unknown";
 }

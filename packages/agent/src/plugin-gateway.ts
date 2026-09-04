@@ -25,6 +25,24 @@ import {
   loadGitHubUserMcpWorkerConnection,
 } from "./integrations/github-user-mcp";
 import {
+  GMAIL_MCP_ENDPOINT_URL,
+  getGmailMcpIntegrationState,
+  gmailMcpRuntimeEndpointUrl,
+  loadGmailMcpWorkerConnection,
+} from "./integrations/gmail-mcp";
+import {
+  GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
+  getGoogleCalendarMcpIntegrationState,
+  googleCalendarMcpRuntimeEndpointUrl,
+  loadGoogleCalendarMcpWorkerConnection,
+} from "./integrations/google-calendar-mcp";
+import {
+  GOOGLE_DRIVE_MCP_ENDPOINT_URL,
+  getGoogleDriveMcpIntegrationState,
+  googleDriveMcpRuntimeEndpointUrl,
+  loadGoogleDriveMcpWorkerConnection,
+} from "./integrations/google-drive-mcp";
+import {
   getLatitudeIntegrationState,
   LATITUDE_MCP_ENDPOINT_URL,
   loadLatitudeMcpWorkerConnection,
@@ -44,6 +62,11 @@ import {
   loadPostHogMcpWorkerConnection,
   POSTHOG_MCP_ENDPOINT_URL,
 } from "./integrations/posthog-mcp";
+import {
+  getRenderIntegrationState,
+  loadRenderMcpWorkerConnection,
+  RENDER_MCP_ENDPOINT_URL,
+} from "./integrations/render-mcp";
 import {
   getSigNozIntegrationState,
   loadSigNozMcpWorkerConnection,
@@ -76,6 +99,24 @@ const providerBindings = {
     getState: getGitHubUserMcpIntegrationState,
     loadConnection: loadGitHubUserMcpWorkerConnection,
   },
+  gmail: {
+    provider: "gmail",
+    endpointUrl: GMAIL_MCP_ENDPOINT_URL,
+    getState: getGmailMcpIntegrationState,
+    loadConnection: loadGmailMcpWorkerConnection,
+  },
+  "google-calendar": {
+    provider: "google_calendar",
+    endpointUrl: GOOGLE_CALENDAR_MCP_ENDPOINT_URL,
+    getState: getGoogleCalendarMcpIntegrationState,
+    loadConnection: loadGoogleCalendarMcpWorkerConnection,
+  },
+  "google-drive": {
+    provider: "google_drive",
+    endpointUrl: GOOGLE_DRIVE_MCP_ENDPOINT_URL,
+    getState: getGoogleDriveMcpIntegrationState,
+    loadConnection: loadGoogleDriveMcpWorkerConnection,
+  },
   linear: {
     provider: "linear",
     endpointUrl: LINEAR_MCP_ENDPOINT_URL,
@@ -87,6 +128,12 @@ const providerBindings = {
     endpointUrl: POSTHOG_MCP_ENDPOINT_URL,
     getState: getPostHogIntegrationState,
     loadConnection: loadPostHogMcpWorkerConnection,
+  },
+  render: {
+    provider: "render",
+    endpointUrl: RENDER_MCP_ENDPOINT_URL,
+    getState: getRenderIntegrationState,
+    loadConnection: loadRenderMcpWorkerConnection,
   },
   neon: {
     provider: "neon",
@@ -316,16 +363,31 @@ function bindRegistration(
     });
     return null;
   }
+  let loadConnection = binding.loadConnection as RemoteMcpGatewayRegistration["loadConnection"];
+  let server = record.server;
+  if (record.pluginName === "google-calendar") {
+    loadConnection = (input) =>
+      loadGoogleCalendarMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: googleCalendarMcpRuntimeEndpointUrl() };
+  } else if (record.pluginName === "google-drive") {
+    loadConnection = (input) =>
+      loadGoogleDriveMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: googleDriveMcpRuntimeEndpointUrl() };
+  } else if (record.pluginName === "gmail") {
+    loadConnection = (input) =>
+      loadGmailMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: gmailMcpRuntimeEndpointUrl() };
+  }
   return {
     source: `plugin:${record.pluginName}:${record.server.name}`,
     connectionProvider: binding.provider,
     label: displayName(record.pluginName),
     description: record.pluginDescription,
-    server: record.server,
+    server,
     capabilities: record.capabilities,
     discoverySnapshot: record.discoverySnapshot,
     getState: binding.getState,
-    loadConnection: binding.loadConnection,
+    loadConnection,
     isEnabled: () =>
       isPluginGatewayRegistrationActive(db, {
         workspaceId: identity.workspaceId,

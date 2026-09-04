@@ -120,6 +120,7 @@ describe("claimNextCodexChatTurn", () => {
     expect(statement.match(/run_after IS NULL OR (?:turn|earlier)\.run_after <=/g)).toHaveLength(2);
     expect(statement).toContain("session.status <> 'closed'");
     expect(statement).toContain("chat.closed_at IS NULL");
+    expect(statement).toContain("task.status IN ('queued', 'running')");
   });
 
   it("fences queued turns on supported host-tool contract versions, bypassing reclaims", async () => {
@@ -720,6 +721,37 @@ describe("runClaimedTurn", () => {
       "This chat run failed unexpectedly. Send your message again to retry.",
       { sessionStatus: "failed" },
     );
+  });
+
+  it("forces a minimal settlement when the failure write itself throws", async () => {
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(
+      new Error("could not determine data type of parameter $51"),
+    );
+    eventMocks.fail.mockRejectedValueOnce(
+      new Error("could not determine data type of parameter $51"),
+    );
+
+    await expect(runClaimedTurn(turn(), env())).resolves.toBeUndefined();
+
+    const force = dbMock.execute.mock.calls
+      .map(([query]) => sqlText(query))
+      .find((text) => text.includes("WITH failed_turn AS"));
+    expect(force).toBeDefined();
+    expect(force).toContain("SET status = 'failed'");
+    expect(force).toContain("UPDATE goat.run_attempts");
+    expect(force).toContain("UPDATE goat.codex_chat_sessions");
+    expect(force).toContain("UPDATE goat.tasks");
+  });
+
+  it("does not force settlement when the failure write reports lease loss", async () => {
+    chatMocks.runCodexChatTurn.mockRejectedValueOnce(new Error("history projection failed"));
+    eventMocks.fail.mockRejectedValueOnce(new CodexChatLeaseLostError());
+
+    await expect(runClaimedTurn(turn(), env())).rejects.toBeInstanceOf(CodexChatLeaseLostError);
+
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("WITH failed_turn AS")),
+    ).toBe(false);
   });
 
   it("terminally settles retryable infrastructure failures after the retry budget", async () => {

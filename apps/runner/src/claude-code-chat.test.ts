@@ -12,7 +12,9 @@ import type {
 } from "@opencompany/db/product-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE,
   extractAcpScheduleWakeup,
+  inspectClaudeCoreMcpInitialization,
   isClaudeCodeAuthenticationFailure,
   runClaudeCodeChatTurn,
 } from "./claude-code-chat";
@@ -291,6 +293,38 @@ describe("isClaudeCodeAuthenticationFailure", () => {
   });
 });
 
+describe("inspectClaudeCoreMcpInitialization", () => {
+  it("requires both action tools from a connected opencompany server", () => {
+    expect(inspectClaudeCoreMcpInitialization(claudeCoreMcpInitNotification())).toEqual({
+      sessionId: "claude_thread_1",
+      status: "connected",
+      advertisedToolCount: 3,
+      hasListActions: true,
+      hasUseAction: true,
+      ready: true,
+      failureReason: null,
+    });
+  });
+
+  it("reports a connected server with an incomplete toolset", () => {
+    expect(
+      inspectClaudeCoreMcpInitialization(
+        claudeCoreMcpInitNotification({ tools: ["mcp__opencompany__list_actions"] }),
+      ),
+    ).toMatchObject({
+      status: "connected",
+      hasListActions: true,
+      hasUseAction: false,
+      ready: false,
+      failureReason: "required_tools_missing",
+    });
+  });
+
+  it("ignores unrelated ACP notifications", () => {
+    expect(inspectClaudeCoreMcpInitialization({ method: "session/update", params: {} })).toBeNull();
+  });
+});
+
 describe("extractAcpScheduleWakeup", () => {
   it("recognizes ACP ScheduleWakeup calls and clamps their delay", () => {
     expect(
@@ -305,6 +339,27 @@ describe("extractAcpScheduleWakeup", () => {
       delaySeconds: 3_600,
       reason: "Final check",
       prompt: "Check the deploy.",
+    });
+  });
+
+  it("recognizes ScheduleWakeup calls wrapped in the Claude ACP MCP envelope", () => {
+    expect(
+      extractAcpScheduleWakeup(
+        acpToolCallEvent("codex_mcp_tool", {
+          kind: "other",
+          tool: "ScheduleWakeup",
+          toolName: "ScheduleWakeup",
+          arguments: {
+            delaySeconds: 600,
+            reason: "Wait for CI",
+            prompt: "Inspect PR #42.",
+          },
+        }),
+      ),
+    ).toEqual({
+      delaySeconds: 600,
+      reason: "Wait for CI",
+      prompt: "Inspect PR #42.",
     });
   });
 
@@ -429,9 +484,13 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     acpMocks.runTurn.mockImplementation(
       async (input: {
         onEngineSessionId: (sessionId: string) => Promise<void>;
+        onNotification?: (
+          notification: ReturnType<typeof claudeCoreMcpInitNotification>,
+        ) => Promise<void>;
         onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
       }) => {
         await input.onEngineSessionId("claude_thread_1");
+        await input.onNotification?.(claudeCoreMcpInitNotification());
         await input.onRuntimeEvents(successfulAcpEvents("Done over ACP."));
         return {
           sessionId: "claude_thread_1",
@@ -486,6 +545,65 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       codexChatTurnId: "goat_codex_turn_1",
       attemptId: "attempt_1",
       leaseId: "lease_1",
+    });
+  });
+
+  it("fails the turn when Claude reports that opencompany MCP is disconnected", async () => {
+    acpMocks.runTurn.mockImplementationOnce(
+      async (input: {
+        onEngineSessionId: (sessionId: string) => Promise<void>;
+        onNotification: (
+          notification: ReturnType<typeof claudeCoreMcpInitNotification>,
+        ) => Promise<void>;
+      }) => {
+        await input.onEngineSessionId("claude_thread_1");
+        await input.onNotification(claudeCoreMcpInitNotification({ status: "failed", tools: [] }));
+        throw new Error("unreachable");
+      },
+    );
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession({
+          workspaceId: "workspace_1",
+          hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+        }),
+        canonicalAttemptId: "attempt_1",
+        env: env({ runnerPublicUrl: "https://runner.example.com" }),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.fail).toHaveBeenCalledWith(CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE, {
+      failureDiagnostic: `[run_turn] ClaudeCoreMcpUnavailableError: ${CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE}`,
+    });
+    expect(authMocks.markClaudeCodeCredentialNeedsReauth).not.toHaveBeenCalled();
+  });
+
+  it("fails the turn when Claude omits its requested MCP initialization event", async () => {
+    acpMocks.runTurn.mockResolvedValueOnce({
+      sessionId: "claude_thread_1",
+      loadedSession: true,
+      promptResponse: { stopReason: "end_turn" },
+      stderrTail: "",
+    });
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession({
+          workspaceId: "workspace_1",
+          hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+        }),
+        canonicalAttemptId: "attempt_1",
+        env: env({ runnerPublicUrl: "https://runner.example.com" }),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.fail).toHaveBeenCalledWith(CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE, {
+      failureDiagnostic: `[run_turn] ClaudeCoreMcpUnavailableError: ${CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE}`,
     });
   });
 
@@ -1092,8 +1210,8 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     const turn = claudeTurn({ settings: { reasoningEffort: "high" } });
     const completion = { taskId: "goat_task_1", nextTurn: { id: "next_turn" } };
     taskMocks.closeTaskTurn.mockResolvedValueOnce({
-      reportedOutcome: "needs_attention",
-      outcomeComment: "Waiting for CI.",
+      disposition: "needs_attention",
+      comment: "Waiting for CI.",
     });
     taskMocks.finalizeTaskResult.mockResolvedValueOnce("PR opened; CI is running.");
     taskMocks.buildTaskTurnCompletion.mockReturnValueOnce(completion);
@@ -1115,10 +1233,15 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       }) => {
         await input.onEngineSessionId("claude_thread_1");
         await input.onRuntimeEvents([
-          acpToolCallEvent("ScheduleWakeup", {
-            delay_seconds: 600,
-            reason: "Wait for CI",
-            prompt: "Inspect PR #42.",
+          acpToolCallEvent("codex_mcp_tool", {
+            kind: "other",
+            tool: "ScheduleWakeup",
+            toolName: "ScheduleWakeup",
+            arguments: {
+              delay_seconds: 600,
+              reason: "Wait for CI",
+              prompt: "Inspect PR #42.",
+            },
           }),
           ...successfulAcpEvents("PR opened; CI is running."),
         ]);
@@ -1159,6 +1282,25 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     expect(wakeupMocks.enqueueCodexChatWakeup).not.toHaveBeenCalled();
   });
 });
+
+function claudeCoreMcpInitNotification(overrides: { status?: string; tools?: string[] } = {}) {
+  return {
+    method: "_claude/sdkMessage",
+    params: {
+      sessionId: "claude_thread_1",
+      message: {
+        type: "system",
+        subtype: "init",
+        tools: overrides.tools ?? [
+          "mcp__opencompany__publish_artifact",
+          "mcp__opencompany__list_actions",
+          "mcp__opencompany__use_action",
+        ],
+        mcp_servers: [{ name: "opencompany", status: overrides.status ?? "connected" }],
+      },
+    },
+  };
+}
 
 function acpToolCallEvent(name: string, rawInput: Record<string, unknown>) {
   return {

@@ -1,8 +1,7 @@
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
-import { defaultBrainFolderManifestEntries } from "../../brain/src/index";
-import { brainFolders, brains, workspaceMembers, workspaces } from "./product-schema";
+import { brains, workspaceMembers, workspaces } from "./product-schema";
 import {
   createWorkspaceForUser,
   getBrainEnrichmentEnabled,
@@ -31,7 +30,7 @@ describe("opencompany brain ids", () => {
 });
 
 describe("opencompany workspace creation", () => {
-  it("uses one batch for the neon-http client", async () => {
+  it("uses one batch for the neon-http client without creating a Brain", async () => {
     const insert = vi.fn((table: unknown) => ({
       values: vi.fn((values: Record<string, unknown>) => {
         const query = {
@@ -47,7 +46,6 @@ describe("opencompany workspace creation", () => {
       async (queries: Array<{ table: unknown; values: Record<string, unknown> }>) =>
         queries.map((query) => {
           if (query.table === workspaces) return [query.values];
-          if (query.table === brains) return [query.values];
           return undefined;
         }),
     );
@@ -72,29 +70,21 @@ describe("opencompany workspace creation", () => {
         slug: "analytical-co",
       }),
     );
-    expect(result.brain).toEqual(
-      expect.objectContaining({
-        workspaceId: "goat_ws_new",
-        name: "General",
-        slug: "general",
-      }),
-    );
+    expect(result.brain).toBeNull();
     expect(batch).toHaveBeenCalledOnce();
     const batchedQueries = batch.mock.calls[0]?.[0] ?? [];
-    expect(batchedQueries).toHaveLength(3 + defaultBrainFolderManifestEntries().length);
+    expect(batchedQueries).toHaveLength(2);
     expect(batchedQueries.some((query) => query.table === workspaceMembers)).toBe(true);
-    expect(batchedQueries.filter((query) => query.table === brainFolders)).toHaveLength(
-      defaultBrainFolderManifestEntries().length,
-    );
+    expect(batchedQueries.some((query) => query.table === brains)).toBe(false);
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
-  it("uses one transaction for the pooled API client", async () => {
+  it("uses one transaction for the pooled API client without creating a Brain", async () => {
     const insertedRows: Array<{ table: unknown; values: Record<string, unknown> }> = [];
     const insert = vi.fn((table: unknown) => ({
       values: vi.fn((values: Record<string, unknown>) => {
         insertedRows.push({ table, values });
-        if (table === workspaces || table === brains) {
+        if (table === workspaces) {
           return { returning: vi.fn(async () => [values]) };
         }
         return Promise.resolve();
@@ -122,18 +112,10 @@ describe("opencompany workspace creation", () => {
         workosOrganizationId: "org_new",
       }),
     );
-    expect(result.brain).toEqual(
-      expect.objectContaining({
-        workspaceId: "workspace_new",
-        name: "General",
-        slug: "general",
-      }),
-    );
+    expect(result.brain).toBeNull();
     expect(transaction).toHaveBeenCalledOnce();
     expect(insertedRows.some((row) => row.table === workspaceMembers)).toBe(true);
-    expect(insertedRows.filter((row) => row.table === brainFolders)).toHaveLength(
-      defaultBrainFolderManifestEntries().length,
-    );
+    expect(insertedRows.some((row) => row.table === brains)).toBe(false);
     expect(execute).toHaveBeenCalledTimes(2);
   });
 });

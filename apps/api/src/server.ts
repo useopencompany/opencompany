@@ -1,10 +1,16 @@
 import { serve } from "@hono/node-server";
 import { getAppUrl } from "@opencompany/agent/app-url";
 import { resolvePersistedAutoModelRouting } from "@opencompany/agent/application/persisted-auto-model-routing";
-import { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
+import {
+  BrainImportApplicationService,
+  WikiImportApplicationService,
+} from "@opencompany/agent/brain-imports";
 import { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
+import { createGmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
+import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
+import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import {
   createPluginGatewayLifecycle,
@@ -128,6 +134,7 @@ const wikiCommands = new WikiCommandApplicationService(
 const wikiSources = createWikiSourceService({ db: database.db });
 const brainSources = new BrainSourceApplicationService(database.db);
 const brainImports = new BrainImportApplicationService(database.db, brainSources);
+const wikiImports = new WikiImportApplicationService(database.db, wikiSources);
 const browserProfiles = new BrowserProfileApplicationService(database.db);
 const skillImports = new SkillImportApplicationService(
   new PostgresSkillBundleRepository(database.db),
@@ -161,6 +168,7 @@ const app = createApiApp({
   wikiSources,
   brainSources,
   brainImports,
+  wikiImports,
   browserProfiles,
   skillImports,
   pluginImports,
@@ -202,7 +210,17 @@ const app = createApiApp({
   userSettings: createUserSettingsService({ db: database.db }),
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),
-  integrationAccounts: createIntegrationAccountService({ db: database.db, runner: runnerClient }),
+  integrationAccounts: createIntegrationAccountService({
+    db: database.db,
+    runner: runnerClient,
+    refreshRenderPluginRegistrations: ({ userWorkosId, workspaceId }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds: [workspaceId],
+        connectionProvider: "render",
+      }),
+  }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
   mcp: createMcpService({
     // The API-hosted MCP tool runs the same command service in-process — no
@@ -219,6 +237,22 @@ const app = createApiApp({
       ? { gatewayApiKey: process.env.VERCEL_AI_GATEWAY_API_KEY }
       : {}),
   }),
+  ...(process.env.API_INTERNAL_TOKEN?.trim()
+    ? {
+        gmailMcp: createGmailMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+        googleCalendarMcp: createGoogleCalendarMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+        googleDriveMcp: createGoogleDriveMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+      }
+    : {}),
   billing: createBillingApplicationService({
     db: database.db,
     stripe,
@@ -261,7 +295,22 @@ const app = createApiApp({
         connectionProvider: "github",
       }),
   }),
-  googleIngress: createGoogleIngress({ db: database.db, identify: identityVerifier }),
+  googleIngress: createGoogleIngress({
+    db: database.db,
+    identify: identityVerifier,
+    refreshPluginRegistrations: ({ provider, userWorkosId, workspaceIds }) =>
+      refreshPluginGatewayRegistrationsForWorkspaces({
+        db: database.db,
+        userWorkosId,
+        workspaceIds,
+        connectionProvider:
+          provider === "gmail"
+            ? "gmail"
+            : provider === "google_drive"
+              ? "google-drive"
+              : "google-calendar",
+      }),
+  }),
   slackIngress: createSlackIngress({
     db: database.db,
     identify: identityVerifier,

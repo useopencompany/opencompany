@@ -33,6 +33,12 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "on",
     },
     {
+      id: "query",
+      label: "Read Gmail",
+      description: "Search and read messages, threads, drafts, and labels in your Gmail account.",
+      defaultMode: "ask",
+    },
+    {
       id: "draft",
       label: "Create drafts",
       description: "Save new email drafts in Gmail for you to review and send.",
@@ -49,27 +55,39 @@ export const PROVIDER_CAPABILITIES: Partial<
     {
       id: "read",
       label: "Find & read files",
-      description: "Search Google Drive and read the contents of Google Docs and Sheets.",
+      description: "Search Google Drive and inspect files you can access.",
       defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read files & permissions",
+      description: "Read or download file contents and inspect who can access a file.",
+      defaultMode: "ask",
     },
     {
       id: "write",
       label: "Edit Docs & Sheets",
-      description: "Create and edit Google Docs, and update spreadsheets you can edit.",
+      description: "Create or copy Drive files, or edit supported Google Docs and Sheets.",
       defaultMode: "ask",
     },
   ],
   google_calendar: [
     {
       id: "read",
-      label: "Read calendar",
-      description: "Look up events on your calendars.",
-      defaultMode: "on",
+      label: "Check calendars & availability",
+      description: "List calendars and inspect availability without reading event details.",
+      defaultMode: "ask",
+    },
+    {
+      id: "query",
+      label: "Read calendar events",
+      description: "Search and read event details from your calendars.",
+      defaultMode: "ask",
     },
     {
       id: "write",
-      label: "Add events",
-      description: "Create new events on your calendars.",
+      label: "Manage calendar events",
+      description: "Create, update, delete, and respond to events on your calendars.",
       defaultMode: "ask",
     },
   ],
@@ -201,6 +219,27 @@ export const PROVIDER_CAPABILITIES: Partial<
       label: "Manage Better Stack",
       description:
         "Change monitoring, incidents, dashboards, alerts, status pages, error state, and team access.",
+      defaultMode: "ask",
+    },
+  ],
+  render: [
+    {
+      id: "read",
+      label: "Inspect Render resources",
+      description: "List workspaces, services, deploys, Postgres databases, and Key Value stores.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read operational data",
+      description: "Read logs and metrics, and run provider-enforced read-only database queries.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Manage Render infrastructure",
+      description:
+        "Create services and datastores, change environment variables, and trigger deploys.",
       defaultMode: "ask",
     },
   ],

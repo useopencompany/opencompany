@@ -1,12 +1,19 @@
 import type { IntegrationProvider, IntegrationStatus } from "@opencompany/db/product-schema";
+import {
+  GOOGLE_CALENDAR_MCP_RECONNECT_REASON,
+  googleCalendarMcpScopesSatisfied,
+} from "./integrations/google-calendar-scopes";
 import { SLACK_MCP_RECONNECT_REASON, slackMcpScopesSatisfied } from "./integrations/slack-scopes";
 
 export type GoogleProviderState = {
   provider: "gmail" | "google_calendar" | "google_drive";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
   accountEmail: string | null;
   accountName: string | null;
+  scopes: string[];
+  capabilityModes: Record<string, unknown>;
 };
 
 export type GoogleDriveSourceProviderState = {
@@ -18,9 +25,8 @@ export type GoogleDriveSourceProviderState = {
   statusReason: string | null;
 };
 
-// The Gmail brain-source connection view: unlike GoogleProviderState it
-// carries the integration id, which the brain-source picker and save action
-// need to key config rows on.
+// The Gmail brain-source connection view adds ingestion-specific status detail
+// used by the brain-source picker and save action.
 export type GmailSourceProviderState = {
   provider: "gmail";
   connected: boolean;
@@ -243,6 +249,7 @@ export type PersonalAccountProvider =
   | "fathom"
   | "attio"
   | "betterstack"
+  | "render"
   | "signoz"
   | "latitude"
   | "neon"
@@ -315,6 +322,7 @@ export function personalAccountsFromRows(
     fathom: [],
     attio: [],
     betterstack: [],
+    render: [],
     signoz: [],
     latitude: [],
     neon: [],
@@ -340,6 +348,7 @@ export function personalAccountsFromRows(
       row.provider === "fathom" ||
       row.provider === "attio" ||
       row.provider === "betterstack" ||
+      row.provider === "render" ||
       row.provider === "signoz" ||
       row.provider === "latitude" ||
       row.provider === "neon" ||
@@ -426,17 +435,24 @@ function accountViewFromRow(
     : [];
   const needsSlackPluginGrant =
     provider === "slack" && row.status === "connected" && !slackMcpScopesSatisfied(scopes);
+  const needsGoogleCalendarPluginGrant =
+    provider === "google_calendar" &&
+    row.status === "connected" &&
+    !googleCalendarMcpScopesSatisfied(scopes);
+  const needsPluginGrant = needsSlackPluginGrant || needsGoogleCalendarPluginGrant;
   return {
     integrationId: row.id ?? "",
     provider,
-    status: needsSlackPluginGrant ? "needs_reauth" : row.status,
-    connected: row.status === "connected" && !needsSlackPluginGrant,
+    status: needsPluginGrant ? "needs_reauth" : row.status,
+    connected: row.status === "connected" && !needsPluginGrant,
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     connectionLabel: row.connectionLabel ?? row.connection_label ?? null,
     statusReason: needsSlackPluginGrant
       ? SLACK_MCP_RECONNECT_REASON
-      : (row.statusReason ?? row.status_reason ?? null),
+      : needsGoogleCalendarPluginGrant
+        ? GOOGLE_CALENDAR_MCP_RECONNECT_REASON
+        : (row.statusReason ?? row.status_reason ?? null),
     scopes,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
@@ -453,17 +469,27 @@ function googleProviderState(
       provider,
       connected: false,
       status: "not_connected",
+      integrationId: null,
       accountEmail: null,
       accountName: null,
+      scopes: [],
+      capabilityModes: {},
     };
   }
+
+  const scopes = Array.isArray(row.scopes)
+    ? row.scopes.filter((scope): scope is string => typeof scope === "string")
+    : [];
 
   return {
     provider,
     connected: row.status === "connected",
     status: row.status,
+    integrationId: row.id ?? null,
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
+    scopes,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }
 

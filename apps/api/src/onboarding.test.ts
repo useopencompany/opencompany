@@ -56,6 +56,7 @@ const workspace = {
   slug: "current-organization",
   workosOrganizationId: "org_current",
   createdByWorkosId: "user_1",
+  legacyBrainEnabled: false,
 };
 
 const workos = {
@@ -80,7 +81,7 @@ describe("onboarding service", () => {
         id: "goat_ws_new",
         workosOrganizationId: "org_new",
       },
-      brain: { id: "brain_new" },
+      brain: null,
     } as never);
   });
 
@@ -115,7 +116,7 @@ describe("onboarding service", () => {
     ).resolves.toEqual({
       workspaceId: "goat_ws_new",
       organizationId: "org_new",
-      brainId: "brain_new",
+      brainId: null,
       createdByCaller: true,
     });
     expect(provisionWorkspace).toHaveBeenCalledWith(
@@ -162,7 +163,7 @@ describe("onboarding service", () => {
     ).resolves.toEqual({
       workspaceId: "goat_ws_current",
       organizationId: "org_current",
-      brainId: "brain_general",
+      brainId: null,
       createdByCaller: true,
     });
     expect(workos.organizations.updateOrganization).toHaveBeenCalledWith({
@@ -193,17 +194,20 @@ describe("onboarding service", () => {
     expect(markUserOnboarded).toHaveBeenCalledWith("user_1", { db });
   });
 
-  it("keeps optional Brain folder tailoring from blocking onboarding", async () => {
+  it("keeps optional Brain folder tailoring for an existing legacy workspace", async () => {
+    vi.mocked(listWorkspacesForUser).mockResolvedValue([
+      { workspace: { ...workspace, legacyBrainEnabled: true }, role: "admin" },
+    ] as never);
     vi.mocked(createBrainFolderRow).mockRejectedValueOnce(new Error("folder conflict"));
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     const service = createOnboardingService({ db: {}, workos: workos as never });
     await expect(
       service.saveWorkspace(identity, {
-        workspaceId: "goat_ws_new",
+        workspaceId: "goat_ws_ignored",
         name: "Analytical Co",
         slug: "analytical-co",
       }),
-    ).resolves.toMatchObject({ workspaceId: "goat_ws_new" });
+    ).resolves.toMatchObject({ workspaceId: "goat_ws_current", brainId: "brain_general" });
     expect(deleteBrainFolderRow).toHaveBeenCalled();
     warning.mockRestore();
   });

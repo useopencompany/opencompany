@@ -3,7 +3,10 @@ import {
   AutoModelRoutingError,
   type AutoModelRoutingResolution,
 } from "@opencompany/agent/application/auto-model-routing";
-import type { BrainImportApplicationService } from "@opencompany/agent/brain-imports";
+import type {
+  BrainImportApplicationService,
+  WikiImportApplicationService,
+} from "@opencompany/agent/brain-imports";
 import type { BrainSourceApplicationService } from "@opencompany/agent/brain-sources";
 import type { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import type {
@@ -13,6 +16,10 @@ import type {
   ImessageProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
+import type { GmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
+import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
+import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
+import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { McpService } from "@opencompany/agent/mcp-http";
 import type { BillingApplicationService } from "@opencompany/billing/application-service";
 import {
@@ -156,6 +163,7 @@ export type CreateApiAppInput = {
   wikiSources: WikiSourceService;
   brainSources: Pick<BrainSourceApplicationService, "list" | "set" | "remove" | "listOptions">;
   brainImports: Pick<BrainImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
+  wikiImports: Pick<WikiImportApplicationService, "start" | "confirm" | "cancel" | "retry">;
   browserProfiles: Pick<
     BrowserProfileApplicationService,
     | "list"
@@ -194,6 +202,9 @@ export type CreateApiAppInput = {
   integrationAccounts: IntegrationAccountService;
   slackBotSettings: SlackBotSettingsService;
   mcp?: McpService;
+  gmailMcp?: GmailMcpService;
+  googleCalendarMcp?: GoogleCalendarMcpService;
+  googleDriveMcp?: GoogleDriveMcpService;
   engineAuth: EngineAuthService;
   engineSessions: EngineSessionService;
   billing: BillingApplicationService;
@@ -306,6 +317,54 @@ export function createApiApp(input: CreateApiAppInput) {
         {
           data: {
             task: taskDto(result.task),
+            messageId: result.messageId,
+            assistantMessageId: result.assistantMessageId,
+            runId: result.runId,
+            transactionId: result.transactionId,
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        202,
+      );
+    },
+    createTaskComment: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const { taskId } = c.req.valid("param");
+      const body = c.req.valid("json");
+      const result = await input.tasks.createComment(actor, taskId, body);
+      if (!result.idempotentReplay && input.captureChatMessage) {
+        void Promise.resolve(
+          input.captureChatMessage({
+            actor,
+            conversationId: result.task.conversationId,
+            firstMessage: false,
+            engine: result.task.engine,
+            model: result.task.model,
+            messageLength: body.body.length,
+            selectionMode: "manual",
+          }),
+        ).catch((error) =>
+          logger.warn("Canonical Task comment analytics capture failed", {
+            event: "opencompany.canonical_task_comment_analytics_failed",
+            task_id: result.task.id,
+            error_name: error instanceof Error ? error.name : typeof error,
+          }),
+        );
+      }
+      return c.json(
+        {
+          data: {
+            task: taskDto(result.task),
+            comment: {
+              id: result.comment.id,
+              taskId: result.comment.taskId,
+              author: "user" as const,
+              kind: "comment" as const,
+              body: result.comment.body,
+              createdAt: result.comment.createdAt.toISOString(),
+            },
             messageId: result.messageId,
             assistantMessageId: result.assistantMessageId,
             runId: result.runId,
@@ -913,6 +972,38 @@ export function createApiApp(input: CreateApiAppInput) {
         },
         200,
       );
+    },
+    startWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      const result = await input.wikiImports.start(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        ...c.req.valid("json"),
+      });
+      return c.json({ data: result, meta }, 201);
+    },
+    confirmWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const result = await input.wikiImports.confirm(
+        actor,
+        params.importRunId,
+        c.req.valid("json").enabledProviders,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    cancelWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.wikiImports.cancel(actor, c.req.valid("param").importRunId);
+      return c.json({ data: result, meta }, 200);
+    },
+    retryWikiImport: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.wikiImports.retry(actor, c.req.valid("param").importRunId);
+      return c.json({ data: result, meta }, 200);
     },
     createBrainDocument: async (c) => {
       const actor = actorFrom(c);
@@ -1865,6 +1956,9 @@ export function createApiApp(input: CreateApiAppInput) {
       }
       const params = c.req.valid("param");
       const query = c.req.valid("query");
+      if (params.readModel !== "task-activities-v1" && query.taskId) {
+        throw new ApiError(400, "invalid_request", "taskId is not valid for this read model.");
+      }
       if (
         query.messageShapeEpoch !== undefined &&
         params.readModel !== "chat-messages-v1" &&
@@ -1877,7 +1971,16 @@ export function createApiApp(input: CreateApiAppInput) {
         );
       }
       let messageShapeEpoch: number | undefined;
-      if (params.readModel.startsWith("brain-")) {
+      if (params.readModel === "task-activities-v1") {
+        if (!query.taskId || query.conversationId || query.brainId) {
+          throw new ApiError(
+            400,
+            "invalid_request",
+            "taskId is required and other resource identifiers are not valid for this read model.",
+          );
+        }
+        await input.tasks.getTask(actor, query.taskId);
+      } else if (params.readModel.startsWith("brain-")) {
         if (query.conversationId || !query.brainId) {
           throw new ApiError(
             400,
@@ -1982,6 +2085,7 @@ export function createApiApp(input: CreateApiAppInput) {
         readModel: params.readModel,
         ...(query.conversationId ? { conversationId: query.conversationId } : {}),
         ...(query.brainId ? { brainId: query.brainId } : {}),
+        ...(query.taskId ? { taskId: query.taskId } : {}),
         ...(messageShapeEpoch !== undefined ? { messageShapeEpoch } : {}),
         requestUrl: new URL(c.req.url),
       }) as never;
@@ -2087,6 +2191,15 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("json").apiKey,
       );
       return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
+    },
+    connectRenderAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.connectRender(
+        actor,
+        c.req.valid("json").apiKey,
+      );
+      return c.json({ data: { state: renderStateDto(state) }, meta }, 200);
     },
     startImessagePairing: async (c) => {
       const actor = actorFrom(c);
@@ -2529,6 +2642,15 @@ export function createApiApp(input: CreateApiAppInput) {
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
   if (input.mcp) {
     app.on(["GET", "POST", "DELETE"], "/mcp", (c) => input.mcp!.handle(c.req.raw));
+  }
+  if (input.gmailMcp) {
+    app.post("/mcp/plugins/gmail", (c) => input.gmailMcp!.handle(c.req.raw));
+  }
+  if (input.googleCalendarMcp) {
+    app.post("/mcp/plugins/google-calendar", (c) => input.googleCalendarMcp!.handle(c.req.raw));
+  }
+  if (input.googleDriveMcp) {
+    app.post("/mcp/plugins/google-drive", (c) => input.googleDriveMcp!.handle(c.req.raw));
   }
   app.post("/internal/onboarding-emails/enroll", async (c) => {
     authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
@@ -3373,6 +3495,19 @@ function granolaStateDto(state: GranolaProviderState) {
     accountEmail: state.accountEmail,
     accountName: state.accountName,
     statusReason: state.statusReason,
+  };
+}
+
+function renderStateDto(state: RenderProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    accountName: state.accountName,
+    statusReason: state.statusReason,
+    capabilityModes: state.capabilityModes,
+    toolModes: state.toolModes,
   };
 }
 

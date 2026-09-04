@@ -83,6 +83,7 @@ const taskCommandMocks = vi.hoisted(() => ({
     },
     transactionId: "1",
   })),
+  comment: vi.fn(async () => ({ replayed: false })),
 }));
 
 const automationCommandMocks = vi.hoisted(() => ({
@@ -187,6 +188,8 @@ vi.mock("@/lib/headless-task-commands", () => ({
   archiveHeadlessTask: taskCommandMocks.archive,
   cancelHeadlessTaskRun: taskCommandMocks.cancel,
   createHeadlessTask: taskCommandMocks.create,
+  createHeadlessTaskComment: taskCommandMocks.comment,
+  newHeadlessTaskCommentId: () => "task_activity_comment_test",
 }));
 
 vi.mock("@/lib/headless-automation-commands", () => ({
@@ -452,6 +455,8 @@ describe("Surface chat streaming UI", () => {
     taskCommandMocks.cancel.mockReset();
     taskCommandMocks.cancel.mockResolvedValue({});
     taskCommandMocks.create.mockClear();
+    taskCommandMocks.comment.mockReset();
+    taskCommandMocks.comment.mockResolvedValue({ replayed: false });
     automationCommandMocks.invokeWorkflow.mockClear();
     automationCommandMocks.listWorkflowCatalog.mockClear();
     automationCommandMocks.archiveSchedule.mockClear();
@@ -1247,8 +1252,9 @@ describe("Surface chat streaming UI", () => {
     );
   });
 
-  it("continues a session-backed workflow task through the same chat composer", async () => {
+  it("posts a session-backed Task comment verbatim without a Chat LLM hop", async () => {
     const user = userEvent.setup();
+    const taskId = "goat_task_1";
 
     render(
       <Surface
@@ -1283,10 +1289,11 @@ describe("Surface chat streaming UI", () => {
           ],
         }}
         taskConversation={{
-          taskId: "goat_task_1",
+          taskId,
           status: "succeeded",
           startedAtMs: Date.now(),
         }}
+        workspaceId="workspace_1"
       />,
     );
 
@@ -1296,16 +1303,19 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("TASK-1 · Done")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Share task run" })).toBeInTheDocument();
 
-    await user.type(screen.getByPlaceholderText("Reply..."), "Please check the afternoon too");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    const body = "  Please check the afternoon too.\n  Preserve this indent.  ";
+    fireEvent.change(screen.getByPlaceholderText("Add a comment…"), { target: { value: body } });
+    await user.click(screen.getByRole("button", { name: "Post comment" }));
 
     await waitFor(() =>
-      expect(chatMock.sendMessage).toHaveBeenCalledWith({
-        text: "Please check the afternoon too",
-      }),
+      expect(taskCommandMocks.comment).toHaveBeenCalledWith(
+        taskId,
+        { id: "task_activity_comment_test", body },
+        { scopeKey: "workspace_1" },
+      ),
     );
-    expect(chatMock.lastResume).toBe(true);
-    expect(screen.getByText("Please check the afternoon too")).toBeInTheDocument();
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(screen.getByText("Comments are sent verbatim to this task.")).toBeVisible();
   });
 
   it("attaches a dropped screenshot when continuing a session-backed task", async () => {
@@ -1385,20 +1395,21 @@ describe("Surface chat streaming UI", () => {
     );
 
     expect(screen.getByText(/pre-cutover task is available as read-only history/i)).toBeVisible();
-    expect(screen.getByPlaceholderText("Reply...")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    expect(screen.getByPlaceholderText("Add a comment…")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Post comment" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Attach files" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start voice dictation" })).toBeDisabled();
-    expect(screen.getByLabelText("Model")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Start voice dictation" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
 
-    const form = screen.getByRole("button", { name: "Send message" }).closest("form");
+    const form = screen.getByRole("button", { name: "Post comment" }).closest("form");
     expect(form).not.toBeNull();
     fireEvent.submit(form!);
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("offers Skill mentions when continuing a session-backed task", async () => {
+  it("treats slash text in a Task comment as verbatim content, not a Skill mention", async () => {
     const user = userEvent.setup();
+    const taskId = "goat_task_1";
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
       {
         id: "product-work",
@@ -1419,7 +1430,7 @@ describe("Surface chat streaming UI", () => {
           messages: [],
         }}
         taskConversation={{
-          taskId: "goat_task_1",
+          taskId,
           status: "succeeded",
           startedAtMs: Date.now(),
         }}
@@ -1427,23 +1438,23 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
-    await user.type(textarea, "/prod");
-    await user.click(await screen.findByRole("option", { name: /Product work/i }));
-    await user.type(textarea, "investigate the mention menu");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    const textarea = screen.getByPlaceholderText("Add a comment…");
+    await user.type(textarea, "/prod investigate the mention menu");
+    expect(screen.queryByRole("option", { name: /Product work/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Post comment" }));
 
     await waitFor(() =>
-      expect(chatMock.sendMessage).toHaveBeenCalledWith({
-        text: "/product-work investigate the mention menu",
-        metadata: { mentions: [{ kind: "skill", id: "product-work" }] },
-      }),
+      expect(taskCommandMocks.comment).toHaveBeenCalledWith(
+        taskId,
+        { id: "task_activity_comment_test", body: "/prod investigate the mention menu" },
+        { scopeKey: "" },
+      ),
     );
+    expect(knowledgeCommandMocks.listSkillCatalog).not.toHaveBeenCalled();
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("starts an ampersand ad-hoc task from an active task conversation", async () => {
-    const user = userEvent.setup();
-
+  it("disables comments while the Task run is active", () => {
     render(
       <Surface
         tasks={[]}
@@ -1470,28 +1481,12 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
-    await user.type(textarea, "& #task research competitors");
-
-    expect(screen.getByTestId("ad-hoc-task-hint")).toHaveTextContent(
-      "Sending starts this as an ad-hoc background task.",
-    );
-    const submit = screen.getByRole("button", { name: "Start task" });
-    expect(submit).toBeEnabled();
-    await user.click(submit);
-
-    await waitFor(() => expect(taskCommandMocks.create).toHaveBeenCalledTimes(1));
-    expect(taskCommandMocks.create).toHaveBeenCalledWith(
-      {
-        goal: "research competitors",
-        engine: "opencompany",
-        model: DEFAULT_MODEL,
-      },
-      { scopeKey: "" },
-    );
+    expect(screen.getByPlaceholderText("Add a comment…")).toBeDisabled();
+    expect(screen.getByText("You can comment when the current run finishes.")).toBeVisible();
+    expect(screen.queryByTestId("ad-hoc-task-hint")).not.toBeInTheDocument();
+    expect(taskCommandMocks.create).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    expect(taskCommandMocks.cancel).not.toHaveBeenCalled();
-    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+    expect(taskCommandMocks.comment).not.toHaveBeenCalled();
   });
 
   it("uses the chat stop control for an active workflow task", async () => {
@@ -1573,7 +1568,7 @@ describe("Surface chat streaming UI", () => {
     await waitFor(() =>
       expect(screen.queryByRole("status", { name: "Stopping task…" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Post comment" })).toBeInTheDocument();
   });
 
   it("restores the task stop control when cancellation fails", async () => {

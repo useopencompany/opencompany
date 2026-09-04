@@ -2,6 +2,8 @@
 
 import {
   type CreateTaskBody,
+  type CreateTaskCommentBody,
+  type CreateTaskCommentResult,
   createApiClient,
   type LegacyTaskDto,
   type LegacyTaskHistoryDto,
@@ -10,7 +12,10 @@ import {
 } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import { reconcileCommittedProjection } from "./headless-collection-reconciliation";
-import { awaitHeadlessTaskTransaction } from "./headless-task-collections";
+import {
+  awaitHeadlessTaskCommentTransaction,
+  awaitHeadlessTaskTransaction,
+} from "./headless-task-collections";
 
 type ClientOptions = { baseUrl?: string; fetch?: typeof globalThis.fetch };
 type ScopedClientOptions = ClientOptions & { scopeKey: string };
@@ -25,6 +30,29 @@ export async function createHeadlessTask(command: CreateTaskBody, options: Scope
   const data = (await response.json()).data;
   await reconcileCommittedProjection(
     awaitHeadlessTaskTransaction(data.transactionId, { scopeKey: options.scopeKey }),
+  );
+  return data;
+}
+
+export function newHeadlessTaskCommentId() {
+  return `task_activity_${crypto.randomUUID()}`;
+}
+
+export async function createHeadlessTaskComment(
+  taskId: string,
+  command: CreateTaskCommentBody,
+  options: ScopedClientOptions,
+): Promise<CreateTaskCommentResult> {
+  const response = await taskClient(options).v1.tasks[":taskId"].comments.$post({
+    param: { taskId },
+    json: command,
+  });
+  if (!response.ok) throw await taskResponseError(response, "Task comment failed");
+  const data = (await response.json()).data;
+  await reconcileCommittedProjection(
+    awaitHeadlessTaskCommentTransaction(taskId, data.transactionId, {
+      scopeKey: options.scopeKey,
+    }),
   );
   return data;
 }

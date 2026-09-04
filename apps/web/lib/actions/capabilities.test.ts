@@ -8,24 +8,27 @@ import {
 } from "@/lib/actions/capabilities";
 
 describe("PROVIDER_CAPABILITIES", () => {
-  it("registers Gmail reads and drafts on by default and sends behind ask", () => {
+  it("preserves legacy Gmail defaults and adds sensitive plugin reads behind ask", () => {
     expect(PROVIDER_CAPABILITIES.gmail).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
       expect.objectContaining({ id: "draft", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
-  it("registers Drive reads on by default and document writes behind ask", () => {
+  it("keeps legacy Drive reads on and guards sensitive MCP reads and writes", () => {
     expect(PROVIDER_CAPABILITIES.google_drive).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
 
-  it("registers Google Calendar with read on by default and write behind ask", () => {
+  it("guards all Google Calendar data and mutations behind ask by default", () => {
     expect(PROVIDER_CAPABILITIES.google_calendar).toEqual([
-      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "read", defaultMode: "ask" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
@@ -96,7 +99,7 @@ describe("effectiveCapabilityMode", () => {
     expect(effectiveCapabilityMode("google_calendar", "write", null)).toBe("ask");
     expect(effectiveCapabilityMode("google_calendar", "write", { write: "banana" })).toBe("ask");
     expect(effectiveCapabilityMode("google_calendar", "write", ["write"])).toBe("ask");
-    expect(effectiveCapabilityMode("google_calendar", "read", undefined)).toBe("on");
+    expect(effectiveCapabilityMode("google_calendar", "read", undefined)).toBe("ask");
   });
 
   it("treats unregistered providers as read on", () => {
@@ -128,7 +131,7 @@ describe("mode helpers", () => {
     expect(providerCapability("gmail", "write")?.label).toBe("Send emails");
     expect(providerCapability("google_drive", "read")?.label).toBe("Find & read files");
     expect(providerCapability("google_drive", "write")?.label).toBe("Edit Docs & Sheets");
-    expect(providerCapability("google_calendar", "write")?.label).toBe("Add events");
+    expect(providerCapability("google_calendar", "write")?.label).toBe("Manage calendar events");
     expect(providerCapability("github_user", "read")?.label).toBe("Read GitHub");
     expect(providerCapability("github_user", "write")?.label).toBe("Manage GitHub");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");

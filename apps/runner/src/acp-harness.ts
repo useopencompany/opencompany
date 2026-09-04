@@ -54,7 +54,10 @@ export type AcpEngineAdapter = {
   id: string;
   displayName: string;
   command: (workdir: string) => string;
-  sessionMeta?: (input: { hasMcpServers: boolean }) => Record<string, unknown> | null;
+  prepareSession?: (input: { mcpServers: AcpMcpServer[] }) => {
+    mcpServers?: AcpMcpServer[];
+    meta?: Record<string, unknown> | null;
+  };
   configOptions: {
     model?: string;
     reasoningEffort?: {
@@ -78,6 +81,11 @@ export type AcpExtensionRequest = {
   params: Record<string, unknown>;
 };
 
+export type AcpNotification = {
+  method: string;
+  params: Record<string, unknown>;
+};
+
 export type AcpHarnessTurnInput = {
   adapter: AcpEngineAdapter;
   sandbox: SandboxHandle;
@@ -90,6 +98,7 @@ export type AcpHarnessTurnInput = {
   timeoutMs: number;
   redact: (value: string) => string;
   checkAbort: () => Promise<void>;
+  onNotification?: (notification: AcpNotification) => Promise<void>;
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
   onEngineSessionId: (sessionId: string) => Promise<void>;
   onExistingSessionInvalidated: () => Promise<void>;
@@ -124,6 +133,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       envs: input.envs,
       redact: input.redact,
       onNotification: async (notification) => {
+        await input.onNotification?.(notification);
         if (projectUpdates && notification.method === "session/update") {
           await input.onRuntimeEvents([notification]);
         }
@@ -171,13 +181,11 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       for (const request of input.extensionRequests ?? []) {
         await client.request(request.method, request.params);
       }
-      const sessionMeta = input.adapter.sessionMeta?.({
-        hasMcpServers: input.mcpServers.length > 0,
-      });
+      const preparedSession = input.adapter.prepareSession?.({ mcpServers: input.mcpServers });
       const sessionParams = {
         cwd: input.workdir,
-        mcpServers: input.mcpServers,
-        ...(sessionMeta ? { _meta: sessionMeta } : {}),
+        mcpServers: preparedSession?.mcpServers ?? input.mcpServers,
+        ...(preparedSession?.meta ? { _meta: preparedSession.meta } : {}),
       };
 
       let loadedSession = false;
@@ -487,11 +495,6 @@ type AcpJsonRpcRequest = {
   params: Record<string, unknown>;
 };
 
-type AcpJsonRpcNotification = {
-  method: string;
-  params: Record<string, unknown>;
-};
-
 class AcpJsonRpcClient {
   private buffer = "";
   private nextId = 1;
@@ -517,7 +520,7 @@ class AcpJsonRpcClient {
       command: string;
       envs: Record<string, string>;
       redact: (value: string) => string;
-      onNotification: (notification: AcpJsonRpcNotification) => Promise<void>;
+      onNotification: (notification: AcpNotification) => Promise<void>;
       onServerRequest: (request: AcpJsonRpcRequest) => Promise<Record<string, unknown>>;
     },
   ) {}
@@ -619,9 +622,13 @@ class AcpJsonRpcClient {
       return;
     }
     if (!method) return;
+    if (this.failure) return;
     const notification = { method, params: readRecord(record.params) ?? {} };
     this.processing = this.processing
-      .then(() => this.input.onNotification(notification))
+      .then(() => {
+        this.throwIfFailed();
+        return this.input.onNotification(notification);
+      })
       .catch((error) => this.fail(asError(error)));
   }
 

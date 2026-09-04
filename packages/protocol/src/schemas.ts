@@ -1,5 +1,9 @@
 import { z } from "@hono/zod-openapi";
-import { WIKI_TOOL_COMMANDS } from "@opencompany/wiki/tool";
+import {
+  normalizeWikiToolInput,
+  WIKI_TOOL_INPUT_JSON_SCHEMA,
+  type WikiToolInput,
+} from "@opencompany/wiki/tool";
 import { API_VERSION, PROTOCOL_VERSION } from "./version";
 
 export const ResourceIdSchema = z.string().min(1).max(256).openapi({ example: "run_019fed53" });
@@ -385,6 +389,7 @@ export const ChatReadModelSchema = z.enum([
   "engine-sessions-v1",
 ]);
 export const TaskReadModelNameSchema = z.literal("tasks-v1");
+export const TaskActivityReadModelNameSchema = z.literal("task-activities-v1");
 export const WorkflowReadModelNameSchema = z.literal("workflows-v1");
 export const WorkflowScheduleReadModelNameSchema = z.literal("workflow-schedules-v1");
 export const TaskScheduleReadModelNameSchema = z.literal("task-schedules-v1");
@@ -394,12 +399,14 @@ export const BrainTimelineReadModelNameSchema = z.literal("brain-timeline-v1");
 export const BrainEdgeReadModelNameSchema = z.literal("brain-edges-v1");
 export const BrainIngestJobReadModelNameSchema = z.literal("brain-ingest-jobs-v1");
 export const BrainImportRunReadModelNameSchema = z.literal("brain-import-runs-v1");
+export const WikiImportRunReadModelNameSchema = z.literal("wiki-import-runs-v1");
 export const WikiPageReadModelNameSchema = z.literal("wiki-pages-v2");
 export const WikiTimelineReadModelNameSchema = z.literal("wiki-timeline-v1");
 export const IntegrationAccountReadModelNameSchema = z.literal("integration-accounts-v1");
 export const ReadModelSchema = z.enum([
   ...ChatReadModelSchema.options,
   TaskReadModelNameSchema.value,
+  TaskActivityReadModelNameSchema.value,
   WorkflowReadModelNameSchema.value,
   WorkflowScheduleReadModelNameSchema.value,
   TaskScheduleReadModelNameSchema.value,
@@ -409,6 +416,7 @@ export const ReadModelSchema = z.enum([
   BrainEdgeReadModelNameSchema.value,
   BrainIngestJobReadModelNameSchema.value,
   BrainImportRunReadModelNameSchema.value,
+  WikiImportRunReadModelNameSchema.value,
   WikiPageReadModelNameSchema.value,
   WikiTimelineReadModelNameSchema.value,
   IntegrationAccountReadModelNameSchema.value,
@@ -432,6 +440,7 @@ export const IntegrationAccountReadModelSchema = z
       "fathom",
       "attio",
       "betterstack",
+      "render",
       "signoz",
       "stripe",
       "latitude",
@@ -581,6 +590,28 @@ export const EngineRuntimeAccessEnvelopeSchema = z
   .openapi("EngineRuntimeAccessEnvelope");
 
 export const TaskReadModelSchema = TaskSchema.openapi("TaskReadModelV1");
+export const TaskActivityAuthorSchema = z.enum(["user", "orchestrator", "system"]);
+export const TaskActivityKindSchema = z.enum([
+  "created",
+  "run_started",
+  "run_finished",
+  "status_changed",
+  "comment",
+  "retry",
+]);
+export const TaskActivityReadModelSchema = z
+  .object({
+    id: ResourceIdSchema,
+    taskId: ResourceIdSchema,
+    author: TaskActivityAuthorSchema,
+    authorWorkosId: ResourceIdSchema.nullable(),
+    kind: TaskActivityKindSchema,
+    body: z.string().max(10_000).nullable(),
+    metadata: z.record(z.string(), z.unknown()),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("TaskActivityReadModelV1");
 export const WorkflowReadModelSchema = WorkflowSchema.openapi("WorkflowReadModelV1");
 export const TaskScheduleReadModelSchema = TaskScheduleSchema.openapi("TaskScheduleReadModelV1");
 
@@ -1655,7 +1686,7 @@ export const PluginSkillSummarySchema = z
 
 export const PluginCapabilityDefinitionSchema = z
   .object({
-    id: z.enum(["read", "query", "write"]),
+    id: z.enum(["read", "query", "draft", "write"]),
     label: z.string().min(1).max(128),
     defaultMode: z.enum(["on", "ask", "off"]),
     tools: z.array(z.string().min(1).max(256)).max(512),
@@ -1669,7 +1700,7 @@ export const PluginDiscoveredToolSchema = z
     description: z.string().max(4_096).optional(),
     classification: z
       .object({
-        capabilityId: z.enum(["read", "query", "write"]),
+        capabilityId: z.enum(["read", "query", "draft", "write"]),
         capabilityLabel: z.string().min(1).max(128),
         defaultMode: z.enum(["on", "ask", "off"]),
         bucket: z.enum(["read", "write"]),
@@ -1994,31 +2025,14 @@ export const AddWikiTimelineEntryBodySchema = z
   .strict()
   .openapi("AddWikiTimelineEntryBody");
 
-// Runtime validator for the shared `wiki` agent tool command contract. It mirrors
-// WIKI_TOOL_INPUT_JSON_SCHEMA (the AI-SDK/MCP schema) and sources its command enum
-// from the same WIKI_TOOL_COMMANDS constant; the protocol test asserts the field
-// set never drifts from the JSON schema. Deliberately not registered as an OpenAPI
-// component — the runner→API command endpoint is internal, not public.
-export const WikiCommandSchema = z
-  .object({
-    command: z.enum([...WIKI_TOOL_COMMANDS]),
-    depth: z.number().int().min(0).max(10).optional(),
-    pages: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(20)]).optional(),
-    path: z.string().min(1).max(512).optional(),
-    body: z.string().max(1_000_000).optional(),
-    kind: WikiKindSchema.optional(),
-    title: z.string().max(160).optional(),
-    query: z.string().min(1).optional(),
-    since: z.string().min(1).optional(),
-    to: z.string().min(1).optional(),
-    recursive: z.boolean().optional(),
-    ignoreCase: z.boolean().optional(),
-    at: z.string().min(1).optional(),
-    text: z.string().min(1).optional(),
-    limit: z.number().int().min(1).max(200).optional(),
-    offset: z.number().int().min(0).optional(),
-  })
-  .strict();
+// Derive the internal runtime validator from the exact JSON Schema advertised
+// to AI-SDK and MCP clients. Provider-generated empty placeholders are removed
+// first; command-specific requirements remain domain errors from the command
+// service, allowing the model to correct a malformed invocation.
+export const WikiCommandSchema = z.preprocess(
+  normalizeWikiToolInput,
+  z.fromJSONSchema(WIKI_TOOL_INPUT_JSON_SCHEMA),
+) as z.ZodType<WikiToolInput>;
 
 // Body of POST /internal/wiki/commands. The API never trusts the caller-supplied
 // tenancy: it reloads the user, onboarding, membership, role, and
@@ -2739,6 +2753,44 @@ export const CreateTaskEnvelopeSchema = z
   .strict()
   .openapi("CreateTaskEnvelope");
 
+export const CreateTaskCommentBodySchema = z
+  .object({
+    id: ResourceIdSchema,
+    body: z.string().min(1).max(10_000),
+  })
+  .strict()
+  .openapi("CreateTaskCommentBody");
+
+export const TaskCommentSchema = z
+  .object({
+    id: ResourceIdSchema,
+    taskId: ResourceIdSchema,
+    author: z.literal("user"),
+    kind: z.literal("comment"),
+    body: z.string().min(1).max(10_000),
+    createdAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("TaskComment");
+
+export const CreateTaskCommentEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        task: TaskSchema,
+        comment: TaskCommentSchema,
+        messageId: ResourceIdSchema,
+        assistantMessageId: ResourceIdSchema,
+        runId: ResourceIdSchema,
+        transactionId: z.string().regex(/^[0-9]+$/u),
+        replayed: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("CreateTaskCommentEnvelope");
+
 export const UpdateTaskBodySchema = z
   .union([
     z.object({ archived: z.boolean() }).strict(),
@@ -3397,7 +3449,7 @@ export const OnboardingWorkspaceEnvelopeSchema = z
       .object({
         workspaceId: ResourceIdSchema,
         organizationId: ResourceIdSchema,
-        brainId: ResourceIdSchema,
+        brainId: ResourceIdSchema.nullable(),
         createdByCaller: z.boolean(),
       })
       .strict(),
@@ -3684,6 +3736,7 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "fathom",
   "attio",
   "betterstack",
+  "render",
   "signoz",
   "latitude",
   "neon",
@@ -3845,6 +3898,28 @@ export const IntegrationApiKeyBodySchema = z
   .object({ apiKey: z.string().min(1).max(4_000) })
   .strict()
   .openapi("IntegrationApiKeyBody");
+
+export const RenderAccountStateSchema = z
+  .object({
+    provider: z.literal("render"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    accountName: z.string().nullable(),
+    statusReason: z.string().nullable(),
+    capabilityModes: z.record(z.string(), z.unknown()),
+    toolModes: z.record(z.string(), z.unknown()),
+  })
+  .strict()
+  .openapi("RenderAccountState");
+
+export const RenderAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: RenderAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("RenderAccountStateEnvelope");
 
 export const AttioAccountStateSchema = z
   .object({
@@ -4163,6 +4238,7 @@ export type LegacyTaskHistoryMessageDto = z.infer<typeof LegacyTaskHistoryMessag
 export type LegacyTaskHistoryEventDto = z.infer<typeof LegacyTaskHistoryEventSchema>;
 export type LegacyTaskHistoryDto = z.infer<typeof LegacyTaskHistoryEnvelopeSchema>["data"];
 export type TaskReadModel = z.infer<typeof TaskReadModelSchema>;
+export type TaskActivityReadModel = z.infer<typeof TaskActivityReadModelSchema>;
 export type WorkflowDto = z.infer<typeof WorkflowSchema>;
 export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
 export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
@@ -4273,6 +4349,8 @@ export type EngineRuntimeAccess = z.infer<typeof EngineRuntimeAccessEnvelopeSche
 export type AttachmentUploadEnvelope = z.infer<typeof AttachmentUploadEnvelopeSchema>;
 export type CreateMessageBody = z.infer<typeof CreateMessageBodySchema>;
 export type CreateTaskBody = z.infer<typeof CreateTaskBodySchema>;
+export type CreateTaskCommentBody = z.infer<typeof CreateTaskCommentBodySchema>;
+export type CreateTaskCommentResult = z.infer<typeof CreateTaskCommentEnvelopeSchema>["data"];
 export type UpdateTaskBody = z.infer<typeof UpdateTaskBodySchema>;
 export type BrowserProfileDto = z.infer<typeof BrowserProfileSchema>;
 export type CreateBrowserProfileBody = z.infer<typeof CreateBrowserProfileBodySchema>;
