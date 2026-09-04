@@ -343,6 +343,36 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  vercel: [
+    {
+      id: "read",
+      label: "Inspect Vercel projects",
+      description:
+        "Search Vercel documentation and inspect teams, projects, deployments, and domain availability.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read operational data",
+      description:
+        "Read logs, runtime errors, analytics, agent traces, protected deployments, and deployment feedback.",
+      defaultMode: "ask",
+    },
+    {
+      id: "draft",
+      label: "Deploy, share, and collaborate",
+      description:
+        "Create deployments or access links, import designs, and change deployment feedback.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Purchase and administer",
+      description:
+        "Make non-refundable purchases or ask the agent to use broader Vercel CLI operations.",
+      defaultMode: "off",
+    },
+  ],
   signoz: [
     {
       id: "read",

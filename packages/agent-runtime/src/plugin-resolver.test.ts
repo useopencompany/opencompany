@@ -398,6 +398,65 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official Vercel package with purchases and CLI access disabled", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/vercel", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "vercel");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "vercel",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "vercel", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "vercel",
+        type: "streamable-http",
+        url: "https://mcp.vercel.com",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Inspect Vercel projects",
+        defaultMode: "on",
+        tools: expect.arrayContaining(["list_projects", "get_deployment"]),
+      }),
+      expect.objectContaining({
+        id: "query",
+        label: "Read operational data",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["get_runtime_logs", "get_agent_run_trace"]),
+      }),
+      expect.objectContaining({
+        id: "draft",
+        label: "Deploy, share, and collaborate",
+        defaultMode: "ask",
+        tools: expect.arrayContaining(["deploy_to_vercel", "reply_to_toolbar_thread"]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Purchase and administer",
+        defaultMode: "off",
+        tools: expect.arrayContaining(["buy_domain", "use_vercel_cli"]),
+      }),
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(32);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "vercel", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the opencompany Google Calendar package with every exposed tool classified", async () => {
     const fixtureRoot = fileURLToPath(
       new URL("./test-fixtures/plugins/google-calendar", import.meta.url),

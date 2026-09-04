@@ -1,0 +1,69 @@
+---
+title: Vercel
+description: Inspect and operate Vercel projects through its official permission-gated MCP server.
+---
+
+## What the Plugin does
+
+Vercel is an official Agent Plugin for main Chat and persistent Codex or Claude Code sessions. Its
+integrity-pinned package connects Vercel's hosted MCP server to opencompany's action gateway. It can
+inspect projects and deployments, investigate logs and analytics, deploy source files, work with
+deployment feedback, and perform explicitly enabled account actions.
+
+The Plugin is workspace-installed, while each person connects their own Vercel account. Installing
+or uninstalling the package never creates or removes that personal connection. Vercel MCP is
+currently a beta service.
+
+## Permission layers
+
+The package uses four reviewed permission groups:
+
+1. **Inspect Vercel projects** defaults to **On** for documentation, project and deployment
+   metadata, and domain-availability checks.
+2. **Read operational data** defaults to **Ask** because logs, analytics, agent traces, protected
+   deployment content, and feedback can contain sensitive production or customer data.
+3. **Deploy, share, and collaborate** defaults to **Ask** because these tools create deployments or
+   access links and change deployment feedback.
+4. **Purchase and administer** defaults to **Off** because purchase tools can create immediate,
+   non-refundable charges and CLI guidance can lead to broader platform operations.
+5. Newly discovered tools stay on **Ask** until a reviewed package version classifies them.
+
+Every call still passes through opencompany's permission checks and audit trail. Vercel purchase
+tools also require a provider-side quote and explicit confirmation.
+
+## Connect Vercel
+
+1. Ask a workspace admin to install Vercel under **Settings → Plugins → Vercel**.
+2. On the Vercel Plugin page, choose **Connect Vercel account**.
+3. Complete Vercel's OAuth consent screen.
+4. Review the four tool groups before enabling sensitive reads or actions.
+
+OAuth tokens remain encrypted and server-side and are sent only to the reviewed
+`https://mcp.vercel.com` endpoint. Project-specific or user-supplied MCP URLs are not accepted.
+
+Vercel only permits reviewed MCP clients. The connection flow will become available after Vercel
+approves opencompany and its production OAuth callback URL; installing the package alone does not
+bypass that provider requirement.
+
+## Current limitations and safety
+
+The MCP tool set does not cover every Vercel administration operation. Environment variables, DNS,
+rollbacks, promotions, firewall settings, and other broader operations may still require the Vercel
+dashboard or CLI.
+
+Logs, traces, protected pages, and feedback can expose secrets or personal data. Query narrowly and
+prefer summaries or aggregates when raw production output is unnecessary. Leave purchases Off
+unless you intentionally want them available, then review the quoted price and proposed charge
+before approving every call.
+
+See [Vercel's MCP documentation](https://vercel.com/docs/agent-resources/vercel-mcp) and
+[tool reference](https://vercel.com/docs/agent-resources/vercel-mcp/tools) for current provider
+requirements and capabilities.
+
+## Example requests
+
+- “Show me failed production deployments from the last day.”
+- “Summarize runtime errors for checkout without returning request bodies.”
+- “Deploy this generated application to a preview environment.”
+
+Vercel is not a Brain source. Tool results enter Brain only through an explicit supported capture.

@@ -108,6 +108,11 @@ import {
   STRIPE_MCP_ENDPOINT_URL,
 } from "./integrations/stripe";
 import {
+  getVercelIntegrationState,
+  loadVercelMcpWorkerConnection,
+  VERCEL_MCP_ENDPOINT_URL,
+} from "./integrations/vercel-mcp";
+import {
   getXMcpIntegrationState,
   loadXMcpWorkerConnection,
   X_MCP_ENDPOINT_URL,
@@ -229,6 +234,12 @@ const providerBindings = {
     endpointUrl: STRIPE_MCP_ENDPOINT_URL,
     getState: getStripeMcpIntegrationState,
     loadConnection: loadStripeMcpWorkerConnection,
+  },
+  vercel: {
+    provider: "vercel",
+    endpointUrl: VERCEL_MCP_ENDPOINT_URL,
+    getState: getVercelIntegrationState,
+    loadConnection: loadVercelMcpWorkerConnection,
   },
   x: {
     provider: "x_account",

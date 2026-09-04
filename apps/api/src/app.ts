@@ -2828,6 +2828,8 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/fathom-mcp/callback", (c) => ingress.callback("fathom", c.req.raw));
     app.get("/integrations/signoz/start", (c) => ingress.start("signoz", c.req.raw));
     app.get("/integrations/signoz/callback", (c) => ingress.callback("signoz", c.req.raw));
+    app.get("/integrations/vercel/start", (c) => ingress.start("vercel", c.req.raw));
+    app.get("/integrations/vercel/callback", (c) => ingress.callback("vercel", c.req.raw));
     app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));
     app.get("/integrations/linear/callback", (c) => ingress.callback("linear", c.req.raw));
     app.get("/integrations/hubspot-mcp/start", (c) => ingress.start("hubspot", c.req.raw));

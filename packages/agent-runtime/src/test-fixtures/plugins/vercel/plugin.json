@@ -1,0 +1,74 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "vercel",
+  "version": "1.0.0",
+  "description": "Inspect Vercel projects and deployments, investigate operational data, and perform permission-gated deployment and account actions.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://vercel.com/docs/agent-resources/vercel-mcp",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/vercel",
+  "license": "MIT",
+  "keywords": ["vercel", "hosting", "deployment", "observability", "analytics"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Inspect Vercel projects",
+        "defaultMode": "on",
+        "tools": [
+          "search_vercel_documentation",
+          "list_teams",
+          "list_projects",
+          "get_project",
+          "list_deployments",
+          "get_deployment",
+          "check_domain_availability_and_price"
+        ]
+      },
+      "query": {
+        "label": "Read operational data",
+        "defaultMode": "ask",
+        "tools": [
+          "get_deployment_build_logs",
+          "get_runtime_logs",
+          "get_runtime_errors",
+          "get_web_analytics",
+          "list_agent_run_projects",
+          "list_agent_runs",
+          "get_agent_run",
+          "get_agent_run_trace",
+          "web_fetch_vercel_url",
+          "list_toolbar_threads",
+          "get_toolbar_thread"
+        ]
+      },
+      "draft": {
+        "label": "Deploy, share, and collaborate",
+        "defaultMode": "ask",
+        "tools": [
+          "deploy_to_vercel",
+          "import-claude-design-from-url",
+          "get_access_to_vercel_url",
+          "change_toolbar_thread_resolve_status",
+          "reply_to_toolbar_thread",
+          "edit_toolbar_message",
+          "add_toolbar_reaction"
+        ]
+      },
+      "write": {
+        "label": "Purchase and administer",
+        "defaultMode": "off",
+        "tools": [
+          "get_purchase_quote",
+          "buy_pro",
+          "buy_credits",
+          "buy_addon",
+          "buy_domain",
+          "get_domain_order",
+          "use_vercel_cli"
+        ]
+      }
+    }
+  }
+}

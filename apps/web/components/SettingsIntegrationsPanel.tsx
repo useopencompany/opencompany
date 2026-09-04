@@ -148,6 +148,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     monogram: "R",
     tileClass: "bg-[#0B0D0E] text-white",
   },
+  vercel: {
+    label: "Vercel",
+    description: "Inspect deployments, investigate production issues, and deploy with approval.",
+    monogram: "V",
+    tileClass: "bg-black text-white",
+  },
   signoz: {
     label: "SigNoz",
     description: "Investigate observability data and manage alerts and dashboards.",
@@ -1318,6 +1324,9 @@ function integrationConnectHref(provider: PersonalAccountProvider | "github") {
     return "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack";
   }
   if (provider === "render") return "/settings/plugins/render#render-api-key";
+  if (provider === "vercel") {
+    return "/api/integrations/vercel/start?returnTo=/settings/plugins/vercel";
+  }
   if (provider === "signoz") {
     return "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz";
   }

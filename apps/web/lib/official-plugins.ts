@@ -14,6 +14,7 @@ export type OfficialMcpPluginName =
   | "neon"
   | "posthog"
   | "render"
+  | "vercel"
   | "signoz"
   | "slack"
   | "stripe"
@@ -57,6 +58,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "neon"
     | "posthog"
     | "render"
+    | "vercel"
     | "signoz"
     | "slack"
     | "stripe"
@@ -283,6 +285,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "render",
     connectHref: "/settings/plugins/render#render-api-key",
     accountDescription: "The Render account opencompany uses when you run Render tools.",
+  },
+  vercel: {
+    name: "vercel",
+    kind: "mcp",
+    label: "Vercel",
+    description:
+      "Inspect Vercel projects and deployments, investigate operational data, and perform permission-gated deployment and account actions.",
+    category: "engineering",
+    source:
+      "https://github.com/useopencompany/plugins/tree/df6f6958cb34414d7bce9060c37978fef3388526/vercel",
+    connectionProvider: "vercel",
+    connectHref: "/api/integrations/vercel/start?returnTo=/settings/plugins/vercel",
+    accountDescription: "The account opencompany uses when you run Vercel tools.",
   },
   signoz: {
     name: "signoz",

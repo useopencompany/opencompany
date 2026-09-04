@@ -21,6 +21,7 @@ import {
   defaultPostHogToolsState,
   defaultSigNozToolsState,
   defaultStripeToolsState,
+  defaultVercelToolsState,
   FathomPluginDetail,
   GitHubPluginDetail,
   GitHubPluginDetailView,
@@ -49,6 +50,7 @@ import {
   StripePluginDetail,
   slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
+  VercelPluginDetail,
   XPluginDetail,
 } from "./OfficialMcpPluginSettings";
 import {
@@ -68,6 +70,7 @@ import {
   POSTHOG_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
   STRIPE_PLUGIN_SOURCE,
+  VERCEL_PLUGIN_SOURCE,
   X_PLUGIN_SOURCE,
 } from "./PluginSettings";
 
@@ -321,6 +324,20 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: [],
           capabilityModes: { read: "on", query: "ask", write: "ask" },
+        },
+      ],
+      vercel: [
+        {
+          integrationId: "gint_vercel",
+          provider: "vercel",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "Vercel",
+          connectionLabel: "Vercel",
+          statusReason: null,
+          scopes: ["openid"],
+          capabilityModes: { read: "on", query: "ask", draft: "ask", write: "off" },
         },
       ],
       slack: [
@@ -1276,6 +1293,42 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Configure legacy Fathom ingestion in Wiki sources");
     expect(FATHOM_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/444dd4dbfaaed6abd2c7c8000024c5be0ff4fa48/fathom",
+    );
+  });
+
+  it("maps Vercel with purchase and CLI actions disabled by default", () => {
+    const vercelPlugin = {
+      ...plugin,
+      id: "plugin_vercel",
+      name: "vercel",
+      manifest: { name: "vercel", description: "Operate Vercel projects." },
+      source: { ...plugin.source, path: "vercel" },
+    } satisfies PluginInstallationDto;
+    const toolsState = defaultVercelToolsState();
+    const html = renderToString(
+      <VercelPluginDetail
+        pluginState={{ status: "ready", plugin: vercelPlugin }}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Vercel");
+    expect(html).toContain("Inspect Vercel projects");
+    expect(html).toContain("Read operational data");
+    expect(html).toContain("Deploy, share, and collaborate");
+    expect(html).toContain("Purchase and administer");
+    expect(toolsState).toMatchObject({
+      status: "ready",
+      groups: [
+        { id: "read", defaultMode: "on" },
+        { id: "query", defaultMode: "ask" },
+        { id: "draft", defaultMode: "ask" },
+        { id: "write", defaultMode: "off" },
+      ],
+    });
+    expect(VERCEL_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/df6f6958cb34414d7bce9060c37978fef3388526/vercel",
     );
   });
 

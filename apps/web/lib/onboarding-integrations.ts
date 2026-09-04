@@ -41,6 +41,7 @@ export function integrationConnectionError(provider: string | null, reason: stri
     case "betterstack_denied":
     case "fathom_denied":
     case "signoz_denied":
+    case "vercel_denied":
     case "x_account_denied":
       return `${name} authorization was cancelled.`;
     case "missing_code":
@@ -101,6 +102,8 @@ function providerName(provider: string | null) {
       return "Better Stack";
     case "render":
       return "Render";
+    case "vercel":
+      return "Vercel";
     case "signoz":
       return "SigNoz";
     case "x_account":
