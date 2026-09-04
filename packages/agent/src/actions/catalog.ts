@@ -90,6 +90,9 @@ export async function resolveActionCatalog(
   const posthogPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:posthog:"),
   );
+  const latitudePluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:latitude:"),
+  );
   const stripePluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:stripe:"),
   );
@@ -106,7 +109,7 @@ export async function resolveActionCatalog(
       : resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
     linearPluginInstalled ? null : resolveLinearActions(input.userWorkosId).catch(() => null),
     posthogPluginInstalled ? null : resolvePostHogActions(input.userWorkosId).catch(() => null),
-    resolveLatitudeActions(input.userWorkosId).catch(() => null),
+    latitudePluginInstalled ? null : resolveLatitudeActions(input.userWorkosId).catch(() => null),
     neonPluginInstalled ? null : resolveNeonActions(input.userWorkosId).catch(() => null),
     resolveAttioActions(input.userWorkosId).catch(() => null),
     githubPluginConnected ? null : resolveGitHubActions(input.workspaceId).catch(() => null),

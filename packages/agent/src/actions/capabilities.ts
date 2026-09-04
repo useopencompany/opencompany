@@ -218,9 +218,17 @@ export const PROVIDER_CAPABILITIES: Partial<
   latitude: [
     {
       id: "read",
-      label: "Read Latitude",
-      description: "Inspect projects, traces, signals, datasets, evaluations, and workspace data.",
+      label: "Inspect Latitude workspace",
+      description:
+        "Inspect project structure, tool analytics, signals, datasets, monitors, and experiments.",
       defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read traces and user data",
+      description:
+        "Read traces, sessions, end-user activity, dataset rows, memory, members, and access keys.",
+      defaultMode: "ask",
     },
     {
       id: "write",

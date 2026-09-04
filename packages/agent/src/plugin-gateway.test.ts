@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   loadGoogleCalendarConnection: vi.fn(),
   getHubSpotState: vi.fn(),
   loadHubSpotConnection: vi.fn(),
+  getLatitudeState: vi.fn(),
+  loadLatitudeConnection: vi.fn(),
   getNeonState: vi.fn(),
   loadNeonConnection: vi.fn(),
   getBetterStackState: vi.fn(),
@@ -108,8 +110,8 @@ vi.mock("./integrations/neon-mcp", () => ({
 }));
 vi.mock("./integrations/latitude-mcp", () => ({
   LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
-  getLatitudeIntegrationState: vi.fn(),
-  loadLatitudeMcpWorkerConnection: vi.fn(),
+  getLatitudeIntegrationState: mocks.getLatitudeState,
+  loadLatitudeMcpWorkerConnection: mocks.loadLatitudeConnection,
 }));
 vi.mock("./integrations/slack-mcp", () => ({
   SLACK_MCP_ENDPOINT_URL: "https://mcp.slack.com/mcp",
@@ -584,6 +586,40 @@ describe("plugin gateway registration cache", () => {
       {
         ...posthogRecord,
         server: { ...posthogRecord.server, url: "https://mcp.posthog.com/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Latitude credentials only to Latitude's exact hosted MCP endpoint", async () => {
+    const latitudeRecord = record({
+      pluginName: "latitude",
+      pluginLabel: "latitude",
+      pluginDescription: "Latitude observability tools.",
+      connectionProvider: "latitude",
+      server: {
+        name: "latitude",
+        type: "streamable-http",
+        url: "https://api.latitude.so/v1/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([latitudeRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:latitude:latitude",
+        connectionProvider: "latitude",
+        getState: mocks.getLatitudeState,
+        loadConnection: mocks.loadLatitudeConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...latitudeRecord,
+        server: { ...latitudeRecord.server, url: "https://api.latitude.so/v1/mcp/other" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

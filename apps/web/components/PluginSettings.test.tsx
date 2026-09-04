@@ -15,6 +15,7 @@ import {
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
+  LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   OfficialSkillPluginDetail,
@@ -275,10 +276,6 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/google-calendar",
     );
-    expect(screen.getByRole("link", { name: /signoz/i })).toHaveAttribute(
-      "href",
-      "/settings/plugins/signoz",
-    );
     expect(screen.getByRole("link", { name: /render/i })).toHaveAttribute(
       "href",
       "/settings/plugins/render",
@@ -303,6 +300,10 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/hubspot",
     );
+    expect(screen.getByRole("link", { name: /latitude/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/latitude",
+    );
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
@@ -326,6 +327,9 @@ describe("Plugin settings", () => {
     );
     expect(HUBSPOT_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
+    );
+    expect(LATITUDE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
     );
     expect(SIGNOZ_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
@@ -385,7 +389,7 @@ describe("Plugin settings", () => {
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
 
     const engineering = screen.getByRole("region", { name: "Engineering" });
-    expect(within(engineering).getAllByRole("link")).toHaveLength(5);
+    expect(within(engineering).getAllByRole("link")).toHaveLength(6);
     expect(within(engineering).getByRole("link", { name: /github/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Engineering" })).toHaveAttribute(
       "aria-pressed",

@@ -152,10 +152,10 @@ describe("SettingsIntegrationsPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    // Personal scope reveals non-plugin connections and hides workspace-owned ones.
+    // Personal scope hides plugin-owned and workspace-owned connections.
     expect(
-      screen.getByText("Observe, understand, and improve your AI agents from opencompany."),
-    ).toBeInTheDocument();
+      screen.queryByText("Observe, understand, and improve your AI agents from opencompany."),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText("Sync files and folders you choose into opencompany."),
     ).not.toBeInTheDocument();
@@ -527,7 +527,7 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.queryByText("founder@example.com")).not.toBeInTheDocument();
   });
 
-  it("connects Latitude as a personal OAuth integration with guarded writes", () => {
+  it("keeps Latitude off legacy settings now that its account lives under Plugins", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_latitude",
@@ -542,24 +542,11 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
-    const latitudeCard = screen
-      .getByText("Observe, understand, and improve your AI agents from opencompany.")
-      .closest("div.rounded-2xl");
-    expect(latitudeCard).not.toBeNull();
-    expect(within(latitudeCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
     expect(
-      within(latitudeCard as HTMLElement).getByRole("group", {
-        name: "Read Latitude permission",
-      }),
-    ).toHaveTextContent("On");
-    expect(
-      within(latitudeCard as HTMLElement).getByRole("group", {
-        name: "Manage Latitude permission",
-      }),
-    ).toHaveTextContent("Ask");
-    expect(
-      within(latitudeCard as HTMLElement).getByRole("link", { name: "Add account" }),
-    ).toHaveAttribute("href", "/api/integrations/latitude/start?returnTo=/settings/integrations");
+      screen.queryByText("Observe, understand, and improve your AI agents from opencompany."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Latitude")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Personal" })).not.toHaveTextContent("1");
   });
 
   it("keeps Neon out of legacy integrations now that its account lives under Plugins", () => {

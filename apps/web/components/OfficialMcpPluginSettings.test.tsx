@@ -13,6 +13,7 @@ import {
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
   defaultHubSpotToolsState,
+  defaultLatitudeToolsState,
   defaultPostHogToolsState,
   defaultSigNozToolsState,
   defaultStripeToolsState,
@@ -27,6 +28,7 @@ import {
   googleCalendarToolsStateFromPlugin,
   googleDriveToolsStateFromPlugin,
   HubSpotPluginDetail,
+  LatitudePluginDetail,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -49,6 +51,7 @@ import {
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
+  LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   POSTHOG_PLUGIN_SOURCE,
@@ -224,6 +227,20 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: [],
           capabilityModes: { read: "ask", query: "ask", write: "ask" },
+        },
+      ],
+      latitude: [
+        {
+          integrationId: "gint_latitude",
+          provider: "latitude",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "Latitude",
+          connectionLabel: "Latitude workspace",
+          statusReason: null,
+          scopes: [],
+          capabilityModes: { read: "on", query: "ask", write: "ask" },
         },
       ],
       linear: [],
@@ -1195,6 +1212,32 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Create insights");
     expect(POSTHOG_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+    );
+    expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps the personal Latitude connection onto the official plugin surface", () => {
+    const latitudePlugin = {
+      ...plugin,
+      id: "plugin_latitude",
+      name: "latitude",
+      manifest: { name: "latitude", description: "Investigate Latitude observability data." },
+      source: { ...plugin.source, path: "latitude" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <LatitudePluginDetail
+        pluginState={{ status: "ready", plugin: latitudePlugin }}
+        toolsState={defaultLatitudeToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Latitude workspace");
+    expect(html).toContain("Inspect Latitude workspace");
+    expect(html).toContain("Read traces and user data");
+    expect(html).toContain("Manage Latitude");
+    expect(LATITUDE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
