@@ -39,6 +39,21 @@ guide](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/
 The project's handling of existing commit metadata is documented in [Git contributor email
 privacy](./docs/contributor-email-privacy.md).
 
+## Contribution Terms
+
+Unless a separate written agreement says otherwise, every contribution intentionally submitted to
+this repository is licensed under the project's [MIT License](./LICENSE) on the same terms as the
+rest of the project. You retain ownership of your contribution.
+
+By submitting a contribution, you represent that you created it or otherwise have the right to
+submit it under MIT. Do not submit employer-owned, confidential, copied, or generated material
+unless you have the permissions needed to do so and can identify any third-party source and license.
+Maintainers may ask for provenance evidence or require unclear material to be removed.
+
+The project does not require a contributor license agreement or Developer Certificate of Origin
+sign-off. Opening a pull request does not transfer copyright or grant rights to the opencompany
+name or logos; see [OPEN_SOURCE.md](./OPEN_SOURCE.md) and [TRADEMARKS.md](./TRADEMARKS.md).
+
 ## Local Checks
 
 Use Bun `1.3.2` and Node `20.20.0` or newer. Install exactly the committed dependency graph:
