@@ -169,7 +169,7 @@ describe("BrainImportApplicationService", () => {
     ]);
     expect(Array.isArray(persisted.sourceSelection.github?.config?.events)).toBe(true);
     expect(persisted.sourceSelection.slack).toBeUndefined();
-    expect(persisted.sourceSelection.jamie).toEqual({ enabled: false });
+    expect(persisted.sourceSelection.jamie).toBeUndefined();
   });
 
   it("requires a connected integration for an enabled provider", async () => {

@@ -15,6 +15,7 @@ import {
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
+  JAMIE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   OfficialSkillPluginDetail,
@@ -303,6 +304,10 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/hubspot",
     );
+    expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/jamie",
+    );
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
@@ -326,6 +331,9 @@ describe("Plugin settings", () => {
     );
     expect(HUBSPOT_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
+    );
+    expect(JAMIE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
     );
     expect(SIGNOZ_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
@@ -352,7 +360,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(15);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(16);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });

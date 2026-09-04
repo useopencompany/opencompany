@@ -8,6 +8,10 @@ import {
   startHubSpotMcpOAuth,
 } from "@opencompany/agent/integrations/hubspot-mcp";
 import {
+  completeJamieMcpOAuth,
+  startJamieMcpOAuth,
+} from "@opencompany/agent/integrations/jamie-mcp";
+import {
   completeLatitudeMcpOAuth,
   startLatitudeMcpOAuth,
 } from "@opencompany/agent/integrations/latitude-mcp";
@@ -48,6 +52,11 @@ vi.mock("@opencompany/agent/integrations/hubspot-mcp", async (importOriginal) =>
   startHubSpotMcpOAuth: vi.fn(),
   completeHubSpotMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/jamie-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startJamieMcpOAuth: vi.fn(),
+  completeJamieMcpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/posthog-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startPostHogMcpOAuth: vi.fn(),
@@ -79,6 +88,7 @@ const PROVIDERS: McpOAuthProvider[] = [
   "latitude",
   "betterstack",
   "signoz",
+  "jamie",
 ];
 
 // The mocked module-level start/complete wrappers, keyed like the ingress.
@@ -90,6 +100,7 @@ const flowMocks = {
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
   betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },
   signoz: { start: startSigNozMcpOAuth, complete: completeSigNozMcpOAuth },
+  jamie: { start: startJamieMcpOAuth, complete: completeJamieMcpOAuth },
 } as const;
 
 function ingress(
@@ -224,7 +235,10 @@ describe("remote MCP OAuth ingress", () => {
       const expectedPath =
         provider === "linear"
           ? "/settings"
-          : provider === "betterstack" || provider === "signoz" || provider === "hubspot"
+          : provider === "betterstack" ||
+              provider === "signoz" ||
+              provider === "hubspot" ||
+              provider === "jamie"
             ? `/settings/plugins/${provider}`
             : "/settings/integrations";
       expect(response.headers.get("location"), provider).toBe(

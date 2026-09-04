@@ -15,16 +15,13 @@ import {
   isNormalizedGranolaMeetingSourceItem,
   isNormalizedHubspotObjectSourceItem,
   isNormalizedImportSourceItem,
-  isNormalizedJamieMeetingSourceItem,
   isNormalizedLinearIssueSourceItem,
   isNormalizedUploadAssetSourceItem,
   type NormalizedBrainPointerSourceItem,
   type NormalizedBrainSourceItem,
-  type NormalizedJamieMeetingSourceItem,
 } from "@opencompany/brain";
 import { normalizeBrainIngestTrace } from "@opencompany/brain/ingest-trace";
 import { releasePendingIngestionReservations } from "@opencompany/db/billing";
-import { brainFilePathFor, listBrainFiles, upsertBrainFile } from "@opencompany/db/brain-files";
 import { recordCreditDebit } from "@opencompany/db/credits";
 import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
 import {
@@ -33,7 +30,6 @@ import {
   type BrainSourceProvider,
   type BrainSourceType,
 } from "@opencompany/db/product-schema";
-import { getDefaultBrainForUser } from "@opencompany/db/workspaces";
 import { captureException, createLogger } from "@opencompany/observability";
 import { flushBraintrust, traceBraintrust } from "@opencompany/observability/braintrust";
 import {
@@ -62,15 +58,9 @@ import {
   runGranolaMeetingAgentIngest,
   runHubspotObjectAgentIngest,
   runImportAgentIngest,
-  runJamieMeetingAgentIngest,
   runLinearIssueAgentIngest,
   runUploadAssetAgentIngest,
 } from "./brain-agent-ingest";
-import {
-  buildJamieMeetingBrainWrites,
-  JAMIE_EVIDENCE_FOLDER,
-  JAMIE_MEETING_FOLDER,
-} from "./brain-jamie-writes";
 import { runBrainPointerHydrate } from "./brain-pointer-hydrators";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -144,20 +134,6 @@ export type BrainIngestHandler<
   isPayload(value: unknown): value is TItem;
   run(input: BrainIngestHandlerInput<TItem>): Promise<Record<string, unknown>>;
 };
-
-// Legacy deterministic template writer; kept registered so already-queued jobs
-// drain. New Jamie webhooks enqueue the agentic kind below.
-const JAMIE_MEETING_INGEST_DESCRIPTOR = {
-  kind: "brain_source_item_ingest",
-  sourceProvider: "jamie",
-  sourceType: "meeting",
-} as const satisfies BrainIngestJobDescriptor;
-
-const JAMIE_MEETING_AGENT_INGEST_DESCRIPTOR = {
-  kind: "brain_agent_ingest",
-  sourceProvider: "jamie",
-  sourceType: "meeting",
-} as const satisfies BrainIngestJobDescriptor;
 
 const GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
@@ -239,16 +215,6 @@ const IMPORT_AGENT_INGEST_DESCRIPTOR = {
 } as const satisfies BrainIngestJobDescriptor;
 
 const BRAIN_INGEST_HANDLERS: readonly BrainIngestHandler[] = [
-  {
-    descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
-    isPayload: isNormalizedJamieMeetingSourceItem,
-    run: runTypedBrainIngestHandler(writeJamieMeetingToBrain),
-  },
-  {
-    descriptor: JAMIE_MEETING_AGENT_INGEST_DESCRIPTOR,
-    isPayload: isNormalizedJamieMeetingSourceItem,
-    run: runTypedBrainIngestHandler(runJamieMeetingAgentIngest),
-  },
   {
     descriptor: GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGranolaMeetingSourceItem,
@@ -1244,61 +1210,6 @@ export function startBrainIngestWorker(
   return {
     ...worker,
     activeCount: () => active.size,
-  };
-}
-
-export async function writeJamieMeetingToBrain(input: {
-  userWorkosId: string;
-  brainRef: string | null;
-  item: NormalizedJamieMeetingSourceItem;
-  env: BrainAgentIngestEnv;
-}) {
-  const writes = buildJamieMeetingBrainWrites(input.item);
-  const db = getDb();
-  // Legacy jobs predate per-job brain refs; they land in the user's default
-  // ("General") brain.
-  const brainRef = input.brainRef ?? (await getDefaultBrainForUser(input.userWorkosId, { db }))?.id;
-  if (!brainRef) {
-    throw new Error(`No accessible opencompany brain found for user ${input.userWorkosId}.`);
-  }
-  const existingRows = await listBrainFiles({ brainRef }, { db });
-  const meetingAlreadyExists = existingRows.some((row) => row.brainId === writes.meetingBrainId);
-  const evidence = await upsertBrainFile(
-    {
-      brainRef,
-      userWorkosId: input.userWorkosId,
-      path: brainFilePathFor(JAMIE_EVIDENCE_FOLDER, writes.evidenceBrainId),
-      content: writes.evidenceContent,
-    },
-    { db },
-  );
-  const meeting = await upsertBrainFile(
-    {
-      brainRef,
-      userWorkosId: input.userWorkosId,
-      path: brainFilePathFor(JAMIE_MEETING_FOLDER, writes.meetingBrainId),
-      content: writes.meetingContent,
-    },
-    { db },
-  );
-
-  return {
-    meetingBrainId: writes.meetingBrainId,
-    evidenceBrainId: writes.evidenceBrainId,
-    meetingDocumentId: meeting.id,
-    evidenceDocumentId: evidence.id,
-    pages:
-      meeting.kind === "page"
-        ? [
-            {
-              brainId: meeting.brainId,
-              folderPath: meeting.folderPath,
-              title: meeting.title || meeting.brainId,
-              action: meetingAlreadyExists ? "updated" : "created",
-            },
-          ]
-        : [],
-    truncatedTranscript: writes.truncatedTranscript,
   };
 }
 

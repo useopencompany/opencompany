@@ -34,7 +34,6 @@ import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
-import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { useHydrated } from "@/components/useHydrated";
 import {
   WikiIngestActivityFeed,
@@ -112,7 +111,7 @@ function WikiSourcesLivePanel({
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [, startTransition] = useTransition();
   const autoEnableAttempted = useRef(new Set<string>());
-  const [setupProvider, setSetupProvider] = useState<"jamie" | "granola" | null>(null);
+  const [setupProvider, setSetupProvider] = useState<"granola" | null>(null);
 
   const integrationCollection = useMemo(
     () => getHeadlessIntegrationAccounts(workspaceId),
@@ -170,12 +169,12 @@ function WikiSourcesLivePanel({
     [eligibleIntegrations, isAdmin, sources],
   );
 
-  // Meeting sources have no picker step. Once a fresh Jamie or Granola
+  // Meeting sources have no picker step. Once a fresh Granola
   // connection appears in the live integration shape, attach it to the Wiki
   // immediately. Existing disabled rows stay disabled so pausing is durable.
   useEffect(() => {
     if (!sources || !integrationsReady) return;
-    const candidates = ["jamie", "granola"].flatMap((provider) =>
+    const candidates = ["granola"].flatMap((provider) =>
       (entriesByProvider.get(provider as WikiSourceProvider) ?? []).filter(
         (entry) =>
           !entry.source &&
@@ -365,8 +364,8 @@ function WikiSourcesLivePanel({
               rowErrors={rowErrors}
               onEnabledChange={updateEnabled}
               connectHref={wikiSourceConnectHref(provider.connectHref, mode)}
-              {...(mode === "onboarding" && (provider.id === "jamie" || provider.id === "granola")
-                ? { onConnect: () => setSetupProvider(provider.id as "jamie" | "granola") }
+              {...(mode === "onboarding" && provider.id === "granola"
+                ? { onConnect: () => setSetupProvider("granola") }
                 : {})}
               {...(provider.scopeRequired ? { scopeSlot: renderScopeSlot } : {})}
             />
@@ -376,9 +375,7 @@ function WikiSourcesLivePanel({
       {mode === "page" ? <WikiIngestActivityFeed /> : null}
       {setupProvider ? (
         <WikiSourceSetupDialog
-          provider={setupProvider}
           integrations={initialIntegrations}
-          isAdmin={isAdmin}
           onClose={() => setSetupProvider(null)}
         />
       ) : null}
@@ -567,54 +564,30 @@ function wikiSourceConnectHref(href: string, mode: "page" | "onboarding") {
 }
 
 function WikiSourceSetupDialog({
-  provider,
   integrations,
-  isAdmin,
   onClose,
 }: {
-  provider: "jamie" | "granola";
   integrations: IntegrationState | undefined;
-  isAdmin: boolean;
   onClose: () => void;
 }) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[85dvh] max-w-[560px] overflow-y-auto">
         <DialogHeader className="mb-3 text-left">
-          <DialogTitle>Connect {provider === "jamie" ? "Jamie" : "Granola"}</DialogTitle>
+          <DialogTitle>Connect Granola</DialogTitle>
           <DialogDescription>
             Completed meetings will start feeding into this workspace Wiki.
           </DialogDescription>
         </DialogHeader>
-        {provider === "jamie" ? (
-          <JamieIntegrationSetup
-            initialState={integrations?.jamie ?? EMPTY_JAMIE_STATE}
-            canManage={isAdmin}
-            variant="modal"
-            onSaved={onClose}
-          />
-        ) : (
-          <GranolaIntegrationSetup
-            initialState={integrations?.granola ?? EMPTY_GRANOLA_STATE}
-            variant="modal"
-            onSaved={onClose}
-          />
-        )}
+        <GranolaIntegrationSetup
+          initialState={integrations?.granola ?? EMPTY_GRANOLA_STATE}
+          variant="modal"
+          onSaved={onClose}
+        />
       </DialogContent>
     </Dialog>
   );
 }
-
-const EMPTY_JAMIE_STATE: IntegrationState["jamie"] = {
-  provider: "jamie",
-  connected: false,
-  status: "not_connected",
-  accountName: null,
-  statusReason: null,
-  integrationId: null,
-  webhookUrl: null,
-  apiKeyConfigured: false,
-};
 
 const EMPTY_GRANOLA_STATE: IntegrationState["granola"] = {
   provider: "granola",
@@ -674,7 +647,7 @@ function buildEntriesByProvider(
   for (const integration of integrations) {
     if (attachedIntegrationIds.has(integration.id)) continue;
     const provider = integration.provider as WikiSourceProvider;
-    const workspaceOwned = provider === "github" || provider === "jamie";
+    const workspaceOwned = provider === "github";
     appendEntry(result, {
       integrationId: integration.id,
       provider,
@@ -706,7 +679,7 @@ function isEligibleWikiSourceIntegration(
   if (integration.status === "disconnected") return false;
   if (!WIKI_SOURCE_PROVIDERS.some((provider) => provider.id === integration.provider)) return false;
   if (integration.provider === "linear" && integration.externalId === "linear_mcp") return false;
-  if (integration.provider === "github" || integration.provider === "jamie") {
+  if (integration.provider === "github") {
     return integration.workspaceId === workspaceId;
   }
   return integration.workspaceId === null;
@@ -743,7 +716,7 @@ function wikiSourceIntegrationRowsFromState(
   const github = integrations.github as IntegrationState["github"] & {
     integrationId?: string | null;
   };
-  for (const connection of [github, integrations.jamie] as const) {
+  for (const connection of [github] as const) {
     if (!connection.integrationId || connection.status === "not_connected") continue;
     rows.push({
       id: connection.integrationId,

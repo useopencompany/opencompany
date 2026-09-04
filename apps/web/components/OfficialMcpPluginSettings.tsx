@@ -272,6 +272,25 @@ export function LinearPluginDetail({
   );
 }
 
+export function JamiePluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.jamie}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function NeonPluginDetail({
   pluginState,
   canEdit,
@@ -1399,6 +1418,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "google_calendar" ||
     config.connectionProvider === "google_drive" ||
     config.connectionProvider === "hubspot" ||
+    config.connectionProvider === "jamie" ||
     config.connectionProvider === "neon" ||
     config.connectionProvider === "posthog" ||
     config.connectionProvider === "render" ||
@@ -1483,7 +1503,9 @@ function pluginAccountsFromState(
               ? state.google_drive.integrationId
               : config.connectionProvider === "x_account"
                 ? state.x_account.integrationId
-                : null;
+                : config.connectionProvider === "jamie"
+                  ? state.jamie.integrationId
+                  : null;
     return {
       accounts,
       permissionConnection:

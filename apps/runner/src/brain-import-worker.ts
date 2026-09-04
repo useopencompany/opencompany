@@ -62,7 +62,6 @@ const FATHOM_IMPORT_MAX_MEETINGS = 20;
 const PROVIDERS: BrainImportProvider[] = [
   "public_web",
   "github",
-  "jamie",
   "granola",
   "fathom",
   "gmail",

@@ -24,7 +24,6 @@ import type {
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import { personalAccountsFromRows } from "@opencompany/agent/integration-state";
-import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import {
   connectAttioIntegration,
   deleteAttioWebhook,
@@ -49,11 +48,6 @@ import {
   isValidGranolaApiKey,
   validateGranolaApiKey,
 } from "@opencompany/agent/integrations/granola";
-import {
-  createOrResetJamieWebhookEndpoint,
-  type JamieWebhookSetup,
-  saveJamieWebhookApiKey,
-} from "@opencompany/agent/integrations/jamie";
 import {
   connectRenderMcpIntegration,
   getRenderIntegrationState,
@@ -102,13 +96,10 @@ type DbLike = any;
 
 const OWNER_ONLY_MESSAGE = "Only the connection owner can manage this account.";
 const STRIPE_ADMIN_ONLY_MESSAGE = "Only workspace admins can manage the Stripe integration.";
-const JAMIE_ADMIN_ONLY_MESSAGE = "Only workspace admins can manage the Jamie integration.";
 
 const IMESSAGE_CODE_TTL_MS = 10 * 60 * 1000;
 const IMESSAGE_RESEND_COOLDOWN_MS = 30 * 1000;
 const IMESSAGE_MAX_CONFIRM_ATTEMPTS = 5;
-
-export { type JamieWebhookSetup };
 
 export type IntegrationAccountService = {
   list(actor: Actor): Promise<IntegrationAccountDto[]>;
@@ -130,8 +121,6 @@ export type IntegrationAccountService = {
   confirmImessagePairing(actor: Actor, code: string): Promise<ImessageProviderState>;
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
   disconnectStripe(actor: Actor): Promise<void>;
-  createOrResetJamieWebhookEndpoint(actor: Actor): Promise<JamieWebhookSetup>;
-  saveJamieWebhookApiKey(actor: Actor, apiKey: string): Promise<JamieWebhookSetup>;
 };
 
 export function createIntegrationAccountService(input: {
@@ -584,71 +573,6 @@ export function createIntegrationAccountService(input: {
       }
       if (!disconnected) {
         throw new ApiError(404, "not_found", "Stripe is not connected.");
-      }
-    },
-
-    async createOrResetJamieWebhookEndpoint(actor) {
-      // Jamie webhooks are workspace-owned plumbing; only admins manage them.
-      requireAdmin(actor, JAMIE_ADMIN_ONLY_MESSAGE);
-      try {
-        return await createOrResetJamieWebhookEndpoint({
-          userWorkosId: actor.userId,
-          workspaceId: actor.workspaceId,
-          db,
-        });
-      } catch (error) {
-        throw commandFailure(error, "Could not create a Jamie webhook endpoint.", "jamie_endpoint");
-      }
-    },
-
-    async saveJamieWebhookApiKey(actor, apiKey) {
-      requireAdmin(actor, JAMIE_ADMIN_ONLY_MESSAGE);
-      try {
-        const setup = await saveJamieWebhookApiKey({
-          workspaceId: actor.workspaceId,
-          apiKey,
-          db,
-        });
-        const [integration] = await db
-          .select({ userWorkosId: integrations.userWorkosId })
-          .from(integrations)
-          .where(
-            and(
-              eq(integrations.id, setup.integrationId),
-              eq(integrations.workspaceId, actor.workspaceId),
-              eq(integrations.provider, "jamie"),
-            ),
-          )
-          .limit(1);
-        if (!integration) throw new Error("Could not resolve the connected Jamie integration.");
-        await ensureWikiSourceEnabledOnConnect({
-          workspaceId: actor.workspaceId,
-          provider: "jamie",
-          integrationId: setup.integrationId,
-          userWorkosId: integration.userWorkosId,
-          createdByWorkosId: actor.userId,
-          db,
-        });
-        await captureIntegrationAddedAnalytics({
-          userWorkosId: actor.userId,
-          workspaceId: actor.workspaceId,
-          provider: "jamie",
-        });
-        return setup;
-      } catch (error) {
-        if (error instanceof ApiError) throw error;
-        // The Jamie lib throws plain Errors with user-facing copy for exactly
-        // two validation cases; only those messages may cross the boundary.
-        // Anything else (driver/network failures) gets the deterministic
-        // fallback so raw infra text never reads as an invalid-key response.
-        const curated =
-          error instanceof Error &&
-          (error.message.startsWith("Jamie API keys must start with") ||
-            error.message.startsWith("Create a Jamie webhook endpoint"));
-        if (curated) {
-          throw new ApiError(400, "invalid_request", (error as Error).message);
-        }
-        throw commandFailure(error, "Could not save the Jamie API key.", "jamie_api_key");
       }
     },
   };

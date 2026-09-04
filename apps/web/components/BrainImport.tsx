@@ -25,7 +25,6 @@ import { listWikiSources } from "@/lib/wiki-source-api";
 const PROVIDERS = [
   ["public_web", "Public web"],
   ["github", "GitHub"],
-  ["jamie", "Jamie"],
   ["granola", "Granola"],
   ["fathom", "Fathom"],
   ["gmail", "Gmail"],
@@ -137,7 +136,7 @@ function CompanyImport({
         const integrationId = source?.integrationId ?? integration?.integrationId;
         if (!integrationId) continue;
         next[id] = {
-          enabled: id === "github" || id === "jamie",
+          enabled: id === "github",
           integrationId,
           config: source?.config ?? {},
         };
@@ -222,7 +221,7 @@ function CompanyImport({
     run &&
     startTransition(async () => {
       const enabledProviders = Array.from(enabledAtConfirm) as Array<
-        "public_web" | "github" | "jamie" | "granola" | "fathom" | "gmail" | "linear"
+        "public_web" | "github" | "granola" | "fathom" | "gmail" | "linear"
       >;
       const result = wiki
         ? await confirmWikiImportAction({ importRunId: run.id, enabledProviders })
@@ -488,8 +487,6 @@ function integrationFor(
   switch (provider) {
     case "github":
       return details.github.integration;
-    case "jamie":
-      return details.jamie.integration;
     case "granola":
       return details.granola.integration;
     case "fathom":

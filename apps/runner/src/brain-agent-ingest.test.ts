@@ -7,7 +7,6 @@ import {
   normalizeGmailThreadWindow,
   normalizeGoogleDriveDocument,
   normalizeHubspotObjectWindow,
-  normalizeJamieMeetingCompletedWebhook,
   normalizeUploadAsset,
 } from "@opencompany/brain";
 import type { BrainIngestTrace, BrainIngestTriageTrace } from "@opencompany/brain/ingest-trace";
@@ -99,7 +98,6 @@ import {
   buildGmailThreadAgentIngestPrompt,
   buildGoogleDriveDocumentAgentIngestPrompt,
   buildHubspotObjectAgentIngestPrompt,
-  buildJamieMeetingAgentIngestPrompt,
   CHAT_CAPTURE_INGEST_PROFILE,
   CHAT_CAPTURE_INGEST_SYSTEM_PROMPT,
   formatBrainFolderInventoryPrompt,
@@ -111,33 +109,10 @@ import {
   runChatCaptureAgentIngest,
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
-  runJamieMeetingAgentIngest,
   UPLOAD_ASSET_INGEST_PROFILE,
   validateBrainAgentInvocation,
 } from "./brain-agent-ingest";
 import { buildGmailThreadEvidenceWrite } from "./brain-gmail-writes";
-import { buildJamieMeetingIds } from "./brain-jamie-writes";
-
-function jamieItem() {
-  return normalizeJamieMeetingCompletedWebhook(
-    {
-      metadata: { event: "meeting.completed", created: "2026-01-01T11:00:00.000Z" },
-      data: {
-        user: { id: "user_123" },
-        event: {
-          externalId: "calendar_event_123",
-          title: "Roadmap Review",
-          startTime: "2026-01-01T10:00:00.000Z",
-          summary: "Discussed priorities for the next product cycle.",
-          participants: [{ name: "Ada", email: "ada@example.com" }],
-          actionItems: ["Share the revised roadmap"],
-          transcript: [{ speakerName: "Ada", startTime: "00:00:00", text: "Transcript segment 0" }],
-        },
-      },
-    },
-    { capturedAt: "2026-01-01T11:01:00.000Z" },
-  );
-}
 
 function captureItem() {
   return normalizeChatCapture({
@@ -540,23 +515,6 @@ describe("tracker ingest profiles", () => {
       expect(prompt).toContain("compiled truth has neither citation");
     },
   );
-});
-
-describe("buildJamieMeetingAgentIngestPrompt", () => {
-  it("carries the evidence pointer, deterministic meeting id, and source content", () => {
-    const item = jamieItem();
-    const ids = buildJamieMeetingIds(item);
-    const prompt = buildJamieMeetingAgentIngestPrompt(item, {
-      ...ids,
-      truncatedTranscript: false,
-    });
-
-    expect(prompt).toContain(`[[evidence:${ids.evidenceBrainId}|`);
-    expect(prompt).toContain(`id "${ids.meetingBrainId}"`);
-    expect(prompt).toContain("Ada (ada@example.com)");
-    expect(prompt).toContain(item.sourceRef);
-    expect(prompt).toContain("Transcript segment 0");
-  });
 });
 
 describe("buildChatCaptureAgentIngestPrompt", () => {
@@ -1954,270 +1912,6 @@ describe("runChatCaptureAgentIngest", () => {
       budget: { accountingComplete: false, exhausted: true },
     });
     expect(brainFilesMock.syncBrainFilesFromRoot).not.toHaveBeenCalled();
-  });
-});
-
-describe("runJamieMeetingAgentIngest", () => {
-  it("writes the evidence snapshot, runs the tool loop, and syncs the brain", async () => {
-    const item = jamieItem();
-    const ids = buildJamieMeetingIds(item);
-    mockAgentRun({
-      finalText: "Updated meeting and attendee pages.",
-      toolInvocations: [
-        { command: "query", args: ["Ada", "--limit", "5"] },
-        {
-          command: "create",
-          args: ["--type", "person", "--id", "ada", "--title", "Ada", "--truth-stdin"],
-          stdin: "Ada leads GTM.",
-        },
-      ],
-    });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item,
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({
-      brainRef: "gbrain_123",
-      skipped: false,
-      toolCalls: 2,
-      mutations: 1,
-      upserted: 3,
-      meetingBrainId: ids.meetingBrainId,
-      evidenceBrainId: ids.evidenceBrainId,
-      summary: "Updated meeting and attendee pages.",
-    });
-    expect(workspacesMock.getDefaultBrainForUser).not.toHaveBeenCalled();
-    expect(localBrainMock.writeLocalBrainFile).toHaveBeenCalledWith(
-      expect.any(String),
-      `evidence/document/${ids.evidenceBrainId}.md`,
-      expect.stringContaining("Transcript segment 0"),
-    );
-    expect(brainFilesMock.syncBrainFilesFromRoot).toHaveBeenCalledWith(
-      expect.objectContaining({ brainRef: "gbrain_123", userWorkosId: "user_123" }),
-    );
-    expect(okCli).toHaveBeenCalledTimes(2);
-    expect(okCli).toHaveBeenCalledWith(
-      expect.objectContaining({
-        argv: [
-          "create",
-          "--type",
-          "person",
-          "--id",
-          "ada",
-          "--title",
-          "Ada",
-          "--truth-stdin",
-          "--json",
-        ],
-        stdin: "Ada leads GTM.",
-      }),
-    );
-  });
-
-  it("falls back to the user's default brain when the job has no brain ref", async () => {
-    mockAgentRun({
-      finalText: "Updated pages.",
-      toolInvocations: [{ command: "timeline-add", args: ["ada", "--body", "Met."] }],
-    });
-
-    await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: null,
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(workspacesMock.getDefaultBrainForUser).toHaveBeenCalledWith(
-      "user_123",
-      expect.anything(),
-    );
-    expect(brainFilesMock.syncBrainFilesFromRoot).toHaveBeenCalledWith(
-      expect.objectContaining({ brainRef: "gbrain_default" }),
-    );
-  });
-
-  it("treats a SKIP reply without writes as a successful no-op that still syncs evidence", async () => {
-    mockAgentRun({ finalText: "SKIP" });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({ skipped: true, mutations: 0 });
-    expect(brainFilesMock.syncBrainFilesFromRoot).toHaveBeenCalledTimes(1);
-  });
-
-  it("treats reasoning that ends with SKIP on its own line as an explicit skip", async () => {
-    mockAgentRun({
-      finalText: "This is a transactional receipt email with no durable company knowledge.\n\nSKIP",
-      toolInvocations: [{ command: "query", args: ["receipt"] }],
-    });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({
-      skipped: true,
-      skipMode: "explicit",
-      reason: "This is a transactional receipt email with no durable company knowledge.",
-      mutations: 0,
-    });
-  });
-
-  it("keeps the reason that follows a leading SKIP sentinel", async () => {
-    mockAgentRun({ finalText: "SKIP — routine dependency bump, nothing durable." });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({
-      skipped: true,
-      skipMode: "explicit",
-      reason: "routine dependency bump, nothing durable.",
-      mutations: 0,
-    });
-  });
-
-  it("does not mistake words starting with the sentinel for an explicit skip", async () => {
-    mockAgentRun({
-      finalText: "SKIPPED nothing; the meeting page was already current.",
-      toolInvocations: [{ command: "query", args: ["meeting"] }],
-    });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({ skipped: true, skipMode: "inferred_no_mutations" });
-  });
-
-  it("infers a skip when the agent completes without brain mutations", async () => {
-    mockAgentRun({
-      finalText: "All done!",
-      toolInvocations: [{ command: "query", args: ["Ada"] }],
-    });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(result).toMatchObject({
-      skipped: true,
-      skipMode: "inferred_no_mutations",
-      reason: "No brain-worthy content identified; agent completed without brain mutations.",
-      mutations: 0,
-    });
-    expect(brainFilesMock.syncBrainFilesFromRoot).toHaveBeenCalled();
-  });
-
-  it("blocks disallowed tool invocations without running the CLI", async () => {
-    mockAgentRun({
-      finalText: "Updated pages.",
-      toolInvocations: [
-        { command: "delete", args: ["ada", "--force"] },
-        { command: "rewrite", args: ["ada", "--truth", "Ada leads GTM."] },
-      ],
-    });
-
-    const result = await runJamieMeetingAgentIngest(
-      {
-        userWorkosId: "user_123",
-        brainRef: "gbrain_123",
-        item: jamieItem(),
-        env: { vercelAiGatewayApiKey: "gw_test" },
-      },
-      { runCli: okCli },
-    );
-
-    expect(okCli).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({
-      toolCalls: 2,
-      mutations: 1,
-      trace: {
-        toolCallCount: 2,
-        mutations: 1,
-        toolCalls: [
-          expect.objectContaining({
-            command: "delete",
-            args: ["ada", "--force"],
-            status: "blocked",
-            mutating: true,
-            errorPreview: expect.stringContaining("not available"),
-          }),
-          expect.objectContaining({
-            command: "rewrite",
-            status: "completed",
-            mutating: true,
-          }),
-        ],
-      },
-    });
-  });
-
-  it("fails on sync conflicts so the job retries against a fresh snapshot", async () => {
-    brainFilesMock.syncBrainFilesFromRoot.mockResolvedValueOnce({
-      upserted: 0,
-      deleted: 0,
-      conflicts: [{ path: "people/ada.md" }],
-    });
-    mockAgentRun({
-      finalText: "Updated pages.",
-      toolInvocations: [{ command: "rewrite", args: ["ada", "--truth", "Ada leads GTM."] }],
-    });
-
-    await expect(
-      runJamieMeetingAgentIngest(
-        {
-          userWorkosId: "user_123",
-          brainRef: "gbrain_123",
-          item: jamieItem(),
-          env: { vercelAiGatewayApiKey: "gw_test" },
-        },
-        { runCli: okCli },
-      ),
-    ).rejects.toThrow(/people\/ada\.md/);
   });
 });
 

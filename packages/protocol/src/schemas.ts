@@ -808,7 +808,6 @@ export const BrainSourceItemListEnvelopeSchema = z
   .openapi("BrainSourceItemListEnvelope");
 
 export const BrainSourceConfigProviderSchema = z.enum([
-  "jamie",
   "gmail",
   "google_drive",
   "github",
@@ -874,15 +873,6 @@ export const BrainSourceAccountSchema = z
   .strict()
   .openapi("BrainSourceAccount");
 
-const JamieSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("jamie"),
-    ...BrainSourceProviderBaseShape,
-    accountName: NullableLabelSchema,
-    webhookUrl: z.url().max(4_096).nullable(),
-    apiKeyConfigured: z.boolean(),
-  })
-  .strict();
 const LinearSourceProviderStateSchema = z
   .object({
     provider: z.literal("linear"),
@@ -957,13 +947,6 @@ export const BrainSourceDetailsSchema = z
         granola: z.array(BrainSourceAccountSchema),
         fathom: z.array(BrainSourceAccountSchema),
         attio: z.array(BrainSourceAccountSchema),
-      })
-      .strict(),
-    jamie: z
-      .object({
-        integration: JamieSourceProviderStateSchema,
-        legacyDefaultDelivery: z.boolean(),
-        isDefaultBrain: z.boolean(),
       })
       .strict(),
     linear: z.object({ integration: LinearSourceProviderStateSchema }).strict(),
@@ -1177,7 +1160,6 @@ export const BrainSourceOptionsEnvelopeSchema = z
 export const BrainImportProviderSchema = z.enum([
   "public_web",
   "github",
-  "jamie",
   "granola",
   "fathom",
   "gmail",
@@ -1320,7 +1302,7 @@ export const WikiPageReadModelSchema = WikiPageSchema.openapi("WikiPageReadModel
 export const WikiTimelineReadModelSchema =
   WikiTimelineEntrySchema.openapi("WikiTimelineReadModelV1");
 
-export const WikiSourceProviderSchema = z.enum(["gmail", "jamie", "granola", "linear", "github"]);
+export const WikiSourceProviderSchema = z.enum(["gmail", "granola", "linear", "github"]);
 
 export const WikiSourceConfigSchema = z
   .record(z.string().min(1).max(128), z.unknown())
@@ -4061,26 +4043,6 @@ export const StripeAccountDeleteEnvelopeSchema = z
   .strict()
   .openapi("StripeAccountDeleteEnvelope");
 
-// The webhook URL and header name are connection instructions, not secrets;
-// the Jamie-issued API key itself is write-only and never returned.
-export const JamieWebhookSetupSchema = z
-  .object({
-    integrationId: IntegrationAccountIdSchema,
-    webhookUrl: z.string().min(1),
-    headerName: z.string().min(1),
-    apiKeyConfigured: z.boolean(),
-  })
-  .strict()
-  .openapi("JamieWebhookSetup");
-
-export const JamieWebhookSetupEnvelopeSchema = z
-  .object({
-    data: z.object({ setup: JamieWebhookSetupSchema }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("JamieWebhookSetupEnvelope");
-
 // Engine + secrets-manager auth commands (#1203 5a3). Credential material
 // (the Claude Code setup token, the Infisical browser token) arrives in
 // request bodies over TLS exactly as the retired Server Actions received it;
@@ -4283,7 +4245,7 @@ export type DeleteBrainFolderBody = z.infer<typeof DeleteBrainFolderBodySchema>;
 export type WikiPageDto = z.infer<typeof WikiPageSchema>;
 export type WikiPageReadModel = z.infer<typeof WikiPageReadModelSchema>;
 export type WikiTimelineReadModel = z.infer<typeof WikiTimelineReadModelSchema>;
-export type WikiSourceProvider = "gmail" | "jamie" | "granola" | "linear" | "github";
+export type WikiSourceProvider = "gmail" | "granola" | "linear" | "github";
 export type WikiSourceDto = z.infer<typeof WikiSourceSchema>;
 export type WikiIngestActivityItemDto = {
   id: string;
@@ -4482,4 +4444,3 @@ export type FathomAccountStateDto = z.infer<typeof FathomAccountStateSchema>;
 export type GranolaAccountStateDto = z.infer<typeof GranolaAccountStateSchema>;
 export type ImessageAccountStateDto = z.infer<typeof ImessageAccountStateSchema>;
 export type StripeAccountStateDto = z.infer<typeof StripeAccountStateSchema>;
-export type JamieWebhookSetupDto = z.infer<typeof JamieWebhookSetupSchema>;

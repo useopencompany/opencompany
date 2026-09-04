@@ -132,10 +132,6 @@ vi.mock("@/components/Surface", () => ({
   },
 }));
 
-vi.mock("@/components/JamieIntegrationSetup", () => ({
-  JamieIntegrationSetup: () => null,
-}));
-
 vi.mock("@/components/GranolaIntegrationSetup", () => ({
   GranolaIntegrationSetup: () => null,
 }));

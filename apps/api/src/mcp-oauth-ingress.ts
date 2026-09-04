@@ -12,6 +12,12 @@ import {
   verifyHubSpotMcpState,
 } from "@opencompany/agent/integrations/hubspot-mcp";
 import {
+  appendJamieMcpStatus,
+  completeJamieMcpOAuth,
+  startJamieMcpOAuth,
+  verifyJamieMcpState,
+} from "@opencompany/agent/integrations/jamie-mcp";
+import {
   appendLatitudeMcpStatus,
   completeLatitudeMcpOAuth,
   startLatitudeMcpOAuth,
@@ -55,6 +61,7 @@ export type McpOAuthProvider =
   | "posthog"
   | "neon"
   | "latitude"
+  | "jamie"
   | "betterstack"
   | "signoz";
 
@@ -139,6 +146,14 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     deniedReason: "latitude_denied",
     invalidStatePath:
       "/settings/integrations?integration=latitude&setup=error&reason=invalid_state",
+  },
+  jamie: {
+    start: startJamieMcpOAuth,
+    complete: completeJamieMcpOAuth,
+    verifyState: verifyJamieMcpState,
+    appendStatus: appendJamieMcpStatus,
+    deniedReason: "jamie_denied",
+    invalidStatePath: "/settings/plugins/jamie?integration=jamie&setup=error&reason=invalid_state",
   },
 };
 

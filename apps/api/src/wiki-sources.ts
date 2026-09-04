@@ -272,13 +272,13 @@ function sourceNotFound() {
 }
 
 function isActiveWikiSource(source: WikiSourceWithIntegration): source is ActiveWikiSource {
-  return source.provider !== "slack";
+  return source.provider !== "slack" && source.provider !== "jamie";
 }
 
 function isActiveWikiIngestActivityRow(
   row: WikiIngestActivityRow,
 ): row is ActiveWikiIngestActivityRow {
-  return row.sourceProvider !== "slack";
+  return row.sourceProvider !== "slack" && row.sourceProvider !== "jamie";
 }
 
 function providerDisplayName(provider: ActiveWikiSourceProvider) {

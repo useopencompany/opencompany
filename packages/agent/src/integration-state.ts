@@ -107,8 +107,7 @@ export type JamieProviderState = {
   accountName: string | null;
   statusReason: string | null;
   integrationId: string | null;
-  webhookUrl: string | null;
-  apiKeyConfigured: boolean;
+  capabilityModes: Record<string, unknown>;
 };
 
 // Granola connects with a personal API key minted in the Granola app; the
@@ -255,6 +254,7 @@ export type PersonalAccountProvider =
   | "google_drive"
   | "linear"
   | "github_user"
+  | "jamie"
   | "slack"
   | "hubspot"
   | "granola"
@@ -317,7 +317,7 @@ type IntegrationStateRow = {
   tool_modes?: Record<string, unknown> | null;
 };
 
-const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
+const JAMIE_MCP_EXTERNAL_ID = "jamie_mcp";
 
 // Collects every personal (non-workspace) account row per provider. The
 // Linear and HubSpot ingestion connections count as accounts; their dedicated
@@ -331,6 +331,7 @@ export function personalAccountsFromRows(
     google_drive: [],
     linear: [],
     github_user: [],
+    jamie: [],
     slack: [],
     hubspot: [],
     granola: [],
@@ -355,6 +356,12 @@ export function personalAccountsFromRows(
     if (row.provider === "hubspot") {
       if ((row.externalId ?? row.external_id) !== "hubspot_mcp") {
         personalAccounts.hubspot.push(accountViewFromRow("hubspot", row));
+      }
+      continue;
+    }
+    if (row.provider === "jamie") {
+      if ((row.externalId ?? row.external_id) === JAMIE_MCP_EXTERNAL_ID) {
+        personalAccounts.jamie.push(accountViewFromRow("jamie", row));
       }
       continue;
     }
@@ -395,12 +402,20 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     if (row.provider === "hubspot" && (row.externalId ?? row.external_id) !== "hubspot_mcp") {
       continue;
     }
-    // GitHub, Jamie, and Stripe are workspace-owned; personal rows for those
-    // providers are pre-ownership leftovers and must not shadow the workspace
-    // connection.
+    // GitHub and Stripe are workspace-owned; personal rows for those providers
+    // are pre-ownership leftovers and must not shadow the workspace connection.
     if (
-      (row.provider === "github" || row.provider === "jamie" || row.provider === "stripe") &&
+      (row.provider === "github" || row.provider === "stripe") &&
       !(row.workspaceId ?? row.workspace_id)
+    ) {
+      continue;
+    }
+    // Jamie's retired webhook integration used workspace-owned rows. Only the
+    // personal OAuth connector row belongs to the official plugin.
+    if (
+      row.provider === "jamie" &&
+      ((row.workspaceId ?? row.workspace_id) ||
+        (row.externalId ?? row.external_id) !== JAMIE_MCP_EXTERNAL_ID)
     ) {
       continue;
     }
@@ -801,8 +816,7 @@ function jamieProviderState(row: IntegrationStateRow | undefined): JamieProvider
       accountName: null,
       statusReason: null,
       integrationId: null,
-      webhookUrl: null,
-      apiKeyConfigured: false,
+      capabilityModes: {},
     };
   }
 
@@ -813,9 +827,6 @@ function jamieProviderState(row: IntegrationStateRow | undefined): JamieProvider
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
     integrationId: row.id ?? null,
-    webhookUrl: null,
-    apiKeyConfigured:
-      row.status === "connected" ||
-      (row.externalId ?? row.external_id ?? "").startsWith(JAMIE_API_KEY_EXTERNAL_ID_PREFIX),
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }
