@@ -257,3 +257,40 @@ describe("Jamie integration state", () => {
     ]);
   });
 });
+
+describe("Granola integration state", () => {
+  it("keeps MCP tool authorization separate from legacy API ingestion", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_granola_ingest",
+        provider: "granola",
+        externalId: "granola:user_1",
+        accountEmail: "ada@example.com",
+        accountType: "granola_api_key",
+        status: "connected",
+      },
+      {
+        id: "gint_granola_mcp",
+        provider: "granola",
+        externalId: "granola_mcp",
+        accountName: "Granola",
+        accountType: "mcp_server",
+        status: "connected",
+        capabilityModes: { read: "on", query: "ask" },
+      },
+    ]);
+
+    expect(state.granola).toMatchObject({
+      integrationId: "gint_granola_ingest",
+      accountEmail: "ada@example.com",
+    });
+    expect(state.granola_mcp).toMatchObject({
+      integrationId: "gint_granola_mcp",
+      connected: true,
+      capabilityModes: { read: "on", query: "ask" },
+    });
+    expect(state.personalAccounts.granola).toEqual([
+      expect.objectContaining({ integrationId: "gint_granola_ingest" }),
+    ]);
+  });
+});

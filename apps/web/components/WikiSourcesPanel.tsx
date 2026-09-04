@@ -364,7 +364,7 @@ function WikiSourcesLivePanel({
               rowErrors={rowErrors}
               onEnabledChange={updateEnabled}
               connectHref={wikiSourceConnectHref(provider.connectHref, mode)}
-              {...(mode === "onboarding" && provider.id === "granola"
+              {...(provider.id === "granola"
                 ? { onConnect: () => setSetupProvider("granola") }
                 : {})}
               {...(provider.scopeRequired ? { scopeSlot: renderScopeSlot } : {})}
@@ -543,13 +543,33 @@ function WikiSourceCard({
             </Link>
           )
         ) : needsReconnect ? (
-          <Link href={connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            Reconnect
-          </Link>
+          onConnect ? (
+            <button
+              type="button"
+              onClick={onConnect}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              Reconnect
+            </button>
+          ) : (
+            <Link href={connectHref} className={buttonVariants({ variant: "outline", size: "sm" })}>
+              Reconnect
+            </Link>
+          )
         ) : provider.id === "gmail" || provider.id === "linear" || provider.id === "granola" ? (
-          <Link href={connectHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
-            Add another account
-          </Link>
+          onConnect ? (
+            <button
+              type="button"
+              onClick={onConnect}
+              className={buttonVariants({ variant: "ghost", size: "sm" })}
+            >
+              Update API key
+            </button>
+          ) : (
+            <Link href={connectHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
+              Add another account
+            </Link>
+          )
         ) : null}
       </CardFooter>
     </Card>
@@ -576,7 +596,7 @@ function WikiSourceSetupDialog({
         <DialogHeader className="mb-3 text-left">
           <DialogTitle>Connect Granola</DialogTitle>
           <DialogDescription>
-            Completed meetings will start feeding into this workspace Wiki.
+            Use a Granola API key for legacy background ingestion into this workspace Wiki.
           </DialogDescription>
         </DialogHeader>
         <GranolaIntegrationSetup
@@ -679,6 +699,7 @@ function isEligibleWikiSourceIntegration(
   if (integration.status === "disconnected") return false;
   if (!WIKI_SOURCE_PROVIDERS.some((provider) => provider.id === integration.provider)) return false;
   if (integration.provider === "linear" && integration.externalId === "linear_mcp") return false;
+  if (integration.provider === "granola" && integration.externalId === "granola_mcp") return false;
   if (integration.provider === "github") {
     return integration.workspaceId === workspaceId;
   }

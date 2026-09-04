@@ -196,6 +196,25 @@ export function GmailPluginDetail({
   );
 }
 
+export function GranolaPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.granola}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function GoogleCalendarPluginDetail({
   pluginState,
   canEdit,
@@ -1430,6 +1449,27 @@ function pluginAccountsFromState(
   accounts: PluginAccount[];
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
 } {
+  if (config.connectionProvider === "granola") {
+    const connection = state.granola_mcp;
+    const permissionConnection: IntegrationAccountView<"granola"> | null = connection.integrationId
+      ? {
+          integrationId: connection.integrationId,
+          provider: "granola",
+          status: connection.status === "not_connected" ? "disconnected" : connection.status,
+          connected: connection.connected,
+          accountEmail: null,
+          accountName: connection.accountName,
+          connectionLabel: connection.accountName || "Granola tool access",
+          statusReason: connection.statusReason,
+          scopes: [],
+          capabilityModes: connection.capabilityModes,
+        }
+      : null;
+    return {
+      permissionConnection,
+      accounts: permissionConnection ? [{ account: permissionConnection }] : [],
+    };
+  }
   if (
     config.connectionProvider === "betterstack" ||
     config.connectionProvider === "github_user" ||
@@ -1566,6 +1606,10 @@ export function defaultGmailToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("gmail");
 }
 
+export function defaultGranolaToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("granola");
+}
+
 export function defaultGoogleCalendarToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("google-calendar");
 }
@@ -1640,6 +1684,12 @@ export function githubToolsStateFromPlugin(plugin: PluginInstallationDto | null)
 
 export function gmailToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "gmail");
+}
+
+export function granolaToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "granola");
 }
 
 export function googleCalendarToolsStateFromPlugin(
@@ -1780,6 +1830,10 @@ export function githubToolsStateFromPreview(preview: PluginImportPreviewDto): Pl
 
 export function gmailToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "gmail");
+}
+
+export function granolaToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "granola");
 }
 
 export function googleCalendarToolsStateFromPreview(

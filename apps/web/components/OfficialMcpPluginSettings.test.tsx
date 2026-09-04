@@ -12,6 +12,7 @@ import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  defaultGranolaToolsState,
   defaultHubSpotToolsState,
   defaultLatitudeToolsState,
   defaultPostHogToolsState,
@@ -23,6 +24,7 @@ import {
   GmailPluginDetailView,
   GoogleCalendarPluginDetail,
   GoogleDrivePluginDetail,
+  GranolaPluginDetail,
   githubToolsStateFromPlugin,
   gmailToolsStateFromPlugin,
   googleCalendarToolsStateFromPlugin,
@@ -51,6 +53,7 @@ import {
   GMAIL_PLUGIN_SOURCE,
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
+  GRANOLA_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
   JAMIE_PLUGIN_SOURCE,
   LATITUDE_PLUGIN_SOURCE,
@@ -125,6 +128,15 @@ const appData = vi.hoisted(() => ({
       accountName: "Acme Analytics",
       integrationId: "gint_posthog_tools",
       capabilityModes: { read: "on", write: "ask" },
+    },
+    granola_mcp: {
+      provider: "granola",
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Granola",
+      integrationId: "gint_granola_mcp",
+      capabilityModes: { read: "on", query: "ask" },
     },
     stripe: {
       connected: true,
@@ -1347,6 +1359,32 @@ describe("Linear plugin settings", () => {
     expect(JAMIE_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
     );
+  });
+
+  it("maps Granola MCP separately from legacy Wiki ingestion", () => {
+    const granolaPlugin = {
+      ...plugin,
+      id: "plugin_granola",
+      name: "granola",
+      manifest: { name: "granola", description: "Search Granola meeting history." },
+      source: { ...plugin.source, path: "granola" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <GranolaPluginDetail
+        pluginState={{ status: "ready", plugin: granolaPlugin }}
+        toolsState={defaultGranolaToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("The Granola account opencompany uses when you search meeting history.");
+    expect(html).toContain("Check Granola account");
+    expect(html).toContain("Read meeting content");
+    expect(html).toContain("Configure legacy Granola API ingestion in Wiki sources");
+    expect(GRANOLA_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/cf036c82fc5186f5187e4da59b040ce92e492df3/granola",
+    );
+    expect(useLiveQuery).not.toHaveBeenCalled();
   });
 
   it("maps the workspace Stripe key onto the official plugin surface", () => {

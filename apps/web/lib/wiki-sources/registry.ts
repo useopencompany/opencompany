@@ -37,7 +37,7 @@ export const WIKI_SOURCE_PROVIDERS: WikiSourceProviderDef[] = [
     Icon: GranolaIcon,
     tileClass: "bg-[#F0EBE1] text-[#1A1714]",
     connectionKind: "api_key",
-    connectHref: "/settings/granola",
+    connectHref: "/wiki/sources",
     scopeRequired: false,
   },
   {

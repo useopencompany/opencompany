@@ -97,6 +97,32 @@ describe("WikiSourcesPanel", () => {
     expect(screen.queryByText("Recent ingestion activity")).not.toBeInTheDocument();
   });
 
+  it("keeps legacy Granola API ingestion on the Wiki source card", async () => {
+    const user = userEvent.setup();
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    await user.click(await screen.findByRole("button", { name: "Set up Granola" }));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("Connect Granola");
+    expect(screen.getByText("Granola setup form")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveTextContent("legacy background ingestion");
+  });
+
+  it("does not expose the Granola MCP OAuth row as a Wiki source", async () => {
+    mocks.integrations = [
+      integration({
+        provider: "granola",
+        externalId: "granola_mcp",
+        accountName: "Granola",
+        accountType: "mcp_server",
+      }),
+    ];
+    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
+
+    expect(await screen.findByRole("button", { name: "Set up Granola" })).toBeInTheDocument();
+    expect(screen.queryByText("Granola tool access")).not.toBeInTheDocument();
+    expect(mocks.upsertWikiSource).not.toHaveBeenCalled();
+  });
   it("does not start the live integration collection during server rendering", () => {
     const html = renderToString(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
 

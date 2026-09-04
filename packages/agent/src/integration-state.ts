@@ -123,6 +123,15 @@ export type GranolaProviderState = {
   statusReason: string | null;
 };
 
+export type GranolaMcpProviderState = {
+  provider: "granola";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
+};
 // Fathom connects with a personal API key minted in Fathom's user settings;
 // the integration id is what the brain-source picker and save action key
 // config rows on.
@@ -266,6 +275,7 @@ export type IntegrationState = {
   jamie: JamieProviderState;
   slack: SlackProviderState;
   granola: GranolaProviderState;
+  granola_mcp: GranolaMcpProviderState;
   fathom: FathomProviderState;
   attio: AttioProviderState;
   stripe: StripeProviderState;
@@ -352,13 +362,18 @@ export function personalAccountsFromRows(
       }
       continue;
     }
+    if (row.provider === "granola") {
+      if ((row.externalId ?? row.external_id) !== "granola_mcp") {
+        personalAccounts.granola.push(accountViewFromRow("granola", row));
+      }
+      continue;
+    }
     if (
       row.provider === "gmail" ||
       row.provider === "google_calendar" ||
       row.provider === "google_drive" ||
       row.provider === "github_user" ||
       row.provider === "slack" ||
-      row.provider === "granola" ||
       row.provider === "fathom" ||
       row.provider === "attio" ||
       row.provider === "betterstack" ||
@@ -376,6 +391,7 @@ export function personalAccountsFromRows(
 
 export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): IntegrationState {
   const byProvider = new Map<IntegrationProvider, IntegrationStateRow>();
+  let granolaMcpRow: IntegrationStateRow | undefined;
   for (const row of rows) {
     if (row.status === "disconnected") continue;
     // Provider "linear" covers two kinds of rows; the MCP card must only ever
@@ -387,6 +403,10 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     // HubSpot also has a separate OAuth connection for Wiki ingestion. Only
     // the MCP-auth-app row belongs to the plugin settings and action gateway.
     if (row.provider === "hubspot" && (row.externalId ?? row.external_id) !== "hubspot_mcp") {
+      continue;
+    }
+    if (row.provider === "granola" && (row.externalId ?? row.external_id) === "granola_mcp") {
+      granolaMcpRow = row;
       continue;
     }
     // GitHub and Stripe are workspace-owned; personal rows for those providers
@@ -421,6 +441,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     jamie: jamieProviderState(byProvider.get("jamie")),
     slack: slackProviderState(byProvider.get("slack")),
     granola: granolaProviderState(byProvider.get("granola")),
+    granola_mcp: granolaMcpProviderState(granolaMcpRow),
     fathom: fathomProviderState(byProvider.get("fathom")),
     attio: attioProviderState(byProvider.get("attio")),
     stripe: stripeProviderState(byProvider.get("stripe")),
@@ -691,6 +712,29 @@ function granolaProviderState(row: IntegrationStateRow | undefined): GranolaProv
   };
 }
 
+function granolaMcpProviderState(row: IntegrationStateRow | undefined): GranolaMcpProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "granola",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      statusReason: null,
+      capabilityModes: {},
+    };
+  }
+
+  return {
+    provider: "granola",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+  };
+}
 function fathomProviderState(row: IntegrationStateRow | undefined): FathomProviderState {
   if (!row || row.status === "disconnected") {
     return {

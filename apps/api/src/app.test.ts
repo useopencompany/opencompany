@@ -1811,6 +1811,8 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/linear/callback", "mcp.callback.linear"],
       ["GET", "/integrations/hubspot-mcp/start", "mcp.start.hubspot"],
       ["GET", "/integrations/hubspot-mcp/callback", "mcp.callback.hubspot"],
+      ["GET", "/integrations/granola-mcp/start", "mcp.start.granola"],
+      ["GET", "/integrations/granola-mcp/callback", "mcp.callback.granola"],
       ["GET", "/integrations/posthog/start", "mcp.start.posthog"],
       ["GET", "/integrations/posthog/callback", "mcp.callback.posthog"],
       ["GET", "/integrations/neon/start", "mcp.start.neon"],

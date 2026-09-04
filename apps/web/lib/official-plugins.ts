@@ -2,6 +2,7 @@ export type OfficialMcpPluginName =
   | "betterstack"
   | "github"
   | "gmail"
+  | "granola"
   | "google-calendar"
   | "google-drive"
   | "hubspot"
@@ -42,6 +43,7 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "betterstack"
     | "github_user"
     | "gmail"
+    | "granola"
     | "google_calendar"
     | "google_drive"
     | "hubspot"
@@ -112,6 +114,20 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     accountDescription: "The most recently connected Gmail account powers Gmail tools.",
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure Gmail ingestion in Wiki sources",
+  },
+  granola: {
+    name: "granola",
+    kind: "mcp",
+    label: "Granola",
+    description: "Search and read meeting notes, summaries, folders, and transcripts.",
+    category: "productivity",
+    source:
+      "https://github.com/useopencompany/plugins/tree/cf036c82fc5186f5187e4da59b040ce92e492df3/granola",
+    connectionProvider: "granola",
+    connectHref: "/api/integrations/granola-mcp/start?returnTo=/settings/plugins/granola",
+    accountDescription: "The Granola account opencompany uses when you search meeting history.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure legacy Granola API ingestion in Wiki sources",
   },
   "google-calendar": {
     name: "google-calendar",
