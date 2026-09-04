@@ -218,15 +218,22 @@ export const PROVIDER_CAPABILITIES: Partial<
   attio: [
     {
       id: "read",
-      label: "Read Attio",
-      description: "Look up CRM records, lists, fields, and pipeline entries.",
+      label: "Inspect Attio structure",
+      description: "Inspect CRM objects, fields, lists, teams, and your Attio identity.",
       defaultMode: "on",
     },
     {
-      id: "write",
-      label: "Update Attio",
+      id: "query",
+      label: "Read CRM data",
       description:
-        "Update CRM records, add them to lists, change list-entry fields, and add comments.",
+        "Read records, list entries, comments, notes, tasks, meetings, call transcripts, emails, members, and reports.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Change Attio",
+      description:
+        "Create, update, merge, or delete CRM records, lists, comments, notes, and tasks.",
       defaultMode: "ask",
     },
   ],

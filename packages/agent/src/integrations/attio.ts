@@ -406,6 +406,7 @@ export async function getAttioIntegrationState(
       and(
         eq(integrations.userWorkosId, userWorkosId),
         eq(integrations.provider, ATTIO_PROVIDER),
+        ne(integrations.externalId, "attio_mcp"),
         ne(integrations.status, "disconnected"),
       ),
     )

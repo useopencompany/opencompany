@@ -6,6 +6,7 @@ import {
   saveIntegrationCredential,
 } from "@opencompany/db/integrations";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { startAttioMcpOAuth, verifyAttioMcpState } from "@/lib/integrations/attio-mcp";
 import {
   startBetterStackMcpOAuth,
   verifyBetterStackMcpState,
@@ -181,6 +182,28 @@ describe("opencompany remote MCP OAuth", () => {
     );
     expect(vi.mocked(auth).mock.calls[0]?.[1]).not.toHaveProperty("scope");
     expect(observed.clientMetadata).toMatchObject({ scope: "read write" });
+  });
+
+  it("connects Attio through dynamic OAuth with its documented endpoint and scopes", async () => {
+    await startAttioMcpOAuth({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/attio",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ serverUrl: "https://mcp.attio.com/mcp" }),
+    );
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/attio-mcp/callback",
+    );
+    expect(observed.clientMetadata).toMatchObject({ scope: "openid offline_access mcp" });
+    expect(observed.clientInformation).toBeUndefined();
+    expect(verifyAttioMcpState(observed.state)).toMatchObject({
+      provider: "attio",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/attio",
+    });
   });
 
   it("connects PostHog with only the analytics scopes and tools opencompany exposes", async () => {

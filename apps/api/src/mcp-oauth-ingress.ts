@@ -1,5 +1,11 @@
 import { getAppUrl } from "@opencompany/agent/app-url";
 import {
+  appendAttioMcpStatus,
+  completeAttioMcpOAuth,
+  startAttioMcpOAuth,
+  verifyAttioMcpState,
+} from "@opencompany/agent/integrations/attio-mcp";
+import {
   appendBetterStackMcpStatus,
   completeBetterStackMcpOAuth,
   startBetterStackMcpOAuth,
@@ -56,6 +62,7 @@ const logger = createLogger({ service: "opencompany-api", runtime: "mcp-oauth-in
 type DbLike = any;
 
 export type McpOAuthProvider =
+  | "attio"
   | "linear"
   | "hubspot"
   | "granola"
@@ -87,6 +94,14 @@ type McpProviderFlow = {
 };
 
 const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
+  attio: {
+    start: startAttioMcpOAuth,
+    complete: completeAttioMcpOAuth,
+    verifyState: verifyAttioMcpState,
+    appendStatus: appendAttioMcpStatus,
+    deniedReason: "attio_mcp_denied",
+    invalidStatePath: "/settings/plugins/attio?integration=attio&setup=error&reason=invalid_state",
+  },
   betterstack: {
     start: startBetterStackMcpOAuth,
     complete: completeBetterStackMcpOAuth,

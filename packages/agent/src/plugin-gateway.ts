@@ -15,6 +15,11 @@ import {
   type RemoteMcpGatewayRegistration,
 } from "./actions/remote-mcp";
 import {
+  ATTIO_MCP_ENDPOINT_URL,
+  getAttioMcpIntegrationState,
+  loadAttioMcpWorkerConnection,
+} from "./integrations/attio-mcp";
+import {
   BETTERSTACK_MCP_ENDPOINT_URL,
   getBetterStackIntegrationState,
   loadBetterStackMcpWorkerConnection,
@@ -107,6 +112,12 @@ type Identity = { userWorkosId: string; workspaceId: string };
 const logger = createLogger({ service: "opencompany-agent", runtime: "plugin-gateway" });
 
 const providerBindings = {
+  attio: {
+    provider: "attio",
+    endpointUrl: ATTIO_MCP_ENDPOINT_URL,
+    getState: getAttioMcpIntegrationState,
+    loadConnection: loadAttioMcpWorkerConnection,
+  },
   betterstack: {
     provider: "betterstack",
     endpointUrl: BETTERSTACK_MCP_ENDPOINT_URL,

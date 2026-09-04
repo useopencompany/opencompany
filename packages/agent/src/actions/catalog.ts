@@ -63,6 +63,9 @@ export async function resolveActionCatalog(
   const linearPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:linear:"),
   );
+  const attioPluginInstalled = remoteMcpRegistrations.some((registration) =>
+    registration.source.startsWith("plugin:attio:"),
+  );
   const githubPluginInstalled = remoteMcpRegistrations.some((registration) =>
     registration.source.startsWith("plugin:github:"),
   );
@@ -111,7 +114,7 @@ export async function resolveActionCatalog(
     posthogPluginInstalled ? null : resolvePostHogActions(input.userWorkosId).catch(() => null),
     latitudePluginInstalled ? null : resolveLatitudeActions(input.userWorkosId).catch(() => null),
     neonPluginInstalled ? null : resolveNeonActions(input.userWorkosId).catch(() => null),
-    resolveAttioActions(input.userWorkosId).catch(() => null),
+    attioPluginInstalled ? null : resolveAttioActions(input.userWorkosId).catch(() => null),
     githubPluginConnected ? null : resolveGitHubActions(input.workspaceId).catch(() => null),
     stripePluginInstalled ? null : resolveStripeActions(input.workspaceId).catch(() => null),
     resolveRevolutActions(input.workspaceId).catch(() => null),

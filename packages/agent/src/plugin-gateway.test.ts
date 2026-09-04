@@ -2,6 +2,8 @@ import type { PluginGatewayRegistrationRecord } from "@opencompany/db/plugin-gat
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  getAttioState: vi.fn(),
+  loadAttioConnection: vi.fn(),
   claimRefresh: vi.fn(async () => true),
   isActive: vi.fn(async () => true),
   listRegistrations: vi.fn(),
@@ -58,6 +60,11 @@ vi.mock("./integrations/linear-mcp", () => ({
   LINEAR_MCP_ENDPOINT_URL: "https://mcp.linear.app/mcp",
   getLinearIntegrationState: mocks.getState,
   loadLinearMcpWorkerConnection: mocks.loadConnection,
+}));
+vi.mock("./integrations/attio-mcp", () => ({
+  ATTIO_MCP_ENDPOINT_URL: "https://mcp.attio.com/mcp",
+  getAttioMcpIntegrationState: mocks.getAttioState,
+  loadAttioMcpWorkerConnection: mocks.loadAttioConnection,
 }));
 vi.mock("./integrations/betterstack-mcp", () => ({
   BETTERSTACK_MCP_ENDPOINT_URL: "https://mcp.betterstack.com",
@@ -695,6 +702,40 @@ describe("plugin gateway registration cache", () => {
       {
         ...hubspotRecord,
         server: { ...hubspotRecord.server, url: "https://evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Attio credentials only to Attio's exact hosted MCP endpoint", async () => {
+    const attioRecord = record({
+      pluginName: "attio",
+      pluginLabel: "Attio",
+      pluginDescription: "Attio CRM tools.",
+      connectionProvider: "attio",
+      server: {
+        name: "attio",
+        type: "streamable-http",
+        url: "https://mcp.attio.com/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([attioRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:attio:attio",
+        connectionProvider: "attio",
+        getState: mocks.getAttioState,
+        loadConnection: mocks.loadAttioConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...attioRecord,
+        server: { ...attioRecord.server, url: "https://evil.example/mcp" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
