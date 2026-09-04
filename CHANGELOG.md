@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The context indicator now shows how full a chat's context actually is, instead of inflating after multi-step tool runs (#1558) — @louis.
 - Skill search is more forgiving: a relevant skill no longer disappears just because your query included an extra word (#1560) — @louis.
 - Tasks no longer get stuck retrying forever — a run that can't finish cleanly is now stopped instead of restarting indefinitely (#1551, #1552) — @louis.
+- Tasks recover from transient coding-engine setup failures, and can repair a missing final response instead of marking otherwise completed work as failed (#1579, #1587) — @louis.
 - Claude coding sessions start reliably again, fixing authorization and readiness checks that could fail a session before your prompt even ran (#1553, #1550) — @louis.
 - Connected actions like PostHog stay available across turns instead of needing to be rediscovered mid-conversation (#1568) — @louis.
 
