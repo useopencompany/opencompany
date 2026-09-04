@@ -69,6 +69,19 @@ describe("External engine tool capability authority", () => {
     });
   });
 
+  it("authorizes MCP initialization while the claimed engine session is starting", () => {
+    expect(
+      authorizeExternalEngineToolCapability({
+        capability,
+        state: state({ sessionStatus: "starting" }),
+        now,
+      }),
+    ).toMatchObject({
+      conversationId: "conversation_1",
+      engine: "claude_code",
+    });
+  });
+
   it.each([
     ["Codex", { engine: "codex" }],
     [
@@ -94,6 +107,8 @@ describe("External engine tool capability authority", () => {
     ["revoked membership", { membershipId: "" }],
     ["interrupted turn", { interruptRequestedAt: now }],
     ["settled attempt", { attemptStatus: "succeeded" }],
+    ["failed session", { sessionStatus: "failed" }],
+    ["idle session", { sessionStatus: "idle" }],
   ])("rejects %s authority", (_name, overrides) => {
     expect(
       authorizeExternalEngineToolCapability({ capability, state: state(overrides), now }),

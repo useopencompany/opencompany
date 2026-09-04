@@ -68,7 +68,10 @@ export function authorizeExternalEngineToolCapability(input: {
     state.attemptWorkerId !== state.turnLeaseOwner ||
     state.attemptStatus !== "running" ||
     (state.engine !== "claude_code" && state.engine !== "codex") ||
-    state.sessionStatus !== "running" ||
+    // ACP clients initialize MCP before they emit turn.started. The claimed Run and Attempt
+    // already own a live lease at that point, while the session deliberately remains in the
+    // presentation-level "starting" state until the engine turn begins.
+    (state.sessionStatus !== "starting" && state.sessionStatus !== "running") ||
     state.activeTurnId !== capability.codexChatTurnId ||
     !isWikiHostToolContractVersion(state.hostToolContractVersion) ||
     !state.workspaceId ||
