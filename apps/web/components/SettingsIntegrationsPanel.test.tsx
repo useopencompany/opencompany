@@ -610,7 +610,7 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.queryByText("@acme · Acme")).not.toBeInTheDocument();
   });
 
-  it("shows a workspace-owned Stripe connection and test-mode label", () => {
+  it("keeps Stripe out of legacy settings now that it lives under Plugins", () => {
     const integrations = integrationStateFromRows([
       {
         id: "gint_stripe",
@@ -625,18 +625,7 @@ describe("SettingsIntegrationsPanel", () => {
 
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
-    const stripeCard = screen
-      .getByText(
-        "Give opencompany read-only access to payment activity, subscriptions, and receivables.",
-      )
-      .closest("div.rounded-2xl");
-    expect(stripeCard).not.toBeNull();
-    expect(within(stripeCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
-    expect(within(stripeCard as HTMLElement).getByText(/Acme Payments · Test mode/)).toBeVisible();
-    expect(within(stripeCard as HTMLElement).queryByRole("link", { name: "Connect" })).toBeNull();
-    expect(within(stripeCard as HTMLElement).getByRole("link", { name: "Manage" })).toHaveAttribute(
-      "href",
-      "/settings/stripe",
-    );
+    expect(screen.queryByText("Stripe")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Acme Payments/)).not.toBeInTheDocument();
   });
 });

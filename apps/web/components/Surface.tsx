@@ -10,6 +10,7 @@ import type {
 import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
+  getAgentModelDefinition,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
@@ -5791,18 +5792,23 @@ function ChatTitleHeader({
   isTask?: boolean;
 }) {
   const EngineIcon = isCloudCodingEngine(engine) ? ENGINE_REGISTRY[engine].Icon : null;
+  const modelLabel = getAgentModelDefinition(model)?.label ?? model;
   return (
     <div className="flex min-w-0 items-center gap-2 text-ink">
-      {EngineIcon ? (
-        <EngineIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
-      ) : (
-        <ModelProviderIcon
-          modelId={model}
-          size={14}
-          strokeWidth={1.9}
-          className="shrink-0 text-ink-muted"
-        />
-      )}
+      <Tooltip>
+        <TooltipTrigger
+          type="button"
+          aria-label={`Model: ${modelLabel}`}
+          className="inline-flex shrink-0 rounded-sm text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          {EngineIcon ? (
+            <EngineIcon size={14} strokeWidth={1.9} />
+          ) : (
+            <ModelProviderIcon modelId={model} size={14} strokeWidth={1.9} />
+          )}
+        </TooltipTrigger>
+        <TooltipContent>{`Model: ${modelLabel}`}</TooltipContent>
+      </Tooltip>
       <span className="max-w-[min(420px,calc(100vw-7rem))] truncate text-[12.5px] font-medium leading-4">
         {title}
       </span>
