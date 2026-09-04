@@ -29,7 +29,7 @@ const SETTINGS_TITLES: Record<string, string> = {
   "/settings/skills": "Skills",
   "/settings/mcp": "MCP",
   "/settings/attio": "Attio",
-  "/settings/fathom": "Fathom",
+  "/settings/fathom": "Fathom ingestion",
   "/settings/granola": "Granola",
   "/settings/jamie": "Jamie",
 };

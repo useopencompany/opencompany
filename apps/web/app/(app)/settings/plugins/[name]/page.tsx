@@ -1,6 +1,7 @@
 import {
   AttioPluginDetail,
   BetterStackPluginDetail,
+  FathomPluginDetail,
   GitHubPluginDetail,
   GmailPluginDetail,
   GoogleCalendarPluginDetail,
@@ -40,6 +41,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ n
     const Detail = {
       attio: AttioPluginDetail,
       betterstack: BetterStackPluginDetail,
+      fathom: FathomPluginDetail,
       github: GitHubPluginDetail,
       gmail: GmailPluginDetail,
       granola: GranolaPluginDetail,

@@ -177,6 +177,25 @@ export function BetterStackPluginDetail({
   );
 }
 
+export function FathomPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.fathom}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function GitHubPluginDetail({
   pluginState,
   canEdit,
@@ -1473,6 +1492,7 @@ function pluginAccountsFromState(
   if (
     config.connectionProvider === "attio" ||
     config.connectionProvider === "betterstack" ||
+    config.connectionProvider === "fathom" ||
     config.connectionProvider === "github_user" ||
     config.connectionProvider === "gmail" ||
     config.connectionProvider === "google_calendar" ||
@@ -1638,6 +1658,10 @@ export function defaultNeonToolsState(): PluginToolsState {
 
 export function defaultBetterStackToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("betterstack");
+}
+
+export function defaultFathomToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("fathom");
 }
 
 export function defaultPostHogToolsState(): PluginToolsState {
