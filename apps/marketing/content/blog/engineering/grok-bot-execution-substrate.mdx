@@ -1,0 +1,130 @@
+---
+title: "The execution substrate is the product"
+description: "What Grok Bot's architecture teaches you about building persistent agents."
+date: "2026-09-04"
+author: "Louis Morgner"
+keywords:
+  - persistent ai agents
+  - ai agent architecture
+  - ai agent infrastructure
+  - agent execution platform
+  - multi-agent orchestration
+  - Grok Bot architecture
+---
+
+Grok Bot is not Grok with a computer attached. It is a persistent agent execution platform that happens to ship a chat UI. We read the official documentation, the reverse-engineered 0.18 desktop build, and xAI's model-training posts to work out what is actually inside. This is what we found — and what we would steal.
+
+One note on evidence, because most writing about this product laundered guesses into facts. Every claim below carries a label:
+
+- **Verified** — current official xAI/Cursor documentation
+- **Artifact** — the unofficial reconstruction of the shipped 0.18 macOS build. Real implementation evidence, but pinned to one version, extended by its author, and not authoritative for current production
+- **Inference** — our synthesis from verified interfaces
+- **Unknown** — no defensible public evidence exists
+
+## The shape of the system (verified)
+
+- **Thin clients everywhere.** macOS, Windows, Linux, iOS, Android. Chat, approvals, live computer preview, takeover. No work runs on the client.
+- **A Cursor-hosted control plane.** Authentication and data settings are Cursor account controls.
+- **One persistent Firecracker microVM per user.** Own kernel, memory, virtual devices; Debian-compatible. Every Bot on the account shares the VM — filesystem, browser sessions, CLI credentials.
+- **Logical Bots on top.** Each Bot has a name, role, conversation history, memories, skills, routines, and its own screen. Screens exist for concurrency — one computer-use task per screen at a time — not for security. Bot identity is not a security boundary.
+- **Delegation outward.** Coding work goes to separate Cursor Cloud Agent VMs.
+
+The load-bearing decision is the shared VM. It makes cross-Bot handoff trivial — same files, same logins — and it means every Bot inherits every other Bot's access. That is a product decision dressed as an infrastructure decision, and most reviews missed it.
+
+## The turn lifecycle (inference)
+
+Nobody published the production scheduler or the state machine. But every component is confirmed in the docs, and the sequence is the useful part:
+
+1. A trigger — user message, schedule, or integration event — targets a named Bot.
+2. The control plane assembles context: role, conversation, memory, skills, team rules, artifacts.
+3. Cursor selects a serving model. There is no user-facing picker, and the mix can change.
+4. The model emits tool calls; the runtime picks an execution surface.
+5. Consequential actions pass Auto Review and deterministic policy; the run pauses for approval or human takeover when required.
+6. Tool results return to the loop. Progress streams to chat; background work continues with the client closed.
+7. The run writes artifacts, may delegate to another Bot or a Cloud Agent, and returns a result.
+8. Post-turn: durable summaries, memory updates, routine state.
+
+If you are building an agent product, this loop is most of your engineering. The model is a line item in step three.
+
+## Execution surfaces: structured first, pixels last
+
+The documented preference order:
+
+1. **Connector/API** when one exists
+2. **Shell and files** where appropriate
+3. **Browser automation** when no connector exists
+4. **Pixel-level computer use** as the fallback for arbitrary GUIs
+
+Reliability drops as the surface gets less structured. Treat pixel control as the expensive fallback it is — not as the demo.
+
+Two details worth stealing:
+
+- **OAuth tokens never reach the agent.** Connector tokens stay on Cursor's connector backend — never given to the Bot, never stored in its VM. The agent calls the connector; it does not hold the credential.
+- **Humans own the irreducible moments.** Passwords, passkeys, 2FA, CAPTCHAs, payment confirmations — routed to human takeover, by design.
+
+The 0.18 artifact matches the doctrine: separate subagent wrappers for DOM/snapshot browser work versus screenshot/click/type computer use (artifact). The hierarchy is not marketing. It is visible in the code shape.
+
+## State is tiered, with explicit ownership
+
+A Bot's state splits into at least six tiers: role/profile, transcript, durable memory, skills, routines, artifacts. You can see the storage design in one detail: duplicating a Bot copies configuration, skills, and routines — but not conversation, memory, or attachments (verified). Operational configuration and accumulated state are separate stores.
+
+Memory deserves its own paragraph, because everyone gets it wrong. In the 0.18 artifact, a background synthesizer proposes memory changes with citations to evidence; a separate verification pass rejects unsupported changes; explicit user-written memories are protected from automatic mutation (artifact). And the docs tell users to re-check current sources for important decisions — memory is a cache of preferences, not a source of truth.
+
+Skills are procedures, not prompts: expected inputs, access, steps, validation, outputs, approval boundary. "Teach a task" records up to ten minutes of visible browser actions and compiles the demonstration into a draft skill that must be reviewed and tested. Routine test runs perform real actions. There is no simulation mode.
+
+## Persistence is a feature; observability is an add-on (verified)
+
+Files and browser sessions survive hibernation on durable disk. Image updates preserve member files; resets preserve synced durable state but can lose recent unsynced work — the durability model is explicit about what it protects.
+
+Enterprise Action Recording is off by default. Enabled, it stores sanitized actions for 90 days and can stream events to your own OpenTelemetry collector. The defaults tell you who the product is built for: individuals first, compliance teams later.
+
+## Safety is a system, not a model
+
+Auto Review is a separate model that evaluates shell commands, plugin calls, computer-use actions, automation writes, and subagent launches before execution. Allow, request approval, or deny.
+
+The important part is what sits next to it: deterministic controls — network destination policy, per-action approvals, connector policy, per-user VM isolation. The honest part is what it does not cover: memory writes and most settings changes bypass Auto Review entirely. External content is marked untrusted when shown to the model.
+
+One more detail worth knowing before you connect anything sensitive: hosted computers use shared static egress IPs, and teams without a network policy default to allow-all egress.
+
+A reviewer model is useful. It cannot be your only enforcement mechanism.
+
+## Orchestration is deliberately boring
+
+Multi-Bot coordination is peer messaging, group chats, ownership handoffs, and delegation to Cloud Agents — not a universal supervisor algorithm. The 0.18 coordinator used bounded, cancellable, round-robin member turns (artifact, version-specific). Bounded and cancellable is the point: budgets, checkpoints, idempotent actions, visible progress. Open-ended agent debate is a bug, not a feature.
+
+## The same patterns show up in their open source
+
+xAI's Grok Build is a different product — a coding harness, not Grok Bot source. But it confirms the house style: declarative agent definitions, independent subagent contexts, tool allow/deny policy, worktree isolation, context compaction, and workflows built from fresh-context parallel workers with checkpoints, aggregation, and a skeptical verification role. One company, one design language: bounded agents, explicit policy, verification as a separate role.
+
+## The model layer is a dependency, not the product
+
+Grok 4.5 was trained alongside Cursor: hundreds of thousands of multi-step engineering RL tasks, automated and model-based grading, and highly asynchronous agentic rollouts lasting hours across tens of thousands of GPUs. Grok 4.6 extended the run with regenerated SFT trajectories across reasoning levels and agent harnesses, then agentic RL over coding, kernel optimization, web development, and CAD.
+
+That training explains the product's long-horizon behavior. It does not tell you what serves your turn. The docs are explicit that Cursor manages model selection and the mix can change; whether a given turn runs on 4.5, 4.6, or something else is **unknown** — and the product is designed so it does not matter. If your architecture breaks when the model swaps, you built a demo.
+
+## What we rejected
+
+- **"The full Grok Bot source leaked."** No. The best-known repository is an explicit reconstruction and extension of one pinned build — original frontend and source maps absent, several headline features added by the researcher, including an inference router and a local Docker sandbox. Useful evidence. Not the monorepo.
+- **"Grok-1's 314B open weights reveal the current architecture."** They do not.
+- **Any claim about current production prompt assembly, the scheduler, or the multi-Bot routing algorithm.** Not public. The round-robin coordinator is 0.18 artifact evidence only.
+
+## Six things we would steal
+
+1. **The substrate is the moat.** Persistence, credentials, approvals, recovery, observability, reliable completion. Multi-agent chat is not an architecture.
+2. **Tier the state.** Role, transcript, memory, skills, routines, artifacts — each with an owner and a retention rule. Configuration and accumulated state are different stores.
+3. **Connector, then DOM, then pixels.** Reliability falls as structure falls. Never let the agent hold OAuth tokens.
+4. **Pair the reviewer model with deterministic limits.** Neither is sufficient alone.
+5. **Bound the orchestration.** Budgets, cancellation, checkpoints, idempotency, explicit ownership, visible progress. Resume beats restart.
+6. **Choose your isolation boundary on purpose.** One VM per user makes handoff cheap and access broad. Company-wide agents deserve a credential- or workload-scoped boundary.
+
+We are building OpenCompany on these principles — persistent agents with tiered state, structured actions first, and approval boundaries that are deterministic where it matters. Grok Bot is the clearest public proof that this category works, and that the hard part was never the model.
+
+The model will keep changing. The substrate is what you keep.
+
+## Sources
+
+- [Grok Bot documentation](https://docs.x.ai/grok-bot/): [Security](https://docs.x.ai/grok-bot/security), [Computer & Apps](https://docs.x.ai/grok-bot/computer-and-apps), [Skills, Routines & Automations](https://docs.x.ai/grok-bot/skills-routines-and-automations), [Teams & Enterprises](https://docs.x.ai/grok-bot/teams-and-enterprises), and [FAQ](https://docs.x.ai/grok-bot/faq)
+- [Designing Grok Bot](https://x.ai/news/designing-grok-bot)
+- [Grok 4.5](https://x.ai/news/grok-4-5) and [Grok 4.6](https://x.ai/news/grok-4-6)
+- [Grok Build](https://github.com/xai-org/grok-build)
+- [grok-bot-0.18-reconstructed](https://github.com/b-nnett/grok-bot-0.18-reconstructed) and its [provenance notes](https://github.com/b-nnett/grok-bot-0.18-reconstructed/blob/main/PROVENANCE.md)
