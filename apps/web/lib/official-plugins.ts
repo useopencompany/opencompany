@@ -6,9 +6,11 @@ export type OfficialMcpPluginName =
   | "google-drive"
   | "linear"
   | "neon"
+  | "posthog"
   | "render"
   | "signoz"
-  | "slack";
+  | "slack"
+  | "x";
 export type OfficialSkillPluginName = "yc-advise";
 export type OfficialPluginName = OfficialMcpPluginName | OfficialSkillPluginName;
 
@@ -30,9 +32,11 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
     | "google_drive"
     | "linear"
     | "neon"
+    | "posthog"
     | "render"
     | "signoz"
-    | "slack";
+    | "slack"
+    | "x_account";
   connectHref: string;
   accountLabel?: string;
   accountDescription: string;
@@ -137,6 +141,18 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectHref: "/api/integrations/neon/start?returnTo=/settings/plugins/neon",
     accountDescription: "The account opencompany uses when you run Neon tools.",
   },
+  posthog: {
+    name: "posthog",
+    kind: "mcp",
+    label: "PostHog",
+    description:
+      "Explore dashboards, insights, schemas, and product analytics, with permission-gated insight creation.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+    connectionProvider: "posthog",
+    connectHref: "/api/integrations/posthog/start?returnTo=/settings/plugins/posthog",
+    accountDescription: "The PostHog account opencompany uses when you run analytics tools.",
+  },
   render: {
     name: "render",
     kind: "mcp",
@@ -170,6 +186,19 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "slack",
     connectHref: "/api/integrations/slack/start?returnTo=/settings/plugins/slack",
     accountDescription: "The most recently connected Slack account powers Slack tools.",
+  },
+  x: {
+    name: "x",
+    kind: "mcp",
+    label: "X",
+    description: "Research public conversations and manage your X account with approval.",
+    source:
+      "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
+    connectionProvider: "x_account",
+    connectHref: "/api/integrations/x-account/start?returnTo=/settings/plugins/x",
+    accountLabel: "X",
+    accountDescription:
+      "The most recently connected X account powers plugin tools. Other connected X accounts remain available if the plugin is uninstalled.",
   },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginMetadata>;
 

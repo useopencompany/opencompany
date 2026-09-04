@@ -2744,6 +2744,29 @@ describe("Surface chat streaming UI", () => {
     expect(await screen.findByText("14k / 1.0M context · 1%")).toBeVisible();
   });
 
+  it("shows the session model in a tooltip from the header icon", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_model_tooltip_1",
+          title: "Model details",
+          model: "openai/gpt-5.6-terra",
+          engine: "codex",
+          messages: [],
+        }}
+      />,
+    );
+
+    const modelIcon = screen.getByRole("button", { name: "Model: GPT 5.6 Terra" });
+    await user.hover(modelIcon);
+
+    expect(await screen.findByText("Model: GPT 5.6 Terra")).toBeVisible();
+  });
+
   it("shows when a Codex chat is waiting for runner capacity", () => {
     render(
       <Surface
@@ -4076,7 +4099,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
     await user.type(
-      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      within(dialog).getByPlaceholderText("Search tasks and chats or start something new..."),
       "Research Q3",
     );
     await user.click(within(dialog).getByRole("option", { name: 'Start new chat: "Research Q3"' }));
@@ -4398,7 +4421,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
     await user.type(
-      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      within(dialog).getByPlaceholderText("Search tasks and chats or start something new..."),
       "Q2 planning",
     );
     const result = await within(dialog).findByText("Q2 planning");
@@ -4468,6 +4491,65 @@ describe("Surface chat streaming UI", () => {
     expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_archived");
   });
 
+  it("mixes active and archived tasks with chats in Cmd+K recency order", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <Surface
+        taskSpawningEnabled
+        tasks={[]}
+        allTasks={[
+          taskView({
+            id: "task_archived",
+            displayId: "TASK-42",
+            name: "Newest archived task",
+            prompt: "Prepare the board update",
+            archivedAt: "2026-08-10T12:00:00.000Z",
+            updatedAt: "2026-08-10T12:00:00.000Z",
+          }),
+          taskView({
+            id: "task_active",
+            displayId: "TASK-41",
+            name: "Older active task",
+            prompt: "Review customer notes",
+            updatedAt: "2026-08-08T12:00:00.000Z",
+          }),
+        ]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_middle",
+            title: "Middle active chat",
+            model: DEFAULT_MODEL,
+            preview: "Plan the next release",
+            updatedAt: "2026-08-09T12:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    const archivedTaskOption = within(dialog).getByRole("option", {
+      name: /Newest archived task/,
+    });
+    const chatOption = within(dialog).getByRole("option", { name: /Middle active chat/ });
+    const activeTaskOption = within(dialog).getByRole("option", { name: /Older active task/ });
+
+    expect(archivedTaskOption.compareDocumentPosition(chatOption)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(chatOption.compareDocumentPosition(activeTaskOption)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(within(archivedTaskOption).getByText("Archived")).toBeInTheDocument();
+
+    await user.click(archivedTaskOption);
+
+    expect(routerMock.push).toHaveBeenCalledWith("/tasks/TASK-42");
+  });
+
   it("drills from Cmd+K search into compose on Enter, prefilled with the typed query", async () => {
     const user = userEvent.setup();
 
@@ -4476,7 +4558,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
     await user.type(
-      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      within(dialog).getByPlaceholderText("Search tasks and chats or start something new..."),
       "Research Q3",
     );
     // The pinned "Start new chat" action is the only forceMounted item, so it stays
@@ -4519,7 +4601,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(
-      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      within(dialog).getByPlaceholderText("Search tasks and chats or start something new..."),
     ).toBeInTheDocument();
 
     await user.keyboard("{Escape}");

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "posthog",
+  "version": "1.0.0",
+  "description": "Explore PostHog dashboards, insights, schemas, and product analytics, with permission-gated insight creation.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://posthog.com/docs/model-context-protocol",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/posthog",
+  "license": "MIT",
+  "keywords": ["posthog", "product-analytics", "dashboards", "insights"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Read analytics",
+        "defaultMode": "on",
+        "tools": [
+          "dashboards-get-all",
+          "dashboard-get",
+          "dashboard-insights-run",
+          "insights-list",
+          "insight-get",
+          "insight-query",
+          "read-data-schema",
+          "query-trends",
+          "query-funnel",
+          "query-retention",
+          "query-paths",
+          "query-stickiness",
+          "query-lifecycle"
+        ]
+      },
+      "write": {
+        "label": "Create insights",
+        "defaultMode": "ask",
+        "tools": ["insight-create"]
+      }
+    }
+  }
+}

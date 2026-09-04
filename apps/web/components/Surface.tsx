@@ -10,6 +10,7 @@ import type {
 import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
+  getAgentModelDefinition,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
@@ -374,6 +375,7 @@ export type SurfaceChatSelection = {
 
 export function Surface({
   tasks,
+  allTasks = tasks,
   schedules = [],
   defaultModel,
   initialChat,
@@ -395,6 +397,7 @@ export function Surface({
   onConversationResolved,
 }: {
   tasks: readonly TaskView[];
+  allTasks?: readonly TaskView[];
   schedules?: readonly TaskScheduleView[];
   defaultModel: string;
   initialChat: ChatSessionView | null;
@@ -1141,15 +1144,32 @@ export function Surface({
     () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
     [optimisticallyArchivedChatIds, recentChats],
   );
-  const paletteChats = useMemo(
+  const commandPaletteItems = useMemo(
     () =>
       [
-        ...paletteRecentChats.map((chat) => ({ chat, archived: false })),
-        ...archivedChats.map((chat) => ({ chat, archived: true })),
+        ...(taskSpawningEnabled
+          ? allTasks.map((task) => ({
+              kind: "task" as const,
+              task,
+              archived: Boolean(task.archivedAt),
+            }))
+          : []),
+        ...paletteRecentChats.map((chat) => ({
+          kind: "chat" as const,
+          chat,
+          archived: false,
+        })),
+        ...archivedChats.map((chat) => ({
+          kind: "chat" as const,
+          chat,
+          archived: true,
+        })),
       ].toSorted(
-        (a, b) => new Date(b.chat.updatedAt).getTime() - new Date(a.chat.updatedAt).getTime(),
+        (a, b) =>
+          new Date(b.kind === "task" ? b.task.updatedAt : b.chat.updatedAt).getTime() -
+          new Date(a.kind === "task" ? a.task.updatedAt : a.chat.updatedAt).getTime(),
       ),
-    [archivedChats, paletteRecentChats],
+    [allTasks, archivedChats, paletteRecentChats, taskSpawningEnabled],
   );
   const showEngineComposerControls = composerEngine !== null;
 
@@ -1677,6 +1697,14 @@ export function Surface({
     (chat: ChatSummaryView) => {
       closeCommandPalette();
       router.push(chatHref(chat.id));
+    },
+    [closeCommandPalette, router],
+  );
+
+  const jumpToTask = useCallback(
+    (task: TaskView) => {
+      closeCommandPalette();
+      router.push(`/tasks/${encodeURIComponent(task.displayId)}`);
     },
     [closeCommandPalette, router],
   );
@@ -2691,12 +2719,12 @@ export function Surface({
       >
         <DialogHeader className="sr-only">
           <DialogTitle>
-            {commandPaletteView === "compose" ? "New chat" : "Jump to a chat"}
+            {commandPaletteView === "compose" ? "New chat" : "Jump to recent work"}
           </DialogTitle>
           <DialogDescription>
             {commandPaletteView === "compose"
               ? "Start a new chat that runs in the background."
-              : "Search chats to reopen, or start a new one."}
+              : "Search tasks and chats, or start a new chat."}
           </DialogDescription>
         </DialogHeader>
         <DialogContent
@@ -2736,7 +2764,7 @@ export function Surface({
                 autoFocus
                 value={chatSearchQuery}
                 onValueChange={setChatSearchQuery}
-                placeholder="Search chats or start something new..."
+                placeholder="Search tasks and chats or start something new..."
               />
               <CommandList>
                 <CommandGroup heading="Actions" forceMount>
@@ -2757,54 +2785,88 @@ export function Surface({
                     </CommandShortcut>
                   </CommandItem>
                 </CommandGroup>
-                <CommandEmpty>No matching chats.</CommandEmpty>
-                {paletteChats.length > 0 ? (
-                  <CommandGroup heading="Chats">
-                    {paletteChats.map(({ chat, archived }) => (
-                      <CommandItem
-                        key={chat.id}
-                        value={`chat ${archived ? "archived " : ""}${chat.title} ${chat.id}`}
-                        onSelect={() => (archived ? restoreAndOpenChat(chat) : jumpToChat(chat))}
-                        className="gap-3"
-                      >
-                        {archived && restoringChatId === chat.id ? (
-                          <LoaderCircle
-                            size={16}
-                            strokeWidth={2}
-                            className="shrink-0 animate-spin text-ink-subtle"
-                          />
-                        ) : archived ? (
-                          <Archive size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-                        ) : (
-                          <MessageSquare
-                            size={16}
-                            strokeWidth={2}
-                            className="shrink-0 text-ink-subtle"
-                          />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <p className="truncate text-[13px] font-medium text-ink">
-                              {chat.title}
+                <CommandEmpty>No matching tasks or chats.</CommandEmpty>
+                {commandPaletteItems.length > 0 ? (
+                  <CommandGroup heading="Recent">
+                    {commandPaletteItems.map((item) =>
+                      item.kind === "task" ? (
+                        <CommandItem
+                          key={`task:${item.task.id}`}
+                          value={`task ${item.archived ? "archived " : ""}${item.task.name} ${item.task.prompt} ${item.task.displayId} ${item.task.id}`}
+                          onSelect={() => jumpToTask(item.task)}
+                          className="gap-3"
+                        >
+                          <Target size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="truncate text-[13px] font-medium text-ink">
+                                {item.task.name}
+                              </p>
+                              {item.archived ? (
+                                <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
+                                  Archived
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="truncate text-[12px] text-ink-subtle">
+                              {item.task.displayId} · {item.task.prompt}
                             </p>
-                            {archived ? (
-                              <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
-                                Archived
-                              </span>
-                            ) : null}
                           </div>
-                          {archived ? null : (
-                            <p className="truncate text-[12px] text-ink-subtle">{chat.preview}</p>
+                        </CommandItem>
+                      ) : (
+                        <CommandItem
+                          key={`chat:${item.chat.id}`}
+                          value={`chat ${item.archived ? "archived " : ""}${item.chat.title} ${item.chat.id}`}
+                          onSelect={() =>
+                            item.archived ? restoreAndOpenChat(item.chat) : jumpToChat(item.chat)
+                          }
+                          className="gap-3"
+                        >
+                          {item.archived && restoringChatId === item.chat.id ? (
+                            <LoaderCircle
+                              size={16}
+                              strokeWidth={2}
+                              className="shrink-0 animate-spin text-ink-subtle"
+                            />
+                          ) : item.archived ? (
+                            <Archive
+                              size={16}
+                              strokeWidth={2}
+                              className="shrink-0 text-ink-subtle"
+                            />
+                          ) : (
+                            <MessageSquare
+                              size={16}
+                              strokeWidth={2}
+                              className="shrink-0 text-ink-subtle"
+                            />
                           )}
-                        </div>
-                        {archived ? (
-                          <CommandShortcut className="flex items-center gap-1">
-                            <RotateCcw size={12} strokeWidth={2} />
-                            Restore
-                          </CommandShortcut>
-                        ) : null}
-                      </CommandItem>
-                    ))}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="truncate text-[13px] font-medium text-ink">
+                                {item.chat.title}
+                              </p>
+                              {item.archived ? (
+                                <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
+                                  Archived
+                                </span>
+                              ) : null}
+                            </div>
+                            {item.archived ? null : (
+                              <p className="truncate text-[12px] text-ink-subtle">
+                                {item.chat.preview}
+                              </p>
+                            )}
+                          </div>
+                          {item.archived ? (
+                            <CommandShortcut className="flex items-center gap-1">
+                              <RotateCcw size={12} strokeWidth={2} />
+                              Restore
+                            </CommandShortcut>
+                          ) : null}
+                        </CommandItem>
+                      ),
+                    )}
                   </CommandGroup>
                 ) : null}
               </CommandList>
@@ -5739,18 +5801,23 @@ function ChatTitleHeader({
   isTask?: boolean;
 }) {
   const EngineIcon = isCloudCodingEngine(engine) ? ENGINE_REGISTRY[engine].Icon : null;
+  const modelLabel = getAgentModelDefinition(model)?.label ?? model;
   return (
     <div className="flex min-w-0 items-center gap-2 text-ink">
-      {EngineIcon ? (
-        <EngineIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
-      ) : (
-        <ModelProviderIcon
-          modelId={model}
-          size={14}
-          strokeWidth={1.9}
-          className="shrink-0 text-ink-muted"
-        />
-      )}
+      <Tooltip>
+        <TooltipTrigger
+          type="button"
+          aria-label={`Model: ${modelLabel}`}
+          className="inline-flex shrink-0 rounded-sm text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          {EngineIcon ? (
+            <EngineIcon size={14} strokeWidth={1.9} />
+          ) : (
+            <ModelProviderIcon modelId={model} size={14} strokeWidth={1.9} />
+          )}
+        </TooltipTrigger>
+        <TooltipContent>{`Model: ${modelLabel}`}</TooltipContent>
+      </Tooltip>
       <span className="max-w-[min(420px,calc(100vw-7rem))] truncate text-[12.5px] font-medium leading-4">
         {title}
       </span>

@@ -16,7 +16,6 @@ import {
   LinearIcon,
   NeonIcon,
   OpenAIIcon,
-  PostHogIcon,
   StripeIcon,
   XIcon,
 } from "@opencompany/ui/icons";
@@ -76,7 +75,6 @@ import {
   type JamieProviderState,
   type LinearProviderState,
   type PersonalAccountProvider,
-  type PostHogProviderState,
   type StripeProviderState,
 } from "@/lib/integration-state";
 import { gmailMcpScopesSatisfied } from "@/lib/integrations/gmail-scopes";
@@ -96,7 +94,6 @@ type IntegrationMetaKey =
   | SettingsPersonalAccountProvider
   | "github"
   | "jamie"
-  | "posthog"
   | "stripe"
   | "infisical"
   | "codex"
@@ -155,12 +152,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Connect issues, projects, and comments from Linear.",
     Icon: LinearIcon,
     tileClass: "bg-[#5E6AD2] text-white",
-  },
-  posthog: {
-    label: "PostHog",
-    description: "Explore product analytics and create focused insights from opencompany.",
-    Icon: PostHogIcon,
-    tileClass: "bg-[#F54E00] text-white",
   },
   latitude: {
     label: "Latitude",
@@ -412,7 +403,6 @@ function countWorkspaceConnected(integrations: IntegrationState) {
   return (
     (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
-    (integrationStatus(integrations.posthog) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
     (integrations.infisical.connected ? 1 : 0) +
     countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
@@ -463,7 +453,6 @@ function IntegrationCards({
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
-            <IntegrationCardRow integration={integrations.posthog} />
             <IntegrationCardRow integration={integrations.stripe} canConnect={isWorkspaceAdmin} />
             <IntegrationProviderGroupCard
               provider="hubspot"
@@ -492,10 +481,6 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
-            />
-            <IntegrationProviderGroupCard
-              provider="x_account"
-              accounts={integrations.personalAccounts.x_account}
             />
             <CodexIntegrationCard integration={integrations.codex} />
             <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
@@ -857,7 +842,6 @@ function IntegrationCardRow({
   integration:
     | GoogleProviderState
     | LinearProviderState
-    | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
     | StripeProviderState;
@@ -870,7 +854,7 @@ function IntegrationCardRow({
   const needsReconnect = integrationNeedsReconnect(integration);
   const statusReason = integrationStatusReason(integration);
   const accountLabel =
-    integration.provider === "linear" || integration.provider === "posthog"
+    integration.provider === "linear"
       ? integration.accountName
       : integration.provider === "github"
         ? integration.accountName
@@ -882,9 +866,7 @@ function IntegrationCardRow({
                 .join(" · ") || null
             : (integration.accountEmail ?? integration.accountName);
   const capabilityBody =
-    connected &&
-    (integration.provider === "linear" || integration.provider === "posthog") &&
-    integration.integrationId ? (
+    connected && integration.provider === "linear" && integration.integrationId ? (
       <CapabilityModeRows
         integrationId={integration.integrationId}
         provider={integration.provider}
@@ -1003,7 +985,7 @@ export function IntegrationAccountRow({
   capabilityIds,
   capabilityOverrides,
 }: {
-  account: IntegrationAccountView;
+  account: IntegrationAccountView<PersonalAccountProvider | "posthog">;
   purposeLabel?: string;
   reconnectHref?: string;
   showCapabilityModes?: boolean;
@@ -1037,7 +1019,11 @@ export function IntegrationAccountRow({
     account.connected &&
     !hasGoogleDriveWriteScope(account.scopes);
   const needsReconnect = account.status === "needs_reauth" || account.status === "sync_failed";
-  const accountConnectHref = reconnectHref ?? integrationConnectHref(account.provider);
+  const accountConnectHref =
+    reconnectHref ??
+    (account.provider === "posthog"
+      ? "/api/integrations/posthog/start?returnTo=/settings/plugins/posthog"
+      : integrationConnectHref(account.provider));
   const needsGmailMcpScope =
     account.provider === "gmail" && account.connected && !gmailMcpScopesSatisfied(account.scopes);
 
@@ -1772,7 +1758,6 @@ function integrationStatus(
   integration:
     | GoogleProviderState
     | LinearProviderState
-    | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
     | StripeProviderState,
@@ -1791,7 +1776,6 @@ function integrationNeedsReconnect(
   integration:
     | GoogleProviderState
     | LinearProviderState
-    | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
     | StripeProviderState,
@@ -1803,7 +1787,6 @@ function integrationStatusReason(
   integration:
     | GoogleProviderState
     | LinearProviderState
-    | PostHogProviderState
     | GitHubProviderState
     | JamieProviderState
     | StripeProviderState,
@@ -1844,8 +1827,6 @@ function integrationConnectHref(
   if (provider === "signoz") {
     return "/api/integrations/signoz/start?returnTo=/settings/plugins/signoz";
   }
-  if (provider === "posthog")
-    return "/api/integrations/posthog/start?returnTo=/settings/integrations";
   if (provider === "x_account")
     return "/api/integrations/x-account/start?returnTo=/settings/integrations";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";
