@@ -114,6 +114,7 @@ export type CreateTaskResult = {
 export type CreateTaskCommentCommand = {
   id: string;
   body: string;
+  attachmentIds?: readonly string[];
 };
 
 export type TaskComment = {
@@ -311,12 +312,24 @@ export class TaskApplicationService {
   ): Promise<CreateTaskCommentResult> {
     requireTaskPermission(actor, TASK_WRITE_PERMISSION);
     const body = input.body;
-    if (!body.trim()) throw new CoreError("invalid_argument", "A comment is required.");
+    const attachmentIds = (input.attachmentIds ?? []).map((id) => resourceId(id, "attachmentId"));
+    if (!body.trim() && attachmentIds.length === 0) {
+      throw new CoreError("invalid_argument", "A comment or attachment is required.");
+    }
     if (body.length > MAX_COMMENT_LENGTH) {
       throw new CoreError(
         "invalid_argument",
         `A comment cannot exceed ${MAX_COMMENT_LENGTH} characters.`,
       );
+    }
+    if (attachmentIds.length > CHAT_ATTACHMENTS_PER_MESSAGE) {
+      throw new CoreError(
+        "invalid_argument",
+        `A Task comment cannot contain more than ${CHAT_ATTACHMENTS_PER_MESSAGE} attachments.`,
+      );
+    }
+    if (new Set(attachmentIds).size !== attachmentIds.length) {
+      throw new CoreError("invalid_argument", "Attachment references must be unique.");
     }
     const result = await this.repository.createTaskCommentAndRun({
       actor,
@@ -325,6 +338,7 @@ export class TaskApplicationService {
         id: resourceId(input.id, "commentId"),
         // Whitespace is deliberately preserved: this exact body becomes the next user Message.
         body,
+        ...(attachmentIds.length ? { attachmentIds } : {}),
       },
     });
     if (!result) throw new CoreError("not_found", "Task not found.");

@@ -322,6 +322,51 @@ describe("AppDataProvider", () => {
     expect(screen.getByTestId("recent").getAttribute("data-runtime-status")).toBe("idle");
   });
 
+  it("keeps archived and older tasks available to global navigation", async () => {
+    const taskRows = [
+      taskRow({
+        id: "task_archived",
+        display_id: "TASK-2",
+        name: "Archived task",
+        archived_at: "2026-07-02T10:00:00.000Z",
+        created_at: "2026-07-02T10:00:00.000Z",
+        updated_at: "2026-07-02T10:00:00.000Z",
+      }),
+      taskRow({
+        id: "task_old",
+        display_id: "TASK-1",
+        name: "Old active task",
+        created_at: "2025-01-01T10:00:00.000Z",
+        updated_at: "2025-01-01T10:00:00.000Z",
+      }),
+    ];
+    const perCollection = [
+      { data: taskRows, isLoading: false },
+      { data: [], isLoading: false },
+      { data: [], isLoading: false },
+      { data: [], isLoading: true },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(() => {
+      const result = perCollection[call % perCollection.length] ?? { data: [], isLoading: false };
+      call += 1;
+      return result;
+    });
+
+    render(
+      <AppDataProvider initialData={initialData()}>
+        <TaskHistoryProbe />
+      </AppDataProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("task-history").getAttribute("data-all-task-ids")).toBe(
+        "task_archived,task_old",
+      ),
+    );
+    expect(screen.getByTestId("task-history").getAttribute("data-home-task-ids")).toBe("");
+  });
+
   it("keeps multiple API-projected working chats without a second live query", () => {
     const old = "2026-07-01T10:00:00.000Z";
     const chatRow = {
@@ -556,6 +601,51 @@ function DataProbe() {
 
 function GmailPrimaryProbe() {
   return <div data-testid="gmail-primary">{useAppData().integrations.gmail.integrationId}</div>;
+}
+
+function TaskHistoryProbe() {
+  const data = useAppData();
+  return (
+    <div
+      data-testid="task-history"
+      data-all-task-ids={data.allTasks.map((task) => task.id).join(",")}
+      data-home-task-ids={data.tasks.map((task) => task.id).join(",")}
+    />
+  );
+}
+
+function taskRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "task_1",
+    display_id: "TASK-1",
+    name: "Task",
+    prompt: "Do the work",
+    model: "anthropic/claude-sonnet-5",
+    engine: "opencompany" as const,
+    session_id: "conversation_task_1",
+    schedule_id: null,
+    scheduled_for: null,
+    workflow_id: null,
+    workflow_brain_ref: null,
+    status: "succeeded" as const,
+    stage: "completed" as const,
+    result: "Done",
+    error: null,
+    reported_outcome: "done" as const,
+    outcome_comment: null,
+    harness_spec: {},
+    debug_trace: {},
+    sandbox_id: null,
+    attempts: 0,
+    next_run_at: null,
+    lease_id: null,
+    lease_owner: null,
+    lease_expires_at: null,
+    archived_at: null,
+    created_at: "2026-07-01T10:00:00.000Z",
+    updated_at: "2026-07-01T10:00:00.000Z",
+    ...overrides,
+  };
 }
 
 function initialData(): AppInitialData {

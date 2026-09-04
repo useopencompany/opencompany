@@ -15,7 +15,10 @@ import {
   GoogleDriveIcon,
   LinearIcon,
   NeonIcon,
+  PostHogIcon,
   SlackIcon,
+  StripeIcon,
+  XIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
@@ -148,6 +151,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: NeonIcon,
     iconClassName: "bg-[#00E599] text-[#0B0F14]",
   },
+  posthog: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.posthog,
+    Icon: PostHogIcon,
+    iconClassName: "bg-[#F54E00] text-white",
+  },
   render: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.render,
     Icon: ServerCog,
@@ -162,6 +170,16 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.slack,
     Icon: SlackIcon,
     iconClassName: "bg-white text-[#4A154B]",
+  },
+  stripe: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.stripe,
+    Icon: StripeIcon,
+    iconClassName: "bg-[#635BFF] text-white",
+  },
+  x: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.x,
+    Icon: XIcon,
+    iconClassName: "bg-black text-white",
   },
 } as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginConfig>;
 
@@ -190,6 +208,8 @@ export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
 export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
+export const POSTHOG_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.posthog.name;
+export const POSTHOG_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.posthog.source;
 export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;
 export const RENDER_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.render.source;
 export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
@@ -198,6 +218,10 @@ export const SIGNOZ_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.signoz.name;
 export const SIGNOZ_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.signoz.source;
 export const SLACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.slack.name;
 export const SLACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.slack.source;
+export const STRIPE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.stripe.name;
+export const STRIPE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.stripe.source;
+export const X_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.x.name;
+export const X_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.x.source;
 export const YC_ADVISE_PLUGIN_NAME = OFFICIAL_SKILL_PLUGINS["yc-advise"].name;
 export const YC_ADVISE_PLUGIN_SOURCE = OFFICIAL_SKILL_PLUGINS["yc-advise"].source;
 
@@ -254,12 +278,20 @@ export function installOfficialBetterStackPlugin(preview?: PluginImportPreviewDt
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.betterstack, preview);
 }
 
+export function installOfficialPostHogPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.posthog, preview);
+}
+
 export function installOfficialSigNozPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.signoz, preview);
 }
 
 export function installOfficialSlackPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.slack, preview);
+}
+
+export function installOfficialStripePlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.stripe, preview);
 }
 
 export function PluginsSettings({

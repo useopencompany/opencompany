@@ -49,6 +49,7 @@ import {
   IntegrationAccountRow,
   IntegrationSetupFeedback,
 } from "@/components/SettingsIntegrationsPanel";
+import { StripeRestrictedKeyConnectionForm } from "@/components/StripeRestrictedKeyConnectionForm";
 import {
   type CapabilityId,
   type CapabilityMode,
@@ -62,7 +63,11 @@ import {
   refreshHeadlessPluginMcp,
 } from "@/lib/headless-knowledge-commands";
 import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
-import { type IntegrationAccountView, type IntegrationState } from "@/lib/integration-state";
+import {
+  type IntegrationAccountView,
+  type IntegrationState,
+  type PersonalAccountProvider,
+} from "@/lib/integration-state";
 import {
   GOOGLE_DRIVE_MCP_RECONNECT_REASON,
   googleDriveMcpScopesSatisfied,
@@ -109,7 +114,8 @@ export type PluginToolsState =
       };
     };
 
-type PluginAccount = { account: IntegrationAccountView };
+type PluginConnectionProvider = PersonalAccountProvider | "posthog" | "stripe";
+type PluginAccount = { account: IntegrationAccountView<PluginConnectionProvider> };
 
 type PluginSkill = {
   id: string;
@@ -128,7 +134,7 @@ export type PluginAccountsState =
   | {
       status: "ready";
       accounts: PluginAccount[];
-      permissionConnection: IntegrationAccountView | null;
+      permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
     };
 
 export type LinearAccountsState = PluginAccountsState;
@@ -285,6 +291,25 @@ export function RenderPluginDetail({
   );
 }
 
+export function PostHogPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.posthog}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function SlackPluginDetail({
   pluginState,
   canEdit,
@@ -304,6 +329,25 @@ export function SlackPluginDetail({
   );
 }
 
+export function StripePluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.stripe}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function SigNozPluginDetail({
   pluginState,
   canEdit,
@@ -316,6 +360,25 @@ export function SigNozPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.signoz}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function XPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.x}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -558,7 +621,9 @@ function OfficialMcpPluginDetailView({
           previewState={previewState}
           canEdit={canEdit}
         />
-        {plugin ? <AccountsSection config={config} state={accountsState} /> : null}
+        {plugin ? (
+          <AccountsSection config={config} state={accountsState} canEdit={canEdit} />
+        ) : null}
         {plugin &&
         config.name === "github" &&
         accountsState.status === "ready" &&
@@ -780,15 +845,17 @@ function PluginHeaderSection({
 function AccountsSection({
   config,
   state,
+  canEdit,
 }: {
   config: OfficialMcpPluginConfig;
   state: PluginAccountsState;
+  canEdit: boolean;
 }) {
   const permissionConnection = state.status === "ready" ? state.permissionConnection : null;
   const displayedAccounts =
     state.status !== "ready"
       ? []
-      : config.connectionProvider === "slack"
+      : config.connectionProvider === "slack" || config.connectionProvider === "x_account"
         ? state.accounts
         : permissionConnection
           ? [{ account: permissionConnection }]
@@ -810,18 +877,33 @@ function AccountsSection({
         <SectionError title="Accounts unavailable" message={state.message} />
       ) : displayedAccounts.length === 0 ? (
         <SectionEmpty icon={Users}>{`No ${accountLabel} accounts are connected.`}</SectionEmpty>
+      ) : config.name === "stripe" ? (
+        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 px-3 py-2">
+          <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-ink-subtle">
+            {permissionConnection?.connectionLabel ||
+              permissionConnection?.accountName ||
+              permissionConnection?.integrationId}
+          </span>
+          <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+            {permissionConnection?.connected ? "Connected" : "Needs reconnect"}
+          </span>
+        </div>
       ) : (
         <div className="flex flex-col gap-2">
           {displayedAccounts.map(({ account }) => (
             <IntegrationAccountRow
               key={account.integrationId}
-              account={account}
+              account={account as IntegrationAccountView<PersonalAccountProvider | "posthog">}
               purposeLabel={
                 config.connectionProvider === "slack"
                   ? account.integrationId === permissionConnection?.integrationId
                     ? "Slack tools"
                     : "Not active"
-                  : accountLabel
+                  : config.connectionProvider === "x_account"
+                    ? account.integrationId === permissionConnection?.integrationId
+                      ? "X tools"
+                      : "Legacy fallback"
+                    : accountLabel
               }
               reconnectHref={config.connectHref}
               showCapabilityModes={false}
@@ -832,6 +914,11 @@ function AccountsSection({
       <div className="flex flex-wrap items-center gap-3">
         {config.name === "render" ? (
           <RenderApiKeyConnectionForm connected={Boolean(permissionConnection?.connected)} />
+        ) : config.name === "stripe" ? (
+          <StripeRestrictedKeyConnectionForm
+            connected={Boolean(permissionConnection?.connected)}
+            canManage={canEdit}
+          />
         ) : (
           <a
             href={config.connectHref}
@@ -866,7 +953,7 @@ function ToolsSection({
   previewState: PluginPreviewState;
   state: PluginToolsState;
   canEdit: boolean;
-  permissionConnection: IntegrationAccountView | null;
+  permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
 }) {
   const router = useRouter();
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -1052,7 +1139,7 @@ function ToolGroupCard({
 }: {
   group: PluginToolGroupView;
   provider: string;
-  permissionConnection: IntegrationAccountView | null;
+  permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
 }) {
   return (
     <Card className="gap-3 bg-surface py-3 shadow-none">
@@ -1093,7 +1180,7 @@ function PluginCapabilityModeRow({
 }: {
   group: PluginToolGroupView;
   provider: string;
-  connection: IntegrationAccountView | null;
+  connection: IntegrationAccountView<PluginConnectionProvider> | null;
 }) {
   const router = useRouter();
   const [pendingMode, setPendingMode] = useState<CapabilityMode | null>(null);
@@ -1284,7 +1371,7 @@ function pluginAccountsFromState(
   config: OfficialMcpPluginConfig,
 ): {
   accounts: PluginAccount[];
-  permissionConnection: IntegrationAccountView | null;
+  permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
 } {
   if (
     config.connectionProvider === "betterstack" ||
@@ -1293,10 +1380,62 @@ function pluginAccountsFromState(
     config.connectionProvider === "google_calendar" ||
     config.connectionProvider === "google_drive" ||
     config.connectionProvider === "neon" ||
+    config.connectionProvider === "posthog" ||
     config.connectionProvider === "render" ||
     config.connectionProvider === "signoz" ||
-    config.connectionProvider === "slack"
+    config.connectionProvider === "slack" ||
+    config.connectionProvider === "stripe" ||
+    config.connectionProvider === "x_account"
   ) {
+    if (config.connectionProvider === "stripe") {
+      const connection = state.stripe;
+      const modeLabel =
+        connection.livemode === false
+          ? "Test mode"
+          : connection.livemode === true
+            ? "Live mode"
+            : null;
+      const permissionConnection: IntegrationAccountView<"stripe"> | null = connection.integrationId
+        ? {
+            integrationId: connection.integrationId,
+            provider: "stripe",
+            status: connection.status === "not_connected" ? "disconnected" : connection.status,
+            connected: connection.connected,
+            accountEmail: null,
+            accountName: connection.accountName,
+            connectionLabel: [connection.accountName, modeLabel].filter(Boolean).join(" · "),
+            statusReason: connection.statusReason,
+            scopes: [],
+            capabilityModes: connection.capabilityModes,
+          }
+        : null;
+      return {
+        permissionConnection,
+        accounts: permissionConnection ? [{ account: permissionConnection }] : [],
+      };
+    }
+    if (config.connectionProvider === "posthog") {
+      const connection = state.posthog;
+      const permissionConnection: IntegrationAccountView<"posthog"> | null =
+        connection.integrationId
+          ? {
+              integrationId: connection.integrationId,
+              provider: "posthog",
+              status: connection.status === "not_connected" ? "disconnected" : connection.status,
+              connected: connection.connected,
+              accountEmail: null,
+              accountName: connection.accountName,
+              connectionLabel: connection.accountName || "PostHog tool access",
+              statusReason: connection.statusReason,
+              scopes: [],
+              capabilityModes: connection.capabilityModes,
+            }
+          : null;
+      return {
+        permissionConnection,
+        accounts: permissionConnection ? [{ account: permissionConnection }] : [],
+      };
+    }
     const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
       account:
         config.connectionProvider === "google_drive" &&
@@ -1319,7 +1458,9 @@ function pluginAccountsFromState(
             ? state.google_calendar.integrationId
             : config.connectionProvider === "google_drive"
               ? state.google_drive.integrationId
-              : null;
+              : config.connectionProvider === "x_account"
+                ? state.x_account.integrationId
+                : null;
     return {
       accounts,
       permissionConnection:
@@ -1329,7 +1470,7 @@ function pluginAccountsFromState(
         null,
     };
   }
-  const permissionConnection: IntegrationAccountView | null = state.linear.integrationId
+  const permissionConnection: IntegrationAccountView<"linear"> | null = state.linear.integrationId
     ? {
         integrationId: state.linear.integrationId,
         provider: "linear",
@@ -1377,8 +1518,16 @@ export function defaultBetterStackToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("betterstack");
 }
 
+export function defaultPostHogToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("posthog");
+}
+
 export function defaultSlackToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("slack");
+}
+
+export function defaultStripeToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("stripe");
 }
 
 export function defaultSigNozToolsState(): PluginToolsState {
@@ -1449,6 +1598,16 @@ export function slackToolsStateFromPlugin(plugin: PluginInstallationDto | null):
 
 export function signozToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
   return officialPluginToolsStateFromPlugin(plugin, "signoz");
+}
+
+export function posthogToolsStateFromPlugin(
+  plugin: PluginInstallationDto | null,
+): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "posthog");
+}
+
+export function stripeToolsStateFromPlugin(plugin: PluginInstallationDto | null): PluginToolsState {
+  return officialPluginToolsStateFromPlugin(plugin, "stripe");
 }
 
 function officialPluginToolsStateFromPlugin(
@@ -1567,6 +1726,14 @@ export function slackToolsStateFromPreview(preview: PluginImportPreviewDto): Plu
 
 export function signozToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
   return officialPluginToolsStateFromPreview(preview, "signoz");
+}
+
+export function posthogToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "posthog");
+}
+
+export function stripeToolsStateFromPreview(preview: PluginImportPreviewDto): PluginToolsState {
+  return officialPluginToolsStateFromPreview(preview, "stripe");
 }
 
 function officialPluginToolsStateFromPreview(

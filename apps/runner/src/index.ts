@@ -16,6 +16,10 @@ import { startAttioFlushWorker } from "./attio-flush-worker";
 import { setBrainImportWakeup, startBrainImportWorker } from "./brain-import-worker";
 import { setBrainIngestWakeup, startBrainIngestWorker } from "./brain-ingest-worker";
 import { startBrainWorkerAdmissionListener } from "./brain-worker-admission";
+import {
+  requireChatAttachmentCleanupToken,
+  startChatAttachmentCleanupWorker,
+} from "./chat-attachment-cleanup-worker";
 import { startCodexChatSelfHealSweeper } from "./codex-chat-self-heal";
 import {
   setCodexChatWakeup,
@@ -62,6 +66,7 @@ installProcessErrorBackstop();
 const env = loadEnv();
 const chatPresentation = createChatPresentationStream();
 assertRunnerDbConfig();
+if (env.taskWorkerEnabled) requireChatAttachmentCleanupToken(env);
 // The LLM broker can be left holding unsettled tokens if a runner dies mid-delegation.
 // Sweep them every 60s; the partial-index scan is cheap and the settlement CAS makes it safe
 // across instances.
@@ -104,6 +109,9 @@ const gmailFlushWorker = env.taskWorkerEnabled ? startGmailFlushWorker(env) : nu
 const granolaPollWorker = env.taskWorkerEnabled ? startGranolaPollWorker() : null;
 const fathomPollWorker = env.taskWorkerEnabled ? startFathomPollWorker() : null;
 const googleDriveSyncWorker = env.taskWorkerEnabled ? startGoogleDriveSyncWorker(env) : null;
+const chatAttachmentCleanupWorker = env.taskWorkerEnabled
+  ? startChatAttachmentCleanupWorker(env, { pool: getDbPool() })
+  : null;
 const stuckWorkMonitor = env.taskWorkerEnabled
   ? startStuckWorkMonitor({
       turnThresholdMs: Math.max(env.codexTimeoutMs + 15 * 60_000, 20 * 60_000),
@@ -224,6 +232,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
     runnerDrainTask("granola_poll", granolaPollWorker),
     runnerDrainTask("fathom_poll", fathomPollWorker),
     runnerDrainTask("google_drive_sync", googleDriveSyncWorker),
+    runnerDrainTask("chat_attachment_cleanup", chatAttachmentCleanupWorker),
     runnerDrainTask("stuck_work_monitor", stuckWorkMonitor),
     runnerDrainTask("codex_chat_self_heal", codexChatSelfHealSweeper),
     runnerDrainTask("sandbox_reconciler", sandboxReconciler),

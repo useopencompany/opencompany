@@ -108,6 +108,9 @@ export type AppInitialData = {
 type AppData = AppInitialData & {
   taskRows: TaskRow[];
   tasksReady: boolean;
+  // Full task history for global navigation. Home continues to use the
+  // intentionally smaller recent/active subset exposed as `tasks`.
+  allTasks: TaskView[];
   // Closed (archived) chats, surfaced in the command palette so the user can
   // search and restore them. Derived from the same live query as recentChats —
   // closed rows already stream to the client, they're just hidden elsewhere.
@@ -257,10 +260,15 @@ function AppLiveDataSubscriptions({
     [integrationAccountsCollection],
   );
 
-  const tasks = useMemo(() => {
+  const allTasks = useMemo(() => {
     if (tasksLoading && !taskRows?.length) return initialData.tasks;
     return currentTaskRows
       .map(taskRowToView)
+      .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }, [currentTaskRows, initialData.tasks, taskRows?.length, tasksLoading]);
+
+  const tasks = useMemo(() => {
+    return allTasks
       .filter(
         (task) =>
           !task.archivedAt &&
@@ -269,7 +277,7 @@ function AppLiveDataSubscriptions({
             isRecentHomeActivity(task.createdAt)),
       )
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [currentTaskRows, initialData.tasks, taskRows?.length, tasksLoading]);
+  }, [allTasks]);
 
   const schedules = useMemo(() => {
     if (!initialData.featureFlags.taskSpawning) return [];
@@ -393,6 +401,7 @@ function AppLiveDataSubscriptions({
     () => ({
       ...initialData,
       tasks,
+      allTasks,
       schedules,
       recentChats,
       archivedChats,
@@ -402,6 +411,7 @@ function AppLiveDataSubscriptions({
     }),
     [
       archivedChats,
+      allTasks,
       initialData,
       integrations,
       recentChats,
@@ -441,6 +451,7 @@ function initialAppData(initialData: AppInitialData): AppData {
     recentChats: selectSidebarChats(initialData.recentChats),
     taskRows: [],
     tasksReady: false,
+    allTasks: initialData.tasks,
     archivedChats: [],
   };
 }

@@ -10,6 +10,7 @@ import type {
 import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
+  getAgentModelDefinition,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
@@ -374,6 +375,7 @@ export type SurfaceChatSelection = {
 
 export function Surface({
   tasks,
+  allTasks = tasks,
   schedules = [],
   defaultModel,
   initialChat,
@@ -395,6 +397,7 @@ export function Surface({
   onConversationResolved,
 }: {
   tasks: readonly TaskView[];
+  allTasks?: readonly TaskView[];
   schedules?: readonly TaskScheduleView[];
   defaultModel: string;
   initialChat: ChatSessionView | null;
@@ -453,7 +456,11 @@ export function Surface({
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const pendingProgrammaticPromptRef = useRef<string | null>(null);
-  const pendingTaskCommentRef = useRef<{ id: string; body: string } | null>(null);
+  const pendingTaskCommentRef = useRef<{
+    id: string;
+    body: string;
+    attachmentIds?: string[];
+  } | null>(null);
   const backgroundTaskFocusOriginRef = useRef<Element | null>(null);
   const onboardingKickoffReadRef = useRef(false);
   const onboardingKickoffPromptRef = useRef<string | null>(null);
@@ -908,7 +915,7 @@ export function Surface({
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
     : null;
-  const attachmentsEnabled = Boolean(userWorkosId) && !activeTaskConversation;
+  const attachmentsEnabled = Boolean(userWorkosId) && !readOnly;
   const composerAttachments = useChatAttachments({
     modelName: String(composerChatModel),
     // The Cmd+K compose view mounts a second composer with its own window-level drop
@@ -919,6 +926,7 @@ export function Surface({
       isActivePane &&
       attachmentsEnabled &&
       !engineSubmitting &&
+      !taskCommentSubmitting &&
       !(newChatCommandOpen && commandPaletteView === "compose"),
     ...(composerEngine === "codex" || composerEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
@@ -1126,15 +1134,32 @@ export function Surface({
     () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
     [optimisticallyArchivedChatIds, recentChats],
   );
-  const paletteChats = useMemo(
+  const commandPaletteItems = useMemo(
     () =>
       [
-        ...paletteRecentChats.map((chat) => ({ chat, archived: false })),
-        ...archivedChats.map((chat) => ({ chat, archived: true })),
+        ...(taskSpawningEnabled
+          ? allTasks.map((task) => ({
+              kind: "task" as const,
+              task,
+              archived: Boolean(task.archivedAt),
+            }))
+          : []),
+        ...paletteRecentChats.map((chat) => ({
+          kind: "chat" as const,
+          chat,
+          archived: false,
+        })),
+        ...archivedChats.map((chat) => ({
+          kind: "chat" as const,
+          chat,
+          archived: true,
+        })),
       ].toSorted(
-        (a, b) => new Date(b.chat.updatedAt).getTime() - new Date(a.chat.updatedAt).getTime(),
+        (a, b) =>
+          new Date(b.kind === "task" ? b.task.updatedAt : b.chat.updatedAt).getTime() -
+          new Date(a.kind === "task" ? a.task.updatedAt : a.chat.updatedAt).getTime(),
       ),
-    [archivedChats, paletteRecentChats],
+    [allTasks, archivedChats, paletteRecentChats, taskSpawningEnabled],
   );
   const showEngineComposerControls = composerEngine !== null;
 
@@ -1666,6 +1691,14 @@ export function Surface({
     [closeCommandPalette, router],
   );
 
+  const jumpToTask = useCallback(
+    (task: TaskView) => {
+      closeCommandPalette();
+      router.push(`/tasks/${encodeURIComponent(task.displayId)}`);
+    },
+    [closeCommandPalette, router],
+  );
+
   const restoreAndOpenChat = useCallback(
     (chat: ChatSummaryView) => {
       if (restoringChatId) return;
@@ -1696,22 +1729,44 @@ export function Surface({
     const rawPrompt = pendingProgrammaticPromptRef.current ?? input;
     const prompt = rawPrompt.trim();
     pendingProgrammaticPromptRef.current = null;
+    const pendingAttachments = composerAttachments.attachments;
+    const readyAttachments = pendingAttachments.filter(
+      (attachment) => attachment.status === "ready",
+    );
+    if (composerAttachments.isUploading) {
+      toast.error("Wait for attachments to finish uploading.");
+      return;
+    }
+    if (composerAttachments.hasFailed) {
+      toast.error("Remove failed attachments before sending.");
+      return;
+    }
     if (activeTaskConversation) {
-      if (isTaskConversationWorking || taskCommentSubmitting || !prompt) return;
+      if (isTaskConversationWorking || taskCommentSubmitting) return;
+      if (!prompt && readyAttachments.length === 0) return;
+      const attachmentIds = readyAttachments.map((attachment) => attachment.id);
+      const pendingCommand = pendingTaskCommentRef.current;
       const command =
-        pendingTaskCommentRef.current?.body === rawPrompt
-          ? pendingTaskCommentRef.current
-          : { id: newHeadlessTaskCommentId(), body: rawPrompt };
+        pendingCommand?.body === rawPrompt &&
+        JSON.stringify(pendingCommand.attachmentIds ?? []) === JSON.stringify(attachmentIds)
+          ? pendingCommand
+          : {
+              id: newHeadlessTaskCommentId(),
+              body: rawPrompt,
+              ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+            };
       pendingTaskCommentRef.current = command;
       clearError();
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
+      composerAttachments.setAttachments([]);
       setTaskCommentSubmitting(true);
       void createHeadlessTaskComment(activeTaskConversation.taskId, command, {
         scopeKey: workspaceId,
       })
         .then(() => {
+          revokeAttachmentPreviews(pendingAttachments);
           if (!mountedRef.current) return;
           pendingTaskCommentRef.current = null;
           router.refresh();
@@ -1720,6 +1775,7 @@ export function Surface({
         .catch((error) => {
           if (!mountedRef.current) return;
           if (!inputRef.current?.value) setInput(rawPrompt);
+          composerAttachments.setAttachments(pendingAttachments);
           toast.error(error instanceof Error ? error.message : "Could not post the comment.");
         })
         .finally(() => {
@@ -1748,19 +1804,7 @@ export function Surface({
       return;
     }
 
-    const pendingAttachments = composerAttachments.attachments;
-    const readyAttachments = pendingAttachments.filter(
-      (attachment) => attachment.status === "ready",
-    );
     if (!prompt && readyAttachments.length === 0) return;
-    if (composerAttachments.isUploading) {
-      toast.error("Wait for attachments to finish uploading.");
-      return;
-    }
-    if (composerAttachments.hasFailed) {
-      toast.error("Remove failed attachments before sending.");
-      return;
-    }
 
     const messagePrompt = backgroundChat?.prompt ?? prompt;
     if (!messagePrompt && readyAttachments.length === 0) return;
@@ -2665,12 +2709,12 @@ export function Surface({
       >
         <DialogHeader className="sr-only">
           <DialogTitle>
-            {commandPaletteView === "compose" ? "New chat" : "Jump to a chat"}
+            {commandPaletteView === "compose" ? "New chat" : "Jump to recent work"}
           </DialogTitle>
           <DialogDescription>
             {commandPaletteView === "compose"
               ? "Start a new chat that runs in the background."
-              : "Search chats to reopen, or start a new one."}
+              : "Search tasks and chats, or start a new chat."}
           </DialogDescription>
         </DialogHeader>
         <DialogContent
@@ -2710,7 +2754,7 @@ export function Surface({
                 autoFocus
                 value={chatSearchQuery}
                 onValueChange={setChatSearchQuery}
-                placeholder="Search chats or start something new..."
+                placeholder="Search tasks and chats or start something new..."
               />
               <CommandList>
                 <CommandGroup heading="Actions" forceMount>
@@ -2731,54 +2775,88 @@ export function Surface({
                     </CommandShortcut>
                   </CommandItem>
                 </CommandGroup>
-                <CommandEmpty>No matching chats.</CommandEmpty>
-                {paletteChats.length > 0 ? (
-                  <CommandGroup heading="Chats">
-                    {paletteChats.map(({ chat, archived }) => (
-                      <CommandItem
-                        key={chat.id}
-                        value={`chat ${archived ? "archived " : ""}${chat.title} ${chat.id}`}
-                        onSelect={() => (archived ? restoreAndOpenChat(chat) : jumpToChat(chat))}
-                        className="gap-3"
-                      >
-                        {archived && restoringChatId === chat.id ? (
-                          <LoaderCircle
-                            size={16}
-                            strokeWidth={2}
-                            className="shrink-0 animate-spin text-ink-subtle"
-                          />
-                        ) : archived ? (
-                          <Archive size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-                        ) : (
-                          <MessageSquare
-                            size={16}
-                            strokeWidth={2}
-                            className="shrink-0 text-ink-subtle"
-                          />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <p className="truncate text-[13px] font-medium text-ink">
-                              {chat.title}
+                <CommandEmpty>No matching tasks or chats.</CommandEmpty>
+                {commandPaletteItems.length > 0 ? (
+                  <CommandGroup heading="Recent">
+                    {commandPaletteItems.map((item) =>
+                      item.kind === "task" ? (
+                        <CommandItem
+                          key={`task:${item.task.id}`}
+                          value={`task ${item.archived ? "archived " : ""}${item.task.name} ${item.task.prompt} ${item.task.displayId} ${item.task.id}`}
+                          onSelect={() => jumpToTask(item.task)}
+                          className="gap-3"
+                        >
+                          <Target size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="truncate text-[13px] font-medium text-ink">
+                                {item.task.name}
+                              </p>
+                              {item.archived ? (
+                                <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
+                                  Archived
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="truncate text-[12px] text-ink-subtle">
+                              {item.task.displayId} · {item.task.prompt}
                             </p>
-                            {archived ? (
-                              <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
-                                Archived
-                              </span>
-                            ) : null}
                           </div>
-                          {archived ? null : (
-                            <p className="truncate text-[12px] text-ink-subtle">{chat.preview}</p>
+                        </CommandItem>
+                      ) : (
+                        <CommandItem
+                          key={`chat:${item.chat.id}`}
+                          value={`chat ${item.archived ? "archived " : ""}${item.chat.title} ${item.chat.id}`}
+                          onSelect={() =>
+                            item.archived ? restoreAndOpenChat(item.chat) : jumpToChat(item.chat)
+                          }
+                          className="gap-3"
+                        >
+                          {item.archived && restoringChatId === item.chat.id ? (
+                            <LoaderCircle
+                              size={16}
+                              strokeWidth={2}
+                              className="shrink-0 animate-spin text-ink-subtle"
+                            />
+                          ) : item.archived ? (
+                            <Archive
+                              size={16}
+                              strokeWidth={2}
+                              className="shrink-0 text-ink-subtle"
+                            />
+                          ) : (
+                            <MessageSquare
+                              size={16}
+                              strokeWidth={2}
+                              className="shrink-0 text-ink-subtle"
+                            />
                           )}
-                        </div>
-                        {archived ? (
-                          <CommandShortcut className="flex items-center gap-1">
-                            <RotateCcw size={12} strokeWidth={2} />
-                            Restore
-                          </CommandShortcut>
-                        ) : null}
-                      </CommandItem>
-                    ))}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="truncate text-[13px] font-medium text-ink">
+                                {item.chat.title}
+                              </p>
+                              {item.archived ? (
+                                <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
+                                  Archived
+                                </span>
+                              ) : null}
+                            </div>
+                            {item.archived ? null : (
+                              <p className="truncate text-[12px] text-ink-subtle">
+                                {item.chat.preview}
+                              </p>
+                            )}
+                          </div>
+                          {item.archived ? (
+                            <CommandShortcut className="flex items-center gap-1">
+                              <RotateCcw size={12} strokeWidth={2} />
+                              Restore
+                            </CommandShortcut>
+                          ) : null}
+                        </CommandItem>
+                      ),
+                    )}
                   </CommandGroup>
                 ) : null}
               </CommandList>
@@ -3252,39 +3330,42 @@ export function Surface({
                   />
                 </div>
                 <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+                  {attachmentsEnabled ? (
+                    <>
+                      <input
+                        ref={attachmentFileInputRef}
+                        type="file"
+                        multiple
+                        accept={CHAT_ATTACHMENT_ACCEPT}
+                        className="hidden"
+                        onChange={(event) => {
+                          const files = Array.from(event.currentTarget.files ?? []);
+                          event.currentTarget.value = "";
+                          if (files.length > 0) composerAttachments.acceptFiles(files);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        aria-label="Attach files"
+                        disabled={
+                          isForegroundTurnWorking ||
+                          taskCommentSubmitting ||
+                          readOnly ||
+                          voiceDictation.isActive
+                        }
+                        onClick={() => attachmentFileInputRef.current?.click()}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                      >
+                        <Plus size={16} strokeWidth={1.9} />
+                      </button>
+                    </>
+                  ) : null}
                   {activeTaskConversation ? (
                     <span className="min-h-7 px-1 text-[11.5px] leading-7 text-ink-subtle">
                       Comments are sent verbatim to this task.
                     </span>
                   ) : (
                     <>
-                      {attachmentsEnabled ? (
-                        <>
-                          <input
-                            ref={attachmentFileInputRef}
-                            type="file"
-                            multiple
-                            accept={CHAT_ATTACHMENT_ACCEPT}
-                            className="hidden"
-                            onChange={(event) => {
-                              const files = Array.from(event.currentTarget.files ?? []);
-                              event.currentTarget.value = "";
-                              if (files.length > 0) composerAttachments.acceptFiles(files);
-                            }}
-                          />
-                          <button
-                            type="button"
-                            aria-label="Attach files"
-                            disabled={
-                              isForegroundTurnWorking || readOnly || voiceDictation.isActive
-                            }
-                            onClick={() => attachmentFileInputRef.current?.click()}
-                            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
-                          >
-                            <Plus size={16} strokeWidth={1.9} />
-                          </button>
-                        </>
-                      ) : null}
                       <button
                         type="button"
                         aria-label="Start voice dictation"
@@ -5359,8 +5440,8 @@ function automationCommandError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-async function uploadCanonicalAttachment({ file }: { file: File }) {
-  return { ...(await uploadHeadlessChatAttachment({ file })), canonical: true };
+async function uploadCanonicalAttachment({ file, pendingId }: { file: File; pendingId: string }) {
+  return { ...(await uploadHeadlessChatAttachment({ file, pendingId })), canonical: true };
 }
 
 function escapeRegExp(value: string) {
@@ -5711,18 +5792,23 @@ function ChatTitleHeader({
   isTask?: boolean;
 }) {
   const EngineIcon = isCloudCodingEngine(engine) ? ENGINE_REGISTRY[engine].Icon : null;
+  const modelLabel = getAgentModelDefinition(model)?.label ?? model;
   return (
     <div className="flex min-w-0 items-center gap-2 text-ink">
-      {EngineIcon ? (
-        <EngineIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
-      ) : (
-        <ModelProviderIcon
-          modelId={model}
-          size={14}
-          strokeWidth={1.9}
-          className="shrink-0 text-ink-muted"
-        />
-      )}
+      <Tooltip>
+        <TooltipTrigger
+          type="button"
+          aria-label={`Model: ${modelLabel}`}
+          className="inline-flex shrink-0 rounded-sm text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          {EngineIcon ? (
+            <EngineIcon size={14} strokeWidth={1.9} />
+          ) : (
+            <ModelProviderIcon modelId={model} size={14} strokeWidth={1.9} />
+          )}
+        </TooltipTrigger>
+        <TooltipContent>{`Model: ${modelLabel}`}</TooltipContent>
+      </Tooltip>
       <span className="max-w-[min(420px,calc(100vw-7rem))] truncate text-[12.5px] font-medium leading-4">
         {title}
       </span>

@@ -5,9 +5,12 @@ const mocks = vi.hoisted(() => ({
   github: vi.fn(),
   gmail: vi.fn(),
   googleDrive: vi.fn(),
+  posthog: vi.fn(),
   noop: vi.fn(),
   remote: vi.fn(),
   registrations: vi.fn(),
+  stripe: vi.fn(),
+  x: vi.fn(),
 }));
 
 vi.mock("../plugin-gateway", () => ({
@@ -21,11 +24,11 @@ vi.mock("./google-drive", () => ({ resolveGoogleDriveActions: mocks.googleDrive 
 vi.mock("./latitude", () => ({ resolveLatitudeActions: mocks.noop }));
 vi.mock("./linear", () => ({ resolveLinearActions: mocks.noop }));
 vi.mock("./neon", () => ({ resolveNeonActions: mocks.noop }));
-vi.mock("./posthog", () => ({ resolvePostHogActions: mocks.noop }));
+vi.mock("./posthog", () => ({ resolvePostHogActions: mocks.posthog }));
 vi.mock("./remote-mcp", () => ({ resolveRemoteMcpActions: mocks.remote }));
 vi.mock("./revolut", () => ({ resolveRevolutActions: mocks.noop }));
-vi.mock("./stripe", () => ({ resolveStripeActions: mocks.noop }));
-vi.mock("./x-account", () => ({ resolveXAccountActions: mocks.noop }));
+vi.mock("./stripe", () => ({ resolveStripeActions: mocks.stripe }));
+vi.mock("./x-account", () => ({ resolveXAccountActions: mocks.x }));
 
 import { resolveActionCatalog } from "./catalog";
 import type { RemoteMcpGatewayRegistration } from "./remote-mcp";
@@ -34,6 +37,7 @@ describe("resolveActionCatalog plugin reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.noop.mockResolvedValue(null);
+    mocks.x.mockResolvedValue(null);
     mocks.calendar.mockResolvedValue({
       id: "google_calendar",
       label: "Google Calendar",
@@ -59,6 +63,18 @@ describe("resolveActionCatalog plugin reconciliation", () => {
       label: "Google Drive",
       description: "Legacy Google Drive actions.",
       actions: [{ id: "google_drive.search_files" }],
+    });
+    mocks.posthog.mockResolvedValue({
+      id: "posthog",
+      label: "PostHog",
+      description: "Legacy PostHog actions.",
+      actions: [{ id: "posthog.query-trends" }],
+    });
+    mocks.stripe.mockResolvedValue({
+      id: "stripe",
+      label: "Stripe",
+      description: "Legacy Stripe founder metrics.",
+      actions: [{ id: "stripe.get_balance" }],
     });
   });
 
@@ -103,6 +119,74 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
     expect(withPlugin.actions).toContainEqual(
       expect.objectContaining({ id: "plugin:google-calendar:google-calendar.list_events" }),
+    );
+  });
+
+  it("keeps legacy PostHog actions as fallback and suppresses them after plugin install", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.posthog).toHaveBeenCalledWith("user_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "posthog.query-trends" }),
+    );
+
+    mocks.posthog.mockClear();
+    const posthogPluginRegistration = {
+      source: "plugin:posthog:posthog",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:posthog:posthog",
+      label: "PostHog",
+      description: "Official PostHog plugin tools.",
+      actions: [{ id: "plugin:posthog:posthog.query-trends" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [posthogPluginRegistration] },
+    );
+
+    expect(mocks.posthog).not.toHaveBeenCalled();
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "posthog.query-trends" }),
+    );
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:posthog:posthog.query-trends" }),
+    );
+  });
+
+  it("keeps legacy Stripe metrics as fallback and suppresses them after plugin install", async () => {
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(mocks.stripe).toHaveBeenCalledWith("workspace_1");
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "stripe.get_balance" }),
+    );
+
+    mocks.stripe.mockClear();
+    const stripePluginRegistration = {
+      source: "plugin:stripe:stripe",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:stripe:stripe",
+      label: "Stripe",
+      description: "Official Stripe plugin tools.",
+      actions: [{ id: "plugin:stripe:stripe.stripe_api_read" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [stripePluginRegistration] },
+    );
+
+    expect(mocks.stripe).not.toHaveBeenCalled();
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "stripe.get_balance" }),
+    );
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:stripe:stripe.stripe_api_read" }),
     );
   });
 
@@ -186,6 +270,61 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     expect(withPlugin.actions).toContainEqual(
       expect.objectContaining({ id: "plugin:slack:slack.search" }),
     );
+  });
+
+  it("keeps legacy X posting only until the official plugin is installed", async () => {
+    mocks.x.mockResolvedValueOnce({
+      id: "x_account",
+      label: "X",
+      description: "Legacy X posting.",
+      actions: [{ id: "x_account.post_tweet" }],
+    });
+    const withoutPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [] },
+    );
+    expect(withoutPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "x_account.post_tweet" }),
+    );
+
+    mocks.x.mockClear();
+    const xPluginRegistration = {
+      source: "plugin:x:x",
+    } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:x:x",
+      label: "X",
+      description: "Official X plugin tools.",
+      actions: [{ id: "plugin:x:x.createPosts" }],
+    });
+    const withPlugin = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      {
+        remoteMcpRegistrations: [xPluginRegistration],
+        resolveManagedCapabilities: async () =>
+          ({
+            sources: [{ id: "x", kind: "managed", label: "X", description: "Managed X research." }],
+            actions: [
+              {
+                id: "x.search_posts",
+                provider: "x",
+              },
+            ],
+          }) as never,
+      },
+    );
+
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "x_account.post_tweet" }),
+    );
+    expect(withPlugin.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:x:x.createPosts" }),
+    );
+    expect(withPlugin.actions).not.toContainEqual(
+      expect.objectContaining({ id: "x.search_posts" }),
+    );
+    expect(withPlugin.providers).not.toContainEqual(expect.objectContaining({ id: "x" }));
+    expect(mocks.x).not.toHaveBeenCalled();
   });
 
   it("keeps legacy Gmail as a fallback and suppresses it once the plugin is installed", async () => {

@@ -22,7 +22,12 @@ vi.mock("@opencompany/agent/integrations/analytics", () => ({
 const sentinelDb = { sentinel: "db" };
 const PKCE_COOKIE = "goat_x_pkce_verifier";
 
-function ingress(overrides: { authError?: ApiError } = {}) {
+function ingress(
+  overrides: {
+    authError?: ApiError;
+    refresh?: (input: { userWorkosId: string; workspaceIds: string[] }) => Promise<void>;
+  } = {},
+) {
   vi.mocked(listWorkspacesForUser).mockResolvedValue([
     { workspace: { id: "workspace_1", workosOrganizationId: null }, role: "admin" },
   ] as never);
@@ -39,6 +44,7 @@ function ingress(overrides: { authError?: ApiError } = {}) {
         activeBrainId: null,
       };
     },
+    ...(overrides.refresh ? { refreshPluginRegistrations: overrides.refresh } : {}),
   });
 }
 
@@ -117,6 +123,7 @@ describe("X account ingress", () => {
 
   it("exchanges the code with the cookie verifier, connects through the injected db, and deletes the cookie", async () => {
     const fetchMock = stubXFetch();
+    const refresh = vi.fn(async () => undefined);
     vi.mocked(connectXAccountIntegration).mockResolvedValue({
       integrationId: "gint_x_1",
     } as never);
@@ -125,7 +132,7 @@ describe("X account ingress", () => {
       returnTo: "/settings",
     });
 
-    const response = await ingress().callback(
+    const response = await ingress({ refresh }).callback(
       callbackRequest({ state, code: "auth-code", verifier: "verifier123" }),
     );
 
@@ -156,6 +163,10 @@ describe("X account ingress", () => {
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
       provider: "x_account",
+    });
+    expect(refresh).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceIds: ["workspace_1"],
     });
   });
 

@@ -12,7 +12,9 @@ import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  defaultPostHogToolsState,
   defaultSigNozToolsState,
+  defaultStripeToolsState,
   GitHubPluginDetail,
   GitHubPluginDetailView,
   GmailPluginDetail,
@@ -30,10 +32,13 @@ import {
   NeonPluginDetailView,
   neonToolsStateFromPlugin,
   type PluginToolsState,
+  PostHogPluginDetail,
   SigNozPluginDetail,
   SlackPluginDetail,
+  StripePluginDetail,
   slackToolsStateFromPlugin,
   uncuratedPluginToolGroups,
+  XPluginDetail,
 } from "./OfficialMcpPluginSettings";
 import {
   BETTERSTACK_PLUGIN_SOURCE,
@@ -43,7 +48,10 @@ import {
   GOOGLE_DRIVE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
+  POSTHOG_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
+  STRIPE_PLUGIN_SOURCE,
+  X_PLUGIN_SOURCE,
 } from "./PluginSettings";
 
 const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
@@ -86,6 +94,24 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_linear_tools",
       capabilityModes: { read: "on", write: "ask" },
     },
+    posthog: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Acme Analytics",
+      integrationId: "gint_posthog_tools",
+      capabilityModes: { read: "on", write: "ask" },
+    },
+    stripe: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Acme Payments",
+      integrationId: "gint_stripe_tools",
+      livemode: false,
+      capabilityModes: { read: "on", query: "ask", write: "ask" },
+      toolModes: {},
+    },
     slack: {
       connected: true,
       status: "connected",
@@ -107,6 +133,14 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_google_drive_latest",
       accountEmail: "founder@example.com",
       accountName: "Founder",
+    },
+    x_account: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Founder",
+      handle: "@founder",
+      integrationId: "gint_x_latest",
     },
     personalAccounts: {
       betterstack: [],
@@ -221,6 +255,32 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: ["channels:history"],
           capabilityModes: {},
+        },
+      ],
+      x_account: [
+        {
+          integrationId: "gint_x_older",
+          provider: "x_account",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "Acme",
+          connectionLabel: "@acme",
+          statusReason: null,
+          scopes: ["tweet.read", "tweet.write", "users.read", "offline.access"],
+          capabilityModes: {},
+        },
+        {
+          integrationId: "gint_x_latest",
+          provider: "x_account",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "Founder",
+          connectionLabel: "@founder",
+          statusReason: null,
+          scopes: ["tweet.read", "tweet.write", "users.read", "offline.access"],
+          capabilityModes: { read: "on", query: "ask", write: "ask" },
         },
       ],
     },
@@ -1101,6 +1161,57 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Manage SigNoz");
   });
 
+  it("maps the existing PostHog OAuth connection onto the official plugin surface", () => {
+    const posthogPlugin = {
+      ...plugin,
+      id: "plugin_posthog",
+      name: "posthog",
+      manifest: { name: "posthog", description: "Explore PostHog analytics." },
+      source: { ...plugin.source, path: "posthog" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <PostHogPluginDetail
+        pluginState={{ status: "ready", plugin: posthogPlugin }}
+        toolsState={defaultPostHogToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Acme Analytics");
+    expect(html).toContain("Read analytics");
+    expect(html).toContain("Create insights");
+    expect(POSTHOG_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+    );
+    expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps the workspace Stripe key onto the official plugin surface", () => {
+    const stripePlugin = {
+      ...plugin,
+      id: "plugin_stripe",
+      name: "stripe",
+      manifest: { name: "stripe", description: "Work with Stripe." },
+      source: { ...plugin.source, path: "stripe" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <StripePluginDetail
+        pluginState={{ status: "ready", plugin: stripePlugin }}
+        toolsState={defaultStripeToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Acme Payments · Test mode");
+    expect(html).toContain("Learn about Stripe");
+    expect(html).toContain("Read Stripe data");
+    expect(html).toContain("Manage Stripe");
+    expect(html).toContain("mcp.stripe.com");
+    expect(STRIPE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/68c22e8a1ffe5eb8a83fb91c68f76f3f45705d3a/stripe",
+    );
+  });
+
   it("shows provenance, accounts, discovered tools, and read-only skills", async () => {
     render(
       <LinearPluginDetailView
@@ -1684,6 +1795,81 @@ describe("Linear plugin settings", () => {
         { id: "write", defaultMode: "ask" },
       ],
     });
+  });
+
+  it("maps the active X account onto the official plugin surface", () => {
+    const xPlugin = {
+      ...plugin,
+      id: "plugin_x",
+      name: "x",
+      manifest: { name: "x", description: "Official X plugin tools." },
+      source: { ...plugin.source, path: "x" },
+    } satisfies PluginInstallationDto;
+    const toolsState: PluginToolsState = {
+      status: "ready",
+      groups: [
+        {
+          id: "read",
+          label: "Research public X data",
+          description: "Public X research tools.",
+          modeKey: "read",
+          defaultMode: "on",
+          curated: true,
+          tools: [],
+        },
+        {
+          id: "query",
+          label: "Read account & private X data",
+          description: "Private X data tools.",
+          modeKey: "query",
+          defaultMode: "ask",
+          curated: true,
+          tools: [],
+        },
+        {
+          id: "write",
+          label: "Manage X",
+          description: "X mutation tools.",
+          modeKey: "write",
+          defaultMode: "ask",
+          curated: true,
+          tools: [],
+        },
+      ],
+      discovery: {
+        status: "pending",
+        toolCount: 0,
+        discoveredAt: null,
+        refreshAfter: null,
+        lastDiscoveryError: null,
+      },
+    };
+
+    render(
+      <XPluginDetail
+        pluginState={{ status: "ready", plugin: xPlugin }}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "X" })).toBeInTheDocument();
+    expect(screen.getByText("@founder · Founder")).toBeInTheDocument();
+    expect(screen.getByText("@acme · Acme")).toBeInTheDocument();
+    expect(screen.getByText("X tools")).toBeInTheDocument();
+    expect(screen.getByText("Legacy fallback")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect X account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/x-account/start?returnTo=/settings/plugins/x",
+    );
+    expect(
+      screen.getByRole("group", { name: "Research public X data permission" }),
+    ).toHaveTextContent("On");
+    expect(
+      screen.getByRole("group", { name: "Read account & private X data permission" }),
+    ).toHaveTextContent("Ask");
+    expect(screen.getByRole("group", { name: "Manage X permission" })).toHaveTextContent("Ask");
+    expect(X_PLUGIN_SOURCE).toContain("/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x");
   });
 
   it("presents Google Calendar with every capability gated on Ask", () => {

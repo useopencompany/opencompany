@@ -34,6 +34,7 @@ const migrationPaths = [
   "0228_goat_plugins.sql",
   "0245_goat_task_activities.sql",
   "0246_goat_task_waiting_status.sql",
+  "0248_goat_chat_attachment_upload_idempotency.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -931,6 +932,104 @@ describe("Postgres Task repository", () => {
     });
   });
 
+  it("claims attachments when an attachment-only comment resumes a Task", async () => {
+    const created = await service.createTask(actor(), {
+      idempotencyKey: "task-attachment-comment",
+      goal: "Review the updated screenshot.",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k3",
+      source: "manual",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns SET status = 'completed', completed_at = now() WHERE id = $1`,
+      [created.runId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_sessions SET status = 'idle', active_turn_id = NULL
+       WHERE chat_session_id = $1`,
+      [created.task.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.tasks SET status = 'succeeded', stage = 'completed' WHERE id = $1`,
+      [created.task.id],
+    );
+
+    const uploads = new PostgresChatAttachmentRepository(
+      execute,
+      () => new Date("2026-08-11T10:00:00.000Z"),
+    );
+    await uploads.reserve({
+      actor: actor(),
+      commandId: "attachment_comment_command_1",
+      idempotencyKey: "task-comment-attachment-upload",
+      requestHash: "b".repeat(64),
+      attachmentId: "attachment_comment_1",
+      blobPathname: "private/user_1/attachment_comment_1/content",
+      expiresAt: new Date("2026-08-12T10:00:00.000Z"),
+    });
+    await uploads.complete({
+      commandId: "attachment_comment_command_1",
+      format: "image",
+      mediaType: "image/png",
+      filename: "updated.png",
+      sizeBytes: 1024,
+      blobUrl: "https://blob.invalid/updated.png",
+      extractedText: null,
+    });
+    const attachmentService = new TaskApplicationService(
+      new PostgresTaskRepository(execute, {
+        now: () => new Date("2026-08-11T10:00:00.000Z"),
+        resolveAttachments: (input) => uploads.resolve(input),
+      }),
+    );
+    const command = {
+      id: "task_comment_attachment_1",
+      body: "",
+      attachmentIds: ["attachment_comment_1"],
+    };
+
+    const resumed = await attachmentService.createComment(actor(), created.task.id, command);
+    await expect(
+      attachmentService.createComment(actor(), created.task.id, command),
+    ).resolves.toMatchObject({
+      messageId: resumed.messageId,
+      assistantMessageId: resumed.assistantMessageId,
+      runId: resumed.runId,
+      idempotentReplay: true,
+    });
+    await expect(
+      database.query<{
+        claimed_message_id: string;
+        attachment_id: string;
+        message_content: string;
+        command_claimed_at: Date;
+        command_cleaned_at: Date;
+      }>(
+        `SELECT
+           upload.claimed_message_id,
+           message.attachments->0->>'id' AS attachment_id,
+           message.content AS message_content,
+           command.claimed_at AS command_claimed_at,
+           command.cleaned_at AS command_cleaned_at
+         FROM goat.chat_attachment_uploads AS upload
+         JOIN goat.chat_messages AS message ON message.id = upload.claimed_message_id
+         JOIN goat.chat_attachment_upload_commands AS command
+           ON command.attachment_id = upload.id
+         WHERE upload.id = 'attachment_comment_1'`,
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          claimed_message_id: resumed.messageId,
+          attachment_id: "attachment_comment_1",
+          message_content: "",
+          command_claimed_at: new Date("2026-08-11T10:00:00.000Z"),
+          command_cleaned_at: new Date("2026-08-11T10:00:00.000Z"),
+        },
+      ],
+    });
+  });
+
   it("rejects comments on archived Tasks", async () => {
     const created = await service.createTask(actor(), {
       idempotencyKey: "task-archived-comment",
@@ -999,19 +1098,27 @@ describe("Postgres Task repository", () => {
       () => new Date("2026-08-11T10:00:00.000Z"),
     );
     await expect(
-      uploads.create({
+      uploads.reserve({
         actor: actor(),
-        id: "attachment_1",
+        commandId: "attachment_command_1",
+        idempotencyKey: "task-attachment-upload",
+        requestHash: "a".repeat(64),
+        attachmentId: "attachment_1",
+        blobPathname: "private/user_1/attachment_1/content",
+        expiresAt: new Date("2026-08-12T10:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ attachmentId: "attachment_1" });
+    await expect(
+      uploads.complete({
+        commandId: "attachment_command_1",
         format: "pdf",
         mediaType: "application/pdf",
         filename: "launch.pdf",
         sizeBytes: 2048,
-        blobPathname: "private/user_1/launch.pdf",
         blobUrl: "https://blob.invalid/launch.pdf",
         extractedText: "Private launch context",
-        expiresAt: new Date("2026-08-12T10:00:00.000Z"),
       }),
-    ).resolves.toMatchObject({ id: "attachment_1" });
+    ).resolves.toMatchObject({ id: "attachment_1", created: true });
     let resolutions = 0;
     const attachmentService = new TaskApplicationService(
       new PostgresTaskRepository(execute, {
@@ -1040,16 +1147,27 @@ describe("Postgres Task repository", () => {
     expect(resolutions).toBe(1);
     expect(
       (
-        await database.query<{ claimed_message_id: string; claimed_at: Date }>(`
-          SELECT claimed_message_id, claimed_at
-          FROM goat.chat_attachment_uploads
-          WHERE id = 'attachment_1'
+        await database.query<{
+          claimed_message_id: string;
+          claimed_at: Date;
+          command_claimed_at: Date;
+          command_cleaned_at: Date;
+        }>(`
+          SELECT upload.claimed_message_id, upload.claimed_at,
+                 command.claimed_at AS command_claimed_at,
+                 command.cleaned_at AS command_cleaned_at
+          FROM goat.chat_attachment_uploads AS upload
+          JOIN goat.chat_attachment_upload_commands AS command
+            ON command.attachment_id = upload.id
+          WHERE upload.id = 'attachment_1'
         `)
       ).rows,
     ).toEqual([
       {
         claimed_message_id: first.messageId,
         claimed_at: new Date("2026-08-11T10:00:00.000Z"),
+        command_claimed_at: new Date("2026-08-11T10:00:00.000Z"),
+        command_cleaned_at: new Date("2026-08-11T10:00:00.000Z"),
       },
     ]);
   });

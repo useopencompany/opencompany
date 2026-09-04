@@ -18,9 +18,12 @@ import {
   OfficialSkillPluginDetail,
   PluginDetail,
   PluginsSettings,
+  POSTHOG_PLUGIN_SOURCE,
   RENDER_PLUGIN_SOURCE,
   SIGNOZ_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
+  STRIPE_PLUGIN_SOURCE,
+  X_PLUGIN_SOURCE,
   YC_ADVISE_PLUGIN_SOURCE,
 } from "./PluginSettings";
 
@@ -260,12 +263,24 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/render",
     );
+    expect(screen.getByRole("link", { name: /posthog/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/posthog",
+    );
+    expect(screen.getByRole("link", { name: /stripe/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/stripe",
+    );
+    expect(screen.getByRole("link", { name: /^x/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/x",
+    );
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
       "/settings/plugins/yc-advise",
     );
-    expect(screen.getAllByText("Not installed")).toHaveLength(11);
-    expect(screen.getAllByText("Official package")).toHaveLength(10);
+    expect(screen.getAllByText("Not installed")).toHaveLength(14);
+    expect(screen.getAllByText("Official package")).toHaveLength(13);
     expect(screen.getByText("Official skill package")).toBeInTheDocument();
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
@@ -285,11 +300,20 @@ describe("Plugin settings", () => {
     expect(RENDER_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
     );
+    expect(POSTHOG_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+    );
     expect(SIGNOZ_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
     );
     expect(SLACK_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/1b912fe6c4f4497147887b2383f0181f763aa19b/slack",
+    );
+    expect(STRIPE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/68c22e8a1ffe5eb8a83fb91c68f76f3f45705d3a/stripe",
+    );
+    expect(X_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
     );
     expect(GMAIL_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
@@ -304,7 +328,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(11);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(14);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });
