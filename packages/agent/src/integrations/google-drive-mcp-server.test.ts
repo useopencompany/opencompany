@@ -368,6 +368,7 @@ describe("opencompany Google Drive MCP server", () => {
     );
     const getUrl = mocks.apiCall.mock.calls[0]?.[2] as URL;
     expect(getUrl.searchParams.get("includeTabsContent")).toBe("true");
+    expect(getUrl.searchParams.get("suggestionsViewMode")).toBe("SUGGESTIONS_INLINE");
     expect(mocks.apiCall).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ provider: "google_drive", integrationId: "integration_1" }),

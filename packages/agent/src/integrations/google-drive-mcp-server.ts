@@ -776,6 +776,7 @@ async function replaceDocumentContents(
 ) {
   const getUrl = new URL(`${DOCS_BASE}/documents/${encodeURIComponent(args.fileId)}`);
   getUrl.searchParams.set("includeTabsContent", "true");
+  getUrl.searchParams.set("suggestionsViewMode", "SUGGESTIONS_INLINE");
   const current = asRecord(await callGoogle(apiCall, payload, "GET", getUrl, signal));
   confirmedDocumentId(current, args.fileId);
   const tab = resolveDocumentTab(current, args.tabId);
