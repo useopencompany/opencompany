@@ -710,6 +710,17 @@ export type ChatMessageDebugTrace = {
   error?: string;
 };
 
+export type ProductChatContextCompactionState = {
+  summary: string;
+  model: string;
+  generation: number;
+  compactedFromMessageId: string;
+  compactedThroughMessageId: string;
+  firstRetainedMessageId: string;
+  estimatedTokensBefore: number;
+  estimatedTokensAfter: number;
+};
+
 export type BrainToolRunTrace = Record<string, unknown>;
 
 export const productSchema = pgSchema("goat");
@@ -4376,6 +4387,37 @@ export const chatMessages = productSchema.table(
     attachmentTextsObjectCheck: check(
       "chat_messages_attachment_texts_object_check",
       sql`${table.attachmentTexts} IS NULL OR jsonb_typeof(${table.attachmentTexts}) = 'object'`,
+    ),
+  }),
+);
+
+// One rolling checkpoint per chat. The canonical chat_messages transcript remains untouched;
+// this row only controls the shorter, derived context sent to the opencompany engine.
+export const chatContextCompactions = productSchema.table(
+  "chat_context_compactions",
+  {
+    chatSessionId: text("chat_session_id")
+      .primaryKey()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    summary: text("summary").notNull(),
+    model: text("model").notNull(),
+    generation: integer("generation").notNull(),
+    compactedFromMessageId: text("compacted_from_message_id").notNull(),
+    compactedThroughMessageId: text("compacted_through_message_id").notNull(),
+    firstRetainedMessageId: text("first_retained_message_id").notNull(),
+    estimatedTokensBefore: integer("estimated_tokens_before").notNull(),
+    estimatedTokensAfter: integer("estimated_tokens_after").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    generationCheck: check(
+      "opencompany_chat_context_compactions_generation_check",
+      sql`${table.generation} > 0`,
+    ),
+    tokenCountsCheck: check(
+      "opencompany_chat_context_compactions_token_counts_check",
+      sql`${table.estimatedTokensBefore} >= 0 AND ${table.estimatedTokensAfter} >= 0`,
     ),
   }),
 );
