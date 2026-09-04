@@ -50,7 +50,7 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     icon: NotebookPen,
     connectionKind: "api_key",
     available: true,
-    connectHref: "/settings/granola",
+    connectHref: "/wiki/sources",
     docsHref: `${DOCS_ORIGIN}/docs/integrations/granola`,
   },
   {

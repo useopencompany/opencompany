@@ -31,6 +31,7 @@ export function integrationConnectionError(provider: string | null, reason: stri
     case "gmail_denied":
     case "slack_denied":
     case "linear_denied":
+    case "granola_denied":
     case "hubspot_denied":
     case "hubspot_mcp_denied":
     case "latitude_denied":

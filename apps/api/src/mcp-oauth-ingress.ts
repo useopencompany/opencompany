@@ -6,6 +6,12 @@ import {
   verifyBetterStackMcpState,
 } from "@opencompany/agent/integrations/betterstack-mcp";
 import {
+  appendGranolaMcpStatus,
+  completeGranolaMcpOAuth,
+  startGranolaMcpOAuth,
+  verifyGranolaMcpState,
+} from "@opencompany/agent/integrations/granola-mcp";
+import {
   appendHubSpotMcpStatus,
   completeHubSpotMcpOAuth,
   startHubSpotMcpOAuth,
@@ -52,6 +58,7 @@ type DbLike = any;
 export type McpOAuthProvider =
   | "linear"
   | "hubspot"
+  | "granola"
   | "posthog"
   | "neon"
   | "latitude"
@@ -114,6 +121,15 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     deniedReason: "hubspot_mcp_denied",
     invalidStatePath:
       "/settings/plugins/hubspot?integration=hubspot&setup=error&reason=invalid_state",
+  },
+  granola: {
+    start: startGranolaMcpOAuth,
+    complete: completeGranolaMcpOAuth,
+    verifyState: verifyGranolaMcpState,
+    appendStatus: appendGranolaMcpStatus,
+    deniedReason: "granola_denied",
+    invalidStatePath:
+      "/settings/plugins/granola?integration=granola&setup=error&reason=invalid_state",
   },
   posthog: {
     start: startPostHogMcpOAuth,

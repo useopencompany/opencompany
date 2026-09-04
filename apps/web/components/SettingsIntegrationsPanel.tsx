@@ -9,7 +9,6 @@ import {
   GmailIcon,
   GoogleCalendarIcon,
   GoogleDriveIcon,
-  GranolaIcon,
   HubSpotIcon,
   type LucideIcon as IconComponent,
   LinearIcon,
@@ -74,7 +73,10 @@ import {
 // monogram fallback where no square vector mark exists), the colored logo tile,
 // and a short connection-focused description. Keyed by provider so the card
 // components derive everything from the provider string.
-type SettingsPersonalAccountProvider = Exclude<PersonalAccountProvider, "latitude" | "slack">;
+type SettingsPersonalAccountProvider = Exclude<
+  PersonalAccountProvider,
+  "granola" | "latitude" | "slack"
+>;
 
 type IntegrationMetaKey = SettingsPersonalAccountProvider | "github" | "jamie" | "infisical";
 
@@ -172,12 +174,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Give workspace coding agents access to the real Infisical CLI.",
     monogram: "I",
     tileClass: "bg-[#6C47FF] text-white",
-  },
-  granola: {
-    label: "Granola",
-    description: "Meeting notes flow in once Granola finishes each summary.",
-    Icon: GranolaIcon,
-    tileClass: "bg-[#F0EBE1] text-[#1A1714]",
   },
   fathom: {
     label: "Fathom",
@@ -318,7 +314,6 @@ const INFISICAL_REGIONS = [
 // Plugins.
 const WORKSPACE_ACCOUNT_PROVIDERS = [
   "attio",
-  "granola",
   "fathom",
 ] as const satisfies readonly SettingsPersonalAccountProvider[];
 
@@ -382,10 +377,6 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="attio"
               accounts={integrations.personalAccounts.attio}
-            />
-            <IntegrationProviderGroupCard
-              provider="granola"
-              accounts={integrations.personalAccounts.granola}
             />
             <IntegrationProviderGroupCard
               provider="fathom"
@@ -924,7 +915,9 @@ export function IntegrationAccountRow({
     reconnectHref ??
     (account.provider === "posthog"
       ? "/api/integrations/posthog/start?returnTo=/settings/plugins/posthog"
-      : integrationConnectHref(account.provider));
+      : account.provider === "granola"
+        ? "/api/integrations/granola-mcp/start?returnTo=/settings/plugins/granola"
+        : integrationConnectHref(account.provider));
   const needsGmailMcpScope =
     account.provider === "gmail" && account.connected && !gmailMcpScopesSatisfied(account.scopes);
 
@@ -1409,7 +1402,6 @@ function integrationConnectHref(
   if (provider === "github_user")
     return "/api/integrations/github-user/start?returnTo=/settings/plugins/github";
   if (provider === "jamie") return "/settings/jamie";
-  if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
   if (provider === "attio") return "/settings/attio";
   if (provider === "slack") return "/settings/plugins/slack";

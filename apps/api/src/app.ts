@@ -2854,6 +2854,8 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/linear/callback", (c) => ingress.callback("linear", c.req.raw));
     app.get("/integrations/hubspot-mcp/start", (c) => ingress.start("hubspot", c.req.raw));
     app.get("/integrations/hubspot-mcp/callback", (c) => ingress.callback("hubspot", c.req.raw));
+    app.get("/integrations/granola-mcp/start", (c) => ingress.start("granola", c.req.raw));
+    app.get("/integrations/granola-mcp/callback", (c) => ingress.callback("granola", c.req.raw));
     app.get("/integrations/posthog/start", (c) => ingress.start("posthog", c.req.raw));
     app.get("/integrations/posthog/callback", (c) => ingress.callback("posthog", c.req.raw));
     app.get("/integrations/neon/start", (c) => ingress.start("neon", c.req.raw));
