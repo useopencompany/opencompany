@@ -58,6 +58,13 @@ bun run secrets:check
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for the review and verification expectations.
 
+## License and community
+
+opencompany is available under the [MIT License](./LICENSE). The owner-approved license decision,
+notice policy, and contribution terms are documented in [OPEN_SOURCE.md](./OPEN_SOURCE.md). See
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for copied third-party material and
+[TRADEMARKS.md](./TRADEMARKS.md) for permitted brand use.
+
 ## Documentation
 
 - [opencompany system map](./docs/system-map.md)
