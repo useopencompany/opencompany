@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import {
-  AGENT_MODEL_CATALOG,
   type ChatHostBootstrap,
   type ChatHostSkillFileChunk,
   type ChatHostToolGatewayResponse,
   type ChatHostToolOperation,
+  isAvailableAgentModelId,
   isClaudeCodeModelId,
   isCodexModelId,
 } from "@opencompany/agent-runtime";
@@ -613,10 +613,10 @@ export function workspaceSkillIdempotencyKey(turnId: string, toolCallId?: string
 
 function requiredModel(value: unknown): AgentModelId {
   const model = requiredString(value, "model");
-  if (!AGENT_MODEL_CATALOG.some((candidate) => candidate.id === model)) {
+  if (!isAvailableAgentModelId(model)) {
     throw new Error(`Unsupported model "${model}".`);
   }
-  return model as AgentModelId;
+  return model;
 }
 
 function optionalEngine(value: unknown) {

@@ -5,6 +5,7 @@ import {
   getAgentModelDefinition,
   hostToolContractVersionForEngine,
   isCodexModelId,
+  resolveAvailableAgentModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import {
@@ -439,11 +440,13 @@ export class PostgresTaskRepository implements TaskRepository {
     const assistantCreatedAt = new Date(now.getTime() + 1);
     const initialMessageContent =
       this.options.compatibility?.initialMessageContent ?? input.command.goal;
-    const runtimeModel = runtimeModelName(input.command.engine, input.command.model);
-    const model = getAgentModelDefinition(input.command.model)?.id;
+    const requestedModel = getAgentModelDefinition(input.command.model)?.id;
+    const model = requestedModel ? resolveAvailableAgentModelId(requestedModel) : undefined;
+    const runtimeModel = model ? runtimeModelName(input.command.engine, model) : null;
     if (!runtimeModel || !model) {
       throw new CoreError("invalid_argument", `Unsupported ${input.command.engine} Task model.`);
     }
+    const normalizedCommand = { ...input.command, model };
     const attachments = resolvedAttachments.attachments;
     const attachmentTexts = resolvedAttachments.attachmentTexts;
     const attachmentIds = input.command.attachmentIds ?? [];
@@ -456,10 +459,10 @@ export class PostgresTaskRepository implements TaskRepository {
     const harness = this.options.resolveHarness
       ? await this.options.resolveHarness({
           actor: input.actor,
-          command: { ...input.command, model },
+          command: normalizedCommand,
         })
-      : defaultHarness({ ...input.command, model });
-    validateHarness(harness, input.command, initialMessageContent);
+      : defaultHarness(normalizedCommand);
+    validateHarness(harness, normalizedCommand, initialMessageContent);
     const assistantDebugTrace = {
       schemaVersion:
         input.command.engine === "opencompany"
@@ -557,7 +560,7 @@ export class PostgresTaskRepository implements TaskRepository {
           )
           SELECT
             winner.conversation_id, ${input.actor.userId}, ${input.command.name},
-            ${input.command.model}, ${input.command.engine}, 'task', ${now}, ${assistantCreatedAt}
+            ${model}, ${input.command.engine}, 'task', ${now}, ${assistantCreatedAt}
           FROM winner
           RETURNING id
         ),
@@ -571,7 +574,7 @@ export class PostgresTaskRepository implements TaskRepository {
           SELECT
             winner.task_id, ${input.command.name}, ${input.actor.userId},
             ${input.actor.workspaceId}, ${input.command.goal}, ${input.command.source},
-            ${input.command.model}, conversation.id, ${input.command.scheduleId ?? null},
+            ${model}, conversation.id, ${input.command.scheduleId ?? null},
             ${input.command.scheduledFor ?? null}, ${input.command.workflowId ?? null},
             ${this.options.compatibility?.workflowBrainRef ?? null},
             'queued', 'queued', ${now},
