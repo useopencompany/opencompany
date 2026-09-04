@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   updateAutoModelRoutingAction,
+  updateTaskTimeRangeAction,
   updateTaskViewModeAction,
   updateTimezoneAction,
 } from "./user-preferences";
@@ -15,6 +16,7 @@ const preferences = {
   taskSpawningEnabled: false,
   wikiEnabled: true,
   taskViewMode: "list",
+  taskTimeRange: "24h",
   autoModelRoutingEnabled: true,
 };
 
@@ -113,6 +115,17 @@ describe("user preference API actions", () => {
       mode: "kanban",
     });
     expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("maps task time-range updates and revalidates the Tasks page", async () => {
+    const requests = stubApi(okEnvelope);
+
+    await expect(updateTaskTimeRangeAction("24h")).resolves.toEqual({
+      ok: true,
+      range: "24h",
+    });
+    await expect((requests[0] as Request).json()).resolves.toEqual({ taskTimeRange: "24h" });
+    expect(revalidatePath).toHaveBeenCalledWith("/tasks");
   });
 
   it("throws the protocol error for failed toggle updates so callers can surface it", async () => {

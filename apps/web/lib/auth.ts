@@ -28,6 +28,7 @@ export type IdentityUser = {
   /** @deprecated Wiki is always enabled. */
   wikiEnabled: true;
   taskViewMode: "board" | "list";
+  taskTimeRange: "24h" | "2d" | "7d" | "30d" | "90d" | "all";
   preferredMcpClient: "claude" | "chatgpt" | "cursor" | null;
   mcpSetupCompletedAt: Date | null;
   onboardedAt: Date | null;
@@ -228,6 +229,7 @@ function identityUser(user: IdentityDto["user"]): IdentityUser {
     chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
     wikiEnabled: true,
     taskViewMode: user.taskViewMode,
+    taskTimeRange: user.taskTimeRange,
     preferredMcpClient: user.preferredMcpClient,
     mcpSetupCompletedAt: user.mcpSetupCompletedAt ? new Date(user.mcpSetupCompletedAt) : null,
     onboardedAt: user.onboardedAt ? new Date(user.onboardedAt) : null,

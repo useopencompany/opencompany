@@ -1,6 +1,11 @@
 import { normalizeScheduleTimezone } from "@opencompany/agent-runtime";
 import type { Actor } from "@opencompany/core";
-import { type McpClient, type TaskViewMode, users } from "@opencompany/db/product-schema";
+import {
+  type McpClient,
+  type TaskTimeRange,
+  type TaskViewMode,
+  users,
+} from "@opencompany/db/product-schema";
 import { eq } from "drizzle-orm";
 import { ApiError } from "./errors";
 
@@ -13,6 +18,7 @@ export type UserPreferenceSet = {
   taskSpawningEnabled: boolean;
   wikiEnabled: true;
   taskViewMode: TaskViewMode;
+  taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
 };
 
@@ -39,6 +45,7 @@ const PREFERENCE_COLUMNS = {
   timezone: users.timezone,
   taskSpawningEnabled: users.taskSpawningEnabled,
   taskViewMode: users.taskViewMode,
+  taskTimeRange: users.taskTimeRange,
   autoModelRoutingEnabled: users.autoModelRoutingEnabled,
 };
 
@@ -62,6 +69,9 @@ export function createUserSettingsService(input: {
       }
       if (command.taskViewMode !== undefined && command.taskViewMode !== current.taskViewMode) {
         changes.taskViewMode = command.taskViewMode;
+      }
+      if (command.taskTimeRange !== undefined && command.taskTimeRange !== current.taskTimeRange) {
+        changes.taskTimeRange = command.taskTimeRange;
       }
       // No-op short-circuit: writing nothing keeps updatedAt stable when every
       // requested value already matches (e.g. the timezone sync on app load).

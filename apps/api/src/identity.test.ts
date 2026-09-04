@@ -45,6 +45,7 @@ const localUser = {
   chatCapabilitiesBetaEnabled: false,
   wikiEnabled: false,
   taskViewMode: "board",
+  taskTimeRange: "7d",
   preferredMcpClient: null,
   mcpSetupCompletedAt: null,
   onboardedAt: now,
