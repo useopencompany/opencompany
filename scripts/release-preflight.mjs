@@ -80,16 +80,7 @@ const groups = {
       "ELECTRIC_URL",
       "REDIS_URL",
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
-      // GitHub App OAuth + webhook ingress (#1203 4a1). The API redirects back
-      // to the web origin, so it also needs the canonical app URL.
       "OPENCOMPANY_NEXT_PUBLIC_APP_URL",
-      "GITHUB_INTEGRATION_APP_ID",
-      "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
-      "GITHUB_INTEGRATION_APP_SLUG",
-      "GITHUB_INTEGRATION_APP_CLIENT_ID",
-      "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
-      "GITHUB_INTEGRATION_STATE_SECRET",
-      "GITHUB_INTEGRATION_APP_WEBHOOK_SECRET",
       "GITHUB_USER_APP_SLUG",
       "GITHUB_USER_APP_CLIENT_ID",
       "GITHUB_USER_APP_CLIENT_SECRET",
@@ -189,14 +180,6 @@ const groups = {
       "OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID",
       "OPENCOMPANY_FEEDBACK_LINEAR_LABELS",
       "OPENCOMPANY_FEEDBACK_LINEAR_PROJECT_ID",
-      // iMessage pairing (#1203 5a2) moved behind /v1: the API sends the
-      // verification text. Optional (mirrors the web group's classification):
-      // without a provider, pairing fails with a clear "not configured" error.
-      "LINQ_API_TOKEN",
-      "LINQ_FROM_NUMBER",
-      "LINQ_API_BASE_URL",
-      "OPENCOMPANY_IMESSAGE_PROVIDER",
-      "OPENCOMPANY_IMESSAGE_KILL_SWITCH",
       // Optional internal-network override for runner control calls.
       "RUNNER_INTERNAL_URL",
     ],
@@ -218,8 +201,6 @@ const groups = {
       "VERCEL_AI_GATEWAY_API_KEY",
       "OPENAI_CODEX_API_KEY",
       "BLOB_READ_WRITE_TOKEN",
-      "GITHUB_INTEGRATION_APP_ID",
-      "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
       "GITHUB_USER_APP_CLIENT_ID",
       "GITHUB_USER_APP_CLIENT_SECRET",
       "GOOGLE_OAUTH_CLIENT_ID",
@@ -282,12 +263,6 @@ const groups = {
       "OPENCOMPANY_OBSERVABILITY_ENABLED",
       "OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT",
       "OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS",
-      "LINQ_API_TOKEN",
-      "LINQ_FROM_NUMBER",
-      "LINQ_API_BASE_URL",
-      "OPENCOMPANY_IMESSAGE_PROVIDER",
-      "OPENCOMPANY_IMESSAGE_KILL_SWITCH",
-      "OPENCOMPANY_IMESSAGE_DAILY_CAP",
       "LATITUDE_API_KEY",
       "LATITUDE_PROJECT_SLUG",
       "LATITUDE_SERVICE_NAME",
@@ -463,12 +438,6 @@ const desktopAuthSecret = process.env.OPENCOMPANY_DESKTOP_AUTH_SECRET?.trim();
 if (desktopAuthSecret && !isBase64Encoded32ByteKey(desktopAuthSecret)) {
   failed = true;
   console.log("\nOPENCOMPANY_DESKTOP_AUTH_SECRET must be a base64-encoded 32-byte key.");
-}
-
-const githubIntegrationStateSecret = process.env.GITHUB_INTEGRATION_STATE_SECRET;
-if (!isUnset(githubIntegrationStateSecret) && githubIntegrationStateSecret.length < 32) {
-  failed = true;
-  console.log("\nGITHUB_INTEGRATION_STATE_SECRET must be at least 32 characters.");
 }
 
 const githubUserAppStateSecret = process.env.GITHUB_USER_APP_STATE_SECRET;

@@ -65,20 +65,6 @@ services:
         sync: false
       - key: MONID_API_KEY
         sync: false
-      - key: GITHUB_INTEGRATION_APP_ID
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_PRIVATE_KEY
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_SLUG
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_CLIENT_ID
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_CLIENT_SECRET
-        sync: false
-      - key: GITHUB_INTEGRATION_STATE_SECRET
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_WEBHOOK_SECRET
-        sync: false
       # Dedicated user-authorized GitHub App for the official GitHub Plugin.
       - key: GITHUB_USER_APP_SLUG
         sync: false
@@ -160,20 +146,6 @@ services:
       - key: NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN
         sync: false
       - key: NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST
-        sync: false
-      # iMessage pairing moved behind /v1 in the #1203 5a2 cutover: the API
-      # sends the verification text through the Linq (or log) provider.
-      # Optional, mirroring the web classification — when unset, pairing fails
-      # with a clear "not configured" error and nothing else degrades.
-      - key: LINQ_API_TOKEN
-        sync: false
-      - key: LINQ_FROM_NUMBER
-        sync: false
-      - key: LINQ_API_BASE_URL
-        sync: false
-      - key: OPENCOMPANY_IMESSAGE_PROVIDER
-        sync: false
-      - key: OPENCOMPANY_IMESSAGE_KILL_SWITCH
         sync: false
       # Engine auth (Codex device flow, Infisical browser login) moved behind
       # /v1 in the #1203 5a3 cutover: the API now makes the sanctioned control
@@ -369,11 +341,6 @@ services:
         sync: false
       - key: MONID_API_KEY
         sync: false
-      # GitHub-backed tasks mint installation tokens inside the runner.
-      - key: GITHUB_INTEGRATION_APP_ID
-        sync: false
-      - key: GITHUB_INTEGRATION_APP_PRIVATE_KEY
-        sync: false
       # Refreshes the personal GitHub App user token before sandbox injection.
       - key: GITHUB_USER_APP_CLIENT_ID
         sync: false
@@ -398,19 +365,6 @@ services:
       - key: OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID
         sync: false
       - key: OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET
-        sync: false
-      # Optional iMessage delivery through Linq.
-      - key: LINQ_API_TOKEN
-        sync: false
-      - key: LINQ_FROM_NUMBER
-        sync: false
-      - key: LINQ_API_BASE_URL
-        sync: false
-      - key: OPENCOMPANY_IMESSAGE_PROVIDER
-        sync: false
-      - key: OPENCOMPANY_IMESSAGE_KILL_SWITCH
-        sync: false
-      - key: OPENCOMPANY_IMESSAGE_DAILY_CAP
         sync: false
       # Optional opencompany rendered-browser task tools.
       - key: RUNNER_OPENCOMPANY_BROWSER_ENABLED

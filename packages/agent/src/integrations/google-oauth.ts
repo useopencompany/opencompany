@@ -83,7 +83,12 @@ export function googleAuthorizationConfigForReturnTo(
   }
   return {
     ...config,
-    scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, ...OPENID_SCOPES],
+    scopes: [
+      GOOGLE_DRIVE_READ_SCOPE,
+      GOOGLE_DRIVE_FILE_SCOPE,
+      GOOGLE_DOCS_WRITE_SCOPE,
+      ...OPENID_SCOPES,
+    ],
   };
 }
 

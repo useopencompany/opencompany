@@ -17,6 +17,43 @@ Keep pull requests focused. Explain the problem, the chosen boundary, user-visib
 and anything reviewers cannot verify locally. UI changes need a browser check of the real route,
 including the primary flow and an obvious error or empty state.
 
+## Commit Identity and Email Privacy
+
+Git records the author and committer email address in every commit. That metadata is visible when a
+repository is public. If you do not want a personal address published, use the GitHub-provided
+`noreply` address shown in your GitHub email settings:
+
+```bash
+git config user.email "YOUR_NOREPLY_EMAIL"
+```
+
+Run that command in this repository to override your global Git identity, or add `--global` to use it
+for future commits in every repository. Confirm the configured value with `git config user.email`
+before committing. Changing the setting does not alter existing commits.
+
+GitHub can also keep the address private for web-based operations and block command-line pushes that
+expose an address marked private. See [GitHub's commit email
+guide](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/setting-your-commit-email-address)
+and [push protection
+guide](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/blocking-command-line-pushes-that-expose-your-personal-email-address).
+The project's handling of existing commit metadata is documented in [Git contributor email
+privacy](./docs/contributor-email-privacy.md).
+
+## Contribution Terms
+
+Unless a separate written agreement says otherwise, every contribution intentionally submitted to
+this repository is licensed under the project's [MIT License](./LICENSE) on the same terms as the
+rest of the project. You retain ownership of your contribution.
+
+By submitting a contribution, you represent that you created it or otherwise have the right to
+submit it under MIT. Do not submit employer-owned, confidential, copied, or generated material
+unless you have the permissions needed to do so and can identify any third-party source and license.
+Maintainers may ask for provenance evidence or require unclear material to be removed.
+
+The project does not require a contributor license agreement or Developer Certificate of Origin
+sign-off. Opening a pull request does not transfer copyright or grant rights to the opencompany
+name or logos; see [OPEN_SOURCE.md](./OPEN_SOURCE.md) and [TRADEMARKS.md](./TRADEMARKS.md).
+
 ## Local Checks
 
 Use Bun `1.3.2` and Node `20.20.0` or newer. Install exactly the committed dependency graph:

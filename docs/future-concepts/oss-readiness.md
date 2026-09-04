@@ -1,16 +1,19 @@
 # Open-source release readiness
 
 - Status: Proposed
-- Last reviewed: 2026-08-26
+- Last reviewed: 2026-09-04
 
 ## Current state
 
-The engineering monorepo is private and licensed under MIT. Its application boundaries, public
-pull-request CI, local setup, release automation, and contributor documentation are materially more
-mature than when open-source preparation began, but repository visibility has not changed.
+The engineering monorepo is private and licensed under MIT. The repository owner formally approved
+MIT as the final project license on 2026-09-04; the decision, notice policy, trademark boundary,
+and contribution terms are recorded in [OPEN_SOURCE.md](../../OPEN_SOURCE.md). Its application
+boundaries, public pull-request CI, local setup, release automation, and contributor documentation
+are materially more mature than when open-source preparation began, but repository visibility has
+not changed.
 
-No license change is accepted by this proposal. MIT remains authoritative unless the repository
-owner completes a separate legal and provenance review and explicitly approves another license.
+MIT remains authoritative. A future license change requires a separate owner decision plus legal
+and provenance review; this proposal does not authorize one.
 
 ## Release goal
 
@@ -28,10 +31,12 @@ documented local path, and execute the same core checks as maintainers.
 
 - Complete a provenance and redistribution audit for source, fonts, images, screenshots, generated
   artifacts, and third-party examples.
-- Run independent secret and personal-data scans over every Git ref. Rotate findings before deciding
-  whether history rewriting is necessary.
-- Decide and document the final license, notices, trademark policy, contribution terms, security
-  reporting path, code of conduct, and maintainer ownership.
+- Follow the accepted [Git contributor email privacy](../contributor-email-privacy.md) decision:
+  rerun independent secret and personal-data scans over every Git ref intended for publication,
+  privately notify contributors whose history contains personal or otherwise non-public addresses,
+  and resolve objections before deciding whether the coordinated history-rewrite exception is
+  necessary.
+- Confirm public-release maintainer ownership and operational coverage.
 - Exercise setup from clean macOS and Linux clones without company Infisical, Neon, Vercel, or
   Render access.
 - Confirm untrusted pull requests cannot access secrets, deployment credentials, writable caches,
@@ -42,6 +47,23 @@ documented local path, and execute the same core checks as maintainers.
   path.
 - Make repository visibility the final, explicit owner-approved operation with a rollback and
   incident-response owner present.
+
+## Resolved release policy
+
+- **License and notices (resolved 2026-09-04):** MIT is the owner-approved final project license.
+  MIT requires preservation of its copyright and permission notice but no project-level `NOTICE`.
+  Copied material is tracked in [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
+- **Trademarks (resolved 2026-09-04):** the MIT license does not grant rights to project branding;
+  permitted referential use and fork requirements are documented in
+  [TRADEMARKS.md](../../TRADEMARKS.md).
+- **Contributions (resolved 2026-09-04):** contributions are inbound=outbound under MIT. No CLA or
+  DCO sign-off is required; contributors represent that they have the right to submit their work.
+  See [CONTRIBUTING.md](../../CONTRIBUTING.md).
+- **Community policies:** [SECURITY.md](../../SECURITY.md) and
+  [CODE_OF_CONDUCT.md](../../CODE_OF_CONDUCT.md) define the current reporting and conduct paths.
+
+These decisions do not close the separate provenance and redistribution audit for tracked source,
+assets, fixtures, or generated material.
 
 ## Non-goals
 

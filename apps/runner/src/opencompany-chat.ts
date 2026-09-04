@@ -13,14 +13,13 @@ import type {
   WebSearchToolOutput,
 } from "@opencompany/agent/chat-ui";
 import {
+  listedActionSourceIdsFromMessages,
   replaceChatUiMessageText,
   textFromChatUiMessage,
   toChatUiMessage,
 } from "@opencompany/agent/chat-ui";
 import { executeChatExaFetch } from "@opencompany/agent/chat-web-fetch";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
-import { resolveImessageProvider } from "@opencompany/agent/imessage/provider";
-import { createSendUserMessageRunner } from "@opencompany/agent/imessage/send-user-message";
 import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import {
@@ -34,7 +33,6 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
 import { ensureMonthlyIncludedUsage } from "@opencompany/db/billing";
 import { hasPositiveCreditBalance } from "@opencompany/db/credits";
-import { resolveImessageDelivery } from "@opencompany/db/imessage";
 import {
   type ChatMessageAttachment,
   type CodexChatSession,
@@ -219,20 +217,24 @@ export async function runProductChatTurn(input: {
     if (input.taskContext) {
       await markTaskTurnRunning({ context: input.taskContext, turn });
     }
-    const runtime = await resolveProductChatRuntime({
-      turn,
-      session,
-      env,
-      signal: generationController.signal,
-      taskContext: input.taskContext,
-    });
-    runtimeCleanup = runtime.cleanup;
-    throwIfAborted(generationController.signal);
     const storedMessages = await loadProductChatStoredMessages({
       chatSessionId: session.chatSessionId,
       currentUserMessageId: turn.userMessageId,
       includeCurrentAssistantMessage: turn.settings.approvalContinuation === true,
     });
+    throwIfAborted(generationController.signal);
+    const prelistedActionSourceIds = listedActionSourceIdsFromMessages(
+      storedMessages.map((message) => toChatUiMessage(message)),
+    );
+    const runtime = await resolveProductChatRuntime({
+      turn,
+      session,
+      env,
+      signal: generationController.signal,
+      prelistedActionSourceIds,
+      taskContext: input.taskContext,
+    });
+    runtimeCleanup = runtime.cleanup;
     throwIfAborted(generationController.signal);
     if (!modelResolution) {
       throw new Error("Durable opencompany chat session is missing its workspace.");
@@ -1125,9 +1127,10 @@ async function resolveProductChatRuntime(input: {
   session: CodexChatSession;
   env: RunnerEnv;
   signal: AbortSignal;
+  prelistedActionSourceIds: readonly string[];
   taskContext?: TaskTurnContext | undefined;
 }) {
-  const { turn, session, env, signal, taskContext } = input;
+  const { turn, session, env, signal, prelistedActionSourceIds, taskContext } = input;
   const model = session.model as AgentModelId;
   if (!AGENT_MODEL_CATALOG.some((candidate) => candidate.id === model)) {
     throw new Error(`Unsupported opencompany chat model: ${session.model}.`);
@@ -1168,6 +1171,7 @@ async function resolveProductChatRuntime(input: {
     turnId: turn.id,
     signal,
     approvalContinuation: Boolean(turn.settings.approvalContinuation),
+    prelistedSourceIds: prelistedActionSourceIds,
   });
   const hostTools = await loadHostTools({
     sessionId: session.id,
@@ -1190,25 +1194,9 @@ async function resolveProductChatRuntime(input: {
       })
     : null;
   const exaApiKey = env.exaApiKey?.trim();
-  const imessageDelivery =
-    resolveImessageProvider() !== null
-      ? await resolveImessageDelivery(turn.userWorkosId, getDb()).catch(() => null)
-      : null;
   const toolContext = createProductChatToolContext({
     model,
     latestUserMessage: turn.prompt,
-    ...(imessageDelivery
-      ? {
-          sendUserMessage: createSendUserMessageRunner({
-            userWorkosId: turn.userWorkosId,
-            phoneE164: imessageDelivery.phoneE164,
-            source: "task",
-            chatSessionId: session.chatSessionId,
-            turnId: turn.id,
-            signal,
-          }),
-        }
-      : {}),
     ...(brain
       ? {
           runBrainCli: (toolInput) =>

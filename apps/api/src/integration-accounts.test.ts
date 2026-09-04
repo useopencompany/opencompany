@@ -1,14 +1,8 @@
 import {
-  connectImessageIntegration,
-  getImessageIntegrationState,
-  hashImessagePairingCode,
-} from "@opencompany/agent/imessage/connect";
-import {
   connectGranolaIntegration,
   getGranolaIntegrationState,
   validateGranolaApiKey,
 } from "@opencompany/agent/integrations/granola";
-import { saveJamieWebhookApiKey } from "@opencompany/agent/integrations/jamie";
 import {
   connectRenderMcpIntegration,
   getRenderIntegrationState,
@@ -21,12 +15,6 @@ import {
   validateStripeRestrictedApiKey,
 } from "@opencompany/agent/integrations/stripe";
 import type { Actor } from "@opencompany/core";
-import {
-  consumeImessageChallenge,
-  getImessagePairingChallenge,
-  incrementImessageChallengeAttempts,
-  upsertImessagePairingChallenge,
-} from "@opencompany/db/imessage";
 import {
   applyIntegrationCapabilityMode,
   disconnectPersonalIntegration,
@@ -43,31 +31,9 @@ vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   loadIntegrationCredential: vi.fn(async () => null),
 }));
 
-vi.mock("@opencompany/db/imessage", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  getImessagePairingChallenge: vi.fn(async () => null),
-  upsertImessagePairingChallenge: vi.fn(async () => undefined),
-  incrementImessageChallengeAttempts: vi.fn(async () => undefined),
-  consumeImessageChallenge: vi.fn(async () => undefined),
-  recordImessageSend: vi.fn(async () => undefined),
-}));
-
 vi.mock("@opencompany/db/wiki-sources", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ensureWikiSourceEnabledOnConnect: vi.fn(async () => true),
-}));
-
-vi.mock("@opencompany/agent/imessage/connect", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  connectImessageIntegration: vi.fn(async () => ({ integrationId: "gint_imsg" })),
-  getImessageIntegrationState: vi.fn(async () => ({
-    provider: "imessage" as const,
-    connected: true,
-    status: "connected" as const,
-    integrationId: "gint_imsg",
-    phoneE164: "+14155551234",
-    statusReason: null,
-  })),
 }));
 
 vi.mock("@opencompany/agent/integrations/granola", async (importOriginal) => ({
@@ -83,12 +49,6 @@ vi.mock("@opencompany/agent/integrations/granola", async (importOriginal) => ({
     accountName: "Sam",
     statusReason: null,
   })),
-}));
-
-vi.mock("@opencompany/agent/integrations/jamie", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  createOrResetJamieWebhookEndpoint: vi.fn(),
-  saveJamieWebhookApiKey: vi.fn(),
 }));
 
 vi.mock("@opencompany/agent/integrations/render-mcp", async (importOriginal) => ({
@@ -200,6 +160,32 @@ describe("integration account service", () => {
             scopes: ["read", "write"],
             capabilityModes: { read: "on", query: "ask", write: "ask" },
           },
+          {
+            id: "gint_fathom_legacy",
+            provider: "fathom",
+            workspaceId: null,
+            externalId: "fathom:user_1",
+            accountEmail: null,
+            accountName: "Fathom",
+            connectionLabel: "Fathom",
+            statusReason: null,
+            status: "connected",
+            scopes: [],
+            capabilityModes: {},
+          },
+          {
+            id: "gint_fathom_mcp",
+            provider: "fathom",
+            workspaceId: null,
+            externalId: "fathom_mcp",
+            accountEmail: null,
+            accountName: "Fathom",
+            connectionLabel: "Fathom",
+            statusReason: null,
+            status: "connected",
+            scopes: ["mcp"],
+            capabilityModes: { query: "ask" },
+          },
         ],
       ]),
     });
@@ -216,6 +202,18 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["gmail.readonly"],
         capabilityModes: { read: "on" },
+      },
+      {
+        integrationId: "gint_fathom_mcp",
+        provider: "fathom",
+        status: "connected",
+        connected: true,
+        accountEmail: null,
+        accountName: "Fathom",
+        connectionLabel: "Fathom",
+        statusReason: null,
+        scopes: ["mcp"],
+        capabilityModes: { query: "ask" },
       },
       {
         integrationId: "gint_betterstack_mcp",
@@ -465,120 +463,7 @@ describe("integration account service", () => {
     expect(getRenderIntegrationState).toHaveBeenCalled();
   });
 
-  it("requires the preference toggle and a configured provider before pairing", async () => {
-    const service = createIntegrationAccountService({
-      db: fakeDb([[{ imessageEnabled: false }]]),
-      resolveImessageProvider: () => null,
-    });
-    await expect(service.startImessagePairing(member, "+14155551234")).rejects.toMatchObject({
-      message: "Enable iMessage notifications in Preferences first.",
-    });
-
-    const unconfigured = createIntegrationAccountService({
-      db: fakeDb([[{ imessageEnabled: true }]]),
-      resolveImessageProvider: () => null,
-    });
-    await expect(unconfigured.startImessagePairing(member, "+14155551234")).rejects.toMatchObject({
-      status: 503,
-      message: "iMessage sending is not configured on this environment.",
-    });
-  });
-
-  it("sends a pairing code and records the delivery", async () => {
-    const send = vi.fn(async () => ({ ok: true as const, providerMessageId: null }));
-    const service = createIntegrationAccountService({
-      db: fakeDb([[{ imessageEnabled: true }]]),
-      resolveImessageProvider: () => ({ name: "log", send }),
-      generatePairingCode: () => "123456",
-    });
-    await expect(
-      service.startImessagePairing(member, "+1 (415) 555-1234"),
-    ).resolves.toBeUndefined();
-    expect(send).toHaveBeenCalledWith({
-      to: "+14155551234",
-      text: "Your opencompany verification code is 123456. It expires in 10 minutes.",
-    });
-    expect(upsertImessagePairingChallenge).toHaveBeenCalledWith(
-      expect.objectContaining({ userWorkosId: "user_1", phoneE164: "+14155551234" }),
-      expect.anything(),
-    );
-  });
-
-  it("throttles pairing resends inside the cooldown window", async () => {
-    const now = new Date("2026-08-13T08:00:00.000Z");
-    vi.mocked(getImessagePairingChallenge).mockResolvedValueOnce({
-      id: "chal_1",
-      phoneE164: "+14155551234",
-      codeHash: "hash",
-      attemptCount: 0,
-      consumedAt: null,
-      createdAt: new Date(now.getTime() - 5_000),
-      expiresAt: new Date(now.getTime() + 60_000),
-    } as never);
-    const service = createIntegrationAccountService({
-      db: fakeDb([[{ imessageEnabled: true }]]),
-      resolveImessageProvider: () => ({ name: "log", send: vi.fn() as never }),
-      now: () => now,
-    });
-    await expect(service.startImessagePairing(member, "+14155551234")).rejects.toMatchObject({
-      status: 429,
-      message: "A code was just sent. Wait a moment before requesting another.",
-    });
-  });
-
-  it("confirms a matching pairing code and connects the number", async () => {
-    const now = new Date("2026-08-13T08:00:00.000Z");
-    const codeHash = hashImessagePairingCode({
-      code: "654321",
-      userWorkosId: "user_1",
-      phoneE164: "+14155551234",
-    });
-    vi.mocked(getImessagePairingChallenge).mockResolvedValueOnce({
-      id: "chal_1",
-      phoneE164: "+14155551234",
-      codeHash,
-      attemptCount: 0,
-      consumedAt: null,
-      createdAt: new Date(now.getTime() - 60_000),
-      expiresAt: new Date(now.getTime() + 60_000),
-    } as never);
-    const service = createIntegrationAccountService({ db: fakeDb(), now: () => now });
-    await expect(service.confirmImessagePairing(member, "654321")).resolves.toMatchObject({
-      provider: "imessage",
-      connected: true,
-      phoneE164: "+14155551234",
-    });
-    expect(consumeImessageChallenge).toHaveBeenCalledWith("chal_1", expect.anything());
-    expect(connectImessageIntegration).toHaveBeenCalledWith(
-      expect.objectContaining({ userWorkosId: "user_1", phoneE164: "+14155551234" }),
-    );
-  });
-
-  it("counts down remaining attempts on a mismatched code", async () => {
-    const now = new Date("2026-08-13T08:00:00.000Z");
-    vi.mocked(getImessagePairingChallenge).mockResolvedValueOnce({
-      id: "chal_1",
-      phoneE164: "+14155551234",
-      codeHash: hashImessagePairingCode({
-        code: "654321",
-        userWorkosId: "user_1",
-        phoneE164: "+14155551234",
-      }),
-      attemptCount: 3,
-      consumedAt: null,
-      createdAt: new Date(now.getTime() - 60_000),
-      expiresAt: new Date(now.getTime() + 60_000),
-    } as never);
-    const service = createIntegrationAccountService({ db: fakeDb(), now: () => now });
-    await expect(service.confirmImessagePairing(member, "111111")).rejects.toMatchObject({
-      status: 400,
-      message: "That code doesn't match. 1 attempt left.",
-    });
-    expect(incrementImessageChallengeAttempts).toHaveBeenCalledWith("chal_1", expect.anything());
-    expect(getImessageIntegrationState).not.toHaveBeenCalled();
-  });
-
-  it("admin-gates the workspace-scoped Stripe and Jamie commands", async () => {
+  it("admin-gates the workspace-scoped Stripe commands", async () => {
     const service = createIntegrationAccountService({ db: fakeDb() });
     await expect(service.connectStripe(member, "rk_test_x".padEnd(40, "a"))).rejects.toMatchObject({
       status: 403,
@@ -587,14 +472,6 @@ describe("integration account service", () => {
     await expect(service.disconnectStripe(member)).rejects.toMatchObject({
       status: 403,
       message: "Only workspace admins can manage the Stripe integration.",
-    });
-    await expect(service.createOrResetJamieWebhookEndpoint(member)).rejects.toMatchObject({
-      status: 403,
-      message: "Only workspace admins can manage the Jamie integration.",
-    });
-    await expect(service.saveJamieWebhookApiKey(member, "sk_x")).rejects.toMatchObject({
-      status: 403,
-      message: "Only workspace admins can manage the Jamie integration.",
     });
   });
 
@@ -655,41 +532,6 @@ describe("integration account service", () => {
     await expect(service.disconnectStripe(admin)).rejects.toMatchObject({
       status: 404,
       message: "Stripe is not connected.",
-    });
-  });
-
-  it("surfaces Jamie lib validation errors verbatim like the retired action", async () => {
-    vi.mocked(saveJamieWebhookApiKey).mockRejectedValueOnce(
-      new Error("Create a Jamie webhook endpoint before saving the API key."),
-    );
-    const service = createIntegrationAccountService({ db: fakeDb() });
-    await expect(service.saveJamieWebhookApiKey(admin, "sk_x")).rejects.toMatchObject({
-      status: 400,
-      message: "Create a Jamie webhook endpoint before saving the API key.",
-    });
-  });
-
-  it("auto-enables Jamie for the Wiki when its API key is saved", async () => {
-    vi.mocked(saveJamieWebhookApiKey).mockResolvedValueOnce({
-      integrationId: "gint_jamie",
-      webhookUrl: "https://example.test/webhooks/jamie",
-      headerName: "x-jamie-api-key",
-      apiKeyConfigured: true,
-    });
-    const db = fakeDb([[{ userWorkosId: "user_connector" }]]);
-    const service = createIntegrationAccountService({ db });
-
-    await expect(service.saveJamieWebhookApiKey(admin, "sk_x")).resolves.toMatchObject({
-      integrationId: "gint_jamie",
-      apiKeyConfigured: true,
-    });
-    expect(ensureWikiSourceEnabledOnConnect).toHaveBeenCalledWith({
-      workspaceId: "workspace_1",
-      provider: "jamie",
-      integrationId: "gint_jamie",
-      userWorkosId: "user_connector",
-      createdByWorkosId: "user_1",
-      db,
     });
   });
 });

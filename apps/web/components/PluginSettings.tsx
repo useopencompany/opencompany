@@ -1,5 +1,6 @@
 "use client";
 
+import { captureProductEvent } from "@opencompany/analytics/product/client";
 import type {
   PluginImportPreviewDto,
   PluginInstallationDto,
@@ -9,11 +10,14 @@ import { Button, buttonVariants } from "@opencompany/ui/components/button";
 import { Input } from "@opencompany/ui/components/input";
 import { toast } from "@opencompany/ui/components/sonner";
 import {
+  AttioIcon,
   BetterStackIcon,
+  FathomIcon,
   GitHubIcon,
   GmailIcon,
   GoogleCalendarIcon,
   GoogleDriveIcon,
+  GranolaIcon,
   HubSpotIcon,
   LinearIcon,
   NeonIcon,
@@ -26,6 +30,7 @@ import { cn } from "@opencompany/ui/lib/utils";
 import {
   Activity,
   Archive,
+  AudioLines,
   ChevronDown,
   ExternalLink,
   FileArchive,
@@ -41,7 +46,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useRef, useState, useTransition } from "react";
 import { SettingsContent } from "@/components/SettingsChrome";
 import {
   approveHeadlessPluginMcp,
@@ -121,10 +126,20 @@ export type OfficialMcpPluginConfig = OfficialMcpPluginMetadata & OfficialPlugin
 export type OfficialSkillPluginConfig = OfficialSkillPluginMetadata & OfficialPluginAppearance;
 
 export const OFFICIAL_MCP_PLUGINS = {
+  attio: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.attio,
+    Icon: AttioIcon,
+    iconClassName: "bg-[#111111] text-white",
+  },
   betterstack: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.betterstack,
     Icon: BetterStackIcon,
     iconClassName: "bg-[#1B1F23] text-white",
+  },
+  fathom: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.fathom,
+    Icon: FathomIcon,
+    iconClassName: "bg-[#1355FF] text-white",
   },
   github: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.github,
@@ -135,6 +150,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.gmail,
     Icon: GmailIcon,
     iconClassName: "bg-white text-[#EA4335]",
+  },
+  granola: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.granola,
+    Icon: GranolaIcon,
+    iconClassName: "bg-[#F0EBE1] text-[#1A1714]",
   },
   "google-calendar": {
     ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],
@@ -150,6 +170,16 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.hubspot,
     Icon: HubSpotIcon,
     iconClassName: "bg-[#FF7A59] text-white",
+  },
+  jamie: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.jamie,
+    Icon: AudioLines,
+    iconClassName: "bg-[#5B5BD6] text-white",
+  },
+  latitude: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.latitude,
+    Icon: Activity,
+    iconClassName: "bg-[#171717] text-white",
   },
   linear: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
@@ -210,12 +240,20 @@ export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
 export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
 export const GMAIL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.gmail.name;
 export const GMAIL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.gmail.source;
+export const GRANOLA_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.granola.name;
+export const GRANOLA_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.granola.source;
 export const GOOGLE_CALENDAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-calendar"].name;
 export const GOOGLE_CALENDAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-calendar"].source;
 export const GOOGLE_DRIVE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-drive"].name;
 export const GOOGLE_DRIVE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-drive"].source;
 export const HUBSPOT_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.hubspot.name;
 export const HUBSPOT_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.hubspot.source;
+export const JAMIE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.jamie.name;
+export const JAMIE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.jamie.source;
+export const ATTIO_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.attio.name;
+export const ATTIO_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.attio.source;
+export const LATITUDE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.latitude.name;
+export const LATITUDE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.latitude.source;
 export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
 export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
 export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
@@ -226,6 +264,8 @@ export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;
 export const RENDER_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.render.source;
 export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
 export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
+export const FATHOM_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.fathom.name;
+export const FATHOM_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.fathom.source;
 export const SIGNOZ_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.signoz.name;
 export const SIGNOZ_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.signoz.source;
 export const SLACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.slack.name;
@@ -286,6 +326,14 @@ export function installOfficialHubSpotPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.hubspot, preview);
 }
 
+export function installOfficialAttioPlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.attio, preview);
+}
+
+export function installOfficialLatitudePlugin(preview?: PluginImportPreviewDto) {
+  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.latitude, preview);
+}
+
 export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {
   return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.neon, preview);
 }
@@ -329,11 +377,14 @@ function pluginCatalogFilterLabel(filter: Exclude<PluginCatalogFilter, "all">) {
 export function PluginsSettings({
   plugins,
   canEdit,
+  workspaceId,
 }: {
   plugins: PluginListItemDto[];
   canEdit: boolean;
+  workspaceId: string;
 }) {
   const router = useRouter();
+  const catalogViewCaptured = useRef(false);
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<PluginCatalogFilter>("all");
   const [installingPluginName, setInstallingPluginName] = useState<OfficialPluginName | null>(null);
@@ -343,6 +394,13 @@ export function PluginsSettings({
   const installedPlugins = new Map(
     plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const),
   );
+
+  useEffect(() => {
+    if (catalogViewCaptured.current) return;
+    if (captureProductEvent("plugin_catalog_viewed", { workspace_id: workspaceId })) {
+      catalogViewCaptured.current = true;
+    }
+  }, [workspaceId]);
 
   const install = (config: OfficialPluginConfig) => {
     if (isInstalling) return;

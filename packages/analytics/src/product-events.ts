@@ -10,6 +10,7 @@ export type ProductAnalyticsUsageSource =
   | "subscription_covered";
 export type ProductOnboardingFlow = "owner" | "member";
 export type ProductOnboardingStep = "profile" | "workspace" | "welcome" | "finish";
+export type ProductPluginKind = "skills" | "mcp" | "hybrid" | "empty";
 
 export type ProductAnalyticsEventPropertiesByName = {
   app_opened: {
@@ -113,6 +114,16 @@ export type ProductAnalyticsEventPropertiesByName = {
     has_schedule: boolean;
     workflow_id?: string;
     schedule_id?: string;
+  };
+  plugin_catalog_viewed: {
+    workspace_id: string;
+  };
+  plugin_installed: {
+    workspace_id: string;
+    plugin_name: string;
+    plugin_kind: ProductPluginKind;
+    skill_count: number;
+    mcp_server_count: number;
   };
   integration_added: {
     workspace_id?: string;
@@ -288,9 +299,25 @@ export const productAnalyticsEvents = {
       "schedule_id",
     ],
   },
+  plugin_catalog_viewed: {
+    name: "plugin_catalog_viewed",
+    description: "A user opened the plugin catalog.",
+    safeProperties: ["workspace_id"],
+  },
+  plugin_installed: {
+    name: "plugin_installed",
+    description: "A user successfully installed a plugin into a workspace.",
+    safeProperties: [
+      "workspace_id",
+      "plugin_name",
+      "plugin_kind",
+      "skill_count",
+      "mcp_server_count",
+    ],
+  },
   integration_added: {
     name: "integration_added",
-    description: "A user connected an integration.",
+    description: "A user connected an integration account, including an account used by a plugin.",
     safeProperties: ["workspace_id", "provider"],
   },
   brain_source_added: {

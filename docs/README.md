@@ -16,6 +16,8 @@ Start with:
   provenance rules.
 - [Electric read models](./electric-sync.md) — authorized live-read architecture and local setup.
 - [Environment variables](./env-vars.md) and [secret management](./secret-management.md).
+- [Git contributor email privacy](./contributor-email-privacy.md) — commit identity guidance and the
+  history-retention decision for public release.
 
 `docs/future-concepts` contains speculative research, not current operational guidance.
 

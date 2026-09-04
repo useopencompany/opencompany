@@ -446,7 +446,6 @@ export const IntegrationAccountReadModelSchema = z
       "latitude",
       "posthog",
       "neon",
-      "imessage",
       "x_account",
     ]),
     workspaceId: z.string().min(1).max(128).nullable(),
@@ -808,10 +807,8 @@ export const BrainSourceItemListEnvelopeSchema = z
   .openapi("BrainSourceItemListEnvelope");
 
 export const BrainSourceConfigProviderSchema = z.enum([
-  "jamie",
   "gmail",
   "google_drive",
-  "github",
   "linear",
   "slack_bot",
   "hubspot",
@@ -874,28 +871,12 @@ export const BrainSourceAccountSchema = z
   .strict()
   .openapi("BrainSourceAccount");
 
-const JamieSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("jamie"),
-    ...BrainSourceProviderBaseShape,
-    accountName: NullableLabelSchema,
-    webhookUrl: z.url().max(4_096).nullable(),
-    apiKeyConfigured: z.boolean(),
-  })
-  .strict();
 const LinearSourceProviderStateSchema = z
   .object({
     provider: z.literal("linear"),
     ...BrainSourceProviderBaseShape,
     accountName: NullableLabelSchema,
     organizationName: NullableLabelSchema,
-  })
-  .strict();
-const GitHubSourceProviderStateSchema = z
-  .object({
-    provider: z.literal("github"),
-    ...BrainSourceProviderBaseShape,
-    accountName: NullableLabelSchema,
   })
   .strict();
 const GmailSourceProviderStateSchema = z
@@ -959,15 +940,7 @@ export const BrainSourceDetailsSchema = z
         attio: z.array(BrainSourceAccountSchema),
       })
       .strict(),
-    jamie: z
-      .object({
-        integration: JamieSourceProviderStateSchema,
-        legacyDefaultDelivery: z.boolean(),
-        isDefaultBrain: z.boolean(),
-      })
-      .strict(),
     linear: z.object({ integration: LinearSourceProviderStateSchema }).strict(),
-    github: z.object({ integration: GitHubSourceProviderStateSchema }).strict(),
     gmail: z.object({ integration: GmailSourceProviderStateSchema }).strict(),
     googleDrive: z.object({ integration: GoogleDriveSourceProviderStateSchema }).strict(),
     hubspot: z.object({ integration: HubspotSourceProviderStateSchema }).strict(),
@@ -1014,17 +987,6 @@ const AttioObjectTypeRefSchema = z.object({ id: z.enum(["person", "company", "de
 const AttioEventRefSchema = z
   .object({ id: z.enum(["object_created", "object_updated", "note_added"]) })
   .strict();
-const GitHubActivityEventSchema = z.enum([
-  "pull_request_opened",
-  "pull_request_merged",
-  "pull_request_commented",
-  "issue_opened",
-  "issue_commented",
-]);
-const GitHubRepositoryRefSchema = z
-  .object({ id: z.string().min(1).max(512), fullName: z.string().min(1).max(512) })
-  .strict();
-
 export const SetBrainSourceBodySchema = z
   .union([
     z
@@ -1059,15 +1021,6 @@ export const SetBrainSourceBodySchema = z
         enabled: z.boolean(),
         objectTypes: z.array(AttioObjectTypeRefSchema).max(50),
         events: z.array(AttioEventRefSchema).max(50),
-      })
-      .strict(),
-    z
-      .object({
-        operation: z.literal("configure"),
-        provider: z.literal("github"),
-        enabled: z.boolean(),
-        repos: z.array(GitHubRepositoryRefSchema).max(500),
-        events: z.array(GitHubActivityEventSchema).max(50),
       })
       .strict(),
     z
@@ -1122,7 +1075,6 @@ export const BrainSourceDeleteEnvelopeSchema = z
 
 export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("linear") }).strict(),
-  z.object({ provider: z.literal("github") }).strict(),
   z
     .object({
       provider: z.literal("google_drive"),
@@ -1155,12 +1107,6 @@ export const BrainSourceOptionsSchema = z
       .strict(),
     z
       .object({
-        provider: z.literal("github"),
-        repos: z.array(GitHubRepositoryRefSchema.extend({ private: z.boolean() }).strict()),
-      })
-      .strict(),
-    z
-      .object({
         provider: z.literal("google_drive"),
         files: z.array(GoogleDriveOptionSchema),
         nextPageToken: z.string().max(4_096).nullable(),
@@ -1176,8 +1122,6 @@ export const BrainSourceOptionsEnvelopeSchema = z
 
 export const BrainImportProviderSchema = z.enum([
   "public_web",
-  "github",
-  "jamie",
   "granola",
   "fathom",
   "gmail",
@@ -1195,23 +1139,10 @@ export const BrainImportRunStatusSchema = z.enum([
   "canceled",
 ]);
 
-// GitHub is the only provider whose import scope may be chosen at start time before a
-// configured Brain source exists. Every other provider reuses its stored source configuration.
-const BrainImportGitHubRepositoryRefSchema = z
-  .object({
-    id: z.string().min(1).max(200).optional(),
-    fullName: z.string().min(1).max(200).optional(),
-  })
-  .strict();
-
 const BrainImportSourceSelectionEntrySchema = z
   .object({
     enabled: z.boolean(),
     integrationId: ResourceIdSchema.optional(),
-    config: z
-      .object({ repos: z.array(BrainImportGitHubRepositoryRefSchema).max(20).optional() })
-      .strict()
-      .optional(),
   })
   .strict();
 
@@ -1320,7 +1251,7 @@ export const WikiPageReadModelSchema = WikiPageSchema.openapi("WikiPageReadModel
 export const WikiTimelineReadModelSchema =
   WikiTimelineEntrySchema.openapi("WikiTimelineReadModelV1");
 
-export const WikiSourceProviderSchema = z.enum(["gmail", "jamie", "granola", "linear", "github"]);
+export const WikiSourceProviderSchema = z.enum(["gmail", "granola", "linear"]);
 
 export const WikiSourceConfigSchema = z
   .record(z.string().min(1).max(128), z.unknown())
@@ -3504,6 +3435,7 @@ export const OnboardingEmailClaimEnvelopeSchema = z
   .openapi("OnboardingEmailClaimEnvelope");
 
 export const TaskViewModeSchema = z.enum(["board", "list"]);
+export const TaskTimeRangeSchema = z.enum(["24h", "2d", "7d", "30d", "90d", "all"]);
 export const McpClientSchema = z.enum(["claude", "chatgpt", "cursor"]);
 
 // Authenticated browser identity read model. Provider organization ids and raw
@@ -3520,10 +3452,10 @@ export const IdentityUserSchema = z
     taskSpawningEnabled: z.boolean(),
     autoModelRoutingEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
-    imessageEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
+    taskTimeRange: TaskTimeRangeSchema,
     preferredMcpClient: McpClientSchema.nullable(),
     mcpSetupCompletedAt: TimestampSchema.nullable(),
     onboardedAt: TimestampSchema.nullable(),
@@ -3581,7 +3513,7 @@ export const UserPreferencesSchema = z
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
-    imessageEnabled: z.boolean(),
+    taskTimeRange: TaskTimeRangeSchema,
     autoModelRoutingEnabled: z.boolean(),
   })
   .strict()
@@ -3594,7 +3526,7 @@ export const UpdateUserPreferencesBodySchema = z
     /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */
     wikiEnabled: z.boolean().optional(),
     taskViewMode: TaskViewModeSchema.optional(),
-    imessageEnabled: z.boolean().optional(),
+    taskTimeRange: TaskTimeRangeSchema.optional(),
     autoModelRoutingEnabled: z.boolean().optional(),
   })
   .strict()
@@ -3990,48 +3922,6 @@ export const GranolaAccountStateEnvelopeSchema = z
   .strict()
   .openapi("GranolaAccountStateEnvelope");
 
-export const ImessageAccountStateSchema = z
-  .object({
-    provider: z.literal("imessage"),
-    connected: z.boolean(),
-    status: IntegrationAccountStatusSchema,
-    integrationId: IntegrationAccountIdSchema.nullable(),
-    phoneE164: z.string().nullable(),
-    statusReason: z.string().nullable(),
-  })
-  .strict()
-  .openapi("ImessageAccountState");
-
-export const ImessageAccountStateEnvelopeSchema = z
-  .object({
-    data: z.object({ state: ImessageAccountStateSchema }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("ImessageAccountStateEnvelope");
-
-export const StartImessagePairingBodySchema = z
-  .object({
-    // E.164 normalization happens server-side so typos keep the retired
-    // action's human-readable error copy.
-    phone: z.string().min(1).max(64),
-  })
-  .strict()
-  .openapi("StartImessagePairingBody");
-
-export const ImessagePairingStartedEnvelopeSchema = z
-  .object({
-    data: z.object({ started: z.literal(true) }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("ImessagePairingStartedEnvelope");
-
-export const ConfirmImessagePairingBodySchema = z
-  .object({ code: z.string().min(1).max(16) })
-  .strict()
-  .openapi("ConfirmImessagePairingBody");
-
 export const StripeAccountStateSchema = z
   .object({
     provider: z.literal("stripe"),
@@ -4060,26 +3950,6 @@ export const StripeAccountDeleteEnvelopeSchema = z
   })
   .strict()
   .openapi("StripeAccountDeleteEnvelope");
-
-// The webhook URL and header name are connection instructions, not secrets;
-// the Jamie-issued API key itself is write-only and never returned.
-export const JamieWebhookSetupSchema = z
-  .object({
-    integrationId: IntegrationAccountIdSchema,
-    webhookUrl: z.string().min(1),
-    headerName: z.string().min(1),
-    apiKeyConfigured: z.boolean(),
-  })
-  .strict()
-  .openapi("JamieWebhookSetup");
-
-export const JamieWebhookSetupEnvelopeSchema = z
-  .object({
-    data: z.object({ setup: JamieWebhookSetupSchema }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("JamieWebhookSetupEnvelope");
 
 // Engine + secrets-manager auth commands (#1203 5a3). Credential material
 // (the Claude Code setup token, the Infisical browser token) arrives in
@@ -4283,7 +4153,7 @@ export type DeleteBrainFolderBody = z.infer<typeof DeleteBrainFolderBodySchema>;
 export type WikiPageDto = z.infer<typeof WikiPageSchema>;
 export type WikiPageReadModel = z.infer<typeof WikiPageReadModelSchema>;
 export type WikiTimelineReadModel = z.infer<typeof WikiTimelineReadModelSchema>;
-export type WikiSourceProvider = "gmail" | "jamie" | "granola" | "linear" | "github";
+export type WikiSourceProvider = "gmail" | "granola" | "linear";
 export type WikiSourceDto = z.infer<typeof WikiSourceSchema>;
 export type WikiIngestActivityItemDto = {
   id: string;
@@ -4482,6 +4352,4 @@ export type SetSlackBotDestinationBody = z.infer<typeof SetSlackBotDestinationBo
 export type AttioAccountStateDto = z.infer<typeof AttioAccountStateSchema>;
 export type FathomAccountStateDto = z.infer<typeof FathomAccountStateSchema>;
 export type GranolaAccountStateDto = z.infer<typeof GranolaAccountStateSchema>;
-export type ImessageAccountStateDto = z.infer<typeof ImessageAccountStateSchema>;
 export type StripeAccountStateDto = z.infer<typeof StripeAccountStateSchema>;
-export type JamieWebhookSetupDto = z.infer<typeof JamieWebhookSetupSchema>;

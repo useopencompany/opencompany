@@ -7,12 +7,14 @@ export type ActionProviderId =
   | "gmail"
   | "google_calendar"
   | "google_drive"
+  | "granola"
   | "linear"
   | "hubspot"
   | "posthog"
   | "attio"
   | "github"
   | "github_user"
+  | "jamie"
   | "stripe"
   | "revolut"
   | "latitude"
@@ -20,6 +22,7 @@ export type ActionProviderId =
   | "betterstack"
   | "render"
   | "signoz"
+  | "fathom"
   | "x_account";
 
 export type ActionSourceId = ActionProviderId | ManagedCapabilitySource | `plugin:${string}`;

@@ -49,6 +49,8 @@ describe("Brain import API actions", () => {
         focus: "Product",
         sourceSelection: {
           public_web: { enabled: true },
+          // Stale callers may still send the retired provider; the adapter
+          // must keep it out of the protocol command.
           github: {
             enabled: true,
             integrationId: "integration_gh",
@@ -79,11 +81,6 @@ describe("Brain import API actions", () => {
       focus: "Product",
       sourceSelection: {
         public_web: { enabled: true },
-        github: {
-          enabled: true,
-          integrationId: "integration_gh",
-          config: { repos: [{ id: "repo_1", fullName: "acme/api" }] },
-        },
         gmail: { enabled: true, integrationId: "integration_gmail" },
       },
     });

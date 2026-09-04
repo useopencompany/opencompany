@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   GOOGLE_DOCS_WRITE_SCOPE,
+  GOOGLE_DRIVE_FILE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
   GOOGLE_SHEETS_WRITE_SCOPE,
+  googleDriveMcpScopesSatisfied,
   hasGoogleDocsWriteScope,
   hasGoogleDriveWriteScope,
   hasGoogleSheetsWriteScope,
@@ -24,5 +26,18 @@ describe("Google Drive OAuth scope capabilities", () => {
     expect(hasGoogleDocsWriteScope([GOOGLE_SHEETS_WRITE_SCOPE])).toBe(false);
     expect(hasGoogleSheetsWriteScope([GOOGLE_SHEETS_WRITE_SCOPE])).toBe(true);
     expect(hasGoogleSheetsWriteScope([GOOGLE_DOCS_WRITE_SCOPE])).toBe(false);
+  });
+
+  it("requires Docs editing access for the official Drive plugin", () => {
+    expect(googleDriveMcpScopesSatisfied([GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE])).toBe(
+      false,
+    );
+    expect(
+      googleDriveMcpScopesSatisfied([
+        GOOGLE_DRIVE_READ_SCOPE,
+        GOOGLE_DRIVE_FILE_SCOPE,
+        GOOGLE_DOCS_WRITE_SCOPE,
+      ]),
+    ).toBe(true);
   });
 });

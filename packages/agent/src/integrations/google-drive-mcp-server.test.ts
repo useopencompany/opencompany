@@ -21,7 +21,11 @@ import {
   createGoogleDriveMcpTicket,
   type GoogleDriveMcpOperation,
 } from "./google-drive-mcp-ticket";
-import { GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DRIVE_READ_SCOPE } from "./google-drive-scopes";
+import {
+  GOOGLE_DOCS_WRITE_SCOPE,
+  GOOGLE_DRIVE_FILE_SCOPE,
+  GOOGLE_DRIVE_READ_SCOPE,
+} from "./google-drive-scopes";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
 
 const SECRET = "shared-test-secret";
@@ -29,7 +33,7 @@ const connectedRow = {
   id: "integration_1",
   userWorkosId: "user_1",
   status: "connected",
-  scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE],
+  scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DOCS_WRITE_SCOPE],
   capabilityModes: { read: "ask", query: "ask", write: "ask" },
   toolModes: {},
 };
@@ -93,7 +97,7 @@ describe("opencompany Google Drive MCP server", () => {
     });
   });
 
-  it("discovers only the eight reviewed Drive-compatible tools", async () => {
+  it("discovers only the ten reviewed Drive-compatible tools", async () => {
     const response = await service().handle(request({ type: "tools/list" }, "tools/list"));
     expect(response.status).toBe(200);
     const body = await responseJson(response);
@@ -106,6 +110,8 @@ describe("opencompany Google Drive MCP server", () => {
       "read_file_content",
       "copy_file",
       "create_file",
+      "replace_document_text",
+      "replace_document_contents",
     ]);
     expect(mocks.apiCall).not.toHaveBeenCalled();
   });
@@ -147,6 +153,8 @@ describe("opencompany Google Drive MCP server", () => {
         "read_file_content",
         "copy_file",
         "create_file",
+        "replace_document_text",
+        "replace_document_contents",
       ]);
     } finally {
       await client.close();
@@ -248,6 +256,155 @@ describe("opencompany Google Drive MCP server", () => {
     );
   });
 
+  it("replaces exact text in a selected Google Docs tab with a revision guard", async () => {
+    mocks.apiCall.mockResolvedValueOnce({
+      documentId: "doc_1",
+      replies: [{ replaceAllText: { occurrencesChanged: 2 } }],
+      writeControl: { requiredRevisionId: "rev_8" },
+    });
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "replace_document_text", capability: "write" },
+        "tools/call",
+        {
+          name: "replace_document_text",
+          arguments: {
+            fileId: "doc_1",
+            findText: "Q3",
+            replaceText: "Q4",
+            matchCase: false,
+            tabId: "t.0",
+            requiredRevisionId: "rev_7",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await responseJson(response);
+    expect(mocks.apiCall).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "google_drive", integrationId: "integration_1" }),
+      "POST",
+      new URL("https://docs.googleapis.com/v1/documents/doc_1:batchUpdate"),
+      {
+        signal: expect.any(AbortSignal),
+        body: {
+          requests: [
+            {
+              replaceAllText: {
+                containsText: { text: "Q3", matchCase: false },
+                replaceText: "Q4",
+                tabsCriteria: { tabIds: ["t.0"] },
+              },
+            },
+          ],
+          writeControl: { requiredRevisionId: "rev_7" },
+        },
+      },
+    );
+    expect(JSON.parse(body.result.content[0].text)).toEqual({
+      document: {
+        id: "doc_1",
+        viewUrl: "https://docs.google.com/document/d/doc_1/edit?tab=t.0",
+        tabId: "t.0",
+        occurrencesChanged: 2,
+        revisionId: "rev_8",
+      },
+    });
+  });
+
+  it("replaces all contents in a nested Google Docs tab against the fetched revision", async () => {
+    mocks.apiCall
+      .mockResolvedValueOnce({
+        documentId: "doc_1",
+        revisionId: "rev_7",
+        tabs: [
+          {
+            tabProperties: { tabId: "t.0" },
+            documentTab: { body: { content: [{ startIndex: 0, endIndex: 2 }] } },
+            childTabs: [
+              {
+                tabProperties: { tabId: "t.child" },
+                documentTab: {
+                  body: {
+                    content: [
+                      { startIndex: 0, endIndex: 1, sectionBreak: {} },
+                      { startIndex: 1, endIndex: 15, paragraph: {} },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        documentId: "doc_1",
+        writeControl: { requiredRevisionId: "rev_8" },
+      });
+    const response = await service().handle(
+      request(
+        { type: "tools/call", tool: "replace_document_contents", capability: "write" },
+        "tools/call",
+        {
+          name: "replace_document_contents",
+          arguments: { fileId: "doc_1", tabId: "t.child", text: "New plan" },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await responseJson(response);
+    expect(body.result).not.toMatchObject({ isError: true });
+    expect(mocks.apiCall).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ provider: "google_drive", integrationId: "integration_1" }),
+      "GET",
+      expect.objectContaining({
+        origin: "https://docs.googleapis.com",
+        pathname: "/v1/documents/doc_1",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+    const getUrl = mocks.apiCall.mock.calls[0]?.[2] as URL;
+    expect(getUrl.searchParams.get("includeTabsContent")).toBe("true");
+    expect(getUrl.searchParams.get("suggestionsViewMode")).toBe("SUGGESTIONS_INLINE");
+    expect(mocks.apiCall).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ provider: "google_drive", integrationId: "integration_1" }),
+      "POST",
+      new URL("https://docs.googleapis.com/v1/documents/doc_1:batchUpdate"),
+      {
+        signal: expect.any(AbortSignal),
+        body: {
+          requests: [
+            {
+              deleteContentRange: {
+                range: { startIndex: 1, endIndex: 14, tabId: "t.child" },
+              },
+            },
+            {
+              insertText: {
+                location: { index: 1, tabId: "t.child" },
+                text: "New plan",
+              },
+            },
+          ],
+          writeControl: { requiredRevisionId: "rev_7" },
+        },
+      },
+    );
+    expect(JSON.parse(body.result.content[0].text)).toEqual({
+      document: {
+        id: "doc_1",
+        viewUrl: "https://docs.google.com/document/d/doc_1/edit?tab=t.child",
+        tabId: "t.child",
+        changed: true,
+        revisionId: "rev_8",
+      },
+    });
+  });
+
   it("returns a trusted reconnect envelope when Google revokes access during a call", async () => {
     const { GoogleAccessAuthError } = await import("./google-access-token");
     mocks.apiCall.mockRejectedValueOnce(new GoogleAccessAuthError("revoked"));
@@ -290,7 +447,7 @@ describe("opencompany Google Drive MCP server", () => {
 
     mocks.loadIntegration.mockResolvedValueOnce({
       ...connectedRow,
-      scopes: [GOOGLE_DRIVE_READ_SCOPE],
+      scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE],
     });
     const missingScope = await service().handle(request({ type: "tools/list" }, "tools/list"));
     expect(missingScope.status).toBe(401);

@@ -21,7 +21,11 @@ import {
   loadGoogleDriveMcpWorkerConnection,
 } from "./google-drive-mcp";
 import { verifyGoogleDriveMcpTicket } from "./google-drive-mcp-ticket";
-import { GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DRIVE_READ_SCOPE } from "./google-drive-scopes";
+import {
+  GOOGLE_DOCS_WRITE_SCOPE,
+  GOOGLE_DRIVE_FILE_SCOPE,
+  GOOGLE_DRIVE_READ_SCOPE,
+} from "./google-drive-scopes";
 
 const connectedRow = {
   id: "gint_drive_latest",
@@ -30,7 +34,7 @@ const connectedRow = {
   accountEmail: "ada@example.com",
   accountName: "Ada",
   statusReason: null,
-  scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE],
+  scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DOCS_WRITE_SCOPE],
   capabilityModes: { query: "ask" },
   toolModes: { create_file: "off" },
 };
@@ -116,7 +120,7 @@ describe("Google Drive MCP connection", () => {
 
     mocks.loadIntegration.mockResolvedValueOnce({
       ...connectedRow,
-      scopes: [GOOGLE_DRIVE_READ_SCOPE],
+      scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE],
     });
     await expect(
       loadGoogleDriveMcpWorkerConnection({

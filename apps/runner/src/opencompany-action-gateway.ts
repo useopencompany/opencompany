@@ -12,6 +12,7 @@ type GatewayContext = {
   turnId: string;
   signal: AbortSignal;
   approvalContinuation: boolean;
+  prelistedSourceIds?: readonly string[];
 };
 
 type GatewayDependencies = { execute: typeof executeActionHostGateway };
@@ -37,13 +38,15 @@ export async function createActionDispatcher(
 
   const catalog = response.catalog as ChatActionCatalog;
   const sourceByAction = new Map(catalog.actions.map((action) => [action.id, action.source]));
+  const availableSourceIds = new Set<string>(catalog.sources.map((source) => source.id));
+  const prelistedSourceIds = context.approvalContinuation
+    ? [...availableSourceIds]
+    : (context.prelistedSourceIds ?? []).filter((sourceId) => availableSourceIds.has(sourceId));
   const approvalFailures = new Map<string, UseActionToolOutput>();
 
   return {
     catalog,
-    ...(context.approvalContinuation
-      ? { prelistedSourceIds: catalog.sources.map((source) => source.id) }
-      : {}),
+    ...(prelistedSourceIds.length > 0 ? { prelistedSourceIds } : {}),
     needsApproval: async ({ action, params, toolCallId }) => {
       const approval = await callGateway(
         context,

@@ -79,7 +79,7 @@ describe("createActionDispatcher", () => {
     expect(execute).toHaveBeenCalledTimes(4);
   });
 
-  it("prelists the recovered catalog only for an approval continuation", async () => {
+  it("prelists every available source for an approval continuation", async () => {
     const execute = vi.fn(
       async () =>
         ({
@@ -105,6 +105,36 @@ describe("createActionDispatcher", () => {
     );
 
     expect(dispatcher?.prelistedSourceIds).toEqual(["plugin:slack:slack"]);
+  });
+
+  it("prelists sources discovered on earlier chat turns while they remain available", async () => {
+    const execute = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          catalog: {
+            sources: [{ id: "plugin:posthog:posthog", label: "PostHog", description: "Analytics" }],
+            actions: [
+              {
+                id: "plugin:posthog:posthog.insight-query",
+                source: "plugin:posthog:posthog",
+                description: "Query an insight.",
+                params: { type: "object" },
+              },
+            ],
+          },
+        }) satisfies ActionGatewayResponse,
+    );
+
+    const dispatcher = await createActionDispatcher(
+      {
+        ...context(),
+        prelistedSourceIds: ["plugin:posthog:posthog", "disconnected-source"],
+      },
+      { execute },
+    );
+
+    expect(dispatcher?.prelistedSourceIds).toEqual(["plugin:posthog:posthog"]);
   });
 
   it("treats an empty authorized catalog as a valid Chat runtime", async () => {

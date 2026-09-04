@@ -185,6 +185,7 @@ export async function getGranolaIntegrationState(
       and(
         eq(integrations.userWorkosId, userWorkosId),
         eq(integrations.provider, GRANOLA_PROVIDER),
+        eq(integrations.externalId, granolaExternalIdForUser(userWorkosId)),
         ne(integrations.status, "disconnected"),
       ),
     )

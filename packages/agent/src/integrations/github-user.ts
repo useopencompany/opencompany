@@ -18,7 +18,6 @@ import {
   ExpiringOAuthReauthRequired,
   getExpiringOAuthAccessToken,
 } from "./expiring-oauth-access-token";
-import { verifyGitHubUserInstallation } from "./github";
 import type { RemoteMcpProviderState } from "./remote-mcp-oauth";
 
 const GITHUB_USER_PROVIDER = "github_user" as const;
@@ -255,10 +254,17 @@ export async function verifyGitHubAppUserInstallation(input: {
   accessToken: string;
   installationId: string;
 }) {
-  return verifyGitHubUserInstallation({
-    userToken: input.accessToken,
-    installationId: input.installationId,
+  const installations = await fetchAllGitHubPages({
+    endpoint: `${GITHUB_API_ROOT}/user/installations`,
+    accessToken: input.accessToken,
+    fetch: globalThis.fetch,
+    readPage: parseInstallationsPage,
   });
+  const installation = installations.find((candidate) => candidate.id === input.installationId);
+  if (!installation) {
+    throw new Error("The GitHub installation was not available to the authorized user.");
+  }
+  return installation;
 }
 
 export async function fetchGitHubUserIdentity(accessToken: string): Promise<GitHubUserIdentity> {

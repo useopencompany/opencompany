@@ -55,9 +55,10 @@ describe("PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
-  it("registers Attio reads on by default and updates behind ask", () => {
+  it("keeps Attio structure visible and guards CRM data and changes", () => {
     expect(PROVIDER_CAPABILITIES.attio).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
@@ -74,6 +75,12 @@ describe("PROVIDER_CAPABILITIES", () => {
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "query", defaultMode: "ask" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
+  it("guards all Fathom meeting and account data behind ask", () => {
+    expect(PROVIDER_CAPABILITIES.fathom).toEqual([
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
     ]);
   });
 
@@ -144,11 +151,13 @@ describe("mode helpers", () => {
     expect(providerCapability("github_user", "write")?.label).toBe("Manage GitHub");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
     expect(providerCapability("slack", "read")?.label).toBe("Search public Slack");
-    expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
+    expect(providerCapability("attio", "query")?.label).toBe("Read CRM data");
+    expect(providerCapability("attio", "write")?.label).toBe("Change Attio");
     expect(providerCapability("neon", "read")?.label).toBe("Inspect Neon structure");
     expect(providerCapability("neon", "query")?.label).toBe("Query database data");
     expect(providerCapability("signoz", "read")?.label).toBe("Read SigNoz documentation");
     expect(providerCapability("signoz", "query")?.label).toBe("Inspect observability data");
+    expect(providerCapability("fathom", "query")?.label).toBe("Read Fathom meetings");
     expect(providerCapability("slack", "query")?.label).toBe("Read private Slack");
     expect(providerCapability("slack", "write")?.label).toBe("Change Slack");
     expect(providerCapability("stripe", "read")?.label).toBe("Learn about Stripe");

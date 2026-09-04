@@ -34,7 +34,6 @@ const appDataMock = vi.hoisted(() => ({
     featureFlags: {
       taskSpawning: false,
       autoModelRouting: false,
-      imessage: false,
       legacyBrain: true,
     },
     integrations: {},
@@ -45,7 +44,6 @@ const appDataMock = vi.hoisted(() => ({
 const userPreferencesMock = vi.hoisted(() => ({
   updateTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
-  updateImessageEnabledAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
@@ -132,20 +130,12 @@ vi.mock("@/components/Surface", () => ({
   },
 }));
 
-vi.mock("@/components/JamieIntegrationSetup", () => ({
-  JamieIntegrationSetup: () => null,
-}));
-
 vi.mock("@/components/GranolaIntegrationSetup", () => ({
   GranolaIntegrationSetup: () => null,
 }));
 
 vi.mock("@/components/FathomIntegrationSetup", () => ({
   FathomIntegrationSetup: () => null,
-}));
-
-vi.mock("@/components/AttioIntegrationSetup", () => ({
-  AttioIntegrationSetup: () => null,
 }));
 
 vi.mock("@/components/McpSetupGuide", () => ({
@@ -171,7 +161,6 @@ vi.mock("@/components/InferenceSettingsPanel", () => ({
 vi.mock("@/lib/user-preferences", () => ({
   updateTaskSpawningAction: userPreferencesMock.updateTaskSpawningAction,
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
-  updateImessageEnabledAction: userPreferencesMock.updateImessageEnabledAction,
 }));
 
 vi.mock("@/lib/headless-automation-commands", () => ({

@@ -169,8 +169,6 @@ vi.mock("./plugin-mcp-launcher", () => ({
   stopPluginMcpProcesses: pluginMcpMocks.stopPluginMcpProcesses,
 }));
 
-vi.mock("./github", () => ({ getGitHubWorkInstallationToken: vi.fn() }));
-
 vi.mock("./infisical-sandbox-auth", async (importOriginal) => {
   const original = await importOriginal<typeof import("./infisical-sandbox-auth")>();
   return {

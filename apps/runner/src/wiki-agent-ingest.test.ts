@@ -23,7 +23,6 @@ vi.mock("@opencompany/observability/braintrust", () => ({
 
 import {
   buildCompanyImportSourceContextHeader,
-  buildGitHubSourceContextHeader,
   buildGmailSourceContextHeader,
   buildLinearSourceContextHeader,
   buildMeetingSourceContextHeader,
@@ -39,10 +38,10 @@ import {
 
 const occurredAt = new Date("2026-08-24T10:00:00.000Z");
 const normalizedPayload = {
-  sourceProvider: "jamie",
+  sourceProvider: "granola",
   sourceType: "meeting",
   externalId: "meeting_123",
-  sourceRef: "jamie:meeting:meeting_123",
+  sourceRef: "granola:meeting:meeting_123",
   title: "Roadmap review",
   occurredAt: occurredAt.toISOString(),
   capturedAt: "2026-08-24T11:00:00.000Z",
@@ -58,9 +57,9 @@ function input(
     attempt: 1,
     workspaceId: "workspace_123",
     actorUserWorkosId: "user_123",
-    sourceProvider: "jamie" as const,
+    sourceProvider: "granola" as const,
     sourceType: "meeting" as const,
-    sourceRef: "jamie:meeting:meeting_123",
+    sourceRef: "granola:meeting:meeting_123",
     title: "Roadmap review",
     occurredAt,
     contentHash: "hash_123",
@@ -130,39 +129,6 @@ function triageResult(
     },
     modelCostUsdMicros: 25,
   } as const;
-}
-
-function githubInput() {
-  return {
-    ...input(vi.fn()),
-    sourceProvider: "github" as const,
-    sourceType: "activity" as const,
-    sourceRef: "github:acme/api:issue:45:comment:99",
-    title: "Billing webhook drops retries",
-    contentHash: "hash_github",
-    normalizedPayload: {
-      sourceProvider: "github",
-      sourceType: "activity",
-      externalId: "comment_99",
-      sourceRef: "github:acme/api:issue:45:comment:99",
-      title: "Billing webhook drops retries",
-      occurredAt: occurredAt.toISOString(),
-      capturedAt: occurredAt.toISOString(),
-      contentHash: "hash_github",
-      content: {
-        activity: {
-          repository: { id: "4242", fullName: "acme/api", private: true },
-          kind: "issue",
-          number: 45,
-          state: "commented",
-          title: "Billing webhook drops retries",
-          labels: ["bug"],
-          author: "ada",
-          body: "We will retain failed deliveries for 24 hours.",
-        },
-      },
-    },
-  };
 }
 
 function companyImportInput(
@@ -379,14 +345,14 @@ describe("opencompany wiki librarian agent", () => {
     expect(WIKI_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS).toBe(900_000);
   });
 
-  it("builds the registered Jamie meeting header and five-section prompt", () => {
+  it("builds the registered Granola meeting header and five-section prompt", () => {
     const message = buildWikiIngestUserMessage(input(vi.fn()));
-    expect(message).toContain("# Source context: jamie/meeting");
+    expect(message).toContain("# Source context: granola/meeting");
     expect(message).toContain("title, date and time, attendees, provider summary, and transcript");
     expect(message).toContain("decisions, project state, commitments, and people or company facts");
     expect(message).toContain("at most a timeline-add");
     expect(message).toContain("do NOT copy the full transcript");
-    expect(message).toContain("[[source:jamie:meeting:meeting_123]]");
+    expect(message).toContain("[[source:granola:meeting:meeting_123]]");
     expect(message).toContain("<normalized-source-payload>");
     expect(message).toContain('"contentHash": "hash_123"');
     for (const section of [
@@ -402,7 +368,7 @@ describe("opencompany wiki librarian agent", () => {
     expect(WIKI_AGENT_INGEST_SYSTEM_PROMPT).toContain("[[source:provider:id]]");
   });
 
-  it("routes both meeting providers through the meeting header registry", () => {
+  it("routes Granola through the meeting header registry", () => {
     const granolaHeader = buildWikiSourceContextHeader({
       sourceProvider: "granola",
       sourceType: "meeting",
@@ -444,7 +410,7 @@ describe("opencompany wiki librarian agent", () => {
     expect(gmailHeader).toContain("[[source:gmail:thread:thread_123]]");
   });
 
-  it("registers Linear and GitHub headers with external-source pointer discipline", () => {
+  it("registers the Linear header with external-source pointer discipline", () => {
     const linearInput = {
       sourceProvider: "linear" as const,
       sourceType: "issue" as const,
@@ -453,25 +419,11 @@ describe("opencompany wiki librarian agent", () => {
       occurredAt,
       sourceConfig: {},
     };
-    const githubHeaderInput = {
-      sourceProvider: "github" as const,
-      sourceType: "activity" as const,
-      sourceRef: "github:acme/api:pull:123",
-      title: "Ship billing retries",
-      occurredAt,
-      sourceConfig: {},
-    };
-
     const linearHeader = buildWikiSourceContextHeader(linearInput);
-    const githubHeader = buildWikiSourceContextHeader(githubHeaderInput);
     expect(linearHeader).toBe(buildLinearSourceContextHeader(linearInput));
     expect(linearHeader).toContain("timeline-add entries or brief page updates");
     expect(linearHeader).toContain("[[source:linear:acme:ENG-42]]");
     expect(linearHeader).toContain("never mirror an issue body");
-    expect(githubHeader).toBe(buildGitHubSourceContextHeader(githubHeaderInput));
-    expect(githubHeader).toContain("[[source:github:acme/api:pull:123]]");
-    expect(githubHeader).toContain("never mirror issue bodies, pull-request descriptions");
-    expect(githubHeader).toContain("finish with SKIP");
   });
 
   it("short-circuits a Gmail job when cheap triage returns skip", async () => {
@@ -487,22 +439,6 @@ describe("opencompany wiki librarian agent", () => {
       mutations: 0,
       trace: {
         triage: { decision: "skip" },
-      },
-    });
-    expect(aiMock.generateText).not.toHaveBeenCalled();
-  });
-
-  it("short-circuits a GitHub comment when cheap triage says skip", async () => {
-    const runTriage = vi.fn(async () => triageResult("skip"));
-
-    await expect(runWikiAgentIngest(githubInput(), { runTriage })).resolves.toMatchObject({
-      model: WIKI_AGENT_INGEST_MODEL,
-      skipped: true,
-      skipMode: "triage",
-      toolCalls: 0,
-      trace: {
-        triage: { decision: "skip" },
-        budget: { modelCostUsdMicros: 25 },
       },
     });
     expect(aiMock.generateText).not.toHaveBeenCalled();
@@ -530,36 +466,6 @@ describe("opencompany wiki librarian agent", () => {
         }),
       }),
     ).resolves.toMatchObject({ skipped: true, skipMode: "explicit" });
-    expect(aiMock.generateText).toHaveBeenCalledOnce();
-  });
-
-  it("feeds GitHub triage hints into the full wiki librarian", async () => {
-    const runTriage = vi.fn(async () => triageResult("ingest"));
-    generate({ text: "SKIP: no wiki update was needed after lookup" });
-
-    const result = await runWikiAgentIngest(githubInput(), { runTriage });
-
-    expect(result.trace.triage).toMatchObject({
-      decision: "ingest",
-      entityHints: ["Acme API", "Billing"],
-    });
-    expect(result.budget.modelCostUsdMicros).toBeGreaterThan(25);
-    const generation = aiMock.generateText.mock.calls[0]?.[0] as any;
-    expect(generation.messages[0].content).toContain("## Cheap triage handoff");
-    expect(generation.messages[0].content).toContain("- Acme API");
-    expect(generation.messages[0].content).toContain("- Billing");
-  });
-
-  it("falls through to the GitHub wiki agent when triage fails", async () => {
-    const runTriage = vi.fn(async () => {
-      throw new Error("triage unavailable");
-    });
-    generate({ text: "SKIP: nothing durable" });
-
-    await expect(runWikiAgentIngest(githubInput(), { runTriage })).resolves.toMatchObject({
-      skipped: true,
-      skipMode: "explicit",
-    });
     expect(aiMock.generateText).toHaveBeenCalledOnce();
   });
 });

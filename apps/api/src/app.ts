@@ -13,7 +13,6 @@ import type {
   AttioProviderState,
   FathomProviderState,
   GranolaProviderState,
-  ImessageProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import type { GmailMcpService } from "@opencompany/agent/integrations/gmail-mcp-server";
@@ -21,6 +20,7 @@ import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/g
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { McpService } from "@opencompany/agent/mcp-http";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { BillingApplicationService } from "@opencompany/billing/application-service";
 import {
   CHAT_PRESENTATION_READ_LIMIT,
@@ -93,13 +93,11 @@ import { admitEngineMessage } from "./engine-messages";
 import type { EngineSessionService } from "./engine-sessions";
 import { ApiError, errorResponse } from "./errors";
 import type { FeedbackService } from "./feedback";
-import type { GitHubIngressService } from "./github-ingress";
 import type { GitHubUserIngressService } from "./github-user-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
 import type { IdentityService } from "./identity";
 import type { IntegrationAccountService } from "./integration-accounts";
-import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
 import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
 import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
@@ -217,14 +215,12 @@ export type CreateApiAppInput = {
   identify: ApiIdentityVerifier;
   emailLifecycleInternalSecret?: string;
   browserOrigins?: readonly string[];
-  githubIngress?: GitHubIngressService;
   githubUserIngress?: GitHubUserIngressService;
   googleIngress?: GoogleIngressService;
   slackIngress?: SlackIngressService;
   linearIngress?: LinearIngressService;
   hubspotIngress?: HubspotIngressService;
   attioIngress?: AttioIngressService;
-  jamieIngress?: JamieIngressService;
   mcpOAuthIngress?: McpOAuthIngressService;
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
@@ -1382,6 +1378,25 @@ export function createApiApp(input: CreateApiAppInput) {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         ...c.req.valid("json"),
       });
+      if (!result.idempotentReplay) {
+        const skillCount = result.plugin.skills.length;
+        const mcpServerCount =
+          result.plugin.stdioServers.length + result.plugin.remoteMcpServers.length;
+        await captureProductServerEvent("plugin_installed", actor.userId, {
+          workspace_id: actor.workspaceId,
+          plugin_name: result.plugin.name,
+          plugin_kind:
+            skillCount > 0 && mcpServerCount > 0
+              ? "hybrid"
+              : skillCount > 0
+                ? "skills"
+                : mcpServerCount > 0
+                  ? "mcp"
+                  : "empty",
+          skill_count: skillCount,
+          mcp_server_count: mcpServerCount,
+        });
+      }
       return c.json(
         {
           data: {
@@ -2220,23 +2235,6 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: { state: renderStateDto(state) }, meta }, 200);
     },
-    startImessagePairing: async (c) => {
-      const actor = actorFrom(c);
-      // Pairing sends a real text message, so it gets its own small bucket
-      // instead of sharing the general write counter.
-      await enforceRateLimit(rateLimiter, actor, "imessage-pairing", 5);
-      await input.integrationAccounts.startImessagePairing(actor, c.req.valid("json").phone);
-      return c.json({ data: { started: true as const }, meta }, 200);
-    },
-    confirmImessagePairing: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const state = await input.integrationAccounts.confirmImessagePairing(
-        actor,
-        c.req.valid("json").code,
-      );
-      return c.json({ data: { state: imessageStateDto(state) }, meta }, 200);
-    },
     connectStripeAccount: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -2251,21 +2249,6 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "write", 60);
       await input.integrationAccounts.disconnectStripe(actor);
       return c.json({ data: { deleted: true as const }, meta }, 200);
-    },
-    createJamieWebhookEndpoint: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const setup = await input.integrationAccounts.createOrResetJamieWebhookEndpoint(actor);
-      return c.json({ data: { setup }, meta }, 200);
-    },
-    saveJamieApiKey: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const setup = await input.integrationAccounts.saveJamieWebhookApiKey(
-        actor,
-        c.req.valid("json").apiKey,
-      );
-      return c.json({ data: { setup }, meta }, 200);
     },
     listIntegrationAccounts: async (c) => {
       const actor = actorFrom(c);
@@ -2768,18 +2751,6 @@ export function createApiApp(input: CreateApiAppInput) {
     });
     return c.json({ data: output, meta }, 200);
   });
-  if (input.githubIngress) {
-    // Purpose-specific provider ingress: registered outside /v1 so the /v1
-    // browser middleware (CORS, cookie-mutation Origin checks, actor context)
-    // does not apply. Each handler owns its authentication and verification.
-    const ingress = input.githubIngress;
-    app.get("/integrations/github/start", (c) => ingress.start(c.req.raw));
-    app.get("/integrations/github/callback", (c) => ingress.callback(c.req.raw));
-    // GitHub caps webhook payloads at 25 MB; unlike the retired Vercel route,
-    // Render enforces no platform body limit, so cap it here.
-    app.use("/webhooks/github/events", ingressBodyLimit(25 * 1024 * 1024));
-    app.post("/webhooks/github/events", (c) => ingress.webhook(c.req.raw));
-  }
   if (input.githubUserIngress) {
     const ingress = input.githubUserIngress;
     app.get("/integrations/github-user/start", (c) => ingress.start(c.req.raw));
@@ -2831,33 +2802,32 @@ export function createApiApp(input: CreateApiAppInput) {
     app.use("/webhooks/attio/events", ingressBodyLimit(5 * 1024 * 1024));
     app.post("/webhooks/attio/events", (c) => ingress.webhook(c.req.raw));
   }
-  if (input.jamieIngress) {
-    const ingress = input.jamieIngress;
-    app.use("/webhooks/jamie", ingressBodyLimit(5 * 1024 * 1024));
-    app.post("/webhooks/jamie", (c) => ingress.webhook(c.req.raw));
-    app.use("/webhooks/jamie/:integrationId", ingressBodyLimit(5 * 1024 * 1024));
-    app.post("/webhooks/jamie/:integrationId", (c) =>
-      ingress.webhookForIntegration(c.req.param("integrationId"), c.req.raw),
-    );
-  }
   if (input.mcpOAuthIngress) {
     const ingress = input.mcpOAuthIngress;
+    app.get("/integrations/attio-mcp/start", (c) => ingress.start("attio", c.req.raw));
+    app.get("/integrations/attio-mcp/callback", (c) => ingress.callback("attio", c.req.raw));
     app.get("/integrations/betterstack/start", (c) => ingress.start("betterstack", c.req.raw));
     app.get("/integrations/betterstack/callback", (c) =>
       ingress.callback("betterstack", c.req.raw),
     );
+    app.get("/integrations/fathom-mcp/start", (c) => ingress.start("fathom", c.req.raw));
+    app.get("/integrations/fathom-mcp/callback", (c) => ingress.callback("fathom", c.req.raw));
     app.get("/integrations/signoz/start", (c) => ingress.start("signoz", c.req.raw));
     app.get("/integrations/signoz/callback", (c) => ingress.callback("signoz", c.req.raw));
     app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));
     app.get("/integrations/linear/callback", (c) => ingress.callback("linear", c.req.raw));
     app.get("/integrations/hubspot-mcp/start", (c) => ingress.start("hubspot", c.req.raw));
     app.get("/integrations/hubspot-mcp/callback", (c) => ingress.callback("hubspot", c.req.raw));
+    app.get("/integrations/granola-mcp/start", (c) => ingress.start("granola", c.req.raw));
+    app.get("/integrations/granola-mcp/callback", (c) => ingress.callback("granola", c.req.raw));
     app.get("/integrations/posthog/start", (c) => ingress.start("posthog", c.req.raw));
     app.get("/integrations/posthog/callback", (c) => ingress.callback("posthog", c.req.raw));
     app.get("/integrations/neon/start", (c) => ingress.start("neon", c.req.raw));
     app.get("/integrations/neon/callback", (c) => ingress.callback("neon", c.req.raw));
     app.get("/integrations/latitude/start", (c) => ingress.start("latitude", c.req.raw));
     app.get("/integrations/latitude/callback", (c) => ingress.callback("latitude", c.req.raw));
+    app.get("/integrations/jamie-mcp/start", (c) => ingress.start("jamie", c.req.raw));
+    app.get("/integrations/jamie-mcp/callback", (c) => ingress.callback("jamie", c.req.raw));
   }
   if (input.xAccountIngress) {
     const ingress = input.xAccountIngress;
@@ -3529,17 +3499,6 @@ function renderStateDto(state: RenderProviderState) {
     statusReason: state.statusReason,
     capabilityModes: state.capabilityModes,
     toolModes: state.toolModes,
-  };
-}
-
-function imessageStateDto(state: ImessageProviderState) {
-  return {
-    provider: state.provider,
-    connected: state.connected,
-    status: integrationAccountStatusDto(state.status),
-    integrationId: state.integrationId,
-    phoneE164: state.phoneE164,
-    statusReason: state.statusReason,
   };
 }
 

@@ -5,8 +5,8 @@ description: Connect opencompany's Google Drive MCP and ingest selected files in
 
 Google Drive is an official opencompany Agent Plugin backed by opencompany's MCP wrapper around the
 stable [Drive REST API](https://developers.google.com/workspace/drive/api/reference/rest/v3). It can
-search and inspect files, read or download bounded file content, inspect permissions, and create or
-copy files without depending on Google's Developer Preview MCP service.
+search and inspect files, read or download bounded file content, inspect permissions, create or copy
+files, and edit existing Google Docs without depending on Google's Developer Preview MCP service.
 
 ## Connect Google Drive
 
@@ -17,24 +17,24 @@ copy files without depending on Google's Developer Preview MCP service.
 
 Each person connects their own Google account. The most recently connected Drive account powers MCP
 tools. Other connected Drive accounts remain available as Brain ingestion sources. Accounts linked
-before the official plugin was added must reconnect once to grant its required `drive.readonly` and
-`drive.file` scopes. Google access and refresh tokens stay server-side. The plugin gateway sends
-only a short-lived signed ticket to `https://api.opencompany.chat/mcp/plugins/google-drive`; the
-endpoint rechecks the installed plugin, connected account, OAuth scopes, and current tool
-permission before calling Google.
+before Google Docs editing was added must reconnect once to grant its required `drive.readonly`,
+`drive.file`, and `documents` scopes. Google access and refresh tokens stay server-side. The plugin
+gateway sends only a short-lived signed ticket to
+`https://api.opencompany.chat/mcp/plugins/google-drive`; the endpoint rechecks the installed plugin,
+connected account, OAuth scopes, and current tool permission before calling Google.
 
 Your Google and Shared Drive permissions still determine which files each tool can access.
 
 ## Permission defaults
 
 All Drive capabilities default to **Ask** because file names, metadata, contents, and access lists
-can be sensitive. Creating or copying a file also changes Drive.
+can be sensitive. Creating, copying, or editing a file also changes Drive.
 
 | Capability               | Tools                                                | Default |
 | ------------------------ | ---------------------------------------------------- | ------- |
 | Browse Drive files       | Search files, list recent files, get file metadata   | Ask     |
 | Read files & permissions | Read or download file contents, get file permissions | Ask     |
-| Create & copy files      | Create files, copy files                             | Ask     |
+| Create & edit files      | Create or copy files, edit Google Docs               | Ask     |
 
 Tools discovered later that are not in these reviewed groups also require confirmation. Persistent
 coding sessions only receive capabilities set to **On**. Tools set to **Ask** remain available in
@@ -47,11 +47,14 @@ file as untrusted and inspect the proposed tool call before approving it. Downlo
 as encoded file content, so confirm the file and destination before allowing another tool to process
 or publish it.
 
-The initial surface contains eight reviewed tools. Downloads and uploads are limited to 5 MB, while
+The surface contains ten reviewed tools. Downloads and uploads are limited to 5 MB, while
 natural-language reads accept supported documents up to 20 MB and return at most 200 KB of extracted
-Markdown. Unsupported, encrypted, scanned, or image-only files fail clearly. The plugin does not
-expose editing, deleting, moving, or sharing tools. Operators need only the stable Drive API; the
-Google Drive MCP API (`drivemcp.googleapis.com`) is not used or required.
+Markdown. Focused Google Doc edits replace exact text and can be limited to one tab. Full-content
+replacement is deliberately separate because it removes existing body formatting and embedded
+content from the selected tab; both operations require explicit user approval. Unsupported,
+encrypted, scanned, or image-only files fail clearly. The plugin does not expose deleting, moving,
+or sharing tools. Operators use the stable Drive and Docs APIs; the Google Drive MCP API
+(`drivemcp.googleapis.com`) is not used or required.
 
 ## Brain ingestion
 

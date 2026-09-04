@@ -1,10 +1,15 @@
 export type OfficialMcpPluginName =
+  | "attio"
   | "betterstack"
+  | "fathom"
   | "github"
   | "gmail"
+  | "granola"
   | "google-calendar"
   | "google-drive"
   | "hubspot"
+  | "jamie"
+  | "latitude"
   | "linear"
   | "neon"
   | "posthog"
@@ -37,12 +42,17 @@ export type OfficialMcpPluginMetadata = OfficialPluginMetadataBase & {
   name: OfficialMcpPluginName;
   kind: "mcp";
   connectionProvider:
+    | "attio"
     | "betterstack"
+    | "fathom"
     | "github_user"
     | "gmail"
+    | "granola"
     | "google_calendar"
     | "google_drive"
     | "hubspot"
+    | "jamie"
+    | "latitude"
     | "linear"
     | "neon"
     | "posthog"
@@ -67,6 +77,20 @@ export type OfficialPluginMetadata = OfficialMcpPluginMetadata | OfficialSkillPl
 
 // The public repository is the reviewed trust boundary. Keep every source pinned to a full commit.
 export const OFFICIAL_MCP_PLUGIN_METADATA = {
+  attio: {
+    name: "attio",
+    kind: "mcp",
+    label: "Attio",
+    description: "Inspect CRM structure, query workspace data, and make approved changes.",
+    category: "business",
+    source:
+      "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",
+    connectionProvider: "attio",
+    connectHref: "/api/integrations/attio-mcp/start?returnTo=/settings/plugins/attio",
+    accountDescription: "The Attio account opencompany uses when you run CRM tools.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure Attio ingestion in Wiki sources",
+  },
   betterstack: {
     name: "betterstack",
     kind: "mcp",
@@ -79,6 +103,20 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     connectionProvider: "betterstack",
     connectHref: "/api/integrations/betterstack/start?returnTo=/settings/plugins/betterstack",
     accountDescription: "The account opencompany uses when you run Better Stack tools.",
+  },
+  fathom: {
+    name: "fathom",
+    kind: "mcp",
+    label: "Fathom",
+    description: "Search meetings and read summaries, transcripts, and action items with approval.",
+    category: "productivity",
+    source:
+      "https://github.com/useopencompany/plugins/tree/444dd4dbfaaed6abd2c7c8000024c5be0ff4fa48/fathom",
+    connectionProvider: "fathom",
+    connectHref: "/api/integrations/fathom-mcp/start?returnTo=/settings/plugins/fathom",
+    accountDescription: "The Fathom account opencompany uses when you search meeting content.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure legacy Fathom ingestion in Wiki sources",
   },
   github: {
     name: "github",
@@ -109,6 +147,20 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure Gmail ingestion in Wiki sources",
   },
+  granola: {
+    name: "granola",
+    kind: "mcp",
+    label: "Granola",
+    description: "Search and read meeting notes, summaries, folders, and transcripts.",
+    category: "productivity",
+    source:
+      "https://github.com/useopencompany/plugins/tree/cf036c82fc5186f5187e4da59b040ce92e492df3/granola",
+    connectionProvider: "granola",
+    connectHref: "/api/integrations/granola-mcp/start?returnTo=/settings/plugins/granola",
+    accountDescription: "The Granola account opencompany uses when you search meeting history.",
+    ingestionHref: "/wiki/sources",
+    ingestionLabel: "Configure legacy Granola API ingestion in Wiki sources",
+  },
   "google-calendar": {
     name: "google-calendar",
     kind: "mcp",
@@ -126,10 +178,11 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     name: "google-drive",
     kind: "mcp",
     label: "Google Drive",
-    description: "Browse, read, create, and copy files through opencompany's Google Drive MCP.",
+    description:
+      "Browse, read, create, copy, and edit files through opencompany's Google Drive MCP.",
     category: "productivity",
     source:
-      "https://github.com/useopencompany/plugins/tree/dc0c91221bcfa9b6088a19277f875c438b37e96e/google-drive",
+      "https://github.com/useopencompany/plugins/tree/bae88070e498725de008e358a74bd18bc46ed27c/google-drive",
     connectionProvider: "google_drive",
     connectHref: "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
     accountDescription:
@@ -150,6 +203,32 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
     accountDescription: "The HubSpot account opencompany uses when you run CRM tools.",
     ingestionHref: "/wiki/sources",
     ingestionLabel: "Configure HubSpot ingestion in Wiki sources",
+  },
+  jamie: {
+    name: "jamie",
+    kind: "mcp",
+    label: "Jamie",
+    description:
+      "Search meeting notes and transcripts, review action items, and organize meetings with approval.",
+    category: "productivity",
+    source:
+      "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
+    connectionProvider: "jamie",
+    connectHref: "/api/integrations/jamie-mcp/start?returnTo=/settings/plugins/jamie",
+    accountDescription: "The Jamie account opencompany uses when you run meeting tools.",
+  },
+  latitude: {
+    name: "latitude",
+    kind: "mcp",
+    label: "Latitude",
+    description:
+      "Inspect agent observability data and manage Latitude workspace resources with approval.",
+    category: "engineering",
+    source:
+      "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
+    connectionProvider: "latitude",
+    connectHref: "/api/integrations/latitude/start?returnTo=/settings/plugins/latitude",
+    accountDescription: "The Latitude account opencompany uses when you run observability tools.",
   },
   linear: {
     name: "linear",

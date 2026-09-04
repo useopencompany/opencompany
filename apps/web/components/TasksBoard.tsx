@@ -56,7 +56,12 @@ import {
   workflowTaskDisplayStatus,
 } from "@/lib/task-display";
 import { useTaskSummary } from "@/lib/use-task-summary";
-import { type TaskViewMode, updateTaskViewModeAction } from "@/lib/user-preferences";
+import {
+  type TaskTimeRange,
+  type TaskViewMode,
+  updateTaskTimeRangeAction,
+  updateTaskViewModeAction,
+} from "@/lib/user-preferences";
 
 const TERMINAL_TASK_STATUSES = new Set<TaskView["status"]>(["succeeded", "failed", "canceled"]);
 const SETTLED_TASK_STATUSES = new Set<TaskView["status"]>([
@@ -70,9 +75,9 @@ export const TASK_BOARD_COLUMN_CAP = 50;
 const ALL_TASKS_FILTER_VALUE = "all";
 const WORKFLOW_FILTER_PREFIX = "workflow:";
 
-type TaskTimeRange = "7d" | "30d" | "90d" | "all";
-
 const TASK_TIME_RANGE_OPTIONS = [
+  "24h",
+  "2d",
   "7d",
   "30d",
   "90d",
@@ -80,6 +85,8 @@ const TASK_TIME_RANGE_OPTIONS = [
 ] as const satisfies readonly TaskTimeRange[];
 
 const TASK_TIME_RANGE_LABELS: Record<TaskTimeRange, string> = {
+  "24h": "Last 24 hours",
+  "2d": "Last 2 days",
   "7d": "Last 7 days",
   "30d": "Last 30 days",
   "90d": "Last 90 days",
@@ -87,6 +94,8 @@ const TASK_TIME_RANGE_LABELS: Record<TaskTimeRange, string> = {
 };
 
 const TASK_TIME_RANGE_MS: Record<Exclude<TaskTimeRange, "all">, number> = {
+  "24h": 24 * 60 * 60 * 1000,
+  "2d": 2 * 24 * 60 * 60 * 1000,
   "7d": 7 * 24 * 60 * 60 * 1000,
   "30d": 30 * 24 * 60 * 60 * 1000,
   "90d": 90 * 24 * 60 * 60 * 1000,
@@ -99,16 +108,20 @@ function isTaskTimeRange(value: unknown): value is TaskTimeRange {
 export function TasksBoardRoute({
   workflowNames,
   initialViewMode = "board",
+  initialTimeRange = "7d",
 }: {
   workflowNames: Record<string, string>;
   initialViewMode?: TaskViewMode;
+  initialTimeRange?: TaskTimeRange;
 }) {
   const { featureFlags, taskRows, tasksReady } = useAppData();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
-  const [timeRange, setTimeRange] = useState<TaskTimeRange>("7d");
+  const [timeRange, setTimeRangeState] = useState<TaskTimeRange>(initialTimeRange);
   const [viewMode, setViewModeState] = useState<TaskViewMode>(initialViewMode);
   const [, startViewModeTransition] = useTransition();
+  const [, startTimeRangeTransition] = useTransition();
+  const timeRangeUpdateId = useRef(0);
   const [nowMs] = useState(() => Date.now());
 
   function setViewMode(mode: TaskViewMode) {
@@ -120,6 +133,20 @@ export function TasksBoardRoute({
       if (!result.ok) {
         setViewModeState(previous);
         toast.error("Could not save your view preference.");
+      }
+    });
+  }
+
+  function setTimeRange(range: TaskTimeRange) {
+    if (range === timeRange) return;
+    const previous = timeRange;
+    const updateId = ++timeRangeUpdateId.current;
+    setTimeRangeState(range);
+    startTimeRangeTransition(async () => {
+      const result = await updateTaskTimeRangeAction(range);
+      if (!result.ok && updateId === timeRangeUpdateId.current) {
+        setTimeRangeState(previous);
+        toast.error("Could not save your time filter.");
       }
     });
   }
@@ -151,9 +178,7 @@ export function TasksBoardRoute({
     for (const task of activeTasks) {
       if (selectedWorkflowId !== null && task.workflowId !== selectedWorkflowId) continue;
       const column = taskBoardColumn(task);
-      // Only the terminal columns are date-filtered so a stalled in-progress
-      // or in-review task never disappears just because it's old.
-      if (cutoffMs !== null && CAPPED_TASK_BOARD_COLUMNS.has(column)) {
+      if (cutoffMs !== null) {
         const updatedMs = new Date(task.updatedAt).getTime();
         if (Number.isFinite(updatedMs) && updatedMs < cutoffMs) continue;
       }

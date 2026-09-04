@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { request as requestHttp } from "node:http";
 import { serve } from "@hono/node-server";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { ChatPresentationReader } from "@opencompany/chat-presentation";
 import {
   type Actor,
@@ -52,6 +53,10 @@ import type { BrainAssetService } from "./brain-assets";
 import type { ChatResourceService } from "./chat-resources";
 import { ApiError } from "./errors";
 import type { ApiRateLimiter } from "./rate-limit";
+
+vi.mock("@opencompany/analytics/product/server", () => ({
+  captureProductServerEvent: vi.fn(async () => undefined),
+}));
 
 const actor: Actor = {
   userId: "user_1",
@@ -990,6 +995,7 @@ describe("canonical Hono API", () => {
   });
 
   it("previews and manages Plugins without exposing package bytes or MCP environment values", async () => {
+    vi.mocked(captureProductServerEvent).mockClear();
     const installation = fakePluginInstallation();
     const packageBytes = new TextEncoder().encode("private plugin package");
     const resolved: ResolvedPluginPackage = {
@@ -1018,7 +1024,10 @@ describe("canonical Hono API", () => {
         mcp: installation.installReport.mcp,
       },
     };
-    const install = vi.fn(async () => ({ plugin: installation, idempotentReplay: false }));
+    const install = vi
+      .fn(async () => ({ plugin: installation, idempotentReplay: false }))
+      .mockResolvedValueOnce({ plugin: installation, idempotentReplay: false })
+      .mockResolvedValueOnce({ plugin: installation, idempotentReplay: true });
     const {
       stdioServers: _stdioServers,
       remoteMcpServers: _remoteMcpServers,
@@ -1092,6 +1101,27 @@ describe("canonical Hono API", () => {
       data: { plugin: { name: "quality-tools", stdioServers: [{ envKeys: ["PRIVATE_TOKEN"] }] } },
     });
     expect(JSON.stringify(importedBody)).not.toContain("secret-value");
+    expect(captureProductServerEvent).toHaveBeenCalledWith("plugin_installed", actor.userId, {
+      workspace_id: actor.workspaceId,
+      plugin_name: "quality-tools",
+      plugin_kind: "mcp",
+      skill_count: 0,
+      mcp_server_count: 2,
+    });
+
+    vi.mocked(captureProductServerEvent).mockClear();
+    const replayedImport = await app.request("/v1/plugins/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "plugin-import-1" },
+      body: JSON.stringify({
+        url: "github.com/example/plugins",
+        expectedResolvedCommit: installation.source.resolvedCommit,
+        expectedIntegrity: installation.integrity,
+      }),
+    });
+    expect(replayedImport.status).toBe(201);
+    await expect(replayedImport.json()).resolves.toMatchObject({ data: { replayed: true } });
+    expect(captureProductServerEvent).not.toHaveBeenCalled();
 
     await expect(app.request("/v1/plugins")).resolves.toMatchObject({ status: 200 });
     const inspected = await app.request("/v1/plugins/quality-tools");
@@ -1152,8 +1182,9 @@ describe("canonical Hono API", () => {
     const set = vi.fn(async () => undefined);
     const remove = vi.fn(async () => undefined);
     const listOptions = vi.fn(async () => ({
-      provider: "github" as const,
-      repos: [{ id: "repo_1", fullName: "acme/api", private: true }],
+      provider: "linear" as const,
+      teams: [{ id: "team_1", name: "Engineering", key: "ENG" }],
+      partial: false,
     }));
     const app = testApp(fakeRepository(), {
       brainSources: brainSourceService({ list, set, remove, listOptions }),
@@ -1173,10 +1204,10 @@ describe("canonical Hono API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         operation: "configure",
-        provider: "github",
+        provider: "linear",
         enabled: true,
-        repos: [{ id: "repo_1", fullName: "acme/api" }],
-        events: ["pull_request_merged"],
+        teams: [{ id: "team_1", name: "Engineering", key: "ENG" }],
+        events: [{ id: "issue_created" }],
       }),
     });
     expect(updated.status).toBe(200);
@@ -1184,19 +1215,23 @@ describe("canonical Hono API", () => {
       actor,
       "brain_1",
       "integration_1",
-      expect.objectContaining({ provider: "github", enabled: true }),
+      expect.objectContaining({ provider: "linear", enabled: true }),
     );
 
     const options = await app.request("/v1/integrations/integration_1/brain-source-options", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: "github" }),
+      body: JSON.stringify({ provider: "linear" }),
     });
     expect(options.status).toBe(200);
     await expect(options.json()).resolves.toMatchObject({
-      data: { provider: "github", repos: [{ fullName: "acme/api", private: true }] },
+      data: {
+        provider: "linear",
+        teams: [{ id: "team_1", name: "Engineering", key: "ENG" }],
+        partial: false,
+      },
     });
-    expect(listOptions).toHaveBeenCalledWith(actor, "integration_1", { provider: "github" });
+    expect(listOptions).toHaveBeenCalledWith(actor, "integration_1", { provider: "linear" });
 
     const removed = await app.request("/v1/brains/brain_1/sources/integration_1", {
       method: "DELETE",
@@ -1207,7 +1242,11 @@ describe("canonical Hono API", () => {
 
   it("rejects invalid source configuration before invoking provider logic", async () => {
     const set = vi.fn(async () => undefined);
-    const listOptions = vi.fn(async () => ({ provider: "github" as const, repos: [] }));
+    const listOptions = vi.fn(async () => ({
+      provider: "linear" as const,
+      teams: [],
+      partial: false,
+    }));
     const app = testApp(fakeRepository(), {
       brainSources: brainSourceService({ set, listOptions }),
     });
@@ -1286,10 +1325,9 @@ describe("canonical Hono API", () => {
         focus: "Product architecture",
         sourceSelection: {
           public_web: { enabled: true },
-          github: {
+          linear: {
             enabled: true,
             integrationId: "integration_1",
-            config: { repos: [{ id: "repo_1", fullName: "acme/api" }] },
           },
         },
       }),
@@ -1304,10 +1342,9 @@ describe("canonical Hono API", () => {
       focus: "Product architecture",
       sourceSelection: {
         public_web: { enabled: true },
-        github: {
+        linear: {
           enabled: true,
           integrationId: "integration_1",
-          config: { repos: [{ id: "repo_1", fullName: "acme/api" }] },
         },
       },
     });
@@ -1315,13 +1352,13 @@ describe("canonical Hono API", () => {
     const confirmed = await app.request("/v1/brains/brain_1/imports/gbimp_1/confirm", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabledProviders: ["public_web", "github"] }),
+      body: JSON.stringify({ enabledProviders: ["public_web", "linear"] }),
     });
     expect(confirmed.status).toBe(200);
     await expect(confirmed.json()).resolves.toMatchObject({
       data: { importRunId: "gbimp_1", status: "ingesting" },
     });
-    expect(confirm).toHaveBeenCalledWith(actor, "brain_1", "gbimp_1", ["public_web", "github"]);
+    expect(confirm).toHaveBeenCalledWith(actor, "brain_1", "gbimp_1", ["public_web", "linear"]);
 
     const canceled = await app.request("/v1/brains/brain_1/imports/gbimp_1/cancel", {
       method: "POST",
@@ -1706,11 +1743,6 @@ describe("canonical Hono API", () => {
       };
     const calls: string[] = [];
     const app = testApp(fakeRepository(), {
-      githubIngress: {
-        start: record("github.start", calls),
-        callback: record("github.callback", calls),
-        webhook: record("github.webhook", calls),
-      },
       githubUserIngress: {
         start: record("github-user.start", calls),
         callback: record("github-user.callback", calls),
@@ -1738,10 +1770,6 @@ describe("canonical Hono API", () => {
       attioIngress: {
         webhook: record("attio.webhook", calls),
       },
-      jamieIngress: {
-        webhook: record("jamie.webhook", calls),
-        webhookForIntegration: record("jamie.webhookForIntegration", calls),
-      },
       mcpOAuthIngress: {
         start: recordMcp("mcp.start", calls),
         callback: recordMcp("mcp.callback", calls),
@@ -1758,9 +1786,6 @@ describe("canonical Hono API", () => {
     });
 
     const routes: Array<[string, string, string]> = [
-      ["GET", "/integrations/github/start", "github.start"],
-      ["GET", "/integrations/github/callback", "github.callback"],
-      ["POST", "/webhooks/github/events", "github.webhook"],
       ["GET", "/integrations/github-user/start", "github-user.start"],
       ["GET", "/integrations/github-user/callback", "github-user.callback"],
       ["GET", "/integrations/github-user/installations", "github-user.installations"],
@@ -1781,12 +1806,14 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/hubspot/callback", "hubspot.callback"],
       ["POST", "/webhooks/hubspot/events", "hubspot.webhook"],
       ["POST", "/webhooks/attio/events", "attio.webhook"],
-      ["POST", "/webhooks/jamie", "jamie.webhook"],
-      ["POST", "/webhooks/jamie/gint_1", "jamie.webhookForIntegration"],
+      ["GET", "/integrations/attio-mcp/start", "mcp.start.attio"],
+      ["GET", "/integrations/attio-mcp/callback", "mcp.callback.attio"],
       ["GET", "/integrations/linear/start", "mcp.start.linear"],
       ["GET", "/integrations/linear/callback", "mcp.callback.linear"],
       ["GET", "/integrations/hubspot-mcp/start", "mcp.start.hubspot"],
       ["GET", "/integrations/hubspot-mcp/callback", "mcp.callback.hubspot"],
+      ["GET", "/integrations/granola-mcp/start", "mcp.start.granola"],
+      ["GET", "/integrations/granola-mcp/callback", "mcp.callback.granola"],
       ["GET", "/integrations/posthog/start", "mcp.start.posthog"],
       ["GET", "/integrations/posthog/callback", "mcp.callback.posthog"],
       ["GET", "/integrations/neon/start", "mcp.start.neon"],
@@ -1795,6 +1822,10 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/latitude/callback", "mcp.callback.latitude"],
       ["GET", "/integrations/signoz/start", "mcp.start.signoz"],
       ["GET", "/integrations/signoz/callback", "mcp.callback.signoz"],
+      ["GET", "/integrations/jamie-mcp/start", "mcp.start.jamie"],
+      ["GET", "/integrations/jamie-mcp/callback", "mcp.callback.jamie"],
+      ["GET", "/integrations/fathom-mcp/start", "mcp.start.fathom"],
+      ["GET", "/integrations/fathom-mcp/callback", "mcp.callback.fathom"],
       ["GET", "/integrations/x-account/start", "x-account.start"],
       ["GET", "/integrations/x-account/callback", "x-account.callback"],
       ["GET", "/integrations/slack-bot/start", "slack-bot.start"],
@@ -3172,7 +3203,7 @@ describe("canonical Hono API", () => {
       taskSpawningEnabled: true,
       wikiEnabled: true as const,
       taskViewMode: "list" as const,
-      imessageEnabled: false,
+      taskTimeRange: "24h" as const,
       autoModelRoutingEnabled: true,
     }));
     const app = testApp(fakeRepository(), {
@@ -3186,7 +3217,12 @@ describe("canonical Hono API", () => {
     });
     expect(updated.status).toBe(200);
     await expect(updated.json()).resolves.toMatchObject({
-      data: { timezone: "Europe/Berlin", taskViewMode: "list", autoModelRoutingEnabled: true },
+      data: {
+        timezone: "Europe/Berlin",
+        taskViewMode: "list",
+        taskTimeRange: "24h",
+        autoModelRoutingEnabled: true,
+      },
       meta: { apiVersion: "v1" },
     });
     expect(updatePreferences).toHaveBeenCalledWith(actor, {
@@ -3207,6 +3243,13 @@ describe("canonical Hono API", () => {
       body: JSON.stringify({ taskViewMode: "kanban" }),
     });
     expect(invalidMode.status).toBe(400);
+
+    const invalidTimeRange = await app.request("/v1/me/preferences", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskTimeRange: "1h" }),
+    });
+    expect(invalidTimeRange.status).toBe(400);
   });
 
   it("requires authentication for the settings surfaces", async () => {
@@ -3629,31 +3672,6 @@ describe("canonical Hono API", () => {
       data: { state: { provider: "render", connected: true, accountName: "Acme Hosting" } },
     });
     expect(connectRender).toHaveBeenCalledWith(actor, renderKey);
-  });
-
-  it("gives iMessage pairing starts their own small rate bucket", async () => {
-    const startImessagePairing = vi.fn(async () => undefined);
-    const buckets: string[] = [];
-    const rateLimiter: ApiRateLimiter = {
-      consume: async ({ bucket, limit }) => {
-        buckets.push(`${bucket}:${limit}`);
-        return { allowed: true };
-      },
-    };
-    const app = testApp(fakeRepository(), {
-      integrationAccounts: integrationAccountService({ startImessagePairing }),
-      rateLimiter,
-    });
-
-    const started = await app.request("/v1/integration-accounts/imessage/pairing", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone: "+14155551234" }),
-    });
-    expect(started.status).toBe(200);
-    await expect(started.json()).resolves.toMatchObject({ data: { started: true } });
-    expect(startImessagePairing).toHaveBeenCalledWith(actor, "+14155551234");
-    expect(buckets).toEqual(["imessage-pairing:5"]);
   });
 
   it("surfaces integration account service errors as protocol envelopes", async () => {
@@ -4815,8 +4833,8 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
       taskSpawningEnabled: true,
       autoModelRoutingEnabled: false,
       chatCapabilitiesBetaEnabled: false,
-      imessageEnabled: false,
       taskViewMode: "board" as const,
+      taskTimeRange: "7d" as const,
       preferredMcpClient: null,
       mcpSetupCompletedAt: null,
       onboardedAt: "2026-08-13T12:00:00.000Z",
@@ -5030,23 +5048,11 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     connectRender: async () => {
       throw new Error("Unexpected Render connect.");
     },
-    startImessagePairing: async () => {
-      throw new Error("Unexpected iMessage pairing start.");
-    },
-    confirmImessagePairing: async () => {
-      throw new Error("Unexpected iMessage pairing confirm.");
-    },
     connectStripe: async () => {
       throw new Error("Unexpected Stripe connect.");
     },
     disconnectStripe: async () => {
       throw new Error("Unexpected Stripe disconnect.");
-    },
-    createOrResetJamieWebhookEndpoint: async () => {
-      throw new Error("Unexpected Jamie webhook endpoint mutation.");
-    },
-    saveJamieWebhookApiKey: async () => {
-      throw new Error("Unexpected Jamie API key mutation.");
     },
   };
 }
@@ -5296,9 +5302,6 @@ function brainSourceDetails() {
         accountName: null,
         organizationName: null,
       },
-    },
-    github: {
-      integration: { ...unavailableBase, provider: "github" as const, accountName: null },
     },
     gmail: {
       integration: { ...unavailableBase, provider: "gmail" as const, accountEmail: null },

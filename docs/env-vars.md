@@ -78,8 +78,7 @@ query parameters, or a fragment.
 `CRON_SECRET` must have the same value in prod `/web` and `/api`: web keeps the public cron URL
 while the API owns onboarding-email persistence.
 
-The official GitHub Plugin uses a dedicated personal GitHub App, separate from the workspace
-ingestion App. Put `GITHUB_USER_APP_SLUG`, `GITHUB_USER_APP_CLIENT_ID`,
+The official GitHub Plugin uses a personal GitHub App. Put `GITHUB_USER_APP_SLUG`, `GITHUB_USER_APP_CLIENT_ID`,
 `GITHUB_USER_APP_CLIENT_SECRET`, and `GITHUB_USER_APP_STATE_SECRET` in prod `/api`; put the client
 ID and secret in prod `/runner` as well so sandbox sessions can refresh the same expiring user
 credential. The public callback remains
@@ -88,8 +87,7 @@ API. The App must request Contents, Issues, and Pull requests read/write plus Ac
 Metadata read, with expiring user tokens and user authorization during installation enabled. Set
 its Setup URL to
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/settings/plugins/github` and enable redirect-on-update so App
-updates return to opencompany. Do not reuse or rename the workspace-owned
-`GITHUB_INTEGRATION_*` values.
+updates return to opencompany.
 
 `BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
 The runner uses it for bounded, durable `PLUGIN_DATA` archives and never injects it into Plugin
