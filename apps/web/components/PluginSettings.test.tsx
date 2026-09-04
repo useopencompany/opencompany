@@ -9,12 +9,17 @@ import {
   previewHeadlessPluginImport,
 } from "@/lib/headless-knowledge-commands";
 import {
+  ATTIO_PLUGIN_SOURCE,
   BETTERSTACK_PLUGIN_SOURCE,
+  FATHOM_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
   GMAIL_PLUGIN_SOURCE,
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
+  GRANOLA_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
+  JAMIE_PLUGIN_SOURCE,
+  LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   OfficialSkillPluginDetail,
@@ -231,7 +236,8 @@ describe("Plugin settings", () => {
     );
   });
 
-  it("offers one-click installation for every uninstalled official package", () => {
+  it("offers one-click installation for every uninstalled official package", async () => {
+    const user = userEvent.setup();
     render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
 
     expect(captureProductEvent).toHaveBeenCalledWith("plugin_catalog_viewed", {
@@ -263,6 +269,14 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/gmail",
     );
+    expect(screen.getByRole("link", { name: /fathom/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/fathom",
+    );
+    expect(screen.getByRole("link", { name: /granola/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/granola",
+    );
     expect(screen.getByRole("link", { name: /google drive/i })).toHaveAttribute(
       "href",
       "/settings/plugins/google-drive",
@@ -274,10 +288,6 @@ describe("Plugin settings", () => {
     expect(screen.getByRole("link", { name: /google calendar/i })).toHaveAttribute(
       "href",
       "/settings/plugins/google-calendar",
-    );
-    expect(screen.getByRole("link", { name: /signoz/i })).toHaveAttribute(
-      "href",
-      "/settings/plugins/signoz",
     );
     expect(screen.getByRole("link", { name: /render/i })).toHaveAttribute(
       "href",
@@ -295,6 +305,18 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/x",
     );
+    expect(screen.getByRole("link", { name: /latitude/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/latitude",
+    );
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(17);
+    await user.click(screen.getByRole("button", { name: "View all productivity plugins" }));
+    expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/jamie",
+    );
+    await user.click(screen.getByRole("button", { name: "All" }));
+    await user.click(screen.getByRole("button", { name: "View all business plugins" }));
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
       "/settings/plugins/yc-advise",
@@ -302,6 +324,10 @@ describe("Plugin settings", () => {
     expect(screen.getByRole("link", { name: /hubspot/i })).toHaveAttribute(
       "href",
       "/settings/plugins/hubspot",
+    );
+    expect(screen.getByRole("link", { name: /attio/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/attio",
     );
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
@@ -318,6 +344,9 @@ describe("Plugin settings", () => {
     expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
     );
+    expect(FATHOM_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/444dd4dbfaaed6abd2c7c8000024c5be0ff4fa48/fathom",
+    );
     expect(RENDER_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
     );
@@ -326,6 +355,15 @@ describe("Plugin settings", () => {
     );
     expect(HUBSPOT_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
+    );
+    expect(JAMIE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
+    );
+    expect(ATTIO_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",
+    );
+    expect(LATITUDE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
     );
     expect(SIGNOZ_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/053e9e9207f320651f1cb9b4e8feb84ab2af6bba/signoz",
@@ -342,6 +380,9 @@ describe("Plugin settings", () => {
     expect(GMAIL_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/587fb06ae2a4e4bed7532e216f8712979ca35e7b/gmail",
     );
+    expect(GRANOLA_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/cf036c82fc5186f5187e4da59b040ce92e492df3/granola",
+    );
     expect(GOOGLE_CALENDAR_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/de04f0c11eeb4e4eb4ed1140818205e14b08401f/google-calendar",
     );
@@ -352,7 +393,7 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(15);
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(5);
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });
@@ -385,7 +426,7 @@ describe("Plugin settings", () => {
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
 
     const engineering = screen.getByRole("region", { name: "Engineering" });
-    expect(within(engineering).getAllByRole("link")).toHaveLength(5);
+    expect(within(engineering).getAllByRole("link")).toHaveLength(6);
     expect(within(engineering).getByRole("link", { name: /github/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Engineering" })).toHaveAttribute(
       "aria-pressed",

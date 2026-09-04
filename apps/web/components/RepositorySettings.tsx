@@ -165,15 +165,15 @@ export function RepositorySettings({
       <div className="rounded-xl border border-dashed border-border bg-surface px-5 py-8 text-center">
         <p className="text-[14px] font-medium text-ink">No GitHub repositories available</p>
         <p className="mx-auto mt-1 max-w-md text-[12.5px] leading-5 text-ink-subtle">
-          Connect GitHub and grant the workspace access to at least one repository before adding
-          setup details.
+          Connect the GitHub plugin and grant your account access to at least one repository before
+          adding setup details.
         </p>
         {canEdit ? (
           <Link
-            href="/settings/integrations"
+            href="/settings/plugins/github"
             className="mt-4 inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
-            Connect GitHub
+            Open GitHub plugin
           </Link>
         ) : null}
       </div>
@@ -214,8 +214,8 @@ export function RepositorySettings({
         </select>
         {selectedOption && !selectedOption.available ? (
           <p className="text-[12px] leading-5 text-warning">
-            This configured repository is no longer in the connected GitHub catalog. You can still
-            remove its saved configuration.
+            This configured repository is not available through your GitHub plugin connection. You
+            can still remove its saved configuration.
           </p>
         ) : null}
       </section>

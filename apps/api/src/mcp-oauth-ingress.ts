@@ -1,16 +1,40 @@
 import { getAppUrl } from "@opencompany/agent/app-url";
 import {
+  appendAttioMcpStatus,
+  completeAttioMcpOAuth,
+  startAttioMcpOAuth,
+  verifyAttioMcpState,
+} from "@opencompany/agent/integrations/attio-mcp";
+import {
   appendBetterStackMcpStatus,
   completeBetterStackMcpOAuth,
   startBetterStackMcpOAuth,
   verifyBetterStackMcpState,
 } from "@opencompany/agent/integrations/betterstack-mcp";
 import {
+  appendFathomMcpStatus,
+  completeFathomMcpOAuth,
+  startFathomMcpOAuth,
+  verifyFathomMcpState,
+} from "@opencompany/agent/integrations/fathom-mcp";
+import {
+  appendGranolaMcpStatus,
+  completeGranolaMcpOAuth,
+  startGranolaMcpOAuth,
+  verifyGranolaMcpState,
+} from "@opencompany/agent/integrations/granola-mcp";
+import {
   appendHubSpotMcpStatus,
   completeHubSpotMcpOAuth,
   startHubSpotMcpOAuth,
   verifyHubSpotMcpState,
 } from "@opencompany/agent/integrations/hubspot-mcp";
+import {
+  appendJamieMcpStatus,
+  completeJamieMcpOAuth,
+  startJamieMcpOAuth,
+  verifyJamieMcpState,
+} from "@opencompany/agent/integrations/jamie-mcp";
 import {
   appendLatitudeMcpStatus,
   completeLatitudeMcpOAuth,
@@ -50,12 +74,16 @@ const logger = createLogger({ service: "opencompany-api", runtime: "mcp-oauth-in
 type DbLike = any;
 
 export type McpOAuthProvider =
+  | "attio"
   | "linear"
   | "hubspot"
+  | "granola"
   | "posthog"
   | "neon"
   | "latitude"
+  | "jamie"
   | "betterstack"
+  | "fathom"
   | "signoz";
 
 // Provider ingress composition for the remote-MCP connectors. Each
@@ -80,6 +108,14 @@ type McpProviderFlow = {
 };
 
 const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
+  attio: {
+    start: startAttioMcpOAuth,
+    complete: completeAttioMcpOAuth,
+    verifyState: verifyAttioMcpState,
+    appendStatus: appendAttioMcpStatus,
+    deniedReason: "attio_mcp_denied",
+    invalidStatePath: "/settings/plugins/attio?integration=attio&setup=error&reason=invalid_state",
+  },
   betterstack: {
     start: startBetterStackMcpOAuth,
     complete: completeBetterStackMcpOAuth,
@@ -88,6 +124,15 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     deniedReason: "betterstack_denied",
     invalidStatePath:
       "/settings/plugins/betterstack?integration=betterstack&setup=error&reason=invalid_state",
+  },
+  fathom: {
+    start: startFathomMcpOAuth,
+    complete: completeFathomMcpOAuth,
+    verifyState: verifyFathomMcpState,
+    appendStatus: appendFathomMcpStatus,
+    deniedReason: "fathom_denied",
+    invalidStatePath:
+      "/settings/plugins/fathom?integration=fathom&setup=error&reason=invalid_state",
   },
   signoz: {
     start: startSigNozMcpOAuth,
@@ -115,6 +160,15 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     invalidStatePath:
       "/settings/plugins/hubspot?integration=hubspot&setup=error&reason=invalid_state",
   },
+  granola: {
+    start: startGranolaMcpOAuth,
+    complete: completeGranolaMcpOAuth,
+    verifyState: verifyGranolaMcpState,
+    appendStatus: appendGranolaMcpStatus,
+    deniedReason: "granola_denied",
+    invalidStatePath:
+      "/settings/plugins/granola?integration=granola&setup=error&reason=invalid_state",
+  },
   posthog: {
     start: startPostHogMcpOAuth,
     complete: completePostHogMcpOAuth,
@@ -139,6 +193,14 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     deniedReason: "latitude_denied",
     invalidStatePath:
       "/settings/integrations?integration=latitude&setup=error&reason=invalid_state",
+  },
+  jamie: {
+    start: startJamieMcpOAuth,
+    complete: completeJamieMcpOAuth,
+    verifyState: verifyJamieMcpState,
+    appendStatus: appendJamieMcpStatus,
+    deniedReason: "jamie_denied",
+    invalidStatePath: "/settings/plugins/jamie?integration=jamie&setup=error&reason=invalid_state",
   },
 };
 

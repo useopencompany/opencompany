@@ -1,52 +1,72 @@
 ---
 title: Attio
-description: Connect Attio CRM activity and actions with a workspace API key.
+description: Work with Attio through its hosted MCP server and ingest CRM activity into Wiki.
 ---
 
-## What the connection does
+Attio has two separate connections in opencompany:
 
-When you save an Attio key, opencompany registers a webhook and receives new people, companies, and
-deals; attribute changes; and notes. Events for one record are buffered into an activity window.
-opencompany then fetches a live record snapshot and any new notes before durable Brain ingestion.
-Routine data-entry churn can be skipped while substantive changes become durable knowledge.
+- The **Attio plugin** uses Attio's hosted MCP server and OAuth to search and change CRM data from
+  chat and tasks.
+- The **Wiki source** uses an Attio access token and webhook to ingest new CRM activity. Its token
+  is not shared with the plugin.
 
-Attio remains the canonical home of each record. Brain stores pointers, current-state summaries,
-and extracted knowledge rather than a stale copy of the CRM record.
+## Connect the Attio plugin
 
-## Setup steps
+1. Open **Settings → Plugins** in opencompany.
+2. Choose **Attio**, then select **Install**.
+3. Select **Connect Attio** and sign in to Attio.
+4. Choose the Attio workspace you want opencompany to use and approve access.
+
+The OAuth connection acts as your Attio user and cannot access data your Attio account cannot
+access. Disconnecting the plugin account revokes opencompany's use of the saved OAuth session;
+uninstalling the plugin removes its tools but leaves the account available for reconnection.
+
+## Permission defaults
+
+- **Inspect Attio structure** defaults to **On** for object schemas, attributes, list definitions,
+  teams, and the connected identity.
+- **Read CRM data** defaults to **Ask** because records, emails, notes, meeting transcripts, tasks,
+  comments, workspace members, reports, and SQL results can contain sensitive customer data.
+- **Change Attio** defaults to **Ask** for every create, update, merge, or delete operation.
+
+You can change each group to **On**, **Ask**, or **Off** from the plugin page. Tools newly added by
+Attio are unclassified until opencompany reviews them and therefore continue to ask for approval.
+The `query-particle-sql` tool is read-only but is not available on every Attio plan. Attio also
+applies per-workspace rate limits, so large jobs may need to run sequentially.
+
+## Connect Attio as a Wiki source
 
 1. In Attio, open **Workspace settings → Developers** and create an integration.
 2. Generate an access token with `object_configuration:read`, `record_permission:read-write`,
    `list_configuration:read-write`, `list_entry:read-write`, `comment:read-write`,
    `note:read-write`, and `webhook:read-write`.
-3. Copy the token.
-4. In opencompany, open **Settings → Attio** or choose **Set up** on the source card.
-5. Paste the token and save it. opencompany validates it, registers the webhook, and stores the
-   webhook signing secret.
+3. In opencompany, open **Wiki → Sources**, choose **Attio**, and paste the token.
+4. Choose the people, company, and deal events that should feed the Wiki.
 
-Chat can search and inspect standard records, lists, fields, saved views, and list entries. With
-confirmation, it can create or update records, create supported list fields and options, add records
-to lists, update list entries, and leave plaintext comments. Writes default to **Ask** and can be
-set to **On**, **Ask**, or **Off** under **Settings → Integrations**. Chat does not delete Attio
-records or list entries.
+opencompany validates the token, registers a webhook, and stores its signing secret server-side.
+Events for one record are buffered into an activity window before opencompany fetches a current
+record snapshot and any new notes. Attio remains the canonical home of each record; Wiki stores
+pointers, current-state summaries, and extracted knowledge rather than a stale CRM copy.
 
-## Brain routing
+## Wiki routing
 
-Enable Attio under **Sources** in a Brain's settings, then choose the record types and events to
-ingest. New sources default to **Record created** and **Note added**. **Record updated** is opt-in
-because CRM fields can change at high volume. Automation and system updates are excluded.
+Enable Attio under **Sources** in Wiki settings, then choose the record types and events to ingest.
+New sources default to **Record created** and **Note added**. **Record updated** is opt-in because
+CRM fields can change at high volume. Automation and system updates are excluded.
 
-Activity fans out to every matching enabled Brain. Disabling or removing the source stops new
-activity and cancels queued or running ingestion for that Brain; canceled events are not replayed
+Activity fans out to every matching enabled Wiki. Disabling or removing the source stops new
+activity and cancels queued or running ingestion for that Wiki; canceled events are not replayed
 when the source is enabled again.
 
 ## Troubleshooting
 
 - Confirm the source is enabled and at least one record type is selected.
-- Confirm **Settings → Attio** shows **Connected**. Saving a replacement key also re-registers the
-  webhook.
+- Reopen the Attio source in **Wiki → Sources** to replace its token and re-register the webhook.
+- If plugin tools cannot connect, disconnect and reconnect Attio from **Settings → Plugins → Attio**
+  and confirm you selected the intended Attio workspace.
 - Only activity after connecting is delivered; historical backfill is not available yet.
 - Allow the activity window to remain quiet for about fifteen minutes.
 - Custom Attio objects are not ingested yet.
 
-The Attio API is documented at [docs.attio.com](https://docs.attio.com).
+See Attio's [MCP documentation](https://docs.attio.com/mcp/overview) and
+[API documentation](https://docs.attio.com/rest-api/overview).

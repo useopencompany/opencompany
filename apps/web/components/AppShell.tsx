@@ -16,14 +16,13 @@ import {
   type IntegrationState,
   integrationStateFromRows,
 } from "@/lib/integration-state";
-import { getAttioIntegrationState } from "@/lib/integrations/attio";
+import { getAttioMcpIntegrationState } from "@/lib/integrations/attio-mcp";
 import { getFathomIntegrationState } from "@/lib/integrations/fathom";
-import { getGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGranolaIntegrationState } from "@/lib/integrations/granola";
+import { getGranolaMcpIntegrationState } from "@/lib/integrations/granola-mcp";
 import { getHubSpotMcpIntegrationState } from "@/lib/integrations/hubspot-mcp";
-import { getImessageIntegrationState } from "@/lib/integrations/imessage";
-import { getJamieIntegrationState } from "@/lib/integrations/jamie";
+import { getJamieMcpIntegrationState } from "@/lib/integrations/jamie-mcp";
 import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
 import { getPostHogIntegrationState } from "@/lib/integrations/posthog-mcp";
@@ -46,15 +45,14 @@ export async function AppShell({ children }: { children: ReactNode }) {
     linear,
     hubspot,
     posthog,
-    github,
     jamie,
     slack,
     granola,
+    granolaMcp,
     fathom,
     attio,
     stripe,
     xAccount,
-    imessage,
     codex,
     claudeCode,
     infisical,
@@ -86,13 +84,8 @@ export async function AppShell({ children }: { children: ReactNode }) {
       emptyIntegrations.posthog,
     ),
     loadOptionalAppShellData(
-      "github_integration",
-      () => getGitHubIntegrationState(workspace.id),
-      emptyIntegrations.github,
-    ),
-    loadOptionalAppShellData(
       "jamie_integration",
-      () => getJamieIntegrationState(workspace.id),
+      () => getJamieMcpIntegrationState(user.workosUserId),
       emptyIntegrations.jamie,
     ),
     loadOptionalAppShellData(
@@ -106,13 +99,18 @@ export async function AppShell({ children }: { children: ReactNode }) {
       emptyIntegrations.granola,
     ),
     loadOptionalAppShellData(
+      "granola_mcp_integration",
+      () => getGranolaMcpIntegrationState(user.workosUserId),
+      emptyIntegrations.granola_mcp,
+    ),
+    loadOptionalAppShellData(
       "fathom_integration",
       () => getFathomIntegrationState(user.workosUserId),
       emptyIntegrations.fathom,
     ),
     loadOptionalAppShellData(
-      "attio_integration",
-      () => getAttioIntegrationState(user.workosUserId),
+      "attio_mcp_integration",
+      () => getAttioMcpIntegrationState(user.workosUserId),
       emptyIntegrations.attio,
     ),
     loadOptionalAppShellData(
@@ -124,11 +122,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
       "x_account_integration",
       () => getXAccountIntegrationState(user.workosUserId),
       emptyIntegrations.x_account,
-    ),
-    loadOptionalAppShellData(
-      "imessage_integration",
-      () => getImessageIntegrationState(user.workosUserId),
-      emptyIntegrations.imessage,
     ),
     loadOptionalAppShellData("codex_auth", loadCurrentCodexAuthSettings, {
       status: null,
@@ -196,15 +189,14 @@ export async function AppShell({ children }: { children: ReactNode }) {
       linear,
       hubspot,
       posthog,
-      github,
       jamie,
       slack,
       granola,
+      granolaMcp,
       fathom,
       attio,
       stripe,
       xAccount,
-      imessage,
       personalAccounts,
       codex: {
         provider: "codex",
@@ -276,15 +268,14 @@ function buildIntegrationState(input: {
   linear: IntegrationState["linear"];
   hubspot: IntegrationState["hubspot"];
   posthog: IntegrationState["posthog"];
-  github: IntegrationState["github"];
   jamie: IntegrationState["jamie"];
   slack: IntegrationState["slack"];
   granola: IntegrationState["granola"];
+  granolaMcp: IntegrationState["granola_mcp"];
   fathom: IntegrationState["fathom"];
   attio: IntegrationState["attio"];
   stripe: IntegrationState["stripe"];
   xAccount: IntegrationState["x_account"];
-  imessage: IntegrationState["imessage"];
   personalAccounts: IntegrationState["personalAccounts"];
   codex: CodexProviderState;
   claudeCode: ClaudeCodeProviderState;
@@ -297,15 +288,14 @@ function buildIntegrationState(input: {
     linear: input.linear,
     hubspot: input.hubspot,
     posthog: input.posthog,
-    github: input.github,
     jamie: input.jamie,
     slack: input.slack,
     granola: input.granola,
+    granola_mcp: input.granolaMcp,
     fathom: input.fathom,
     attio: input.attio,
     stripe: input.stripe,
     x_account: input.xAccount,
-    imessage: input.imessage,
     codex: input.codex,
     claude_code: input.claudeCode,
     infisical: input.infisical,

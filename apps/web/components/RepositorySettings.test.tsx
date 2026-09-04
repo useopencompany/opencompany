@@ -93,7 +93,9 @@ describe("RepositorySettings", () => {
     expect(
       screen.getByRole("option", { name: "opencompany/app · Unavailable" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/no longer in the connected GitHub catalog/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/not available through your GitHub plugin connection/i),
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText("Environment file contents")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Setup instructions")).toBeDisabled();
 

@@ -6,13 +6,14 @@ import { serverApiClient, serverApiError } from "@/lib/server-api-client";
 // Mirrors the protocol's UserPreferences contract with concrete web-side types:
 // the generated z.infer types collapse to `any` under this app's tsconfig.
 export type TaskViewMode = "board" | "list";
+export type TaskTimeRange = "24h" | "2d" | "7d" | "30d" | "90d" | "all";
 
 type UserPreferences = {
   timezone: string;
   taskSpawningEnabled: boolean;
   wikiEnabled: true;
   taskViewMode: TaskViewMode;
-  imessageEnabled: boolean;
+  taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
 };
 
@@ -40,12 +41,14 @@ export async function updateTaskViewModeAction(mode: TaskViewMode) {
   }
 }
 
-export async function updateImessageEnabledAction(enabled: boolean) {
-  const preferences = await patchPreferences({ imessageEnabled: enabled === true });
-  revalidatePath("/");
-  revalidatePath("/settings/preferences");
-  revalidatePath("/settings/integrations");
-  return { ok: true, enabled: preferences.imessageEnabled } as const;
+export async function updateTaskTimeRangeAction(range: TaskTimeRange) {
+  try {
+    const preferences = await patchPreferences({ taskTimeRange: range });
+    revalidatePath("/tasks");
+    return { ok: true, range: preferences.taskTimeRange } as const;
+  } catch {
+    return { ok: false, range } as const;
+  }
 }
 
 export async function updateAutoModelRoutingAction(enabled: boolean) {

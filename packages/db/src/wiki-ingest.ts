@@ -14,7 +14,7 @@ import {
   wikiSourceItems,
 } from "./product-schema";
 
-export type ActiveWikiSourceProvider = Exclude<WikiSourceProvider, "slack">;
+export type ActiveWikiSourceProvider = Exclude<WikiSourceProvider, "slack" | "github">;
 export type ActiveWikiIngestSourceProvider = ActiveWikiSourceProvider | "opencompany-import";
 
 type DbLike = any;

@@ -1,30 +1,16 @@
-import { randomInt } from "node:crypto";
 import {
   isCapabilityId,
   isCapabilityMode,
   providerCapability,
 } from "@opencompany/agent/actions/capabilities";
-import {
-  connectImessageIntegration,
-  getImessageIntegrationState,
-  hashImessagePairingCode,
-  normalizeImessagePhoneE164,
-  verifyImessagePairingCode,
-} from "@opencompany/agent/imessage/connect";
-import {
-  type ImessageProvider,
-  resolveImessageProvider,
-} from "@opencompany/agent/imessage/provider";
 import type {
   AttioProviderState,
   FathomProviderState,
   GranolaProviderState,
-  ImessageProviderState,
   JamieProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import { personalAccountsFromRows } from "@opencompany/agent/integration-state";
-import { captureIntegrationAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import {
   connectAttioIntegration,
   deleteAttioWebhook,
@@ -50,11 +36,6 @@ import {
   validateGranolaApiKey,
 } from "@opencompany/agent/integrations/granola";
 import {
-  createOrResetJamieWebhookEndpoint,
-  type JamieWebhookSetup,
-  saveJamieWebhookApiKey,
-} from "@opencompany/agent/integrations/jamie";
-import {
   connectRenderMcpIntegration,
   getRenderIntegrationState,
   isValidRenderApiKey,
@@ -75,18 +56,11 @@ import {
   type AttioApiKeyCredentialPayload,
 } from "@opencompany/db/attio";
 import {
-  consumeImessageChallenge,
-  getImessagePairingChallenge,
-  incrementImessageChallengeAttempts,
-  recordImessageSend,
-  upsertImessagePairingChallenge,
-} from "@opencompany/db/imessage";
-import {
   applyIntegrationCapabilityMode,
   disconnectPersonalIntegration,
   loadIntegrationCredential,
 } from "@opencompany/db/integrations";
-import { brainSources, integrations, users } from "@opencompany/db/product-schema";
+import { brainSources, integrations } from "@opencompany/db/product-schema";
 import { ensureWikiSourceEnabledOnConnect } from "@opencompany/db/wiki-sources";
 import { createLogger } from "@opencompany/observability";
 import type { IntegrationAccountDto } from "@opencompany/protocol";
@@ -102,13 +76,6 @@ type DbLike = any;
 
 const OWNER_ONLY_MESSAGE = "Only the connection owner can manage this account.";
 const STRIPE_ADMIN_ONLY_MESSAGE = "Only workspace admins can manage the Stripe integration.";
-const JAMIE_ADMIN_ONLY_MESSAGE = "Only workspace admins can manage the Jamie integration.";
-
-const IMESSAGE_CODE_TTL_MS = 10 * 60 * 1000;
-const IMESSAGE_RESEND_COOLDOWN_MS = 30 * 1000;
-const IMESSAGE_MAX_CONFIRM_ATTEMPTS = 5;
-
-export { type JamieWebhookSetup };
 
 export type IntegrationAccountService = {
   list(actor: Actor): Promise<IntegrationAccountDto[]>;
@@ -126,20 +93,13 @@ export type IntegrationAccountService = {
   connectFathom(actor: Actor, apiKey: string): Promise<FathomProviderState>;
   connectGranola(actor: Actor, apiKey: string): Promise<GranolaProviderState>;
   connectRender(actor: Actor, apiKey: string): Promise<RenderProviderState>;
-  startImessagePairing(actor: Actor, phone: string): Promise<void>;
-  confirmImessagePairing(actor: Actor, code: string): Promise<ImessageProviderState>;
   connectStripe(actor: Actor, apiKey: string): Promise<StripeProviderState>;
   disconnectStripe(actor: Actor): Promise<void>;
-  createOrResetJamieWebhookEndpoint(actor: Actor): Promise<JamieWebhookSetup>;
-  saveJamieWebhookApiKey(actor: Actor, apiKey: string): Promise<JamieWebhookSetup>;
 };
 
 export function createIntegrationAccountService(input: {
   db: DbLike;
   now?: () => Date;
-  // Injectable so tests can exercise the pairing flow without Linq credentials.
-  resolveImessageProvider?: () => ImessageProvider | null;
-  generatePairingCode?: () => string;
   runner?: RunnerClient;
   refreshRenderPluginRegistrations?: (input: {
     userWorkosId: string;
@@ -152,10 +112,6 @@ export function createIntegrationAccountService(input: {
 }): IntegrationAccountService {
   const db = input.db;
   const now = input.now ?? (() => new Date());
-  const imessageProviderResolver = input.resolveImessageProvider ?? resolveImessageProvider;
-  const generatePairingCode =
-    input.generatePairingCode ?? (() => String(randomInt(100000, 1000000)));
-
   return {
     async list(actor) {
       const rows = await db
@@ -400,139 +356,6 @@ export function createIntegrationAccountService(input: {
       }
     },
 
-    async startImessagePairing(actor, phone) {
-      const [user] = await db
-        .select({ imessageEnabled: users.imessageEnabled })
-        .from(users)
-        .where(eq(users.workosUserId, actor.userId))
-        .limit(1);
-      if (!user?.imessageEnabled) {
-        throw new ApiError(
-          400,
-          "invalid_request",
-          "Enable iMessage notifications in Preferences first.",
-        );
-      }
-      const provider = imessageProviderResolver();
-      if (!provider) {
-        throw new ApiError(
-          503,
-          "unavailable",
-          "iMessage sending is not configured on this environment.",
-          true,
-        );
-      }
-      const phoneE164 = normalizeImessagePhoneE164(phone);
-      if (!phoneE164) {
-        throw new ApiError(
-          400,
-          "invalid_request",
-          "Enter the number in international format, e.g. +14155551234.",
-        );
-      }
-
-      try {
-        const existing = await getImessagePairingChallenge(actor.userId, db);
-        if (
-          existing &&
-          !existing.consumedAt &&
-          now().getTime() - existing.createdAt.getTime() < IMESSAGE_RESEND_COOLDOWN_MS
-        ) {
-          throw new ApiError(
-            429,
-            "rate_limited",
-            "A code was just sent. Wait a moment before requesting another.",
-            true,
-          );
-        }
-
-        const code = generatePairingCode();
-        await upsertImessagePairingChallenge(
-          {
-            userWorkosId: actor.userId,
-            phoneE164,
-            codeHash: hashImessagePairingCode({
-              code,
-              userWorkosId: actor.userId,
-              phoneE164,
-            }),
-            expiresAt: new Date(now().getTime() + IMESSAGE_CODE_TTL_MS),
-          },
-          db,
-        );
-
-        const sendResult = await provider.send({
-          to: phoneE164,
-          text: `Your opencompany verification code is ${code}. It expires in 10 minutes.`,
-        });
-        await recordImessageSend(
-          {
-            userWorkosId: actor.userId,
-            source: "pairing",
-            status: sendResult.ok ? "sent" : "failed",
-            errorReason: sendResult.ok ? null : sendResult.error,
-          },
-          db,
-        );
-        if (!sendResult.ok) {
-          throw new ApiError(503, "unavailable", sendResult.error, true);
-        }
-      } catch (error) {
-        throw commandFailure(error, "Could not send the verification code.", "imessage_pairing");
-      }
-    },
-
-    async confirmImessagePairing(actor, code) {
-      const trimmed = code.trim();
-      if (!/^\d{6}$/.test(trimmed)) {
-        throw new ApiError(400, "invalid_request", "Enter the 6-digit code from the message.");
-      }
-      try {
-        const challenge = await getImessagePairingChallenge(actor.userId, db);
-        if (!challenge || challenge.consumedAt) {
-          throw new ApiError(
-            400,
-            "invalid_request",
-            "No pending verification. Request a new code.",
-          );
-        }
-        if (challenge.expiresAt.getTime() < now().getTime()) {
-          throw new ApiError(400, "invalid_request", "That code expired. Request a new one.");
-        }
-        if (challenge.attemptCount >= IMESSAGE_MAX_CONFIRM_ATTEMPTS) {
-          throw new ApiError(429, "rate_limited", "Too many attempts. Request a new code.");
-        }
-        if (
-          !verifyImessagePairingCode({
-            code: trimmed,
-            userWorkosId: actor.userId,
-            phoneE164: challenge.phoneE164,
-            expectedHash: challenge.codeHash,
-          })
-        ) {
-          await incrementImessageChallengeAttempts(challenge.id, db);
-          const remaining = IMESSAGE_MAX_CONFIRM_ATTEMPTS - challenge.attemptCount - 1;
-          throw new ApiError(
-            400,
-            "invalid_request",
-            remaining > 0
-              ? `That code doesn't match. ${remaining} attempt${remaining === 1 ? "" : "s"} left.`
-              : "That code doesn't match. Request a new code.",
-          );
-        }
-
-        await consumeImessageChallenge(challenge.id, db);
-        await connectImessageIntegration({
-          userWorkosId: actor.userId,
-          phoneE164: challenge.phoneE164,
-          db,
-        });
-        return await getImessageIntegrationState(actor.userId, db);
-      } catch (error) {
-        throw commandFailure(error, "Could not verify the code.", "imessage_confirm");
-      }
-    },
-
     async connectStripe(actor, apiKey) {
       requireAdmin(actor, STRIPE_ADMIN_ONLY_MESSAGE);
       const trimmed = apiKey.trim();
@@ -584,71 +407,6 @@ export function createIntegrationAccountService(input: {
       }
       if (!disconnected) {
         throw new ApiError(404, "not_found", "Stripe is not connected.");
-      }
-    },
-
-    async createOrResetJamieWebhookEndpoint(actor) {
-      // Jamie webhooks are workspace-owned plumbing; only admins manage them.
-      requireAdmin(actor, JAMIE_ADMIN_ONLY_MESSAGE);
-      try {
-        return await createOrResetJamieWebhookEndpoint({
-          userWorkosId: actor.userId,
-          workspaceId: actor.workspaceId,
-          db,
-        });
-      } catch (error) {
-        throw commandFailure(error, "Could not create a Jamie webhook endpoint.", "jamie_endpoint");
-      }
-    },
-
-    async saveJamieWebhookApiKey(actor, apiKey) {
-      requireAdmin(actor, JAMIE_ADMIN_ONLY_MESSAGE);
-      try {
-        const setup = await saveJamieWebhookApiKey({
-          workspaceId: actor.workspaceId,
-          apiKey,
-          db,
-        });
-        const [integration] = await db
-          .select({ userWorkosId: integrations.userWorkosId })
-          .from(integrations)
-          .where(
-            and(
-              eq(integrations.id, setup.integrationId),
-              eq(integrations.workspaceId, actor.workspaceId),
-              eq(integrations.provider, "jamie"),
-            ),
-          )
-          .limit(1);
-        if (!integration) throw new Error("Could not resolve the connected Jamie integration.");
-        await ensureWikiSourceEnabledOnConnect({
-          workspaceId: actor.workspaceId,
-          provider: "jamie",
-          integrationId: setup.integrationId,
-          userWorkosId: integration.userWorkosId,
-          createdByWorkosId: actor.userId,
-          db,
-        });
-        await captureIntegrationAddedAnalytics({
-          userWorkosId: actor.userId,
-          workspaceId: actor.workspaceId,
-          provider: "jamie",
-        });
-        return setup;
-      } catch (error) {
-        if (error instanceof ApiError) throw error;
-        // The Jamie lib throws plain Errors with user-facing copy for exactly
-        // two validation cases; only those messages may cross the boundary.
-        // Anything else (driver/network failures) gets the deterministic
-        // fallback so raw infra text never reads as an invalid-key response.
-        const curated =
-          error instanceof Error &&
-          (error.message.startsWith("Jamie API keys must start with") ||
-            error.message.startsWith("Create a Jamie webhook endpoint"));
-        if (curated) {
-          throw new ApiError(400, "invalid_request", (error as Error).message);
-        }
-        throw commandFailure(error, "Could not save the Jamie API key.", "jamie_api_key");
       }
     },
   };

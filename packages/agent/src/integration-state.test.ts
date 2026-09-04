@@ -187,6 +187,42 @@ describe("SigNoz integration state", () => {
   });
 });
 
+describe("Fathom integration state", () => {
+  it("keeps MCP tool authorization separate from legacy Wiki ingestion", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_fathom_ingest",
+        provider: "fathom",
+        externalId: "fathom:user_1",
+        accountName: "Fathom",
+        status: "connected",
+      },
+      {
+        id: "gint_fathom_mcp",
+        provider: "fathom",
+        externalId: "fathom_mcp",
+        accountName: "Fathom",
+        status: "connected",
+        scopes: ["mcp"],
+        capabilityModes: { query: "ask" },
+      },
+    ]);
+
+    expect(state.fathom).toMatchObject({
+      integrationId: "gint_fathom_ingest",
+      connected: true,
+    });
+    expect(state.personalAccounts.fathom).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_fathom_mcp",
+        provider: "fathom",
+        connected: true,
+        capabilityModes: { query: "ask" },
+      }),
+    ]);
+  });
+});
+
 describe("HubSpot integration state", () => {
   it("keeps MCP tool authorization separate from Wiki ingestion accounts", () => {
     const state = integrationStateFromRows([
@@ -218,6 +254,114 @@ describe("HubSpot integration state", () => {
         integrationId: "gint_hubspot_ingest",
         connectionLabel: "Acme portal",
       }),
+    ]);
+  });
+});
+
+describe("Jamie integration state", () => {
+  it("ignores retired workspace webhook rows and selects only the personal MCP OAuth row", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_jamie_webhook",
+        provider: "jamie",
+        workspaceId: "workspace_1",
+        externalId: "jamie_webhook",
+        accountName: "Retired webhook",
+        status: "connected",
+      },
+      {
+        id: "gint_jamie_mcp",
+        provider: "jamie",
+        externalId: "jamie_mcp",
+        accountName: "Jamie",
+        status: "connected",
+        capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
+      },
+    ]);
+
+    expect(state.jamie).toMatchObject({
+      integrationId: "gint_jamie_mcp",
+      connected: true,
+      capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
+    });
+    expect(state.personalAccounts.jamie).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_jamie_mcp",
+        provider: "jamie",
+        connected: true,
+      }),
+    ]);
+  });
+});
+
+describe("Attio integration state", () => {
+  it("keeps MCP tool authorization separate from Wiki ingestion accounts", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_attio_ingest",
+        provider: "attio",
+        externalId: "workspace_123",
+        connectionLabel: "Acme CRM",
+        status: "connected",
+        scopes: ["record_permission:read-write"],
+      },
+      {
+        id: "gint_attio_mcp",
+        provider: "attio",
+        externalId: "attio_mcp",
+        accountName: "Attio",
+        status: "connected",
+        capabilityModes: { read: "on", query: "ask", write: "ask" },
+      },
+    ]);
+
+    expect(state.attio).toMatchObject({
+      integrationId: "gint_attio_mcp",
+      connected: true,
+      capabilityModes: { read: "on", query: "ask", write: "ask" },
+    });
+    expect(state.personalAccounts.attio).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_attio_ingest",
+        connectionLabel: "Acme CRM",
+      }),
+    ]);
+  });
+});
+
+describe("Granola integration state", () => {
+  it("keeps MCP tool authorization separate from legacy API ingestion", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_granola_ingest",
+        provider: "granola",
+        externalId: "granola:user_1",
+        accountEmail: "ada@example.com",
+        accountType: "granola_api_key",
+        status: "connected",
+      },
+      {
+        id: "gint_granola_mcp",
+        provider: "granola",
+        externalId: "granola_mcp",
+        accountName: "Granola",
+        accountType: "mcp_server",
+        status: "connected",
+        capabilityModes: { read: "on", query: "ask" },
+      },
+    ]);
+
+    expect(state.granola).toMatchObject({
+      integrationId: "gint_granola_ingest",
+      accountEmail: "ada@example.com",
+    });
+    expect(state.granola_mcp).toMatchObject({
+      integrationId: "gint_granola_mcp",
+      connected: true,
+      capabilityModes: { read: "on", query: "ask" },
+    });
+    expect(state.personalAccounts.granola).toEqual([
+      expect.objectContaining({ integrationId: "gint_granola_ingest" }),
     ]);
   });
 });

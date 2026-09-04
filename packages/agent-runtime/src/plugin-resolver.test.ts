@@ -291,6 +291,58 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official Granola package with sensitive meeting access behind Ask", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/granola", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "granola");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "granola",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "granola", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "granola",
+        type: "streamable-http",
+        url: "https://mcp.granola.ai/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      {
+        id: "read",
+        label: "Check Granola account",
+        defaultMode: "on",
+        tools: ["get_account_info"],
+      },
+      {
+        id: "query",
+        label: "Read meeting content",
+        defaultMode: "ask",
+        tools: [
+          "query_granola_meetings",
+          "list_meeting_folders",
+          "list_meetings",
+          "get_meetings",
+          "get_meeting_transcript",
+        ],
+      },
+    ]);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "granola", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official Better Stack package with its reviewed permission boundary", async () => {
     const fixtureRoot = fileURLToPath(
       new URL("./test-fixtures/plugins/betterstack", import.meta.url),
@@ -449,6 +501,112 @@ describe("resolvePlugin", () => {
     });
   });
 
+  it("loads the official Latitude package with every reviewed tool classified", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/latitude", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "latitude");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "latitude",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "latitude", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "latitude",
+        type: "streamable-http",
+        url: "https://api.latitude.so/v1/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toHaveLength(3);
+    expect(plugin.capabilities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "read",
+          label: "Inspect Latitude workspace",
+          defaultMode: "on",
+          tools: expect.arrayContaining(["listProjects", "listMonitors", "getExperiment"]),
+        }),
+        expect.objectContaining({
+          id: "query",
+          label: "Read traces and user data",
+          defaultMode: "ask",
+          tools: expect.arrayContaining(["getTrace", "querySpans", "getMemoryRecord"]),
+        }),
+        expect.objectContaining({
+          id: "write",
+          label: "Manage Latitude",
+          defaultMode: "ask",
+          tools: expect.arrayContaining(["deleteProject", "createApiKey", "removeMember"]),
+        }),
+      ]),
+    );
+    expect(plugin.capabilities.map((capability) => capability.tools.length)).toEqual([26, 47, 54]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(127);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "latitude", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
+  it("loads the official Fathom package with all meeting data behind Ask", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/fathom", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "fathom");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "fathom",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "fathom", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "fathom",
+        type: "streamable-http",
+        url: "https://api.fathom.ai/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      {
+        id: "query",
+        label: "Read Fathom meetings",
+        defaultMode: "ask",
+        tools: [
+          "search_meetings",
+          "find_person",
+          "list_meetings",
+          "get_meeting_transcript",
+          "get_meeting_summary",
+          "get_recording_by_url",
+          "get_recording_by_call_id",
+          "list_teams",
+          "get_identity",
+        ],
+      },
+    ]);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "fathom", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
   it("loads the official PostHog package with every reviewed analytics tool classified", async () => {
     const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/posthog", import.meta.url));
     const files = await fixtureFiles(fixtureRoot, "posthog");
@@ -555,6 +713,69 @@ describe("resolvePlugin", () => {
     expect(plugin.report.mcp).toMatchObject({
       status: "parsed",
       reports: [{ name: "hubspot", status: "gateway-registered" }],
+    });
+    expect(plugin.report.capabilities).toEqual({
+      present: true,
+      status: "parsed",
+      issues: [],
+    });
+  });
+
+  it("loads the official Attio package with every documented tool classified", async () => {
+    const fixtureRoot = fileURLToPath(new URL("./test-fixtures/plugins/attio", import.meta.url));
+    const files = await fixtureFiles(fixtureRoot, "attio");
+    const plugin = await resolvePlugin({
+      url: "useopencompany/plugins",
+      selectedPath: "attio",
+      fetcher: fetcher(files),
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+
+    expect(plugin.manifest).toMatchObject({ name: "attio", version: "1.0.0" });
+    expect(plugin.skills).toEqual([]);
+    expect(plugin.stdioServers).toEqual([]);
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "attio",
+        type: "streamable-http",
+        url: "https://mcp.attio.com/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.capabilities).toEqual([
+      expect.objectContaining({
+        id: "read",
+        label: "Inspect Attio structure",
+        defaultMode: "on",
+        tools: expect.arrayContaining(["list-objects", "list-attribute-definitions", "whoami"]),
+      }),
+      expect.objectContaining({
+        id: "query",
+        label: "Read CRM data",
+        defaultMode: "ask",
+        tools: expect.arrayContaining([
+          "search-records",
+          "get-call-recording",
+          "get-email-content",
+          "query-particle-sql",
+        ]),
+      }),
+      expect.objectContaining({
+        id: "write",
+        label: "Change Attio",
+        defaultMode: "ask",
+        tools: expect.arrayContaining([
+          "create-record",
+          "merge-records",
+          "delete-comment",
+          "update-task",
+        ]),
+      }),
+    ]);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(41);
+    expect(plugin.report.mcp).toMatchObject({
+      status: "parsed",
+      reports: [{ name: "attio", status: "gateway-registered" }],
     });
     expect(plugin.report.capabilities).toEqual({
       present: true,

@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
-import type { NormalizedGitHubActivitySourceItem } from "@opencompany/brain";
-import type { BrainIngestTriageTrace } from "@opencompany/brain/ingest-trace";
 import { WIKI_INGEST_MODEL } from "@opencompany/db/billing-constants";
 import { parseGmailWikiSourceConfig } from "@opencompany/db/gmail";
 import type { WikiIngestSourceType } from "@opencompany/db/product-schema";
@@ -22,10 +20,6 @@ import {
 } from "@opencompany/wiki/tool";
 import * as ai from "ai";
 import { executeApiWikiCommand, type WikiCommandOutput } from "./api-wiki-client";
-import {
-  buildGitHubCommentIngestTriagePrompt,
-  runWikiIngestTriage as runGitHubWikiIngestTriage,
-} from "./brain-ingest-triage";
 import type { RunnerEnv } from "./env";
 import {
   buildWikiIngestTriagePrompt,
@@ -181,14 +175,8 @@ export type WikiAgentIngestInput = {
   executeCommand?: typeof executeApiWikiCommand;
 };
 
-type WikiPreparedTriageInput =
-  | WikiIngestTriageInput
-  | Parameters<typeof runGitHubWikiIngestTriage>[0];
-
 type WikiAgentIngestDependencies = {
-  runTriage?: (
-    input: WikiPreparedTriageInput,
-  ) => Promise<WikiIngestTriageTrace | BrainIngestTriageTrace>;
+  runTriage?: (input: WikiIngestTriageInput) => Promise<WikiIngestTriageTrace>;
 };
 
 export type WikiSourceContextHeaderInput = Pick<
@@ -204,10 +192,8 @@ export const WIKI_SOURCE_CONTEXT_HEADER_BUILDERS: Partial<
   Record<ActiveWikiIngestSourceProvider, WikiSourceContextHeaderBuilder>
 > = {
   gmail: buildGmailSourceContextHeader,
-  jamie: buildMeetingSourceContextHeader,
   granola: buildMeetingSourceContextHeader,
   linear: buildLinearSourceContextHeader,
-  github: buildGitHubSourceContextHeader,
   "opencompany-import": buildCompanyImportSourceContextHeader,
 };
 
@@ -246,16 +232,6 @@ export function buildLinearSourceContextHeader(input: WikiSourceContextHeaderInp
     "Worth writing: durable project or issue state changes, decisions, commitments, and facts that materially update the workspace's understanding.",
     `Linear handling: the canonical issue lives in Linear. Add durable changes to relevant wiki pages as timeline-add entries or brief page updates that reference [[source:${input.sourceRef}]].`,
     "Source handling: never mirror an issue body or comment thread into the wiki. If the issue changes nothing durable, finish with SKIP.",
-  ].join("\n");
-}
-
-export function buildGitHubSourceContextHeader(input: WikiSourceContextHeaderInput): string {
-  return [
-    ...sourceMetadataHeader(input),
-    "Window contents: one GitHub issue or pull-request activity item, possibly combining an opened, discussion, and merged window.",
-    "Worth writing: durable project state changes, decisions, commitments, and implementation outcomes that materially update the workspace's understanding.",
-    `GitHub handling: the canonical issue or pull request lives in GitHub. Add durable changes to relevant wiki pages as timeline-add entries or brief page updates that reference [[source:${input.sourceRef}]].`,
-    "Source handling: never mirror issue bodies, pull-request descriptions, comment threads, or diffs into the wiki. If the issue or pull request changes nothing durable, finish with SKIP.",
   ].join("\n");
 }
 
@@ -399,36 +375,20 @@ async function runPreparedWikiIngestTriage(
   deps: WikiAgentIngestDependencies,
 ): Promise<WikiIngestTriageTrace | null> {
   const sourcePrompt = buildWikiIngestTriagePrompt(input);
-  const githubItem = githubItemForTriage(input);
-  if (!sourcePrompt && !githubItem) return null;
+  if (!sourcePrompt) return null;
 
   try {
-    const triageInput: WikiPreparedTriageInput = sourcePrompt
-      ? {
-          prompt: sourcePrompt,
-          gatewayApiKey: input.env.vercelAiGatewayApiKey,
-          actorUserWorkosId: input.actorUserWorkosId,
-          workspaceId: input.workspaceId,
-          ingestJobId: input.jobId,
-          ...(input.signal ? { signal: input.signal } : {}),
-        }
-      : {
-          prompt: buildGitHubCommentIngestTriagePrompt(
-            githubItem as NormalizedGitHubActivitySourceItem,
-          ),
-          gatewayApiKey: input.env.vercelAiGatewayApiKey,
-          userWorkosId: input.actorUserWorkosId,
-          workspaceId: input.workspaceId,
-          ingestJobId: input.jobId,
-          ...(input.signal ? { signal: input.signal } : {}),
-        };
+    const triageInput: WikiIngestTriageInput = {
+      prompt: sourcePrompt,
+      gatewayApiKey: input.env.vercelAiGatewayApiKey,
+      actorUserWorkosId: input.actorUserWorkosId,
+      workspaceId: input.workspaceId,
+      ingestJobId: input.jobId,
+      ...(input.signal ? { signal: input.signal } : {}),
+    };
     const triage = deps.runTriage
       ? await deps.runTriage(triageInput)
-      : sourcePrompt
-        ? await runSourceWikiIngestTriage(triageInput as WikiIngestTriageInput)
-        : await runGitHubWikiIngestTriage(
-            triageInput as Parameters<typeof runGitHubWikiIngestTriage>[0],
-          );
+      : await runSourceWikiIngestTriage(triageInput);
     const normalizedTriage = normalizeWikiIngestTriage(triage);
     logger.info("opencompany wiki cheap triage finished", {
       event: "opencompany.goat_wiki_ingest_triage_finished",
@@ -455,9 +415,7 @@ async function runPreparedWikiIngestTriage(
   }
 }
 
-function normalizeWikiIngestTriage(
-  triage: WikiIngestTriageTrace | BrainIngestTriageTrace,
-): WikiIngestTriageTrace {
+function normalizeWikiIngestTriage(triage: WikiIngestTriageTrace): WikiIngestTriageTrace {
   return {
     model: triage.model,
     decision: triage.decision,
@@ -572,16 +530,6 @@ export function explicitSkipFromFinalText(finalText: string): { reason?: string 
     return reason ? { reason } : {};
   }
   return null;
-}
-
-function githubItemForTriage(
-  input: WikiAgentIngestInput,
-): NormalizedGitHubActivitySourceItem | null {
-  if (input.sourceProvider !== "github" || input.sourceType !== "activity") return null;
-  const item = input.normalizedPayload as Partial<NormalizedGitHubActivitySourceItem>;
-  return item.content?.activity?.state === "commented"
-    ? (item as NormalizedGitHubActivitySourceItem)
-    : null;
 }
 
 export async function runWikiIngestAgentLoop(

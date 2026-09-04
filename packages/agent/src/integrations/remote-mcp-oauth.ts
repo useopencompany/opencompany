@@ -62,6 +62,7 @@ type RemoteMcpIntegrationConfig<TProvider extends IntegrationProvider> = {
   externalId: string;
   storedScopes: readonly string[];
   authScope?: string;
+  clientGrantTypes?: readonly ("authorization_code" | "refresh_token")[];
   routeSegment?: string;
   staticClientInformation?: () => OAuthClientInformation;
   acceptLegacyStateWithoutProvider?: boolean;
@@ -413,7 +414,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
         return {
           client_name: "opencompany",
           redirect_uris: [callbackUrl()],
-          grant_types: ["authorization_code", "refresh_token"],
+          grant_types: [...(config.clientGrantTypes ?? ["authorization_code", "refresh_token"])],
           response_types: ["code"],
           ...(config.authScope ? { scope: config.authScope } : {}),
         };

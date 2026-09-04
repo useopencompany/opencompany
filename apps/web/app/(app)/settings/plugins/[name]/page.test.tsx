@@ -6,6 +6,7 @@ const getHeadlessPluginMock = vi.hoisted(() => vi.fn());
 const officialSkillPluginDetailMock = vi.hoisted(() => vi.fn(() => null));
 
 vi.mock("@/components/OfficialMcpPluginSettings", () => ({
+  AttioPluginDetail: vi.fn(() => null),
   BetterStackPluginDetail: vi.fn(() => null),
   GitHubPluginDetail: vi.fn(() => null),
   LinearPluginDetail: vi.fn(() => null),

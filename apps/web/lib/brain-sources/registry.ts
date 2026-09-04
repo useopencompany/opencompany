@@ -1,20 +1,8 @@
 import type { BrainSourceConfigProvider } from "@opencompany/protocol";
 import type { LucideIcon } from "lucide-react";
-import {
-  Contact,
-  Files,
-  FileText,
-  GitBranch,
-  Handshake,
-  ListTodo,
-  Mail,
-  NotebookPen,
-  Video,
-} from "lucide-react";
+import { Contact, Files, Handshake, ListTodo, Mail, NotebookPen, Video } from "lucide-react";
 
 const DOCS_ORIGIN = "https://docs.opencompany.cloud";
-
-export const JAMIE_DOCS_HREF = `${DOCS_ORIGIN}/docs/integrations/jamie`;
 
 export type BrainSourceProviderDef = {
   id: BrainSourceConfigProvider;
@@ -34,23 +22,13 @@ export type BrainSourceProviderDef = {
 // SlackBotDestinationCard), not ingestion sources.
 export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
   {
-    id: "jamie",
-    name: "Jamie",
-    description: "Meeting notes flow into this brain after every completed meeting.",
-    icon: FileText,
-    connectionKind: "webhook",
-    available: true,
-    connectHref: "/settings/jamie",
-    docsHref: JAMIE_DOCS_HREF,
-  },
-  {
     id: "granola",
     name: "Granola",
     description: "Meeting notes flow into this brain once Granola finishes each summary.",
     icon: NotebookPen,
     connectionKind: "api_key",
     available: true,
-    connectHref: "/settings/granola",
+    connectHref: "/wiki/sources",
     docsHref: `${DOCS_ORIGIN}/docs/integrations/granola`,
   },
   {
@@ -80,15 +58,6 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
     connectionKind: "oauth",
     available: true,
     connectHref: "/api/integrations/google-drive/start?returnTo=/settings/integrations",
-  },
-  {
-    id: "github",
-    name: "GitHub",
-    description: "New and merged pull requests and new issues from repos you choose.",
-    icon: GitBranch,
-    connectionKind: "oauth",
-    available: true,
-    connectHref: "/api/integrations/github/start?returnTo=/settings/integrations",
   },
   {
     id: "linear",
@@ -126,16 +95,11 @@ export const BRAIN_SOURCE_PROVIDERS: BrainSourceProviderDef[] = [
 // the brain until the user picks what to ingest, so onboarding opens a focused
 // config surface right after connect.
 //
-// The meeting-note providers (Jamie, Granola, Fathom) have nothing to scope —
+// The meeting-note providers (Granola and Fathom) have nothing to scope —
 // once connected, every meeting flows in — so onboarding auto-enables them on
 // connect instead of prompting for config.
 export function brainSourceNeedsConfig(id: BrainSourceConfigProvider): boolean {
   return (
-    id === "linear" ||
-    id === "github" ||
-    id === "gmail" ||
-    id === "google_drive" ||
-    id === "hubspot" ||
-    id === "attio"
+    id === "linear" || id === "gmail" || id === "google_drive" || id === "hubspot" || id === "attio"
   );
 }

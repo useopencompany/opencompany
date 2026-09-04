@@ -10,23 +10,32 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
+  AttioPluginDetail,
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  defaultAttioToolsState,
+  defaultFathomToolsState,
+  defaultGranolaToolsState,
   defaultHubSpotToolsState,
+  defaultLatitudeToolsState,
   defaultPostHogToolsState,
   defaultSigNozToolsState,
   defaultStripeToolsState,
+  FathomPluginDetail,
   GitHubPluginDetail,
   GitHubPluginDetailView,
   GmailPluginDetail,
   GmailPluginDetailView,
   GoogleCalendarPluginDetail,
   GoogleDrivePluginDetail,
+  GranolaPluginDetail,
   githubToolsStateFromPlugin,
   gmailToolsStateFromPlugin,
   googleCalendarToolsStateFromPlugin,
   googleDriveToolsStateFromPlugin,
   HubSpotPluginDetail,
+  JamiePluginDetail,
+  LatitudePluginDetail,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -43,12 +52,17 @@ import {
   XPluginDetail,
 } from "./OfficialMcpPluginSettings";
 import {
+  ATTIO_PLUGIN_SOURCE,
   BETTERSTACK_PLUGIN_SOURCE,
+  FATHOM_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
   GMAIL_PLUGIN_SOURCE,
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
+  GRANOLA_PLUGIN_SOURCE,
   HUBSPOT_PLUGIN_SOURCE,
+  JAMIE_PLUGIN_SOURCE,
+  LATITUDE_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   POSTHOG_PLUGIN_SOURCE,
@@ -105,6 +119,22 @@ const appData = vi.hoisted(() => ({
       integrationId: "gint_hubspot_mcp",
       capabilityModes: { read: "on", query: "ask", write: "ask" },
     },
+    jamie: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Jamie",
+      integrationId: "gint_jamie_mcp",
+      capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
+    },
+    attio: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Acme Attio",
+      integrationId: "gint_attio_mcp",
+      capabilityModes: { read: "on", query: "ask", write: "ask" },
+    },
     posthog: {
       connected: true,
       status: "connected",
@@ -112,6 +142,15 @@ const appData = vi.hoisted(() => ({
       accountName: "Acme Analytics",
       integrationId: "gint_posthog_tools",
       capabilityModes: { read: "on", write: "ask" },
+    },
+    granola_mcp: {
+      provider: "granola",
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Granola",
+      integrationId: "gint_granola_mcp",
+      capabilityModes: { read: "on", query: "ask" },
     },
     stripe: {
       connected: true,
@@ -155,6 +194,20 @@ const appData = vi.hoisted(() => ({
     },
     personalAccounts: {
       betterstack: [],
+      fathom: [
+        {
+          integrationId: "gint_fathom_mcp",
+          provider: "fathom",
+          status: "connected",
+          connected: true,
+          accountEmail: "founder@example.com",
+          accountName: "Founder",
+          connectionLabel: "Fathom",
+          statusReason: null,
+          scopes: ["mcp"],
+          capabilityModes: { query: "ask" },
+        },
+      ],
       gmail: [
         {
           integrationId: "gint_gmail",
@@ -226,7 +279,35 @@ const appData = vi.hoisted(() => ({
           capabilityModes: { read: "ask", query: "ask", write: "ask" },
         },
       ],
+      latitude: [
+        {
+          integrationId: "gint_latitude",
+          provider: "latitude",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "Latitude",
+          connectionLabel: "Latitude workspace",
+          statusReason: null,
+          scopes: [],
+          capabilityModes: { read: "on", query: "ask", write: "ask" },
+        },
+      ],
       linear: [],
+      jamie: [
+        {
+          integrationId: "gint_jamie_mcp",
+          provider: "jamie",
+          status: "connected",
+          connected: true,
+          accountEmail: null,
+          accountName: "Jamie",
+          connectionLabel: "Jamie",
+          statusReason: null,
+          scopes: [],
+          capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
+        },
+      ],
       neon: [],
       signoz: [
         {
@@ -1174,6 +1255,30 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Manage SigNoz");
   });
 
+  it("maps the dedicated Fathom MCP connection onto the official plugin surface", () => {
+    const fathomPlugin = {
+      ...plugin,
+      id: "plugin_fathom",
+      name: "fathom",
+      manifest: { name: "fathom", description: "Read Fathom meeting content." },
+      source: { ...plugin.source, path: "fathom" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <FathomPluginDetail
+        pluginState={{ status: "ready", plugin: fathomPlugin }}
+        toolsState={defaultFathomToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("founder@example.com");
+    expect(html).toContain("Read Fathom meetings");
+    expect(html).toContain("Configure legacy Fathom ingestion in Wiki sources");
+    expect(FATHOM_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/444dd4dbfaaed6abd2c7c8000024c5be0ff4fa48/fathom",
+    );
+  });
+
   it("maps the existing PostHog OAuth connection onto the official plugin surface", () => {
     const posthogPlugin = {
       ...plugin,
@@ -1195,6 +1300,32 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Create insights");
     expect(POSTHOG_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+    );
+    expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps the personal Latitude connection onto the official plugin surface", () => {
+    const latitudePlugin = {
+      ...plugin,
+      id: "plugin_latitude",
+      name: "latitude",
+      manifest: { name: "latitude", description: "Investigate Latitude observability data." },
+      source: { ...plugin.source, path: "latitude" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <LatitudePluginDetail
+        pluginState={{ status: "ready", plugin: latitudePlugin }}
+        toolsState={defaultLatitudeToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Latitude workspace");
+    expect(html).toContain("Inspect Latitude workspace");
+    expect(html).toContain("Read traces and user data");
+    expect(html).toContain("Manage Latitude");
+    expect(LATITUDE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
@@ -1222,6 +1353,115 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Configure HubSpot ingestion in Wiki sources");
     expect(HUBSPOT_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
+    );
+    expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps Jamie OAuth onto the official plugin without offering legacy ingestion", () => {
+    const jamiePlugin = {
+      ...plugin,
+      id: "plugin_jamie",
+      name: "jamie",
+      manifest: { name: "jamie", description: "Search and manage Jamie meeting content." },
+      source: { ...plugin.source, path: "jamie" },
+      remoteMcpServers: [
+        {
+          name: "jamie",
+          type: "streamable-http" as const,
+          connectionProvider: "jamie",
+          capabilities: [
+            {
+              id: "read",
+              label: "Browse Jamie organization",
+              defaultMode: "on" as const,
+              tools: ["list_templates", "list_tags"],
+            },
+            {
+              id: "query",
+              label: "Read meetings & tasks",
+              defaultMode: "ask" as const,
+              tools: ["list_meetings", "get_meeting", "list_tasks"],
+            },
+            {
+              id: "write",
+              label: "Manage Jamie content",
+              defaultMode: "ask" as const,
+              tools: ["create_tasks", "create_tag"],
+            },
+            {
+              id: "draft",
+              label: "Permanently delete tags",
+              defaultMode: "off" as const,
+              tools: ["delete_tag"],
+            },
+          ],
+          tools: [],
+        },
+      ],
+    } satisfies PluginInstallationDto;
+
+    render(<JamiePluginDetail pluginState={{ status: "ready", plugin: jamiePlugin }} canEdit />);
+
+    expect(screen.getByRole("heading", { level: 1, name: "Jamie" })).toBeInTheDocument();
+    expect(screen.getByText("Browse Jamie organization")).toBeInTheDocument();
+    expect(screen.getByText("Read meetings & tasks")).toBeInTheDocument();
+    expect(screen.getByText("Manage Jamie content")).toBeInTheDocument();
+    expect(screen.getByText("Permanently delete tags")).toBeInTheDocument();
+    expect(screen.queryByText(/ingestion in Wiki sources/i)).not.toBeInTheDocument();
+    expect(JAMIE_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/ad062203fcbb628ad27572d564cd536025f2d6ed/jamie",
+    );
+  });
+
+  it("maps the dedicated Attio MCP connection onto the official plugin surface", () => {
+    const attioPlugin = {
+      ...plugin,
+      id: "plugin_attio",
+      name: "attio",
+      manifest: { name: "attio", description: "Work with Attio CRM." },
+      source: { ...plugin.source, path: "attio" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <AttioPluginDetail
+        pluginState={{ status: "ready", plugin: attioPlugin }}
+        toolsState={defaultAttioToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Acme Attio");
+    expect(html).toContain("Inspect Attio structure");
+    expect(html).toContain("Read CRM data");
+    expect(html).toContain("Change Attio");
+    expect(html).toContain("Configure Attio ingestion in Wiki sources");
+    expect(ATTIO_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/0daeec4cff5d5f9925af2901410e1aa6c8baf0d8/attio",
+    );
+    expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps Granola MCP separately from legacy Wiki ingestion", () => {
+    const granolaPlugin = {
+      ...plugin,
+      id: "plugin_granola",
+      name: "granola",
+      manifest: { name: "granola", description: "Search Granola meeting history." },
+      source: { ...plugin.source, path: "granola" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <GranolaPluginDetail
+        pluginState={{ status: "ready", plugin: granolaPlugin }}
+        toolsState={defaultGranolaToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("The Granola account opencompany uses when you search meeting history.");
+    expect(html).toContain("Check Granola account");
+    expect(html).toContain("Read meeting content");
+    expect(html).toContain("Configure legacy Granola API ingestion in Wiki sources");
+    expect(GRANOLA_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/cf036c82fc5186f5187e4da59b040ce92e492df3/granola",
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
   });

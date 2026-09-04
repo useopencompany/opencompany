@@ -5,9 +5,7 @@ const githubUserMocks = vi.hoisted(() => ({
   loadIdentity: vi.fn(),
   loadIntegration: vi.fn(),
 }));
-const githubWorkMocks = vi.hoisted(() => ({ getInstallationToken: vi.fn() }));
 const dbMocks = vi.hoisted(() => ({
-  legacyRows: [] as Array<{ installationId: string | null }>,
   db: {} as Record<string, unknown>,
 }));
 
@@ -16,7 +14,7 @@ const queryBuilder = {
   from: vi.fn(() => queryBuilder),
   where: vi.fn(() => queryBuilder),
   orderBy: vi.fn(() => queryBuilder),
-  limit: vi.fn(async () => dbMocks.legacyRows),
+  limit: vi.fn(async () => []),
 };
 Object.assign(dbMocks.db, queryBuilder);
 
@@ -34,10 +32,6 @@ vi.mock("@opencompany/agent/integrations/github-user", () => ({
 
 vi.mock("./db", () => ({ getDb: () => dbMocks.db }));
 
-vi.mock("./github", () => ({
-  getGitHubWorkInstallationToken: githubWorkMocks.getInstallationToken,
-}));
-
 import {
   buildGitHubCommandEnv,
   GITHUB_RECONNECT_NOTICE,
@@ -49,10 +43,8 @@ import {
 describe("GitHub sandbox auth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    dbMocks.legacyRows = [];
     githubUserMocks.loadIntegration.mockResolvedValue(null);
     githubUserMocks.loadIdentity.mockResolvedValue(null);
-    githubWorkMocks.getInstallationToken.mockResolvedValue(null);
   });
 
   it("refreshes and returns the connected personal GitHub credential", async () => {
@@ -78,20 +70,6 @@ describe("GitHub sandbox auth", () => {
       gitAuthorEmail: "octocat@github.com",
     });
     expect(decodeGitAuthHeader(auth?.githubAuthHeader)).toBe("x-access-token:ghu_personal");
-    expect(githubWorkMocks.getInstallationToken).not.toHaveBeenCalled();
-  });
-
-  it("keeps the legacy workspace installation as a fallback", async () => {
-    dbMocks.legacyRows = [{ installationId: "installation_legacy" }];
-    githubWorkMocks.getInstallationToken.mockResolvedValue("ghs_workspace");
-
-    const auth = await loadGitHubAuthForUser("user_1");
-
-    expect(githubWorkMocks.getInstallationToken).toHaveBeenCalledWith({
-      installationId: "installation_legacy",
-    });
-    expect(auth).toMatchObject({ githubToken: "ghs_workspace", provider: "github" });
-    expect(decodeGitAuthHeader(auth?.githubAuthHeader)).toBe("x-access-token:ghs_workspace");
   });
 
   it("does not silently switch identities when personal refresh fails", async () => {
@@ -100,10 +78,8 @@ describe("GitHub sandbox auth", () => {
       status: "connected",
     });
     githubUserMocks.getAccessToken.mockRejectedValue(new Error("Reconnect GitHub in Settings."));
-    dbMocks.legacyRows = [{ installationId: "installation_legacy" }];
 
     await expect(loadGitHubAuthForUser("user_1")).rejects.toThrow("Reconnect GitHub in Settings.");
-    expect(githubWorkMocks.getInstallationToken).not.toHaveBeenCalled();
   });
 
   it("ignores a personal integration that is no longer connected", async () => {
@@ -116,29 +92,23 @@ describe("GitHub sandbox auth", () => {
     expect(githubUserMocks.getAccessToken).not.toHaveBeenCalled();
   });
 
-  it("does not fall back to the workspace App when personal GitHub needs reauthorization", async () => {
+  it("requires reauthorization when personal GitHub is disconnected", async () => {
     githubUserMocks.loadIntegration.mockResolvedValue({
       id: "integration_personal",
       status: "needs_reauth",
     });
-    dbMocks.legacyRows = [{ installationId: "installation_legacy" }];
-
     await expect(loadGitHubAuthForUser("user_1")).rejects.toMatchObject({
       name: "GitHubUserAccessAuthError",
     });
-    expect(githubWorkMocks.getInstallationToken).not.toHaveBeenCalled();
   });
 
-  it("degrades sync failures to no auth without falling back or requiring reconnect", async () => {
+  it("degrades sync failures to no auth without requiring reconnect", async () => {
     githubUserMocks.loadIntegration.mockResolvedValue({
       id: "integration_personal",
       status: "sync_failed",
     });
-    dbMocks.legacyRows = [{ installationId: "installation_legacy" }];
-
     await expect(loadGitHubAuthForUser("user_1")).resolves.toBeNull();
     expect(githubUserMocks.getAccessToken).not.toHaveBeenCalled();
-    expect(githubWorkMocks.getInstallationToken).not.toHaveBeenCalled();
   });
 
   it("injects the personal token into gh and git through the existing environment contract", () => {

@@ -14,6 +14,10 @@ export default async function TasksPage() {
     workflows.map((workflow) => [workflow.slug, workflow.name]),
   );
   return (
-    <TasksBoardRoute workflowNames={workflowNames} initialViewMode={context.user.taskViewMode} />
+    <TasksBoardRoute
+      workflowNames={workflowNames}
+      initialViewMode={context.user.taskViewMode}
+      initialTimeRange={context.user.taskTimeRange}
+    />
   );
 }

@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   resolveNeonActions: vi.fn(),
   resolveLinearActions: vi.fn(),
   resolvePostHogActions: vi.fn(),
-  resolveGitHubActions: vi.fn(),
   resolveStripeActions: vi.fn(),
   resolveRevolutActions: vi.fn(),
   resolvePluginGatewayRegistrations: vi.fn(async () => []),
@@ -46,9 +45,6 @@ vi.mock("@opencompany/agent/actions/neon", () => ({
 vi.mock("@opencompany/agent/actions/posthog", () => ({
   resolvePostHogActions: mocks.resolvePostHogActions,
 }));
-vi.mock("@opencompany/agent/actions/github", () => ({
-  resolveGitHubActions: mocks.resolveGitHubActions,
-}));
 vi.mock("@opencompany/agent/actions/stripe", () => ({
   resolveStripeActions: mocks.resolveStripeActions,
 }));
@@ -75,7 +71,6 @@ function providerCatalog(
     | "linear"
     | "posthog"
     | "attio"
-    | "github"
     | "stripe"
     | "revolut",
 ): ActionProviderCatalog {
@@ -128,7 +123,6 @@ describe("resolveActionCatalog", () => {
     mocks.resolveLatitudeActions.mockResolvedValue(providerCatalog("latitude"));
     mocks.resolveNeonActions.mockResolvedValue(providerCatalog("neon"));
     mocks.resolveAttioActions.mockResolvedValue(providerCatalog("attio"));
-    mocks.resolveGitHubActions.mockResolvedValue(providerCatalog("github"));
     mocks.resolveStripeActions.mockResolvedValue(providerCatalog("stripe"));
     mocks.resolveRevolutActions.mockResolvedValue(providerCatalog("revolut"));
 
@@ -145,7 +139,6 @@ describe("resolveActionCatalog", () => {
       "latitude",
       "neon",
       "attio",
-      "github",
       "stripe",
       "revolut",
     ]);
@@ -158,7 +151,6 @@ describe("resolveActionCatalog", () => {
       "latitude description",
       "neon description",
       "attio description",
-      "github description",
       "stripe description",
       "revolut description",
     ]);
@@ -171,11 +163,9 @@ describe("resolveActionCatalog", () => {
       "latitude.read_something",
       "neon.read_something",
       "attio.read_something",
-      "github.read_something",
       "stripe.read_something",
       "revolut.read_something",
     ]);
-    expect(mocks.resolveGitHubActions).toHaveBeenCalledWith("workspace_1");
     expect(mocks.resolveStripeActions).toHaveBeenCalledWith("workspace_1");
     expect(mocks.resolveRevolutActions).toHaveBeenCalledWith("workspace_1");
   });
@@ -189,7 +179,6 @@ describe("resolveActionCatalog", () => {
     mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveNeonActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
-    mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
     mocks.resolveRevolutActions.mockResolvedValue(null);
 
@@ -209,7 +198,6 @@ describe("resolveActionCatalog", () => {
     mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveNeonActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
-    mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
     mocks.resolveRevolutActions.mockResolvedValue(null);
 
@@ -229,7 +217,6 @@ describe("resolveActionCatalog", () => {
       mocks.resolveLatitudeActions,
       mocks.resolveNeonActions,
       mocks.resolveAttioActions,
-      mocks.resolveGitHubActions,
       mocks.resolveStripeActions,
       mocks.resolveRevolutActions,
     ]) {
@@ -278,7 +265,6 @@ describe("resolveActionCatalog", () => {
       mocks.resolvePostHogActions,
       mocks.resolveLatitudeActions,
       mocks.resolveAttioActions,
-      mocks.resolveGitHubActions,
       mocks.resolveStripeActions,
       mocks.resolveRevolutActions,
     ]) {
@@ -329,7 +315,6 @@ describe("resolveActionCatalog", () => {
     mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveNeonActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
-    mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
     mocks.resolveRevolutActions.mockResolvedValue(null);
     mocks.listWorkspaceCapabilities.mockResolvedValue([
@@ -388,7 +373,6 @@ describe("resolveActionCatalog", () => {
     mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveNeonActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
-    mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
     mocks.resolveRevolutActions.mockResolvedValue(null);
 

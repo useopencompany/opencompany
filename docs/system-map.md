@@ -66,12 +66,8 @@ Browser reads use typed `/v1` resources and fixed authorized API read models, in
 `integration-accounts-v1`. The generic web Electric shape proxy and the legacy `/api/skills`
 response adapter are deleted; clients cannot select physical tables or predicates.
 
-GitHub has two intentionally separate identities. The workspace-owned GitHub App (`github`)
-handles selected-repository ingestion and webhooks, and provides sandbox git access when a user has
-not connected a personal account. The official **GitHub as you** Plugin uses the personal
-`github_user` connection for user-authorized tools and coding-sandbox git/gh access. For members
-with that personal connection, its MCP tools replace the legacy `github.search_issues` action so
-the catalog never presents two GitHub issue-search paths. Plugin settings read the user token's
+The official **GitHub as you** Plugin uses the personal `github_user` connection for
+user-authorized tools and coding-sandbox git/gh access. Plugin settings read the user token's
 reachable App installations and repositories from GitHub. A tool or sandbox git failure that is
 confirmed outside that intersection links back through the combined install-and-authorize flow;
 the client uses bounded, backoff polling with ordinary access reads instead of depending on
