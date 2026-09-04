@@ -30,13 +30,13 @@ export type ProductChatUiPart = {
   [key: string]: unknown;
 };
 
-type ProductChatUsage = Partial<
+type ProductChatContextUsage = Partial<
   Pick<LanguageModelUsage, "inputTokens" | "outputTokens" | "totalTokens">
 >;
 
 export type ProductChatProjection = {
   parts: ProductChatUiPart[];
-  usage?: ProductChatUsage;
+  contextUsage?: ProductChatContextUsage;
   finishReason?: string;
 };
 
@@ -113,7 +113,9 @@ export function createProductChatProjector(input: {
       ...(effectiveProjection.finishReason
         ? { finishReason: effectiveProjection.finishReason }
         : {}),
-      ...(effectiveProjection.usage ? { usage: compactUsage(effectiveProjection.usage) } : {}),
+      ...(effectiveProjection.contextUsage
+        ? { usage: compactUsage(effectiveProjection.contextUsage) }
+        : {}),
       ...(options.error ? { error: options.error } : {}),
       ...(options.aborted ? { aborted: true } : {}),
       ...(typeof options.durationMs === "number" ? { durationMs: options.durationMs } : {}),
@@ -201,7 +203,7 @@ export function createProductChatProjector(input: {
     return {
       parts,
       ...(row.debug_trace?.finishReason ? { finishReason: row.debug_trace.finishReason } : {}),
-      ...(row.debug_trace?.usage ? { usage: row.debug_trace.usage } : {}),
+      ...(row.debug_trace?.usage ? { contextUsage: row.debug_trace.usage } : {}),
     };
   };
 
@@ -573,7 +575,7 @@ async function recordProductChatModelCost(input: {
   }
 }
 
-function compactUsage(usage: ProductChatUsage) {
+function compactUsage(usage: ProductChatContextUsage) {
   return {
     inputTokens: readUsageNumber(usage.inputTokens),
     outputTokens: readUsageNumber(usage.outputTokens),
