@@ -405,6 +405,25 @@ export function RenderPluginDetail({
   );
 }
 
+export function VercelPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.vercel}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function PostHogPluginDetail({
   pluginState,
   canEdit,
@@ -1521,6 +1540,7 @@ function pluginAccountsFromState(
     config.connectionProvider === "neon" ||
     config.connectionProvider === "posthog" ||
     config.connectionProvider === "render" ||
+    config.connectionProvider === "vercel" ||
     config.connectionProvider === "signoz" ||
     config.connectionProvider === "slack" ||
     config.connectionProvider === "stripe" ||
@@ -1700,6 +1720,10 @@ export function defaultStripeToolsState(): PluginToolsState {
 
 export function defaultSigNozToolsState(): PluginToolsState {
   return defaultOfficialPluginToolsState("signoz");
+}
+
+export function defaultVercelToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("vercel");
 }
 
 function defaultOfficialPluginToolsState(provider: OfficialMcpPluginName): PluginToolsState {

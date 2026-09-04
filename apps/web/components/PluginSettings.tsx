@@ -43,6 +43,7 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  Triangle,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -201,6 +202,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     Icon: ServerCog,
     iconClassName: "bg-[#0B0D0E] text-white",
   },
+  vercel: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.vercel,
+    Icon: Triangle,
+    iconClassName: "bg-black text-white",
+  },
   signoz: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
     Icon: Activity,
@@ -262,6 +268,8 @@ export const POSTHOG_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.posthog.name;
 export const POSTHOG_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.posthog.source;
 export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;
 export const RENDER_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.render.source;
+export const VERCEL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.vercel.name;
+export const VERCEL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.vercel.source;
 export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
 export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
 export const FATHOM_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.fathom.name;

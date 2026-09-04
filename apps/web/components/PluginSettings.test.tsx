@@ -30,6 +30,7 @@ import {
   SIGNOZ_PLUGIN_SOURCE,
   SLACK_PLUGIN_SOURCE,
   STRIPE_PLUGIN_SOURCE,
+  VERCEL_PLUGIN_SOURCE,
   X_PLUGIN_SOURCE,
   YC_ADVISE_PLUGIN_SOURCE,
 } from "./PluginSettings";
@@ -316,6 +317,12 @@ describe("Plugin settings", () => {
       "/settings/plugins/jamie",
     );
     await user.click(screen.getByRole("button", { name: "All" }));
+    await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
+    expect(screen.getByRole("link", { name: /vercel/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/vercel",
+    );
+    await user.click(screen.getByRole("button", { name: "All" }));
     await user.click(screen.getByRole("button", { name: "View all business plugins" }));
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
@@ -349,6 +356,9 @@ describe("Plugin settings", () => {
     );
     expect(RENDER_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",
+    );
+    expect(VERCEL_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
     );
     expect(POSTHOG_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
@@ -426,8 +436,16 @@ describe("Plugin settings", () => {
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
 
     const engineering = screen.getByRole("region", { name: "Engineering" });
-    expect(within(engineering).getAllByRole("link")).toHaveLength(6);
+    expect(within(engineering).getAllByRole("link")).toHaveLength(7);
     expect(within(engineering).getByRole("link", { name: /github/i })).toBeInTheDocument();
+    expect(within(engineering).getByRole("link", { name: /signoz/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/signoz",
+    );
+    expect(within(engineering).getByRole("link", { name: /vercel/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/vercel",
+    );
     expect(screen.getByRole("button", { name: "Engineering" })).toHaveAttribute(
       "aria-pressed",
       "true",

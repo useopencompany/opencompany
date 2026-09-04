@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   loadBetterStackConnection: vi.fn(),
   getRenderState: vi.fn(),
   loadRenderConnection: vi.fn(),
+  getVercelState: vi.fn(),
+  loadVercelConnection: vi.fn(),
   getPostHogState: vi.fn(),
   loadPostHogConnection: vi.fn(),
   getSlackState: vi.fn(),
@@ -129,6 +131,11 @@ vi.mock("./integrations/render-mcp", () => ({
   RENDER_MCP_ENDPOINT_URL: "https://mcp.render.com/mcp",
   getRenderIntegrationState: mocks.getRenderState,
   loadRenderMcpWorkerConnection: mocks.loadRenderConnection,
+}));
+vi.mock("./integrations/vercel-mcp", () => ({
+  VERCEL_MCP_ENDPOINT_URL: "https://mcp.vercel.com",
+  getVercelIntegrationState: mocks.getVercelState,
+  loadVercelMcpWorkerConnection: mocks.loadVercelConnection,
 }));
 vi.mock("./integrations/neon-mcp", () => ({
   NEON_MCP_ENDPOINT_URL:
@@ -943,6 +950,48 @@ describe("plugin gateway registration cache", () => {
       {
         ...renderRecord,
         server: { ...renderRecord.server, url: "https://mcp.render.com.evil.example/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Vercel credentials only to Vercel's exact MCP root endpoint", async () => {
+    const vercelRecord = record({
+      pluginName: "vercel",
+      pluginLabel: "vercel",
+      pluginDescription: "Vercel plugin tools.",
+      connectionProvider: "vercel",
+      server: {
+        name: "vercel",
+        type: "streamable-http",
+        url: "https://mcp.vercel.com",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([vercelRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:vercel:vercel",
+        connectionProvider: "vercel",
+        getState: mocks.getVercelState,
+        loadConnection: mocks.loadVercelConnection,
+      }),
+    ]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...vercelRecord,
+        server: { ...vercelRecord.server, url: "https://mcp.vercel.com/mcp" },
+      },
+    ]);
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+
+    mocks.listRegistrations.mockResolvedValueOnce([
+      {
+        ...vercelRecord,
+        server: { ...vercelRecord.server, url: "https://mcp.vercel.com.evil.example" },
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);

@@ -54,6 +54,9 @@ describe("opencompany onboarding integrations", () => {
     expect(onboardingConnectionError("fathom", "fathom_denied")).toBe(
       "Fathom authorization was cancelled.",
     );
+    expect(onboardingConnectionError("vercel", "vercel_denied")).toBe(
+      "Vercel authorization was cancelled.",
+    );
     expect(onboardingConnectionError("github_user", "missing_code")).toContain(
       "did not return a valid authorization",
     );
@@ -82,6 +85,7 @@ describe("opencompany onboarding integrations", () => {
     expect(integrationConnectionSuccess("neon")).toBe("Neon connected.");
     expect(integrationConnectionSuccess("betterstack")).toBe("Better Stack connected.");
     expect(integrationConnectionSuccess("signoz")).toBe("SigNoz connected.");
+    expect(integrationConnectionSuccess("vercel")).toBe("Vercel connected.");
     expect(integrationConnectionSuccess("github_user")).toBe("GitHub connected.");
     expect(integrationConnectionSuccess(null)).toBe("Integration connected.");
   });

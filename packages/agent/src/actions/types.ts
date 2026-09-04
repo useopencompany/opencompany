@@ -21,6 +21,7 @@ export type ActionProviderId =
   | "neon"
   | "betterstack"
   | "render"
+  | "vercel"
   | "signoz"
   | "fathom"
   | "x_account";
