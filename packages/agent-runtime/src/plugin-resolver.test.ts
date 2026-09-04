@@ -745,7 +745,7 @@ describe("resolvePlugin", () => {
       trustedCapabilitySources: ["useopencompany/plugins"],
     });
 
-    expect(plugin.manifest).toMatchObject({ name: "google-drive", version: "1.1.0" });
+    expect(plugin.manifest).toMatchObject({ name: "google-drive", version: "1.2.0" });
     expect(plugin.skills).toEqual([]);
     expect(plugin.remoteServers).toEqual([
       {
@@ -770,12 +770,12 @@ describe("resolvePlugin", () => {
       },
       {
         id: "write",
-        label: "Create & copy files",
+        label: "Create & edit files",
         defaultMode: "ask",
-        tools: ["copy_file", "create_file"],
+        tools: ["copy_file", "create_file", "replace_document_text", "replace_document_contents"],
       },
     ]);
-    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(8);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(10);
     expect(plugin.report.mcp).toMatchObject({
       status: "parsed",
       reports: [{ name: "google-drive", status: "gateway-registered" }],

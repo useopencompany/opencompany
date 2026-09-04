@@ -6,6 +6,7 @@ import {
   GOOGLE_CALENDAR_READ_SCOPE,
 } from "./integrations/google-calendar-scopes";
 import {
+  GOOGLE_DOCS_WRITE_SCOPE,
   GOOGLE_DRIVE_FILE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
 } from "./integrations/google-drive-scopes";
@@ -152,7 +153,7 @@ describe("Google Drive integration state", () => {
         id: "gint_drive",
         provider: "google_drive",
         status: "connected",
-        scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE],
+        scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DOCS_WRITE_SCOPE],
       },
     ]);
 
