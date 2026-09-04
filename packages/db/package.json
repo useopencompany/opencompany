@@ -140,10 +140,6 @@
       "types": "./src/brain-event-claims.ts",
       "default": "./src/brain-event-claims.ts"
     },
-    "./github": {
-      "types": "./src/github.ts",
-      "default": "./src/github.ts"
-    },
     "./harness": {
       "types": "./src/harness.ts",
       "default": "./src/harness.ts"

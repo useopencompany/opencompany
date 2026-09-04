@@ -864,22 +864,6 @@ export function rankStoredBrainImportCandidate(
   const item = asRecord(value);
   const content = asRecord(item.content);
   switch (provider) {
-    case "github": {
-      const activity = asRecord(content.activity);
-      const actor = `${activity.author ?? ""} ${activity.mergedBy ?? ""}`.toLowerCase();
-      const title = String(item.title ?? "").toLowerCase();
-      if (actor.includes("[bot]") || actor.includes("dependabot") || title.includes("dependabot")) {
-        return Number.NEGATIVE_INFINITY;
-      }
-      const state = activity.state;
-      const priority = state === "merged" ? 300 : state === "commented" ? 200 : 100;
-      return (
-        priority +
-        numeric(activity.comments) * 10 +
-        numeric(activity.additions) +
-        numeric(activity.deletions)
-      );
-    }
     case "jamie": {
       const meeting = asRecord(content.meeting);
       const substance =
@@ -935,13 +919,6 @@ export function matchesBrainImportSelectedScope(
   const item = asRecord(value);
   const content = asRecord(item.content);
   switch (provider) {
-    case "github": {
-      const repository = asRecord(asRecord(content.activity).repository);
-      const allowed = configuredIds(config?.repos, ["id", "fullName"]);
-      return (
-        allowed.has(String(repository.id ?? "")) || allowed.has(String(repository.fullName ?? ""))
-      );
-    }
     case "linear": {
       const teamId = String(asRecord(content.issue).teamId ?? "");
       return configuredIds(config?.teams, ["id"]).has(teamId);

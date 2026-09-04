@@ -1,9 +1,9 @@
+import { listGitHubUserRepositoryAccess } from "@opencompany/agent/integrations/github-user";
 import type { Actor } from "@opencompany/core";
 import {
   deleteRepoConfig,
   isValidGitHubRepositoryExternalId,
   listRepoConfigs,
-  listWorkspaceRepositories,
   normalizeRepoSetupInstructions,
   type RepoConfigView,
   upsertRepoConfig,
@@ -40,10 +40,24 @@ export type RepoConfigService = {
 export function createRepoConfigService(input: { db: DbLike }): RepoConfigService {
   return {
     async list(actor) {
-      const [repositories, configs] = await Promise.all([
-        listWorkspaceRepositories({ db: input.db, workspaceId: actor.workspaceId }),
+      const [access, configs] = await Promise.all([
+        listGitHubUserRepositoryAccess({ userWorkosId: actor.userId, db: input.db }).catch(
+          () => null,
+        ),
         listRepoConfigs({ db: input.db, workspaceId: actor.workspaceId }),
       ]);
+      const repositories = access
+        ? access.installations
+            .flatMap((installation) => installation.repositories)
+            .map((repository) => ({
+              repositoryExternalId: repository.id,
+              repositoryFullName: repository.fullName,
+              private: repository.private,
+            }))
+            .toSorted((left, right) =>
+              left.repositoryFullName.localeCompare(right.repositoryFullName),
+            )
+        : [];
       return { repositories, configs };
     },
 
@@ -55,7 +69,7 @@ export function createRepoConfigService(input: { db: DbLike }): RepoConfigServic
         if (!validation.ok) throw new ApiError(400, "invalid_request", validation.message);
       }
       const repository = await resolveConfigurableRepository(input.db, {
-        workspaceId: actor.workspaceId,
+        userWorkosId: actor.userId,
         repositoryExternalId,
       });
       if (!repository) {
@@ -94,7 +108,7 @@ export function createRepoConfigService(input: { db: DbLike }): RepoConfigServic
       const normalized = normalizeRepoSetupInstructions(setupInstructions);
       if (!normalized.ok) throw new ApiError(400, "invalid_request", normalized.message);
       const repository = await resolveConfigurableRepository(input.db, {
-        workspaceId: actor.workspaceId,
+        userWorkosId: actor.userId,
         repositoryExternalId,
       });
       if (!repository) {
@@ -161,23 +175,23 @@ function requireValidRepositoryId(repositoryExternalId: string) {
   }
 }
 
-// Membership validation: only repositories in the workspace's connected GitHub
-// catalog are configurable, and the stored full name always mirrors the catalog.
+// Repository validation comes from the acting admin's official GitHub Plugin
+// connection, and the stored full name always mirrors GitHub's response.
 async function resolveConfigurableRepository(
   db: DbLike,
-  input: { workspaceId: string; repositoryExternalId: string },
+  input: { userWorkosId: string; repositoryExternalId: string },
 ): Promise<{ repositoryExternalId: string; repositoryFullName: string } | null> {
-  const repositories = await listWorkspaceRepositories({
+  const access = await listGitHubUserRepositoryAccess({
+    userWorkosId: input.userWorkosId,
     db,
-    workspaceId: input.workspaceId,
-  });
-  const repository = repositories.find(
-    (candidate) => candidate.repositoryExternalId === input.repositoryExternalId,
-  );
+  }).catch(() => null);
+  const repositories =
+    access?.installations.flatMap((installation) => installation.repositories) ?? [];
+  const repository = repositories.find((candidate) => candidate.id === input.repositoryExternalId);
   return repository
     ? {
-        repositoryExternalId: repository.repositoryExternalId,
-        repositoryFullName: repository.repositoryFullName,
+        repositoryExternalId: repository.id,
+        repositoryFullName: repository.fullName,
       }
     : null;
 }

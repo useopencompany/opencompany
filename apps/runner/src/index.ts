@@ -29,7 +29,6 @@ import {
 import { assertRunnerDbConfig, closeDb, getDbPool } from "./db";
 import { loadEnv } from "./env";
 import { startFathomPollWorker } from "./fathom-poll-worker";
-import { startGitHubFlushWorker } from "./github-flush-worker";
 import { startGmailFlushWorker } from "./gmail-flush-worker";
 import { startGmailPollWorker } from "./gmail-poll-worker";
 import { setGoogleDriveSyncWakeup, startGoogleDriveSyncWorker } from "./google-drive-sync-worker";
@@ -101,7 +100,6 @@ const brainIngestWorker = env.taskWorkerEnabled ? startBrainIngestWorker(env) : 
 const wikiIngestWorker = env.taskWorkerEnabled ? startWikiIngestWorker(env) : null;
 const brainImportWorker = env.taskWorkerEnabled ? startBrainImportWorker(env) : null;
 const linearFlushWorker = env.taskWorkerEnabled ? startLinearFlushWorker() : null;
-const gitHubFlushWorker = env.taskWorkerEnabled ? startGitHubFlushWorker() : null;
 const hubspotFlushWorker = env.taskWorkerEnabled ? startHubspotFlushWorker(env) : null;
 const attioFlushWorker = env.taskWorkerEnabled ? startAttioFlushWorker() : null;
 const gmailPollWorker = env.taskWorkerEnabled ? startGmailPollWorker(env) : null;
@@ -224,7 +222,6 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
       stop: async () => drainSlackBotEvents(),
     },
     runnerDrainTask("linear_flush", linearFlushWorker),
-    runnerDrainTask("github_flush", gitHubFlushWorker),
     runnerDrainTask("hubspot_flush", hubspotFlushWorker),
     runnerDrainTask("attio_flush", attioFlushWorker),
     runnerDrainTask("gmail_poll", gmailPollWorker),

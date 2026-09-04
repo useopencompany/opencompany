@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   attio: vi.fn(),
   calendar: vi.fn(),
-  github: vi.fn(),
   gmail: vi.fn(),
   googleDrive: vi.fn(),
   latitude: vi.fn(),
@@ -19,7 +18,6 @@ vi.mock("../plugin-gateway", () => ({
   resolvePluginGatewayRegistrations: mocks.registrations,
 }));
 vi.mock("./attio", () => ({ resolveAttioActions: mocks.attio }));
-vi.mock("./github", () => ({ resolveGitHubActions: mocks.github }));
 vi.mock("./gmail", () => ({ resolveGmailActions: mocks.gmail }));
 vi.mock("./google-calendar", () => ({ resolveGoogleCalendarActions: mocks.calendar }));
 vi.mock("./google-drive", () => ({ resolveGoogleDriveActions: mocks.googleDrive }));
@@ -54,12 +52,6 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     });
     mocks.remote.mockResolvedValue(null);
     mocks.registrations.mockResolvedValue([]);
-    mocks.github.mockResolvedValue({
-      id: "github",
-      label: "GitHub",
-      description: "Legacy workspace GitHub actions.",
-      actions: [{ id: "github.search_issues" }],
-    });
     mocks.gmail.mockResolvedValue({
       id: "gmail",
       label: "Gmail",
@@ -92,14 +84,15 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     });
   });
 
-  it("keeps the legacy GitHub issue search when the official plugin is absent", async () => {
+  it("does not expose GitHub actions when the official plugin is absent", async () => {
     const catalog = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [] },
     );
 
-    expect(mocks.github).toHaveBeenCalledWith("workspace_1");
-    expect(catalog.actions).toContainEqual(expect.objectContaining({ id: "github.search_issues" }));
+    expect(catalog.actions).not.toContainEqual(
+      expect.objectContaining({ id: expect.stringContaining("github") }),
+    );
   });
 
   it("keeps Calendar fallback actions only while the official plugin is absent", async () => {
@@ -238,7 +231,7 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     );
   });
 
-  it("suppresses the legacy GitHub issue search when the official plugin is installed", async () => {
+  it("exposes GitHub actions through the official plugin", async () => {
     const githubPluginRegistration = {
       source: "plugin:github:github",
       getState: vi.fn().mockResolvedValue({
@@ -248,44 +241,25 @@ describe("resolveActionCatalog plugin reconciliation", () => {
         toolModes: {},
       }),
     } as unknown as RemoteMcpGatewayRegistration;
+    mocks.remote.mockResolvedValueOnce({
+      id: "plugin:github:github",
+      label: "GitHub",
+      description: "Official GitHub plugin tools.",
+      actions: [{ id: "plugin:github:github.search_issues" }],
+    });
 
     const catalog = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       { remoteMcpRegistrations: [githubPluginRegistration] },
     );
 
-    expect(mocks.github).not.toHaveBeenCalled();
     expect(mocks.remote).toHaveBeenCalledWith(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
       githubPluginRegistration,
     );
-    expect(catalog.actions).not.toContainEqual(
-      expect.objectContaining({ id: "github.search_issues" }),
+    expect(catalog.actions).toContainEqual(
+      expect.objectContaining({ id: "plugin:github:github.search_issues" }),
     );
-  });
-
-  it("keeps the legacy GitHub issue search for members without a personal connection", async () => {
-    const githubPluginRegistration = {
-      source: "plugin:github:github",
-      getState: vi.fn().mockResolvedValue({
-        connected: false,
-        integrationId: null,
-        capabilityModes: {},
-        toolModes: {},
-      }),
-    } as unknown as RemoteMcpGatewayRegistration;
-
-    const catalog = await resolveActionCatalog(
-      { userWorkosId: "user_without_github", workspaceId: "workspace_1" },
-      { remoteMcpRegistrations: [githubPluginRegistration] },
-    );
-
-    expect(githubPluginRegistration.getState).toHaveBeenCalledWith({
-      userWorkosId: "user_without_github",
-      workspaceId: "workspace_1",
-    });
-    expect(mocks.github).toHaveBeenCalledWith("workspace_1");
-    expect(catalog.actions).toContainEqual(expect.objectContaining({ id: "github.search_issues" }));
   });
 
   it("exposes Slack tools only through the official plugin", async () => {

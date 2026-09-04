@@ -9,10 +9,8 @@ import { BRAIN_SOURCE_PROVIDERS } from "@/lib/brain-sources/registry";
 const brainSourceActionsMock = vi.hoisted(() => ({
   getBrainSourcesAction: vi.fn(),
   listGoogleDriveResourcesAction: vi.fn(),
-  listGitHubRepositoriesAction: vi.fn(),
   listLinearTeamsAction: vi.fn(),
   setBrainAttioSourceAction: vi.fn(),
-  setBrainGitHubSourceAction: vi.fn(),
   setBrainGmailSourceAction: vi.fn(),
   setBrainGoogleDriveSourceAction: vi.fn(),
   setBrainLinearSourceAction: vi.fn(),
@@ -364,16 +362,6 @@ function brainSourceDetails(
         integrationId: null,
         accountName: null,
         organizationName: null,
-        statusReason: null,
-      },
-    },
-    github: {
-      integration: {
-        provider: "github",
-        connected: false,
-        status: "not_connected",
-        integrationId: null,
-        accountName: null,
         statusReason: null,
       },
     },

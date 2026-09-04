@@ -26,12 +26,12 @@ describe("upsertBrainSource", () => {
     await expect(
       upsertBrainSource({
         brainRef: "gbrain_1",
-        provider: "github",
+        provider: "linear",
         integrationId: "gint_1",
         userWorkosId: "user_1",
         createdByWorkosId: "user_1",
         enabled: true,
-        config: { repos: [{ owner: "acme", repo: "api" }] },
+        config: { teams: [{ id: "team_1", name: "Engineering" }] },
         now: new Date("2026-07-22T13:30:00.000Z"),
       }),
     ).resolves.toEqual({ id: "gbscfg_1", created: true });
@@ -59,12 +59,12 @@ describe("upsertBrainSource", () => {
     await expect(
       upsertBrainSource({
         brainRef: "gbrain_1",
-        provider: "github",
+        provider: "linear",
         integrationId: "gint_1",
         userWorkosId: "user_1",
         createdByWorkosId: "user_1",
         enabled: true,
-        config: { repos: [{ owner: "acme", repo: "api" }] },
+        config: { teams: [{ id: "team_1", name: "Engineering" }] },
         now: new Date("2026-07-22T13:30:00.000Z"),
         db,
       }),

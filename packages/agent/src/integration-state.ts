@@ -92,14 +92,6 @@ export type HubspotSourceProviderState = {
   statusReason: string | null;
 };
 
-export type GitHubProviderState = {
-  provider: "github";
-  connected: boolean;
-  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
-  accountName: string | null;
-  statusReason: string | null;
-};
-
 export type JamieProviderState = {
   provider: "jamie";
   connected: boolean;
@@ -281,7 +273,6 @@ export type IntegrationState = {
   linear: LinearProviderState;
   hubspot: HubSpotProviderState;
   posthog: PostHogProviderState;
-  github: GitHubProviderState;
   jamie: JamieProviderState;
   slack: SlackProviderState;
   granola: GranolaProviderState;
@@ -444,12 +435,9 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     ) {
       continue;
     }
-    // GitHub and Stripe are workspace-owned; personal rows for those providers
-    // are pre-ownership leftovers and must not shadow the workspace connection.
-    if (
-      (row.provider === "github" || row.provider === "stripe") &&
-      !(row.workspaceId ?? row.workspace_id)
-    ) {
+    // Stripe is workspace-owned; personal rows are pre-ownership leftovers
+    // and must not shadow the workspace connection.
+    if (row.provider === "stripe" && !(row.workspaceId ?? row.workspace_id)) {
       continue;
     }
     // Jamie's retired webhook integration used workspace-owned rows. Only the
@@ -472,7 +460,6 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     linear: linearProviderState(byProvider.get("linear")),
     hubspot: hubspotProviderState(byProvider.get("hubspot")),
     posthog: posthogProviderState(byProvider.get("posthog")),
-    github: githubProviderState(byProvider.get("github")),
     jamie: jamieProviderState(byProvider.get("jamie")),
     slack: slackProviderState(byProvider.get("slack")),
     granola: granolaProviderState(byProvider.get("granola")),
@@ -645,26 +632,6 @@ function hubspotProviderState(row: IntegrationStateRow | undefined): HubSpotProv
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
-  };
-}
-
-function githubProviderState(row: IntegrationStateRow | undefined): GitHubProviderState {
-  if (!row) {
-    return {
-      provider: "github",
-      connected: false,
-      status: "not_connected",
-      accountName: null,
-      statusReason: null,
-    };
-  }
-
-  return {
-    provider: "github",
-    connected: row.status === "connected",
-    status: row.status,
-    accountName: row.accountName ?? row.account_name ?? null,
-    statusReason: row.statusReason ?? row.status_reason ?? null,
   };
 }
 

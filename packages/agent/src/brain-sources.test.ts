@@ -21,7 +21,6 @@ const mocks = vi.hoisted(() => ({
   getDriveToken: vi.fn(async () => "cursor_1"),
   hasAnySource: vi.fn(async () => false),
   listDriveFiles: vi.fn(async () => ({ files: [], nextPageToken: null })),
-  listGitHubRepositories: vi.fn(async () => []),
   listPersonalAccounts: vi.fn(async () => []),
   listSharedDrives: vi.fn(async () => []),
   listSources: vi.fn(async () => []),
@@ -50,10 +49,6 @@ vi.mock("@opencompany/db/brain-sources", () => ({
 vi.mock("@opencompany/db/workspaces", () => ({
   getDefaultBrainForUser: mocks.getDefaultBrain,
   getBrainAccess: mocks.getBrainAccess,
-}));
-vi.mock("@opencompany/db/github", async (importActual) => ({
-  ...(await importActual<typeof import("@opencompany/db/github")>()),
-  listGitHubIntegrationRepositories: mocks.listGitHubRepositories,
 }));
 vi.mock("@opencompany/db/google-drive", async (importActual) => ({
   ...(await importActual<typeof import("@opencompany/db/google-drive")>()),

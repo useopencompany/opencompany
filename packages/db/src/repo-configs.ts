@@ -14,7 +14,7 @@ import { parse } from "dotenv";
 import { and, asc, eq } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type * as schema from "./product-schema";
-import { integrationResources, integrations, repoConfigs } from "./product-schema";
+import { repoConfigs } from "./product-schema";
 
 const REPO_CONFIG_ENCRYPTION_KEY_VERSION = DEFAULT_ENCRYPTION_KEY_VERSION;
 
@@ -129,7 +129,7 @@ export async function listDecryptedRepoConfigs(input: {
     .select({
       workspaceId: repoConfigs.workspaceId,
       repositoryExternalId: repoConfigs.repositoryExternalId,
-      repositoryFullName: integrationResources.name,
+      repositoryFullName: repoConfigs.repositoryFullName,
       encryptedEnvPayload: repoConfigs.encryptedEnvPayload,
       encryptionKeyVersion: repoConfigs.encryptionKeyVersion,
       envKeys: repoConfigs.envKeys,
@@ -137,26 +137,8 @@ export async function listDecryptedRepoConfigs(input: {
       updatedAt: repoConfigs.updatedAt,
     })
     .from(repoConfigs)
-    .innerJoin(
-      integrationResources,
-      and(
-        eq(integrationResources.externalId, repoConfigs.repositoryExternalId),
-        eq(integrationResources.provider, "github"),
-        eq(integrationResources.resourceType, "repository"),
-        eq(integrationResources.status, "available"),
-      ),
-    )
-    .innerJoin(
-      integrations,
-      and(
-        eq(integrations.id, integrationResources.integrationId),
-        eq(integrations.workspaceId, repoConfigs.workspaceId),
-        eq(integrations.provider, "github"),
-        eq(integrations.status, "connected"),
-      ),
-    )
     .where(eq(repoConfigs.workspaceId, input.workspaceId))
-    .orderBy(asc(integrationResources.name));
+    .orderBy(asc(repoConfigs.repositoryFullName));
 
   const configs = new Map<string, DecryptedRepoConfig>();
   for (const row of rows) {
@@ -197,49 +179,6 @@ export async function listDecryptedRepoConfigs(input: {
     }
   }
   return [...configs.values()];
-}
-
-export async function listWorkspaceRepositories(input: {
-  db: RepoConfigDb;
-  workspaceId: string;
-}): Promise<WorkspaceRepository[]> {
-  const rows = await input.db
-    .select({
-      repositoryExternalId: integrationResources.externalId,
-      repositoryFullName: integrationResources.name,
-      metadata: integrationResources.metadata,
-    })
-    .from(integrationResources)
-    .innerJoin(integrations, eq(integrationResources.integrationId, integrations.id))
-    .where(
-      and(
-        eq(integrations.workspaceId, input.workspaceId),
-        eq(integrations.provider, "github"),
-        eq(integrations.status, "connected"),
-        eq(integrationResources.provider, "github"),
-        eq(integrationResources.resourceType, "repository"),
-        eq(integrationResources.status, "available"),
-      ),
-    )
-    .orderBy(asc(integrationResources.name));
-
-  const repositories = new Map<string, WorkspaceRepository>();
-  for (const row of rows) {
-    if (!isValidGitHubRepositoryExternalId(row.repositoryExternalId)) continue;
-    if (!isValidGitHubRepositoryFullName(row.repositoryFullName)) continue;
-    const metadata =
-      row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
-        ? row.metadata
-        : {};
-    repositories.set(row.repositoryExternalId, {
-      repositoryExternalId: row.repositoryExternalId,
-      repositoryFullName: row.repositoryFullName,
-      private: metadata.private === true,
-    });
-  }
-  return [...repositories.values()].toSorted((a, b) =>
-    a.repositoryFullName.localeCompare(b.repositoryFullName),
-  );
 }
 
 export async function upsertRepoConfig(input: {

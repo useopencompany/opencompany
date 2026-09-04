@@ -26,7 +26,6 @@ export function integrationConnectionError(provider: string | null, reason: stri
       return `${name} isn't available right now. Please try again later.`;
     case "session_mismatch":
       return `Sign in with the same account that started the ${name} connection, then try again.`;
-    case "github_denied":
     case "github_user_denied":
     case "gmail_denied":
     case "slack_denied":
@@ -66,7 +65,6 @@ export function integrationConnectionSuccess(provider: string | null) {
 
 function providerName(provider: string | null) {
   switch (provider) {
-    case "github":
     case "github_user":
       return "GitHub";
     case "gmail":

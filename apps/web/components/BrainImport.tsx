@@ -14,7 +14,7 @@ import {
   startBrainImportDiscoveryAction,
   startWikiImportDiscoveryAction,
 } from "@/lib/brain-import-actions";
-import { getBrainSourcesAction, listGitHubRepositoriesAction } from "@/lib/brain-source-actions";
+import { getBrainSourcesAction } from "@/lib/brain-source-actions";
 import {
   getHeadlessBrainCollections,
   getHeadlessWikiCollections,
@@ -24,7 +24,6 @@ import { listWikiSources } from "@/lib/wiki-source-api";
 
 const PROVIDERS = [
   ["public_web", "Public web"],
-  ["github", "GitHub"],
   ["granola", "Granola"],
   ["fathom", "Fathom"],
   ["gmail", "Gmail"],
@@ -136,31 +135,10 @@ function CompanyImport({
         const integrationId = source?.integrationId ?? integration?.integrationId;
         if (!integrationId) continue;
         next[id] = {
-          enabled: id === "github",
+          enabled: false,
           integrationId,
           config: source?.config ?? {},
         };
-      }
-      const github = next.github;
-      const existingRepos = Array.isArray(github?.config?.repos) ? github.config.repos : [];
-      if (github?.integrationId && existingRepos.length === 0) {
-        const repositories = await listGitHubRepositoriesAction(github.integrationId);
-        if (repositories.ok) {
-          github.config = {
-            ...github.config,
-            repos: repositories.repos.slice(0, 5).map((repo) => ({
-              id: repo.id,
-              fullName: repo.fullName,
-            })),
-            events: [
-              "pull_request_opened",
-              "pull_request_merged",
-              "pull_request_commented",
-              "issue_opened",
-              "issue_commented",
-            ],
-          };
-        }
       }
       if (next.gmail) {
         const existingEvents = Array.isArray(next.gmail.config?.events)
@@ -221,7 +199,7 @@ function CompanyImport({
     run &&
     startTransition(async () => {
       const enabledProviders = Array.from(enabledAtConfirm) as Array<
-        "public_web" | "github" | "granola" | "fathom" | "gmail" | "linear"
+        "public_web" | "granola" | "fathom" | "gmail" | "linear"
       >;
       const result = wiki
         ? await confirmWikiImportAction({ importRunId: run.id, enabledProviders })
@@ -485,8 +463,6 @@ function integrationFor(
 ) {
   if (!details) return null;
   switch (provider) {
-    case "github":
-      return details.github.integration;
     case "granola":
       return details.granola.integration;
     case "fathom":

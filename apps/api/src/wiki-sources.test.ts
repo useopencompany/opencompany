@@ -54,13 +54,6 @@ describe("Wiki source service", () => {
 
     await expect(service.list(member)).resolves.toMatchObject([
       {
-        id: "gwscfg_workspace",
-        ownerKind: "workspace",
-        canConfigure: false,
-        canToggle: false,
-        canDelete: false,
-      },
-      {
         id: "gwscfg_1",
         ownerKind: "user",
         isOwn: false,
@@ -72,9 +65,10 @@ describe("Wiki source service", () => {
     expect(listWikiSourcesForWorkspace).toHaveBeenCalledWith("workspace_1", expect.anything());
   });
 
-  it("hides retired Slack activity rows", async () => {
+  it("hides retired Slack and GitHub activity rows", async () => {
     vi.mocked(listWikiIngestActivityRows).mockResolvedValueOnce([
       activityRow({ sourceProvider: "slack", sourceType: "conversation" }),
+      activityRow({ id: "gwjob_github", sourceProvider: "github", sourceType: "activity" }),
       activityRow({ id: "gwjob_gmail", sourceProvider: "gmail", sourceType: "thread" }),
     ] as never);
     const service = createWikiSourceService({ db: integrationDb([]) });
@@ -218,8 +212,8 @@ describe("Wiki source service", () => {
 
     await expect(
       service.upsert(member, {
-        integrationId: "integration_github",
-        provider: "github",
+        integrationId: "integration_jamie",
+        provider: "jamie",
         enabled: true,
       }),
     ).rejects.toMatchObject({ code: "forbidden" });

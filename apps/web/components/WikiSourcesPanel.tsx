@@ -40,7 +40,7 @@ import {
   WikiIngestActivitySkeleton,
 } from "@/components/WikiIngestActivityFeed";
 import { WikiGmailSourceEditor } from "@/components/WikiSourceScopeEditors";
-import { WikiGitHubRepoPicker, WikiLinearTeamPicker } from "@/components/WikiSourceScopePickers";
+import { WikiLinearTeamPicker } from "@/components/WikiSourceScopePickers";
 import {
   getHeadlessIntegrationAccounts,
   type HeadlessIntegrationAccountReadModel,
@@ -65,7 +65,6 @@ export type WikiSourceScopeSlot = (entry: WikiSourceEntry) => ReactNode;
 
 export function WikiSourcesPanel({
   workspaceId,
-  isAdmin,
   mode = "page",
   integrationState,
 }: {
@@ -87,7 +86,6 @@ export function WikiSourcesPanel({
   return (
     <WikiSourcesLivePanel
       workspaceId={workspaceId}
-      isAdmin={isAdmin}
       mode={mode}
       initialIntegrations={integrationState ?? initialIntegrations}
     />
@@ -96,12 +94,10 @@ export function WikiSourcesPanel({
 
 function WikiSourcesLivePanel({
   workspaceId,
-  isAdmin,
   initialIntegrations,
   mode,
 }: {
   workspaceId: string;
-  isAdmin: boolean;
   initialIntegrations: IntegrationState | undefined;
   mode: "page" | "onboarding";
 }) {
@@ -122,8 +118,8 @@ function WikiSourcesLivePanel({
     [integrationCollection],
   );
   const initialIntegrationRows = useMemo(
-    () => wikiSourceIntegrationRowsFromState(initialIntegrations, workspaceId),
-    [initialIntegrations, workspaceId],
+    () => wikiSourceIntegrationRowsFromState(initialIntegrations),
+    [initialIntegrations],
   );
   const displayedIntegrationRows = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialIntegrationRows;
@@ -134,9 +130,9 @@ function WikiSourcesLivePanel({
   const eligibleIntegrations = useMemo(
     () =>
       displayedIntegrationRows.filter((integration) =>
-        isEligibleWikiSourceIntegration(integration, workspaceId),
+        isEligibleWikiSourceIntegration(integration),
       ),
-    [displayedIntegrationRows, workspaceId],
+    [displayedIntegrationRows],
   );
 
   const loadSources = async () => {
@@ -165,8 +161,8 @@ function WikiSourcesLivePanel({
   }, []);
 
   const entriesByProvider = useMemo(
-    () => buildEntriesByProvider(sources ?? [], eligibleIntegrations, isAdmin),
-    [eligibleIntegrations, isAdmin, sources],
+    () => buildEntriesByProvider(sources ?? [], eligibleIntegrations),
+    [eligibleIntegrations, sources],
   );
 
   // Meeting sources have no picker step. Once a fresh Granola
@@ -289,16 +285,6 @@ function WikiSourcesLivePanel({
     if (entry.provider === "linear") {
       return (
         <WikiLinearTeamPicker
-          integrationId={entry.integrationId}
-          source={entry.source}
-          canConfigure={canConfigure}
-          onSaved={(source) => setSources((current) => mergeSource(current, source))}
-        />
-      );
-    }
-    if (entry.provider === "github") {
-      return (
-        <WikiGitHubRepoPicker
           integrationId={entry.integrationId}
           source={entry.source}
           canConfigure={canConfigure}
@@ -642,7 +628,6 @@ function WikiSourceCardSkeletons() {
 function buildEntriesByProvider(
   sources: WikiSourceDto[],
   integrations: HeadlessIntegrationAccountReadModel[],
-  isAdmin: boolean,
 ) {
   const result = new Map<WikiSourceProvider, WikiSourceEntry[]>();
   const integrationsById = new Map(
@@ -667,7 +652,6 @@ function buildEntriesByProvider(
   for (const integration of integrations) {
     if (attachedIntegrationIds.has(integration.id)) continue;
     const provider = integration.provider as WikiSourceProvider;
-    const workspaceOwned = provider === "github";
     appendEntry(result, {
       integrationId: integration.id,
       provider,
@@ -675,9 +659,9 @@ function buildEntriesByProvider(
       accountName: integration.accountName,
       accountEmail: integration.accountEmail,
       connectionLabel: integration.connectionLabel,
-      ownerName: workspaceOwned ? "Workspace connection" : "You",
+      ownerName: "You",
       source: null,
-      canToggle: workspaceOwned ? isAdmin : true,
+      canToggle: true,
     });
   }
   for (const entries of result.values()) {
@@ -692,23 +676,16 @@ function appendEntry(entries: Map<WikiSourceProvider, WikiSourceEntry[]>, entry:
   entries.set(entry.provider, providerEntries);
 }
 
-function isEligibleWikiSourceIntegration(
-  integration: HeadlessIntegrationAccountReadModel,
-  workspaceId: string,
-) {
+function isEligibleWikiSourceIntegration(integration: HeadlessIntegrationAccountReadModel) {
   if (integration.status === "disconnected") return false;
   if (!WIKI_SOURCE_PROVIDERS.some((provider) => provider.id === integration.provider)) return false;
   if (integration.provider === "linear" && integration.externalId === "linear_mcp") return false;
   if (integration.provider === "granola" && integration.externalId === "granola_mcp") return false;
-  if (integration.provider === "github") {
-    return integration.workspaceId === workspaceId;
-  }
   return integration.workspaceId === null;
 }
 
 function wikiSourceIntegrationRowsFromState(
   integrations: IntegrationState | undefined,
-  workspaceId: string,
 ): HeadlessIntegrationAccountReadModel[] {
   if (!integrations) return [];
 
@@ -730,29 +707,6 @@ function wikiSourceIntegrationRowsFromState(
         capabilityModes: account.capabilityModes,
       });
     }
-  }
-
-  // The server integration snapshot includes the workspace-owned connection
-  // ids even though the legacy aggregate type does not expose GitHub's id.
-  const github = integrations.github as IntegrationState["github"] & {
-    integrationId?: string | null;
-  };
-  for (const connection of [github] as const) {
-    if (!connection.integrationId || connection.status === "not_connected") continue;
-    rows.push({
-      id: connection.integrationId,
-      provider: connection.provider,
-      workspaceId,
-      externalId: "server-snapshot",
-      connectionLabel: null,
-      accountName: connection.accountName,
-      accountEmail: null,
-      accountType: null,
-      status: connection.status,
-      statusReason: connection.statusReason,
-      scopes: [],
-      capabilityModes: {},
-    });
   }
 
   return rows;

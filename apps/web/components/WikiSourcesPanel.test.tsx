@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   listWikiSources: vi.fn(),
   setWikiSourceEnabled: vi.fn(),
   upsertWikiSource: vi.fn(),
-  listGitHubRepositories: vi.fn(),
   listLinearTeams: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
@@ -48,7 +47,6 @@ vi.mock("@/lib/wiki-source-api", () => ({
 }));
 
 vi.mock("@/lib/brain-source-actions", () => ({
-  listGitHubRepositoriesAction: mocks.listGitHubRepositories,
   listLinearTeamsAction: mocks.listLinearTeams,
 }));
 
@@ -70,7 +68,6 @@ describe("WikiSourcesPanel", () => {
     mocks.listWikiSources.mockResolvedValue([]);
     mocks.setWikiSourceEnabled.mockReset();
     mocks.upsertWikiSource.mockReset();
-    mocks.listGitHubRepositories.mockReset();
     mocks.listLinearTeams.mockReset();
     mocks.toastError.mockReset();
     mocks.toastSuccess.mockReset();
@@ -82,7 +79,7 @@ describe("WikiSourcesPanel", () => {
     const connect = await screen.findByRole("link", { name: "Connect Gmail" });
     expect(connect).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/wiki/sources");
     expect(screen.getByText("No sources are feeding yet")).toBeInTheDocument();
-    expect(screen.getAllByText("Not connected")).toHaveLength(4);
+    expect(screen.getAllByText("Not connected")).toHaveLength(3);
   });
 
   it("keeps OAuth connections in onboarding and ships no dead scope placeholder", async () => {
@@ -242,52 +239,6 @@ describe("WikiSourcesPanel", () => {
     );
   });
 
-  it("configures selected GitHub repositories through the Wiki sources API", async () => {
-    mocks.integrations = [
-      integration({ provider: "github", workspaceId: "workspace_1", accountName: "Acme" }),
-    ];
-    mocks.listGitHubRepositories.mockResolvedValue({
-      ok: true,
-      repos: [{ id: "4242", fullName: "acme/api", private: true }],
-    });
-    mocks.upsertWikiSource.mockResolvedValue(
-      source({
-        provider: "github",
-        accountName: "Acme",
-        ownerKind: "workspace",
-        config: {
-          repos: [{ id: "4242", fullName: "acme/api" }],
-          events: [
-            "pull_request_opened",
-            "pull_request_merged",
-            "pull_request_commented",
-            "issue_opened",
-            "issue_commented",
-          ],
-        },
-      }),
-    );
-    const user = userEvent.setup();
-    render(<WikiSourcesPanel workspaceId="workspace_1" isAdmin />);
-
-    await user.click(await screen.findByRole("button", { name: "Configure" }));
-    await user.click(await screen.findByRole("checkbox", { name: /acme\/api/u }));
-    await user.click(screen.getByRole("button", { name: "Save GitHub source" }));
-
-    await waitFor(() =>
-      expect(mocks.upsertWikiSource).toHaveBeenCalledWith(
-        expect.objectContaining({
-          integrationId: "integration_1",
-          provider: "github",
-          enabled: true,
-          config: expect.objectContaining({
-            repos: [{ id: "4242", fullName: "acme/api" }],
-          }),
-        }),
-      ),
-    );
-  });
-
   it("uses the server integration snapshot while the live read model loads", async () => {
     mocks.integrationsLoading = true;
     mocks.initialIntegrations = initialIntegrationState([
@@ -417,14 +368,6 @@ function integrationAccount(overrides: Record<string, unknown> = {}) {
 function initialIntegrationState(gmail: Array<Record<string, unknown>>) {
   return {
     personalAccounts: { gmail, slack: [], linear: [], granola: [] },
-    github: {
-      provider: "github",
-      connected: false,
-      status: "not_connected",
-      integrationId: null,
-      accountName: null,
-      statusReason: null,
-    },
     jamie: {
       provider: "jamie",
       connected: false,

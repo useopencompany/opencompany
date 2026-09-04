@@ -93,7 +93,6 @@ import { admitEngineMessage } from "./engine-messages";
 import type { EngineSessionService } from "./engine-sessions";
 import { ApiError, errorResponse } from "./errors";
 import type { FeedbackService } from "./feedback";
-import type { GitHubIngressService } from "./github-ingress";
 import type { GitHubUserIngressService } from "./github-user-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
@@ -216,7 +215,6 @@ export type CreateApiAppInput = {
   identify: ApiIdentityVerifier;
   emailLifecycleInternalSecret?: string;
   browserOrigins?: readonly string[];
-  githubIngress?: GitHubIngressService;
   githubUserIngress?: GitHubUserIngressService;
   googleIngress?: GoogleIngressService;
   slackIngress?: SlackIngressService;
@@ -2753,18 +2751,6 @@ export function createApiApp(input: CreateApiAppInput) {
     });
     return c.json({ data: output, meta }, 200);
   });
-  if (input.githubIngress) {
-    // Purpose-specific provider ingress: registered outside /v1 so the /v1
-    // browser middleware (CORS, cookie-mutation Origin checks, actor context)
-    // does not apply. Each handler owns its authentication and verification.
-    const ingress = input.githubIngress;
-    app.get("/integrations/github/start", (c) => ingress.start(c.req.raw));
-    app.get("/integrations/github/callback", (c) => ingress.callback(c.req.raw));
-    // GitHub caps webhook payloads at 25 MB; unlike the retired Vercel route,
-    // Render enforces no platform body limit, so cap it here.
-    app.use("/webhooks/github/events", ingressBodyLimit(25 * 1024 * 1024));
-    app.post("/webhooks/github/events", (c) => ingress.webhook(c.req.raw));
-  }
   if (input.githubUserIngress) {
     const ingress = input.githubUserIngress;
     app.get("/integrations/github-user/start", (c) => ingress.start(c.req.raw));
