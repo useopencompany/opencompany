@@ -6,6 +6,7 @@ import { Markdown } from "@/components/Markdown";
 import {
   type HistoricalPresentationDetailController,
   HistoricalPresentationDetailStatus,
+  useHistoricalPresentationDetail,
 } from "./HistoricalPresentationDetail";
 
 export function ReasoningItem({
@@ -16,6 +17,7 @@ export function ReasoningItem({
   detail?: HistoricalPresentationDetailController;
 }) {
   const [expanded, setExpanded] = useState(false);
+  useHistoricalPresentationDetail(expanded, detail);
   const compactText = text.replace(/\s+/g, " ").trim();
   const preview =
     compactText.length > 160 ? `${compactText.slice(0, 157).trimEnd()}...` : compactText;
@@ -49,7 +51,10 @@ export function ReasoningItem({
       {expanded ? (
         <div className="ml-6 mt-1 border-l border-border pl-3 text-[12px] leading-5 text-ink-muted">
           {detail && detail.state !== "loaded" ? (
-            <HistoricalPresentationDetailStatus detail={detail} />
+            <>
+              <Markdown content={text} />
+              <HistoricalPresentationDetailStatus detail={detail} />
+            </>
           ) : (
             <Markdown content={text} />
           )}
