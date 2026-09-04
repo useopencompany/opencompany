@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Google Docs rewritten from Markdown now keep headings, lists, checkboxes, and inline formatting instead of displaying raw Markdown as plain text.
+
 ## [1.23.0] - 2026-09-04
 
 ### Added
