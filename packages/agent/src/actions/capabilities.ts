@@ -121,6 +121,29 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  hubspot: [
+    {
+      id: "read",
+      label: "Inspect HubSpot structure",
+      description:
+        "Inspect your HubSpot user access, object schemas, and property definitions without reading CRM records.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Read CRM & marketing data",
+      description:
+        "Read CRM records, conversations, owners, campaigns, content, and marketing analytics.",
+      defaultMode: "ask",
+    },
+    {
+      id: "write",
+      label: "Change HubSpot",
+      description:
+        "Create or update CRM records, campaigns, marketing emails, landing pages, and blog posts.",
+      defaultMode: "ask",
+    },
+  ],
   posthog: [
     {
       id: "read",

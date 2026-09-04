@@ -36,6 +36,9 @@ describe("opencompany onboarding integrations", () => {
     expect(onboardingConnectionError("posthog", "posthog_denied")).toBe(
       "PostHog authorization was cancelled.",
     );
+    expect(onboardingConnectionError("hubspot", "hubspot_mcp_denied")).toBe(
+      "HubSpot authorization was cancelled.",
+    );
     expect(onboardingConnectionError("neon", "neon_denied")).toBe(
       "Neon authorization was cancelled.",
     );

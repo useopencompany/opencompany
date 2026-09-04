@@ -12,6 +12,7 @@ import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  defaultHubSpotToolsState,
   defaultPostHogToolsState,
   defaultSigNozToolsState,
   defaultStripeToolsState,
@@ -25,6 +26,7 @@ import {
   gmailToolsStateFromPlugin,
   googleCalendarToolsStateFromPlugin,
   googleDriveToolsStateFromPlugin,
+  HubSpotPluginDetail,
   type LinearAccountsState,
   LinearPluginDetail,
   LinearPluginDetailView,
@@ -46,6 +48,7 @@ import {
   GMAIL_PLUGIN_SOURCE,
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
   GOOGLE_DRIVE_PLUGIN_SOURCE,
+  HUBSPOT_PLUGIN_SOURCE,
   LINEAR_PLUGIN_SOURCE,
   NEON_PLUGIN_SOURCE,
   POSTHOG_PLUGIN_SOURCE,
@@ -93,6 +96,14 @@ const appData = vi.hoisted(() => ({
       accountName: "Linear tool access",
       integrationId: "gint_linear_tools",
       capabilityModes: { read: "on", write: "ask" },
+    },
+    hubspot: {
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountName: "Acme CRM",
+      integrationId: "gint_hubspot_mcp",
+      capabilityModes: { read: "on", query: "ask", write: "ask" },
     },
     posthog: {
       connected: true,
@@ -1182,6 +1193,33 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Create insights");
     expect(POSTHOG_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+    );
+    expect(useLiveQuery).not.toHaveBeenCalled();
+  });
+
+  it("maps the dedicated HubSpot MCP connection onto the official plugin surface", () => {
+    const hubspotPlugin = {
+      ...plugin,
+      id: "plugin_hubspot",
+      name: "hubspot",
+      manifest: { name: "hubspot", description: "Work with HubSpot CRM." },
+      source: { ...plugin.source, path: "hubspot" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <HubSpotPluginDetail
+        pluginState={{ status: "ready", plugin: hubspotPlugin }}
+        toolsState={defaultHubSpotToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("Acme CRM");
+    expect(html).toContain("Inspect HubSpot structure");
+    expect(html).toContain("Read CRM &amp; marketing data");
+    expect(html).toContain("Change HubSpot");
+    expect(html).toContain("Configure HubSpot ingestion in Wiki sources");
+    expect(HUBSPOT_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
   });

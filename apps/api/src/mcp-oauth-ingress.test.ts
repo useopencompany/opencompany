@@ -4,6 +4,10 @@ import {
   startBetterStackMcpOAuth,
 } from "@opencompany/agent/integrations/betterstack-mcp";
 import {
+  completeHubSpotMcpOAuth,
+  startHubSpotMcpOAuth,
+} from "@opencompany/agent/integrations/hubspot-mcp";
+import {
   completeLatitudeMcpOAuth,
   startLatitudeMcpOAuth,
 } from "@opencompany/agent/integrations/latitude-mcp";
@@ -39,6 +43,11 @@ vi.mock("@opencompany/agent/integrations/linear-mcp", async (importOriginal) => 
   startLinearMcpOAuth: vi.fn(),
   completeLinearMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/hubspot-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startHubSpotMcpOAuth: vi.fn(),
+  completeHubSpotMcpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/posthog-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startPostHogMcpOAuth: vi.fn(),
@@ -64,6 +73,7 @@ const STATE_SECRET = "mcp-state-secret-mcp-state-secret";
 const sentinelDb = { sentinel: "db" };
 const PROVIDERS: McpOAuthProvider[] = [
   "linear",
+  "hubspot",
   "posthog",
   "neon",
   "latitude",
@@ -74,6 +84,7 @@ const PROVIDERS: McpOAuthProvider[] = [
 // The mocked module-level start/complete wrappers, keyed like the ingress.
 const flowMocks = {
   linear: { start: startLinearMcpOAuth, complete: completeLinearMcpOAuth },
+  hubspot: { start: startHubSpotMcpOAuth, complete: completeHubSpotMcpOAuth },
   posthog: { start: startPostHogMcpOAuth, complete: completePostHogMcpOAuth },
   neon: { start: startNeonMcpOAuth, complete: completeNeonMcpOAuth },
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
@@ -213,7 +224,7 @@ describe("remote MCP OAuth ingress", () => {
       const expectedPath =
         provider === "linear"
           ? "/settings"
-          : provider === "betterstack" || provider === "signoz"
+          : provider === "betterstack" || provider === "signoz" || provider === "hubspot"
             ? `/settings/plugins/${provider}`
             : "/settings/integrations";
       expect(response.headers.get("location"), provider).toBe(

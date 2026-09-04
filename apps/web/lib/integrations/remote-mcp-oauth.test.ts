@@ -5,11 +5,16 @@ import {
   markIntegrationStatus,
   saveIntegrationCredential,
 } from "@opencompany/db/integrations";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   startBetterStackMcpOAuth,
   verifyBetterStackMcpState,
 } from "@/lib/integrations/betterstack-mcp";
+import {
+  completeHubSpotMcpOAuth,
+  startHubSpotMcpOAuth,
+  verifyHubSpotMcpState,
+} from "@/lib/integrations/hubspot-mcp";
 import {
   appendLatitudeMcpStatus,
   startLatitudeMcpOAuth,
@@ -26,8 +31,11 @@ import { startPostHogMcpOAuth, verifyPostHogMcpState } from "@/lib/integrations/
 import { startSigNozMcpOAuth, verifySigNozMcpState } from "@/lib/integrations/signoz-mcp";
 
 const observed = vi.hoisted(() => ({
+  authorizationServerInformation: null as unknown,
   callbackUrl: "",
+  clientInformation: null as unknown,
   clientMetadata: null as unknown,
+  codeVerifier: "",
   state: "",
   dbRows: [] as unknown[],
   dbResults: [] as unknown[][],
@@ -69,11 +77,24 @@ vi.mock("@opencompany/agent/app-url", () => ({
 }));
 
 vi.mock("@ai-sdk/mcp", () => ({
-  auth: vi.fn(async (provider) => {
+  auth: vi.fn(async (provider, options) => {
+    observed.authorizationServerInformation = await provider.authorizationServerInformation?.();
     observed.callbackUrl = provider.redirectUrl;
+    observed.clientInformation = await provider.clientInformation();
     observed.clientMetadata = provider.clientMetadata;
     observed.state = provider.state();
-    await provider.saveClientInformation({ client_id: "dynamic_client" });
+    if (options.authorizationCode) {
+      observed.codeVerifier = await provider.codeVerifier();
+      return "AUTHORIZED";
+    }
+    if (!observed.clientInformation) {
+      await provider.saveClientInformation({ client_id: "dynamic_client" });
+    }
+    await provider.saveAuthorizationServerInformation({
+      issuer: "https://provider.example",
+      authorizationServerUrl: "https://provider.example",
+      tokenEndpoint: "https://provider.example/token",
+    });
     await provider.saveCodeVerifier("verifier");
     await provider.saveState(observed.state);
     provider.redirectToAuthorization(new URL("https://provider.example/oauth"));
@@ -85,11 +106,18 @@ describe("opencompany remote MCP OAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("MCP_OAUTH_STATE_SECRET", "test-state-secret");
+    observed.authorizationServerInformation = null;
     observed.callbackUrl = "";
+    observed.clientInformation = null;
     observed.clientMetadata = null;
+    observed.codeVerifier = "";
     observed.state = "";
     observed.dbRows = [];
     observed.dbResults = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("connects Latitude with dynamic registration and its documented endpoint", async () => {
@@ -229,6 +257,88 @@ describe("opencompany remote MCP OAuth", () => {
     });
     expect(() => verifyLinearMcpState(observed.state)).toThrow(
       "Invalid Linear MCP provider state.",
+    );
+  });
+
+  it("keeps static HubSpot client credentials out of the persisted OAuth payload", async () => {
+    vi.stubEnv("OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID", "hubspot_client");
+    vi.stubEnv("OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET", "hubspot_secret");
+
+    await expect(
+      startHubSpotMcpOAuth({
+        userWorkosId: "user_1",
+        returnTo: "/settings/plugins/hubspot",
+      }),
+    ).resolves.toEqual({
+      status: "redirect",
+      redirectUrl: "https://provider.example/oauth",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ serverUrl: "https://mcp.hubspot.com" }),
+    );
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/hubspot-mcp/callback",
+    );
+    expect(observed.clientInformation).toEqual({
+      client_id: "hubspot_client",
+      client_secret: "hubspot_secret",
+    });
+    expect(saveIntegrationCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "hubspot",
+        payload: expect.objectContaining({
+          authorizationServerInformation: {
+            issuer: "https://provider.example",
+            authorizationServerUrl: "https://provider.example",
+            tokenEndpoint: "https://provider.example/token",
+          },
+        }),
+      }),
+    );
+    expect(JSON.stringify(vi.mocked(saveIntegrationCredential).mock.calls)).not.toContain(
+      "hubspot_secret",
+    );
+    expect(verifyHubSpotMcpState(observed.state)).toMatchObject({
+      provider: "hubspot",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/hubspot",
+    });
+
+    const persistedPayload = vi.mocked(saveIntegrationCredential).mock.calls.at(-1)?.[0].payload;
+    vi.mocked(loadIntegrationCredential).mockResolvedValueOnce({
+      payload: persistedPayload ?? {},
+      expiresAt: null,
+      lastRotatedAt: null,
+      updatedAt: new Date("2026-09-04T00:00:00.000Z"),
+      encryptionKeyVersion: 1,
+    });
+    await completeHubSpotMcpOAuth({
+      userWorkosId: "user_1",
+      integrationId: "gint_remote_mcp",
+      code: "hubspot_code",
+      state: observed.state,
+      db: {
+        update: () => ({
+          set: () => ({ where: async () => [] }),
+        }),
+      },
+    });
+
+    expect(observed.authorizationServerInformation).toEqual({
+      issuer: "https://provider.example",
+      authorizationServerUrl: "https://provider.example",
+      tokenEndpoint: "https://provider.example/token",
+    });
+    expect(observed.codeVerifier).toBe("verifier");
+    expect(auth).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        serverUrl: "https://mcp.hubspot.com",
+        authorizationCode: "hubspot_code",
+        callbackState: observed.state,
+      }),
     );
   });
 

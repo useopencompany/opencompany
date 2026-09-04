@@ -1,0 +1,61 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "hubspot",
+  "version": "1.0.0",
+  "description": "Inspect HubSpot structure, query CRM and marketing data, and make permission-gated changes.",
+  "author": {
+    "name": "opencompany",
+    "url": "https://opencompany.com"
+  },
+  "homepage": "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server",
+  "repository": "https://github.com/useopencompany/plugins/tree/main/hubspot",
+  "license": "MIT",
+  "keywords": ["hubspot", "crm", "sales", "marketing", "customer-data"],
+  "extensions": {
+    "so.opencompany.capabilities": {
+      "read": {
+        "label": "Inspect HubSpot structure",
+        "defaultMode": "on",
+        "tools": [
+          "get_user_details",
+          "discover_hubspot_schema",
+          "search_properties",
+          "get_properties",
+          "tool_guidance"
+        ]
+      },
+      "query": {
+        "label": "Read CRM & marketing data",
+        "defaultMode": "ask",
+        "tools": [
+          "get_organization_details",
+          "search_crm_objects",
+          "get_crm_objects",
+          "query_crm_data",
+          "search_owners",
+          "get_campaign_attribution_reports",
+          "read_campaign_data",
+          "search_conversations",
+          "get_conversation_channel_metadata",
+          "get_marketing_email_analytics",
+          "get_content_analytics_report",
+          "render_landing_page_ui",
+          "render_asset"
+        ]
+      },
+      "write": {
+        "label": "Change HubSpot",
+        "defaultMode": "ask",
+        "tools": [
+          "manage_crm_objects",
+          "manage_campaign_objects",
+          "manage_marketing_email",
+          "manage_landing_page",
+          "manage_blog_post",
+          "manage_onboarding",
+          "submit_feedback"
+        ]
+      }
+    }
+  }
+}

@@ -43,6 +43,11 @@ import {
   loadGoogleDriveMcpWorkerConnection,
 } from "./integrations/google-drive-mcp";
 import {
+  getHubSpotMcpIntegrationState,
+  HUBSPOT_MCP_ENDPOINT_URL,
+  loadHubSpotMcpWorkerConnection,
+} from "./integrations/hubspot-mcp";
+import {
   getLatitudeIntegrationState,
   LATITUDE_MCP_ENDPOINT_URL,
   loadLatitudeMcpWorkerConnection,
@@ -132,6 +137,12 @@ const providerBindings = {
     endpointUrl: LINEAR_MCP_ENDPOINT_URL,
     getState: getLinearIntegrationState,
     loadConnection: loadLinearMcpWorkerConnection,
+  },
+  hubspot: {
+    provider: "hubspot",
+    endpointUrl: HUBSPOT_MCP_ENDPOINT_URL,
+    getState: getHubSpotMcpIntegrationState,
+    loadConnection: loadHubSpotMcpWorkerConnection,
   },
   posthog: {
     provider: "posthog",

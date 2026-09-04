@@ -6,6 +6,12 @@ import {
   verifyBetterStackMcpState,
 } from "@opencompany/agent/integrations/betterstack-mcp";
 import {
+  appendHubSpotMcpStatus,
+  completeHubSpotMcpOAuth,
+  startHubSpotMcpOAuth,
+  verifyHubSpotMcpState,
+} from "@opencompany/agent/integrations/hubspot-mcp";
+import {
   appendLatitudeMcpStatus,
   completeLatitudeMcpOAuth,
   startLatitudeMcpOAuth,
@@ -45,6 +51,7 @@ type DbLike = any;
 
 export type McpOAuthProvider =
   | "linear"
+  | "hubspot"
   | "posthog"
   | "neon"
   | "latitude"
@@ -98,6 +105,15 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     appendStatus: appendLinearMcpStatus,
     deniedReason: "linear_denied",
     invalidStatePath: "/settings?integration=linear&setup=error&reason=invalid_state",
+  },
+  hubspot: {
+    start: startHubSpotMcpOAuth,
+    complete: completeHubSpotMcpOAuth,
+    verifyState: verifyHubSpotMcpState,
+    appendStatus: appendHubSpotMcpStatus,
+    deniedReason: "hubspot_mcp_denied",
+    invalidStatePath:
+      "/settings/plugins/hubspot?integration=hubspot&setup=error&reason=invalid_state",
   },
   posthog: {
     start: startPostHogMcpOAuth,

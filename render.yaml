@@ -120,6 +120,12 @@ services:
         sync: false
       - key: OPENCOMPANY_HUBSPOT_STATE_SECRET
         sync: false
+      # HubSpot MCP auth-app credentials are a distinct OAuth audience from
+      # the read-only ingestion app above.
+      - key: OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID
+        sync: false
+      - key: OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET
+        sync: false
       # #1203 4d1 cutover: remote-MCP (Linear/PostHog/Neon/Latitude), X account,
       # and Slack answer-bot OAuth/webhook ingress moved to the API.
       - key: MCP_OAUTH_STATE_SECRET
@@ -387,6 +393,11 @@ services:
       - key: OPENCOMPANY_HUBSPOT_CLIENT_ID
         sync: false
       - key: OPENCOMPANY_HUBSPOT_CLIENT_SECRET
+        sync: false
+      # Refreshes audience-bound HubSpot MCP OAuth tokens for plugin calls.
+      - key: OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID
+        sync: false
+      - key: OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET
         sync: false
       # Optional iMessage delivery through Linq.
       - key: LINQ_API_TOKEN

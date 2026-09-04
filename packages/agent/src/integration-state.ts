@@ -56,6 +56,16 @@ export type PostHogProviderState = {
   capabilityModes: Record<string, unknown>;
 };
 
+export type HubSpotProviderState = {
+  provider: "hubspot";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
+};
+
 // The Linear brain-source connection (a Linear OAuth app with webhooks), as
 // opposed to LinearProviderState which describes the MCP connector. Both
 // share provider "linear"; rows are told apart by external_id ("linear_mcp"
@@ -262,6 +272,7 @@ export type IntegrationState = {
   google_calendar: GoogleProviderState;
   google_drive: GoogleProviderState;
   linear: LinearProviderState;
+  hubspot: HubSpotProviderState;
   posthog: PostHogProviderState;
   github: GitHubProviderState;
   jamie: JamieProviderState;
@@ -309,8 +320,8 @@ type IntegrationStateRow = {
 const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
 
 // Collects every personal (non-workspace) account row per provider. The
-// Linear ingest connections count as accounts; the MCP connector row
-// (external_id "linear_mcp") never does.
+// Linear and HubSpot ingestion connections count as accounts; their dedicated
+// MCP connector rows (external_id "linear_mcp" / "hubspot_mcp") never do.
 export function personalAccountsFromRows(
   rows: readonly IntegrationStateRow[],
 ): Record<PersonalAccountProvider, IntegrationAccountView[]> {
@@ -341,13 +352,18 @@ export function personalAccountsFromRows(
       }
       continue;
     }
+    if (row.provider === "hubspot") {
+      if ((row.externalId ?? row.external_id) !== "hubspot_mcp") {
+        personalAccounts.hubspot.push(accountViewFromRow("hubspot", row));
+      }
+      continue;
+    }
     if (
       row.provider === "gmail" ||
       row.provider === "google_calendar" ||
       row.provider === "google_drive" ||
       row.provider === "github_user" ||
       row.provider === "slack" ||
-      row.provider === "hubspot" ||
       row.provider === "granola" ||
       row.provider === "fathom" ||
       row.provider === "attio" ||
@@ -374,6 +390,11 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     if (row.provider === "linear" && (row.externalId ?? row.external_id) !== "linear_mcp") {
       continue;
     }
+    // HubSpot also has a separate OAuth connection for Wiki ingestion. Only
+    // the MCP-auth-app row belongs to the plugin settings and action gateway.
+    if (row.provider === "hubspot" && (row.externalId ?? row.external_id) !== "hubspot_mcp") {
+      continue;
+    }
     // GitHub, Jamie, and Stripe are workspace-owned; personal rows for those
     // providers are pre-ownership leftovers and must not shadow the workspace
     // connection.
@@ -392,6 +413,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     google_calendar: googleProviderState("google_calendar", byProvider.get("google_calendar")),
     google_drive: googleProviderState("google_drive", byProvider.get("google_drive")),
     linear: linearProviderState(byProvider.get("linear")),
+    hubspot: hubspotProviderState(byProvider.get("hubspot")),
     posthog: posthogProviderState(byProvider.get("posthog")),
     github: githubProviderState(byProvider.get("github")),
     jamie: jamieProviderState(byProvider.get("jamie")),
@@ -536,6 +558,30 @@ function posthogProviderState(row: IntegrationStateRow | undefined): PostHogProv
 
   return {
     provider: "posthog",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+  };
+}
+
+function hubspotProviderState(row: IntegrationStateRow | undefined): HubSpotProviderState {
+  if (!row) {
+    return {
+      provider: "hubspot",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      statusReason: null,
+      capabilityModes: {},
+    };
+  }
+
+  return {
+    provider: "hubspot",
     connected: row.status === "connected",
     status: row.status,
     integrationId: row.id ?? null,

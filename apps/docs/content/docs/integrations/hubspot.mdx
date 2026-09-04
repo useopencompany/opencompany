@@ -1,19 +1,38 @@
 ---
 title: HubSpot
-description: Connect CRM activity for selected contacts, companies, and deals.
+description: Use HubSpot tools and optionally ingest selected CRM activity into Wiki.
 ---
 
-## What connecting does
+## Connect HubSpot tools
 
-HubSpot connects a CRM account so opencompany can work with the authorized portal and identify the
-account behind later provider activity.
+Install HubSpot from **Settings → Plugins**, then connect the HubSpot account opencompany should use.
+The plugin uses HubSpot's hosted MCP server at `https://mcp.hubspot.com`. Its tool connection is
+separate from the HubSpot connection used for Wiki ingestion.
 
-## Scopes and permissions
+HubSpot requires an MCP auth app and OAuth 2.1 with PKCE. An administrator for the HubSpot account
+must authorize the app before other users in that account can connect it.
 
-The full OAuth scope and supported action matrix is coming soon. Review the HubSpot consent screen
-and the account identity shown in opencompany before using the connection across a workspace.
+## Tool permissions
+
+HubSpot tools are grouped by effect:
+
+- **Inspect HubSpot structure** defaults to **On** and covers user access, schemas, properties, and
+  tool guidance without reading CRM records.
+- **Read CRM & marketing data** defaults to **Ask** because records, conversations, owners,
+  campaigns, and analytics can contain sensitive business or customer data.
+- **Change HubSpot** defaults to **Ask** for record, campaign, email, landing-page, blog, onboarding,
+  and feedback mutations.
+
+New or unclassified tools always require confirmation until opencompany reviews them. HubSpot also
+enforces the connected user's own permissions. If HubSpot Sensitive Data is enabled, its MCP server
+blocks activity objects and conversation data.
+
+HubSpot determines OAuth grants from the MCP server's current tools and the permissions accepted at
+installation. If HubSpot adds scopes later, reconnect the plugin account to grant them.
 
 ## Brain ingestion
 
-HubSpot can ingest selected activity for contacts, companies, and deals. Choose the allowed objects
-and event types in the destination Brain's Sources settings; connection alone does not enable them.
+HubSpot can separately ingest selected activity for contacts, companies, and deals. Configure that
+connection in **Wiki → Sources**, then choose the allowed objects and event types. Connecting the
+plugin alone does not enable Wiki ingestion, and configuring ingestion does not authorize plugin
+tools.

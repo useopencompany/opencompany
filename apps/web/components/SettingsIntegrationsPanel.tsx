@@ -341,9 +341,9 @@ const INFISICAL_REGIONS = [
 // Group-card providers surfaced under each scope. These are all user-owned in the
 // data model (each member connects their own account), but the CRM / meeting /
 // issue-tracking tools read as shared workspace tooling, so we present them under
-// the Workspace scope. Official Gmail, Calendar, and Drive accounts live under Plugins.
+// the Workspace scope. Official Gmail, Calendar, Drive, and HubSpot tool accounts live under
+// Plugins.
 const WORKSPACE_ACCOUNT_PROVIDERS = [
-  "hubspot",
   "attio",
   "granola",
   "fathom",
@@ -415,10 +415,6 @@ function IntegrationCards({
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
-            <IntegrationProviderGroupCard
-              provider="hubspot"
-              accounts={integrations.personalAccounts.hubspot}
-            />
             <IntegrationProviderGroupCard
               provider="attio"
               accounts={integrations.personalAccounts.attio}
