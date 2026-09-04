@@ -365,6 +365,15 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  fathom: [
+    {
+      id: "query",
+      label: "Read Fathom meetings",
+      description:
+        "Search meetings and read summaries, transcripts, action items, teams, and account identity.",
+      defaultMode: "ask",
+    },
+  ],
   x_account: [
     {
       id: "read",

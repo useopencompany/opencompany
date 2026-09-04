@@ -14,12 +14,14 @@ import {
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
   defaultAttioToolsState,
+  defaultFathomToolsState,
   defaultGranolaToolsState,
   defaultHubSpotToolsState,
   defaultLatitudeToolsState,
   defaultPostHogToolsState,
   defaultSigNozToolsState,
   defaultStripeToolsState,
+  FathomPluginDetail,
   GitHubPluginDetail,
   GitHubPluginDetailView,
   GmailPluginDetail,
@@ -52,6 +54,7 @@ import {
 import {
   ATTIO_PLUGIN_SOURCE,
   BETTERSTACK_PLUGIN_SOURCE,
+  FATHOM_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
   GMAIL_PLUGIN_SOURCE,
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
@@ -191,6 +194,20 @@ const appData = vi.hoisted(() => ({
     },
     personalAccounts: {
       betterstack: [],
+      fathom: [
+        {
+          integrationId: "gint_fathom_mcp",
+          provider: "fathom",
+          status: "connected",
+          connected: true,
+          accountEmail: "founder@example.com",
+          accountName: "Founder",
+          connectionLabel: "Fathom",
+          statusReason: null,
+          scopes: ["mcp"],
+          capabilityModes: { query: "ask" },
+        },
+      ],
       gmail: [
         {
           integrationId: "gint_gmail",
@@ -1236,6 +1253,30 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read SigNoz documentation");
     expect(html).toContain("Inspect observability data");
     expect(html).toContain("Manage SigNoz");
+  });
+
+  it("maps the dedicated Fathom MCP connection onto the official plugin surface", () => {
+    const fathomPlugin = {
+      ...plugin,
+      id: "plugin_fathom",
+      name: "fathom",
+      manifest: { name: "fathom", description: "Read Fathom meeting content." },
+      source: { ...plugin.source, path: "fathom" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <FathomPluginDetail
+        pluginState={{ status: "ready", plugin: fathomPlugin }}
+        toolsState={defaultFathomToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("founder@example.com");
+    expect(html).toContain("Read Fathom meetings");
+    expect(html).toContain("Configure legacy Fathom ingestion in Wiki sources");
+    expect(FATHOM_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/444dd4dbfaaed6abd2c7c8000024c5be0ff4fa48/fathom",
+    );
   });
 
   it("maps the existing PostHog OAuth connection onto the official plugin surface", () => {

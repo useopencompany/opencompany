@@ -325,10 +325,12 @@ type IntegrationStateRow = {
 };
 
 const JAMIE_MCP_EXTERNAL_ID = "jamie_mcp";
+const FATHOM_MCP_EXTERNAL_ID = "fathom_mcp";
 
 // Collects every personal (non-workspace) account row per provider. The
-// Linear, HubSpot, Attio, and Granola ingestion connections count as accounts; their dedicated
-// MCP connector rows never do.
+// Linear, HubSpot, Attio, and Granola ingestion connections count as accounts;
+// their dedicated MCP connector rows do not. Fathom is the inverse: only its MCP
+// connector is shown in plugin account lists, while its API-key row stays in Wiki sources.
 export function personalAccountsFromRows(
   rows: readonly IntegrationStateRow[],
 ): Record<PersonalAccountProvider, IntegrationAccountView[]> {
@@ -384,13 +386,18 @@ export function personalAccountsFromRows(
       }
       continue;
     }
+    if (row.provider === "fathom") {
+      if ((row.externalId ?? row.external_id) === FATHOM_MCP_EXTERNAL_ID) {
+        personalAccounts.fathom.push(accountViewFromRow("fathom", row));
+      }
+      continue;
+    }
     if (
       row.provider === "gmail" ||
       row.provider === "google_calendar" ||
       row.provider === "google_drive" ||
       row.provider === "github_user" ||
       row.provider === "slack" ||
-      row.provider === "fathom" ||
       row.provider === "betterstack" ||
       row.provider === "render" ||
       row.provider === "signoz" ||
@@ -427,6 +434,14 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     // Attio's API-key connection remains available for Wiki ingestion and as
     // a legacy action fallback. Plugin settings reflect only the MCP OAuth row.
     if (row.provider === "attio" && (row.externalId ?? row.external_id) !== "attio_mcp") {
+      continue;
+    }
+    // Fathom's API-key row remains the Wiki ingestion fallback. The dedicated
+    // OAuth connector is surfaced only through personalAccounts on the Plugin page.
+    if (
+      row.provider === "fathom" &&
+      (row.externalId ?? row.external_id) === FATHOM_MCP_EXTERNAL_ID
+    ) {
       continue;
     }
     // GitHub and Stripe are workspace-owned; personal rows for those providers

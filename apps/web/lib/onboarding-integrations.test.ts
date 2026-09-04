@@ -51,6 +51,9 @@ describe("opencompany onboarding integrations", () => {
     expect(onboardingConnectionError("signoz", "signoz_denied")).toBe(
       "SigNoz authorization was cancelled.",
     );
+    expect(onboardingConnectionError("fathom", "fathom_denied")).toBe(
+      "Fathom authorization was cancelled.",
+    );
     expect(onboardingConnectionError("github", "missing_code")).toContain(
       "did not return a valid authorization",
     );

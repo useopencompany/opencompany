@@ -12,6 +12,12 @@ import {
   verifyBetterStackMcpState,
 } from "@opencompany/agent/integrations/betterstack-mcp";
 import {
+  appendFathomMcpStatus,
+  completeFathomMcpOAuth,
+  startFathomMcpOAuth,
+  verifyFathomMcpState,
+} from "@opencompany/agent/integrations/fathom-mcp";
+import {
   appendGranolaMcpStatus,
   completeGranolaMcpOAuth,
   startGranolaMcpOAuth,
@@ -77,6 +83,7 @@ export type McpOAuthProvider =
   | "latitude"
   | "jamie"
   | "betterstack"
+  | "fathom"
   | "signoz";
 
 // Provider ingress composition for the remote-MCP connectors. Each
@@ -117,6 +124,15 @@ const MCP_PROVIDER_FLOWS: Record<McpOAuthProvider, McpProviderFlow> = {
     deniedReason: "betterstack_denied",
     invalidStatePath:
       "/settings/plugins/betterstack?integration=betterstack&setup=error&reason=invalid_state",
+  },
+  fathom: {
+    start: startFathomMcpOAuth,
+    complete: completeFathomMcpOAuth,
+    verifyState: verifyFathomMcpState,
+    appendStatus: appendFathomMcpStatus,
+    deniedReason: "fathom_denied",
+    invalidStatePath:
+      "/settings/plugins/fathom?integration=fathom&setup=error&reason=invalid_state",
   },
   signoz: {
     start: startSigNozMcpOAuth,

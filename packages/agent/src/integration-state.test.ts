@@ -187,6 +187,42 @@ describe("SigNoz integration state", () => {
   });
 });
 
+describe("Fathom integration state", () => {
+  it("keeps MCP tool authorization separate from legacy Wiki ingestion", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_fathom_ingest",
+        provider: "fathom",
+        externalId: "fathom:user_1",
+        accountName: "Fathom",
+        status: "connected",
+      },
+      {
+        id: "gint_fathom_mcp",
+        provider: "fathom",
+        externalId: "fathom_mcp",
+        accountName: "Fathom",
+        status: "connected",
+        scopes: ["mcp"],
+        capabilityModes: { query: "ask" },
+      },
+    ]);
+
+    expect(state.fathom).toMatchObject({
+      integrationId: "gint_fathom_ingest",
+      connected: true,
+    });
+    expect(state.personalAccounts.fathom).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_fathom_mcp",
+        provider: "fathom",
+        connected: true,
+        capabilityModes: { query: "ask" },
+      }),
+    ]);
+  });
+});
+
 describe("HubSpot integration state", () => {
   it("keeps MCP tool authorization separate from Wiki ingestion accounts", () => {
     const state = integrationStateFromRows([

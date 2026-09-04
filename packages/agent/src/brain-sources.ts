@@ -74,6 +74,7 @@ import type {
   HubspotSourceProviderState,
   LinearSourceProviderState,
 } from "./integration-state";
+import { FATHOM_MCP_EXTERNAL_ID } from "./integrations/fathom-mcp";
 import type { GitHubProviderState } from "./integrations/github";
 import {
   GoogleDriveReconnectRequiredError,
@@ -806,7 +807,13 @@ export class BrainSourceApplicationService {
           eq(integrations.id, integrationId),
           eq(integrations.provider, provider),
           sourceIntegrationOwnerWhere(provider, actor),
-          ...(provider === "linear" ? [ne(integrations.externalId, LINEAR_MCP_EXTERNAL_ID)] : []),
+          ...(provider === "linear"
+            ? [ne(integrations.externalId, LINEAR_MCP_EXTERNAL_ID)]
+            : provider === "granola"
+              ? [ne(integrations.externalId, GRANOLA_MCP_EXTERNAL_ID)]
+              : provider === "fathom"
+                ? [ne(integrations.externalId, FATHOM_MCP_EXTERNAL_ID)]
+                : []),
         ),
       )
       .limit(1);
@@ -877,7 +884,9 @@ export class BrainSourceApplicationService {
             ? { excludeExternalId: LINEAR_MCP_EXTERNAL_ID }
             : provider === "granola"
               ? { excludeExternalId: GRANOLA_MCP_EXTERNAL_ID }
-              : {}),
+              : provider === "fathom"
+                ? { excludeExternalId: FATHOM_MCP_EXTERNAL_ID }
+                : {}),
           db: this.db,
         }),
       ),
@@ -906,6 +915,7 @@ function sourceProviderStates(rows: IntegrationRow[], actor: Actor) {
         !row.workspaceId &&
         (provider !== "linear" || row.externalId !== LINEAR_MCP_EXTERNAL_ID) &&
         (provider !== "granola" || row.externalId !== GRANOLA_MCP_EXTERNAL_ID) &&
+        (provider !== "fathom" || row.externalId !== FATHOM_MCP_EXTERNAL_ID) &&
         (!usesLatestActiveRow || row.status !== "disconnected"),
     );
   };

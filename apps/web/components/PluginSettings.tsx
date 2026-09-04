@@ -12,6 +12,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import {
   AttioIcon,
   BetterStackIcon,
+  FathomIcon,
   GitHubIcon,
   GmailIcon,
   GoogleCalendarIcon,
@@ -134,6 +135,11 @@ export const OFFICIAL_MCP_PLUGINS = {
     ...OFFICIAL_MCP_PLUGIN_METADATA.betterstack,
     Icon: BetterStackIcon,
     iconClassName: "bg-[#1B1F23] text-white",
+  },
+  fathom: {
+    ...OFFICIAL_MCP_PLUGIN_METADATA.fathom,
+    Icon: FathomIcon,
+    iconClassName: "bg-[#1355FF] text-white",
   },
   github: {
     ...OFFICIAL_MCP_PLUGIN_METADATA.github,
@@ -258,6 +264,8 @@ export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;
 export const RENDER_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.render.source;
 export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
 export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
+export const FATHOM_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.fathom.name;
+export const FATHOM_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.fathom.source;
 export const SIGNOZ_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.signoz.name;
 export const SIGNOZ_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.signoz.source;
 export const SLACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.slack.name;

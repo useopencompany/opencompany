@@ -78,6 +78,12 @@ describe("PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
+  it("guards all Fathom meeting and account data behind ask", () => {
+    expect(PROVIDER_CAPABILITIES.fathom).toEqual([
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+    ]);
+  });
+
   it("keeps public Stripe guidance on and guards account data and mutations", () => {
     expect(PROVIDER_CAPABILITIES.stripe).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
@@ -151,6 +157,7 @@ describe("mode helpers", () => {
     expect(providerCapability("neon", "query")?.label).toBe("Query database data");
     expect(providerCapability("signoz", "read")?.label).toBe("Read SigNoz documentation");
     expect(providerCapability("signoz", "query")?.label).toBe("Inspect observability data");
+    expect(providerCapability("fathom", "query")?.label).toBe("Read Fathom meetings");
     expect(providerCapability("slack", "query")?.label).toBe("Read private Slack");
     expect(providerCapability("slack", "write")?.label).toBe("Change Slack");
     expect(providerCapability("stripe", "read")?.label).toBe("Learn about Stripe");

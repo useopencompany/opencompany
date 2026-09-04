@@ -39,6 +39,7 @@ export function integrationConnectionError(provider: string | null, reason: stri
     case "posthog_denied":
     case "neon_denied":
     case "betterstack_denied":
+    case "fathom_denied":
     case "signoz_denied":
     case "x_account_denied":
       return `${name} authorization was cancelled.`;

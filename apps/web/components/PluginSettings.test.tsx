@@ -11,6 +11,7 @@ import {
 import {
   ATTIO_PLUGIN_SOURCE,
   BETTERSTACK_PLUGIN_SOURCE,
+  FATHOM_PLUGIN_SOURCE,
   GITHUB_PLUGIN_SOURCE,
   GMAIL_PLUGIN_SOURCE,
   GOOGLE_CALENDAR_PLUGIN_SOURCE,
@@ -268,6 +269,10 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/gmail",
     );
+    expect(screen.getByRole("link", { name: /fathom/i })).toHaveAttribute(
+      "href",
+      "/settings/plugins/fathom",
+    );
     expect(screen.getByRole("link", { name: /granola/i })).toHaveAttribute(
       "href",
       "/settings/plugins/granola",
@@ -304,11 +309,13 @@ describe("Plugin settings", () => {
       "href",
       "/settings/plugins/latitude",
     );
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(17);
+    await user.click(screen.getByRole("button", { name: "View all productivity plugins" }));
     expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
       "href",
       "/settings/plugins/jamie",
     );
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(17);
+    await user.click(screen.getByRole("button", { name: "All" }));
     await user.click(screen.getByRole("button", { name: "View all business plugins" }));
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
@@ -336,6 +343,9 @@ describe("Plugin settings", () => {
     );
     expect(BETTERSTACK_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/betterstack$/u,
+    );
+    expect(FATHOM_PLUGIN_SOURCE).toBe(
+      "https://github.com/useopencompany/plugins/tree/444dd4dbfaaed6abd2c7c8000024c5be0ff4fa48/fathom",
     );
     expect(RENDER_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/569241125c96a07b9072d42aee404822a6950b26/render",

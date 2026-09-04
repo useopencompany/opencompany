@@ -11,6 +11,7 @@ import {
   startBetterStackMcpOAuth,
   verifyBetterStackMcpState,
 } from "@/lib/integrations/betterstack-mcp";
+import { startFathomMcpOAuth, verifyFathomMcpState } from "@/lib/integrations/fathom-mcp";
 import {
   completeHubSpotMcpOAuth,
   startHubSpotMcpOAuth,
@@ -281,6 +282,30 @@ describe("opencompany remote MCP OAuth", () => {
     expect(() => verifyLinearMcpState(observed.state)).toThrow(
       "Invalid Linear MCP provider state.",
     );
+  });
+
+  it("connects Fathom with its supported dynamic-client grant and MCP scope", async () => {
+    await startFathomMcpOAuth({
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/fathom",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ serverUrl: "https://api.fathom.ai/mcp" }),
+    );
+    expect(observed.callbackUrl).toBe(
+      "https://opencompany.example/api/integrations/fathom-mcp/callback",
+    );
+    expect(observed.clientMetadata).toMatchObject({
+      scope: "mcp",
+      grant_types: ["authorization_code"],
+    });
+    expect(verifyFathomMcpState(observed.state)).toMatchObject({
+      provider: "fathom",
+      userWorkosId: "user_1",
+      returnTo: "/settings/plugins/fathom",
+    });
   });
 
   it("keeps static HubSpot client credentials out of the persisted OAuth payload", async () => {

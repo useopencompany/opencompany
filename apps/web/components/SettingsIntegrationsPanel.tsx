@@ -3,7 +3,6 @@
 import { toast } from "@opencompany/ui/components/sonner";
 import {
   BetterStackIcon,
-  FathomIcon,
   GitHubIcon,
   GmailIcon,
   GoogleCalendarIcon,
@@ -73,7 +72,7 @@ import {
 // components derive everything from the provider string.
 type SettingsPersonalAccountProvider = Exclude<
   PersonalAccountProvider,
-  "attio" | "granola" | "jamie" | "latitude" | "slack"
+  "attio" | "fathom" | "granola" | "jamie" | "latitude" | "slack"
 >;
 
 type IntegrationMetaKey = SettingsPersonalAccountProvider | "github" | "infisical";
@@ -160,12 +159,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Give workspace coding agents access to the real Infisical CLI.",
     monogram: "I",
     tileClass: "bg-[#6C47FF] text-white",
-  },
-  fathom: {
-    label: "Fathom",
-    description: "Meeting recordings flow in after Fathom finishes each summary.",
-    Icon: FathomIcon,
-    tileClass: "bg-[#1355FF] text-white",
   },
   x_account: {
     label: "X",
@@ -292,9 +285,8 @@ const INFISICAL_REGIONS = [
 // issue-tracking tools read as shared workspace tooling, so we present them under
 // the Workspace scope. Official Gmail, Calendar, Drive, HubSpot, Attio, and Granola tool accounts
 // live under Plugins; their separate ingestion connections are managed from Wiki sources.
-const WORKSPACE_ACCOUNT_PROVIDERS = [
-  "fathom",
-] as const satisfies readonly SettingsPersonalAccountProvider[];
+const WORKSPACE_ACCOUNT_PROVIDERS =
+  [] as const satisfies readonly SettingsPersonalAccountProvider[];
 
 function countConnectedAccounts(
   integrations: IntegrationState,
@@ -351,10 +343,6 @@ function IntegrationCards({
               canManage={isWorkspaceAdmin}
             />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
-            <IntegrationProviderGroupCard
-              provider="fathom"
-              accounts={integrations.personalAccounts.fathom}
-            />
           </div>
         </section>
       ) : (
@@ -780,61 +768,6 @@ function IntegrationCardRow({
         ) : (
           <NotConnectedStatus />
         )
-      }
-    />
-  );
-}
-
-// A personal provider with any number of connected accounts. Zero accounts
-// renders the classic "Connect" card; with accounts, each connection gets its
-// own row inside the card (identity + status + disconnect) plus an "Add account"
-// affordance — a second OAuth pass creates a second integration row.
-function IntegrationProviderGroupCard({
-  provider,
-  accounts,
-  capabilityIds,
-  capabilityOverrides,
-}: {
-  provider: SettingsPersonalAccountProvider;
-  accounts: IntegrationAccountView[];
-  capabilityIds?: readonly CapabilityId[];
-  capabilityOverrides?: Partial<
-    Record<CapabilityId, Partial<Pick<ProviderCapability, "label" | "description">>>
-  >;
-}) {
-  const meta = INTEGRATION_META[provider];
-  const connectHref = integrationConnectHref(provider);
-  if (accounts.length === 0) {
-    return (
-      <IntegrationCard meta={meta} footer={<ConnectLink href={connectHref} label="Connect" />} />
-    );
-  }
-  return (
-    <IntegrationCard
-      meta={meta}
-      body={
-        <div className="flex flex-col gap-1.5">
-          {accounts.map((account) => (
-            <IntegrationAccountRow
-              key={account.integrationId}
-              account={account}
-              {...(capabilityIds ? { capabilityIds } : {})}
-              {...(capabilityOverrides ? { capabilityOverrides } : {})}
-            />
-          ))}
-        </div>
-      }
-      footer={
-        <ConnectLink
-          href={connectHref}
-          label={
-            provider === "google_calendar"
-              ? "Reconnect or add"
-              : provider === "neon"
-                ? "Reconnect"
-                : "Add account"
-          }
-        />
       }
     />
   );
@@ -1369,7 +1302,12 @@ function integrationConnectHref(provider: PersonalAccountProvider | "github") {
     return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "github_user")
     return "/api/integrations/github-user/start?returnTo=/settings/plugins/github";
-  if (provider === "fathom") return "/settings/fathom";
+  if (provider === "granola")
+    return "/api/integrations/granola-mcp/start?returnTo=/settings/plugins/granola";
+  if (provider === "fathom")
+    return "/api/integrations/fathom-mcp/start?returnTo=/settings/plugins/fathom";
+  if (provider === "attio")
+    return "/api/integrations/attio-mcp/start?returnTo=/settings/plugins/attio";
   if (provider === "slack") return "/settings/plugins/slack";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
