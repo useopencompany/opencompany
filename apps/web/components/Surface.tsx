@@ -1122,12 +1122,13 @@ export function Surface({
       (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
   );
   // The message whose trace stays fully expanded. Prefer the turn identified by run metadata;
-  // while any work is in flight without one (task runs, transports without a run id yet), protect
-  // the newest assistant message so a streaming trace never compacts mid-turn.
+  // while work is in flight without one (task runs, transports without a run id yet), protect the
+  // newest assistant message so a streaming trace never compacts mid-turn. A submitting turn has
+  // no assistant row yet, so it must not re-expand the previous turn's collapsed trace.
   const activeAssistantMessageId =
     foregroundAssistantMessageId && !isChatTurnTerminal(chatTurnPhase)
       ? foregroundAssistantMessageId
-      : isAgentWorking || isTaskRunInFlight
+      : (isAgentWorking || isTaskRunInFlight) && chatTurnPhase !== "submitting"
         ? latestAssistantMessageId
         : null;
   const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
